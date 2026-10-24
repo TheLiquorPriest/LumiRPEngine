@@ -875,6 +875,11 @@ var STEP_LABEL = {
   skip: "Time-skip beats",
   consolidate: "Memory consolidation"
 };
+var STEP_OUTPUT_LABEL = {
+  text: "Text: instructions for the step's call",
+  effects: "Changes: effects it proposes after the reply",
+  decision: "A decision: the question its call answers"
+};
 var VAR_TEXT = {
   world: "the world's name",
   pov: "the player character's name",
@@ -902,14 +907,14 @@ var PROSE_VARS = ["world", "pov", "place", "clock", "scene", "present", "facts",
 var MIND_VARS = ["character", "world", "pov", "place", "clock"];
 var STEP_VARS = {
   interpret: { phase: "before the reply", vars: ["world", "pov"], note: "None on a Decision connection." },
-  "npc.choose": { phase: "before the reply", vars: [], note: "Sent as written." },
-  judge: { phase: "before the reply", vars: [], note: "Sent as written." },
-  "puzzle.answer": { phase: "before the reply", vars: [], note: "Sent as written." },
+  "npc.choose": { phase: "before the reply", vars: [] },
+  judge: { phase: "before the reply", vars: [] },
+  "puzzle.answer": { phase: "before the reply", vars: [] },
   brief: { phase: "before the reply", vars: PROSE_VARS },
   outline: { phase: "before the reply", vars: [...PROSE_VARS, "sections"] },
   extract: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
   choices: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
-  contradiction: { phase: "after the reply", vars: [], note: "A decision template is sent as written; an effects template gets extract's." },
+  contradiction: { phase: "after the reply", vars: [], note: "A world's effects template for this step gets the reply-reading placeholders (extract's)." },
   mind: { phase: "with the minds", vars: MIND_VARS },
   memory: { phase: "with the minds", vars: MIND_VARS },
   consolidate: { phase: "with the minds", vars: MIND_VARS },
@@ -920,6 +925,31 @@ var PROSE_PROMPTS = {
   brief: "You brief a roleplay narrator before their next reply. In two or three sentences, say what matters right now in {{world}}: where {{pov}} is, who is present, what the player just did and how it turned out, and anything pressing. Use only the facts given; invent nothing.",
   outline: "You outline a roleplay narrator's next reply. Expand the engine's beats into two to four short beats, in order, consistent with the facts and the outcome. Don't decide anything the facts don't settle, and don't add events.",
   choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts. Each under twelve words, first person, as the player would type it."
+};
+var DECISION_PROMPTS = {
+  "npc.choose": "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.",
+  contradiction: "Does the narrator's reply contradict one of these engine facts? Pick the fact it contradicts, or none.",
+  "puzzle.answer": "Is the player's answer correct: the same as one of the accepted answers, allowing for wording and spelling?",
+  judge: "Judge how well the player's described approach suits what their character attempts."
+};
+var ADDED_BEFORE = {
+  interpret: [
+    "The task: map the player's typed input to the engine actions it takes, in order.",
+    "The world and the player character.",
+    "The scene, the places nearby and the recent messages.",
+    "The action catalog: every action your character can take here, with its details.",
+    "The rules for reading it: ids and amounts, several actions in one message, time passing after them, routine changes.",
+    "The answer format."
+  ].join(`
+`),
+  extract: [
+    "The task: propose the changes the reply's prose says actually happened.",
+    "The world, and the change types switched on.",
+    "The rules: nothing considered, refused or hypothetical; world ids; amounts as written; the strict rule for each change type.",
+    "Where the reply leaves your character, and the usual routines of the people with them.",
+    "The answer format."
+  ].join(`
+`)
 };
 var PROMPT_EFFECT = {
   interpret: "Added before the built-in instructions, which it can't change; on a Decision connection it is the question asked.",
@@ -2328,1131 +2358,235 @@ function obj(value) {
   return isRecord(value) ? value : null;
 }
 
-// src/shared/ids.ts
-var DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"];
-var BANDS = ["principal", "supporting", "background"];
-var INTERRUPT_CLASSES = ["invitation", "bill", "decline", "incident", "quest", "rule", "arrival", "overdue", "needs", "weather"];
-
-// src/shared/tiers.ts
-var BAND_LABEL = { principal: "Leads", supporting: "Supporting", background: "Background" };
-function isBand(value) {
-  return BANDS.some((b3) => b3 === value);
+// src/frontend/gm/gate.ts
+function revealTruth(ui) {
+  return ui.gm.revealed ? ui : { ...ui, gm: { ...ui.gm, revealed: true } };
 }
-function tierOf(world, tier) {
-  const t3 = isRecord(world.tiers) && hasOwn(world.tiers, tier) ? world.tiers[tier] : undefined;
-  return isRecord(t3) && isBand(t3.band) ? t3 : undefined;
+function hideTruth(ui) {
+  return ui.gm.revealed ? { ...ui, gm: { ...ui.gm, revealed: false } } : ui;
 }
-function tiersInOrder(world) {
-  if (!isRecord(world.tiers))
-    return [];
-  return Object.keys(world.tiers).flatMap((id) => {
-    const t3 = tierOf(world, id);
-    return t3 ? [{ id, t: t3, order: typeof t3.order === "number" && Number.isFinite(t3.order) ? t3.order : Number.MAX_SAFE_INTEGER }] : [];
-  }).sort((a3, b3) => a3.order - b3.order || a3.id.localeCompare(b3.id)).map(({ id, t: t3 }) => [id, t3]);
+function gmAt(ui, section) {
+  return ui.gm.section === section ? ui : { ...ui, gm: { ...ui.gm, section } };
 }
-function firstIn(world, bands) {
-  const ordered = tiersInOrder(world);
-  for (const band of bands) {
-    const hit = ordered.find(([, t3]) => t3.band === band);
-    if (hit)
-      return hit[0];
-  }
-  return;
+function gmOpen(ui, section, entity) {
+  return { ...ui, gm: { ...ui.gm, section, focus: entity } };
 }
-function spawnTierOf(world) {
-  if (typeof world.spawnTier === "string" && tierOf(world, world.spawnTier))
-    return world.spawnTier;
-  return firstIn(world, ["background", "supporting", "principal"]) ?? "background";
-}
-function tierLabel(world, tier) {
-  return tierOf(world, tier)?.label ?? (isBand(tier) ? BAND_LABEL[tier] : tier);
+function focusTaken(ui) {
+  if (ui.gm.focus === undefined)
+    return ui;
+  const { focus: _taken, ...gm } = ui.gm;
+  return { ...ui, gm };
 }
 
-// src/shared/needs.ts
-var NEED_IDS = ["hunger", "fatigue", "social", "fun"];
-var NEED_DEFAULTS = {
-  hunger: { on: true, rate: 4, tell: 60, alert: 80 },
-  fatigue: { on: true, rate: 3, tell: 60, alert: 80 },
-  social: { on: true, rate: 1.5, tell: 60, alert: 80 },
-  fun: { on: true, rate: 1, tell: 60, alert: 80 }
-};
-var RATE_MAX = 100;
-var inScale = (v3, max) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= 0 && v3 <= max;
-function needsSettingsOf(world) {
-  const raw = isRecord(world.needs) ? world.needs : {};
-  const one = (need) => {
-    const set = isRecord(raw[need]) ? raw[need] : {};
-    const base = NEED_DEFAULTS[need];
-    return {
-      on: typeof set.on === "boolean" ? set.on : base.on,
-      rate: inScale(set.rate, RATE_MAX) ? set.rate : base.rate,
-      tell: inScale(set.tell, 100) ? set.tell : base.tell,
-      alert: inScale(set.alert, 100) ? set.alert : base.alert
-    };
-  };
-  return { hunger: one("hunger"), fatigue: one("fatigue"), social: one("social"), fun: one("fun") };
-}
-
-// src/frontend/build/schema.ts
-var NEED_LABELS = { hunger: "Hunger", fatigue: "Fatigue", social: "Social", fun: "Fun" };
-var NEED_FIELDS = [
-  { kind: "bool", key: "on", label: "On", hint: "Off: it never grows, shows, is told or alerts" },
-  { kind: "number", key: "rate", label: "Grows an hour", min: 0, max: 100, step: 0.5, hint: "On its scale of 0 (met) to 100 (urgent)" },
-  { kind: "number", key: "tell", label: "Told from", min: 0, max: 100, step: 1, hint: "From here the narrator is told of it and Play marks it" },
-  { kind: "number", key: "alert", label: "Alerts from", min: 0, max: 100, step: 1, hint: "From here it raises the needs alert in a timelapse (Time → Interrupts says what that does)" }
-];
-var FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"];
-var BOUND_MODES = ["auto", "confirm", "never"];
-var VISIBILITY = ["public", "known_by", "secret"];
-var PLACE_VISIBILITY = ["public", "known_by", "discoverable", "secret"];
-var TRAVEL_MODES = ["walk", "road", "offroad", "water"];
-var BAND = {
-  kind: "object",
-  key: "",
-  label: "Band",
-  fields: [
-    { kind: "text", key: "label", label: "Label" },
-    { kind: "number", key: "min", label: "From (inclusive)", optional: true },
-    { kind: "number", key: "max", label: "To (exclusive)", optional: true }
-  ]
-};
-var FIELD_DEF = {
-  kind: "object",
-  key: "",
-  label: "Field",
-  fields: [
-    { kind: "enum", key: "type", label: "Type", values: FIELD_TYPES },
-    { kind: "text", key: "label", label: "Label", optional: true },
-    { kind: "json", key: "default", label: "Default", optional: true },
-    { kind: "number", key: "min", label: "Min", optional: true, when: { key: "type", values: ["number", "money", "duration"] } },
-    { kind: "number", key: "max", label: "Max", optional: true, when: { key: "type", values: ["number", "money", "duration"] } },
-    { kind: "tags", key: "values", label: "Enum values", noun: "value", when: { key: "type", values: ["enum"] } },
-    { kind: "ref", key: "ref", label: "Ref kind", collection: "kinds", optional: true, when: { key: "type", values: ["ref", "list"] } },
-    { kind: "enum", key: "of", label: "List of", values: FIELD_TYPES.filter((t3) => t3 !== "list"), optional: true, when: { key: "type", values: ["list"] } },
-    { kind: "list", key: "bands", label: "Bands (shown as words)", item: BAND, title: "label", when: { key: "type", values: ["number"] } },
-    { kind: "expr", key: "derived", label: "Derived formula", optional: true },
-    { kind: "bool", key: "locked", label: "Locked (never offered to a model)" },
-    {
-      kind: "object",
-      key: "bound",
-      label: "Bound on model changes",
-      optional: true,
-      fields: [
-        { kind: "enum", key: "mode", label: "Mode", values: BOUND_MODES },
-        { kind: "number", key: "maxDelta", label: "Largest change per turn", optional: true }
-      ]
-    },
-    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
-    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
-    { kind: "enum", key: "domain", label: "Realism domain", values: DOMAINS, optional: true },
-    { kind: "number", key: "level", label: "Live from level", min: 0, max: 4, step: 1, optional: true }
-  ]
-};
-var EFFECT = {
-  kind: "object",
-  key: "",
-  label: "Effect",
-  fields: [
-    { kind: "text", key: "type", label: "Effect type", hint: "e.g. set, add, economy.charge" },
-    { kind: "effectArgs", key: "args", label: "Arguments (values or formulas)" }
-  ]
-};
-var LIST_ITEMS = {
-  appointments: {
-    title: "label",
-    item: {
-      kind: "object",
-      key: "",
-      label: "Appointment",
-      fields: [
-        { kind: "text", key: "label", label: "What", optional: true, hint: "Shown as Appointment when empty" },
-        { kind: "gameTime", key: "at", label: "Starts" },
-        { kind: "duration", key: "minutes", label: "How long", optional: true, hint: "An hour when empty" },
-        { kind: "ref", key: "place", label: "Where", collection: "places", optional: true }
-      ]
-    }
-  },
-  trips: {
-    title: "label",
-    item: {
-      kind: "object",
-      key: "",
-      label: "Trip",
-      fields: [
-        { kind: "text", key: "label", label: "What", optional: true, hint: "Shown as Away when empty" },
-        { kind: "gameTime", key: "from", label: "Leaves" },
-        { kind: "gameTime", key: "until", label: "Back" },
-        { kind: "ref", key: "place", label: "Where to", collection: "places", optional: true }
-      ]
-    }
-  },
-  chores: {
-    title: "label",
-    item: {
-      kind: "object",
-      key: "",
-      label: "Chore",
-      fields: [
-        { kind: "text", key: "label", label: "Chore" },
-        { kind: "duration", key: "minutes", label: "How long", optional: true, hint: "45 min when empty" },
-        { kind: "ref", key: "place", label: "Where", collection: "places", optional: true, hint: "At home when empty" },
-        { kind: "number", key: "utility", label: "How much they want to do it", optional: true, hint: "Weighed against their other plans; 2 when empty" }
-      ]
-    }
-  },
-  conditions: {
-    title: "label",
-    item: {
-      kind: "object",
-      key: "",
-      label: "Condition",
-      fields: [
-        { kind: "text", key: "id", label: "Id", hint: "Effects and formulas name the condition by it" },
-        { kind: "text", key: "label", label: "Label", optional: true },
-        { kind: "number", key: "mod", label: "Check modifier", step: 1, optional: true, hint: "Added to their checks; −2 when empty" },
-        { kind: "gameTime", key: "until", label: "Ends", optional: true, hint: "Lasts until removed when empty" }
-      ]
-    }
-  },
-  bills: {
-    title: "label",
-    item: {
-      kind: "object",
-      key: "",
-      label: "Bill",
-      fields: [
-        { kind: "text", key: "label", label: "What", optional: true },
-        { kind: "money", key: "amountCents", label: "Amount", min: 0 },
-        { kind: "enum", key: "every", label: "Every", values: ["month", "week", "year"], optional: true },
-        { kind: "scalar", key: "day", label: "Day", optional: true, hint: "The day of the month; for a weekly bill, the weekday (Friday) or its number" },
-        { kind: "number", key: "month", label: "Month (yearly bills)", min: 1, max: 12, step: 1, optional: true },
-        { kind: "ref", key: "payee", label: "Paid to", collection: "entities", optional: true }
-      ]
-    }
-  },
-  pieces: {
-    title: "name",
-    item: {
-      kind: "object",
-      key: "",
-      label: "Piece",
-      fields: [
-        { kind: "text", key: "name", label: "Piece" },
-        { kind: "number", key: "qty", label: "How many", min: 1, step: 1, optional: true, hint: "One when empty" }
-      ]
-    }
-  }
-};
-var COLLECTION_SPECS = {
-  kinds: [
-    { kind: "text", key: "label", label: "Label" },
-    { kind: "ref", key: "extends", label: "Extends", collection: "kinds", optional: true },
-    { kind: "record", key: "fields", label: "Fields", item: FIELD_DEF, keyLabel: "Field id" },
-    { kind: "text", key: "pack", label: "Pack", optional: true, readonly: true }
-  ],
-  relations: [
-    { kind: "text", key: "label", label: "Label" },
-    { kind: "ref", key: "from", label: "From kind", collection: "kinds", any: true },
-    { kind: "ref", key: "to", label: "To kind", collection: "kinds", any: true },
-    { kind: "enum", key: "cardinality", label: "Cardinality", values: ["one_one", "one_many", "many_one", "many_many"] },
-    { kind: "bool", key: "symmetric", label: "Symmetric", hint: "Both sides hold it (siblings); the engine keeps the other side" },
-    { kind: "ref", key: "inverse", label: "Inverse (what the other side holds back)", collection: "relations", optional: true },
-    { kind: "record", key: "fields", label: "Fields", item: FIELD_DEF, keyLabel: "Field id" }
-  ],
-  entities: [
-    { kind: "text", key: "name", label: "Name" },
-    { kind: "ref", key: "kind", label: "Kind", collection: "kinds" },
-    { kind: "tier", key: "tier", label: "Tier" },
-    { kind: "classes", key: "class", label: "Classification" },
-    { kind: "tagList", key: "tags", label: "Tags" },
-    { kind: "kindFields", key: "fields", label: "Fields" },
-    {
-      kind: "list",
-      key: "relations",
-      label: "Relations",
-      title: "type",
-      item: {
-        kind: "object",
-        key: "",
-        label: "Relation",
-        fields: [
-          { kind: "ref", key: "type", label: "Type", collection: "relations" },
-          { kind: "ref", key: "to", label: "To", collection: "entities" },
-          { kind: "relationFields", key: "fields", label: "Fields" },
-          { kind: "gameTime", key: "until", label: "Until", optional: true, hint: "It ends then; it lasts when empty" }
-        ]
-      }
-    },
-    { kind: "levels", key: "levels", label: "Level overrides" },
-    { kind: "agent", key: "agent", label: "Lives their own day (agendas and plans)" },
-    { kind: "life", key: "life", label: "Starts (life state)" },
-    { kind: "refs", key: "lifeKnownBy", label: "Who knows how it starts (none: everyone)", collections: ["entities"] },
-    { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
-    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, optional: true },
-    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by", "discoverable"] } },
-    {
-      kind: "list",
-      key: "cues",
-      label: "Cues: how they act while a secret stays hidden",
-      title: "text",
-      item: {
-        kind: "object",
-        key: "",
-        label: "Cue",
-        fields: [
-          { kind: "text", key: "text", label: "What the narrator sees them do (never the secret itself)" },
-          { kind: "ref", key: "lore", label: "While this secret lore stays gated", collection: "lore", optional: true },
-          { kind: "ref", key: "track", label: "While this track keeps something hidden", collection: "tracks", optional: true },
-          { kind: "text", key: "flag", label: "Until this story flag is set", optional: true, hint: "Pick one of the three: the secret the cue stands for" }
-        ]
-      }
-    }
-  ],
-  places: [
-    { kind: "text", key: "name", label: "Name" },
-    { kind: "ref", key: "parent", label: "Inside", collection: "places", optional: true },
-    { kind: "text", key: "timeZone", label: "Time zone (IANA)", optional: true, hint: "Inherited from the parent when empty" },
-    { kind: "text", key: "sceneType", label: "Default scene type", optional: true },
-    { kind: "bool", key: "adjudicate", label: "Checks roll here", hint: "Marked for a world whose checks roll only where marked: here and in the places inside it" },
-    { kind: "ref", key: "grid", label: "Grid", collection: "grids", optional: true },
-    {
-      kind: "object",
-      key: "cell",
-      label: "Cell on the parent's grid",
-      optional: true,
-      fields: [
-        { kind: "number", key: "x", label: "x", min: 0, step: 1 },
-        { kind: "number", key: "y", label: "y", min: 0, step: 1 }
-      ]
-    },
-    {
-      kind: "object",
-      key: "layoutPos",
-      label: "Position on the parent's node map",
-      optional: true,
-      fields: [
-        { kind: "number", key: "x", label: "x", step: 1 },
-        { kind: "number", key: "y", label: "y", step: 1 }
-      ]
-    },
-    { kind: "json", key: "fields", label: "Fields" },
-    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, optional: true },
-    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by", "discoverable"] } }
-  ],
-  routes: [
-    { kind: "ref", key: "from", label: "From", collection: "places" },
-    { kind: "ref", key: "to", label: "To", collection: "places" },
-    {
-      kind: "record",
-      key: "modes",
-      label: "Modes",
-      keyLabel: "Mode",
-      keys: TRAVEL_MODES,
-      item: {
-        kind: "object",
-        key: "",
-        label: "Leg",
-        fields: [
-          { kind: "duration", key: "minutes", label: "Time" },
-          { kind: "number", key: "distanceKm", label: "Distance (km)", min: 0, optional: true },
-          { kind: "text", key: "terrain", label: "Terrain", optional: true }
-        ]
-      }
-    },
-    { kind: "bool", key: "bidirectional", label: "Both directions" }
-  ],
-  grids: [
-    { kind: "number", key: "width", label: "Width", min: 1, step: 1 },
-    { kind: "number", key: "height", label: "Height", min: 1, step: 1 },
-    { kind: "number", key: "cellMeters", label: "Cell size (m)", optional: true },
-    { kind: "json", key: "terrain", label: "Terrain (row-major)" },
-    { kind: "json", key: "blocked", label: "Blocked cells" },
-    { kind: "json", key: "zones", label: "Zones" }
-  ],
-  maps: [
-    { kind: "text", key: "title", label: "Title", optional: true },
-    { kind: "ref", key: "scope", label: "Draws the inside of", collection: "places" },
-    { kind: "json", key: "size", label: "Size [width, height]", optional: true },
-    { kind: "json", key: "layout", label: "Layout rows", optional: true },
-    { kind: "json", key: "legend", label: "Legend", optional: true },
-    { kind: "json", key: "places", label: "Places", optional: true },
-    { kind: "json", key: "links", label: "Links", optional: true }
-  ],
-  rules: [
-    { kind: "json", key: "on", label: "Trigger", hint: '{"event": "…"} · {"tick": "turn|slot|day"} · {"enter": "place"} · {"at": "formula"} · with the grid system on, {"zone": "…", "in": "place"} or {"cell": [x, y], "in": "place"}, and "who": a selector (else the POV)' },
-    { kind: "expr", key: "when", label: "When", optional: true },
-    { kind: "list", key: "do", label: "Do", item: EFFECT, title: "type" },
-    { kind: "bool", key: "once", label: "Once" },
-    { kind: "duration", key: "cooldownMinutes", label: "Cooldown", optional: true },
-    { kind: "bool", key: "interrupt", label: "Interrupts a timelapse" },
-    {
-      kind: "object",
-      key: "beat",
-      label: "Storylet beat",
-      optional: true,
-      fields: [
-        { kind: "text", key: "hint", label: "Outline hint" },
-        { kind: "number", key: "weight", label: "Weight", optional: true }
-      ]
-    }
-  ],
-  actions: [
-    { kind: "text", key: "label", label: "Label" },
-    { kind: "text", key: "description", label: "Description", multiline: true, optional: true, hint: "What it does, in a line: the model that reads typed messages is told it" },
-    {
-      kind: "record",
-      key: "params",
-      label: "Parameters",
-      keyLabel: "Parameter",
-      item: {
-        kind: "object",
-        key: "",
-        label: "Parameter",
-        fields: [
-          { kind: "enum", key: "type", label: "Type", values: FIELD_TYPES },
-          { kind: "text", key: "label", label: "Label", optional: true },
-          { kind: "ref", key: "ref", label: "Ref kind", collection: "kinds", optional: true },
-          { kind: "bool", key: "optional", label: "Optional" },
-          { kind: "selector", key: "of", label: "Only candidates matching", optional: true }
-        ]
-      }
-    },
-    { kind: "list", key: "requires", label: "Requires", item: { kind: "expr", key: "", label: "Requirement" } },
-    { kind: "ref", key: "check", label: "Check", collection: "checks", optional: true, inline: true },
-    { kind: "record", key: "outcomes", label: "Effects per outcome", keyLabel: "Outcome", suggest: "outcomes", hint: "One list per outcome of the check; default when the action has no check", item: { kind: "list", key: "", label: "Effects", item: EFFECT, title: "type" } },
-    { kind: "expr", key: "duration", label: "Duration (minutes)" },
-    {
-      kind: "object",
-      key: "activity",
-      label: "Starts an activity",
-      optional: true,
-      fields: [
-        { kind: "text", key: "type", label: "Activity", hint: "sleep, work_shift, travel, waiting, …" },
-        { kind: "expr", key: "until", label: "Until" }
-      ]
-    },
-    { kind: "tags", key: "lexicon", label: "Verbs and phrases", noun: "phrase" },
-    { kind: "text", key: "observable", label: "Observable label", optional: true },
-    { kind: "bool", key: "adjudicate", label: "Its check always rolls", hint: "Marked for a world whose checks roll only where marked" },
-    {
-      kind: "object",
-      key: "combat",
-      label: "Combat action (offered only where the ruleset has combat)",
-      optional: true,
-      fields: [
-        { kind: "record", key: "cost", label: "Cost (budget → how many)", keyLabel: "Budget", item: { kind: "number", key: "", label: "How many", min: 0, step: 1 } },
-        { kind: "bool", key: "start", label: "Starts a fight (taken only when none is under way)" },
-        { kind: "enum", key: "role", label: "Everyone else's tactics use it to", values: ["attack", "defend"], optional: true }
-      ]
-    }
-  ],
-  checks: [
-    { kind: "dice", key: "dice", label: "Dice" },
-    { kind: "expr", key: "modifier", label: "Modifier", optional: true },
-    {
-      kind: "list",
-      key: "bands",
-      label: "Outcome bands",
-      title: "outcome",
-      item: {
-        kind: "object",
-        key: "",
-        label: "Band",
-        fields: [
-          { kind: "text", key: "outcome", label: "Outcome" },
-          { kind: "number", key: "min", label: "Min total", optional: true },
-          { kind: "number", key: "max", label: "Max total", optional: true }
-        ]
-      }
-    },
-    { kind: "tags", key: "pass", label: "Outcomes that count as success (empty: success and every band after it)", noun: "outcome" },
-    { kind: "text", key: "auto", label: "Outcome when not rolled", optional: true, hint: "Used when neither the action nor the check has a success outcome" }
-  ],
-  schedules: [
-    { kind: "json", key: "owner", label: "Owner", optional: true, hint: '"entity, group or kind id" · {"kind": [...], "class": {...}, "memberOf": [...]} (a selector)' },
-    { kind: "text", key: "target", label: "Sets" },
-    { kind: "json", key: "recurrence", label: "Recurrence" },
-    { kind: "json", key: "slots", label: "Slots" }
-  ],
-  tracks: [
-    { kind: "enum", key: "kind", label: "Kind", values: ["quest", "secret", "puzzle", "agenda"] },
-    { kind: "text", key: "label", label: "Label" },
-    { kind: "ref", key: "owner", label: "Owner", collection: "entities", optional: true },
-    { kind: "text", key: "start", label: "Start stage" },
-    { kind: "json", key: "stages", label: "Stages" },
-    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY },
-    { kind: "selector", key: "knownBy", label: "Known by (besides its owner and those who know the owner)", optional: true, when: { key: "visibility", values: ["known_by"] } },
-    { kind: "bool", key: "adjudicate", label: "Checks roll while it's in progress", hint: "Marked for a world whose checks roll only where marked" }
-  ],
-  tables: [{ kind: "json", key: "rows", label: "Rows" }],
-  sections: [
-    { kind: "text", key: "label", label: "Label" },
-    { kind: "number", key: "rank", label: "Rank (lower is reserved first)", step: 1 },
-    { kind: "text", key: "template", label: "Template", multiline: true },
-    { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
-    { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v3) => v3 !== false },
-    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, optional: true, hint: "player: what the player character knows (default) · scene: also what the people with him know or plainly see · gm: everything, each fact he doesn't know marked for the narrator" },
-    { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
-    { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
-    { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" }
-  ],
-  steps: [
-    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
-    { kind: "text", key: "template", label: "Template", multiline: true },
-    { kind: "enum", key: "output", label: "Output", values: ["text", "effects", "decision"] },
-    { kind: "tags", key: "signals", label: "Signals", noun: "signal" }
-  ],
-  packs: [
-    { kind: "number", key: "version", label: "Format version", step: 1 },
-    { kind: "json", key: "config", label: "Config" }
-  ],
-  lore: [
-    { kind: "text", key: "title", label: "Title" },
-    { kind: "text", key: "content", label: "Content", multiline: true },
-    { kind: "tags", key: "keys", label: "Keywords", noun: "keyword" },
-    { kind: "refs", key: "links", label: "Links (entities and places)", collections: ["entities", "places"] },
-    { kind: "text", key: "group", label: "Group", optional: true, hint: "Entries sharing a group are alternatives to each other" },
-    { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among otherwise equal entries" },
-    { kind: "enum", key: "visibility", label: "Who may read it (Known by: once the player character knows everything it links)", values: ["public", "known_by"], optional: true },
-    { kind: "bool", key: "secret", label: "Secret", hint: "Only the helpers you pick read it, until the gate holds", reads: (secret) => loreIsSecret({ secret }) },
-    { kind: "expr", key: "gate", label: "Gate (revealed once it holds)", optional: true },
-    { kind: "refs", key: "holders", label: "Whose own secret it is (their minds read it, gate or no gate)", collections: ["entities"] }
-  ],
-  classifications: [
-    { kind: "text", key: "label", label: "Label" },
-    { kind: "bool", key: "multiple", label: "Several values per entity", hint: "Off: one value each, like a story role. On: any number, like allegiances" },
-    { kind: "bool", key: "shown", label: "Players can see this classification", hint: "Off: only Build and GM mode see it; Play → People never groups or filters by it" },
-    { kind: "number", key: "order", label: "Order (lowest first)", optional: true, step: 1 },
-    { kind: "text", key: "description", label: "Description", multiline: true, optional: true },
-    { kind: "facetValues", key: "values", label: "Values" }
-  ],
-  routines: [
-    { kind: "text", key: "label", label: "Label", optional: true },
-    { kind: "bool", key: "inherit", label: "Keeps the blocks of less specific routines", reads: (inherit) => inherit !== false }
-  ]
-};
-var PART_SPECS = {
-  calendar: [
-    { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
-    { kind: "localTime", key: "epoch", label: "Clock starts at (the epoch)", hint: "Minute 0 of the world's clock, in its own calendar" },
-    { kind: "text", key: "timeZone", label: "Time zone (IANA)" },
-    {
-      kind: "list",
-      key: "dayParts",
-      label: "Day parts",
-      title: "label",
-      item: {
-        kind: "object",
-        key: "",
-        label: "Day part",
-        fields: [
-          { kind: "text", key: "id", label: "Id" },
-          { kind: "text", key: "label", label: "Label" },
-          { kind: "timeOfDay", key: "start", label: "Starts" }
-        ]
-      }
-    },
-    {
-      kind: "list",
-      key: "holidays",
-      label: "Holidays",
-      title: "label",
-      item: {
-        kind: "object",
-        key: "",
-        label: "Holiday",
-        fields: [
-          { kind: "text", key: "id", label: "Id" },
-          { kind: "text", key: "label", label: "Label" },
-          { kind: "json", key: "rule", label: "Date rule" },
-          { kind: "bool", key: "dayOff", label: "Day off" }
-        ]
-      }
-    },
-    { kind: "json", key: "custom", label: "Custom calendar (month lengths and names)", optional: true }
-  ],
-  realism: [
-    { kind: "enum", key: "preset", label: "Preset", values: ["story", "grounded", "simulation", "custom"] },
-    { kind: "levels", key: "levels", label: "Domain levels", floored: true },
-    { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
-    { kind: "claims", key: "claims", label: "Player claims" }
-  ],
-  needs: NEED_IDS.map((need) => ({ kind: "object", key: need, label: NEED_LABELS[need], fields: NEED_FIELDS })),
-  time: [
-    { kind: "record", key: "sceneTicks", label: "Default tick per scene type", keyLabel: "Scene type", item: { kind: "duration", key: "", label: "Tick" } },
-    { kind: "json", key: "interrupts", label: "Interrupt policy" },
-    { kind: "json", key: "speedThrough", label: "Speed through" },
-    { kind: "enum", key: "montage", label: "Montage", values: ["key", "day", "week"] },
-    {
-      kind: "object",
-      key: "unitCap",
-      label: "Unit cap",
-      fields: [
-        { kind: "number", key: "agentDays", label: "Agent-days", min: 1, step: 1 },
-        { kind: "number", key: "events", label: "Events", min: 1, step: 1 }
-      ]
-    }
-  ],
-  meta: [
-    { kind: "text", key: "name", label: "World name" },
-    { kind: "ref", key: "pov", label: "Point of view", collection: "entities" },
-    {
-      kind: "object",
-      key: "start",
-      label: "Start",
-      fields: [
-        { kind: "ref", key: "place", label: "Place", collection: "places" },
-        { kind: "localTime", key: "at", label: "At" }
-      ]
-    },
-    { kind: "enum", key: "seedMode", label: "Re-run rolls", values: ["fresh", "same_roll"] },
-    { kind: "bool", key: "lenientPricing", label: "Lenient pricing (accept narrated prices inside the band)" },
-    { kind: "number", key: "spawnCap", label: "People replies may introduce in a chat (0 for none)", min: 0, max: 500, step: 1 },
-    {
-      kind: "record",
-      key: "lifeStates",
-      label: "Life states (besides Alive, Dying and Dead)",
-      keyLabel: "State id",
-      item: {
-        kind: "object",
-        key: "",
-        label: "Life state",
-        fields: [
-          { kind: "text", key: "label", label: "Label" },
-          { kind: "bool", key: "acts", label: "Still acts (follows schedules and plans, chooses, takes combat turns)" },
-          { kind: "text", key: "reads", label: "Reads to the narrator as", hint: "lies unconscious · is missing · walks again" }
-        ]
-      }
-    },
-    {
-      kind: "object",
-      key: "currency",
-      label: "Currency",
-      fields: [
-        { kind: "text", key: "code", label: "Code (ISO 4217 or your own, e.g. GP)" },
-        { kind: "text", key: "symbol", label: "Symbol" },
-        { kind: "text", key: "minorUnit", label: "Minor unit (cent, copper…)" },
-        { kind: "number", key: "decimals", label: "Decimals (2 → 100 minor units per major)", min: 0, max: 6, step: 1 },
-        { kind: "text", key: "format", label: "Format", hint: "{sign}{symbol}{amount} · {sign}{major} sp {minor} cp" }
-      ]
-    },
-    {
-      kind: "object",
-      key: "mapSettings",
-      label: "Map",
-      fields: [
-        { kind: "enum", key: "display", label: "The map shows (knowledge: what the POV knows, places only heard of dashed; fog: fog over what it hasn't seen)", values: ["knowledge", "fog"] },
-        {
-          kind: "object",
-          key: "grid",
-          label: "Grid system",
-          fields: [
-            { kind: "bool", key: "movement", label: "Grid movement", hint: "Walls and doors steer the POV across grids, things lie in cells, and cells and zones trigger rules; Space plays at 3 or more" },
-            { kind: "number", key: "sightRadius", label: "Sight radius (cells the POV sees around it)", min: 0, max: 32, step: 1 }
-          ]
-        },
-        { kind: "bool", key: "travelSimulation", label: "Travel simulation: moves need a route", hint: "Off (the default): moves are story first, so a move the reply tells always lands and Go goes even where no route leads. On: a narrated move no route reaches didn't happen, and Go needs a walking route" }
-      ]
-    }
-  ]
-};
-var ID_MAX = 64;
-var FOLD = { ß: "ss", æ: "ae", œ: "oe", ø: "o", đ: "d", ð: "d", ł: "l", þ: "th" };
-function deriveId(name, taken) {
-  const snake = name.normalize("NFKD").replace(/[\u0300-\u036f'’]/g, "").toLowerCase().replace(/[ßæœøđðłþ]/g, (c3) => FOLD[c3] ?? c3).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^(\d)/, "x$1");
-  const base = snake.slice(0, ID_MAX).replace(/_+$/, "") || "item";
-  for (let n2 = 1;; n2++) {
-    const suffix = n2 === 1 ? "" : `_${n2}`;
-    const id = `${base.slice(0, ID_MAX - suffix.length).replace(/_+$/, "")}${suffix}`;
-    if (!taken.has(id) && safeKey(id))
-      return id;
-  }
-}
-function newItem(collection, id, world, name) {
-  const shown = name?.trim() || id;
-  switch (collection) {
-    case "kinds":
-      return { id, label: shown, fields: {} };
-    case "relations":
-      return { id, label: shown, from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: {} };
-    case "entities":
-      return { id, kind: "", name: shown, tier: spawnTierOf(world), fields: {}, relations: [] };
-    case "places":
-      return { id, name: shown, fields: {} };
-    case "routes":
-      return { id, from: "", to: "", modes: { walk: { minutes: 10 } }, bidirectional: true };
-    case "grids":
-      return { id, width: 16, height: 16, terrain: Array.from({ length: 256 }, () => "grass"), blocked: [], zones: {} };
-    case "maps":
-      return { id, scope: world.start.place, places: [], ...name?.trim() ? { title: name.trim() } : {} };
-    case "rules":
-      return { id, on: { tick: "turn" }, do: [] };
-    case "actions":
-      return { id, label: shown, params: {}, requires: [], outcomes: { default: [] }, duration: "1" };
-    case "checks":
-      return { id, dice: "2d6", bands: [{ outcome: "fail", max: 6 }, { outcome: "success", min: 7 }] };
-    case "schedules":
-      return { id, target: "place", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "17:00", value: null }] };
-    case "tracks":
-      return { id, kind: "quest", label: shown, start: "start", stages: { start: { label: "Start", next: [] } }, visibility: "public" };
-    case "tables":
-      return { id, pack: "", schema: `lre-table/${id}/v1`, revision: "", label: shown, columns: {}, rows: {} };
-    case "sections":
-      return { id, label: shown, rank: 50, template: "", position: { type: "native" } };
-    case "steps":
-      return { id, purpose: "brief", template: "", output: "text", signals: [] };
-    case "packs":
-      return { version: 1, config: {} };
-    case "lore":
-      return { id, title: shown, content: "", keys: [], links: [] };
-    case "classifications":
-      return { id, label: name?.trim() || id.replace(/_/g, " "), multiple: false, values: {} };
-    case "routines":
-      return { id, label: shown, blocks: [] };
-  }
-}
-
-// src/frontend/build/chrome.tsx
-var COLLECTION_INFO = {
-  entities: { label: "Entities", hint: "People, things, vehicles", noun: "entity", icon: "users" },
-  kinds: { label: "Kinds", hint: "Types and their fields", noun: "kind", icon: "layers" },
-  classifications: { label: "Classifications", hint: "Story roles, allegiances: your own facets", noun: "classification", icon: "star" },
-  relations: { label: "Relations", hint: "How entities connect", noun: "relation", icon: "link" },
-  places: { label: "Places", hint: "Where things happen", noun: "place", icon: "pin" },
-  maps: { label: "Maps", hint: "Floor plans and town maps, as lre-map-v1", noun: "map", icon: "map" },
-  routes: { label: "Routes", hint: "Travel between places", noun: "route", icon: "route" },
-  grids: { label: "Grids", hint: "Maps inside places", noun: "grid", icon: "grid" },
-  actions: { label: "Actions", hint: "What the player can do", noun: "action", icon: "bolt" },
-  checks: { label: "Checks", hint: "Dice and outcome bands", noun: "check", icon: "dice" },
-  rules: { label: "Rules", hint: "When this, do that", noun: "rule", icon: "branch" },
-  routines: { label: "Routines", hint: "How people's days usually go: the world's, a group's, a kind's or someone's own", noun: "routine", icon: "clock" },
-  schedules: { label: "Schedules", hint: "Shifts, opening hours, weather: one field slot by slot", noun: "schedule", icon: "calendar" },
-  tracks: { label: "Tracks", hint: "Quests, secrets, puzzles, agendas", noun: "track", icon: "flag" },
-  lore: { label: "Lore", hint: "Entries, lookup table, indexing", noun: "lore entry", icon: "book" },
-  tables: { label: "Data tables", hint: "Prices, jobs, regions…", noun: "data table", icon: "table" },
-  sections: { label: "Sections", hint: "What the narrator reads", noun: "section", icon: "scroll" },
-  steps: { label: "Step templates", hint: "Prompted model steps", noun: "step template", icon: "sparkle" },
-  packs: { label: "Packs", hint: "Enabled domain packs", noun: "pack", icon: "box" }
-};
-var PART_INFO = {
-  meta: { label: "World", hint: "Name, point of view, start, currency and map", icon: "globe" },
-  calendar: { label: "Calendar", hint: "Dates, months and holidays", icon: "calendar" },
-  realism: { label: "Realism defaults", hint: "How closely new chats simulate each part of life", icon: "sliders" },
-  tiers: { label: "Tiers", hint: "How deeply each person is simulated", icon: "layers" },
-  time: { label: "Time defaults", hint: "How time passes in new chats", icon: "clock" },
-  ruleset: { label: "Ruleset", hint: "Character fields, checks, levels, the sheet and combat", icon: "shield" },
-  loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
-  minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
-  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, at a place, or of a step always reads", icon: "pin" },
-  routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" },
-  needs: { label: "Needs", hint: "Hunger, fatigue, company and fun: each on or off, how fast it grows, when it's told and when it alerts", icon: "sliders" }
-};
-function go(app, build) {
-  app.ui.update((ui) => ({ ...ui, build }));
-}
-function itemLabel(collection, id, value, places) {
-  if (isRecord(value)) {
-    if (typeof value.name === "string" && value.name)
-      return value.name;
-    if (typeof value.label === "string" && value.label)
-      return value.label;
-    if (typeof value.title === "string" && value.title)
-      return value.title;
-    if (collection === "routes" && typeof value.from === "string") {
-      const [from, to] = [value.from, value.to].map((place) => typeof place === "string" && places && hasOwn(places, place) ? places[place]?.name ?? place : String(place));
-      return `${from} → ${to}`;
-    }
-  }
-  return humanize(id);
-}
-function OverflowMenu(props) {
-  const [open, setOpen] = d2(false);
-  const [up, setUp] = d2(false);
-  const root = T2(null);
-  const button = T2(null);
-  const list2 = T2(null);
-  const menuId = P2();
-  F2(() => {
-    if (!open)
+// src/frontend/gm/ui.tsx
+function usePages() {
+  const [page, setPage] = d2(null);
+  const ref = T2(null);
+  const opener = T2(null);
+  const open = page !== null;
+  const shown = T2(open);
+  A(() => {
+    if (open === shown.current)
       return;
-    const rect = list2.current?.getBoundingClientRect();
-    if (rect && rect.bottom > window.innerHeight - 8 && rect.height + 48 < (button.current?.getBoundingClientRect().top ?? 0))
-      setUp(true);
-    list2.current?.querySelector('[role="menuitem"]:not(:disabled)')?.focus();
-    const away = (event) => {
-      if (root.current && event.composedPath().includes(root.current))
-        return;
-      setOpen(false);
-      setUp(false);
-    };
-    document.addEventListener("pointerdown", away, true);
-    return () => document.removeEventListener("pointerdown", away, true);
+    shown.current = open;
+    if (open) {
+      ref.current?.querySelector(":scope > .lre-gm-page .lre-page-header button")?.focus();
+      return;
+    }
+    const back = opener.current;
+    opener.current = null;
+    if (back?.isConnected)
+      back.focus();
   }, [open]);
-  const close = (refocus) => {
-    setOpen(false);
-    setUp(false);
-    if (refocus)
-      button.current?.focus();
-  };
-  const onKeyDown = (event) => {
-    if (!open)
-      return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close(true);
-      return;
+  return {
+    page,
+    open: (next) => {
+      if (page === null)
+        opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setPage(next);
+    },
+    back: () => setPage(null),
+    host: {
+      ref,
+      onKeyDown: (event) => {
+        if (event.key !== "Escape" || page === null || event.defaultPrevented)
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        setPage(null);
+      }
     }
-    if (event.key === "Tab") {
-      close(false);
-      return;
-    }
-    const all = [...list2.current?.querySelectorAll('[role="menuitem"]:not(:disabled)') ?? []];
-    const at = all.findIndex((entry) => entry === event.target);
-    const next = event.key === "ArrowDown" ? (at + 1) % all.length : event.key === "ArrowUp" ? at <= 0 ? all.length - 1 : at - 1 : event.key === "Home" ? 0 : event.key === "End" ? all.length - 1 : -1;
-    if (next < 0 || all.length === 0)
-      return;
-    event.preventDefault();
-    all[next]?.focus();
   };
-  return /* @__PURE__ */ u3("div", {
-    ref: root,
-    class: "lre-build-menu",
-    onKeyDown,
-    children: [
-      /* @__PURE__ */ u3("button", {
-        ref: button,
-        type: "button",
-        class: "lre-iconbtn ghost",
-        "aria-label": props.label,
-        title: props.label,
-        "aria-haspopup": "menu",
-        "aria-expanded": open,
-        "aria-controls": open ? menuId : undefined,
-        disabled: props.disabled,
-        onClick: () => open ? close(false) : setOpen(true),
-        children: /* @__PURE__ */ u3(Icon, {
-          name: "more"
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      open ? /* @__PURE__ */ u3("div", {
-        ref: list2,
-        id: menuId,
-        class: up ? "lre-build-menu-list up" : "lre-build-menu-list",
-        role: "menu",
-        "aria-label": props.label,
-        children: props.items.map((item) => /* @__PURE__ */ u3("button", {
-          type: "button",
-          role: "menuitem",
-          class: item.danger ? "danger" : undefined,
-          disabled: item.disabled,
-          onClick: () => {
-            close(true);
-            item.onSelect();
-          },
-          children: [
-            item.icon ? /* @__PURE__ */ u3(Icon, {
-              name: item.icon,
-              size: 16
-            }, undefined, false, undefined, this) : null,
-            /* @__PURE__ */ u3("span", {
-              children: item.label
-            }, undefined, false, undefined, this)
-          ]
-        }, item.label, true, undefined, this))
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
 }
-function ItemHeader(props) {
-  const showIds = useShowIds();
-  const onDelete = props.onDelete;
-  const items = [...props.menu ?? [], ...onDelete ? [{ label: "Delete", icon: "trash", danger: true, disabled: props.busy, onSelect: onDelete }] : []];
-  const subtitle = props.subtitle !== undefined || showIds ? /* @__PURE__ */ u3(M, {
-    children: [
-      props.subtitle,
-      props.subtitle !== undefined && showIds ? " · " : null,
-      /* @__PURE__ */ u3(IdText, {
-        id: props.id
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this) : undefined;
-  const actions = props.actions !== undefined || items.length > 0 ? /* @__PURE__ */ u3(M, {
-    children: [
-      props.actions,
-      items.length > 0 ? /* @__PURE__ */ u3(OverflowMenu, {
-        label: "Item actions",
-        items
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this) : undefined;
-  return /* @__PURE__ */ u3(PageHeader, {
-    title: props.title,
-    subtitle,
-    actions
+function useGmFocus(open) {
+  const app = useApp();
+  const focus = useUi((ui) => ui.gm.focus);
+  A(() => {
+    if (focus === undefined)
+      return;
+    open(focus);
+    app.ui.update(focusTaken);
+  }, [focus]);
+}
+function SheetLink(props) {
+  const app = useApp();
+  return /* @__PURE__ */ u3(Button, {
+    size: "sm",
+    variant: "secondary",
+    icon: "user",
+    onClick: () => app.ui.update((ui) => gmOpen(ui, "world", props.entity)),
+    children: "Character sheet"
   }, undefined, false, undefined, this);
 }
-async function deleteItem(app, send, item) {
-  const noun = COLLECTION_INFO[item.collection].noun;
-  if (!await app.host.confirm(`Delete ${noun}`, item.message ?? `Delete the ${noun} “${item.name ?? item.id}”? References to it will show in Problems.`, "danger", "Delete"))
-    return false;
-  const message = await send({ type: "lre.editor", worldId: item.worldId, base: null, op: "remove", collection: item.collection, id: item.id });
-  if (message.type !== "lre.result")
-    return false;
-  go(app, { view: "collection", worldId: item.worldId, collection: item.collection });
-  return true;
-}
-var newNames = new Map;
-function newItemName(worldId, collection, id) {
-  return newNames.get(`${worldId}/${collection}/${id}`);
-}
-function openNewItem(app, item) {
-  newNames.set(`${item.worldId}/${item.collection}/${item.id}`, item.name);
-  go(app, { view: "item", worldId: item.worldId, collection: item.collection, id: `new:${item.id}` });
-}
-function idProblem(id, taken, noun) {
-  if (!id)
-    return "Give it an id.";
-  if (taken.has(id))
-    return `Another ${noun} already has this id.`;
-  return safeKey(id) ? null : "This id is reserved. Choose another.";
-}
-function NewItem(props) {
-  const app = useApp();
-  const showIds = useShowIds();
-  const noun = COLLECTION_INFO[props.collection].noun;
-  const [name, setName] = d2("");
-  const [typed, setTyped] = d2(null);
-  const nameId = P2();
-  const idId = P2();
-  const input = T2(null);
-  A(() => input.current?.focus(), []);
-  const id = typed ?? (name.trim() ? deriveId(name.trim(), props.taken) : "");
-  const problem = typed === null ? null : idProblem(typed, props.taken, noun);
-  const ready = name.trim() !== "" && id !== "" && problem === null;
-  const idField = /* @__PURE__ */ u3(Field, {
-    label: "Id",
-    for: idId,
-    help: "How rules, formulas and other items refer to it. It follows the name until you change it.",
-    error: problem,
-    children: /* @__PURE__ */ u3("input", {
-      id: idId,
-      class: "lre-input lre-build-mono",
-      value: id,
-      autoComplete: "off",
-      spellcheck: false,
-      "aria-invalid": problem !== null || undefined,
-      onInput: (event) => setTyped(event.currentTarget.value.replace(/[^\w.-]/g, "_"))
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3("form", {
-    class: "lre-build-new",
-    "aria-label": `New ${noun}`,
-    "data-lre-new": props.collection,
-    onSubmit: (event) => {
-      event.preventDefault();
-      if (!ready)
-        return;
-      openNewItem(app, { worldId: props.worldId, collection: props.collection, id, name: name.trim() });
-      props.onDone();
-    },
-    onKeyDown: (event) => {
-      if (event.key !== "Escape")
-        return;
-      event.stopPropagation();
-      props.onDone();
-    },
-    children: [
-      /* @__PURE__ */ u3(Field, {
-        label: `Name of the new ${noun}`,
-        for: nameId,
-        children: /* @__PURE__ */ u3("input", {
-          ref: input,
-          id: nameId,
-          class: "lre-input",
-          value: name,
-          autoComplete: "off",
-          onInput: (event) => setName(event.currentTarget.value)
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      showIds ? idField : /* @__PURE__ */ u3(Disclosure, {
-        summary: "Advanced",
-        children: idField
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-build-actions",
-        children: [
-          /* @__PURE__ */ u3(Button, {
-            type: "submit",
-            variant: "primary",
-            iconAfter: "chevron-right",
-            disabled: !ready,
-            children: "Continue"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Button, {
-            variant: "ghost",
-            onClick: props.onDone,
-            children: "Cancel"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-
-// src/frontend/build/check.tsx
-var COLLECTIONS = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "routines", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
-var PARTS = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "lorePins", "routineSettings", "needs"];
-var META_FIELDS = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "lifeStates", "currency", "mapSettings"];
-function issueTarget(path) {
-  const [head, id, pinned] = path.split(".");
-  if (head === "lorePins" && pinned)
-    return id === "characters" ? { collection: "entities", id: pinned } : id === "places" ? { collection: "places", id: pinned } : null;
-  const collection = COLLECTIONS.find((c3) => c3 === head);
-  return collection && id ? { collection, id } : null;
-}
-function issueRoute(worldId, path) {
-  const target = issueTarget(path);
-  if (target)
-    return { view: "item", worldId, collection: target.collection, id: target.id, at: path };
-  const part = issuePart(path);
-  return part ? { view: "part", worldId, part } : null;
-}
-function issuePart(path) {
-  const head = path.split(".")[0] ?? "";
-  return head === "spawnTier" ? "tiers" : META_FIELDS.includes(head) ? "meta" : PARTS.find((p3) => p3 === head) ?? null;
-}
-var SEVERITY = {
-  error: { label: "Error", tone: "neg" },
-  warning: { label: "Warning", tone: "warn" },
-  info: { label: "Info", tone: "neutral" }
-};
-function SeverityBadge(props) {
-  const severity = SEVERITY[props.severity];
-  return /* @__PURE__ */ u3(Badge, {
-    tone: severity.tone,
-    children: [
-      /* @__PURE__ */ u3(Icon, {
-        name: props.severity === "info" ? "info" : "alert",
-        size: 12
-      }, undefined, false, undefined, this),
-      severity.label
-    ]
-  }, undefined, true, undefined, this);
-}
-function IssueRow(props) {
-  const app = useApp();
-  const { issue, worldId, doc } = props;
-  const target = issueTarget(issue.path);
-  const part = target ? null : issuePart(issue.path);
-  let where = issue.path;
-  if (target) {
-    const items = doc ? doc[target.collection] ?? {} : {};
-    where = `${COLLECTION_INFO[target.collection].label} › ${itemLabel(target.collection, target.id, hasOwn(items, target.id) ? items[target.id] : undefined, doc?.places)}`;
-  } else if (part)
-    where = PART_INFO[part].label;
-  const route = worldId === undefined ? null : issueRoute(worldId, issue.path);
-  const open = route ? () => go(app, route) : null;
+function GmPage(props) {
   return /* @__PURE__ */ u3("div", {
-    class: "lre-lint",
-    role: "listitem",
-    "data-lre-issue": issue.code,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "lre-lint-text",
-        children: [
-          /* @__PURE__ */ u3(SeverityBadge, {
-            severity: issue.severity
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            class: "lre-lint-message",
-            children: issue.message
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            class: "lre-lint-where",
-            children: where
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(IdText, {
-            id: `${issue.path} · ${issue.code}`
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      open ? /* @__PURE__ */ u3(Button, {
-        size: "sm",
-        label: `Open ${where}`,
-        onClick: open,
-        children: "Open"
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function CheckView(props) {
-  const app = useApp();
-  const doc = useSelect(app.drafts, (d3) => d3?.worldId === props.worldId ? d3.doc : undefined);
-  const [issues, setIssues] = d2(null);
-  const [severity, setSeverity] = d2("all");
-  const [busy, run] = useBusy();
-  const check = () => run(async () => {
-    const result = await app.request({ type: "lre.world", op: "lint", worldId: props.worldId });
-    setIssues(result?.lint ?? []);
-  });
-  A(check, [props.worldId]);
-  const count = (s3) => issues?.filter((i3) => i3.severity === s3).length ?? 0;
-  const shown = (issues ?? []).filter((i3) => severity === "all" || i3.severity === severity);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-build-page",
-    "data-lre-check": true,
+    class: "lre-gm-page",
+    "data-lre-gm-page": props.name,
     children: [
       /* @__PURE__ */ u3(PageHeader, {
-        title: "Problems",
-        subtitle: "The whole draft, checked as the engine will play it",
-        actions: /* @__PURE__ */ u3(Button, {
-          size: "sm",
-          icon: "refresh",
-          busy,
-          onClick: check,
-          children: busy ? "Checking…" : "Check again"
-        }, undefined, false, undefined, this)
+        title: props.title,
+        subtitle: props.subtitle,
+        onBack: props.onBack,
+        backLabel: props.backLabel,
+        actions: props.actions
       }, undefined, false, undefined, this),
-      issues === null ? /* @__PURE__ */ u3(Empty, {
-        icon: "hourglass",
-        children: "Checking the world…"
-      }, undefined, false, undefined, this) : issues.length === 0 ? /* @__PURE__ */ u3(Banner, {
-        tone: "info",
-        icon: "check",
-        title: "No issues",
-        children: "The world is ready to play."
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
-        children: [
-          /* @__PURE__ */ u3(Seg, {
-            label: "Severity",
-            value: severity,
-            options: [
-              { value: "all", label: `All ${issues.length}` },
-              { value: "error", label: `Errors ${count("error")}` },
-              { value: "warning", label: `Warnings ${count("warning")}` },
-              { value: "info", label: `Info ${count("info")}` }
-            ],
-            onChange: (next) => setSeverity(next)
-          }, undefined, false, undefined, this),
-          shown.length === 0 ? /* @__PURE__ */ u3(Empty, {
-            children: "Nothing at this severity."
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Section, {
-            flush: true,
-            children: /* @__PURE__ */ u3("div", {
-              class: "lre-build-issues",
-              role: "list",
-              children: shown.map((issue, i3) => /* @__PURE__ */ u3(IssueRow, {
-                issue,
-                worldId: props.worldId,
-                doc
-              }, `${issue.path}:${issue.code}:${i3}`, false, undefined, this))
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
+      props.children
     ]
   }, undefined, true, undefined, this);
+}
+function ActionRows(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-rows",
+    role: "list",
+    "aria-label": props.label,
+    children: props.children
+  }, undefined, false, undefined, this);
+}
+function ActionRow(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-row",
+    role: "listitem",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-row-main",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-gm-row-text",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-gm-row-title",
+                children: props.title
+              }, undefined, false, undefined, this),
+              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
+                class: "lre-gm-row-sub",
+                children: props.subtitle
+              }, undefined, false, undefined, this) : null,
+              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
+                id: props.id
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          props.value !== undefined ? /* @__PURE__ */ u3("span", {
+            class: props.tone ? `lre-gm-row-value lre-${props.tone}` : "lre-gm-row-value",
+            children: props.value
+          }, undefined, false, undefined, this) : null,
+          props.actions !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-gm-row-actions",
+            children: props.actions
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmCard(props) {
+  return /* @__PURE__ */ u3("section", {
+    class: "lre-card lre-gm-card",
+    "data-lre-gm-card": props.name,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-card-head",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-gm-card-titles",
+            children: [
+              /* @__PURE__ */ u3("h3", {
+                class: "lre-gm-card-title",
+                children: props.title
+              }, undefined, false, undefined, this),
+              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
+                class: "lre-gm-card-sub",
+                children: props.subtitle
+              }, undefined, false, undefined, this) : null,
+              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
+                id: props.id
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          props.badges !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-gm-badges",
+            children: props.badges
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function EditNoticeBar(props) {
+  const ref = T2(null);
+  F2(() => {
+    const el = ref.current;
+    const mode = el?.closest(".lre-gm");
+    if (!el || !mode)
+      return;
+    const publish = () => mode.style.setProperty("--lre-gm-notice-h", `${el.offsetHeight}px`);
+    publish();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    observer?.observe(el);
+    return () => {
+      observer?.disconnect();
+      mode.style.removeProperty("--lre-gm-notice-h");
+    };
+  }, []);
+  return /* @__PURE__ */ u3("div", {
+    ref,
+    class: "lre-gm-notice",
+    role: "status",
+    "data-lre-gm-notice": "",
+    children: [
+      /* @__PURE__ */ u3(Icon, {
+        name: "check",
+        size: 16
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-gm-notice-text",
+        children: props.notice.text
+      }, undefined, false, undefined, this),
+      props.notice.undo.length > 0 ? /* @__PURE__ */ u3(Button, {
+        size: "sm",
+        icon: "undo",
+        disabled: props.busy,
+        onClick: props.onUndo,
+        children: "Undo"
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(IconButton, {
+        icon: "close",
+        label: "Dismiss",
+        onClick: props.onDismiss
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BuildLink() {
+  const app = useApp();
+  return /* @__PURE__ */ u3(Button, {
+    variant: "ghost",
+    icon: "hammer",
+    onClick: () => app.ui.update((ui) => ({ ...ui, mode: "build" })),
+    children: "Kinds and places are the world's: edit them in Build"
+  }, undefined, false, undefined, this);
 }
 
 // src/shared/protocol.ts
@@ -3710,421 +2844,10 @@ async function discardDraft(app) {
     app.drafts.set({ ...draft, base: message.body.base, doc: message.body.draft, lint: message.body.lint, version: message.body.version, dirty: message.body.stored, reloaded: false });
 }
 
-// src/shared/minds.ts
-var FIDELITIES = ["live", "near", "far", "background"];
-var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
-  here: 45,
-  nearby: 20,
-  mentioned: 40,
-  regard: 10,
-  knows: 10,
-  owner: 15,
-  track: 8,
-  roles: { antagonist: 20 },
-  rule: 5,
-  pending: 15,
-  band: { principal: 15, supporting: 5, background: 0 },
-  recent: 10
-});
-var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
-var DEFAULT_MINDS_MEMORY = Object.freeze({
-  witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 4000 },
-  notes: { show: 8, keep: 24 },
-  commitments: { show: 8 },
-  salience: { halfLifeDays: 7, floor: 0.5 },
-  consolidate: { enabled: true, periodDays: 1 }
-});
-var DEFAULT_WORLD_MINDS = Object.freeze({
-  secrecy: "brief",
-  weights: DEFAULT_FIDELITY_WEIGHTS,
-  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
-  always: null,
-  never: null,
-  memory: DEFAULT_MINDS_MEMORY
-});
-var MINDS_RANGES = {
-  weight: [-100, 200],
-  threshold: [0, 1000],
-  show: [0, 64],
-  keep: [1, 64],
-  recallTokens: [0, Number.MAX_SAFE_INTEGER],
-  halfLifeDays: [0.1, 3650],
-  floor: [0, 5],
-  periodDays: [0.1, 365]
-};
-var num2 = (v3, [lo, hi], fallback) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= lo && v3 <= hi ? v3 : fallback;
-var whole = (v3, range, fallback) => Math.round(num2(v3, range, fallback));
-var wholeOrNone = (v3, range, fallback) => v3 === "none" ? "none" : typeof v3 === "number" && Number.isFinite(v3) && v3 >= range[0] && v3 <= range[1] ? Math.round(v3) : fallback;
-var obj2 = (v3) => isRecord(v3) ? v3 : {};
-function selectorOrNull(v3) {
-  if (!isRecord(v3))
-    return null;
-  const out = {};
-  const list2 = (x2) => Array.isArray(x2) && x2.every((s3) => typeof s3 === "string") ? x2.slice(0, 200) : undefined;
-  const ids = list2(v3.ids);
-  const kind = list2(v3.kind);
-  const tier = list2(v3.tier);
-  const memberOf = list2(v3.memberOf);
-  const tag = list2(v3.tag);
-  if (ids)
-    out.ids = ids;
-  if (kind)
-    out.kind = kind;
-  if (tier)
-    out.tier = tier;
-  if (memberOf)
-    out.memberOf = memberOf;
-  if (tag)
-    out.tag = tag;
-  if (isRecord(v3.class)) {
-    const classes = {};
-    for (const [facet, values] of Object.entries(v3.class)) {
-      const vs = list2(values);
-      if (safeKey(facet) && vs)
-        classes[facet] = vs;
-    }
-    out.class = classes;
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
-  const m2 = obj2(raw);
-  const witness = obj2(m2.witness);
-  const recall = obj2(m2.recall);
-  const notes = obj2(m2.notes);
-  const commitments = obj2(m2.commitments);
-  const salience = obj2(m2.salience);
-  const consolidate = obj2(m2.consolidate);
-  return {
-    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
-    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
-    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
-    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
-    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
-    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
-  };
-}
-function worldMindsOf(world) {
-  const raw = obj2(world.minds);
-  const w3 = obj2(raw.weights);
-  const band = obj2(w3.band);
-  const d3 = DEFAULT_FIDELITY_WEIGHTS;
-  const weight = (v3, fallback) => num2(v3, MINDS_RANGES.weight, fallback);
-  const roles = {};
-  const rawRoles = isRecord(w3.roles) ? w3.roles : d3.roles;
-  for (const [value, points] of Object.entries(rawRoles))
-    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
-      roles[value] = weight(points, 0);
-  const t3 = obj2(raw.thresholds);
-  const far = num2(t3.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
-  const near = Math.max(far, num2(t3.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
-  const live = Math.max(near, num2(t3.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
-  return {
-    secrecy: raw.secrecy === "full" ? "full" : "brief",
-    weights: {
-      here: weight(w3.here, d3.here),
-      nearby: weight(w3.nearby, d3.nearby),
-      mentioned: weight(w3.mentioned, d3.mentioned),
-      regard: weight(w3.regard, d3.regard),
-      knows: weight(w3.knows, d3.knows),
-      owner: weight(w3.owner, d3.owner),
-      track: weight(w3.track, d3.track),
-      roles,
-      rule: weight(w3.rule, d3.rule),
-      pending: weight(w3.pending, d3.pending),
-      band: { principal: weight(band.principal, d3.band.principal), supporting: weight(band.supporting, d3.band.supporting), background: weight(band.background, d3.band.background) },
-      recent: weight(w3.recent, d3.recent)
-    },
-    thresholds: { live, near, far },
-    always: selectorOrNull(raw.always),
-    never: selectorOrNull(raw.never),
-    memory: memoryConfigOf(raw.memory)
-  };
-}
-function limitOf(limit) {
-  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
-}
-var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
-function isMindPurpose(purpose) {
-  return MIND_PURPOSES.includes(purpose);
-}
-function worldMindTemplate(world, purpose) {
-  return Object.values(world.steps).filter((t3) => t3.purpose === purpose && t3.template.trim() !== "").sort((a3, b3) => a3.id.localeCompare(b3.id))[0];
-}
-var MIND_SOURCES = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life"];
-var DEFAULT_MIND_READS = Object.freeze({
-  pinned: { on: true, tokens: "none" },
-  activated: { on: true, tokens: 1600 },
-  reply: { on: true, tokens: "none" },
-  message: { on: true, tokens: "none" },
-  history: { on: false, messages: 8, tokens: 3000 },
-  summary: { on: false, tokens: "none" },
-  memory: { on: false, tokens: "none" },
-  thoughts: { on: false, tokens: "none" },
-  recall: { on: false },
-  routine: { on: true, tokens: 400 },
-  plans: { on: true, tokens: 400 },
-  life: { on: false, tokens: "none" }
-});
-var MINDS_PRESETS = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
-});
-function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
-}
-var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
-var MIND_PROMPT_MAX = 20000;
-var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
-var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
-function planInForce(p3) {
-  return p3.source !== "mind";
-}
-var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
-var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
-var MIND_APPROACHES = ["reactive", "proactive"];
-var MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  gmIntent: 600,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160
-};
-var MIND_PROMPT_DEFAULTS = Object.freeze({
-  mind: [
-    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
-    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
-  ].join(`
-`),
-  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
-  skip: [
-    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
-    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
-  ].join(`
-`),
-  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
-});
-var MIND_ANSWER_FORMATS = Object.freeze({
-  mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
-    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
-    "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- mood: one or two words.",
-    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
-  ].join(`
-`),
-  memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
-    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
-    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
-    "- told: what they told whom in this turn, in a few words each.",
-    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
-    "Use empty lists for anything the turn didn't give."
-  ].join(`
-`),
-  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
-});
-
-// src/shared/routines.ts
-var ROUTINE_BLOCK_KINDS = ["fixed", "flexible", "optional"];
-function storySourceLabel(source) {
-  return source.by === "player" ? "From your message" : "The story";
-}
-function isOff(entry) {
-  return "off" in entry && entry.off === true;
-}
-var BASIC_BLOCKS = Object.freeze([
-  { id: "sleep", label: "Sleep", activity: "sleep", kind: "flexible", window: { from: "21:30", to: "01:00" }, minutes: 480, priority: 5, place: "home", needs: ["fatigue"], source: { type: "builtin" } },
-  { id: "breakfast", label: "Breakfast", activity: "breakfast", kind: "flexible", window: { from: "06:00", to: "10:00" }, minutes: 30, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } },
-  { id: "lunch", label: "Lunch", activity: "lunch", kind: "flexible", window: { from: "11:00", to: "14:00" }, minutes: 45, priority: 4, place: "work", needs: ["hunger"], source: { type: "builtin" } },
-  { id: "dinner", label: "Dinner", activity: "dinner", kind: "flexible", window: { from: "17:00", to: "21:00" }, minutes: 60, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } }
-]);
-var ROUTINE_AWARENESS = ["story_first", "balanced", "routine_first"];
-var ROUTINE_INVITATIONS = ["off", "player", "everyone"];
-var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
-var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
-var ROUTINE_ROLES = ["informative", "enforced", "off"];
-var ROUTINE_ROLE_LABEL = { informative: "Informative", enforced: "Enforced", off: "Off" };
-var SKIP_LIVES = ["stay", "routine", "model"];
-var SKIP_LIFE_LABEL = { stay: "Stay put", routine: "Follow their routine", model: "Planned by the model" };
-var SKIP_PLAN_CALLS = ["together", "parallel"];
-var SKIP_PLAN_CALLS_LABEL = { together: "All in one call", parallel: "One call per person, at once" };
-var DEFAULT_ROUTINE_ROLES = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
-var DEFAULT_SKIP_LIVES = Object.freeze({ live: "model", near: "model", far: "model", background: "routine" });
-var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, skipPlanCalls: "together", narrator: true, paletteFollowsRoutine: false });
-var AWARENESS_LABEL = { story_first: "Story first", balanced: "Balanced", routine_first: "Routine first" };
-var INVITATIONS_LABEL = { off: "Off", player: "To the player only", everyone: "Between everyone" };
-var SOCIABILITY_LABEL = { reserved: "Reserved", usual: "Usual", outgoing: "Outgoing" };
-var PLAN_BEND_LABEL = { must: "Only plans that must happen", strong: "Strong plans", standard: "Strong plans, and set-time plans for the cast", ordinary: "Strong plans, and set-time plans for anyone" };
-var BLOCK_KIND_LABEL = { fixed: "Fixed", flexible: "Flexible", optional: "Optional" };
-function routineSettingsOf(world) {
-  const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
-  const pick = (v3, allowed, fallback) => allowed.find((a3) => a3 === v3) ?? fallback;
-  const perLevel = (v3, allowed, fallback) => {
-    const set = isRecord(v3) ? v3 : {};
-    return { live: pick(set.live, allowed, fallback.live), near: pick(set.near, allowed, fallback.near), far: pick(set.far, allowed, fallback.far), background: pick(set.background, allowed, fallback.background) };
-  };
-  return {
-    awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
-    invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
-    sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
-    planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
-    roles: perLevel(raw.roles, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES),
-    skips: perLevel(raw.skips, SKIP_LIVES, DEFAULT_SKIP_LIVES),
-    skipPlanCalls: pick(raw.skipPlanCalls, SKIP_PLAN_CALLS, DEFAULT_ROUTINE_SETTINGS.skipPlanCalls),
-    narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
-    paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine
-  };
-}
-var ROUTINE_MODES = ["follows", "no_invitations", "off"];
-var ROUTINE_MODE_LABEL = { follows: "Follows their routine", no_invitations: "Follows it, no invitations", off: "No routine" };
-var HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-var SEASONS = ["spring", "summer", "autumn", "winter"];
-function isTime(v3) {
-  return typeof v3 === "string" && HHMM.test(v3);
-}
-function sourceProblem(v3, world) {
-  if (v3 === undefined)
-    return null;
-  if (!isRecord(v3))
-    return "its source isn't one";
-  const t3 = v3.type;
-  const quote = v3.quote === undefined || typeof v3.quote === "string";
-  if (t3 === "authored")
-    return null;
-  if (t3 === "lore")
-    return typeof v3.entry === "string" && v3.entry !== "" && quote ? null : "a lore source names its entry";
-  if (t3 === "sheet")
-    return typeof v3.entity === "string" && typeof v3.field === "string" && quote ? null : "a sheet source names its entity and field";
-  if (world)
-    return "world data rests on what's authored, a lore entry or a sheet field";
-  if (t3 === "builtin")
-    return null;
-  if (t3 === "story")
-    return typeof v3.at === "number" && (v3.turn === undefined || typeof v3.turn === "string") && (v3.by === undefined || v3.by === "player") ? null : "a story source has its time";
-  if (t3 === "gm")
-    return typeof v3.at === "number" ? null : "a GM source has its time";
-  return "its source isn't one";
-}
-function placeProblem(v3) {
-  if (v3 === undefined || v3 === "home" || v3 === "work" || v3 === "here" || v3 === "with")
-    return null;
-  if (isRecord(v3) && typeof v3.place === "string" && v3.place !== "")
-    return null;
-  if (isRecord(v3) && typeof v3.nearest === "string" && v3.nearest !== "")
-    return null;
-  return "its place is home, work, here, with, {place} or {nearest}";
-}
-function daysProblem(v3) {
-  if (v3 === undefined)
-    return null;
-  if (!isRecord(v3))
-    return "its days aren't a set of constraints";
-  const ints = (x2, lo, hi) => Array.isArray(x2) && x2.every((n2) => Number.isInteger(n2) && n2 >= lo && n2 <= hi);
-  const strs = (x2) => Array.isArray(x2) && x2.every((s3) => typeof s3 === "string");
-  if (v3.weekdays !== undefined && !ints(v3.weekdays, 0, 6))
-    return "weekdays are 0 (Sunday) to 6";
-  if (v3.off !== undefined && v3.off !== "only" && v3.off !== "never")
-    return "days off are only or never";
-  if (v3.holidays !== undefined && !strs(v3.holidays))
-    return "holidays are calendar ids";
-  if (v3.except !== undefined && !strs(v3.except))
-    return "except lists calendar ids";
-  if (v3.birthday !== undefined && v3.birthday !== "own" && v3.birthday !== "friend")
-    return "a birthday is own or friend";
-  if (v3.seasons !== undefined && !(Array.isArray(v3.seasons) && v3.seasons.every((s3) => SEASONS.some((x2) => x2 === s3))))
-    return "seasons are spring, summer, autumn and winter";
-  if (v3.weather !== undefined && v3.weather !== "fair" && v3.weather !== "foul")
-    return "weather is fair or foul";
-  return null;
-}
-function blockShapeProblems(v3, world = true) {
-  if (!isRecord(v3))
-    return ["a block is an object"];
-  const out = [];
-  if (typeof v3.id !== "string" || v3.id === "")
-    out.push("a block has an id");
-  if (v3.off === true)
-    return out;
-  if (typeof v3.label !== "string" || v3.label.trim() === "")
-    out.push("a block has a label");
-  if (typeof v3.activity !== "string" || v3.activity.trim() === "")
-    out.push("a block has an activity");
-  if (!ROUTINE_BLOCK_KINDS.some((k2) => k2 === v3.kind))
-    out.push("its kind is fixed, flexible or optional");
-  if (typeof v3.minutes !== "number" || !Number.isInteger(v3.minutes) || v3.minutes < 1 || v3.minutes > 1440)
-    out.push("its length (minutes) is 1 to 1,440 minutes");
-  if (v3.kind === "fixed" && !isTime(v3.at))
-    out.push("a fixed block starts at an HH:MM time (at)");
-  if (v3.kind !== "fixed" && v3.at !== undefined)
-    out.push("only a fixed block has a start time (at)");
-  if (v3.kind !== "fixed" && !(isRecord(v3.window) && isTime(v3.window.from) && isTime(v3.window.to)))
-    out.push("its window is HH:MM to HH:MM");
-  if (v3.perWeek !== undefined && !(v3.kind !== "fixed" && Number.isInteger(v3.perWeek) && typeof v3.perWeek === "number" && v3.perWeek >= 1 && v3.perWeek <= 7))
-    out.push("times a week (perWeek) is 1 to 7, for a flexible or optional block");
-  if (v3.chance !== undefined && !(v3.kind === "optional" && typeof v3.chance === "number" && v3.chance > 0 && v3.chance <= 1))
-    out.push("a chance is above 0 and at most 1, for an optional block");
-  if (v3.priority !== undefined && !(typeof v3.priority === "number" && Number.isInteger(v3.priority) && v3.priority >= 1 && v3.priority <= 5))
-    out.push("its priority is 1 to 5");
-  if (v3.needs !== undefined && !(Array.isArray(v3.needs) && v3.needs.every((n2) => typeof n2 === "string")))
-    out.push("its needs are names");
-  if (v3.private !== undefined && typeof v3.private !== "boolean")
-    out.push("private is true or false");
-  if (v3.company !== undefined && !(isRecord(v3.company) && isRecord(v3.company.who) && (v3.company.invite === undefined || typeof v3.company.invite === "boolean")))
-    out.push("its company is {who: a selector, invite?}");
-  for (const p3 of [placeProblem(v3.place), daysProblem(v3.days), sourceProblem(v3.source, world)])
-    if (p3)
-      out.push(p3);
-  return out;
-}
-function routineShapeProblems(v3) {
-  if (!isRecord(v3))
-    return ["a routine is an object"];
-  const out = [];
-  if (typeof v3.id !== "string" || v3.id === "")
-    out.push("a routine has an id");
-  if (v3.label !== undefined && typeof v3.label !== "string")
-    out.push("its label is text");
-  if (v3.owner !== undefined && !(typeof v3.owner === "string" ? v3.owner !== "" : isRecord(v3.owner)))
-    out.push("its owner is an entity, a group, a kind or a selector");
-  if (v3.inherit !== undefined && typeof v3.inherit !== "boolean")
-    out.push("inherit is true or false");
-  const src = sourceProblem(v3.source, true);
-  if (src)
-    out.push(src);
-  if (!Array.isArray(v3.blocks))
-    return [...out, "a routine has a list of blocks"];
-  const ids = new Set;
-  v3.blocks.forEach((b3, i3) => {
-    for (const p3 of blockShapeProblems(b3, true))
-      out.push(`block ${i3 + 1}: ${p3}`);
-    const id = isRecord(b3) && typeof b3.id === "string" ? b3.id : "";
-    if (id !== "" && ids.has(id))
-      out.push(`block ${i3 + 1}: another block of this routine is ${id}`);
-    ids.add(id);
-  });
-  return out;
-}
+// src/shared/ids.ts
+var DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"];
+var BANDS = ["principal", "supporting", "background"];
+var INTERRUPT_CLASSES = ["invitation", "bill", "decline", "incident", "quest", "rule", "arrival", "overdue", "needs", "weather"];
 
 // src/frontend/scroll.ts
 function scrollParent(el) {
@@ -4435,815 +3158,1262 @@ function Chip(props) {
   }, undefined, false, undefined, this);
 }
 
-// src/shared/classes.ts
-var NESTING_DEPTH = 16;
-function withinValue(values, value, ancestor) {
-  let current2 = value;
-  for (let depth = 0;current2 !== undefined && depth < NESTING_DEPTH; depth++) {
-    if (current2 === ancestor)
-      return true;
-    current2 = hasOwn(values, current2) ? values[current2]?.parent : undefined;
-  }
-  return false;
-}
-function facetsInOrder(world) {
-  if (!isRecord(world.classifications))
-    return [];
-  const rank = (f3) => typeof f3.order === "number" && Number.isFinite(f3.order) ? f3.order : Number.MAX_SAFE_INTEGER;
-  const name = (id, f3) => typeof f3.label === "string" ? f3.label : id;
-  return Object.entries(world.classifications).filter(([, f3]) => isRecord(f3) && isRecord(f3.values)).sort(([a3, fa], [b3, fb]) => rank(fa) - rank(fb) || name(a3, fa).localeCompare(name(b3, fb)) || a3.localeCompare(b3));
-}
-function facetTree(values) {
-  const ids = Object.keys(values);
-  const out = [];
-  const seen = new Set;
-  const visit = (id, depth) => {
-    const value = values[id];
-    if (!value || seen.has(id))
-      return;
-    seen.add(id);
-    out.push({ id, value, depth });
-    for (const child of ids)
-      if (values[child]?.parent === id)
-        visit(child, depth + 1);
-  };
-  for (const id of ids) {
-    const parent = values[id]?.parent;
-    if (parent === undefined || !hasOwn(values, parent))
-      visit(id, 0);
-  }
-  for (const id of ids)
-    visit(id, 0);
-  return out;
-}
-
-// src/frontend/build/facet-editor.tsx
-var CHIP_CHOICE_MAX = 6;
-function classesOf(v3) {
-  if (!isRecord(v3))
-    return;
-  return Object.fromEntries(Object.entries(v3).map(([facet, values]) => [facet, Array.isArray(values) ? values.filter((x2) => typeof x2 === "string") : []]));
-}
-function facetValuesOf(v3) {
-  const out = {};
-  for (const [id, raw] of Object.entries(isRecord(v3) ? v3 : {})) {
-    if (!isRecord(raw))
-      continue;
-    out[id] = { label: typeof raw.label === "string" ? raw.label : id, ...typeof raw.parent === "string" ? { parent: raw.parent } : {}, ...typeof raw.description === "string" ? { description: raw.description } : {} };
-  }
-  return out;
-}
-function removeValue(values, id) {
-  const parent = values[id]?.parent;
-  const out = {};
-  for (const [vid, v3] of Object.entries(values)) {
-    if (vid === id)
-      continue;
-    if (v3.parent !== id)
-      out[vid] = v3;
-    else {
-      const { parent: _gone, ...rest } = v3;
-      out[vid] = parent === undefined ? rest : { ...rest, parent };
-    }
-  }
-  return out;
-}
-function subtree(values, id) {
-  const out = new Set([id]);
-  for (let grew = true;grew; ) {
-    grew = false;
-    for (const [vid, v3] of Object.entries(values)) {
-      if (v3.parent !== undefined && out.has(v3.parent) && !out.has(vid)) {
-        out.add(vid);
-        grew = true;
-      }
-    }
-  }
-  return out;
-}
-function parentLabel(values, v3) {
-  return v3.parent !== undefined && hasOwn(values, v3.parent) ? values[v3.parent]?.label : undefined;
-}
-function facetOptions(values) {
-  return facetTree(values).map(({ id, value }) => {
-    const parent = parentLabel(values, value);
-    return { value: id, label: value.label, ...parent !== undefined ? { sublabel: `in ${parent}` } : {} };
-  });
-}
-function ChipLines(props) {
-  if (props.option.sublabel === undefined)
-    return /* @__PURE__ */ u3(M, {
-      children: props.option.label
-    }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3("span", {
-    class: "lre-form-facet-lines",
-    children: [
-      /* @__PURE__ */ u3("span", {
-        children: props.option.label
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("span", {
-        class: "lre-form-facet-in",
-        children: props.option.sublabel
-      }, undefined, false, undefined, this)
+// src/frontend/build/expr-editor.tsx
+var WORD_OPERATORS = ["and", "or", "not"];
+var OPERATOR_GROUPS = [
+  {
+    title: "Arithmetic",
+    keys: [
+      ["+", "Plus"],
+      ["-", "Minus"],
+      ["*", "Times"],
+      ["/", "Divided by"],
+      ["%", "Remainder"],
+      ["(", "Open bracket"],
+      [")", "Close bracket"]
     ]
-  }, undefined, true, undefined, this);
-}
-function idProblem2(id, taken) {
-  if (!id)
-    return "Give it an id.";
-  if (taken.has(id))
-    return "There's already a value with this id.";
-  return safeKey(id) ? null : "This id is reserved. Choose another.";
-}
-function FacetValuesInput(props) {
-  const values = props.value ?? {};
-  const showIds = useShowIds();
-  const idId = P2();
-  const [open, setOpen] = d2(null);
-  const [name, setName] = d2("");
-  const [typed, setTyped] = d2(null);
-  const edit = (id, patch) => {
-    const next = { ...values[id] ?? { label: id }, ...patch };
-    if (patch.parent === undefined && "parent" in patch)
-      delete next.parent;
-    if (patch.description === undefined && "description" in patch)
-      delete next.description;
-    props.onChange({ ...values, [id]: next });
-  };
-  const remove = (id) => {
-    if (open === id)
-      setOpen(null);
-    props.onChange(removeValue(values, id));
-  };
-  const taken = new Set(Object.keys(values));
-  const newId = typed ?? (name.trim() ? deriveId(name.trim(), taken) : "");
-  const problem = typed === null ? null : idProblem2(typed, taken);
-  const ready = name.trim() !== "" && newId !== "" && problem === null;
-  const add = () => {
-    if (!ready)
-      return;
-    props.onChange({ ...values, [newId]: { label: name.trim() } });
-    setName("");
-    setTyped(null);
-  };
-  const tree = facetTree(values);
-  const current2 = open !== null && hasOwn(values, open) ? values[open] : undefined;
-  const blocked = open !== null ? subtree(values, open) : null;
-  const idField = /* @__PURE__ */ u3(Field, {
-    label: "Id",
-    for: idId,
-    help: "How rules and entities refer to it. It follows the label until you change it.",
-    error: problem,
-    children: /* @__PURE__ */ u3("input", {
-      id: idId,
-      class: "lre-input lre-build-mono",
-      value: newId,
-      autoComplete: "off",
-      spellcheck: false,
-      "aria-invalid": problem !== null || undefined,
-      onInput: (event) => setTyped(event.currentTarget.value.replace(/[^\w-]/g, "_"))
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
-    "data-lre-facet-values": true,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
-      }, undefined, false, undefined, this),
-      tree.length === 0 ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: "No values yet."
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
-        class: "lre-form-items",
-        children: tree.map(({ id, value, depth }) => {
-          const parent = parentLabel(values, value);
-          const title = value.label || id;
-          const subtitle = parent !== undefined ? `in ${parent}` : value.parent !== undefined ? `in ${value.parent} (not a value)` : value.description;
-          return /* @__PURE__ */ u3("div", {
-            class: "lre-form-facet-row",
-            "data-depth": Math.min(depth, 4),
-            "data-lre-facet-value": id,
-            children: [
-              /* @__PURE__ */ u3(ItemRow, {
-                title,
-                subtitle,
-                onOpen: () => setOpen(id),
-                openLabel: `Edit ${title}`,
-                actions: /* @__PURE__ */ u3(IconButton, {
-                  icon: "trash",
-                  label: `Remove ${title}`,
-                  onClick: () => remove(id)
-                }, undefined, false, undefined, this)
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("div", {
-                class: "lre-form-facet-row-issues",
-                children: props.issues(`${props.path}.${id}`)
-              }, undefined, false, undefined, this)
-            ]
-          }, id, true, undefined, this);
-        })
-      }, undefined, false, undefined, this),
-      open !== null && current2 ? /* @__PURE__ */ u3(FormSheet, {
-        title: current2.label || open,
-        subtitle: props.label,
-        onClose: () => setOpen(null),
-        children: [
-          /* @__PURE__ */ u3("label", {
-            class: "lre-field",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "label",
-                children: "Label"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("input", {
-                class: "lre-input",
-                value: current2.label,
-                onInput: (event) => edit(open, { label: event.currentTarget.value })
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(RefPicker, {
-            label: "Nested under",
-            value: current2.parent ?? "",
-            options: facetOptions(values).filter((o4) => !blocked?.has(o4.value)),
-            none: "Nothing: a top-level value",
-            onChange: (parent) => edit(open, { parent: parent === "" ? undefined : parent })
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("label", {
-            class: "lre-field",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "label",
-                children: [
-                  "Description",
-                  /* @__PURE__ */ u3("span", {
-                    class: "lre-form-optional",
-                    children: " · optional"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ u3("input", {
-                class: "lre-input",
-                value: current2.description ?? "",
-                onInput: (event) => edit(open, { description: event.currentTarget.value === "" ? undefined : event.currentTarget.value })
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          props.issues(`${props.path}.${open}`),
-          /* @__PURE__ */ u3(IdText, {
-            id: open
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-form-facet-actions",
-            children: /* @__PURE__ */ u3(Button, {
-              variant: "danger",
-              icon: "trash",
-              onClick: () => remove(open),
-              children: "Remove value"
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null,
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-facet-new",
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-form-add",
-            children: [
-              /* @__PURE__ */ u3("input", {
-                class: "lre-input",
-                placeholder: "New value's label",
-                "aria-label": "New value's label",
-                value: name,
-                onInput: (event) => setName(event.currentTarget.value),
-                onKeyDown: (event) => {
-                  if (event.key !== "Enter")
-                    return;
-                  event.preventDefault();
-                  add();
-                }
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                icon: "plus",
-                disabled: !ready,
-                onClick: add,
-                children: "Add value"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          name.trim() !== "" || typed !== null ? showIds ? idField : /* @__PURE__ */ u3(Disclosure, {
-            summary: "Advanced",
-            children: idField
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this)
+  },
+  {
+    title: "Compare",
+    keys: [
+      ["==", "Equals"],
+      ["!=", "Doesn't equal"],
+      ["<", "Less than"],
+      ["<=", "At most"],
+      [">", "More than"],
+      [">=", "At least"]
     ]
-  }, undefined, true, undefined, this);
-}
-function ClassesInput(props) {
-  const value = props.value ?? {};
-  const facets = facetsInOrder(props.doc);
-  const set = (facet, values) => {
-    const next = { ...value };
-    if (values.length > 0)
-      next[facet] = values;
+  },
+  {
+    title: "Logic",
+    keys: [
+      ["and", "And"],
+      ["or", "Or"],
+      ["not", "Not"],
+      ["?", "Then"],
+      [":", "Otherwise"]
+    ]
+  }
+];
+function exprFunctions(functions, mode) {
+  const names = new Set(functions);
+  for (const name of EFFECT_ONLY_FUNCTIONS) {
+    if (mode === "effect")
+      names.add(name);
     else
-      delete next[facet];
-    props.onChange(Object.keys(next).length > 0 ? next : undefined);
+      names.delete(name);
+  }
+  return [...names].sort();
+}
+function exprCompletions(word, identifiers, functions) {
+  if (word === "")
+    return [];
+  const ids = identifiers.filter((id) => id.startsWith(word) && id !== word);
+  const calls = functions.filter((name) => name.startsWith(word)).map((name) => `${name}(`);
+  return [...ids, ...calls].slice(0, 8);
+}
+function checkBalance(text) {
+  const stack = [];
+  const pairs = { ")": "(", "]": "[", "}": "{" };
+  let quote = null;
+  for (let i3 = 0;i3 < text.length; i3 += 1) {
+    const ch = text[i3] ?? "";
+    if (quote) {
+      if (ch === "\\")
+        i3 += 1;
+      else if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'")
+      quote = ch;
+    else if (ch === "(" || ch === "[" || ch === "{")
+      stack.push(ch);
+    else if (ch === ")" || ch === "]" || ch === "}") {
+      if (stack.pop() !== pairs[ch])
+        return { ok: false, message: `Unexpected ${ch} at ${i3 + 1}` };
+    }
+  }
+  if (quote)
+    return { ok: false, message: "Unclosed string" };
+  if (stack.length > 0)
+    return { ok: false, message: `${stack.length} unclosed ${stack.at(-1)}` };
+  return { ok: true, message: null };
+}
+var KEYWORDS = { and: true, or: true, not: true, true: true, false: true, null: true };
+var CLOCK_WORDS = {
+  clock: "the time",
+  minute: "the minute of the day",
+  hour: "the hour",
+  day: "the day number",
+  weekday: "the weekday",
+  date: "the day of the month",
+  month: "the month",
+  year: "the year",
+  daypart: "the part of the day"
+};
+var BINDING_WORDS = { actor: "the actor", target: "the target" };
+var DOMAIN_IDS = DOMAINS;
+var NAME_START = /[A-Za-z_]/;
+var NAME_PART = /\w/;
+function formulaNames(text) {
+  const out = [];
+  const skipSpace = (from) => {
+    let j3 = from;
+    while (/\s/.test(text.charAt(j3)))
+      j3 += 1;
+    return j3;
   };
-  const stale = Object.keys(value).filter((facet) => !facets.some(([id]) => id === facet));
+  const nameEnd = (from) => {
+    let j3 = from + 1;
+    while (NAME_PART.test(text.charAt(j3)))
+      j3 += 1;
+    return j3;
+  };
+  let i3 = 0;
+  while (i3 < text.length) {
+    const c3 = text.charAt(i3);
+    if (c3 === '"' || c3 === "'") {
+      i3 += 1;
+      while (i3 < text.length && text.charAt(i3) !== c3)
+        i3 += text.charAt(i3) === "\\" ? 2 : 1;
+      i3 += 1;
+    } else if (NAME_START.test(c3)) {
+      let end = nameEnd(i3);
+      const path = [text.slice(i3, end)];
+      for (;; ) {
+        const dot = skipSpace(end);
+        if (text.charAt(dot) !== "." || /[0-9]/.test(text.charAt(dot + 1)))
+          break;
+        const start = skipSpace(dot + 1);
+        if (!NAME_START.test(text.charAt(start)))
+          break;
+        end = nameEnd(start);
+        path.push(text.slice(start, end));
+      }
+      out.push({ path, call: path.length === 1 && text.charAt(skipSpace(end)) === "(" });
+      i3 = end;
+    } else {
+      i3 += 1;
+    }
+  }
+  return out;
+}
+function fieldLabel(doc, field, kind) {
+  if (!doc)
+    return;
+  const preferred = kind !== undefined && hasOwn(doc.kinds, kind) ? doc.kinds[kind] : undefined;
+  for (const def of preferred ? [preferred, ...Object.values(doc.kinds)] : Object.values(doc.kinds)) {
+    const label = hasOwn(def.fields, field) ? def.fields[field]?.label : undefined;
+    if (label)
+      return label;
+  }
+  return;
+}
+function fieldWords(doc, path, kind) {
+  const [field = "", ...deeper] = path;
+  const label = fieldLabel(doc, field, kind);
+  const words = label === undefined ? field : /^[A-Z](?![A-Z])/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
+  return [words, ...deeper].join(".");
+}
+function nameOf(doc, id) {
+  if (!doc)
+    return;
+  if (hasOwn(doc.entities, id))
+    return doc.entities[id]?.name || undefined;
+  if (hasOwn(doc.places, id))
+    return doc.places[id]?.name || undefined;
+  if (hasOwn(doc.tracks, id))
+    return doc.tracks[id]?.label || undefined;
+  return fieldLabel(doc, id);
+}
+function readOf(path, doc) {
+  const id = path.join(".");
+  const [head = "", ...rest] = path;
+  const [second = ""] = rest;
+  if (head === "self")
+    return rest.length === 0 ? { id, label: "self", what: "self" } : { id, label: `own ${fieldWords(doc, rest)}`, what: "own field" };
+  const binding = hasOwn(BINDING_WORDS, head) ? BINDING_WORDS[head] : undefined;
+  if (binding !== undefined)
+    return { id, label: rest.length === 0 ? binding : `${binding}'s ${fieldWords(doc, rest)}`, what: "param" };
+  if (head === "pov") {
+    const kind = doc && hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov]?.kind : undefined;
+    return { id, label: rest.length === 0 ? "the POV character" : `the POV character's ${fieldWords(doc, rest, kind)}`, what: "pov" };
+  }
+  if (head === "here")
+    return { id, label: rest.length === 0 ? "the current place" : `the ${fieldWords(doc, rest)} here`, what: "here" };
+  if (head === "stage" && rest.length === 1) {
+    const track2 = (doc && hasOwn(doc.tracks, second) ? doc.tracks[second]?.label : undefined) || second;
+    return { id, label: `the stage of “${track2}”`, what: "track stage" };
+  }
+  if (head === "level" && rest.length === 1 && DOMAIN_IDS.includes(second))
+    return { id, label: `the ${second} level`, what: "level" };
+  if (rest.length === 0 && hasOwn(CLOCK_WORDS, head))
+    return { id, label: CLOCK_WORDS[head] ?? head, what: "the clock" };
+  if (doc && hasOwn(doc.entities, head)) {
+    const entity = doc.entities[head];
+    const name = entity?.name || head;
+    return rest.length === 0 ? { id, label: name, what: "entity" } : { id, label: `${name}'s ${fieldWords(doc, rest, entity?.kind)}`, what: "entity field" };
+  }
+  if (doc && hasOwn(doc.places, head)) {
+    const name = doc.places[head]?.name || head;
+    return rest.length === 0 ? { id, label: name, what: "place" } : { id, label: `${name}'s ${fieldWords(doc, rest)}`, what: "place field" };
+  }
+  if (doc && rest.length === 0) {
+    if (hasOwn(doc.tracks, head))
+      return { id, label: `the track “${doc.tracks[head]?.label || head}”`, what: "track" };
+    if (hasOwn(doc.checks, head))
+      return { id, label: `the ${head} check`, what: "check" };
+    if (Object.values(doc.kinds).some((def) => hasOwn(def.fields, head)))
+      return { id, label: `own ${fieldWords(doc, path)}`, what: "own field" };
+  }
+  return { id, label: id, what: "param" };
+}
+function exprReads(text, doc) {
+  const reads = [];
+  const functions = [];
+  for (const { path, call } of formulaNames(text)) {
+    const head = path[0] ?? "";
+    if (hasOwn(KEYWORDS, head))
+      continue;
+    if (call) {
+      if (!functions.includes(head))
+        functions.push(head);
+    } else {
+      const id = path.join(".");
+      if (!reads.some((read) => read.id === id))
+        reads.push(readOf(path, doc));
+    }
+  }
+  return { reads, functions };
+}
+function exprSummary(text, doc) {
+  const { reads, functions } = exprReads(text, doc);
+  const labels = [...new Set(reads.map((read) => read.label))];
+  const [reading = "", using = ""] = [labels, functions].map((words) => words.length <= 1 ? words[0] ?? "" : `${words.slice(0, -1).join(", ")} and ${words.at(-1) ?? ""}`);
+  const sentence = reading === "" ? "Reads nothing" : `Reads ${reading}`;
+  return using === "" ? `${sentence}.` : `${sentence}; uses ${using}.`;
+}
+function ExprReadout(props) {
+  if (props.text.trim() === "")
+    return null;
+  return /* @__PURE__ */ u3("p", {
+    class: "lre-expr-readout",
+    children: exprSummary(props.text, props.doc)
+  }, undefined, false, undefined, this);
+}
+function withToken(value, start, end, token, replace) {
+  const before = value.slice(0, Math.max(0, start - replace));
+  const text = WORD_OPERATORS.includes(token) ? ` ${token} ` : token;
+  return { value: before + text + value.slice(end), caret: before.length + text.length };
+}
+function useFormula(value, onChange, mobile) {
+  const input = T2(null);
+  const typing = T2(false);
+  const [caret, setCaret] = d2(null);
+  const word = /[A-Za-z_][\w.]*$/.exec(value.slice(0, Math.min(caret ?? value.length, value.length)))?.[0] ?? "";
+  const track2 = () => setCaret(input.current?.selectionStart ?? null);
+  return {
+    input,
+    word,
+    track: track2,
+    press: () => {
+      typing.current = document.activeElement === input.current;
+    },
+    edit: (text) => {
+      onChange(text);
+      track2();
+    },
+    insert: (token, replace = 0) => {
+      const el = input.current;
+      const next = withToken(value, el?.selectionStart ?? value.length, el?.selectionEnd ?? value.length, token, replace);
+      const focus = !mobile || typing.current;
+      typing.current = false;
+      onChange(next.value);
+      setCaret(next.caret);
+      queueMicrotask(() => {
+        if (focus)
+          el?.focus({ preventScroll: true });
+        el?.setSelectionRange(next.caret, next.caret);
+      });
+    }
+  };
+}
+function Suggestions(props) {
+  const tokens = exprCompletions(props.word, props.identifiers, props.functions);
+  if (tokens.length === 0)
+    return null;
   return /* @__PURE__ */ u3("div", {
-    class: "lre-field lre-form-facet-classes",
-    "data-lre-classes": true,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
-      }, undefined, false, undefined, this),
-      facets.length === 0 ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: "No classifications yet: add facets in Build → Classifications."
-      }, undefined, false, undefined, this) : null,
-      facets.map(([facet, f3]) => {
-        const held = value[facet] ?? [];
-        const options = facetOptions(f3.values);
-        const known = (v3) => options.some((o4) => o4.value === v3);
-        const picker = !f3.multiple && options.length > CHIP_CHOICE_MAX;
-        const extra = picker ? held.filter(known).slice(1) : [];
-        const odd = [...held.filter((v3) => !known(v3)).map((v3) => ({ v: v3, text: `${v3} (not a value)` })), ...extra.map((v3) => ({ v: v3, text: `${options.find((o4) => o4.value === v3)?.label ?? v3} (only one allowed)` }))];
-        const warn = odd.length > 0 ? /* @__PURE__ */ u3("div", {
-          class: "lre-form-chips",
-          children: odd.map(({ v: v3, text }) => /* @__PURE__ */ u3(Chip, {
-            tone: "warn",
-            removeLabel: `Remove ${v3}`,
-            onRemove: () => set(facet, held.filter((x2) => x2 !== v3)),
-            children: text
-          }, v3, false, undefined, this))
-        }, undefined, false, undefined, this) : null;
-        if (picker) {
-          return /* @__PURE__ */ u3("div", {
-            class: "lre-form-facet-class",
-            "data-lre-class-facet": facet,
-            children: [
-              /* @__PURE__ */ u3(RefPicker, {
-                label: f3.label,
-                value: held.find(known) ?? "",
-                options,
-                none: "None",
-                onChange: (v3) => set(facet, v3 === "" ? [] : [v3])
-              }, undefined, false, undefined, this),
-              warn
-            ]
-          }, facet, true, undefined, this);
-        }
-        return /* @__PURE__ */ u3("div", {
-          class: "lre-form-facet-class",
-          "data-lre-class-facet": facet,
-          children: [
-            /* @__PURE__ */ u3("span", {
-              class: "lre-form-facet-label",
-              children: f3.label
-            }, undefined, false, undefined, this),
-            f3.multiple ? /* @__PURE__ */ u3("span", {
-              class: "lre-field-help",
-              children: "Any number of these."
-            }, undefined, false, undefined, this) : null,
-            options.length === 0 ? /* @__PURE__ */ u3("span", {
-              class: "lre-field-help",
-              children: "This classification has no values yet."
-            }, undefined, false, undefined, this) : null,
-            /* @__PURE__ */ u3("div", {
-              class: "lre-form-chips",
-              role: "group",
-              "aria-label": f3.label,
-              children: options.map((o4) => {
-                const on = held.includes(o4.value);
-                const next = on ? held.filter((v3) => v3 !== o4.value) : f3.multiple ? [...held, o4.value] : [o4.value];
-                return /* @__PURE__ */ u3(Chip, {
-                  pressed: on,
-                  onToggle: () => set(facet, next),
-                  children: /* @__PURE__ */ u3(ChipLines, {
-                    option: o4
-                  }, undefined, false, undefined, this)
-                }, o4.value, false, undefined, this);
-              })
-            }, undefined, false, undefined, this),
-            warn
-          ]
-        }, facet, true, undefined, this);
-      }),
-      stale.map((facet) => /* @__PURE__ */ u3("div", {
-        class: "lre-form-facet-stale",
+    class: props.scroll ? "lre-form-chips lre-expr-suggest scroll" : "lre-form-chips lre-expr-suggest",
+    role: "group",
+    "aria-label": "Suggestions",
+    children: tokens.map((token) => {
+      const name = token.endsWith("(") ? undefined : nameOf(props.doc, token);
+      const shown = name !== undefined && name.toLowerCase().replace(/[_\s]+/g, " ").trim() !== token.toLowerCase().replace(/_/g, " ") ? name : undefined;
+      return /* @__PURE__ */ u3(Chip, {
+        label: shown !== undefined ? `${token}, ${shown}` : undefined,
+        onPress: () => props.onPick(token),
         children: [
           /* @__PURE__ */ u3("span", {
-            class: "lre-form-facet-stale-text",
-            children: [
-              /* @__PURE__ */ u3(Icon, {
-                name: "alert",
-                size: 16
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("span", {
-                children: `${facet}: ${(value[facet] ?? []).join(", ")} (no longer a classification)`
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(Button, {
-            variant: "ghost",
-            size: "sm",
-            label: `Remove ${facet}`,
-            onClick: () => set(facet, []),
-            children: "Remove"
-          }, undefined, false, undefined, this)
+            class: "lre-expr-token",
+            children: token
+          }, undefined, false, undefined, this),
+          shown !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-expr-chip-name",
+            children: shown
+          }, undefined, false, undefined, this) : null
         ]
-      }, facet, true, undefined, this))
-    ]
-  }, undefined, true, undefined, this);
+      }, token, true, undefined, this);
+    })
+  }, undefined, false, undefined, this);
 }
-
-// src/frontend/build/selector-editor.tsx
-function selectorOf(v3) {
-  if (!isRecord(v3))
-    return;
-  const out = {};
-  for (const key of ["ids", "kind", "tier", "memberOf", "tag"]) {
-    const list2 = v3[key];
-    if (Array.isArray(list2))
-      out[key] = list2.filter((x2) => typeof x2 === "string");
-  }
-  if (isRecord(v3.class))
-    out.class = Object.fromEntries(Object.entries(v3.class).map(([facet, values]) => [facet, Array.isArray(values) ? values.filter((x2) => typeof x2 === "string") : []]));
-  return out;
-}
-var GROUP_KIND = "group";
-function worldTags(doc) {
-  const out = new Set;
-  for (const e3 of Object.values(doc.entities))
-    for (const t3 of Array.isArray(e3.tags) ? e3.tags : [])
-      if (typeof t3 === "string")
-        out.add(t3);
-  return [...out].sort((a3, b3) => a3.localeCompare(b3));
-}
-function kindIs(doc, kind, ancestor) {
-  const seen = new Set;
-  for (let id = kind;id !== undefined && !seen.has(id); id = doc.kinds[id]?.extends) {
-    if (id === ancestor)
-      return true;
-    seen.add(id);
-  }
-  return false;
-}
-function groupOptions(doc) {
-  return Object.values(doc.entities).filter((e3) => kindIs(doc, e3.kind, GROUP_KIND)).map((e3) => ({ value: e3.id, label: e3.name || e3.id })).sort((a3, b3) => a3.label.localeCompare(b3.label));
-}
-function TagListInput(props) {
-  const noun = props.noun ?? "tag";
-  const [text, setText] = d2("");
-  const list2 = P2();
-  const commit = (raw) => {
-    const more = raw.split(",").map((t3) => t3.trim()).filter((t3) => t3 !== "" && !props.value.includes(t3));
-    if (more.length > 0)
-      props.onChange([...props.value, ...new Set(more)]);
-  };
-  const add = () => {
-    commit(text);
-    setText("");
-  };
+function KeyGroup(props) {
+  const id = P2();
   return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
-    "data-lre-tags": true,
+    class: "lre-expr-group",
+    role: "group",
+    "aria-labelledby": id,
     children: [
       /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
+        id,
+        class: "lre-expr-group-title",
+        children: props.title
       }, undefined, false, undefined, this),
-      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
-        class: "lre-form-chips",
-        children: props.value.map((tag) => /* @__PURE__ */ u3(Chip, {
-          removeLabel: `Remove ${noun} ${tag}`,
-          onRemove: () => props.onChange(props.value.filter((t3) => t3 !== tag)),
-          children: tag
-        }, tag, false, undefined, this))
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-add",
-        children: [
-          /* @__PURE__ */ u3("input", {
-            class: "lre-input",
-            list: list2,
-            placeholder: `Add ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`,
-            "aria-label": `Add to ${props.label}`,
-            value: text,
-            onInput: (event) => {
-              const typed = event.currentTarget.value;
-              const cut = typed.lastIndexOf(",");
-              if (cut < 0) {
-                setText(typed);
-                return;
-              }
-              commit(typed.slice(0, cut));
-              setText(typed.slice(cut + 1).trimStart());
-            },
-            onPaste: (event) => {
-              const pasted = event.clipboardData?.getData("text") ?? "";
-              if (!pasted.includes(","))
-                return;
-              event.preventDefault();
-              commit(`${text},${pasted}`);
-              setText("");
-            },
-            onKeyDown: (event) => {
-              if (event.key !== "Enter")
-                return;
-              event.preventDefault();
-              add();
-            }
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Button, {
-            size: "sm",
-            icon: "plus",
-            disabled: text.trim() === "",
-            onClick: add,
-            children: "Add"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("datalist", {
-            id: list2,
-            children: props.suggestions.filter((t3) => !props.value.includes(t3)).map((t3) => /* @__PURE__ */ u3("option", {
-              value: t3
-            }, t3, false, undefined, this))
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
       props.children
     ]
   }, undefined, true, undefined, this);
 }
-function PickList(props) {
-  const left = props.options.filter((o4) => !props.value.includes(o4.value));
+function KeyFilter(props) {
   return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
+    class: "lre-build-search",
     children: [
-      /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
+      /* @__PURE__ */ u3(Icon, {
+        name: "search",
+        size: 16
       }, undefined, false, undefined, this),
-      props.help !== undefined ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: props.help
-      }, undefined, false, undefined, this) : null,
-      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
-        class: "lre-form-chips",
-        children: props.value.map((id) => {
-          const name = props.options.find((o4) => o4.value === id)?.label;
-          return /* @__PURE__ */ u3(Chip, {
-            tone: name === undefined ? "warn" : undefined,
-            removeLabel: `Remove ${name ?? id}`,
-            onRemove: () => props.onChange(props.value.filter((other) => other !== id)),
-            children: [
-              name ?? `${id} (missing)`,
-              " ",
-              /* @__PURE__ */ u3(IdText, {
-                id
-              }, undefined, false, undefined, this)
-            ]
-          }, id, true, undefined, this);
-        })
-      }, undefined, false, undefined, this) : null,
-      left.length > 0 ? /* @__PURE__ */ u3(AddPicker, {
-        label: `Add to ${props.label}`,
-        options: left,
-        placeholder: props.placeholder,
-        onAdd: (id) => props.onChange([...props.value, id])
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function Toggles(props) {
-  const unknown = props.value.filter((v3) => !props.options.some((o4) => o4.value === v3));
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
-      }, undefined, false, undefined, this),
-      props.help !== undefined ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: props.help
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-chips",
-        role: "group",
+      /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        type: "search",
+        placeholder: props.label,
         "aria-label": props.label,
-        children: [
-          props.options.map((o4) => {
-            const on = props.value.includes(o4.value);
-            return /* @__PURE__ */ u3(Chip, {
-              pressed: on,
-              onToggle: () => props.onChange(on ? props.value.filter((v3) => v3 !== o4.value) : [...props.value, o4.value]),
-              children: /* @__PURE__ */ u3(ChipLines, {
-                option: o4
-              }, undefined, false, undefined, this)
-            }, o4.value, false, undefined, this);
-          }),
-          unknown.map((v3) => /* @__PURE__ */ u3(Chip, {
-            tone: "warn",
-            removeLabel: `Remove ${v3}`,
-            onRemove: () => props.onChange(props.value.filter((x2) => x2 !== v3)),
-            children: `${v3} (missing)`
-          }, v3, false, undefined, this))
-        ]
-      }, undefined, true, undefined, this)
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: false,
+        value: props.value,
+        onInput: (event) => props.onInput(event.currentTarget.value),
+        onKeyDown: (event) => {
+          if (event.key !== "Escape" || props.value === "")
+            return;
+          event.preventDefault();
+          props.onInput("");
+        }
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-function tidy(selector) {
-  const out = {};
-  if (selector.ids?.length)
-    out.ids = selector.ids;
-  if (selector.kind?.length)
-    out.kind = selector.kind;
-  if (selector.tier?.length)
-    out.tier = selector.tier;
-  if (selector.tag?.length)
-    out.tag = selector.tag;
-  if (selector.memberOf?.length)
-    out.memberOf = selector.memberOf;
-  const classes = Object.entries(selector.class ?? {}).filter(([, values]) => values.length > 0);
-  if (classes.length > 0)
-    out.class = Object.fromEntries(classes);
-  return out;
-}
-function SelectorEditor(props) {
-  const { doc } = props;
-  if (props.value === undefined) {
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-form-sel-absent",
-      "data-lre-selector": true,
-      children: [
-        /* @__PURE__ */ u3("span", {
-          class: "lre-form-sel-absent-label",
-          children: props.label
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Button, {
-          size: "sm",
-          icon: "plus",
-          onClick: () => props.onChange({}),
-          children: "Add a selector"
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  const value = props.value;
-  const set = (patch) => props.onChange(tidy({ ...value, ...patch }));
-  const kinds = Object.entries(doc.kinds).map(([id, k2]) => ({ value: id, label: k2.label || id })).sort((a3, b3) => a3.label.localeCompare(b3.label));
-  const entities = Object.values(doc.entities).map((e3) => ({ value: e3.id, label: e3.name || e3.id })).sort((a3, b3) => a3.label.localeCompare(b3.label));
-  const empty = Object.keys(tidy(value)).length === 0;
+function Palette(props) {
+  const [callQuery, setCallQuery] = d2("");
+  const [nameQuery, setNameQuery] = d2("");
+  const names = b2(() => props.identifiers.map((id) => ({ id, name: nameOf(props.doc, id) })), [props.identifiers, props.doc]);
+  const callNeedle = callQuery.trim().toLowerCase();
+  const nameNeedle = nameQuery.trim().toLowerCase();
+  const calls = props.functions.filter((name) => name.toLowerCase().includes(callNeedle));
+  const shown = names.filter((n2) => n2.id.toLowerCase().includes(nameNeedle) || (n2.name ?? "").toLowerCase().includes(nameNeedle));
   return /* @__PURE__ */ u3("div", {
-    class: "lre-form-sel",
-    "data-lre-selector": true,
-    children: /* @__PURE__ */ u3(FormGroup, {
-      title: props.label,
-      aside: props.optional ? /* @__PURE__ */ u3(Button, {
-        variant: "ghost",
-        size: "sm",
-        label: `Remove ${props.label}`,
-        onClick: () => props.onChange(undefined),
-        children: "Remove"
-      }, undefined, false, undefined, this) : undefined,
+    class: props.inline ? "lre-expr-palette inline" : "lre-expr-palette",
+    children: [
+      OPERATOR_GROUPS.map((group) => /* @__PURE__ */ u3(KeyGroup, {
+        title: group.title,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-expr-keys",
+          children: group.keys.map(([token, name]) => /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-expr-key",
+            "aria-label": name,
+            title: name,
+            onClick: () => props.onInsert(token),
+            children: token
+          }, token, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, group.title, false, undefined, this)),
+      props.functions.length > 0 ? /* @__PURE__ */ u3(KeyGroup, {
+        title: "Functions",
+        children: [
+          /* @__PURE__ */ u3(KeyFilter, {
+            label: "Find a function",
+            value: callQuery,
+            onInput: setCallQuery
+          }, undefined, false, undefined, this),
+          calls.length > 0 ? /* @__PURE__ */ u3("div", {
+            class: "lre-expr-words",
+            children: calls.map((name) => /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-expr-key",
+              onClick: () => props.onInsert(`${name}(`),
+              children: [
+                name,
+                "("
+              ]
+            }, name, true, undefined, this))
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
+            class: "lre-expr-none",
+            children: "No function matches."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      names.length > 0 ? /* @__PURE__ */ u3(KeyGroup, {
+        title: "Names",
+        children: [
+          names.length > 8 ? /* @__PURE__ */ u3(KeyFilter, {
+            label: "Find a name",
+            value: nameQuery,
+            onInput: setNameQuery
+          }, undefined, false, undefined, this) : null,
+          shown.length > 0 ? /* @__PURE__ */ u3("div", {
+            class: "lre-expr-words",
+            children: shown.map((n2) => /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-expr-key name",
+              onClick: () => props.onInsert(n2.id),
+              children: [
+                n2.name !== undefined ? /* @__PURE__ */ u3("span", {
+                  children: n2.name
+                }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+                  class: "lre-expr-token",
+                  children: n2.id
+                }, undefined, false, undefined, this),
+                n2.name !== undefined ? /* @__PURE__ */ u3(IdText, {
+                  id: n2.id
+                }, undefined, false, undefined, this) : null
+              ]
+            }, n2.id, true, undefined, this))
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
+            class: "lre-expr-none",
+            children: "No name matches."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function ExprPage(props) {
+  const formula = useFormula(props.value, props.onChange, props.mobile);
+  A(() => {
+    const timer = setTimeout(() => {
+      const el = formula.input.current;
+      if (!el)
+        return;
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(el.value.length, el.value.length);
+      formula.track();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+  return /* @__PURE__ */ u3(FormSheet, {
+    title: props.label,
+    subtitle: props.hint,
+    onClose: props.onClose,
+    actions: /* @__PURE__ */ u3(Button, {
+      variant: "primary",
+      size: "sm",
+      onClick: () => props.onClose(),
+      children: "Done"
+    }, undefined, false, undefined, this),
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-expr-page",
+      onPointerDown: formula.press,
       children: [
-        /* @__PURE__ */ u3("p", {
-          class: "lre-form-sel-lead",
-          children: empty ? "Matches every entity." : "An entity must pass every constraint below; within one, any value will do."
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(PickList, {
-          label: "Kind",
-          help: "Or a kind that inherits from it.",
-          value: value.kind ?? [],
-          options: kinds,
-          placeholder: "Add a kind…",
-          onChange: (kind) => set({ kind })
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Toggles, {
-          label: "Tier",
-          value: value.tier ?? [],
-          options: tiersInOrder(doc).map(([id, t3]) => ({ value: id, label: t3.label })),
-          onChange: (tier) => set({ tier })
-        }, undefined, false, undefined, this),
-        facetsInOrder(doc).map(([facet, f3]) => /* @__PURE__ */ u3(Toggles, {
-          label: f3.label,
-          help: "A value, or one nested under it.",
-          value: value.class?.[facet] ?? [],
-          options: facetOptions(f3.values),
-          onChange: (values) => set({ class: { ...value.class, [facet]: values } })
-        }, facet, false, undefined, this)),
-        /* @__PURE__ */ u3(TagListInput, {
-          label: "Tag",
-          value: value.tag ?? [],
-          suggestions: worldTags(doc),
-          onChange: (tag) => set({ tag })
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(PickList, {
-          label: "Member of",
-          help: "Directly, or through a member group.",
-          value: value.memberOf ?? [],
-          options: groupOptions(doc),
-          placeholder: "Add a group…",
-          onChange: (memberOf) => set({ memberOf })
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(PickList, {
-          label: "Only these entities",
-          value: value.ids ?? [],
-          options: entities,
-          placeholder: "Add an entity…",
-          onChange: (ids) => set({ ids })
+        /* @__PURE__ */ u3("div", {
+          class: "lre-expr-compose",
+          children: [
+            /* @__PURE__ */ u3("textarea", {
+              ref: formula.input,
+              class: props.invalid ? "lre-input lre-expr-input page invalid" : "lre-input lre-expr-input page",
+              rows: 6,
+              spellcheck: false,
+              autocapitalize: "off",
+              autocorrect: "off",
+              "aria-label": props.label,
+              value: props.value,
+              onInput: (event) => formula.edit(event.currentTarget.value),
+              onKeyUp: formula.track,
+              onClick: formula.track
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Suggestions, {
+              word: formula.word,
+              identifiers: props.identifiers,
+              functions: props.functions,
+              doc: props.doc,
+              scroll: props.mobile,
+              onPick: (token) => formula.insert(token, formula.word.length)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(ExprReadout, {
+              text: props.value,
+              doc: props.doc
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Issues, {
+              issues: props.issues
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3(Palette, {
+          functions: props.functions,
+          identifiers: props.identifiers,
+          doc: props.doc,
+          onInsert: (token) => formula.insert(token)
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
 }
-
-// src/frontend/build/owner-picker.tsx
-var GROUP_KIND2 = "group";
-var LEVELS = ["entity", "group", "kind", "selector", "none"];
-function ownerLevel(doc, owner) {
-  if (isRecord(owner))
-    return "selector";
-  if (typeof owner !== "string" || owner === "")
-    return "none";
-  const entity = hasOwn(doc.entities, owner) ? doc.entities[owner] : undefined;
-  if (entity)
-    return kindIs(doc, entity.kind, GROUP_KIND2) ? "group" : "entity";
-  return "kind";
-}
-function ownerOptions(doc, level) {
-  const kindLabel = (id) => hasOwn(doc.kinds, id) ? doc.kinds[id]?.label || id : id;
-  const byName = (a3, b3) => a3.label.localeCompare(b3.label) || a3.value.localeCompare(b3.value);
-  switch (level) {
-    case "entity":
-    case "group":
-      return Object.values(doc.entities).filter((e3) => kindIs(doc, e3.kind, GROUP_KIND2) === (level === "group")).map((e3) => ({ value: e3.id, label: e3.name || e3.id, sublabel: kindLabel(e3.kind) })).sort(byName);
-    case "kind":
-      return Object.keys(doc.kinds).map((id) => ({ value: id, label: kindLabel(id) })).sort(byName);
-    default:
-      return [];
-  }
-}
-function ownerWords(doc, owner, none) {
-  const level = ownerLevel(doc, owner);
-  if (level === "none")
-    return none;
-  if (level === "selector" || typeof owner !== "string")
-    return "People a selector picks";
-  if (level === "kind")
-    return `Every ${hasOwn(doc.kinds, owner) ? doc.kinds[owner]?.label || owner : owner}`;
-  const name = hasOwn(doc.entities, owner) ? doc.entities[owner]?.name || owner : owner;
-  return level === "group" ? `${name} (a group)` : name;
-}
-function OwnerPicker(props) {
-  const stored = ownerLevel(props.doc, props.value);
-  const [pending, setPending] = d2(null);
-  const level = stored !== "none" ? stored : pending ?? "none";
-  const names = { entity: "Someone", group: "Group", kind: "Kind", selector: "Selector", none: props.noneLabel };
-  const help = {
-    entity: "Someone or something of their own: it wins over every level after it.",
-    group: "Every member of a group (a family, a household, a crew), through member groups too.",
-    kind: "Everyone of a kind, or of a kind that inherits from it.",
-    selector: "Everyone a rule picks: by kind, tier, class, tag or group.",
-    none: props.noneHelp
-  };
+function ExprEditor(props) {
+  const app = useApp();
+  const mobile = useSelect(app.host.viewport, isMobile);
+  const [tools, setTools] = d2(false);
+  const [page, setPage] = d2(false);
+  const functions = b2(() => exprFunctions(props.functions, props.mode ?? "formula"), [props.functions, props.mode]);
+  const formula = useFormula(props.value, props.onChange, mobile);
+  const balance = checkBalance(props.value);
+  const invalid = !balance.ok || props.lint.length > 0;
+  const issues = balance.message ? [{ severity: "error", path: "", code: "balance", message: balance.message }, ...props.lint] : props.lint;
   return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    "data-lre-owner": level,
+    class: "lre-field",
+    "data-lre-expr": true,
+    onPointerDown: formula.press,
     children: [
-      /* @__PURE__ */ u3(Field, {
-        label: props.label,
-        help: help[level],
-        children: /* @__PURE__ */ u3(Seg, {
-          label: props.label,
-          value: level,
-          options: LEVELS.map((l3) => ({ value: l3, label: names[l3] })),
-          onChange: (next) => {
-            setPending(next === "none" || next === "selector" ? null : next);
-            props.onChange(next === "selector" ? {} : undefined);
-          }
-        }, undefined, false, undefined, this)
+      /* @__PURE__ */ u3("div", {
+        class: "label lre-expr-head",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-expr-label",
+            children: [
+              props.label,
+              props.optional ? /* @__PURE__ */ u3("span", {
+                class: "lre-form-optional",
+                children: " · optional"
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-expr-actions",
+            children: [
+              /* @__PURE__ */ u3(IconButton, {
+                icon: "function",
+                label: "Operators and functions",
+                pressed: mobile ? undefined : tools,
+                onClick: () => mobile ? setPage(true) : setTools(!tools)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(IconButton, {
+                icon: "expand",
+                label: "Open the formula editor",
+                onClick: () => setPage(true)
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("textarea", {
+        ref: formula.input,
+        class: invalid ? "lre-input lre-expr-input invalid" : "lre-input lre-expr-input",
+        rows: 2,
+        spellcheck: false,
+        autocapitalize: "off",
+        autocorrect: "off",
+        "aria-label": props.label,
+        value: props.value,
+        onInput: (event) => formula.edit(event.currentTarget.value),
+        onKeyUp: formula.track,
+        onClick: formula.track
       }, undefined, false, undefined, this),
-      level === "selector" ? /* @__PURE__ */ u3(SelectorEditor, {
-        label: "Picks",
-        value: selectorOf(props.value) ?? {},
+      /* @__PURE__ */ u3(Suggestions, {
+        word: formula.word,
+        identifiers: props.identifiers,
+        functions,
         doc: props.doc,
-        onChange: (next) => props.onChange(next ?? {})
-      }, undefined, false, undefined, this) : level === "none" ? null : /* @__PURE__ */ u3(RefPicker, {
-        label: level === "entity" ? "Who or what" : level === "group" ? "Which group" : "Which kind",
-        value: typeof props.value === "string" ? props.value : "",
-        options: ownerOptions(props.doc, level),
-        onChange: (next) => props.onChange(next || undefined)
-      }, undefined, false, undefined, this)
+        scroll: mobile,
+        onPick: (token) => formula.insert(token, formula.word.length)
+      }, undefined, false, undefined, this),
+      tools && !mobile ? /* @__PURE__ */ u3(Palette, {
+        functions,
+        identifiers: props.identifiers,
+        doc: props.doc,
+        inline: true,
+        onInsert: (token) => formula.insert(token)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(ExprReadout, {
+        text: props.value,
+        doc: props.doc
+      }, undefined, false, undefined, this),
+      props.hint ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: props.hint
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Issues, {
+        issues
+      }, undefined, false, undefined, this),
+      page ? /* @__PURE__ */ u3(ExprPage, {
+        label: props.label,
+        hint: props.hint,
+        value: props.value,
+        identifiers: props.identifiers,
+        functions,
+        doc: props.doc,
+        issues,
+        invalid,
+        mobile,
+        onChange: props.onChange,
+        onClose: () => setPage(false)
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
+}
+
+// src/shared/tiers.ts
+var BAND_LABEL = { principal: "Leads", supporting: "Supporting", background: "Background" };
+function isBand(value) {
+  return BANDS.some((b3) => b3 === value);
+}
+function tierOf(world, tier) {
+  const t3 = isRecord(world.tiers) && hasOwn(world.tiers, tier) ? world.tiers[tier] : undefined;
+  return isRecord(t3) && isBand(t3.band) ? t3 : undefined;
+}
+function tiersInOrder(world) {
+  if (!isRecord(world.tiers))
+    return [];
+  return Object.keys(world.tiers).flatMap((id) => {
+    const t3 = tierOf(world, id);
+    return t3 ? [{ id, t: t3, order: typeof t3.order === "number" && Number.isFinite(t3.order) ? t3.order : Number.MAX_SAFE_INTEGER }] : [];
+  }).sort((a3, b3) => a3.order - b3.order || a3.id.localeCompare(b3.id)).map(({ id, t: t3 }) => [id, t3]);
+}
+function firstIn(world, bands) {
+  const ordered = tiersInOrder(world);
+  for (const band of bands) {
+    const hit = ordered.find(([, t3]) => t3.band === band);
+    if (hit)
+      return hit[0];
+  }
+  return;
+}
+function spawnTierOf(world) {
+  if (typeof world.spawnTier === "string" && tierOf(world, world.spawnTier))
+    return world.spawnTier;
+  return firstIn(world, ["background", "supporting", "principal"]) ?? "background";
+}
+function tierLabel(world, tier) {
+  return tierOf(world, tier)?.label ?? (isBand(tier) ? BAND_LABEL[tier] : tier);
+}
+
+// src/frontend/build/schema.ts
+var FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"];
+var BOUND_MODES = ["auto", "confirm", "never"];
+var VISIBILITY = ["public", "known_by", "secret"];
+var PLACE_VISIBILITY = ["public", "known_by", "discoverable", "secret"];
+var ENTITY_VISIBILITY_LABEL = { public: "Anyone who can see it", known_by: "Whoever knows of it", discoverable: "Hidden until searched", secret: "Secret (GM only)" };
+var PLACE_VISIBILITY_LABEL = { public: "Anyone", known_by: "Whoever knows of it", discoverable: "Hidden until visited or heard of", secret: "Secret (GM only)" };
+var TRAVEL_MODES = ["walk", "road", "offroad", "water"];
+var BAND = {
+  kind: "object",
+  key: "",
+  label: "Band",
+  fields: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "number", key: "min", label: "From (inclusive)", optional: true },
+    { kind: "number", key: "max", label: "To (exclusive)", optional: true }
+  ]
+};
+var FIELD_DEF = {
+  kind: "object",
+  key: "",
+  label: "Field",
+  fields: [
+    { kind: "enum", key: "type", label: "Type", values: FIELD_TYPES },
+    { kind: "text", key: "label", label: "Label", optional: true },
+    { kind: "json", key: "default", label: "Default", optional: true },
+    { kind: "number", key: "min", label: "Min", optional: true, when: { key: "type", values: ["number", "money", "duration"] } },
+    { kind: "number", key: "max", label: "Max", optional: true, when: { key: "type", values: ["number", "money", "duration"] } },
+    { kind: "tags", key: "values", label: "Enum values", noun: "value", when: { key: "type", values: ["enum"] } },
+    { kind: "ref", key: "ref", label: "Ref kind", collection: "kinds", optional: true, when: { key: "type", values: ["ref", "list"] } },
+    { kind: "enum", key: "of", label: "List of", values: FIELD_TYPES.filter((t3) => t3 !== "list"), optional: true, when: { key: "type", values: ["list"] } },
+    { kind: "list", key: "bands", label: "Bands (shown as words)", item: BAND, title: "label", when: { key: "type", values: ["number"] } },
+    { kind: "expr", key: "derived", label: "Derived formula", optional: true },
+    { kind: "bool", key: "locked", label: "Locked (never offered to a model)" },
+    {
+      kind: "object",
+      key: "bound",
+      label: "Bound on model changes",
+      optional: true,
+      fields: [
+        { kind: "enum", key: "mode", label: "Mode", values: BOUND_MODES },
+        { kind: "number", key: "maxDelta", label: "Largest change per turn", optional: true }
+      ]
+    },
+    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
+    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
+    { kind: "enum", key: "domain", label: "Realism domain", values: DOMAINS, optional: true },
+    { kind: "number", key: "level", label: "Live from level", min: 0, max: 4, step: 1, optional: true }
+  ]
+};
+var EFFECT = {
+  kind: "object",
+  key: "",
+  label: "Effect",
+  fields: [
+    { kind: "text", key: "type", label: "Effect type", hint: "e.g. set, add, economy.charge" },
+    { kind: "effectArgs", key: "args", label: "Arguments (values or formulas)" }
+  ]
+};
+var LIST_ITEMS = {
+  appointments: {
+    title: "label",
+    item: {
+      kind: "object",
+      key: "",
+      label: "Appointment",
+      fields: [
+        { kind: "text", key: "label", label: "What", optional: true, hint: "Shown as Appointment when empty" },
+        { kind: "gameTime", key: "at", label: "Starts" },
+        { kind: "duration", key: "minutes", label: "How long", optional: true, hint: "An hour when empty" },
+        { kind: "ref", key: "place", label: "Where", collection: "places", optional: true }
+      ]
+    }
+  },
+  trips: {
+    title: "label",
+    item: {
+      kind: "object",
+      key: "",
+      label: "Trip",
+      fields: [
+        { kind: "text", key: "label", label: "What", optional: true, hint: "Shown as Away when empty" },
+        { kind: "gameTime", key: "from", label: "Leaves" },
+        { kind: "gameTime", key: "until", label: "Back" },
+        { kind: "ref", key: "place", label: "Where to", collection: "places", optional: true }
+      ]
+    }
+  },
+  chores: {
+    title: "label",
+    item: {
+      kind: "object",
+      key: "",
+      label: "Chore",
+      fields: [
+        { kind: "text", key: "label", label: "Chore" },
+        { kind: "duration", key: "minutes", label: "How long", optional: true, hint: "45 min when empty" },
+        { kind: "ref", key: "place", label: "Where", collection: "places", optional: true, hint: "At home when empty" },
+        { kind: "number", key: "utility", label: "How much they want to do it", optional: true, hint: "Weighed against their other plans; 2 when empty" }
+      ]
+    }
+  },
+  conditions: {
+    title: "label",
+    item: {
+      kind: "object",
+      key: "",
+      label: "Condition",
+      fields: [
+        { kind: "text", key: "id", label: "Id", hint: "Effects and formulas name the condition by it" },
+        { kind: "text", key: "label", label: "Label", optional: true },
+        { kind: "number", key: "mod", label: "Check modifier", step: 1, optional: true, hint: "Added to their checks; −2 when empty" },
+        { kind: "gameTime", key: "until", label: "Ends", optional: true, hint: "Lasts until removed when empty" }
+      ]
+    }
+  },
+  bills: {
+    title: "label",
+    item: {
+      kind: "object",
+      key: "",
+      label: "Bill",
+      fields: [
+        { kind: "text", key: "label", label: "What", optional: true },
+        { kind: "money", key: "amountCents", label: "Amount", min: 0 },
+        { kind: "enum", key: "every", label: "Every", values: ["month", "week", "year"], optional: true },
+        { kind: "scalar", key: "day", label: "Day", optional: true, hint: "The day of the month; for a weekly bill, the weekday (Friday) or its number" },
+        { kind: "number", key: "month", label: "Month (yearly bills)", min: 1, max: 12, step: 1, optional: true },
+        { kind: "ref", key: "payee", label: "Paid to", collection: "entities", optional: true }
+      ]
+    }
+  },
+  pieces: {
+    title: "name",
+    item: {
+      kind: "object",
+      key: "",
+      label: "Piece",
+      fields: [
+        { kind: "text", key: "name", label: "Piece" },
+        { kind: "number", key: "qty", label: "How many", min: 1, step: 1, optional: true, hint: "One when empty" }
+      ]
+    }
+  }
+};
+var COLLECTION_SPECS = {
+  kinds: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "ref", key: "extends", label: "Extends", collection: "kinds", optional: true },
+    { kind: "record", key: "fields", label: "Fields", item: FIELD_DEF, keyLabel: "Field id" },
+    { kind: "text", key: "pack", label: "Pack", optional: true, readonly: true }
+  ],
+  relations: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "ref", key: "from", label: "From kind", collection: "kinds", any: true },
+    { kind: "ref", key: "to", label: "To kind", collection: "kinds", any: true },
+    { kind: "enum", key: "cardinality", label: "Cardinality", values: ["one_one", "one_many", "many_one", "many_many"] },
+    { kind: "bool", key: "symmetric", label: "Symmetric", hint: "Both sides hold it (siblings); the engine keeps the other side" },
+    { kind: "ref", key: "inverse", label: "Inverse (what the other side holds back)", collection: "relations", optional: true },
+    { kind: "record", key: "fields", label: "Fields", item: FIELD_DEF, keyLabel: "Field id" }
+  ],
+  entities: [
+    { kind: "text", key: "name", label: "Name" },
+    { kind: "ref", key: "kind", label: "Kind", collection: "kinds" },
+    { kind: "tier", key: "tier", label: "Tier" },
+    { kind: "classes", key: "class", label: "Classification" },
+    { kind: "tagList", key: "tags", label: "Tags" },
+    { kind: "kindFields", key: "fields", label: "Fields" },
+    {
+      kind: "list",
+      key: "relations",
+      label: "Relations",
+      title: "type",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Relation",
+        fields: [
+          { kind: "ref", key: "type", label: "Type", collection: "relations" },
+          { kind: "ref", key: "to", label: "To", collection: "entities" },
+          { kind: "relationFields", key: "fields", label: "Fields" },
+          { kind: "gameTime", key: "until", label: "Until", optional: true, hint: "It ends then; it lasts when empty" }
+        ]
+      }
+    },
+    { kind: "levels", key: "levels", label: "Level overrides" },
+    { kind: "agent", key: "agent", label: "Lives their own day (agendas and plans)" },
+    { kind: "life", key: "life", label: "Starts (life state)" },
+    { kind: "refs", key: "lifeKnownBy", label: "Who knows how it starts (none: everyone)", collections: ["entities"] },
+    { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
+    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, labels: ENTITY_VISIBILITY_LABEL, optional: true },
+    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by", "discoverable"] } },
+    {
+      kind: "list",
+      key: "cues",
+      label: "Cues: how they act while a secret stays hidden",
+      title: "text",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Cue",
+        fields: [
+          { kind: "text", key: "text", label: "What the narrator sees them do (never the secret itself)" },
+          { kind: "ref", key: "lore", label: "While this secret lore stays gated", collection: "lore", optional: true },
+          { kind: "ref", key: "track", label: "While this track keeps something hidden", collection: "tracks", optional: true },
+          { kind: "text", key: "flag", label: "Until this story flag is set", optional: true, hint: "Pick one of the three: the secret the cue stands for" }
+        ]
+      }
+    }
+  ],
+  places: [
+    { kind: "text", key: "name", label: "Name" },
+    { kind: "ref", key: "parent", label: "Inside", collection: "places", optional: true },
+    { kind: "text", key: "timeZone", label: "Time zone (IANA)", optional: true, hint: "Inherited from the parent when empty" },
+    { kind: "text", key: "sceneType", label: "Default scene type", optional: true },
+    { kind: "bool", key: "adjudicate", label: "Checks roll here", hint: "Marked for a world whose checks roll only where marked: here and in the places inside it" },
+    { kind: "ref", key: "grid", label: "Grid", collection: "grids", optional: true },
+    {
+      kind: "object",
+      key: "cell",
+      label: "Cell on the parent's grid",
+      optional: true,
+      fields: [
+        { kind: "number", key: "x", label: "x", min: 0, step: 1 },
+        { kind: "number", key: "y", label: "y", min: 0, step: 1 }
+      ]
+    },
+    {
+      kind: "object",
+      key: "layoutPos",
+      label: "Position on the parent's node map",
+      optional: true,
+      fields: [
+        { kind: "number", key: "x", label: "x", step: 1 },
+        { kind: "number", key: "y", label: "y", step: 1 }
+      ]
+    },
+    { kind: "json", key: "fields", label: "Fields" },
+    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, labels: PLACE_VISIBILITY_LABEL, optional: true },
+    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by", "discoverable"] } }
+  ],
+  routes: [
+    { kind: "ref", key: "from", label: "From", collection: "places" },
+    { kind: "ref", key: "to", label: "To", collection: "places" },
+    {
+      kind: "record",
+      key: "modes",
+      label: "Modes",
+      keyLabel: "Mode",
+      keys: TRAVEL_MODES,
+      item: {
+        kind: "object",
+        key: "",
+        label: "Leg",
+        fields: [
+          { kind: "duration", key: "minutes", label: "Time" },
+          { kind: "number", key: "distanceKm", label: "Distance (km)", min: 0, optional: true },
+          { kind: "text", key: "terrain", label: "Terrain", optional: true }
+        ]
+      }
+    },
+    { kind: "bool", key: "bidirectional", label: "Both directions" }
+  ],
+  grids: [
+    { kind: "number", key: "width", label: "Width", min: 1, step: 1 },
+    { kind: "number", key: "height", label: "Height", min: 1, step: 1 },
+    { kind: "number", key: "cellMeters", label: "Cell size (m)", optional: true },
+    { kind: "json", key: "terrain", label: "Terrain (row-major)" },
+    { kind: "json", key: "blocked", label: "Blocked cells" },
+    { kind: "json", key: "zones", label: "Zones" }
+  ],
+  maps: [
+    { kind: "text", key: "title", label: "Title", optional: true },
+    { kind: "ref", key: "scope", label: "Draws the inside of", collection: "places" },
+    { kind: "json", key: "size", label: "Size [width, height]", optional: true },
+    { kind: "json", key: "layout", label: "Layout rows", optional: true },
+    { kind: "json", key: "legend", label: "Legend", optional: true },
+    { kind: "json", key: "places", label: "Places", optional: true },
+    { kind: "json", key: "links", label: "Links", optional: true }
+  ],
+  rules: [
+    { kind: "json", key: "on", label: "Trigger", hint: '{"event": "…"} · {"tick": "turn|slot|day"} · {"enter": "place"} · {"at": "formula"} · with the grid system on, {"zone": "…", "in": "place"} or {"cell": [x, y], "in": "place"}, and "who": a selector (else the POV)' },
+    { kind: "expr", key: "when", label: "When", optional: true },
+    { kind: "list", key: "do", label: "Do", item: EFFECT, title: "type" },
+    { kind: "bool", key: "once", label: "Once" },
+    { kind: "duration", key: "cooldownMinutes", label: "Cooldown", optional: true },
+    { kind: "bool", key: "interrupt", label: "Interrupts a timelapse" },
+    {
+      kind: "object",
+      key: "beat",
+      label: "Storylet beat",
+      optional: true,
+      fields: [
+        { kind: "text", key: "hint", label: "Outline hint" },
+        { kind: "number", key: "weight", label: "Weight", optional: true }
+      ]
+    }
+  ],
+  actions: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "text", key: "description", label: "Description", multiline: true, optional: true, hint: "What it does, in a line: the model that reads typed messages is told it" },
+    {
+      kind: "record",
+      key: "params",
+      label: "Parameters",
+      keyLabel: "Parameter",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Parameter",
+        fields: [
+          { kind: "enum", key: "type", label: "Type", values: FIELD_TYPES },
+          { kind: "text", key: "label", label: "Label", optional: true },
+          { kind: "ref", key: "ref", label: "Ref kind", collection: "kinds", optional: true },
+          { kind: "bool", key: "optional", label: "Optional" },
+          { kind: "selector", key: "of", label: "Only candidates matching", optional: true }
+        ]
+      }
+    },
+    { kind: "list", key: "requires", label: "Requires", item: { kind: "expr", key: "", label: "Requirement" } },
+    { kind: "ref", key: "check", label: "Check", collection: "checks", optional: true, inline: true },
+    { kind: "record", key: "outcomes", label: "Effects per outcome", keyLabel: "Outcome", suggest: "outcomes", hint: "One list per outcome of the check; default when the action has no check", item: { kind: "list", key: "", label: "Effects", item: EFFECT, title: "type" } },
+    { kind: "expr", key: "duration", label: "Duration (minutes)" },
+    {
+      kind: "object",
+      key: "activity",
+      label: "Starts an activity",
+      optional: true,
+      fields: [
+        { kind: "text", key: "type", label: "Activity", hint: "sleep, work_shift, travel, waiting, …" },
+        { kind: "expr", key: "until", label: "Until" }
+      ]
+    },
+    { kind: "tags", key: "lexicon", label: "Verbs and phrases", noun: "phrase" },
+    { kind: "text", key: "observable", label: "Observable label", optional: true },
+    { kind: "bool", key: "adjudicate", label: "Its check always rolls", hint: "Marked for a world whose checks roll only where marked" },
+    {
+      kind: "object",
+      key: "combat",
+      label: "Combat action (offered only where the ruleset has combat)",
+      optional: true,
+      fields: [
+        { kind: "record", key: "cost", label: "Cost (budget → how many)", keyLabel: "Budget", item: { kind: "number", key: "", label: "How many", min: 0, step: 1 } },
+        { kind: "bool", key: "start", label: "Starts a fight (taken only when none is under way)" },
+        { kind: "enum", key: "role", label: "Everyone else's tactics use it to", values: ["attack", "defend"], optional: true }
+      ]
+    }
+  ],
+  checks: [
+    { kind: "dice", key: "dice", label: "Dice" },
+    { kind: "expr", key: "modifier", label: "Modifier", optional: true },
+    {
+      kind: "list",
+      key: "bands",
+      label: "Outcome bands",
+      title: "outcome",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Band",
+        fields: [
+          { kind: "text", key: "outcome", label: "Outcome" },
+          { kind: "number", key: "min", label: "Min total", optional: true },
+          { kind: "number", key: "max", label: "Max total", optional: true }
+        ]
+      }
+    },
+    { kind: "tags", key: "pass", label: "Outcomes that count as success (empty: success and every band after it)", noun: "outcome" },
+    { kind: "text", key: "auto", label: "Outcome when not rolled", optional: true, hint: "Used when neither the action nor the check has a success outcome" }
+  ],
+  schedules: [
+    { kind: "json", key: "owner", label: "Owner", optional: true, hint: '"entity, group or kind id" · {"kind": [...], "class": {...}, "memberOf": [...]} (a selector)' },
+    { kind: "text", key: "target", label: "Sets" },
+    { kind: "json", key: "recurrence", label: "Recurrence" },
+    { kind: "json", key: "slots", label: "Slots" }
+  ],
+  tracks: [
+    { kind: "enum", key: "kind", label: "Kind", values: ["quest", "secret", "puzzle", "agenda"] },
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "ref", key: "owner", label: "Owner", collection: "entities", optional: true },
+    { kind: "text", key: "start", label: "Start stage" },
+    { kind: "json", key: "stages", label: "Stages" },
+    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY },
+    { kind: "selector", key: "knownBy", label: "Known by (besides its owner and those who know the owner)", optional: true, when: { key: "visibility", values: ["known_by"] } },
+    { kind: "bool", key: "adjudicate", label: "Checks roll while it's in progress", hint: "Marked for a world whose checks roll only where marked" }
+  ],
+  tables: [{ kind: "json", key: "rows", label: "Rows" }],
+  sections: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "number", key: "rank", label: "Rank (lower is reserved first)", step: 1 },
+    { kind: "text", key: "template", label: "Template", multiline: true },
+    { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
+    { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v3) => v3 !== false },
+    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: { player: "What your character knows", scene: "Also what the people with your character know", gm: "Everything, with what your character doesn't know marked" }, optional: true, hint: "Unset, it's what your character knows. The wider choices also tell the narrator what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
+    { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
+    { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
+    { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" }
+  ],
+  steps: [
+    { kind: "enum", key: "purpose", label: "Purpose", values: Object.keys(STEP_LABEL), labels: STEP_LABEL },
+    { kind: "text", key: "template", label: "Template", multiline: true },
+    { kind: "enum", key: "output", label: "Output", values: Object.keys(STEP_OUTPUT_LABEL), labels: STEP_OUTPUT_LABEL },
+    { kind: "tags", key: "signals", label: "Signals", noun: "signal" }
+  ],
+  packs: [
+    { kind: "number", key: "version", label: "Format version", step: 1 },
+    { kind: "json", key: "config", label: "Config" }
+  ],
+  lore: [
+    { kind: "text", key: "title", label: "Title" },
+    { kind: "text", key: "content", label: "Content", multiline: true },
+    { kind: "tags", key: "keys", label: "Keywords", noun: "keyword" },
+    { kind: "refs", key: "links", label: "Links (entities and places)", collections: ["entities", "places"] },
+    { kind: "text", key: "group", label: "Group", optional: true, hint: "Entries sharing a group are alternatives to each other" },
+    { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among otherwise equal entries" },
+    { kind: "enum", key: "visibility", label: "Who may read it (Known by: once the player character knows everything it links)", values: ["public", "known_by"], optional: true },
+    { kind: "bool", key: "secret", label: "Secret", hint: "Only the helpers you pick read it, until the gate holds", reads: (secret) => loreIsSecret({ secret }) },
+    { kind: "expr", key: "gate", label: "Gate (revealed once it holds)", optional: true },
+    { kind: "refs", key: "holders", label: "Whose own secret it is (their minds read it, gate or no gate)", collections: ["entities"] }
+  ],
+  classifications: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "bool", key: "multiple", label: "Several values per entity", hint: "Off: one value each, like a story role. On: any number, like allegiances" },
+    { kind: "bool", key: "shown", label: "Players can see this classification", hint: "Off: only Build and GM mode see it; Play → People never groups or filters by it" },
+    { kind: "number", key: "order", label: "Order (lowest first)", optional: true, step: 1 },
+    { kind: "text", key: "description", label: "Description", multiline: true, optional: true },
+    { kind: "facetValues", key: "values", label: "Values" }
+  ],
+  routines: [
+    { kind: "text", key: "label", label: "Label", optional: true },
+    { kind: "bool", key: "inherit", label: "Keeps the blocks of less specific routines", reads: (inherit) => inherit !== false }
+  ]
+};
+var PART_SPECS = {
+  calendar: [
+    { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
+    { kind: "localTime", key: "epoch", label: "Clock starts at (the epoch)", hint: "Minute 0 of the world's clock, in its own calendar" },
+    { kind: "text", key: "timeZone", label: "Time zone (IANA)" },
+    {
+      kind: "list",
+      key: "dayParts",
+      label: "Day parts",
+      title: "label",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Day part",
+        fields: [
+          { kind: "text", key: "id", label: "Id" },
+          { kind: "text", key: "label", label: "Label" },
+          { kind: "timeOfDay", key: "start", label: "Starts" }
+        ]
+      }
+    },
+    {
+      kind: "list",
+      key: "holidays",
+      label: "Holidays",
+      title: "label",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Holiday",
+        fields: [
+          { kind: "text", key: "id", label: "Id" },
+          { kind: "text", key: "label", label: "Label" },
+          { kind: "json", key: "rule", label: "Date rule" },
+          { kind: "bool", key: "dayOff", label: "Day off" }
+        ]
+      }
+    },
+    { kind: "json", key: "custom", label: "Custom calendar (month lengths and names)", optional: true }
+  ],
+  realism: [
+    { kind: "enum", key: "preset", label: "Preset", values: ["story", "grounded", "simulation", "custom"] },
+    { kind: "levels", key: "levels", label: "Domain levels", floored: true },
+    { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
+    { kind: "claims", key: "claims", label: "Player claims" }
+  ],
+  time: [
+    { kind: "record", key: "sceneTicks", label: "Default tick per scene type", keyLabel: "Scene type", item: { kind: "duration", key: "", label: "Tick" } },
+    { kind: "json", key: "interrupts", label: "Interrupt policy" },
+    { kind: "json", key: "speedThrough", label: "Speed through" },
+    { kind: "enum", key: "montage", label: "Montage", values: ["key", "day", "week"] },
+    {
+      kind: "object",
+      key: "unitCap",
+      label: "Unit cap",
+      fields: [
+        { kind: "number", key: "agentDays", label: "Agent-days", min: 1, step: 1 },
+        { kind: "number", key: "events", label: "Events", min: 1, step: 1 }
+      ]
+    }
+  ],
+  meta: [
+    { kind: "text", key: "name", label: "World name" },
+    { kind: "ref", key: "pov", label: "Point of view", collection: "entities" },
+    {
+      kind: "object",
+      key: "start",
+      label: "Start",
+      fields: [
+        { kind: "ref", key: "place", label: "Place", collection: "places" },
+        { kind: "localTime", key: "at", label: "At" }
+      ]
+    },
+    { kind: "enum", key: "seedMode", label: "Re-run rolls", values: ["fresh", "same_roll"] },
+    { kind: "bool", key: "lenientPricing", label: "Lenient pricing (accept narrated prices inside the band)" },
+    { kind: "number", key: "spawnCap", label: "People replies may introduce in a chat (0 for none)", min: 0, max: 500, step: 1 },
+    {
+      kind: "record",
+      key: "lifeStates",
+      label: "Life states (besides Alive, Dying and Dead)",
+      keyLabel: "State id",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Life state",
+        fields: [
+          { kind: "text", key: "label", label: "Label" },
+          { kind: "bool", key: "acts", label: "Still acts (follows schedules and plans, chooses, takes combat turns)" },
+          { kind: "text", key: "reads", label: "Reads to the narrator as", hint: "lies unconscious · is missing · walks again" }
+        ]
+      }
+    },
+    {
+      kind: "object",
+      key: "currency",
+      label: "Currency",
+      fields: [
+        { kind: "text", key: "code", label: "Code (ISO 4217 or your own, e.g. GP)" },
+        { kind: "text", key: "symbol", label: "Symbol" },
+        { kind: "text", key: "minorUnit", label: "Minor unit (cent, copper…)" },
+        { kind: "number", key: "decimals", label: "Decimals (2 → 100 minor units per major)", min: 0, max: 6, step: 1 },
+        { kind: "text", key: "format", label: "Format", hint: "{sign}{symbol}{amount} · {sign}{major} sp {minor} cp" }
+      ]
+    },
+    {
+      kind: "object",
+      key: "mapSettings",
+      label: "Map",
+      fields: [
+        { kind: "enum", key: "display", label: "The map shows (knowledge: what the POV knows, places only heard of dashed; fog: fog over what it hasn't seen)", values: ["knowledge", "fog"] },
+        {
+          kind: "object",
+          key: "grid",
+          label: "Grid system",
+          fields: [
+            { kind: "bool", key: "movement", label: "Grid movement", hint: "Walls and doors steer the POV across grids, things lie in cells, and cells and zones trigger rules; Space plays at 3 or more" },
+            { kind: "number", key: "sightRadius", label: "Sight radius (cells the POV sees around it)", min: 0, max: 32, step: 1 }
+          ]
+        },
+        { kind: "bool", key: "travelSimulation", label: "Travel simulation: moves need a route", hint: "Off (the default): moves are story first, so a move the reply tells always lands and Go goes even where no route leads. On: a narrated move no route reaches didn't happen, and Go needs a walking route" }
+      ]
+    }
+  ]
+};
+var ID_MAX = 64;
+var FOLD = { ß: "ss", æ: "ae", œ: "oe", ø: "o", đ: "d", ð: "d", ł: "l", þ: "th" };
+function deriveId(name, taken) {
+  const snake = name.normalize("NFKD").replace(/[\u0300-\u036f'’]/g, "").toLowerCase().replace(/[ßæœøđðłþ]/g, (c3) => FOLD[c3] ?? c3).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^(\d)/, "x$1");
+  const base = snake.slice(0, ID_MAX).replace(/_+$/, "") || "item";
+  for (let n2 = 1;; n2++) {
+    const suffix = n2 === 1 ? "" : `_${n2}`;
+    const id = `${base.slice(0, ID_MAX - suffix.length).replace(/_+$/, "")}${suffix}`;
+    if (!taken.has(id) && safeKey(id))
+      return id;
+  }
+}
+function newItem(collection, id, world, name) {
+  const shown = name?.trim() || id;
+  switch (collection) {
+    case "kinds":
+      return { id, label: shown, fields: {} };
+    case "relations":
+      return { id, label: shown, from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: {} };
+    case "entities":
+      return { id, kind: "", name: shown, tier: spawnTierOf(world), fields: {}, relations: [] };
+    case "places":
+      return { id, name: shown, fields: {} };
+    case "routes":
+      return { id, from: "", to: "", modes: { walk: { minutes: 10 } }, bidirectional: true };
+    case "grids":
+      return { id, width: 16, height: 16, terrain: Array.from({ length: 256 }, () => "grass"), blocked: [], zones: {} };
+    case "maps":
+      return { id, scope: world.start.place, places: [], ...name?.trim() ? { title: name.trim() } : {} };
+    case "rules":
+      return { id, on: { tick: "turn" }, do: [] };
+    case "actions":
+      return { id, label: shown, params: {}, requires: [], outcomes: { default: [] }, duration: "1" };
+    case "checks":
+      return { id, dice: "2d6", bands: [{ outcome: "fail", max: 6 }, { outcome: "success", min: 7 }] };
+    case "schedules":
+      return { id, target: "place", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "17:00", value: null }] };
+    case "tracks":
+      return { id, kind: "quest", label: shown, start: "start", stages: { start: { label: "Start", next: [] } }, visibility: "public" };
+    case "tables":
+      return { id, pack: "", schema: `lre-table/${id}/v1`, revision: "", label: shown, columns: {}, rows: {} };
+    case "sections":
+      return { id, label: shown, rank: 50, template: "", position: { type: "native" } };
+    case "steps":
+      return { id, purpose: "brief", template: "", output: "text", signals: [] };
+    case "packs":
+      return { version: 1, config: {} };
+    case "lore":
+      return { id, title: shown, content: "", keys: [], links: [] };
+    case "classifications":
+      return { id, label: name?.trim() || id.replace(/_/g, " "), multiple: false, values: {} };
+    case "routines":
+      return { id, label: shown, blocks: [] };
+  }
 }
 
 // src/shared/claims.ts
@@ -5289,14 +4459,14 @@ function parseMoneyInput(text, currency, unit = "major") {
       t3 = (lower.startsWith(word) ? t3.slice(word.length) : t3.slice(0, t3.length - word.length)).trim();
   }
   const m2 = AMOUNT.exec(t3);
-  const whole2 = m2?.[1];
+  const whole = m2?.[1];
   const fraction = m2?.[2];
-  if (!m2 || whole2 === undefined && (fraction === undefined || fraction === ""))
+  if (!m2 || whole === undefined && (fraction === undefined || fraction === ""))
     return null;
   const decimals = places(currency, unit);
   if (fraction !== undefined && (decimals === 0 || fraction.length > decimals))
     return null;
-  const minor = Number((whole2 ?? "0").replace(/,/g, "")) * 10 ** decimals + Number((fraction ?? "").padEnd(decimals, "0") || "0");
+  const minor = Number((whole ?? "0").replace(/,/g, "")) * 10 ** decimals + Number((fraction ?? "").padEnd(decimals, "0") || "0");
   if (!Number.isSafeInteger(minor))
     return null;
   return negative && minor !== 0 ? -minor : minor;
@@ -5947,616 +5117,6 @@ function RealismThisChat(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/frontend/build/expr-editor.tsx
-var WORD_OPERATORS = ["and", "or", "not"];
-var OPERATOR_GROUPS = [
-  {
-    title: "Arithmetic",
-    keys: [
-      ["+", "Plus"],
-      ["-", "Minus"],
-      ["*", "Times"],
-      ["/", "Divided by"],
-      ["%", "Remainder"],
-      ["(", "Open bracket"],
-      [")", "Close bracket"]
-    ]
-  },
-  {
-    title: "Compare",
-    keys: [
-      ["==", "Equals"],
-      ["!=", "Doesn't equal"],
-      ["<", "Less than"],
-      ["<=", "At most"],
-      [">", "More than"],
-      [">=", "At least"]
-    ]
-  },
-  {
-    title: "Logic",
-    keys: [
-      ["and", "And"],
-      ["or", "Or"],
-      ["not", "Not"],
-      ["?", "Then"],
-      [":", "Otherwise"]
-    ]
-  }
-];
-function exprFunctions(functions, mode) {
-  const names = new Set(functions);
-  for (const name of EFFECT_ONLY_FUNCTIONS) {
-    if (mode === "effect")
-      names.add(name);
-    else
-      names.delete(name);
-  }
-  return [...names].sort();
-}
-function exprCompletions(word, identifiers, functions) {
-  if (word === "")
-    return [];
-  const ids = identifiers.filter((id) => id.startsWith(word) && id !== word);
-  const calls = functions.filter((name) => name.startsWith(word)).map((name) => `${name}(`);
-  return [...ids, ...calls].slice(0, 8);
-}
-function checkBalance(text) {
-  const stack = [];
-  const pairs = { ")": "(", "]": "[", "}": "{" };
-  let quote = null;
-  for (let i3 = 0;i3 < text.length; i3 += 1) {
-    const ch = text[i3] ?? "";
-    if (quote) {
-      if (ch === "\\")
-        i3 += 1;
-      else if (ch === quote)
-        quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'")
-      quote = ch;
-    else if (ch === "(" || ch === "[" || ch === "{")
-      stack.push(ch);
-    else if (ch === ")" || ch === "]" || ch === "}") {
-      if (stack.pop() !== pairs[ch])
-        return { ok: false, message: `Unexpected ${ch} at ${i3 + 1}` };
-    }
-  }
-  if (quote)
-    return { ok: false, message: "Unclosed string" };
-  if (stack.length > 0)
-    return { ok: false, message: `${stack.length} unclosed ${stack.at(-1)}` };
-  return { ok: true, message: null };
-}
-var KEYWORDS = { and: true, or: true, not: true, true: true, false: true, null: true };
-var CLOCK_WORDS = {
-  clock: "the time",
-  minute: "the minute of the day",
-  hour: "the hour",
-  day: "the day number",
-  weekday: "the weekday",
-  date: "the day of the month",
-  month: "the month",
-  year: "the year",
-  daypart: "the part of the day"
-};
-var BINDING_WORDS = { actor: "the actor", target: "the target" };
-var DOMAIN_IDS = DOMAINS;
-var NAME_START = /[A-Za-z_]/;
-var NAME_PART = /\w/;
-function formulaNames(text) {
-  const out = [];
-  const skipSpace = (from) => {
-    let j3 = from;
-    while (/\s/.test(text.charAt(j3)))
-      j3 += 1;
-    return j3;
-  };
-  const nameEnd = (from) => {
-    let j3 = from + 1;
-    while (NAME_PART.test(text.charAt(j3)))
-      j3 += 1;
-    return j3;
-  };
-  let i3 = 0;
-  while (i3 < text.length) {
-    const c3 = text.charAt(i3);
-    if (c3 === '"' || c3 === "'") {
-      i3 += 1;
-      while (i3 < text.length && text.charAt(i3) !== c3)
-        i3 += text.charAt(i3) === "\\" ? 2 : 1;
-      i3 += 1;
-    } else if (NAME_START.test(c3)) {
-      let end = nameEnd(i3);
-      const path = [text.slice(i3, end)];
-      for (;; ) {
-        const dot = skipSpace(end);
-        if (text.charAt(dot) !== "." || /[0-9]/.test(text.charAt(dot + 1)))
-          break;
-        const start = skipSpace(dot + 1);
-        if (!NAME_START.test(text.charAt(start)))
-          break;
-        end = nameEnd(start);
-        path.push(text.slice(start, end));
-      }
-      out.push({ path, call: path.length === 1 && text.charAt(skipSpace(end)) === "(" });
-      i3 = end;
-    } else {
-      i3 += 1;
-    }
-  }
-  return out;
-}
-function fieldLabel(doc, field, kind) {
-  if (!doc)
-    return;
-  const preferred = kind !== undefined && hasOwn(doc.kinds, kind) ? doc.kinds[kind] : undefined;
-  for (const def of preferred ? [preferred, ...Object.values(doc.kinds)] : Object.values(doc.kinds)) {
-    const label = hasOwn(def.fields, field) ? def.fields[field]?.label : undefined;
-    if (label)
-      return label;
-  }
-  return;
-}
-function fieldWords(doc, path, kind) {
-  const [field = "", ...deeper] = path;
-  const label = fieldLabel(doc, field, kind);
-  const words = label === undefined ? field : /^[A-Z](?![A-Z])/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
-  return [words, ...deeper].join(".");
-}
-function nameOf(doc, id) {
-  if (!doc)
-    return;
-  if (hasOwn(doc.entities, id))
-    return doc.entities[id]?.name || undefined;
-  if (hasOwn(doc.places, id))
-    return doc.places[id]?.name || undefined;
-  if (hasOwn(doc.tracks, id))
-    return doc.tracks[id]?.label || undefined;
-  return fieldLabel(doc, id);
-}
-function readOf(path, doc) {
-  const id = path.join(".");
-  const [head = "", ...rest] = path;
-  const [second = ""] = rest;
-  if (head === "self")
-    return rest.length === 0 ? { id, label: "self", what: "self" } : { id, label: `own ${fieldWords(doc, rest)}`, what: "own field" };
-  const binding = hasOwn(BINDING_WORDS, head) ? BINDING_WORDS[head] : undefined;
-  if (binding !== undefined)
-    return { id, label: rest.length === 0 ? binding : `${binding}'s ${fieldWords(doc, rest)}`, what: "param" };
-  if (head === "pov") {
-    const kind = doc && hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov]?.kind : undefined;
-    return { id, label: rest.length === 0 ? "the POV character" : `the POV character's ${fieldWords(doc, rest, kind)}`, what: "pov" };
-  }
-  if (head === "here")
-    return { id, label: rest.length === 0 ? "the current place" : `the ${fieldWords(doc, rest)} here`, what: "here" };
-  if (head === "stage" && rest.length === 1) {
-    const track2 = (doc && hasOwn(doc.tracks, second) ? doc.tracks[second]?.label : undefined) || second;
-    return { id, label: `the stage of “${track2}”`, what: "track stage" };
-  }
-  if (head === "level" && rest.length === 1 && DOMAIN_IDS.includes(second))
-    return { id, label: `the ${second} level`, what: "level" };
-  if (rest.length === 0 && hasOwn(CLOCK_WORDS, head))
-    return { id, label: CLOCK_WORDS[head] ?? head, what: "the clock" };
-  if (doc && hasOwn(doc.entities, head)) {
-    const entity = doc.entities[head];
-    const name = entity?.name || head;
-    return rest.length === 0 ? { id, label: name, what: "entity" } : { id, label: `${name}'s ${fieldWords(doc, rest, entity?.kind)}`, what: "entity field" };
-  }
-  if (doc && hasOwn(doc.places, head)) {
-    const name = doc.places[head]?.name || head;
-    return rest.length === 0 ? { id, label: name, what: "place" } : { id, label: `${name}'s ${fieldWords(doc, rest)}`, what: "place field" };
-  }
-  if (doc && rest.length === 0) {
-    if (hasOwn(doc.tracks, head))
-      return { id, label: `the track “${doc.tracks[head]?.label || head}”`, what: "track" };
-    if (hasOwn(doc.checks, head))
-      return { id, label: `the ${head} check`, what: "check" };
-    if (Object.values(doc.kinds).some((def) => hasOwn(def.fields, head)))
-      return { id, label: `own ${fieldWords(doc, path)}`, what: "own field" };
-  }
-  return { id, label: id, what: "param" };
-}
-function exprReads(text, doc) {
-  const reads = [];
-  const functions = [];
-  for (const { path, call } of formulaNames(text)) {
-    const head = path[0] ?? "";
-    if (hasOwn(KEYWORDS, head))
-      continue;
-    if (call) {
-      if (!functions.includes(head))
-        functions.push(head);
-    } else {
-      const id = path.join(".");
-      if (!reads.some((read) => read.id === id))
-        reads.push(readOf(path, doc));
-    }
-  }
-  return { reads, functions };
-}
-function exprSummary(text, doc) {
-  const { reads, functions } = exprReads(text, doc);
-  const labels = [...new Set(reads.map((read) => read.label))];
-  const [reading = "", using = ""] = [labels, functions].map((words) => words.length <= 1 ? words[0] ?? "" : `${words.slice(0, -1).join(", ")} and ${words.at(-1) ?? ""}`);
-  const sentence = reading === "" ? "Reads nothing" : `Reads ${reading}`;
-  return using === "" ? `${sentence}.` : `${sentence}; uses ${using}.`;
-}
-function ExprReadout(props) {
-  if (props.text.trim() === "")
-    return null;
-  return /* @__PURE__ */ u3("p", {
-    class: "lre-expr-readout",
-    children: exprSummary(props.text, props.doc)
-  }, undefined, false, undefined, this);
-}
-function withToken(value, start, end, token, replace) {
-  const before = value.slice(0, Math.max(0, start - replace));
-  const text = WORD_OPERATORS.includes(token) ? ` ${token} ` : token;
-  return { value: before + text + value.slice(end), caret: before.length + text.length };
-}
-function useFormula(value, onChange, mobile) {
-  const input = T2(null);
-  const typing = T2(false);
-  const [caret, setCaret] = d2(null);
-  const word = /[A-Za-z_][\w.]*$/.exec(value.slice(0, Math.min(caret ?? value.length, value.length)))?.[0] ?? "";
-  const track2 = () => setCaret(input.current?.selectionStart ?? null);
-  return {
-    input,
-    word,
-    track: track2,
-    press: () => {
-      typing.current = document.activeElement === input.current;
-    },
-    edit: (text) => {
-      onChange(text);
-      track2();
-    },
-    insert: (token, replace = 0) => {
-      const el = input.current;
-      const next = withToken(value, el?.selectionStart ?? value.length, el?.selectionEnd ?? value.length, token, replace);
-      const focus = !mobile || typing.current;
-      typing.current = false;
-      onChange(next.value);
-      setCaret(next.caret);
-      queueMicrotask(() => {
-        if (focus)
-          el?.focus({ preventScroll: true });
-        el?.setSelectionRange(next.caret, next.caret);
-      });
-    }
-  };
-}
-function Suggestions(props) {
-  const tokens = exprCompletions(props.word, props.identifiers, props.functions);
-  if (tokens.length === 0)
-    return null;
-  return /* @__PURE__ */ u3("div", {
-    class: props.scroll ? "lre-form-chips lre-expr-suggest scroll" : "lre-form-chips lre-expr-suggest",
-    role: "group",
-    "aria-label": "Suggestions",
-    children: tokens.map((token) => {
-      const name = token.endsWith("(") ? undefined : nameOf(props.doc, token);
-      const shown = name !== undefined && name.toLowerCase().replace(/[_\s]+/g, " ").trim() !== token.toLowerCase().replace(/_/g, " ") ? name : undefined;
-      return /* @__PURE__ */ u3(Chip, {
-        label: shown !== undefined ? `${token}, ${shown}` : undefined,
-        onPress: () => props.onPick(token),
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-expr-token",
-            children: token
-          }, undefined, false, undefined, this),
-          shown !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-expr-chip-name",
-            children: shown
-          }, undefined, false, undefined, this) : null
-        ]
-      }, token, true, undefined, this);
-    })
-  }, undefined, false, undefined, this);
-}
-function KeyGroup(props) {
-  const id = P2();
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-expr-group",
-    role: "group",
-    "aria-labelledby": id,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        id,
-        class: "lre-expr-group-title",
-        children: props.title
-      }, undefined, false, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function KeyFilter(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-build-search",
-    children: [
-      /* @__PURE__ */ u3(Icon, {
-        name: "search",
-        size: 16
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("input", {
-        class: "lre-input",
-        type: "search",
-        placeholder: props.label,
-        "aria-label": props.label,
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: false,
-        value: props.value,
-        onInput: (event) => props.onInput(event.currentTarget.value),
-        onKeyDown: (event) => {
-          if (event.key !== "Escape" || props.value === "")
-            return;
-          event.preventDefault();
-          props.onInput("");
-        }
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function Palette(props) {
-  const [callQuery, setCallQuery] = d2("");
-  const [nameQuery, setNameQuery] = d2("");
-  const names = b2(() => props.identifiers.map((id) => ({ id, name: nameOf(props.doc, id) })), [props.identifiers, props.doc]);
-  const callNeedle = callQuery.trim().toLowerCase();
-  const nameNeedle = nameQuery.trim().toLowerCase();
-  const calls = props.functions.filter((name) => name.toLowerCase().includes(callNeedle));
-  const shown = names.filter((n2) => n2.id.toLowerCase().includes(nameNeedle) || (n2.name ?? "").toLowerCase().includes(nameNeedle));
-  return /* @__PURE__ */ u3("div", {
-    class: props.inline ? "lre-expr-palette inline" : "lre-expr-palette",
-    children: [
-      OPERATOR_GROUPS.map((group) => /* @__PURE__ */ u3(KeyGroup, {
-        title: group.title,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-expr-keys",
-          children: group.keys.map(([token, name]) => /* @__PURE__ */ u3("button", {
-            type: "button",
-            class: "lre-expr-key",
-            "aria-label": name,
-            title: name,
-            onClick: () => props.onInsert(token),
-            children: token
-          }, token, false, undefined, this))
-        }, undefined, false, undefined, this)
-      }, group.title, false, undefined, this)),
-      props.functions.length > 0 ? /* @__PURE__ */ u3(KeyGroup, {
-        title: "Functions",
-        children: [
-          /* @__PURE__ */ u3(KeyFilter, {
-            label: "Find a function",
-            value: callQuery,
-            onInput: setCallQuery
-          }, undefined, false, undefined, this),
-          calls.length > 0 ? /* @__PURE__ */ u3("div", {
-            class: "lre-expr-words",
-            children: calls.map((name) => /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-expr-key",
-              onClick: () => props.onInsert(`${name}(`),
-              children: [
-                name,
-                "("
-              ]
-            }, name, true, undefined, this))
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
-            class: "lre-expr-none",
-            children: "No function matches."
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null,
-      names.length > 0 ? /* @__PURE__ */ u3(KeyGroup, {
-        title: "Names",
-        children: [
-          names.length > 8 ? /* @__PURE__ */ u3(KeyFilter, {
-            label: "Find a name",
-            value: nameQuery,
-            onInput: setNameQuery
-          }, undefined, false, undefined, this) : null,
-          shown.length > 0 ? /* @__PURE__ */ u3("div", {
-            class: "lre-expr-words",
-            children: shown.map((n2) => /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-expr-key name",
-              onClick: () => props.onInsert(n2.id),
-              children: [
-                n2.name !== undefined ? /* @__PURE__ */ u3("span", {
-                  children: n2.name
-                }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
-                  class: "lre-expr-token",
-                  children: n2.id
-                }, undefined, false, undefined, this),
-                n2.name !== undefined ? /* @__PURE__ */ u3(IdText, {
-                  id: n2.id
-                }, undefined, false, undefined, this) : null
-              ]
-            }, n2.id, true, undefined, this))
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
-            class: "lre-expr-none",
-            children: "No name matches."
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function ExprPage(props) {
-  const formula = useFormula(props.value, props.onChange, props.mobile);
-  A(() => {
-    const timer = setTimeout(() => {
-      const el = formula.input.current;
-      if (!el)
-        return;
-      el.focus({ preventScroll: true });
-      el.setSelectionRange(el.value.length, el.value.length);
-      formula.track();
-    }, 0);
-    return () => clearTimeout(timer);
-  }, []);
-  return /* @__PURE__ */ u3(FormSheet, {
-    title: props.label,
-    subtitle: props.hint,
-    onClose: props.onClose,
-    actions: /* @__PURE__ */ u3(Button, {
-      variant: "primary",
-      size: "sm",
-      onClick: () => props.onClose(),
-      children: "Done"
-    }, undefined, false, undefined, this),
-    children: /* @__PURE__ */ u3("div", {
-      class: "lre-expr-page",
-      onPointerDown: formula.press,
-      children: [
-        /* @__PURE__ */ u3("div", {
-          class: "lre-expr-compose",
-          children: [
-            /* @__PURE__ */ u3("textarea", {
-              ref: formula.input,
-              class: props.invalid ? "lre-input lre-expr-input page invalid" : "lre-input lre-expr-input page",
-              rows: 6,
-              spellcheck: false,
-              autocapitalize: "off",
-              autocorrect: "off",
-              "aria-label": props.label,
-              value: props.value,
-              onInput: (event) => formula.edit(event.currentTarget.value),
-              onKeyUp: formula.track,
-              onClick: formula.track
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Suggestions, {
-              word: formula.word,
-              identifiers: props.identifiers,
-              functions: props.functions,
-              doc: props.doc,
-              scroll: props.mobile,
-              onPick: (token) => formula.insert(token, formula.word.length)
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(ExprReadout, {
-              text: props.value,
-              doc: props.doc
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Issues, {
-              issues: props.issues
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
-        /* @__PURE__ */ u3(Palette, {
-          functions: props.functions,
-          identifiers: props.identifiers,
-          doc: props.doc,
-          onInsert: (token) => formula.insert(token)
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function ExprEditor(props) {
-  const app = useApp();
-  const mobile = useSelect(app.host.viewport, isMobile);
-  const [tools, setTools] = d2(false);
-  const [page, setPage] = d2(false);
-  const functions = b2(() => exprFunctions(props.functions, props.mode ?? "formula"), [props.functions, props.mode]);
-  const formula = useFormula(props.value, props.onChange, mobile);
-  const balance = checkBalance(props.value);
-  const invalid = !balance.ok || props.lint.length > 0;
-  const issues = balance.message ? [{ severity: "error", path: "", code: "balance", message: balance.message }, ...props.lint] : props.lint;
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
-    "data-lre-expr": true,
-    onPointerDown: formula.press,
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "label lre-expr-head",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-expr-label",
-            children: [
-              props.label,
-              props.optional ? /* @__PURE__ */ u3("span", {
-                class: "lre-form-optional",
-                children: " · optional"
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            class: "lre-expr-actions",
-            children: [
-              /* @__PURE__ */ u3(IconButton, {
-                icon: "function",
-                label: "Operators and functions",
-                pressed: mobile ? undefined : tools,
-                onClick: () => mobile ? setPage(true) : setTools(!tools)
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(IconButton, {
-                icon: "expand",
-                label: "Open the formula editor",
-                onClick: () => setPage(true)
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("textarea", {
-        ref: formula.input,
-        class: invalid ? "lre-input lre-expr-input invalid" : "lre-input lre-expr-input",
-        rows: 2,
-        spellcheck: false,
-        autocapitalize: "off",
-        autocorrect: "off",
-        "aria-label": props.label,
-        value: props.value,
-        onInput: (event) => formula.edit(event.currentTarget.value),
-        onKeyUp: formula.track,
-        onClick: formula.track
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Suggestions, {
-        word: formula.word,
-        identifiers: props.identifiers,
-        functions,
-        doc: props.doc,
-        scroll: mobile,
-        onPick: (token) => formula.insert(token, formula.word.length)
-      }, undefined, false, undefined, this),
-      tools && !mobile ? /* @__PURE__ */ u3(Palette, {
-        functions,
-        identifiers: props.identifiers,
-        doc: props.doc,
-        inline: true,
-        onInsert: (token) => formula.insert(token)
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3(ExprReadout, {
-        text: props.value,
-        doc: props.doc
-      }, undefined, false, undefined, this),
-      props.hint ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: props.hint
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3(Issues, {
-        issues
-      }, undefined, false, undefined, this),
-      page ? /* @__PURE__ */ u3(ExprPage, {
-        label: props.label,
-        hint: props.hint,
-        value: props.value,
-        identifiers: props.identifiers,
-        functions,
-        doc: props.doc,
-        issues,
-        invalid,
-        mobile,
-        onChange: props.onChange,
-        onClose: () => setPage(false)
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-
 // src/frontend/build/effect-args.tsx
 function parseArgText(text) {
   const trimmed = text.trim();
@@ -6702,6 +5262,736 @@ function EffectArgsInput(props) {
       }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
+}
+
+// src/shared/classes.ts
+var NESTING_DEPTH = 16;
+function withinValue(values, value, ancestor) {
+  let current2 = value;
+  for (let depth = 0;current2 !== undefined && depth < NESTING_DEPTH; depth++) {
+    if (current2 === ancestor)
+      return true;
+    current2 = hasOwn(values, current2) ? values[current2]?.parent : undefined;
+  }
+  return false;
+}
+function facetsInOrder(world) {
+  if (!isRecord(world.classifications))
+    return [];
+  const rank = (f3) => typeof f3.order === "number" && Number.isFinite(f3.order) ? f3.order : Number.MAX_SAFE_INTEGER;
+  const name = (id, f3) => typeof f3.label === "string" ? f3.label : id;
+  return Object.entries(world.classifications).filter(([, f3]) => isRecord(f3) && isRecord(f3.values)).sort(([a3, fa], [b3, fb]) => rank(fa) - rank(fb) || name(a3, fa).localeCompare(name(b3, fb)) || a3.localeCompare(b3));
+}
+function facetTree(values) {
+  const ids = Object.keys(values);
+  const out = [];
+  const seen = new Set;
+  const visit = (id, depth) => {
+    const value = values[id];
+    if (!value || seen.has(id))
+      return;
+    seen.add(id);
+    out.push({ id, value, depth });
+    for (const child of ids)
+      if (values[child]?.parent === id)
+        visit(child, depth + 1);
+  };
+  for (const id of ids) {
+    const parent = values[id]?.parent;
+    if (parent === undefined || !hasOwn(values, parent))
+      visit(id, 0);
+  }
+  for (const id of ids)
+    visit(id, 0);
+  return out;
+}
+
+// src/frontend/build/facet-editor.tsx
+var CHIP_CHOICE_MAX = 6;
+function classesOf(v3) {
+  if (!isRecord(v3))
+    return;
+  return Object.fromEntries(Object.entries(v3).map(([facet, values]) => [facet, Array.isArray(values) ? values.filter((x2) => typeof x2 === "string") : []]));
+}
+function facetValuesOf(v3) {
+  const out = {};
+  for (const [id, raw] of Object.entries(isRecord(v3) ? v3 : {})) {
+    if (!isRecord(raw))
+      continue;
+    out[id] = { label: typeof raw.label === "string" ? raw.label : id, ...typeof raw.parent === "string" ? { parent: raw.parent } : {}, ...typeof raw.description === "string" ? { description: raw.description } : {} };
+  }
+  return out;
+}
+function removeValue(values, id) {
+  const parent = values[id]?.parent;
+  const out = {};
+  for (const [vid, v3] of Object.entries(values)) {
+    if (vid === id)
+      continue;
+    if (v3.parent !== id)
+      out[vid] = v3;
+    else {
+      const { parent: _gone, ...rest } = v3;
+      out[vid] = parent === undefined ? rest : { ...rest, parent };
+    }
+  }
+  return out;
+}
+function subtree(values, id) {
+  const out = new Set([id]);
+  for (let grew = true;grew; ) {
+    grew = false;
+    for (const [vid, v3] of Object.entries(values)) {
+      if (v3.parent !== undefined && out.has(v3.parent) && !out.has(vid)) {
+        out.add(vid);
+        grew = true;
+      }
+    }
+  }
+  return out;
+}
+function parentLabel(values, v3) {
+  return v3.parent !== undefined && hasOwn(values, v3.parent) ? values[v3.parent]?.label : undefined;
+}
+function facetOptions(values) {
+  return facetTree(values).map(({ id, value }) => {
+    const parent = parentLabel(values, value);
+    return { value: id, label: value.label, ...parent !== undefined ? { sublabel: `in ${parent}` } : {} };
+  });
+}
+function ChipLines(props) {
+  if (props.option.sublabel === undefined)
+    return /* @__PURE__ */ u3(M, {
+      children: props.option.label
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("span", {
+    class: "lre-form-facet-lines",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        children: props.option.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-form-facet-in",
+        children: props.option.sublabel
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function idProblem(id, taken) {
+  if (!id)
+    return "Give it an id.";
+  if (taken.has(id))
+    return "There's already a value with this id.";
+  return safeKey(id) ? null : "This id is reserved. Choose another.";
+}
+function FacetValuesInput(props) {
+  const values = props.value ?? {};
+  const showIds = useShowIds();
+  const idId = P2();
+  const [open, setOpen] = d2(null);
+  const [name, setName] = d2("");
+  const [typed, setTyped] = d2(null);
+  const edit = (id, patch) => {
+    const next = { ...values[id] ?? { label: id }, ...patch };
+    if (patch.parent === undefined && "parent" in patch)
+      delete next.parent;
+    if (patch.description === undefined && "description" in patch)
+      delete next.description;
+    props.onChange({ ...values, [id]: next });
+  };
+  const remove = (id) => {
+    if (open === id)
+      setOpen(null);
+    props.onChange(removeValue(values, id));
+  };
+  const taken = new Set(Object.keys(values));
+  const newId = typed ?? (name.trim() ? deriveId(name.trim(), taken) : "");
+  const problem = typed === null ? null : idProblem(typed, taken);
+  const ready = name.trim() !== "" && newId !== "" && problem === null;
+  const add = () => {
+    if (!ready)
+      return;
+    props.onChange({ ...values, [newId]: { label: name.trim() } });
+    setName("");
+    setTyped(null);
+  };
+  const tree = facetTree(values);
+  const current2 = open !== null && hasOwn(values, open) ? values[open] : undefined;
+  const blocked = open !== null ? subtree(values, open) : null;
+  const idField = /* @__PURE__ */ u3(Field, {
+    label: "Id",
+    for: idId,
+    help: "How rules and entities refer to it. It follows the label until you change it.",
+    error: problem,
+    children: /* @__PURE__ */ u3("input", {
+      id: idId,
+      class: "lre-input lre-build-mono",
+      value: newId,
+      autoComplete: "off",
+      spellcheck: false,
+      "aria-invalid": problem !== null || undefined,
+      onInput: (event) => setTyped(event.currentTarget.value.replace(/[^\w-]/g, "_"))
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    "data-lre-facet-values": true,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      tree.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: "No values yet."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+        class: "lre-form-items",
+        children: tree.map(({ id, value, depth }) => {
+          const parent = parentLabel(values, value);
+          const title = value.label || id;
+          const subtitle = parent !== undefined ? `in ${parent}` : value.parent !== undefined ? `in ${value.parent} (not a value)` : value.description;
+          return /* @__PURE__ */ u3("div", {
+            class: "lre-form-facet-row",
+            "data-depth": Math.min(depth, 4),
+            "data-lre-facet-value": id,
+            children: [
+              /* @__PURE__ */ u3(ItemRow, {
+                title,
+                subtitle,
+                onOpen: () => setOpen(id),
+                openLabel: `Edit ${title}`,
+                actions: /* @__PURE__ */ u3(IconButton, {
+                  icon: "trash",
+                  label: `Remove ${title}`,
+                  onClick: () => remove(id)
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-facet-row-issues",
+                children: props.issues(`${props.path}.${id}`)
+              }, undefined, false, undefined, this)
+            ]
+          }, id, true, undefined, this);
+        })
+      }, undefined, false, undefined, this),
+      open !== null && current2 ? /* @__PURE__ */ u3(FormSheet, {
+        title: current2.label || open,
+        subtitle: props.label,
+        onClose: () => setOpen(null),
+        children: [
+          /* @__PURE__ */ u3("label", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "label",
+                children: "Label"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                value: current2.label,
+                onInput: (event) => edit(open, { label: event.currentTarget.value })
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(RefPicker, {
+            label: "Nested under",
+            value: current2.parent ?? "",
+            options: facetOptions(values).filter((o4) => !blocked?.has(o4.value)),
+            none: "Nothing: a top-level value",
+            onChange: (parent) => edit(open, { parent: parent === "" ? undefined : parent })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("label", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "label",
+                children: [
+                  "Description",
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-form-optional",
+                    children: " · optional"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                value: current2.description ?? "",
+                onInput: (event) => edit(open, { description: event.currentTarget.value === "" ? undefined : event.currentTarget.value })
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          props.issues(`${props.path}.${open}`),
+          /* @__PURE__ */ u3(IdText, {
+            id: open
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-form-facet-actions",
+            children: /* @__PURE__ */ u3(Button, {
+              variant: "danger",
+              icon: "trash",
+              onClick: () => remove(open),
+              children: "Remove value"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-facet-new",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-form-add",
+            children: [
+              /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                placeholder: "New value's label",
+                "aria-label": "New value's label",
+                value: name,
+                onInput: (event) => setName(event.currentTarget.value),
+                onKeyDown: (event) => {
+                  if (event.key !== "Enter")
+                    return;
+                  event.preventDefault();
+                  add();
+                }
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                icon: "plus",
+                disabled: !ready,
+                onClick: add,
+                children: "Add value"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          name.trim() !== "" || typed !== null ? showIds ? idField : /* @__PURE__ */ u3(Disclosure, {
+            summary: "Advanced",
+            children: idField
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ClassesInput(props) {
+  const value = props.value ?? {};
+  const facets = facetsInOrder(props.doc);
+  const set = (facet, values) => {
+    const next = { ...value };
+    if (values.length > 0)
+      next[facet] = values;
+    else
+      delete next[facet];
+    props.onChange(Object.keys(next).length > 0 ? next : undefined);
+  };
+  const stale = Object.keys(value).filter((facet) => !facets.some(([id]) => id === facet));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field lre-form-facet-classes",
+    "data-lre-classes": true,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      facets.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: "No classifications yet: add facets in Build → Classifications."
+      }, undefined, false, undefined, this) : null,
+      facets.map(([facet, f3]) => {
+        const held = value[facet] ?? [];
+        const options = facetOptions(f3.values);
+        const known = (v3) => options.some((o4) => o4.value === v3);
+        const picker = !f3.multiple && options.length > CHIP_CHOICE_MAX;
+        const extra = picker ? held.filter(known).slice(1) : [];
+        const odd = [...held.filter((v3) => !known(v3)).map((v3) => ({ v: v3, text: `${v3} (not a value)` })), ...extra.map((v3) => ({ v: v3, text: `${options.find((o4) => o4.value === v3)?.label ?? v3} (only one allowed)` }))];
+        const warn = odd.length > 0 ? /* @__PURE__ */ u3("div", {
+          class: "lre-form-chips",
+          children: odd.map(({ v: v3, text }) => /* @__PURE__ */ u3(Chip, {
+            tone: "warn",
+            removeLabel: `Remove ${v3}`,
+            onRemove: () => set(facet, held.filter((x2) => x2 !== v3)),
+            children: text
+          }, v3, false, undefined, this))
+        }, undefined, false, undefined, this) : null;
+        if (picker) {
+          return /* @__PURE__ */ u3("div", {
+            class: "lre-form-facet-class",
+            "data-lre-class-facet": facet,
+            children: [
+              /* @__PURE__ */ u3(RefPicker, {
+                label: f3.label,
+                value: held.find(known) ?? "",
+                options,
+                none: "None",
+                onChange: (v3) => set(facet, v3 === "" ? [] : [v3])
+              }, undefined, false, undefined, this),
+              warn
+            ]
+          }, facet, true, undefined, this);
+        }
+        return /* @__PURE__ */ u3("div", {
+          class: "lre-form-facet-class",
+          "data-lre-class-facet": facet,
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "lre-form-facet-label",
+              children: f3.label
+            }, undefined, false, undefined, this),
+            f3.multiple ? /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: "Any number of these."
+            }, undefined, false, undefined, this) : null,
+            options.length === 0 ? /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: "This classification has no values yet."
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3("div", {
+              class: "lre-form-chips",
+              role: "group",
+              "aria-label": f3.label,
+              children: options.map((o4) => {
+                const on = held.includes(o4.value);
+                const next = on ? held.filter((v3) => v3 !== o4.value) : f3.multiple ? [...held, o4.value] : [o4.value];
+                return /* @__PURE__ */ u3(Chip, {
+                  pressed: on,
+                  onToggle: () => set(facet, next),
+                  children: /* @__PURE__ */ u3(ChipLines, {
+                    option: o4
+                  }, undefined, false, undefined, this)
+                }, o4.value, false, undefined, this);
+              })
+            }, undefined, false, undefined, this),
+            warn
+          ]
+        }, facet, true, undefined, this);
+      }),
+      stale.map((facet) => /* @__PURE__ */ u3("div", {
+        class: "lre-form-facet-stale",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-form-facet-stale-text",
+            children: [
+              /* @__PURE__ */ u3(Icon, {
+                name: "alert",
+                size: 16
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                children: `${facet}: ${(value[facet] ?? []).join(", ")} (no longer a classification)`
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            size: "sm",
+            label: `Remove ${facet}`,
+            onClick: () => set(facet, []),
+            children: "Remove"
+          }, undefined, false, undefined, this)
+        ]
+      }, facet, true, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/selector-editor.tsx
+function selectorOf(v3) {
+  if (!isRecord(v3))
+    return;
+  const out = {};
+  for (const key of ["ids", "kind", "tier", "memberOf", "tag"]) {
+    const list2 = v3[key];
+    if (Array.isArray(list2))
+      out[key] = list2.filter((x2) => typeof x2 === "string");
+  }
+  if (isRecord(v3.class))
+    out.class = Object.fromEntries(Object.entries(v3.class).map(([facet, values]) => [facet, Array.isArray(values) ? values.filter((x2) => typeof x2 === "string") : []]));
+  return out;
+}
+var GROUP_KIND = "group";
+function worldTags(doc) {
+  const out = new Set;
+  for (const e3 of Object.values(doc.entities))
+    for (const t3 of Array.isArray(e3.tags) ? e3.tags : [])
+      if (typeof t3 === "string")
+        out.add(t3);
+  return [...out].sort((a3, b3) => a3.localeCompare(b3));
+}
+function kindIs(doc, kind, ancestor) {
+  const seen = new Set;
+  for (let id = kind;id !== undefined && !seen.has(id); id = doc.kinds[id]?.extends) {
+    if (id === ancestor)
+      return true;
+    seen.add(id);
+  }
+  return false;
+}
+function groupOptions(doc) {
+  return Object.values(doc.entities).filter((e3) => kindIs(doc, e3.kind, GROUP_KIND)).map((e3) => ({ value: e3.id, label: e3.name || e3.id })).sort((a3, b3) => a3.label.localeCompare(b3.label));
+}
+function TagListInput(props) {
+  const noun = props.noun ?? "tag";
+  const [text, setText] = d2("");
+  const list2 = P2();
+  const commit = (raw) => {
+    const more = raw.split(",").map((t3) => t3.trim()).filter((t3) => t3 !== "" && !props.value.includes(t3));
+    if (more.length > 0)
+      props.onChange([...props.value, ...new Set(more)]);
+  };
+  const add = () => {
+    commit(text);
+    setText("");
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    "data-lre-tags": true,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-form-chips",
+        children: props.value.map((tag) => /* @__PURE__ */ u3(Chip, {
+          removeLabel: `Remove ${noun} ${tag}`,
+          onRemove: () => props.onChange(props.value.filter((t3) => t3 !== tag)),
+          children: tag
+        }, tag, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-add",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            list: list2,
+            placeholder: `Add ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`,
+            "aria-label": `Add to ${props.label}`,
+            value: text,
+            onInput: (event) => {
+              const typed = event.currentTarget.value;
+              const cut = typed.lastIndexOf(",");
+              if (cut < 0) {
+                setText(typed);
+                return;
+              }
+              commit(typed.slice(0, cut));
+              setText(typed.slice(cut + 1).trimStart());
+            },
+            onPaste: (event) => {
+              const pasted = event.clipboardData?.getData("text") ?? "";
+              if (!pasted.includes(","))
+                return;
+              event.preventDefault();
+              commit(`${text},${pasted}`);
+              setText("");
+            },
+            onKeyDown: (event) => {
+              if (event.key !== "Enter")
+                return;
+              event.preventDefault();
+              add();
+            }
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            icon: "plus",
+            disabled: text.trim() === "",
+            onClick: add,
+            children: "Add"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("datalist", {
+            id: list2,
+            children: props.suggestions.filter((t3) => !props.value.includes(t3)).map((t3) => /* @__PURE__ */ u3("option", {
+              value: t3
+            }, t3, false, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function PickList(props) {
+  const left = props.options.filter((o4) => !props.value.includes(o4.value));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      props.help !== undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: props.help
+      }, undefined, false, undefined, this) : null,
+      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-form-chips",
+        children: props.value.map((id) => {
+          const name = props.options.find((o4) => o4.value === id)?.label;
+          return /* @__PURE__ */ u3(Chip, {
+            tone: name === undefined ? "warn" : undefined,
+            removeLabel: `Remove ${name ?? id}`,
+            onRemove: () => props.onChange(props.value.filter((other) => other !== id)),
+            children: [
+              name ?? `${id} (missing)`,
+              " ",
+              /* @__PURE__ */ u3(IdText, {
+                id
+              }, undefined, false, undefined, this)
+            ]
+          }, id, true, undefined, this);
+        })
+      }, undefined, false, undefined, this) : null,
+      left.length > 0 ? /* @__PURE__ */ u3(AddPicker, {
+        label: `Add to ${props.label}`,
+        options: left,
+        placeholder: props.placeholder,
+        onAdd: (id) => props.onChange([...props.value, id])
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function Toggles(props) {
+  const unknown = props.value.filter((v3) => !props.options.some((o4) => o4.value === v3));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      props.help !== undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: props.help
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-chips",
+        role: "group",
+        "aria-label": props.label,
+        children: [
+          props.options.map((o4) => {
+            const on = props.value.includes(o4.value);
+            return /* @__PURE__ */ u3(Chip, {
+              pressed: on,
+              onToggle: () => props.onChange(on ? props.value.filter((v3) => v3 !== o4.value) : [...props.value, o4.value]),
+              children: /* @__PURE__ */ u3(ChipLines, {
+                option: o4
+              }, undefined, false, undefined, this)
+            }, o4.value, false, undefined, this);
+          }),
+          unknown.map((v3) => /* @__PURE__ */ u3(Chip, {
+            tone: "warn",
+            removeLabel: `Remove ${v3}`,
+            onRemove: () => props.onChange(props.value.filter((x2) => x2 !== v3)),
+            children: `${v3} (missing)`
+          }, v3, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function tidy(selector) {
+  const out = {};
+  if (selector.ids?.length)
+    out.ids = selector.ids;
+  if (selector.kind?.length)
+    out.kind = selector.kind;
+  if (selector.tier?.length)
+    out.tier = selector.tier;
+  if (selector.tag?.length)
+    out.tag = selector.tag;
+  if (selector.memberOf?.length)
+    out.memberOf = selector.memberOf;
+  const classes = Object.entries(selector.class ?? {}).filter(([, values]) => values.length > 0);
+  if (classes.length > 0)
+    out.class = Object.fromEntries(classes);
+  return out;
+}
+function SelectorEditor(props) {
+  const { doc } = props;
+  if (props.value === undefined) {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-form-sel-absent",
+      "data-lre-selector": true,
+      children: [
+        /* @__PURE__ */ u3("span", {
+          class: "lre-form-sel-absent-label",
+          children: props.label
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "plus",
+          onClick: () => props.onChange({}),
+          children: "Add a selector"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  const value = props.value;
+  const set = (patch) => props.onChange(tidy({ ...value, ...patch }));
+  const kinds = Object.entries(doc.kinds).map(([id, k2]) => ({ value: id, label: k2.label || id })).sort((a3, b3) => a3.label.localeCompare(b3.label));
+  const entities = Object.values(doc.entities).map((e3) => ({ value: e3.id, label: e3.name || e3.id })).sort((a3, b3) => a3.label.localeCompare(b3.label));
+  const empty = Object.keys(tidy(value)).length === 0;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-form-sel",
+    "data-lre-selector": true,
+    children: /* @__PURE__ */ u3(FormGroup, {
+      title: props.label,
+      aside: props.optional ? /* @__PURE__ */ u3(Button, {
+        variant: "ghost",
+        size: "sm",
+        label: `Remove ${props.label}`,
+        onClick: () => props.onChange(undefined),
+        children: "Remove"
+      }, undefined, false, undefined, this) : undefined,
+      children: [
+        /* @__PURE__ */ u3("p", {
+          class: "lre-form-sel-lead",
+          children: empty ? "Matches every entity." : "An entity must pass every constraint below; within one, any value will do."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(PickList, {
+          label: "Kind",
+          help: "Or a kind that inherits from it.",
+          value: value.kind ?? [],
+          options: kinds,
+          placeholder: "Add a kind…",
+          onChange: (kind) => set({ kind })
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Toggles, {
+          label: "Tier",
+          value: value.tier ?? [],
+          options: tiersInOrder(doc).map(([id, t3]) => ({ value: id, label: t3.label })),
+          onChange: (tier) => set({ tier })
+        }, undefined, false, undefined, this),
+        facetsInOrder(doc).map(([facet, f3]) => /* @__PURE__ */ u3(Toggles, {
+          label: f3.label,
+          help: "A value, or one nested under it.",
+          value: value.class?.[facet] ?? [],
+          options: facetOptions(f3.values),
+          onChange: (values) => set({ class: { ...value.class, [facet]: values } })
+        }, facet, false, undefined, this)),
+        /* @__PURE__ */ u3(TagListInput, {
+          label: "Tag",
+          value: value.tag ?? [],
+          suggestions: worldTags(doc),
+          onChange: (tag) => set({ tag })
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(PickList, {
+          label: "Member of",
+          help: "Directly, or through a member group.",
+          value: value.memberOf ?? [],
+          options: groupOptions(doc),
+          placeholder: "Add a group…",
+          onChange: (memberOf) => set({ memberOf })
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(PickList, {
+          label: "Only these entities",
+          value: value.ids ?? [],
+          options: entities,
+          placeholder: "Add an entity…",
+          onChange: (ids) => set({ ids })
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
 }
 
 // src/frontend/build/schema-form.tsx
@@ -7379,7 +6669,7 @@ function RefInput(props) {
     class: "lre-field",
     children: [
       /* @__PURE__ */ u3(RefPicker, {
-        label: props.optional ? `${props.label} · optional` : props.label,
+        label: props.optional && props.unmarked !== true ? `${props.label} · optional` : props.label,
         value: typeof props.value === "string" ? props.value : "",
         options: props.options,
         none: props.optional ? "None" : undefined,
@@ -7439,7 +6729,7 @@ function valueWords(field, value, ctx) {
     case "list":
       return Array.isArray(value) ? `${value.length} ${field.label.toLowerCase()}` : "";
     case "enum":
-      return typeof value === "string" ? words(value) : "";
+      return typeof value === "string" ? field.labels?.[value] ?? words(value) : "";
     case "text":
     case "expr":
     case "dice":
@@ -7974,7 +7264,7 @@ function DefInput(props) {
   const { def, ctx, name } = props;
   const label = def.label ?? humanize(name);
   const issues = lintAt(ctx.lint, props.path);
-  const notes = [def.level ? `From level ${def.level} (${LEVEL_LABEL[def.level]})` : null, def.locked ? "Never offered to a model" : null, def.visibility === "secret" ? "Secret" : def.visibility === "known_by" ? "Known only to some" : null].filter((n2) => n2 !== null);
+  const notes = props.words ?? [def.level ? `From level ${def.level} (${LEVEL_LABEL[def.level]})` : null, def.locked ? "Never offered to a model" : null, def.visibility === "secret" ? "Secret" : def.visibility === "known_by" ? "Known only to some" : null].filter((n2) => n2 !== null);
   const help = notes.join(" · ") || undefined;
   const placeholder = def.default === undefined || def.default === null ? undefined : `Default: ${typeof def.default === "string" ? def.default : JSON.stringify(def.default)}`;
   if (def.derived) {
@@ -8018,7 +7308,7 @@ function DefInput(props) {
         min: def.min,
         max: def.max,
         optional: true,
-        hint: [poolNote(def, props.defs), def.bands?.length ? `Shown as ${def.bands.map((b3) => b3.label).join(", ")}` : null, help].filter((h3) => h3).join(" · ") || undefined,
+        hint: (props.words ? [help] : [poolNote(def, props.defs), def.bands?.length ? `Shown as ${def.bands.map((b3) => b3.label).join(", ")}` : null, help]).filter((h3) => h3).join(" · ") || undefined,
         placeholder,
         issues,
         onChange: props.onChange
@@ -8079,6 +7369,7 @@ function DefInput(props) {
         value: props.value,
         options,
         optional: true,
+        unmarked: props.words !== undefined,
         hint: help,
         issues,
         onChange: props.onChange
@@ -8131,6 +7422,7 @@ function DefInput(props) {
           value: props.value,
           options: tableChoices(table).map((c3) => ({ value: c3.key, label: c3.label })),
           optional: true,
+          unmarked: props.words !== undefined,
           hint: [`A row of ${table.label}`, help].filter((h3) => h3).join(" · "),
           issues,
           onChange: props.onChange
@@ -8579,7 +7871,7 @@ function FieldInput(props) {
       return /* @__PURE__ */ u3(ChoiceInput, {
         label: spec.label,
         value: props.value,
-        options: spec.values.map((v3) => ({ value: v3, label: words(v3) })),
+        options: spec.values.map((v3) => ({ value: v3, label: spec.labels?.[v3] ?? words(v3) })),
         optional: spec.optional,
         hint: spec.hint,
         issues,
@@ -8901,6 +8193,1460 @@ function worldIdentifiers(doc) {
     for (const field of Object.keys(kind.fields))
       out.add(field);
   return [...out].sort();
+}
+
+// src/frontend/build/book-lore.tsx
+function addedWords(seconds, time) {
+  const at = new Date(seconds * 1000);
+  return time ? at.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : at.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+function bookLabels(books) {
+  const brought = (b3) => b3.character ? ["came with a character"] : [];
+  const added = (b3, time) => b3.added === null ? [] : [`added ${addedWords(b3.added, time)}`];
+  const tellers = [() => [], brought, (b3) => [...brought(b3), ...added(b3, false)], (b3) => [...brought(b3), ...added(b3, true)], (b3) => [...brought(b3), `id ${b3.id}`]];
+  const label = (b3, said) => `${said.length > 0 ? `${b3.name} · ${said.join(", ")}` : b3.name}${b3.attached ? " (in this chat)" : ""}`;
+  const groups = new Map;
+  for (const b3 of books) {
+    const key = b3.name.trim().toLowerCase();
+    groups.set(key, [...groups.get(key) ?? [], b3]);
+  }
+  const out = {};
+  for (const group of groups.values()) {
+    const tell = tellers.find((t3) => new Set(group.map((b3) => label(b3, t3(b3)))).size === group.length);
+    for (const b3 of group)
+      out[b3.id] = label(b3, tell ? tell(b3) : [`id ${b3.id}`]);
+  }
+  return out;
+}
+function useBooks() {
+  const app = useApp();
+  const [books, setBooks] = d2(null);
+  A(() => {
+    const chatId = app.client.getState().chatId;
+    app.request({ type: "lre.lore", op: "books", ...chatId ? { chatId } : {} }).then((body) => setBooks(body?.books ?? []));
+  }, []);
+  return books;
+}
+function LoreBooksSection() {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d3) => d3);
+  const send = b2(() => draftSend(app), [app]);
+  const [busy, run] = useBusy();
+  const books = useBooks();
+  const labels = b2(() => bookLabels(books ?? []), [books]);
+  const [choice, setChoice] = d2("");
+  const pickId = P2();
+  if (!draft)
+    return null;
+  const listed = loreBooksOf(draft.doc);
+  const save = (next) => run(async () => {
+    setChoice("");
+    await send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "meta", value: { loreBooks: next } });
+  });
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-lore-books": true,
+    children: /* @__PURE__ */ u3(Section, {
+      title: "Lore books",
+      aside: listed.length > 0 ? /* @__PURE__ */ u3(Badge, {
+        children: listed.length
+      }, undefined, false, undefined, this) : undefined,
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: "The helpers and minds read these World Info books as lore, live, beside the books attached to a chat and your global books. A character's or persona's book is read only when it is listed here. Commit, then Upgrade a chat, to use a change in it."
+          }, undefined, false, undefined, this),
+          listed.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
+            label: "Lore books",
+            children: listed.map((id) => {
+              const title = labels[id] ?? id;
+              const missing = books !== null && !books.some((b3) => b3.id === id);
+              return /* @__PURE__ */ u3(ActionRow, {
+                title,
+                subtitle: missing ? "This book no longer exists, so nothing reads it: remove it." : undefined,
+                value: missing ? /* @__PURE__ */ u3(Badge, {
+                  tone: "neg",
+                  children: "Missing"
+                }, undefined, false, undefined, this) : undefined,
+                actions: /* @__PURE__ */ u3(IconButton, {
+                  icon: "close",
+                  label: `Remove ${title}`,
+                  disabled: busy,
+                  onClick: () => save(listed.filter((b3) => b3 !== id))
+                }, undefined, false, undefined, this)
+              }, id, false, undefined, this);
+            })
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(draft.lint, "loreBooks")
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-add",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                for: pickId,
+                children: "Add a book"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("select", {
+                id: pickId,
+                class: "lre-input",
+                value: choice,
+                onChange: (event) => setChoice(event.currentTarget.value),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: books === null ? "Loading books…" : "Choose a book"
+                  }, undefined, false, undefined, this),
+                  (books ?? []).filter((b3) => !listed.includes(b3.id)).map((b3) => /* @__PURE__ */ u3("option", {
+                    value: b3.id,
+                    children: labels[b3.id] ?? b3.name
+                  }, b3.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-pins-actions",
+                children: /* @__PURE__ */ u3(Button, {
+                  variant: "primary",
+                  icon: "plus",
+                  disabled: choice === "" || busy,
+                  onClick: () => save([...listed, choice]),
+                  children: "Add"
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function listWords(words2) {
+  return words2.length <= 1 ? words2[0] ?? "" : `${words2.slice(0, -1).join(", ")} and ${words2.at(-1) ?? ""}`;
+}
+function audienceChoices(audience) {
+  return LORE_AUDIENCE.filter((p3) => !PROSE_STEPS.includes(p3) || audience.includes(p3));
+}
+function SecretAudience(props) {
+  const labelId = P2();
+  const named = props.audience.filter((p3) => PROSE_STEPS.includes(p3));
+  const toggle = (purpose) => props.onChange(props.audience.includes(purpose) ? props.audience.filter((p3) => p3 !== purpose) : LORE_AUDIENCE.filter((p3) => p3 === purpose || props.audience.includes(p3)));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    role: "group",
+    "aria-labelledby": labelId,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        id: labelId,
+        children: "Helpers that may read it before the gate holds"
+      }, undefined, false, undefined, this),
+      audienceChoices(props.audience).map((purpose) => /* @__PURE__ */ u3(CheckField, {
+        label: STEP_LABEL[purpose],
+        help: PROSE_STEPS.includes(purpose) ? "Writes for the player, so it never reads a secret: untick it" : undefined,
+        checked: props.audience.includes(purpose),
+        onChange: () => toggle(purpose)
+      }, purpose, false, undefined, this)),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: [
+          listWords(PROSE_STEPS.map((p3) => STEP_LABEL[p3])),
+          " aren't offered: they write what the narrator or the player sees, so they never read a secret before its gate holds."
+        ]
+      }, undefined, true, undefined, this),
+      named.length > 0 ? /* @__PURE__ */ u3(Banner, {
+        tone: "warn",
+        children: [
+          listWords(named.map((p3) => STEP_LABEL[p3])),
+          " write",
+          named.length === 1 ? "s" : "",
+          " what the narrator or the player sees, so ",
+          named.length === 1 ? "it never reads" : "they never read",
+          " this secret before its gate holds."
+        ]
+      }, undefined, true, undefined, this) : null,
+      props.issues ? /* @__PURE__ */ u3(Issues, {
+        issues: props.issues
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+var QUOTABLE = /^[^'"\\]+$/;
+function gateExamples(doc) {
+  const out = [];
+  const nextOf = (t3) => {
+    const later = (sid) => sid !== t3.start && QUOTABLE.test(sid) && hasOwn(t3.stages, sid);
+    return (hasOwn(t3.stages, t3.start) ? t3.stages[t3.start]?.next.map((n2) => n2.to).find(later) : undefined) ?? Object.keys(t3.stages).find(later);
+  };
+  const track2 = Object.values(doc.tracks).filter((t3) => QUOTABLE.test(t3.id) && nextOf(t3) !== undefined).sort((a3, b3) => (a3.label || a3.id).localeCompare(b3.label || b3.id))[0];
+  const stage = track2 ? nextOf(track2) : undefined;
+  if (track2 && stage !== undefined) {
+    const read = /^[A-Za-z_]\w*$/.test(track2.id) ? `stage.${track2.id}` : `stage('${track2.id}')`;
+    out.push({ formula: `${read} == '${stage}'`, words: `while “${track2.label || track2.id}” is at “${track2.stages[stage]?.label || stage}”` });
+  }
+  const someone = Object.values(doc.entities).filter((e3) => e3.id !== doc.pov && QUOTABLE.test(e3.id) && kindIs(doc, e3.kind, "person")).sort((a3, b3) => (a3.name || a3.id).localeCompare(b3.name || b3.id))[0];
+  if (someone)
+    out.push({ formula: `knows(pov, '${someone.id}')`, words: `once your character knows ${someone.name || someone.id}` });
+  const start = doc.places[doc.start.place];
+  if (start && QUOTABLE.test(start.id))
+    out.push({ formula: `at(pov, '${start.id}')`, words: `while your character is at ${start.name || start.id}` });
+  return out;
+}
+function GateExamples(props) {
+  const examples = b2(() => gateExamples(props.doc), [props.doc]);
+  if (examples.length === 0)
+    return null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: "For example, tap one to use it:"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(List, {
+        children: examples.map((x2) => /* @__PURE__ */ u3(ListRow, {
+          icon: "function",
+          title: /* @__PURE__ */ u3("span", {
+            class: "lre-expr-token",
+            children: x2.formula
+          }, undefined, false, undefined, this),
+          subtitle: x2.words,
+          onClick: () => props.onPick(x2.formula)
+        }, x2.formula, false, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function loreSpec(key) {
+  const spec = COLLECTION_SPECS.lore.find((s3) => s3.key === key);
+  if (!spec)
+    throw new Error(`world lore has no ${key} field`);
+  return spec;
+}
+var SECRET_GATE_SPEC = { kind: "expr", key: "gate", label: loreSpec("gate").label };
+var HOLDERS_SPEC = loreSpec("holders");
+var LINKS_SPEC = loreSpec("links");
+function sentence(text) {
+  const said = `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+  return /[.!?]$/.test(said) ? said : `${said}.`;
+}
+function useGateProblem(secret, gate) {
+  const app = useApp();
+  const [problem, setProblem] = d2(null);
+  const asked = T2(0);
+  A(() => {
+    const ask = ++asked.current;
+    if (!secret) {
+      setProblem(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      app.request({ type: "lre.lore", op: "check", fields: { secret: true, gate } }).then((body) => {
+        if (ask === asked.current)
+          setProblem(body?.problem ?? null);
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [secret, gate]);
+  return problem;
+}
+function idsOf(value) {
+  const ids = Array.isArray(value) ? value.filter((v3) => typeof v3 === "string") : [];
+  return ids.length > 0 ? ids : undefined;
+}
+function EntryFields(props) {
+  const [fields, setFields] = d2(props.entry.lore ?? {});
+  const visibilityId = P2();
+  A(() => setFields(props.entry.lore ?? {}), [props.entry.id, JSON.stringify(props.entry.lore ?? {})]);
+  const secret = loreIsSecret(fields);
+  const gate = fields.gate ?? "";
+  const problem = useGateProblem(secret, gate);
+  const balanced = checkBalance(gate).ok;
+  const refused = secret && (!balanced || problem !== null);
+  const identifiers = b2(() => worldIdentifiers(props.doc), [props.doc]);
+  const issues = secret && balanced && problem !== null ? [{ severity: "error", path: "book.gate", code: "gate", message: sentence(problem) }] : [];
+  const ctx = { doc: props.doc, lint: issues, path: "book", identifiers, functions: props.functions };
+  const set = (patch) => setFields({ ...fields, ...patch });
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-form-lore-fields",
+    "data-lre-book-entry": props.entry.id,
+    children: [
+      /* @__PURE__ */ u3(CheckField, {
+        label: "Make this entry secret",
+        help: "It is stored switched off: it reaches no prompt and no helper until its gate holds.",
+        checked: secret,
+        onChange: (on) => set({ secret: on })
+      }, undefined, false, undefined, this),
+      secret ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(FieldInput, {
+            spec: SECRET_GATE_SPEC,
+            value: fields.gate,
+            ctx,
+            path: ctx.path,
+            parent: {},
+            onChange: (next) => set({ gate: typeof next === "string" && next !== "" ? next : undefined })
+          }, undefined, false, undefined, this),
+          gate.trim() === "" || refused ? /* @__PURE__ */ u3(GateExamples, {
+            doc: props.doc,
+            onPick: (formula) => set({ gate: formula })
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(FieldInput, {
+            spec: HOLDERS_SPEC,
+            value: fields.holders,
+            ctx,
+            path: ctx.path,
+            parent: {},
+            onChange: (next) => set({ holders: idsOf(next) })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SecretAudience, {
+            audience: fields.audience ?? [],
+            onChange: (next) => set({ audience: next.length > 0 ? next : undefined })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("label", {
+            class: "label",
+            for: visibilityId,
+            children: "Who may read it"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            id: visibilityId,
+            class: "lre-input",
+            value: fields.visibility ?? "public",
+            onChange: (event) => set({ visibility: event.currentTarget.value === "known_by" ? "known_by" : "public" }),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "public",
+                children: "Anyone"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("option", {
+                value: "known_by",
+                children: "Known by: once your character knows everyone and everywhere it links"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(FieldInput, {
+        spec: LINKS_SPEC,
+        value: fields.links,
+        ctx,
+        path: ctx.path,
+        parent: {},
+        onChange: (next) => set({ links: idsOf(next) })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TagListInput, {
+        label: "Aliases",
+        noun: "alias",
+        value: fields.aliases ?? [],
+        suggestions: [],
+        onChange: (next) => set({ aliases: next }),
+        children: /* @__PURE__ */ u3("span", {
+          class: "lre-field-help",
+          children: "Other names it goes by"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-pins-actions",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: props.busy || refused,
+            onClick: () => props.onSave(fields),
+            children: "Save to the book"
+          }, undefined, false, undefined, this),
+          props.entry.lore ? /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: props.busy,
+            onClick: () => props.onSave(null),
+            children: "Take the fields off"
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BookEntriesSection() {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d3) => d3);
+  const books = useBooks();
+  const labels = b2(() => bookLabels(books ?? []), [books]);
+  const [busy, run] = useBusy();
+  const [book, setBook] = d2("");
+  const [entries, setEntries] = d2(null);
+  const [open, setOpen] = d2(null);
+  const bookId = P2();
+  A(() => {
+    setEntries(null);
+    setOpen(null);
+    if (book === "")
+      return;
+    app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
+  }, [book]);
+  if (!draft)
+    return null;
+  const save = (entryId, fields) => run(async () => {
+    const body = await app.request({ type: "lre.lore", op: "fields", bookId: book, entryId, fields });
+    if (body?.entries)
+      setEntries(body.entries);
+  });
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-book-entries": true,
+    children: /* @__PURE__ */ u3(Section, {
+      title: "World Info entries",
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: "An entry of a book the chat reads is lore as it is. Give it the fields a world entry has, or make it secret: it stays switched off, out of every prompt and helper, until its gate holds."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("label", {
+            for: bookId,
+            children: "Book"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            id: bookId,
+            class: "lre-input",
+            value: book,
+            onChange: (event) => setBook(event.currentTarget.value),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "",
+                children: books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"
+              }, undefined, false, undefined, this),
+              (books ?? []).map((b3) => /* @__PURE__ */ u3("option", {
+                value: b3.id,
+                children: labels[b3.id] ?? b3.name
+              }, b3.id, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this),
+          entries && entries.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
+            label: "Entries",
+            children: entries.map((e3) => /* @__PURE__ */ u3(ActionRow, {
+              title: e3.title,
+              value: e3.lore && loreIsSecret(e3.lore) ? /* @__PURE__ */ u3(Badge, {
+                tone: "gm",
+                children: "Secret"
+              }, undefined, false, undefined, this) : e3.lore ? /* @__PURE__ */ u3(Badge, {
+                children: "Lore fields"
+              }, undefined, false, undefined, this) : e3.disabled ? /* @__PURE__ */ u3(Badge, {
+                children: "Off in its book"
+              }, undefined, false, undefined, this) : undefined,
+              actions: /* @__PURE__ */ u3(IconButton, {
+                icon: open === e3.id ? "close" : "edit",
+                label: open === e3.id ? `Close ${e3.title}` : `Edit ${e3.title}'s lore fields`,
+                onClick: () => setOpen(open === e3.id ? null : e3.id)
+              }, undefined, false, undefined, this),
+              children: open === e3.id ? /* @__PURE__ */ u3(EntryFields, {
+                entry: e3,
+                doc: draft.doc,
+                functions: draft.functions,
+                busy,
+                onSave: (fields) => save(e3.id, fields)
+              }, undefined, false, undefined, this) : null
+            }, e3.id, false, undefined, this))
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
+// src/shared/needs.ts
+var NEED_IDS = ["hunger", "fatigue", "social", "fun"];
+var NEED_WORDS = {
+  hunger: { name: "Hunger", word: "hungry", metBy: "eating" },
+  fatigue: { name: "Fatigue", word: "tired", metBy: "sleep, a night's or a nap" },
+  social: { name: "Social", word: "lonely", metBy: "a chat, or time with someone you know" },
+  fun: { name: "Fun", word: "bored", metBy: "rest, leisure, exercise or a night out" }
+};
+var NEED_DEFAULTS = {
+  hunger: { on: true, rate: 4, tell: 60, alert: 80 },
+  fatigue: { on: true, rate: 3, tell: 60, alert: 80 },
+  social: { on: true, rate: 1.5, tell: 60, alert: 80 },
+  fun: { on: true, rate: 1, tell: 60, alert: 80 }
+};
+var RATE_MAX = 100;
+var inScale = (v3, max) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= 0 && v3 <= max;
+function needsSettingsOf(world) {
+  const raw = isRecord(world.needs) ? world.needs : {};
+  const one = (need) => {
+    const set = isRecord(raw[need]) ? raw[need] : {};
+    const base = NEED_DEFAULTS[need];
+    return {
+      on: typeof set.on === "boolean" ? set.on : base.on,
+      rate: inScale(set.rate, RATE_MAX) ? set.rate : base.rate,
+      tell: inScale(set.tell, 100) ? set.tell : base.tell,
+      alert: inScale(set.alert, 100) ? set.alert : base.alert
+    };
+  };
+  return { hunger: one("hunger"), fatigue: one("fatigue"), social: one("social"), fun: one("fun") };
+}
+
+// src/frontend/build/chrome.tsx
+var COLLECTION_INFO = {
+  entities: { label: "Entities", hint: "People, things, vehicles", noun: "entity", icon: "users" },
+  kinds: { label: "Kinds", hint: "Types and their fields", noun: "kind", icon: "layers" },
+  classifications: { label: "Classifications", hint: "Story roles, allegiances: your own facets", noun: "classification", icon: "star" },
+  relations: { label: "Relations", hint: "How entities connect", noun: "relation", icon: "link" },
+  places: { label: "Places", hint: "Where things happen", noun: "place", icon: "pin" },
+  maps: { label: "Maps", hint: "Floor plans and town maps, as lre-map-v1", noun: "map", icon: "map" },
+  routes: { label: "Routes", hint: "Travel between places", noun: "route", icon: "route" },
+  grids: { label: "Grids", hint: "Maps inside places", noun: "grid", icon: "grid" },
+  actions: { label: "Actions", hint: "What the player can do", noun: "action", icon: "bolt" },
+  checks: { label: "Checks", hint: "Dice and outcome bands", noun: "check", icon: "dice" },
+  rules: { label: "Rules", hint: "When this, do that", noun: "rule", icon: "branch" },
+  routines: { label: "Routines", hint: "How people's days usually go: the world's, a group's, a kind's or someone's own", noun: "routine", icon: "clock" },
+  schedules: { label: "Schedules", hint: "Shifts, opening hours, weather: one field slot by slot", noun: "schedule", icon: "calendar" },
+  tracks: { label: "Tracks", hint: "Quests, secrets, puzzles, agendas", noun: "track", icon: "flag" },
+  lore: { label: "Lore", hint: "Entries, lookup table, indexing", noun: "lore entry", icon: "book" },
+  tables: { label: "Data tables", hint: "Prices, jobs, regions…", noun: "data table", icon: "table" },
+  sections: { label: "Sections", hint: "What the narrator reads", noun: "section", icon: "scroll" },
+  steps: { label: "Step templates", hint: "Prompted model steps", noun: "step template", icon: "sparkle" },
+  packs: { label: "Packs", hint: "Enabled domain packs", noun: "pack", icon: "box" }
+};
+var NEED_LIST = NEED_IDS.map((need, i3) => i3 === 0 ? NEED_WORDS[need].name : NEED_WORDS[need].name.toLowerCase()).join(", ").replace(/, ([^,]*)$/, " and $1");
+var PART_INFO = {
+  meta: { label: "World", hint: "Name, point of view, start, currency and map", icon: "globe" },
+  calendar: { label: "Calendar", hint: "Dates, months and holidays", icon: "calendar" },
+  realism: { label: "Realism defaults", hint: "How closely new chats simulate each part of life", icon: "sliders" },
+  tiers: { label: "Tiers", hint: "How deeply each person is simulated", icon: "layers" },
+  time: { label: "Time defaults", hint: "How time passes in new chats", icon: "clock" },
+  ruleset: { label: "Ruleset", hint: "Character fields, checks, levels, the sheet and combat", icon: "shield" },
+  loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
+  minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
+  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, at a place, or of a step always reads", icon: "pin" },
+  routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" },
+  needs: { label: "Needs", hint: `${NEED_LIST}: each on or off, how fast it grows, when the narrator is told and when it alerts`, icon: "sliders" }
+};
+var newHold = null;
+function holdNew(app, noun) {
+  const hold = { confirm: () => app.host.confirm(`Leave the new ${noun}?`, `It isn't in the draft until you create it, so leaving throws it away.`, "warning", "Leave") };
+  newHold = hold;
+  return () => {
+    if (newHold === hold)
+      newHold = null;
+  };
+}
+function go(app, build) {
+  const hold = newHold;
+  if (!hold) {
+    app.ui.update((ui) => ({ ...ui, build }));
+    return;
+  }
+  hold.confirm().then((leave) => {
+    if (!leave)
+      return;
+    if (newHold === hold)
+      newHold = null;
+    app.ui.update((ui) => ({ ...ui, build }));
+  });
+}
+function itemLabel(collection, id, value, places2) {
+  if (isRecord(value)) {
+    if (typeof value.name === "string" && value.name)
+      return value.name;
+    if (typeof value.label === "string" && value.label)
+      return value.label;
+    if (typeof value.title === "string" && value.title)
+      return value.title;
+    if (collection === "routes" && typeof value.from === "string") {
+      const [from, to] = [value.from, value.to].map((place) => typeof place === "string" && places2 && hasOwn(places2, place) ? places2[place]?.name ?? place : String(place));
+      return `${from} → ${to}`;
+    }
+  }
+  return humanize(id);
+}
+function OverflowMenu(props) {
+  const [open, setOpen] = d2(false);
+  const [up, setUp] = d2(false);
+  const root = T2(null);
+  const button = T2(null);
+  const list2 = T2(null);
+  const menuId = P2();
+  F2(() => {
+    if (!open)
+      return;
+    const rect = list2.current?.getBoundingClientRect();
+    if (rect && rect.bottom > window.innerHeight - 8 && rect.height + 48 < (button.current?.getBoundingClientRect().top ?? 0))
+      setUp(true);
+    list2.current?.querySelector('[role="menuitem"]:not(:disabled)')?.focus();
+    const away = (event) => {
+      if (root.current && event.composedPath().includes(root.current))
+        return;
+      setOpen(false);
+      setUp(false);
+    };
+    document.addEventListener("pointerdown", away, true);
+    return () => document.removeEventListener("pointerdown", away, true);
+  }, [open]);
+  const close = (refocus) => {
+    setOpen(false);
+    setUp(false);
+    if (refocus)
+      button.current?.focus();
+  };
+  const onKeyDown = (event) => {
+    if (!open)
+      return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+      return;
+    }
+    if (event.key === "Tab") {
+      close(false);
+      return;
+    }
+    const all = [...list2.current?.querySelectorAll('[role="menuitem"]:not(:disabled)') ?? []];
+    const at = all.findIndex((entry) => entry === event.target);
+    const next = event.key === "ArrowDown" ? (at + 1) % all.length : event.key === "ArrowUp" ? at <= 0 ? all.length - 1 : at - 1 : event.key === "Home" ? 0 : event.key === "End" ? all.length - 1 : -1;
+    if (next < 0 || all.length === 0)
+      return;
+    event.preventDefault();
+    all[next]?.focus();
+  };
+  return /* @__PURE__ */ u3("div", {
+    ref: root,
+    class: "lre-build-menu",
+    onKeyDown,
+    children: [
+      /* @__PURE__ */ u3("button", {
+        ref: button,
+        type: "button",
+        class: "lre-iconbtn ghost",
+        "aria-label": props.label,
+        title: props.label,
+        "aria-haspopup": "menu",
+        "aria-expanded": open,
+        "aria-controls": open ? menuId : undefined,
+        disabled: props.disabled,
+        onClick: () => open ? close(false) : setOpen(true),
+        children: /* @__PURE__ */ u3(Icon, {
+          name: "more"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      open ? /* @__PURE__ */ u3("div", {
+        ref: list2,
+        id: menuId,
+        class: up ? "lre-build-menu-list up" : "lre-build-menu-list",
+        role: "menu",
+        "aria-label": props.label,
+        children: props.items.map((item) => /* @__PURE__ */ u3("button", {
+          type: "button",
+          role: "menuitem",
+          class: item.danger ? "danger" : undefined,
+          disabled: item.disabled,
+          onClick: () => {
+            close(true);
+            item.onSelect();
+          },
+          children: [
+            item.icon ? /* @__PURE__ */ u3(Icon, {
+              name: item.icon,
+              size: 16
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3("span", {
+              children: item.label
+            }, undefined, false, undefined, this)
+          ]
+        }, item.label, true, undefined, this))
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function ItemHeader(props) {
+  const showIds = useShowIds();
+  const onDelete = props.onDelete;
+  const items = [...props.menu ?? [], ...onDelete ? [{ label: "Delete", icon: "trash", danger: true, disabled: props.busy, onSelect: onDelete }] : []];
+  const subtitle = props.subtitle !== undefined || showIds ? /* @__PURE__ */ u3(M, {
+    children: [
+      props.subtitle,
+      props.subtitle !== undefined && showIds ? " · " : null,
+      /* @__PURE__ */ u3(IdText, {
+        id: props.id
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this) : undefined;
+  const actions = props.actions !== undefined || items.length > 0 ? /* @__PURE__ */ u3(M, {
+    children: [
+      props.actions,
+      items.length > 0 ? /* @__PURE__ */ u3(OverflowMenu, {
+        label: "Item actions",
+        items
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this) : undefined;
+  return /* @__PURE__ */ u3(PageHeader, {
+    title: props.title,
+    subtitle,
+    actions
+  }, undefined, false, undefined, this);
+}
+async function deleteItem(app, send, item) {
+  const noun = COLLECTION_INFO[item.collection].noun;
+  if (!await app.host.confirm(`Delete ${noun}`, item.message ?? `Delete the ${noun} “${item.name ?? item.id}”? References to it will show in Problems.`, "danger", "Delete"))
+    return false;
+  const message = await send({ type: "lre.editor", worldId: item.worldId, base: null, op: "remove", collection: item.collection, id: item.id });
+  if (message.type !== "lre.result")
+    return false;
+  go(app, { view: "collection", worldId: item.worldId, collection: item.collection });
+  return true;
+}
+var newNames = new Map;
+function newItemName(worldId, collection, id) {
+  return newNames.get(`${worldId}/${collection}/${id}`);
+}
+function openNewItem(app, item) {
+  newNames.set(`${item.worldId}/${item.collection}/${item.id}`, item.name);
+  go(app, { view: "item", worldId: item.worldId, collection: item.collection, id: `new:${item.id}` });
+}
+function idProblem2(id, taken, noun) {
+  if (!id)
+    return "Give it an id.";
+  if (taken.has(id))
+    return `Another ${noun} already has this id.`;
+  return safeKey(id) ? null : "This id is reserved. Choose another.";
+}
+function NewItem(props) {
+  const app = useApp();
+  const showIds = useShowIds();
+  const noun = COLLECTION_INFO[props.collection].noun;
+  const [name, setName] = d2("");
+  const [typed, setTyped] = d2(null);
+  const nameId = P2();
+  const idId = P2();
+  const input = T2(null);
+  A(() => input.current?.focus(), []);
+  const id = typed ?? (name.trim() ? deriveId(name.trim(), props.taken) : "");
+  const problem = typed === null ? null : idProblem2(typed, props.taken, noun);
+  const ready = name.trim() !== "" && id !== "" && problem === null;
+  const idField = /* @__PURE__ */ u3(Field, {
+    label: "Id",
+    for: idId,
+    help: "How rules, formulas and other items refer to it. It follows the name until you change it.",
+    error: problem,
+    children: /* @__PURE__ */ u3("input", {
+      id: idId,
+      class: "lre-input lre-build-mono",
+      value: id,
+      autoComplete: "off",
+      spellcheck: false,
+      "aria-invalid": problem !== null || undefined,
+      onInput: (event) => setTyped(event.currentTarget.value.replace(/[^\w.-]/g, "_"))
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-build-new",
+    "aria-label": `New ${noun}`,
+    "data-lre-new": props.collection,
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (!ready)
+        return;
+      openNewItem(app, { worldId: props.worldId, collection: props.collection, id, name: name.trim() });
+      props.onDone();
+    },
+    onKeyDown: (event) => {
+      if (event.key !== "Escape")
+        return;
+      event.stopPropagation();
+      props.onDone();
+    },
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: `Name of the new ${noun}`,
+        for: nameId,
+        children: /* @__PURE__ */ u3("input", {
+          ref: input,
+          id: nameId,
+          class: "lre-input",
+          value: name,
+          autoComplete: "off",
+          onInput: (event) => setName(event.currentTarget.value)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      showIds ? idField : /* @__PURE__ */ u3(Disclosure, {
+        summary: "Advanced",
+        children: idField
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-build-actions",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            type: "submit",
+            variant: "primary",
+            iconAfter: "chevron-right",
+            disabled: !ready,
+            children: "Continue"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            onClick: props.onDone,
+            children: "Cancel"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/check.tsx
+var COLLECTIONS = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "routines", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
+var PARTS = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "lorePins", "routineSettings", "needs"];
+var META_FIELDS = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "lifeStates", "currency", "mapSettings"];
+function issueTarget(path) {
+  const [head, id, pinned] = path.split(".");
+  if (head === "lorePins" && pinned)
+    return id === "characters" ? { collection: "entities", id: pinned } : id === "places" ? { collection: "places", id: pinned } : null;
+  const collection = COLLECTIONS.find((c3) => c3 === head);
+  return collection && id ? { collection, id } : null;
+}
+function issueRoute(worldId, path) {
+  const target = issueTarget(path);
+  if (target)
+    return { view: "item", worldId, collection: target.collection, id: target.id, at: path };
+  const part = issuePart(path);
+  return part ? { view: "part", worldId, part } : null;
+}
+function issuePart(path) {
+  const head = path.split(".")[0] ?? "";
+  return head === "spawnTier" ? "tiers" : META_FIELDS.includes(head) ? "meta" : PARTS.find((p3) => p3 === head) ?? null;
+}
+var SEVERITY = {
+  error: { label: "Error", tone: "neg" },
+  warning: { label: "Warning", tone: "warn" },
+  info: { label: "Info", tone: "neutral" }
+};
+function SeverityBadge(props) {
+  const severity = SEVERITY[props.severity];
+  return /* @__PURE__ */ u3(Badge, {
+    tone: severity.tone,
+    children: [
+      /* @__PURE__ */ u3(Icon, {
+        name: props.severity === "info" ? "info" : "alert",
+        size: 12
+      }, undefined, false, undefined, this),
+      severity.label
+    ]
+  }, undefined, true, undefined, this);
+}
+function IssueRow(props) {
+  const app = useApp();
+  const { issue, worldId, doc } = props;
+  const target = issueTarget(issue.path);
+  const part = target ? null : issuePart(issue.path);
+  let where = issue.path;
+  if (target) {
+    const items = doc ? doc[target.collection] ?? {} : {};
+    where = `${COLLECTION_INFO[target.collection].label} › ${itemLabel(target.collection, target.id, hasOwn(items, target.id) ? items[target.id] : undefined, doc?.places)}`;
+  } else if (part)
+    where = PART_INFO[part].label;
+  const route = worldId === undefined ? null : issueRoute(worldId, issue.path);
+  const open = route ? () => go(app, route) : null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-lint",
+    role: "listitem",
+    "data-lre-issue": issue.code,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-lint-text",
+        children: [
+          /* @__PURE__ */ u3(SeverityBadge, {
+            severity: issue.severity
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-lint-message",
+            children: issue.message
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-lint-where",
+            children: where
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(IdText, {
+            id: `${issue.path} · ${issue.code}`
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      open ? /* @__PURE__ */ u3(Button, {
+        size: "sm",
+        label: `Open ${where}`,
+        onClick: open,
+        children: "Open"
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function CheckView(props) {
+  const app = useApp();
+  const doc = useSelect(app.drafts, (d3) => d3?.worldId === props.worldId ? d3.doc : undefined);
+  const [issues, setIssues] = d2(null);
+  const [severity, setSeverity] = d2("all");
+  const [busy, run] = useBusy();
+  const check = () => run(async () => {
+    const result = await app.request({ type: "lre.world", op: "lint", worldId: props.worldId });
+    setIssues(result?.lint ?? []);
+  });
+  A(check, [props.worldId]);
+  const count = (s3) => issues?.filter((i3) => i3.severity === s3).length ?? 0;
+  const shown = (issues ?? []).filter((i3) => severity === "all" || i3.severity === severity);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-page",
+    "data-lre-check": true,
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: "Problems",
+        subtitle: "The whole draft, checked as the engine will play it",
+        actions: /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "refresh",
+          busy,
+          onClick: check,
+          children: busy ? "Checking…" : "Check again"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      issues === null ? /* @__PURE__ */ u3(Empty, {
+        icon: "hourglass",
+        children: "Checking the world…"
+      }, undefined, false, undefined, this) : issues.length === 0 ? /* @__PURE__ */ u3(Banner, {
+        tone: "info",
+        icon: "check",
+        title: "No issues",
+        children: "The world is ready to play."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(Seg, {
+            label: "Severity",
+            value: severity,
+            options: [
+              { value: "all", label: `All ${issues.length}` },
+              { value: "error", label: `Errors ${count("error")}` },
+              { value: "warning", label: `Warnings ${count("warning")}` },
+              { value: "info", label: `Info ${count("info")}` }
+            ],
+            onChange: (next) => setSeverity(next)
+          }, undefined, false, undefined, this),
+          shown.length === 0 ? /* @__PURE__ */ u3(Empty, {
+            children: "Nothing at this severity."
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Section, {
+            flush: true,
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-build-issues",
+              role: "list",
+              children: shown.map((issue, i3) => /* @__PURE__ */ u3(IssueRow, {
+                issue,
+                worldId: props.worldId,
+                doc
+              }, `${issue.path}:${issue.code}:${i3}`, false, undefined, this))
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/shared/minds.ts
+var FIDELITIES = ["live", "near", "far", "background"];
+var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
+  here: 45,
+  nearby: 20,
+  mentioned: 40,
+  regard: 10,
+  knows: 10,
+  owner: 15,
+  track: 8,
+  roles: { antagonist: 20 },
+  rule: 5,
+  pending: 15,
+  band: { principal: 15, supporting: 5, background: 0 },
+  recent: 10
+});
+var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
+var DEFAULT_MINDS_MEMORY = Object.freeze({
+  witness: { show: 8 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
+  notes: { show: 8, keep: 24 },
+  commitments: { show: 8 },
+  salience: { halfLifeDays: 7, floor: 0.5 },
+  consolidate: { enabled: true, periodDays: 1 }
+});
+var DEFAULT_WORLD_MINDS = Object.freeze({
+  secrecy: "brief",
+  weights: DEFAULT_FIDELITY_WEIGHTS,
+  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
+  always: null,
+  never: null,
+  memory: DEFAULT_MINDS_MEMORY
+});
+var MINDS_RANGES = {
+  weight: [-100, 200],
+  threshold: [0, 1000],
+  show: [0, 64],
+  keep: [1, 64],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
+  halfLifeDays: [0.1, 3650],
+  floor: [0, 5],
+  periodDays: [0.1, 365]
+};
+var num2 = (v3, [lo, hi], fallback) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= lo && v3 <= hi ? v3 : fallback;
+var whole = (v3, range, fallback) => Math.round(num2(v3, range, fallback));
+var wholeOrNone = (v3, range, fallback) => v3 === "none" ? "none" : typeof v3 === "number" && Number.isFinite(v3) && v3 >= range[0] && v3 <= range[1] ? Math.round(v3) : fallback;
+var obj2 = (v3) => isRecord(v3) ? v3 : {};
+function selectorOrNull(v3) {
+  if (!isRecord(v3))
+    return null;
+  const out = {};
+  const list2 = (x2) => Array.isArray(x2) && x2.every((s3) => typeof s3 === "string") ? x2.slice(0, 200) : undefined;
+  const ids = list2(v3.ids);
+  const kind = list2(v3.kind);
+  const tier = list2(v3.tier);
+  const memberOf = list2(v3.memberOf);
+  const tag = list2(v3.tag);
+  if (ids)
+    out.ids = ids;
+  if (kind)
+    out.kind = kind;
+  if (tier)
+    out.tier = tier;
+  if (memberOf)
+    out.memberOf = memberOf;
+  if (tag)
+    out.tag = tag;
+  if (isRecord(v3.class)) {
+    const classes = {};
+    for (const [facet, values] of Object.entries(v3.class)) {
+      const vs = list2(values);
+      if (safeKey(facet) && vs)
+        classes[facet] = vs;
+    }
+    out.class = classes;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
+  const m2 = obj2(raw);
+  const witness = obj2(m2.witness);
+  const recall = obj2(m2.recall);
+  const notes = obj2(m2.notes);
+  const commitments = obj2(m2.commitments);
+  const salience = obj2(m2.salience);
+  const consolidate = obj2(m2.consolidate);
+  return {
+    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
+    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
+    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
+    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+  };
+}
+function worldMindsOf(world) {
+  const raw = obj2(world.minds);
+  const w3 = obj2(raw.weights);
+  const band = obj2(w3.band);
+  const d3 = DEFAULT_FIDELITY_WEIGHTS;
+  const weight = (v3, fallback) => num2(v3, MINDS_RANGES.weight, fallback);
+  const roles = {};
+  const rawRoles = isRecord(w3.roles) ? w3.roles : d3.roles;
+  for (const [value, points] of Object.entries(rawRoles))
+    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
+      roles[value] = weight(points, 0);
+  const t3 = obj2(raw.thresholds);
+  const far = num2(t3.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num2(t3.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num2(t3.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  return {
+    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    weights: {
+      here: weight(w3.here, d3.here),
+      nearby: weight(w3.nearby, d3.nearby),
+      mentioned: weight(w3.mentioned, d3.mentioned),
+      regard: weight(w3.regard, d3.regard),
+      knows: weight(w3.knows, d3.knows),
+      owner: weight(w3.owner, d3.owner),
+      track: weight(w3.track, d3.track),
+      roles,
+      rule: weight(w3.rule, d3.rule),
+      pending: weight(w3.pending, d3.pending),
+      band: { principal: weight(band.principal, d3.band.principal), supporting: weight(band.supporting, d3.band.supporting), background: weight(band.background, d3.band.background) },
+      recent: weight(w3.recent, d3.recent)
+    },
+    thresholds: { live, near, far },
+    always: selectorOrNull(raw.always),
+    never: selectorOrNull(raw.never),
+    memory: memoryConfigOf(raw.memory)
+  };
+}
+function limitOf(limit) {
+  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+function isMindPurpose(purpose) {
+  return MIND_PURPOSES.includes(purpose);
+}
+function worldMindTemplate(world, purpose) {
+  return Object.values(world.steps).filter((t3) => t3.purpose === purpose && t3.template.trim() !== "").sort((a3, b3) => a3.id.localeCompare(b3.id))[0];
+}
+var MIND_SOURCES = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life"];
+var DEFAULT_MIND_READS = Object.freeze({
+  pinned: { on: true, tokens: "none" },
+  activated: { on: true, tokens: 1600 },
+  reply: { on: true, tokens: "none" },
+  message: { on: true, tokens: "none" },
+  history: { on: false, messages: 8, tokens: 3000 },
+  summary: { on: false, tokens: "none" },
+  memory: { on: false, tokens: "none" },
+  thoughts: { on: false, tokens: "none" },
+  recall: { on: false },
+  routine: { on: true, tokens: 400 },
+  plans: { on: true, tokens: 400 },
+  life: { on: false, tokens: "none" }
+});
+var MINDS_PRESETS = Object.freeze({
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+});
+function defaultMindsSettings(preset = "standard") {
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
+}
+var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
+var MIND_PROMPT_MAX = 20000;
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
+var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+function planInForce(p3) {
+  return p3.source !== "mind";
+}
+var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
+var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MIND_APPROACHES = ["reactive", "proactive"];
+var MIND_TEXT_CAPS = {
+  monologue: 1200,
+  depiction: 600,
+  intent: 300,
+  gmIntent: 600,
+  reaction: 200,
+  reactions: 4,
+  plans: 4,
+  planWhat: 160,
+  mood: 40,
+  interrupt: 200,
+  note: 300,
+  notes: 4,
+  commitment: 240,
+  commitments: 3,
+  summary: 900,
+  told: 240,
+  tolds: 3,
+  reason: 160
+};
+var MIND_PROMPT_DEFAULTS = Object.freeze({
+  mind: [
+    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
+    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
+  ].join(`
+`),
+  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
+  ].join(`
+`),
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+});
+var MIND_ANSWER_FORMATS = Object.freeze({
+  mind: [
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
+    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
+    "- intent: what they mean to do next, in one sentence.",
+    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    "- mood: one or two words.",
+    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
+  ].join(`
+`),
+  memory: [
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
+    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
+    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
+    "- told: what they told whom in this turn, in a few words each.",
+    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+});
+
+// src/shared/routines.ts
+var ROUTINE_BLOCK_KINDS = ["fixed", "flexible", "optional"];
+function storySourceLabel(source) {
+  return source.by === "player" ? "From your message" : "The story";
+}
+function isOff(entry) {
+  return "off" in entry && entry.off === true;
+}
+var BASIC_BLOCKS = Object.freeze([
+  { id: "sleep", label: "Sleep", activity: "sleep", kind: "flexible", window: { from: "21:30", to: "01:00" }, minutes: 480, priority: 5, place: "home", needs: ["fatigue"], source: { type: "builtin" } },
+  { id: "breakfast", label: "Breakfast", activity: "breakfast", kind: "flexible", window: { from: "06:00", to: "10:00" }, minutes: 30, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } },
+  { id: "lunch", label: "Lunch", activity: "lunch", kind: "flexible", window: { from: "11:00", to: "14:00" }, minutes: 45, priority: 4, place: "work", needs: ["hunger"], source: { type: "builtin" } },
+  { id: "dinner", label: "Dinner", activity: "dinner", kind: "flexible", window: { from: "17:00", to: "21:00" }, minutes: 60, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } }
+]);
+var ROUTINE_AWARENESS = ["story_first", "balanced", "routine_first"];
+var ROUTINE_INVITATIONS = ["off", "player", "everyone"];
+var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
+var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
+var ROUTINE_ROLES = ["informative", "enforced", "off"];
+var ROUTINE_ROLE_LABEL = { informative: "Informative", enforced: "Enforced", off: "Off" };
+var SKIP_LIVES = ["stay", "routine", "model"];
+var SKIP_LIFE_LABEL = { stay: "Stay put", routine: "Follow their routine", model: "Planned by the model" };
+var SKIP_PLAN_CALLS = ["together", "parallel"];
+var SKIP_PLAN_CALLS_LABEL = { together: "All in one call", parallel: "One call per person, at once" };
+var DEFAULT_ROUTINE_ROLES = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
+var DEFAULT_SKIP_LIVES = Object.freeze({ live: "model", near: "model", far: "model", background: "routine" });
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, skipPlanCalls: "together", narrator: true, paletteFollowsRoutine: false });
+var AWARENESS_LABEL = { story_first: "Story first", balanced: "Balanced", routine_first: "Routine first" };
+var INVITATIONS_LABEL = { off: "Off", player: "To the player only", everyone: "Between everyone" };
+var SOCIABILITY_LABEL = { reserved: "Reserved", usual: "Usual", outgoing: "Outgoing" };
+var PLAN_BEND_LABEL = { must: "Only plans that must happen", strong: "Strong plans", standard: "Strong plans, and set-time plans for the cast", ordinary: "Strong plans, and set-time plans for anyone" };
+var BLOCK_KIND_LABEL = { fixed: "Fixed", flexible: "Flexible", optional: "Optional" };
+function routineSettingsOf(world) {
+  const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
+  const pick = (v3, allowed, fallback) => allowed.find((a3) => a3 === v3) ?? fallback;
+  const perLevel = (v3, allowed, fallback) => {
+    const set = isRecord(v3) ? v3 : {};
+    return { live: pick(set.live, allowed, fallback.live), near: pick(set.near, allowed, fallback.near), far: pick(set.far, allowed, fallback.far), background: pick(set.background, allowed, fallback.background) };
+  };
+  return {
+    awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
+    invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
+    sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
+    planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
+    roles: perLevel(raw.roles, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES),
+    skips: perLevel(raw.skips, SKIP_LIVES, DEFAULT_SKIP_LIVES),
+    skipPlanCalls: pick(raw.skipPlanCalls, SKIP_PLAN_CALLS, DEFAULT_ROUTINE_SETTINGS.skipPlanCalls),
+    narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
+    paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine
+  };
+}
+var ROUTINE_MODES = ["follows", "no_invitations", "off"];
+var ROUTINE_MODE_LABEL = { follows: "Follows their routine", no_invitations: "Follows it, no invitations", off: "No routine" };
+var HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+var SEASONS = ["spring", "summer", "autumn", "winter"];
+function isTime(v3) {
+  return typeof v3 === "string" && HHMM.test(v3);
+}
+function sourceProblem(v3, world) {
+  if (v3 === undefined)
+    return null;
+  if (!isRecord(v3))
+    return "its source isn't one";
+  const t3 = v3.type;
+  const quote = v3.quote === undefined || typeof v3.quote === "string";
+  if (t3 === "authored")
+    return null;
+  if (t3 === "lore")
+    return typeof v3.entry === "string" && v3.entry !== "" && quote ? null : "a lore source names its entry";
+  if (t3 === "sheet")
+    return typeof v3.entity === "string" && typeof v3.field === "string" && quote ? null : "a sheet source names its entity and field";
+  if (world)
+    return "world data rests on what's authored, a lore entry or a sheet field";
+  if (t3 === "builtin")
+    return null;
+  if (t3 === "story")
+    return typeof v3.at === "number" && (v3.turn === undefined || typeof v3.turn === "string") && (v3.by === undefined || v3.by === "player") ? null : "a story source has its time";
+  if (t3 === "gm")
+    return typeof v3.at === "number" ? null : "a GM source has its time";
+  return "its source isn't one";
+}
+function placeProblem(v3) {
+  if (v3 === undefined || v3 === "home" || v3 === "work" || v3 === "here" || v3 === "with")
+    return null;
+  if (isRecord(v3) && typeof v3.place === "string" && v3.place !== "")
+    return null;
+  if (isRecord(v3) && typeof v3.nearest === "string" && v3.nearest !== "")
+    return null;
+  return "its place is home, work, here, with, {place} or {nearest}";
+}
+function daysProblem(v3) {
+  if (v3 === undefined)
+    return null;
+  if (!isRecord(v3))
+    return "its days aren't a set of constraints";
+  const ints = (x2, lo, hi) => Array.isArray(x2) && x2.every((n2) => Number.isInteger(n2) && n2 >= lo && n2 <= hi);
+  const strs = (x2) => Array.isArray(x2) && x2.every((s3) => typeof s3 === "string");
+  if (v3.weekdays !== undefined && !ints(v3.weekdays, 0, 6))
+    return "weekdays are 0 (Sunday) to 6";
+  if (v3.off !== undefined && v3.off !== "only" && v3.off !== "never")
+    return "days off are only or never";
+  if (v3.holidays !== undefined && !strs(v3.holidays))
+    return "holidays are calendar ids";
+  if (v3.except !== undefined && !strs(v3.except))
+    return "except lists calendar ids";
+  if (v3.birthday !== undefined && v3.birthday !== "own" && v3.birthday !== "friend")
+    return "a birthday is own or friend";
+  if (v3.seasons !== undefined && !(Array.isArray(v3.seasons) && v3.seasons.every((s3) => SEASONS.some((x2) => x2 === s3))))
+    return "seasons are spring, summer, autumn and winter";
+  if (v3.weather !== undefined && v3.weather !== "fair" && v3.weather !== "foul")
+    return "weather is fair or foul";
+  return null;
+}
+function blockShapeProblems(v3, world = true) {
+  if (!isRecord(v3))
+    return ["a block is an object"];
+  const out = [];
+  if (typeof v3.id !== "string" || v3.id === "")
+    out.push("a block has an id");
+  if (v3.off === true)
+    return out;
+  if (typeof v3.label !== "string" || v3.label.trim() === "")
+    out.push("a block has a label");
+  if (typeof v3.activity !== "string" || v3.activity.trim() === "")
+    out.push("a block has an activity");
+  if (!ROUTINE_BLOCK_KINDS.some((k2) => k2 === v3.kind))
+    out.push("its kind is fixed, flexible or optional");
+  if (typeof v3.minutes !== "number" || !Number.isInteger(v3.minutes) || v3.minutes < 1 || v3.minutes > 1440)
+    out.push("its length (minutes) is 1 to 1,440 minutes");
+  if (v3.kind === "fixed" && !isTime(v3.at))
+    out.push("a fixed block starts at an HH:MM time (at)");
+  if (v3.kind !== "fixed" && v3.at !== undefined)
+    out.push("only a fixed block has a start time (at)");
+  if (v3.kind !== "fixed" && !(isRecord(v3.window) && isTime(v3.window.from) && isTime(v3.window.to)))
+    out.push("its window is HH:MM to HH:MM");
+  if (v3.perWeek !== undefined && !(v3.kind !== "fixed" && Number.isInteger(v3.perWeek) && typeof v3.perWeek === "number" && v3.perWeek >= 1 && v3.perWeek <= 7))
+    out.push("times a week (perWeek) is 1 to 7, for a flexible or optional block");
+  if (v3.chance !== undefined && !(v3.kind === "optional" && typeof v3.chance === "number" && v3.chance > 0 && v3.chance <= 1))
+    out.push("a chance is above 0 and at most 1, for an optional block");
+  if (v3.priority !== undefined && !(typeof v3.priority === "number" && Number.isInteger(v3.priority) && v3.priority >= 1 && v3.priority <= 5))
+    out.push("its priority is 1 to 5");
+  if (v3.needs !== undefined && !(Array.isArray(v3.needs) && v3.needs.every((n2) => typeof n2 === "string")))
+    out.push("its needs are names");
+  if (v3.private !== undefined && typeof v3.private !== "boolean")
+    out.push("private is true or false");
+  if (v3.company !== undefined && !(isRecord(v3.company) && isRecord(v3.company.who) && (v3.company.invite === undefined || typeof v3.company.invite === "boolean")))
+    out.push("its company is {who: a selector, invite?}");
+  for (const p3 of [placeProblem(v3.place), daysProblem(v3.days), sourceProblem(v3.source, world)])
+    if (p3)
+      out.push(p3);
+  return out;
+}
+function routineShapeProblems(v3) {
+  if (!isRecord(v3))
+    return ["a routine is an object"];
+  const out = [];
+  if (typeof v3.id !== "string" || v3.id === "")
+    out.push("a routine has an id");
+  if (v3.label !== undefined && typeof v3.label !== "string")
+    out.push("its label is text");
+  if (v3.owner !== undefined && !(typeof v3.owner === "string" ? v3.owner !== "" : isRecord(v3.owner)))
+    out.push("its owner is an entity, a group, a kind or a selector");
+  if (v3.inherit !== undefined && typeof v3.inherit !== "boolean")
+    out.push("inherit is true or false");
+  const src = sourceProblem(v3.source, true);
+  if (src)
+    out.push(src);
+  if (!Array.isArray(v3.blocks))
+    return [...out, "a routine has a list of blocks"];
+  const ids = new Set;
+  v3.blocks.forEach((b3, i3) => {
+    for (const p3 of blockShapeProblems(b3, true))
+      out.push(`block ${i3 + 1}: ${p3}`);
+    const id = isRecord(b3) && typeof b3.id === "string" ? b3.id : "";
+    if (id !== "" && ids.has(id))
+      out.push(`block ${i3 + 1}: another block of this routine is ${id}`);
+    ids.add(id);
+  });
+  return out;
+}
+
+// src/frontend/build/owner-picker.tsx
+var GROUP_KIND2 = "group";
+var LEVELS = ["entity", "group", "kind", "selector", "none"];
+function ownerLevel(doc, owner) {
+  if (isRecord(owner))
+    return "selector";
+  if (typeof owner !== "string" || owner === "")
+    return "none";
+  const entity = hasOwn(doc.entities, owner) ? doc.entities[owner] : undefined;
+  if (entity)
+    return kindIs(doc, entity.kind, GROUP_KIND2) ? "group" : "entity";
+  return "kind";
+}
+function ownerOptions(doc, level) {
+  const kindLabel = (id) => hasOwn(doc.kinds, id) ? doc.kinds[id]?.label || id : id;
+  const byName = (a3, b3) => a3.label.localeCompare(b3.label) || a3.value.localeCompare(b3.value);
+  switch (level) {
+    case "entity":
+    case "group":
+      return Object.values(doc.entities).filter((e3) => kindIs(doc, e3.kind, GROUP_KIND2) === (level === "group")).map((e3) => ({ value: e3.id, label: e3.name || e3.id, sublabel: kindLabel(e3.kind) })).sort(byName);
+    case "kind":
+      return Object.keys(doc.kinds).map((id) => ({ value: id, label: kindLabel(id) })).sort(byName);
+    default:
+      return [];
+  }
+}
+function ownerWords(doc, owner, none) {
+  const level = ownerLevel(doc, owner);
+  if (level === "none")
+    return none;
+  if (level === "selector" || typeof owner !== "string")
+    return "People a selector picks";
+  if (level === "kind")
+    return `Every ${hasOwn(doc.kinds, owner) ? doc.kinds[owner]?.label || owner : owner}`;
+  const name = hasOwn(doc.entities, owner) ? doc.entities[owner]?.name || owner : owner;
+  return level === "group" ? `${name} (a group)` : name;
+}
+function OwnerPicker(props) {
+  const stored = ownerLevel(props.doc, props.value);
+  const [pending, setPending] = d2(null);
+  const level = stored !== "none" ? stored : pending ?? "none";
+  const names = { entity: "Someone", group: "Group", kind: "Kind", selector: "Selector", none: props.noneLabel };
+  const help = {
+    entity: "Someone or something of their own: it wins over every level after it.",
+    group: "Every member of a group (a family, a household, a crew), through member groups too.",
+    kind: "Everyone of a kind, or of a kind that inherits from it.",
+    selector: "Everyone a rule picks: by kind, tier, class, tag or group.",
+    none: props.noneHelp
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-owner": level,
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: props.label,
+        help: help[level],
+        children: /* @__PURE__ */ u3(Seg, {
+          label: props.label,
+          value: level,
+          options: LEVELS.map((l3) => ({ value: l3, label: names[l3] })),
+          onChange: (next) => {
+            setPending(next === "none" || next === "selector" ? null : next);
+            props.onChange(next === "selector" ? {} : undefined);
+          }
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      level === "selector" ? /* @__PURE__ */ u3(SelectorEditor, {
+        label: "Picks",
+        value: selectorOf(props.value) ?? {},
+        doc: props.doc,
+        onChange: (next) => props.onChange(next ?? {})
+      }, undefined, false, undefined, this) : level === "none" ? null : /* @__PURE__ */ u3(RefPicker, {
+        label: level === "entity" ? "Who or what" : level === "group" ? "Which group" : "Which kind",
+        value: typeof props.value === "string" ? props.value : "",
+        options: ownerOptions(props.doc, level),
+        onChange: (next) => props.onChange(next || undefined)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
 }
 
 // src/frontend/build/schedule-form.tsx
@@ -9732,7 +10478,6 @@ function scheduleWrite(worldId, id, schedule) {
 var TIME2 = /^([01]\d|2[0-3]):[0-5]\d$/;
 var WEEKDAYS2 = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 var SEASONS2 = ["spring", "summer", "autumn", "winter"];
-var NEEDS = { hunger: "Hunger", fatigue: "Rest", social: "Company", fun: "Fun" };
 var ACTIVITIES = ["sleep", "breakfast", "lunch", "dinner", "work", "socialize", "leisure"];
 var KIND_WORDS = {
   fixed: { label: "At a set time", help: "At the same time on each day it's on." },
@@ -10235,7 +10980,7 @@ function RoutineBlockForm(props) {
                 class: "lre-form-chips",
                 role: "group",
                 "aria-label": "The needs it meets",
-                children: Object.entries(NEEDS).map(([need, label]) => {
+                children: NEED_IDS.map((need) => {
                   const on = block.needs?.includes(need) ?? false;
                   return /* @__PURE__ */ u3(Chip, {
                     pressed: on,
@@ -10244,7 +10989,7 @@ function RoutineBlockForm(props) {
                       const { needs: _3, ...rest } = block;
                       set(next.length === 0 ? rest : { ...rest, needs: next });
                     },
-                    children: label
+                    children: NEED_WORDS[need].name
                   }, need, false, undefined, this);
                 })
               }, undefined, false, undefined, this)
@@ -11551,8 +12296,9 @@ function JobInput(props) {
   const mapIdId = P2();
   A(() => {
     if (props.kind === "import_lore" || props.kind === "index_book")
-      app.host.worldBooks().then(setBooks, () => setBooks([]));
+      app.request({ type: "lre.lore", op: "books" }).then((body) => setBooks(body?.books ?? []));
   }, [props.kind]);
+  const labels = b2(() => bookLabels(books ?? []), [books]);
   if (props.kind === "propose_routines")
     return /* @__PURE__ */ u3(RoutineJobStart, {
       busy: props.busy,
@@ -11586,7 +12332,7 @@ function JobInput(props) {
                 onChange: () => setPicked([book.id])
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("span", {
-                children: book.name
+                children: labels[book.id] ?? book.name
               }, undefined, false, undefined, this)
             ]
           }, book.id, true, undefined, this))
@@ -11655,7 +12401,7 @@ function JobInput(props) {
                 onChange: () => setPicked(picked.includes(book.id) ? picked.filter((id) => id !== book.id) : [...picked, book.id])
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("span", {
-                children: book.name
+                children: labels[book.id] ?? book.name
               }, undefined, false, undefined, this)
             ]
           }, book.id, true, undefined, this))
@@ -14433,198 +15179,13 @@ function mapTemplate(kind, id, scope) {
   };
 }
 
-// src/frontend/gm/gate.ts
-function revealTruth(ui) {
-  return ui.gm.revealed ? ui : { ...ui, gm: { ...ui.gm, revealed: true } };
-}
-function hideTruth(ui) {
-  return ui.gm.revealed ? { ...ui, gm: { ...ui.gm, revealed: false } } : ui;
-}
-function gmAt(ui, section) {
-  return ui.gm.section === section ? ui : { ...ui, gm: { ...ui.gm, section } };
-}
-function gmOpen(ui, section, entity) {
-  return { ...ui, gm: { ...ui.gm, section, focus: entity } };
-}
-function focusTaken(ui) {
-  if (ui.gm.focus === undefined)
-    return ui;
-  const { focus: _taken, ...gm } = ui.gm;
-  return { ...ui, gm };
-}
-
-// src/frontend/gm/ui.tsx
-function usePages() {
-  const [page, setPage] = d2(null);
-  const ref = T2(null);
-  const opener = T2(null);
-  const open = page !== null;
-  const shown = T2(open);
-  A(() => {
-    if (open === shown.current)
-      return;
-    shown.current = open;
-    if (open) {
-      ref.current?.querySelector(":scope > .lre-gm-page .lre-page-header button")?.focus();
-      return;
-    }
-    const back = opener.current;
-    opener.current = null;
-    if (back?.isConnected)
-      back.focus();
-  }, [open]);
-  return {
-    page,
-    open: (next) => {
-      if (page === null)
-        opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      setPage(next);
-    },
-    back: () => setPage(null),
-    host: {
-      ref,
-      onKeyDown: (event) => {
-        if (event.key !== "Escape" || page === null || event.defaultPrevented)
-          return;
-        event.preventDefault();
-        event.stopPropagation();
-        setPage(null);
-      }
-    }
-  };
-}
-function useGmFocus(open) {
-  const app = useApp();
-  const focus = useUi((ui) => ui.gm.focus);
-  A(() => {
-    if (focus === undefined)
-      return;
-    open(focus);
-    app.ui.update(focusTaken);
-  }, [focus]);
-}
-function SheetLink(props) {
-  const app = useApp();
-  return /* @__PURE__ */ u3(Button, {
-    size: "sm",
-    variant: "secondary",
-    icon: "user",
-    onClick: () => app.ui.update((ui) => gmOpen(ui, "world", props.entity)),
-    children: "Character sheet"
-  }, undefined, false, undefined, this);
-}
-function GmPage(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-gm-page",
-    "data-lre-gm-page": props.name,
-    children: [
-      /* @__PURE__ */ u3(PageHeader, {
-        title: props.title,
-        subtitle: props.subtitle,
-        onBack: props.onBack,
-        backLabel: props.backLabel,
-        actions: props.actions
-      }, undefined, false, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function ActionRows(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-gm-rows",
-    role: "list",
-    "aria-label": props.label,
-    children: props.children
-  }, undefined, false, undefined, this);
-}
-function ActionRow(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-gm-row",
-    role: "listitem",
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-gm-row-main",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-gm-row-text",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-gm-row-title",
-                children: props.title
-              }, undefined, false, undefined, this),
-              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
-                class: "lre-gm-row-sub",
-                children: props.subtitle
-              }, undefined, false, undefined, this) : null,
-              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
-                id: props.id
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          props.value !== undefined ? /* @__PURE__ */ u3("span", {
-            class: props.tone ? `lre-gm-row-value lre-${props.tone}` : "lre-gm-row-value",
-            children: props.value
-          }, undefined, false, undefined, this) : null,
-          props.actions !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-gm-row-actions",
-            children: props.actions
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function GmCard(props) {
-  return /* @__PURE__ */ u3("section", {
-    class: "lre-card lre-gm-card",
-    "data-lre-gm-card": props.name,
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-gm-card-head",
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-gm-card-titles",
-            children: [
-              /* @__PURE__ */ u3("h3", {
-                class: "lre-gm-card-title",
-                children: props.title
-              }, undefined, false, undefined, this),
-              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
-                class: "lre-gm-card-sub",
-                children: props.subtitle
-              }, undefined, false, undefined, this) : null,
-              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
-                id: props.id
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          props.badges !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-gm-badges",
-            children: props.badges
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function BuildLink() {
-  const app = useApp();
-  return /* @__PURE__ */ u3(Button, {
-    variant: "ghost",
-    icon: "hammer",
-    onClick: () => app.ui.update((ui) => ({ ...ui, mode: "build" })),
-    children: "Kinds and places are the world's: edit them in Build"
-  }, undefined, false, undefined, this);
-}
-
 // src/frontend/build/lore-pins.tsx
 var HINT = {
   characters: "Their mind reads these first, every time they think, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
-  places: "Every helper and mind call here, or in a place inside it, reads these first, within its lore tokens.",
-  steps: "Every call of this step reads these first, whatever its lore setting, within its lore tokens (Settings → Steps)."
+  places: "Every helper and mind call here, or in a place inside it, reads these first, within its lore tokens."
 };
+var PINS_NOTE = "Pins go to the draft as you change them; a chat uses them once you commit and Upgrade it.";
+var KEEP_NOTE = "A pin that doesn't fit is cut, and keeps its start. Choose “When it doesn't fit, keep the end” for an entry written oldest first, such as a running timeline, a log or a journal, whose newest part matters most.";
 var MIND_STEP_HINT = {
   mind: "Every character's mind reads these, after what is pinned to them, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
   memory: "Each character's memory after the reply reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
@@ -14640,6 +15201,7 @@ function LorePinsSection(props) {
   const [views, setViews] = d2({});
   const [adding, setAdding] = d2(null);
   const [books, setBooks] = d2(null);
+  const labels = b2(() => bookLabels(books ?? []), [books]);
   const [book, setBook] = d2("");
   const [entries, setEntries] = d2(null);
   const [choice, setChoice] = d2("");
@@ -14689,7 +15251,7 @@ function LorePinsSection(props) {
   };
   const taken = new Set(list2.map(lorePinKey));
   const lore = Object.values(draft.doc.lore).filter((l3) => !taken.has(`lore:${l3.id}`)).sort((a3, b3) => a3.title.localeCompare(b3.title));
-  const hint = props.target === "steps" ? isMindPurpose(props.id) ? MIND_STEP_HINT[props.id] : HINT.steps : HINT[props.target];
+  const hint = props.target === "steps" ? isMindPurpose(props.id) ? MIND_STEP_HINT[props.id] : null : HINT[props.target];
   return /* @__PURE__ */ u3("div", {
     "data-lre-lore-pins": `${props.target}:${props.id}`,
     children: /* @__PURE__ */ u3(Section, {
@@ -14700,13 +15262,14 @@ function LorePinsSection(props) {
       children: /* @__PURE__ */ u3("div", {
         class: "lre-stack",
         children: [
-          /* @__PURE__ */ u3("p", {
+          hint ? /* @__PURE__ */ u3("p", {
             class: "lre-build-note",
-            children: [
-              hint,
-              " Pins go to the draft as you change them; a chat uses them once you commit and Upgrade it."
-            ]
-          }, undefined, true, undefined, this),
+            children: props.target === "steps" ? hint : `${hint} ${PINS_NOTE}`
+          }, undefined, false, undefined, this) : null,
+          props.target !== "steps" && list2.length > 0 ? /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: KEEP_NOTE
+          }, undefined, false, undefined, this) : null,
           list2.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
             label: "Pinned lore",
             children: list2.map((pin, i3) => {
@@ -14718,33 +15281,32 @@ function LorePinsSection(props) {
                   tone: t3.badge === "Missing" ? "neg" : t3.badge === "Secret" ? "gm" : "neutral",
                   children: t3.badge
                 }, undefined, false, undefined, this) : undefined,
-                actions: /* @__PURE__ */ u3(M, {
-                  children: [
-                    /* @__PURE__ */ u3("select", {
-                      class: "lre-input",
-                      "aria-label": `When ${t3.title} doesn't fit, keep`,
-                      value: pin.keep ?? "start",
-                      disabled: busy,
-                      onChange: (event) => save(list2.map((p3, j3) => j3 === i3 ? { ...p3, keep: event.currentTarget.value === "end" ? "end" : "start" } : p3)),
-                      children: [
-                        /* @__PURE__ */ u3("option", {
-                          value: "start",
-                          children: "When it doesn't fit, keep the start"
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ u3("option", {
-                          value: "end",
-                          children: "When it doesn't fit, keep the end"
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ u3(IconButton, {
-                      icon: "close",
-                      label: `Unpin ${t3.title}`,
-                      disabled: busy,
-                      onClick: () => save(list2.filter((_3, j3) => j3 !== i3))
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
+                actions: /* @__PURE__ */ u3(IconButton, {
+                  icon: "close",
+                  label: `Unpin ${t3.title}`,
+                  disabled: busy,
+                  onClick: () => save(list2.filter((_3, j3) => j3 !== i3))
+                }, undefined, false, undefined, this),
+                children: /* @__PURE__ */ u3("div", {
+                  class: "lre-form-pins-keep",
+                  children: /* @__PURE__ */ u3("select", {
+                    class: "lre-input",
+                    "aria-label": `When ${t3.title} doesn't fit, keep`,
+                    value: pin.keep ?? "start",
+                    disabled: busy,
+                    onChange: (event) => save(list2.map((p3, j3) => j3 === i3 ? { ...p3, keep: event.currentTarget.value === "end" ? "end" : "start" } : p3)),
+                    children: [
+                      /* @__PURE__ */ u3("option", {
+                        value: "start",
+                        children: "When it doesn't fit, keep the start"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ u3("option", {
+                        value: "end",
+                        children: "When it doesn't fit, keep the end"
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                }, undefined, false, undefined, this)
               }, lorePinKey(pin), false, undefined, this);
             })
           }, undefined, false, undefined, this) : null,
@@ -14811,7 +15373,7 @@ function LorePinsSection(props) {
                   }, undefined, false, undefined, this),
                   (books ?? []).map((b3) => /* @__PURE__ */ u3("option", {
                     value: b3.id,
-                    children: b3.attached ? `${b3.name} (in this chat)` : b3.name
+                    children: labels[b3.id] ?? b3.name
                   }, b3.id, false, undefined, this))
                 ]
               }, undefined, true, undefined, this),
@@ -14951,8 +15513,17 @@ async function sendInChunks(items, send) {
   }
   return { applied, of: all.length };
 }
-function forCharacters(change) {
-  return change.kind === "role" || change.kind === "pin" || change.kind === "intent";
+function mixOf(labels, max = 3) {
+  const counts = new Map;
+  for (const label of labels)
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  const groups = [...counts].sort((a3, b3) => b3[1] - a3[1]);
+  const shown = groups.slice(0, max).map(([label, n2]) => `${n2} ${label}`);
+  const rest = groups.slice(max).reduce((sum, [, n2]) => sum + n2, 0);
+  return rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
+}
+function forCharacters(kind) {
+  return kind === "role" || kind === "pin" || kind === "intent";
 }
 function bulkOps(ids, change) {
   switch (change.kind) {
@@ -15043,6 +15614,25 @@ function PickBox(props) {
     tabIndex: -1
   }, undefined, false, undefined, this);
 }
+function GroupPicks(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-selectbar-groups",
+    role: "group",
+    "aria-label": props.label,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-selectbar-groups-label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      props.groups.map((g2) => /* @__PURE__ */ u3(Button, {
+        size: "sm",
+        variant: "secondary",
+        onClick: () => props.onPick(g2),
+        children: `${g2.label} · ${g2.ids.length}`
+      }, g2.id, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
 function SelectBar(props) {
   const { selection } = props;
   const count = selection.ids.filter((id) => props.all.includes(id)).length;
@@ -15066,26 +15656,6 @@ function SelectBar(props) {
             onClick: () => selection.set([...selection.ids, ...props.shown]),
             children: `Select all ${props.shown.length}`
           }, undefined, false, undefined, this),
-          props.groups && props.groups.length > 0 ? /* @__PURE__ */ u3("select", {
-            class: "lre-input",
-            "aria-label": props.groupLabel ?? "Select by level",
-            value: "",
-            onChange: (event) => {
-              const group = props.groups?.find((g2) => g2.id === event.currentTarget.value);
-              if (group)
-                selection.set(group.ids);
-            },
-            children: [
-              /* @__PURE__ */ u3("option", {
-                value: "",
-                children: props.groupLabel ?? "Select by level"
-              }, undefined, false, undefined, this),
-              props.groups.map((g2) => /* @__PURE__ */ u3("option", {
-                value: g2.id,
-                children: `${g2.label} (${g2.ids.length})`
-              }, g2.id, false, undefined, this))
-            ]
-          }, undefined, true, undefined, this) : null,
           /* @__PURE__ */ u3(Button, {
             size: "sm",
             variant: "ghost",
@@ -15095,6 +15665,11 @@ function SelectBar(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      props.groups && props.groups.length > 0 ? /* @__PURE__ */ u3(GroupPicks, {
+        label: props.groupLabel ?? "Select a level",
+        groups: props.groups,
+        onPick: (group) => selection.set(group.ids)
+      }, undefined, false, undefined, this) : null,
       props.children !== undefined ? /* @__PURE__ */ u3("div", {
         class: "lre-selectbar-actions",
         children: props.children
@@ -15106,20 +15681,52 @@ function SelectBar(props) {
 // src/frontend/build/batch-sheet.tsx
 var LEVELS3 = [0, 1, 2, 3, 4];
 var WHOLE_BOOK2 = "lre:whole-book";
+function draftTargets(doc, collection, ids, everything) {
+  if (collection === "places" || everything)
+    return [...ids];
+  return ids.filter((id) => hasOwn(doc.entities, id) && kindIs(doc, doc.entities[id]?.kind ?? "", "person"));
+}
+function ChangeCard(props) {
+  return /* @__PURE__ */ u3(Section, {
+    title: props.title,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      children: [
+        props.children,
+        props.now ? /* @__PURE__ */ u3("p", {
+          class: "lre-batch-now",
+          children: [
+            "Now: ",
+            props.now
+          ]
+        }, undefined, true, undefined, this) : null,
+        /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          icon: props.icon ?? "check",
+          disabled: props.busy || !props.ready || props.reach === 0,
+          onClick: props.onApply,
+          children: !props.ready ? props.verb : props.reach === 0 ? "None of them fit" : `${props.verb} for ${props.reach}`
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
 function DraftBatchSheet(props) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d3) => d3);
   const [busy, run] = useBusy();
   const [outcome, setOutcome] = d2(null);
-  const [tier, setTier] = d2("");
-  const [domain, setDomain] = d2(DOMAINS[0]);
+  const [tier, setTier] = d2(null);
+  const [domain, setDomain] = d2(null);
   const [level, setLevel] = d2(null);
   const [sceneType, setSceneType] = d2("");
   const [lore, setLore] = d2("");
   const [books, setBooks] = d2(null);
+  const labels = b2(() => bookLabels(books ?? []), [books]);
   const [book, setBook] = d2("");
   const [entries, setEntries] = d2(null);
   const [entry, setEntry] = d2("");
+  const [all, setAll] = d2({ tier: false, level: false, pin: false });
   const ids = { tier: P2(), domain: P2(), level: P2(), scene: P2(), scenes: P2(), lore: P2(), book: P2(), entry: P2() };
   A(() => {
     app.request({ type: "lre.lore", op: "books", ...app.client.getState().chatId ? { chatId: app.client.getState().chatId ?? "" } : {} }).then((body) => setBooks(body?.books ?? []));
@@ -15135,15 +15742,16 @@ function DraftBatchSheet(props) {
     return null;
   const doc = draft.doc;
   const tiers = Object.entries(doc.tiers).sort(([, a3], [, b3]) => a3.order - b3.order);
-  const tierPick = tier !== "" ? tier : tiers[0]?.[0] ?? "";
   const scenes = [...new Set(Object.values(doc.places).flatMap((p3) => p3.sceneType ? [p3.sceneType] : []))].sort();
   const pin = lore !== "" ? { lore } : book !== "" && entry !== "" ? entry === WHOLE_BOOK2 ? { book } : { book, entry } : null;
   const send = draftSend(app);
-  const apply = (change) => run(async () => {
+  const reach = (card) => draftTargets(doc, props.collection, props.ids, all[card]);
+  const others = props.ids.length - draftTargets(doc, props.collection, props.ids, false).length;
+  const apply = (targets, change) => run(async () => {
     const current2 = app.drafts.get();
     if (!current2)
       return;
-    const ops = draftPatch(current2.doc, props.collection, props.ids, change);
+    const ops = draftPatch(current2.doc, props.collection, targets, change);
     if (ops.length === 0)
       return setOutcome("Nothing to change: everyone selected has it already.");
     const done = await sendInChunks(ops, async (chunk) => (await send({ type: "lre.editor", worldId: current2.worldId, base: current2.base, op: "patch", ops: chunk })).type === "lre.result");
@@ -15152,10 +15760,23 @@ function DraftBatchSheet(props) {
     else
       setOutcome(done.applied === 0 ? "Nothing was saved." : `${done.applied} of ${done.of} writes saved; the next was refused, so the rest weren't sent.`);
   });
+  const widen = (card) => props.collection === "entities" && others > 0 ? /* @__PURE__ */ u3(HostSwitch, {
+    checked: all[card],
+    label: others === 1 ? "Also the 1 picked that isn't a person" : `Also the ${others} picked that aren't people`,
+    onChange: (checked) => setAll({ ...all, [card]: checked })
+  }, undefined, false, undefined, this) : null;
+  const entity = (id) => hasOwn(doc.entities, id) ? doc.entities[id] : undefined;
+  const tierOf2 = (id) => id === undefined ? "with no tier" : doc.tiers[id]?.label ?? id;
+  const levelOf = (id) => {
+    const set = LEVELS3.find((n2) => domain !== null && n2 === entity(id)?.levels?.[domain]);
+    return set === undefined ? "from the tier" : `set to ${set} · ${LEVEL_LABEL[set]}`;
+  };
+  const pinned = (id) => pin !== null && (lorePinsOf(doc)[props.collection === "entities" ? "characters" : "places"][id] ?? []).some((p3) => lorePinKey(p3) === lorePinKey(pin));
+  const levelChange = domain === null || level === null ? null : { kind: "level", domain, level: level === "tier" ? null : level };
   const noun = props.collection === "entities" ? "entity" : "place";
   return /* @__PURE__ */ u3(FormSheet, {
     title: props.ids.length === 1 ? `Change 1 ${noun}` : `Change ${props.ids.length} ${props.collection}`,
-    subtitle: "Each change goes to the draft at once",
+    subtitle: "Pick a value, then apply it: each change goes to the draft at once",
     onClose: props.onClose,
     children: /* @__PURE__ */ u3("div", {
       class: "lre-stack",
@@ -15167,89 +15788,99 @@ function DraftBatchSheet(props) {
         }, undefined, false, undefined, this) : null,
         props.collection === "entities" ? /* @__PURE__ */ u3(M, {
           children: [
-            /* @__PURE__ */ u3(Section, {
+            /* @__PURE__ */ u3(ChangeCard, {
               title: "Tier",
-              children: /* @__PURE__ */ u3("div", {
-                class: "lre-stack",
-                children: [
-                  /* @__PURE__ */ u3(Field, {
-                    label: "Tier",
-                    for: ids.tier,
-                    children: /* @__PURE__ */ u3("select", {
-                      id: ids.tier,
-                      class: "lre-input",
-                      value: tierPick,
-                      onChange: (event) => setTier(event.currentTarget.value),
-                      children: tiers.map(([id, t3]) => /* @__PURE__ */ u3("option", {
+              now: reach("tier").length > 0 ? mixOf(reach("tier").map((id) => tierOf2(entity(id)?.tier))) : null,
+              ready: tier !== null,
+              reach: reach("tier").length,
+              busy,
+              verb: "Set the tier",
+              onApply: () => tier !== null && apply(reach("tier"), { kind: "tier", tier }),
+              children: [
+                /* @__PURE__ */ u3(Field, {
+                  label: "Tier",
+                  for: ids.tier,
+                  children: /* @__PURE__ */ u3("select", {
+                    id: ids.tier,
+                    class: "lre-input",
+                    value: tier ?? "",
+                    onChange: (event) => setTier(event.currentTarget.value === "" ? null : event.currentTarget.value),
+                    children: [
+                      /* @__PURE__ */ u3("option", {
+                        value: "",
+                        children: "Choose a tier…"
+                      }, undefined, false, undefined, this),
+                      tiers.map(([id, t3]) => /* @__PURE__ */ u3("option", {
                         value: id,
                         children: t3.label
                       }, id, false, undefined, this))
-                    }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ u3(Button, {
-                    variant: "primary",
-                    icon: "check",
-                    disabled: busy || tierPick === "",
-                    onClick: () => apply({ kind: "tier", tier: tierPick }),
-                    children: "Set the tier"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Section, {
-              title: "Detail in one domain",
-              children: /* @__PURE__ */ u3("div", {
-                class: "lre-stack",
-                children: [
-                  /* @__PURE__ */ u3(Field, {
-                    label: "Domain",
-                    for: ids.domain,
-                    children: /* @__PURE__ */ u3("select", {
-                      id: ids.domain,
-                      class: "lre-input",
-                      value: domain,
-                      onChange: (event) => setDomain(DOMAINS.find((d3) => d3 === event.currentTarget.value) ?? DOMAINS[0]),
-                      children: DOMAINS.map((d3) => /* @__PURE__ */ u3("option", {
+                    ]
+                  }, undefined, true, undefined, this)
+                }, undefined, false, undefined, this),
+                widen("tier")
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3(ChangeCard, {
+              title: "Detail in one area",
+              now: domain === null || reach("level").length === 0 ? null : mixOf(reach("level").map(levelOf)),
+              ready: levelChange !== null,
+              reach: reach("level").length,
+              busy,
+              verb: "Set the level",
+              onApply: () => levelChange && apply(reach("level"), levelChange),
+              children: [
+                /* @__PURE__ */ u3(Field, {
+                  label: "Area",
+                  for: ids.domain,
+                  children: /* @__PURE__ */ u3("select", {
+                    id: ids.domain,
+                    class: "lre-input",
+                    value: domain ?? "",
+                    onChange: (event) => setDomain(DOMAINS.find((d3) => d3 === event.currentTarget.value) ?? null),
+                    children: [
+                      /* @__PURE__ */ u3("option", {
+                        value: "",
+                        children: "Choose an area…"
+                      }, undefined, false, undefined, this),
+                      DOMAINS.map((d3) => /* @__PURE__ */ u3("option", {
                         value: d3,
                         children: DOMAIN_LABEL[d3]
                       }, d3, false, undefined, this))
-                    }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ u3(Field, {
-                    label: "Level",
-                    for: ids.level,
-                    help: "A level here wins over the tier's; From the tier removes the override.",
-                    children: /* @__PURE__ */ u3("select", {
-                      id: ids.level,
-                      class: "lre-input",
-                      value: level === null ? "" : String(level),
-                      onChange: (event) => setLevel(LEVELS3.find((n2) => String(n2) === event.currentTarget.value) ?? null),
-                      children: [
-                        /* @__PURE__ */ u3("option", {
-                          value: "",
-                          children: "From the tier"
-                        }, undefined, false, undefined, this),
-                        LEVELS3.map((n2) => /* @__PURE__ */ u3("option", {
-                          value: String(n2),
-                          children: [
-                            n2,
-                            " · ",
-                            LEVEL_LABEL[n2]
-                          ]
-                        }, n2, true, undefined, this))
-                      ]
-                    }, undefined, true, undefined, this)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ u3(Button, {
-                    variant: "primary",
-                    icon: "check",
-                    disabled: busy,
-                    onClick: () => apply({ kind: "level", domain, level }),
-                    children: "Set the level"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Field, {
+                  label: "Level",
+                  for: ids.level,
+                  help: "A level here wins over the tier's; “From the tier” removes it.",
+                  children: /* @__PURE__ */ u3("select", {
+                    id: ids.level,
+                    class: "lre-input",
+                    value: level === null ? "" : String(level),
+                    onChange: (event) => setLevel(event.currentTarget.value === "tier" ? "tier" : LEVELS3.find((n2) => String(n2) === event.currentTarget.value) ?? null),
+                    children: [
+                      /* @__PURE__ */ u3("option", {
+                        value: "",
+                        children: "Choose a level…"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ u3("option", {
+                        value: "tier",
+                        children: "From the tier"
+                      }, undefined, false, undefined, this),
+                      LEVELS3.map((n2) => /* @__PURE__ */ u3("option", {
+                        value: String(n2),
+                        children: [
+                          n2,
+                          " · ",
+                          LEVEL_LABEL[n2]
+                        ]
+                      }, n2, true, undefined, this))
+                    ]
+                  }, undefined, true, undefined, this)
+                }, undefined, false, undefined, this),
+                widen("level")
+              ]
+            }, undefined, true, undefined, this)
           ]
         }, undefined, true, undefined, this) : /* @__PURE__ */ u3(Section, {
           title: "Default scene type",
@@ -15259,12 +15890,13 @@ function DraftBatchSheet(props) {
               /* @__PURE__ */ u3(Field, {
                 label: "Scene type",
                 for: ids.scene,
-                help: "Blank removes it. A place a map draws keeps the map's.",
+                help: "A place a map draws keeps the map's.",
                 children: [
                   /* @__PURE__ */ u3("input", {
                     id: ids.scene,
                     class: "lre-input",
                     list: ids.scenes,
+                    placeholder: "Choose or type a scene type…",
                     value: sceneType,
                     onInput: (event) => setSceneType(event.currentTarget.value)
                   }, undefined, false, undefined, this),
@@ -15276,102 +15908,114 @@ function DraftBatchSheet(props) {
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("p", {
+                class: "lre-batch-now",
+                children: [
+                  "Now: ",
+                  mixOf(props.ids.map((id) => doc.places[id]?.map !== undefined ? "drawn by a map" : doc.places[id]?.sceneType ?? "none"))
+                ]
+              }, undefined, true, undefined, this),
               /* @__PURE__ */ u3(Button, {
                 variant: "primary",
                 icon: "check",
+                disabled: busy || sceneType.trim() === "",
+                onClick: () => apply(props.ids, { kind: "sceneType", sceneType: sceneType.trim() }),
+                children: sceneType.trim() === "" ? "Set the scene type" : `Set it for ${props.ids.length}`
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                variant: "ghost",
+                icon: "close",
                 disabled: busy,
-                onClick: () => apply({ kind: "sceneType", sceneType: sceneType.trim() === "" ? null : sceneType.trim() }),
-                children: sceneType.trim() === "" ? "Remove the scene type" : "Set the scene type"
+                onClick: () => apply(props.ids, { kind: "sceneType", sceneType: null }),
+                children: "Remove their scene type"
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this)
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Section, {
+        /* @__PURE__ */ u3(ChangeCard, {
           title: "Pin lore",
-          children: /* @__PURE__ */ u3("div", {
-            class: "lre-stack",
-            children: [
-              /* @__PURE__ */ u3("p", {
-                class: "lre-build-note",
-                children: "Adds the pin to each one's Pinned lore, where it isn't pinned already. A chat uses it once you commit and Upgrade it."
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Field, {
-                label: "One of the world's lore entries",
-                for: ids.lore,
-                children: /* @__PURE__ */ u3("select", {
-                  id: ids.lore,
-                  class: "lre-input",
-                  value: lore,
-                  onChange: (event) => (setLore(event.currentTarget.value), setBook("")),
-                  children: [
-                    /* @__PURE__ */ u3("option", {
-                      value: "",
-                      children: "Choose an entry"
-                    }, undefined, false, undefined, this),
-                    Object.values(doc.lore).sort((a3, b3) => a3.title.localeCompare(b3.title)).map((l3) => /* @__PURE__ */ u3("option", {
-                      value: l3.id,
-                      children: l3.title || l3.id
-                    }, l3.id, false, undefined, this))
-                  ]
-                }, undefined, true, undefined, this)
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Field, {
-                label: "Or from a World Info book",
-                for: ids.book,
-                children: /* @__PURE__ */ u3("select", {
-                  id: ids.book,
-                  class: "lre-input",
-                  value: book,
-                  onChange: (event) => (setBook(event.currentTarget.value), setLore("")),
-                  children: [
-                    /* @__PURE__ */ u3("option", {
-                      value: "",
-                      children: books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"
-                    }, undefined, false, undefined, this),
-                    (books ?? []).map((b3) => /* @__PURE__ */ u3("option", {
-                      value: b3.id,
-                      children: b3.name
-                    }, b3.id, false, undefined, this))
-                  ]
-                }, undefined, true, undefined, this)
-              }, undefined, false, undefined, this),
-              book !== "" ? /* @__PURE__ */ u3(Field, {
-                label: "Entry",
-                for: ids.entry,
-                children: /* @__PURE__ */ u3("select", {
-                  id: ids.entry,
-                  class: "lre-input",
-                  value: entry,
-                  onChange: (event) => setEntry(event.currentTarget.value),
-                  children: [
-                    /* @__PURE__ */ u3("option", {
-                      value: "",
-                      children: entries === null ? "Loading entries…" : "Choose the whole book or one entry"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3("option", {
-                      value: WHOLE_BOOK2,
-                      children: "The whole book (its switched-on entries, new ones too)"
-                    }, undefined, false, undefined, this),
-                    (entries ?? []).map((e3) => /* @__PURE__ */ u3("option", {
-                      value: e3.id,
-                      children: [
-                        e3.title || e3.id,
-                        e3.disabled ? " (off in its book)" : ""
-                      ]
-                    }, e3.id, true, undefined, this))
-                  ]
-                }, undefined, true, undefined, this)
-              }, undefined, false, undefined, this) : null,
-              /* @__PURE__ */ u3(Button, {
-                variant: "primary",
-                icon: "pin",
-                disabled: busy || pin === null,
-                onClick: () => pin && apply({ kind: "pin", pin }),
-                children: "Pin it"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        }, undefined, false, undefined, this)
+          now: pin === null ? null : mixOf(reach("pin").map((id) => pinned(id) ? "pinned already" : "not yet")),
+          ready: pin !== null,
+          reach: reach("pin").length,
+          busy,
+          icon: "pin",
+          verb: "Pin it",
+          onApply: () => pin && apply(reach("pin"), { kind: "pin", pin }),
+          children: [
+            /* @__PURE__ */ u3("p", {
+              class: "lre-build-note",
+              children: "Adds the pin to each one's Pinned lore, where it isn't pinned already. A chat uses it once you commit and Upgrade it."
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Field, {
+              label: "One of the world's lore entries",
+              for: ids.lore,
+              children: /* @__PURE__ */ u3("select", {
+                id: ids.lore,
+                class: "lre-input",
+                value: lore,
+                onChange: (event) => (setLore(event.currentTarget.value), setBook("")),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: "Choose an entry…"
+                  }, undefined, false, undefined, this),
+                  Object.values(doc.lore).sort((a3, b3) => a3.title.localeCompare(b3.title)).map((l3) => /* @__PURE__ */ u3("option", {
+                    value: l3.id,
+                    children: l3.title || l3.id
+                  }, l3.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Field, {
+              label: "Or from a World Info book",
+              for: ids.book,
+              children: /* @__PURE__ */ u3("select", {
+                id: ids.book,
+                class: "lre-input",
+                value: book,
+                onChange: (event) => (setBook(event.currentTarget.value), setLore("")),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book…"
+                  }, undefined, false, undefined, this),
+                  (books ?? []).map((b3) => /* @__PURE__ */ u3("option", {
+                    value: b3.id,
+                    children: labels[b3.id] ?? b3.name
+                  }, b3.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this)
+            }, undefined, false, undefined, this),
+            book !== "" ? /* @__PURE__ */ u3(Field, {
+              label: "Entry",
+              for: ids.entry,
+              children: /* @__PURE__ */ u3("select", {
+                id: ids.entry,
+                class: "lre-input",
+                value: entry,
+                onChange: (event) => setEntry(event.currentTarget.value),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: entries === null ? "Loading entries…" : "Choose the whole book or one entry…"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("option", {
+                    value: WHOLE_BOOK2,
+                    children: "The whole book (its switched-on entries, new ones too)"
+                  }, undefined, false, undefined, this),
+                  (entries ?? []).map((e3) => /* @__PURE__ */ u3("option", {
+                    value: e3.id,
+                    children: [
+                      e3.title || e3.id,
+                      e3.disabled ? " (off in its book)" : ""
+                    ]
+                  }, e3.id, true, undefined, this))
+                ]
+              }, undefined, true, undefined, this)
+            }, undefined, false, undefined, this) : null,
+            widen("pin")
+          ]
+        }, undefined, true, undefined, this)
       ]
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
@@ -16122,6 +16766,13 @@ function TextListEditor(props) {
 }
 
 // src/frontend/build/character-model.ts
+function isCharacter(doc, value) {
+  return isRecord(value) && typeof value.kind === "string" && kindIs(doc, value.kind, "person");
+}
+var PERSON_ONLY = { life: true, lifeKnownBy: true, characterId: true, cues: true, agent: true };
+function entityFormSpecs(doc, value) {
+  return isCharacter(doc, value) ? COLLECTION_SPECS.entities : COLLECTION_SPECS.entities.filter((s3) => PERSON_ONLY[s3.key] !== true);
+}
 function opensCharacterPage(doc, collection, id) {
   if (collection !== "entities" || id === null || id.startsWith("new:"))
     return false;
@@ -16201,9 +16852,18 @@ function revealScaffold(entity) {
     return { problem: "Put it somewhere first: a place, or in a container or on someone." };
   return { entity: { ...entity, visibility: "discoverable" } };
 }
-function itemObjective(check, item, place = "") {
+function itemObjective(check, item, place = null, label = "") {
   const quote = (s3) => `'${s3}'`;
-  return check === "at" ? `at(${quote(item)}, ${quote(place)})` : `${check}(pov, ${quote(item)})`;
+  const when = check === "at" ? `at(${quote(item.id)}, ${quote(place?.id ?? "")})` : `${check}(pov, ${quote(item.id)})`;
+  return { label: label.trim() !== "" ? label.trim() : itemObjectiveLabel(check, item, place), when };
+}
+function itemObjectiveLabel(check, item, place = null) {
+  const thing = /^[A-Z][a-z]/.test(item.name) && !/^[A-Z][a-z]*'/.test(item.name) ? item.name.charAt(0).toLowerCase() + item.name.slice(1) : item.name;
+  if (check === "carries")
+    return `Have the ${thing} with you`;
+  if (check === "has_item")
+    return `Have a ${thing}`;
+  return `Get the ${thing} to ${place?.name ?? "the place"}`;
 }
 
 // src/frontend/build/character.tsx
@@ -16316,13 +16976,11 @@ function CharacterPage(props) {
       /* @__PURE__ */ u3(Section, {
         title: "Work and money",
         children: [
-          /* @__PURE__ */ u3(RefPicker, {
-            label: "Works for",
+          /* @__PURE__ */ u3(WorksFor, {
+            model,
+            world: formDoc,
             value: typeof fields.employer === "string" ? fields.employer : "",
-            options: entitiesOfKind(formDoc, "business"),
-            none: "No employer",
-            placeholder: "Pick a business",
-            onChange: (v3) => setField("employer", v3 === "" ? undefined : v3)
+            onPick: (v3) => setField("employer", v3)
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(SectionFields, {
             section: "work",
@@ -16422,11 +17080,12 @@ function SectionFields(props) {
       }
       return /* @__PURE__ */ u3(DefInput, {
         name: f3.id,
-        def: { ...def, label: f3.label, ...f3.help ? { hint: f3.help } : {} },
+        def: { ...def, label: f3.label },
         defs,
         value: v3,
         ctx: props.ctx,
         path: `${props.ctx.path}.fields.${f3.id}`,
+        words: f3.help ? [f3.help] : [],
         onChange: (next) => props.onField(f3.id, next)
       }, f3.id, false, undefined, this);
     })
@@ -16486,10 +17145,44 @@ function WhereTheyLive(props) {
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
 }
+var EMPLOYER_KINDS = [
+  { value: "place", label: "A place" },
+  { value: "business", label: "A business" }
+];
+function WorksFor(props) {
+  const places2 = props.model?.places ?? [];
+  const [kind, setKind] = d2(props.value !== "" && !places2.some((p3) => p3.id === props.value) && props.model?.character.employer?.kind !== "place" ? "business" : "place");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-works-for": "",
+    children: [
+      /* @__PURE__ */ u3(Seg, {
+        label: "Works for",
+        value: kind,
+        options: EMPLOYER_KINDS,
+        onChange: setKind
+      }, undefined, false, undefined, this),
+      kind === "place" ? /* @__PURE__ */ u3(PlacePicker, {
+        title: "Where they work",
+        label: "Works at",
+        places: places2,
+        value: places2.some((p3) => p3.id === props.value) ? props.value : null,
+        clearLabel: "No employer",
+        onPick: (p3) => props.onPick(p3?.id)
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(RefPicker, {
+        label: "Works for",
+        value: places2.some((p3) => p3.id === props.value) ? "" : props.value,
+        options: entitiesOfKind(props.world, "business"),
+        none: "No employer",
+        placeholder: "Pick a business",
+        onChange: (v3) => props.onPick(v3 === "" ? undefined : v3)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function TheirDay(props) {
   const app = useApp();
   const routines = Object.values(props.world.routines ?? {}).filter((r3) => r3.owner === props.id);
-  const schedules = Object.values(props.world.schedules).filter((s3) => s3.owner === props.id);
   return /* @__PURE__ */ u3(Section, {
     title: "Their day",
     children: [
@@ -16513,11 +17206,11 @@ function TheirDay(props) {
           }, r3.id, false, undefined, this))
         ]
       }, undefined, true, undefined, this),
-      schedules.length > 0 ? /* @__PURE__ */ u3(FormGroup, {
+      (props.model?.schedules.length ?? 0) > 0 ? /* @__PURE__ */ u3(FormGroup, {
         title: "Schedules",
-        children: schedules.map((s3) => /* @__PURE__ */ u3(ItemRow, {
-          title: humanize(s3.id),
-          subtitle: `Sets ${humanize(s3.target)}`,
+        children: props.model?.schedules.map((s3) => /* @__PURE__ */ u3(ItemRow, {
+          title: s3.label,
+          subtitle: s3.summary !== s3.label ? s3.summary : undefined,
           openLabel: "Edit the schedule",
           onOpen: () => go(app, { view: "item", worldId: props.world.id, collection: "schedules", id: s3.id })
         }, s3.id, false, undefined, this))
@@ -16666,36 +17359,28 @@ function ContentsSection(props) {
 function RevealItem(props) {
   if (typeof props.value.kind !== "string" || !isItemKind(props.kinds, props.value.kind))
     return null;
-  if (props.value.visibility === "discoverable") {
-    return /* @__PURE__ */ u3(Banner, {
-      tone: "info",
-      icon: "search",
-      children: "Hidden until the player character searches where it lies, or opens what holds it."
-    }, undefined, false, undefined, this);
-  }
+  const hidden = props.value.visibility === "discoverable";
+  if (!hidden && props.value.visibility !== undefined && props.value.visibility !== "public")
+    return null;
   const made = revealScaffold(props.value);
+  const problem = !hidden && "problem" in made ? made.problem : null;
+  const toggle = (on) => {
+    if (on && "entity" in made)
+      props.onChange(made.entity);
+    else if (!on) {
+      const { visibility: _visibility, ...shown } = props.value;
+      props.onChange(shown);
+    }
+  };
   return /* @__PURE__ */ u3("div", {
     "data-lre-reveal": "",
-    children: /* @__PURE__ */ u3(FormGroup, {
-      title: "Reveal this item",
-      children: [
-        /* @__PURE__ */ u3("span", {
-          class: "lre-small lre-muted",
-          children: "Keeps it hidden until the player character searches where it lies, or opens what holds it, with Search."
-        }, undefined, false, undefined, this),
-        "problem" in made ? /* @__PURE__ */ u3("span", {
-          class: "lre-small",
-          children: made.problem
-        }, undefined, false, undefined, this) : null,
-        /* @__PURE__ */ u3(Button, {
-          size: "sm",
-          icon: "search",
-          disabled: "problem" in made,
-          onClick: () => ("entity" in made) ? props.onChange(made.entity) : undefined,
-          children: "Hide until searched"
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this)
+    children: /* @__PURE__ */ u3(CheckField, {
+      label: "Hidden until searched",
+      help: problem ?? (hidden ? "Search finds it where it lies, or when what holds it is opened. Save to draft keeps it." : "Off: anyone who can see where it lies sees it. Save to draft keeps a change."),
+      checked: hidden,
+      disabled: problem !== null,
+      onChange: toggle
+    }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
 var CHECKS = [
@@ -16713,6 +17398,13 @@ function ItemObjectivePicker(props) {
   const items = b2(() => Object.values(props.world.entities).filter((e3) => isItemKind(kinds, e3.kind)).map((e3) => ({ value: e3.id, label: e3.name, ...e3.visibility === "discoverable" ? { sublabel: "hidden until searched" } : {} })).sort((a3, b3) => a3.label.localeCompare(b3.label)), [props.world.entities, kinds]);
   const places2 = b2(() => Object.values(props.world.places).map((p3) => ({ value: p3.id, label: p3.name })).sort((a3, b3) => a3.label.localeCompare(b3.label)), [props.world.places]);
   const ready = item !== "" && (check !== "at" || place !== "");
+  const named = (id, of) => ({ id, name: of[id]?.name ?? id });
+  const [label, setLabel] = d2("");
+  const suggested = ready ? itemObjectiveLabel(check, named(item, props.world.entities), check === "at" ? named(place, props.world.places) : null) : "";
+  const add = () => {
+    props.onAdd(itemObjective(check, named(item, props.world.entities), check === "at" ? named(place, props.world.places) : null, label));
+    setLabel("");
+  };
   return /* @__PURE__ */ u3("div", {
     "data-lre-item-objective": "",
     children: /* @__PURE__ */ u3(FormGroup, {
@@ -16738,11 +17430,19 @@ function ItemObjectivePicker(props) {
           placeholder: "Pick a place",
           onChange: setPlace
         }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(TextInput, {
+          label: "What the player reads",
+          value: label,
+          placeholder: suggested || "Pick a thing first",
+          hint: "Left empty, it reads as shown.",
+          issues: [],
+          onChange: (v3) => setLabel(typeof v3 === "string" ? v3 : "")
+        }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(Button, {
           size: "sm",
           icon: "plus",
           disabled: !ready,
-          onClick: () => props.onAdd(itemObjective(check, item, place)),
+          onClick: add,
           children: "Add objective"
         }, undefined, false, undefined, this)
       ]
@@ -17848,338 +18548,151 @@ function MindsEditor() {
   }, undefined, true, undefined, this);
 }
 
-// src/frontend/build/book-lore.tsx
-function useBooks() {
-  const app = useApp();
-  const [books, setBooks] = d2(null);
-  A(() => {
-    app.request({ type: "lre.lore", op: "books" }).then((body) => setBooks(body?.books ?? []));
-  }, []);
-  return books;
+// src/frontend/build/needs-editor.tsx
+function needTiming(t3) {
+  if (t3.rate <= 0)
+    return "At 0 points an hour it never grows, so it's never told and never alerts.";
+  const after = (point) => formatMinutes(point / t3.rate * 60);
+  return `From met, it's told after ${after(t3.tell)} and alerts after ${after(t3.alert)}.`;
 }
-function LoreBooksSection() {
+var ON_OFF = [
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" }
+];
+function NeedsFields(props) {
+  const set = (need, patch) => props.onChange({ ...props.value, [need]: { ...props.value[need], ...patch } });
+  return /* @__PURE__ */ u3(M, {
+    children: NEED_IDS.map((need) => {
+      const t3 = props.value[need];
+      const words2 = NEED_WORDS[need];
+      return /* @__PURE__ */ u3(FormGroup, {
+        title: words2.name,
+        aside: /* @__PURE__ */ u3(Seg, {
+          label: words2.name,
+          value: t3.on ? "on" : "off",
+          options: ON_OFF,
+          disabled: props.disabled,
+          onChange: (v3) => set(need, { on: v3 === "on" })
+        }, undefined, false, undefined, this),
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: [
+              "Met by ",
+              words2.metBy,
+              ". Once it's pressing, the narrator is told your character is ",
+              words2.word,
+              "."
+            ]
+          }, undefined, true, undefined, this),
+          t3.on ? /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3(NumberStepper, {
+                label: `Grows by ${t3.rate} ${t3.rate === 1 ? "point" : "points"} an hour, out of 100`,
+                value: t3.rate,
+                min: 0,
+                max: 100,
+                step: 0.5,
+                disabled: props.disabled,
+                onChange: (rate) => set(need, { rate })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(NumberStepper, {
+                label: `Told to the narrator from ${t3.tell}`,
+                value: t3.tell,
+                min: 0,
+                max: 100,
+                integer: true,
+                disabled: props.disabled,
+                onChange: (tell) => set(need, { tell })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(NumberStepper, {
+                label: `An alert from ${t3.alert}`,
+                value: t3.alert,
+                min: 0,
+                max: 100,
+                integer: true,
+                disabled: props.disabled,
+                onChange: (alert) => set(need, { alert })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("p", {
+                class: "lre-minds-note",
+                children: [
+                  needTiming(t3),
+                  " Play → Me marks it from the point it's told. An alert stops a time skip only if Time → Interrupts says so, which by default it doesn't."
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "Off: it never grows, shows, is told or alerts."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(props.lint, `needs.${need}`)
+          }, undefined, false, undefined, this)
+        ]
+      }, need, true, undefined, this);
+    })
+  }, undefined, false, undefined, this);
+}
+function NeedsEditor() {
   const app = useApp();
   const draft = useSelect(app.drafts, (d3) => d3);
   const send = b2(() => draftSend(app), [app]);
+  const initial = draft ? needsSettingsOf(draft.doc) : NEED_DEFAULTS;
+  const [value, setValue] = d2(initial);
   const [busy, run] = useBusy();
-  const books = useBooks();
-  const [choice, setChoice] = d2("");
-  const pickId = P2();
+  useHeld(value, setValue, initial, `${draft?.worldId ?? ""}/needs`);
   if (!draft)
     return null;
-  const listed = loreBooksOf(draft.doc);
-  const save = (next) => run(async () => {
-    await send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "meta", value: { loreBooks: next } });
-    setChoice("");
-  });
+  const changed = JSON.stringify(value) !== JSON.stringify(initial);
+  const save = (next) => run(() => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "needs", value: next }));
+  const lint = lintAt(draft.lint, "needs");
   return /* @__PURE__ */ u3("div", {
-    "data-lre-lore-books": true,
-    children: /* @__PURE__ */ u3(Section, {
-      title: "Lore books",
-      aside: listed.length > 0 ? /* @__PURE__ */ u3(Badge, {
-        children: listed.length
-      }, undefined, false, undefined, this) : undefined,
-      children: /* @__PURE__ */ u3("div", {
-        class: "lre-stack",
-        children: [
-          /* @__PURE__ */ u3("p", {
-            class: "lre-build-note",
-            children: "The helpers and minds read these World Info books as lore, live, beside the books attached to a chat and your global books. A character's or persona's book is read only when it is listed here. Commit, then Upgrade a chat, to use a change in it."
-          }, undefined, false, undefined, this),
-          listed.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
-            label: "Lore books",
-            children: listed.map((id) => {
-              const name = books?.find((b3) => b3.id === id)?.name;
-              const missing = books !== null && name === undefined;
-              return /* @__PURE__ */ u3(ActionRow, {
-                title: name ?? id,
-                subtitle: missing ? "This book no longer exists, so nothing reads it: remove it." : undefined,
-                value: missing ? /* @__PURE__ */ u3(Badge, {
-                  tone: "neg",
-                  children: "Missing"
-                }, undefined, false, undefined, this) : undefined,
-                actions: /* @__PURE__ */ u3(IconButton, {
-                  icon: "close",
-                  label: `Remove ${name ?? id}`,
-                  disabled: busy,
-                  onClick: () => save(listed.filter((b3) => b3 !== id))
-                }, undefined, false, undefined, this)
-              }, id, false, undefined, this);
-            })
-          }, undefined, false, undefined, this) : null,
-          /* @__PURE__ */ u3(Issues, {
-            issues: lintAt(draft.lint, "loreBooks")
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-form-pins-add",
-            children: [
-              /* @__PURE__ */ u3("label", {
-                for: pickId,
-                children: "Add a book"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("select", {
-                id: pickId,
-                class: "lre-input",
-                value: choice,
-                onChange: (event) => setChoice(event.currentTarget.value),
-                children: [
-                  /* @__PURE__ */ u3("option", {
-                    value: "",
-                    children: books === null ? "Loading books…" : "Choose a book"
-                  }, undefined, false, undefined, this),
-                  (books ?? []).filter((b3) => !listed.includes(b3.id)).map((b3) => /* @__PURE__ */ u3("option", {
-                    value: b3.id,
-                    children: b3.name
-                  }, b3.id, false, undefined, this))
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ u3("div", {
-                class: "lre-form-pins-actions",
-                children: /* @__PURE__ */ u3(Button, {
-                  variant: "primary",
-                  icon: "plus",
-                  disabled: choice === "" || busy,
-                  onClick: () => save([...listed, choice]),
-                  children: "Add"
-                }, undefined, false, undefined, this)
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function EntryFields(props) {
-  const [fields, setFields] = d2(props.entry.lore ?? {});
-  const gateId = P2();
-  const visibilityId = P2();
-  const audienceLabel = P2();
-  A(() => setFields(props.entry.lore ?? {}), [props.entry.id, JSON.stringify(props.entry.lore ?? {})]);
-  const secret = loreIsSecret(fields);
-  const audience = fields.audience ?? [];
-  const prose = audience.filter((p3) => PROSE_STEPS.includes(p3));
-  const set = (patch) => setFields({ ...fields, ...patch });
-  const toggle = (purpose) => set({ audience: audience.includes(purpose) ? audience.filter((p3) => p3 !== purpose) : LORE_AUDIENCE.filter((p3) => p3 === purpose || audience.includes(p3)) });
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-form-lore-fields",
-    "data-lre-book-entry": props.entry.id,
+    class: "lre-build-page",
+    "data-lre-editor": "part:needs",
     children: [
-      /* @__PURE__ */ u3(CheckField, {
-        label: "Make this entry secret",
-        help: "It is stored switched off: it reaches no prompt and no helper until its gate holds.",
-        checked: secret,
-        onChange: (on) => set({ secret: on })
+      /* @__PURE__ */ u3(PageHeader, {
+        title: PART_INFO.needs.label,
+        subtitle: PART_INFO.needs.hint
       }, undefined, false, undefined, this),
-      secret ? /* @__PURE__ */ u3(M, {
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-field",
-            children: [
-              /* @__PURE__ */ u3("label", {
-                class: "label",
-                for: gateId,
-                children: "Gate"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("input", {
-                id: gateId,
-                class: "lre-input",
-                value: fields.gate ?? "",
-                placeholder: "stage.keeper == 'revealed'",
-                onInput: (event) => set({ gate: event.currentTarget.value })
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("span", {
-                class: "lre-field-help",
-                children: "When it may be read: a formula on the world's state"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-field",
-            role: "group",
-            "aria-labelledby": audienceLabel,
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "label",
-                id: audienceLabel,
-                children: "Helpers that may read it before the gate holds"
-              }, undefined, false, undefined, this),
-              LORE_AUDIENCE.map((purpose) => /* @__PURE__ */ u3(CheckField, {
-                label: STEP_LABEL[purpose],
-                help: PROSE_STEPS.includes(purpose) ? "Writes for the player: never reads a secret" : undefined,
-                checked: audience.includes(purpose),
-                onChange: () => toggle(purpose)
-              }, purpose, false, undefined, this))
-            ]
-          }, undefined, true, undefined, this),
-          prose.length > 0 ? /* @__PURE__ */ u3(Banner, {
-            tone: "warn",
-            children: [
-              prose.map((p3) => STEP_LABEL[p3]).join(", "),
-              " write what the narrator or the player sees, so they never read this secret before its gate holds."
-            ]
-          }, undefined, true, undefined, this) : null,
-          /* @__PURE__ */ u3(TagListInput, {
-            label: "Holders",
-            noun: "character id",
-            value: fields.holders ?? [],
-            suggestions: [],
-            onChange: (next) => set({ holders: next }),
-            children: /* @__PURE__ */ u3("span", {
-              class: "lre-field-help",
-              children: "Characters whose own secret it is: their minds read it"
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null,
-      /* @__PURE__ */ u3("div", {
-        class: "lre-field",
-        children: [
-          /* @__PURE__ */ u3("label", {
-            class: "label",
-            for: visibilityId,
-            children: "Who may read it"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("select", {
-            id: visibilityId,
-            class: "lre-input",
-            value: fields.visibility ?? "public",
-            onChange: (event) => set({ visibility: event.currentTarget.value === "known_by" ? "known_by" : "public" }),
-            children: [
-              /* @__PURE__ */ u3("option", {
-                value: "public",
-                children: "Anyone"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("option", {
-                value: "known_by",
-                children: "Known by: once your character knows everyone and everywhere it links"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3(TagListInput, {
-        label: "Links",
-        noun: "id",
-        value: fields.links ?? [],
-        suggestions: [],
-        onChange: (next) => set({ links: next }),
-        children: /* @__PURE__ */ u3("span", {
-          class: "lre-field-help",
-          children: "The people and places it is about"
-        }, undefined, false, undefined, this)
+      /* @__PURE__ */ u3("p", {
+        class: "lre-build-note",
+        children: "Each need runs from 0, met, to 100, urgent, and grows by the hour until something meets it. Needs run from Cast life 4 (Realism), and only the player character's are told and shown."
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(TagListInput, {
-        label: "Aliases",
-        noun: "alias",
-        value: fields.aliases ?? [],
-        suggestions: [],
-        onChange: (next) => set({ aliases: next }),
-        children: /* @__PURE__ */ u3("span", {
-          class: "lre-field-help",
-          children: "Other names it goes by"
-        }, undefined, false, undefined, this)
+      /* @__PURE__ */ u3(Issues, {
+        issues: lint.filter((issue) => !NEED_IDS.some((need) => issue.path === `needs.${need}` || issue.path.startsWith(`needs.${need}.`)))
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-pins-actions",
+      /* @__PURE__ */ u3(NeedsFields, {
+        value,
+        lint,
+        disabled: busy,
+        onChange: setValue
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SaveBar, {
         children: [
           /* @__PURE__ */ u3(Button, {
             variant: "primary",
-            disabled: props.busy,
-            onClick: () => props.onSave(fields),
-            children: "Save to the book"
+            disabled: !changed,
+            busy,
+            onClick: () => save(value),
+            children: "Save to draft"
           }, undefined, false, undefined, this),
-          props.entry.lore ? /* @__PURE__ */ u3(Button, {
+          /* @__PURE__ */ u3(Button, {
             variant: "ghost",
-            disabled: props.busy,
-            onClick: () => props.onSave(null),
-            children: "Take the fields off"
-          }, undefined, false, undefined, this) : null
+            disabled: !changed || busy,
+            onClick: () => setValue(initial),
+            children: "Revert"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: busy || draft.doc.needs === undefined,
+            onClick: () => save(NEED_DEFAULTS),
+            children: "Use the defaults"
+          }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
-}
-function BookEntriesSection() {
-  const app = useApp();
-  const books = useBooks();
-  const [busy, run] = useBusy();
-  const [book, setBook] = d2("");
-  const [entries, setEntries] = d2(null);
-  const [open, setOpen] = d2(null);
-  const bookId = P2();
-  A(() => {
-    setEntries(null);
-    setOpen(null);
-    if (book === "")
-      return;
-    app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
-  }, [book]);
-  const save = (entryId, fields) => run(async () => {
-    const body = await app.request({ type: "lre.lore", op: "fields", bookId: book, entryId, fields });
-    if (body?.entries)
-      setEntries(body.entries);
-  });
-  const shown = entries?.find((e3) => e3.id === open) ?? null;
-  return /* @__PURE__ */ u3("div", {
-    "data-lre-book-entries": true,
-    children: /* @__PURE__ */ u3(Section, {
-      title: "World Info entries",
-      children: /* @__PURE__ */ u3("div", {
-        class: "lre-stack",
-        children: [
-          /* @__PURE__ */ u3("p", {
-            class: "lre-build-note",
-            children: "An entry of a book the chat reads is lore as it is. Give it the fields a world entry has, or make it secret: it stays switched off, out of every prompt and helper, until its gate holds."
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("label", {
-            for: bookId,
-            children: "Book"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("select", {
-            id: bookId,
-            class: "lre-input",
-            value: book,
-            onChange: (event) => setBook(event.currentTarget.value),
-            children: [
-              /* @__PURE__ */ u3("option", {
-                value: "",
-                children: books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"
-              }, undefined, false, undefined, this),
-              (books ?? []).map((b3) => /* @__PURE__ */ u3("option", {
-                value: b3.id,
-                children: b3.attached ? `${b3.name} (in this chat)` : b3.name
-              }, b3.id, false, undefined, this))
-            ]
-          }, undefined, true, undefined, this),
-          entries && entries.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
-            label: "Entries",
-            children: entries.map((e3) => /* @__PURE__ */ u3(ActionRow, {
-              title: e3.title,
-              value: e3.lore && loreIsSecret(e3.lore) ? /* @__PURE__ */ u3(Badge, {
-                tone: "gm",
-                children: "Secret"
-              }, undefined, false, undefined, this) : e3.lore ? /* @__PURE__ */ u3(Badge, {
-                children: "Lore fields"
-              }, undefined, false, undefined, this) : e3.disabled ? /* @__PURE__ */ u3(Badge, {
-                children: "Off in its book"
-              }, undefined, false, undefined, this) : undefined,
-              actions: /* @__PURE__ */ u3(IconButton, {
-                icon: open === e3.id ? "close" : "edit",
-                label: open === e3.id ? `Close ${e3.title}` : `Edit ${e3.title}'s lore fields`,
-                onClick: () => setOpen(open === e3.id ? null : e3.id)
-              }, undefined, false, undefined, this)
-            }, e3.id, false, undefined, this))
-          }, undefined, false, undefined, this) : null,
-          shown ? /* @__PURE__ */ u3(EntryFields, {
-            entry: shown,
-            busy,
-            onSave: (fields) => save(shown.id, fields)
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
 }
 
 // src/frontend/build/lore-editor.tsx
@@ -18187,7 +18700,7 @@ var specs = (keys) => COLLECTION_SPECS.lore.filter((s3) => keys.includes(s3.key)
 var TEXT = specs(["title", "content"]);
 var MORE = specs(["links", "group", "priority"]);
 var SECRET = specs(["visibility", "secret"]);
-var GATE = specs(["gate", "holders"]);
+var HOLDERS = specs(["holders"]);
 function useDrift(app, worldId, lore, id) {
   const [drift, setDrift] = d2(null);
   const sourced = Object.entries(lore).filter(([key, l3]) => (id === undefined || key === id) && loreSourceOf(l3.source).kind === "book");
@@ -18236,7 +18749,7 @@ function LoreList(props) {
     children: [
       /* @__PURE__ */ u3(PageHeader, {
         title: "Lore",
-        subtitle: "Kept in the world. The engine's helpers read it. The narrator gets no lore section, but the brief and the prose outline draw on public entries in what they write for its Outline.",
+        subtitle: "Kept in the world. The engine's helpers read it, and the narrator gets the entries about where your character is in the Place section; the brief and the prose outline draw on the other public entries for its Outline.",
         actions: add
       }, undefined, false, undefined, this),
       adding ? /* @__PURE__ */ u3(NewItem, {
@@ -18492,14 +19005,13 @@ function LoreEditor(props) {
   const [busy, run] = useBusy();
   useHeld(value, setValue, initial, `${props.world.id}/lore/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
-  const audienceLabel = P2();
   const lint = draft?.lint ?? [];
   const path = `lore.${id}`;
   const ctx = { doc: props.world, lint, path, identifiers, functions: draft?.functions ?? [] };
   const changed = JSON.stringify(value) !== JSON.stringify(stored ?? null);
   const secret = loreIsSecret(value);
   const audience = strings(value.audience).filter((s3) => LORE_AUDIENCE.includes(s3));
-  const prose = audience.filter((s3) => PROSE_STEPS.includes(s3));
+  const gate = typeof value.gate === "string" ? value.gate : "";
   const topicsInUse = b2(() => [...new Set(Object.values(props.world.lore).flatMap((l3) => l3.topics ?? []))].sort((a3, b3) => a3.localeCompare(b3)), [props.world.lore]);
   const keywordsInUse = b2(() => [
     ...new Set(Object.entries(props.world.lore).filter(([other]) => other !== id).flatMap(([, l3]) => l3.keys))
@@ -18634,43 +19146,35 @@ function LoreEditor(props) {
               class: "lre-form-lore-fields",
               "data-lre-lore-audience": true,
               children: [
+                /* @__PURE__ */ u3(FieldInput, {
+                  spec: SECRET_GATE_SPEC,
+                  value: value.gate,
+                  ctx,
+                  path,
+                  parent: value,
+                  onChange: (next) => {
+                    const out = { ...value };
+                    if (typeof next === "string" && next !== "")
+                      out.gate = next;
+                    else
+                      delete out.gate;
+                    setValue(out);
+                  }
+                }, undefined, false, undefined, this),
+                gate.trim() === "" ? /* @__PURE__ */ u3(GateExamples, {
+                  doc: props.world,
+                  onPick: (formula) => setValue({ ...value, gate: formula })
+                }, undefined, false, undefined, this) : null,
                 /* @__PURE__ */ u3(SchemaFields, {
-                  specs: GATE,
+                  specs: HOLDERS,
                   value,
                   ctx,
                   onChange: setValue
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-field",
-                  role: "group",
-                  "aria-labelledby": audienceLabel,
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "label",
-                      id: audienceLabel,
-                      children: "Helpers that may read it before the gate holds"
-                    }, undefined, false, undefined, this),
-                    LORE_AUDIENCE.map((purpose) => /* @__PURE__ */ u3(CheckField, {
-                      label: STEP_LABEL[purpose],
-                      help: PROSE_STEPS.includes(purpose) ? "Writes for the player: never reads a secret" : undefined,
-                      checked: audience.includes(purpose),
-                      onChange: () => set("audience", audience.includes(purpose) ? audience.filter((p3) => p3 !== purpose) : LORE_AUDIENCE.filter((p3) => p3 === purpose || audience.includes(p3)))
-                    }, purpose, false, undefined, this))
-                  ]
-                }, undefined, true, undefined, this),
-                prose.length > 0 ? /* @__PURE__ */ u3(Banner, {
-                  tone: "warn",
-                  children: [
-                    prose.map((p3) => STEP_LABEL[p3]).join(", "),
-                    " write",
-                    prose.length === 1 ? "s" : "",
-                    " what the narrator or the player sees, so ",
-                    prose.length === 1 ? "it never reads" : "they never read",
-                    " this secret before its gate holds."
-                  ]
-                }, undefined, true, undefined, this) : null,
-                /* @__PURE__ */ u3(Issues, {
-                  issues: lintAt(lint, `${path}.audience`)
+                /* @__PURE__ */ u3(SecretAudience, {
+                  audience,
+                  issues: lintAt(lint, `${path}.audience`),
+                  onChange: (next) => set("audience", next)
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this) : null
@@ -19005,9 +19509,9 @@ var INVITATIONS_EXPLAINED = {
   everyone: "Routine blocks may invite anyone, and people take each other's invitations."
 };
 var SOCIABILITY_EXPLAINED = {
-  reserved: "The wish for company and fun grows half as fast.",
-  usual: "The wish for company and fun grows as it usually does.",
-  outgoing: "The wish for company and fun grows half again as fast."
+  reserved: `${NEED_WORDS.social.name} and ${NEED_WORDS.fun.name.toLowerCase()} needs grow half as fast.`,
+  usual: `${NEED_WORDS.social.name} and ${NEED_WORDS.fun.name.toLowerCase()} needs grow as they usually do.`,
+  outgoing: `${NEED_WORDS.social.name} and ${NEED_WORDS.fun.name.toLowerCase()} needs grow half again as fast.`
 };
 function routineSettingsWrite(worldId, settings) {
   return { type: "lre.editor", worldId, base: null, op: "set", part: "routineSettings", value: { ...settings } };
@@ -23938,7 +24442,7 @@ function VarsPanel(props) {
       children: [
         row.vars.length === 0 ? /* @__PURE__ */ u3("p", {
           class: "lre-minds-note",
-          children: "None: this prompt is sent as you write it."
+          children: "No placeholders: the prompt is sent as you write it."
         }, undefined, false, undefined, this) : null,
         row.vars.length > 0 ? /* @__PURE__ */ u3("dl", {
           class: "lre-minds-vars-list",
@@ -23961,10 +24465,10 @@ function VarsPanel(props) {
           class: "lre-minds-note",
           children: row.note
         }, undefined, false, undefined, this) : null,
-        /* @__PURE__ */ u3("p", {
+        row.vars.length > 0 ? /* @__PURE__ */ u3("p", {
           class: "lre-minds-note",
           children: "Each holds only what your character may know: a line that would give away a secret is left out."
-        }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : null
       ]
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
@@ -23994,11 +24498,13 @@ function PromptEditor(props) {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          props.value === undefined ? /* @__PURE__ */ u3(Badge, {
-            children: "Built-in"
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+          props.value !== undefined ? /* @__PURE__ */ u3(Badge, {
             tone: "accent",
             children: "Your own"
+          }, undefined, false, undefined, this) : props.builtIn !== undefined ? /* @__PURE__ */ u3(Badge, {
+            children: "Built-in"
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+            children: "None added"
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
@@ -24007,6 +24513,7 @@ function PromptEditor(props) {
           class: "lre-input lre-minds-prompt-input",
           rows: 10,
           "aria-label": `${props.label} prompt`,
+          placeholder: props.builtIn === undefined ? "Nothing added: the built-in instructions run alone." : undefined,
           value: text,
           disabled: props.busy,
           onInput: (event) => setText(event.currentTarget.value)
@@ -24059,13 +24566,36 @@ function PromptEditor(props) {
         }, undefined, false, undefined, this),
         props.builtIn !== undefined ? /* @__PURE__ */ u3("div", {
           class: "lre-minds-default",
+          "data-lre-built-in": "replaced",
           children: /* @__PURE__ */ u3(Disclosure, {
-            summary: "The built-in default",
-            children: /* @__PURE__ */ u3("pre", {
-              class: "lre-minds-code",
-              children: props.builtIn
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
+            summary: "The built-in prompt (read-only)",
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-minds-note",
+                children: "Your prompt starts from this and replaces it; Reset to the default goes back to it."
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("pre", {
+                class: "lre-minds-code",
+                children: props.builtIn
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this) : props.adds !== undefined ? /* @__PURE__ */ u3("div", {
+          class: "lre-minds-default",
+          "data-lre-built-in": "added",
+          children: /* @__PURE__ */ u3(Disclosure, {
+            summary: "The built-in instructions (read-only)",
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-minds-note",
+                children: "Your prompt goes before these, which it can't change. They're made fresh each turn from the scene, so here is what they hold:"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("pre", {
+                class: "lre-minds-code",
+                children: props.adds
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
         }, undefined, false, undefined, this) : null,
         props.children
       ]
@@ -24939,6 +25469,16 @@ function SchemaEditor(props) {
   const path = `${props.collection}.${id}`;
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
   const PackConfig = props.collection === "packs" ? app.catalog.configs.get(id) : undefined;
+  const release = T2(() => {
+    return;
+  });
+  A(() => {
+    if (!isNew)
+      return;
+    const free = holdNew(app, COLLECTION_INFO[props.collection].noun);
+    release.current = free;
+    return free;
+  }, [isNew, props.collection, props.id]);
   if (isRecord(stored) && typeof stored.map === "string")
     return /* @__PURE__ */ u3(MapOwned, {
       worldId: props.world.id,
@@ -24951,8 +25491,10 @@ function SchemaEditor(props) {
   const name = itemLabel(props.collection, id, value, props.world.places);
   const save = () => run(async () => {
     const message = await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "put", collection: props.collection, id, value });
-    if (message.type === "lre.result" && isNew)
+    if (message.type === "lre.result" && isNew) {
+      release.current();
       go(app, { view: "item", worldId: props.world.id, collection: props.collection, id });
+    }
   });
   return /* @__PURE__ */ u3("div", {
     class: "lre-build-page",
@@ -24976,7 +25518,7 @@ function SchemaEditor(props) {
         onChange: (config) => setValue({ ...value, config })
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(SchemaFields, {
-        specs: COLLECTION_SPECS[props.collection],
+        specs: props.collection === "entities" ? entityFormSpecs(formDoc, value) : COLLECTION_SPECS[props.collection],
         value,
         ctx: { doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields },
         onChange: setValue
@@ -25016,7 +25558,7 @@ function SchemaEditor(props) {
           }, undefined, false, undefined, this)
         }, def.field, false, undefined, this);
       }) : null,
-      !isNew && (props.collection === "entities" || props.collection === "places") ? /* @__PURE__ */ u3(LorePinsSection, {
+      !isNew && (props.collection === "places" || props.collection === "entities" && isCharacter(formDoc, value)) ? /* @__PURE__ */ u3(LorePinsSection, {
         target: props.collection === "entities" ? "characters" : "places",
         id
       }, undefined, false, undefined, this) : null,
@@ -25069,8 +25611,6 @@ function partValue(doc, part) {
       return doc.realism;
     case "time":
       return doc.time;
-    case "needs":
-      return structuredClone(needsSettingsOf(doc));
     case "meta":
       return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}), currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) };
   }
@@ -25108,7 +25648,14 @@ function PartView(props) {
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3("p", {
           class: "lre-build-note",
-          children: "Lore pinned to a character or a place is on its page. Lore pinned to a step below is read by every call of that step."
+          children: [
+            "Lore pinned to a character or a place is on its page. Every call of a step below reads what is pinned to that step first, whatever the step's lore setting, within its lore tokens (Settings → Steps); a minds step says who reads its pins. ",
+            PINS_NOTE
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3("p", {
+          class: "lre-build-note",
+          children: KEEP_NOTE
         }, undefined, false, undefined, this),
         LORE_AUDIENCE.map((step) => /* @__PURE__ */ u3(LorePinsSection, {
           target: "steps",
@@ -25125,6 +25672,8 @@ function PartView(props) {
   }
   if (props.part === "routineSettings")
     return /* @__PURE__ */ u3(RoutineSettingsEditor, {}, undefined, false, undefined, this);
+  if (props.part === "needs")
+    return /* @__PURE__ */ u3(NeedsEditor, {}, undefined, false, undefined, this);
   return /* @__PURE__ */ u3(SchemaPartView, {
     part: props.part
   }, undefined, false, undefined, this);
@@ -26145,26 +26694,26 @@ function PinsAndUpgrade(props) {
 
 // src/frontend/gm/feed.tsx
 var SCOPE_LABEL = {
-  player: "What the player character knows",
-  scene: "Also what the people with him know",
-  gm: "Everything, marked for the narrator"
+  player: "What your character knows",
+  scene: "Also what the people with your character know",
+  gm: "Everything, with what your character doesn't know marked"
 };
 function feedSummary(feed) {
-  const parts = [];
   if (feed.enabled === false)
-    parts.push("off");
-  if (feed.scope && feed.scope !== "player")
-    parts.push(feed.scope === "scene" ? "scene scope" : "GM scope");
-  if (feed.maxLines !== undefined)
-    parts.push(`≤ ${feed.maxLines} lines`);
-  if (feed.maxTokens !== undefined)
-    parts.push(`≤ ${feed.maxTokens} tokens`);
+    return "Left out of the prompt";
+  const caps = [feed.maxLines !== undefined ? `${feed.maxLines} lines` : null, feed.maxTokens !== undefined ? `${feed.maxTokens} tokens` : null].filter((c3) => c3 !== null);
+  const parts = ["In the prompt", SCOPE_LABEL[feed.scope ?? "player"], caps.length > 0 ? `at most ${caps.join(", ")}` : "no cap"];
   if (feed.include)
-    parts.push(`sources: ${feed.include.join(", ")}`);
-  return parts.length > 0 ? parts.join(" · ") : "as the world has it";
+    parts.push(`${feed.include.length} picked ${feed.include.length === 1 ? "source" : "sources"}`);
+  return parts.join(" · ");
 }
-function chatFeedOf(draft, sources) {
-  const include = sources.split(",").map((s3) => s3.trim()).filter((s3) => s3 !== "");
+function ownSources(sources, section) {
+  return sources.filter((s3) => s3.slot === section).map((s3) => s3.id);
+}
+function sourcesTaken(feed, sources, section) {
+  return feed.include ?? ownSources(sources, section);
+}
+function chatFeedOf(draft, picked, own) {
   const to = {};
   if (draft.enabled === false)
     to.enabled = false;
@@ -26174,8 +26723,9 @@ function chatFeedOf(draft, sources) {
     to.maxLines = draft.maxLines;
   if (draft.maxTokens !== undefined)
     to.maxTokens = draft.maxTokens;
-  if (include.length > 0)
-    to.include = include;
+  const same = picked.length === own.length && own.every((id) => picked.includes(id));
+  if (!same && picked.length > 0)
+    to.include = [...picked];
   return to;
 }
 var CAP_START = { maxLines: 12, maxTokens: 400 };
@@ -26184,8 +26734,10 @@ function SectionFeedForm(props) {
   const [busy, run] = useBusy();
   const start = props.row.chat ?? props.row.world;
   const [draft, setDraft] = d2(start);
-  const [sources, setSources] = d2((start.include ?? []).join(", "));
+  const own = ownSources(props.sources, props.row.id);
+  const [picked, setPicked] = d2(sourcesTaken(start, props.sources, props.row.id));
   const set = (patch) => setDraft((d3) => ({ ...d3, ...patch }));
+  const offered = [...props.sources.filter((s3) => s3.slot === props.row.id), ...props.sources.filter((s3) => s3.slot !== props.row.id)];
   const send = (to) => run(async () => {
     const result = await app.request(editRequest(props.chatId, [{ op: "feed", section: props.row.id, to }]));
     if (result?.pending)
@@ -26193,73 +26745,84 @@ function SectionFeedForm(props) {
     if (result)
       props.onDone();
   });
-  const save = () => send(chatFeedOf(draft, sources));
+  const noneTaken = draft.enabled !== false && picked.length === 0;
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-feed-form": props.row.id,
     children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: props.row.chat ? "This chat has its own settings for this section." : "This chat follows the world's settings for this section."
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(HostSwitch, {
         checked: draft.enabled !== false,
         label: "In the prompt",
         onChange: (on) => set({ enabled: on })
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Field, {
+      /* @__PURE__ */ u3(HostSelect, {
         label: "Whose knowledge",
-        children: /* @__PURE__ */ u3(HostSelect, {
-          label: "Whose knowledge",
-          value: draft.scope ?? "player",
-          options: FEED_SCOPES.map((s3) => ({ value: s3, label: SCOPE_LABEL[s3] })),
-          onChange: (v3) => set({ scope: FEED_SCOPES.find((s3) => s3 === v3) ?? "player" })
-        }, undefined, false, undefined, this)
+        value: draft.scope ?? "player",
+        options: FEED_SCOPES.map((s3) => ({ value: s3, label: SCOPE_LABEL[s3] })),
+        onChange: (v3) => set({ scope: FEED_SCOPES.find((s3) => s3 === v3) ?? "player" })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(HostSwitch, {
         checked: draft.maxLines !== undefined,
         label: "Cap its lines",
         onChange: (on) => set({ maxLines: on ? draft.maxLines ?? CAP_START.maxLines : undefined })
       }, undefined, false, undefined, this),
-      draft.maxLines !== undefined ? /* @__PURE__ */ u3(Field, {
+      draft.maxLines !== undefined ? /* @__PURE__ */ u3(NumberStepper, {
         label: "At most lines",
-        children: /* @__PURE__ */ u3(NumberStepper, {
-          label: "At most lines",
-          value: draft.maxLines,
-          min: 1,
-          integer: true,
-          onChange: (v3) => set({ maxLines: v3 })
-        }, undefined, false, undefined, this)
+        value: draft.maxLines,
+        min: 1,
+        integer: true,
+        onChange: (v3) => set({ maxLines: v3 })
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(HostSwitch, {
         checked: draft.maxTokens !== undefined,
         label: "Cap its tokens",
         onChange: (on) => set({ maxTokens: on ? draft.maxTokens ?? CAP_START.maxTokens : undefined })
       }, undefined, false, undefined, this),
-      draft.maxTokens !== undefined ? /* @__PURE__ */ u3(Field, {
-        label: "At most tokens",
-        help: "Lines past it are cut from the end",
-        children: /* @__PURE__ */ u3(NumberStepper, {
-          label: "At most tokens",
-          value: draft.maxTokens,
-          min: 1,
-          integer: true,
-          onChange: (v3) => set({ maxTokens: v3 })
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3(Field, {
-        label: "Sources",
-        help: "Comma-separated renderer sources; empty: its own section's",
-        children: /* @__PURE__ */ u3("input", {
-          class: "lre-input",
-          "aria-label": "Sources",
-          value: sources,
-          onInput: (e3) => setSources(e3.currentTarget.value)
+      draft.maxTokens !== undefined ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(NumberStepper, {
+            label: "At most tokens",
+            value: draft.maxTokens,
+            min: 1,
+            integer: true,
+            onChange: (v3) => set({ maxTokens: v3 })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: "Lines past it are cut from the end."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3(Section, {
+        title: "What it tells",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          "data-lre-feed-sources": true,
+          children: offered.map((s3) => /* @__PURE__ */ u3(CheckField, {
+            label: s3.label,
+            help: own.includes(s3.id) ? "Its own" : undefined,
+            checked: picked.includes(s3.id),
+            onChange: (on) => setPicked((p3) => on ? [...p3, s3.id] : p3.filter((id) => id !== s3.id))
+          }, s3.id, false, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
+      noneTaken ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "Tick at least one, or switch the section out of the prompt."
+      }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3("div", {
         class: "lre-row",
         children: [
           /* @__PURE__ */ u3(Button, {
             variant: "primary",
             busy,
-            onClick: save,
+            disabled: noneTaken,
+            onClick: () => send(chatFeedOf(draft, picked, own)),
             children: "Save for this chat"
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Button, {
@@ -26274,39 +26837,53 @@ function SectionFeedForm(props) {
   }, undefined, true, undefined, this);
 }
 function FeedThisChat(props) {
-  const [open, setOpen] = d2(null);
+  const pages = usePages();
   const rows = props.controls?.sections ?? [];
   if (rows.length === 0)
     return /* @__PURE__ */ u3(Empty, {
       icon: "scroll",
       children: "Section settings appear once the chat has started."
     }, undefined, false, undefined, this);
-  const row = rows.find((r3) => r3.id === open);
+  const row = rows.find((r3) => r3.id === pages.page);
   return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
+    ref: pages.host.ref,
+    class: "lre-gm-pages",
+    onKeyDown: pages.host.onKeyDown,
+    "data-lre-gm-feed": true,
     children: [
-      /* @__PURE__ */ u3("span", {
-        class: "lre-small lre-muted",
-        children: "What goes into each section the narrator reads in this chat. A change is a GM edit with its own Undo; the world's settings are in Build → Sections."
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        flush: true,
-        children: /* @__PURE__ */ u3(List, {
-          children: rows.map((r3) => /* @__PURE__ */ u3(ListRow, {
-            icon: "scroll",
-            title: r3.label,
-            subtitle: `${r3.chat ? "This chat: " : "World: "}${feedSummary(r3.chat ?? r3.world)}`,
-            chevron: true,
-            onClick: () => setOpen(open === r3.id ? null : r3.id)
-          }, r3.id, false, undefined, this))
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      row ? /* @__PURE__ */ u3(Section, {
+      /* @__PURE__ */ u3("div", {
+        class: "lre-stack lre-gm-list",
+        hidden: row !== undefined,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: "What goes into each section the narrator reads in this chat. A change is a GM edit with its own Undo; the world's settings are in Build → Sections."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            flush: true,
+            children: /* @__PURE__ */ u3(List, {
+              children: rows.map((r3) => /* @__PURE__ */ u3(ListRow, {
+                icon: "scroll",
+                title: r3.label,
+                subtitle: `${r3.chat ? "This chat" : "The world's"}: ${feedSummary(r3.chat ?? r3.world)}`,
+                chevron: true,
+                onClick: () => pages.open(r3.id)
+              }, r3.id, false, undefined, this))
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      row ? /* @__PURE__ */ u3(GmPage, {
+        name: "section",
         title: row.label,
+        subtitle: "Section, this chat",
+        backLabel: "Sections",
+        onBack: pages.back,
         children: /* @__PURE__ */ u3(SectionFeedForm, {
           chatId: props.chatId,
           row,
-          onDone: () => setOpen(null)
+          sources: props.controls?.sources ?? [],
+          onDone: pages.back
         }, row.id, false, undefined, this)
       }, undefined, false, undefined, this) : null
     ]
@@ -26526,6 +27103,18 @@ function GmMode() {
   const sync = useSelect(app.sync, (state) => state);
   const section = useUi((ui) => ui.gm.section);
   A(() => () => app.ui.update(hideTruth), []);
+  const root = T2(null);
+  F2(() => {
+    const nav = root.current?.querySelector(":scope > .lre-bottomnav");
+    const el = root.current;
+    if (!nav || !el)
+      return;
+    const publish = () => el.style.setProperty("--lre-gm-nav-h", `${nav.offsetHeight}px`);
+    publish();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    observer?.observe(nav);
+    return () => observer?.disconnect();
+  });
   const chat = T2(sync.chatId);
   A(() => {
     if (chat.current === sync.chatId)
@@ -26562,6 +27151,7 @@ function GmMode() {
   const others = panels.filter((panel) => panel !== truth);
   const dot = others.some((panel) => view.pending.some((mark) => mark.panel === panel.id));
   return /* @__PURE__ */ u3("div", {
+    ref: root,
     class: "lre-gm",
     "data-lre-section": "gm",
     "data-lre-gm-section": section,
@@ -26950,7 +27540,7 @@ function TimePage(props) {
             ]
           }, undefined, true, undefined, this),
           /* @__PURE__ */ u3(NumberStepper, {
-            label: `Run skips up to (min): ${time.askBeyondMinutes > 0 ? formatMinutes(time.askBeyondMinutes) : "every skip asks"}`,
+            label: "Run skips up to (minutes)",
             value: time.askBeyondMinutes,
             min: 0,
             max: TIMELAPSE_REACH_MINUTES,
@@ -26958,6 +27548,12 @@ function TimePage(props) {
             integer: true,
             disabled: props.busy,
             onChange: (askBeyondMinutes) => props.patch({ time: { askBeyondMinutes } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-small lre-muted",
+            style: { margin: 0 },
+            "data-lre-skip-limit": true,
+            children: time.askBeyondMinutes > 0 ? `That's ${formatMinutes(time.askBeyondMinutes)}: a longer skip is offered as a Timelapse chip.` : "0: every skip with a length is offered as a Timelapse chip."
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
@@ -28354,6 +28950,15 @@ function stepPromptPatch(purpose, text, builtIn) {
   const own = text === null || text.trim() === "" || builtIn !== undefined && text.trim() === builtIn.trim() ? null : text;
   return { modelUse: { steps: { [purpose]: { template: own } } } };
 }
+function stepBuiltIn(purpose) {
+  if (purpose === "interpret" || purpose === "extract")
+    return { use: "added", text: ADDED_BEFORE[purpose] };
+  if (purpose === "skip")
+    return { use: "replaced", text: SKIP_PLAN_PROMPT };
+  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate")
+    return { use: "replaced", text: MIND_PROMPT_DEFAULTS[purpose] };
+  return { use: "replaced", text: purpose === "brief" || purpose === "outline" || purpose === "choices" ? PROSE_PROMPTS[purpose] : DECISION_PROMPTS[purpose] };
+}
 function StepPrompts(props) {
   const { purpose, busy } = props;
   if (purpose === "mind" || purpose === "memory" || purpose === "consolidate")
@@ -28363,12 +28968,15 @@ function StepPrompts(props) {
       busy,
       patch: props.patch
     }, undefined, false, undefined, this);
-  const builtIn = purpose === "skip" ? SKIP_PLAN_PROMPT : purpose === "brief" || purpose === "outline" || purpose === "choices" ? PROSE_PROMPTS[purpose] : undefined;
+  const built = stepBuiltIn(purpose);
+  const builtIn = built.use === "replaced" ? built.text : undefined;
+  const adds = built.use === "added" ? built.text : undefined;
   const own = /* @__PURE__ */ u3(PromptEditor, {
     id: purpose === "skip" ? "skip_plan" : purpose,
     label: purpose === "skip" ? "The skip plan" : "Your prompt",
     note: purpose === "skip" ? "As a time skip starts, how the people the model plans spend it. Replaces the built-in instructions; the answer format stays." : `${PROMPT_EFFECT[purpose]} It wins over the world's step template.`,
     builtIn,
+    adds,
     value: props.config.template,
     max: STEP_PROMPT_MAX,
     vars: purpose === "skip" ? "skip_plan" : purpose,
@@ -28812,6 +29420,8 @@ function TimeoutsSection(props) {
 }
 
 // src/frontend/settings/settings.tsx
+var STILL_CHECKING = { preset_lint_pending: true, step_model_unchecked: true };
+var CAVEAT_FIX = { step_connection_missing: "steps", step_model_missing: "steps", step_model_unchecked: "steps" };
 var PAGE2 = {
   helper: { title: "Helper model", subtitle: "What the engine's model calls run on", icon: "sliders" },
   model: { title: "Model use", subtitle: "How much the engine asks a model", icon: "bolt" },
@@ -28877,7 +29487,7 @@ function summaryOf(page, data, caveats, showIds, connections) {
     case "display":
       return { subtitle: "Show ids", value: showIds ? "On" : "Off" };
     case "caveats": {
-      const found = caveats?.filter((c3) => c3.code !== "preset_lint_pending") ?? [];
+      const found = caveats?.filter((c3) => !hasOwn(STILL_CHECKING, c3.code)) ?? [];
       if (caveats === null || found.length === 0 && caveats.length > 0)
         return { subtitle: "Checking your preset…" };
       return found.length > 0 ? { subtitle: "Warnings and what to know", badge: /* @__PURE__ */ u3(Badge, {
@@ -28962,10 +29572,23 @@ function CaveatsPage(props) {
         children: "Checking your preset against this chat…"
       }, undefined, false, undefined, this) : props.caveats.length > 0 ? /* @__PURE__ */ u3("div", {
         class: "lre-stack",
-        children: props.caveats.map((caveat) => /* @__PURE__ */ u3(Banner, {
-          tone: caveat.code === "preset_lint_pending" ? "info" : "warn",
-          children: caveat.message
-        }, caveat.code, false, undefined, this))
+        children: props.caveats.map((caveat) => {
+          const fix = hasOwn(CAVEAT_FIX, caveat.code) ? CAVEAT_FIX[caveat.code] : undefined;
+          return /* @__PURE__ */ u3("div", {
+            "data-lre-caveat": caveat.code,
+            children: /* @__PURE__ */ u3(Banner, {
+              tone: hasOwn(STILL_CHECKING, caveat.code) ? "info" : "warn",
+              actions: fix ? /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: PAGE2[fix].icon,
+                onClick: () => props.open(fix),
+                children: `Open ${PAGE2[fix].title}`
+              }, undefined, false, undefined, this) : undefined,
+              children: caveat.message
+            }, undefined, false, undefined, this)
+          }, caveat.code, false, undefined, this);
+        })
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
         icon: "check",
         children: "No warnings right now."
@@ -29112,7 +29735,8 @@ function Settings() {
     patch,
     busy
   }, undefined, false, undefined, this) : page === "display" ? /* @__PURE__ */ u3(DisplayPage, {}, undefined, false, undefined, this) : page === "diagnostics" ? /* @__PURE__ */ u3(DiagnosticsPage, {}, undefined, false, undefined, this) : page === "mcp" ? /* @__PURE__ */ u3(McpServerPage, {}, undefined, false, undefined, this) : /* @__PURE__ */ u3(CaveatsPage, {
-    caveats
+    caveats,
+    open: go2
   }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3("div", {
     ref: root,
@@ -31441,7 +32065,11 @@ var ui_default2 = combat;
 function decodeNeedsView(value) {
   if (!isRecord(value) || !Array.isArray(value.needs))
     return null;
-  return list(value.needs, (n2) => typeof n2.need === "string" && typeof n2.value === "number" ? { need: n2.need, name: str(n2.name, n2.need), label: str(n2.label), value: n2.value, pressing: n2.pressing === true } : null);
+  return list(value.needs, (n2) => typeof n2.need === "string" && typeof n2.value === "number" ? { need: n2.need, name: str(n2.name, n2.need), label: str(n2.label), value: n2.value, pressing: n2.pressing === true, tell: typeof n2.tell === "number" ? n2.tell : null, metBy: str(n2.metBy) } : null);
+}
+function needLine(n2) {
+  const point = n2.pressing ? `You're ${n2.label}, and the narrator knows.` : n2.tell !== null && n2.label !== "" ? `From ${n2.tell} you're ${n2.label}, and the narrator is told.` : "";
+  return [point, n2.metBy !== "" ? `Met by ${n2.metBy}.` : ""].filter((s3) => s3 !== "").join(" ");
 }
 function NeedsPanel(props) {
   const needs = decodeNeedsView(props.view);
@@ -31455,22 +32083,34 @@ function NeedsPanel(props) {
       tone: "warn",
       children: needs.filter((n2) => n2.pressing).map((n2) => n2.label).join(", ")
     }, undefined, false, undefined, this) : undefined,
-    children: /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      "data-lre-needs": true,
-      children: needs.map((n2) => /* @__PURE__ */ u3("div", {
-        "data-lre-need": n2.need,
-        "data-lre-pressing": n2.pressing ? "" : undefined,
-        children: /* @__PURE__ */ u3(Meter, {
-          label: n2.pressing ? `${n2.name}: ${n2.label}` : n2.name,
-          value: n2.value,
-          max: 100,
-          tone: n2.pressing ? "warn" : "accent",
-          showValue: true
-        }, undefined, false, undefined, this)
-      }, n2.need, false, undefined, this))
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-small lre-muted lre-needs-note",
+        children: "Each runs from 0, met, to 100, urgent, and grows by the hour until something meets it."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        "data-lre-needs": true,
+        children: needs.map((n2) => /* @__PURE__ */ u3("div", {
+          "data-lre-need": n2.need,
+          "data-lre-pressing": n2.pressing ? "" : undefined,
+          children: [
+            /* @__PURE__ */ u3(Meter, {
+              label: n2.pressing ? `${n2.name}: ${n2.label}` : n2.name,
+              value: n2.value,
+              max: 100,
+              tone: n2.pressing ? "warn" : "accent",
+              showValue: true
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("p", {
+              class: "lre-small lre-muted lre-need-line",
+              children: needLine(n2)
+            }, undefined, false, undefined, this)
+          ]
+        }, n2.need, true, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
 }
 
 // src/packs/castlife/ui/panel.tsx
@@ -32118,6 +32758,16 @@ function PersonSheet(props) {
 }
 
 // src/frontend/gm/editor.ts
+function newEdits(before, after) {
+  const seen = new Set(before.map((e3) => `${e3.messageId}\x00${e3.seq}`));
+  return after.filter((e3) => !seen.has(`${e3.messageId}\x00${e3.seq}`));
+}
+function editNotice(made, done) {
+  return { text: done ?? (made.flatMap((e3) => e3.lines).join(" · ") || "Saved"), undo: made.flatMap((e3) => e3.undo === null ? [] : [e3.undo]) };
+}
+function noticeStands(notice, gm) {
+  return notice.undo.every((chip) => gm.edits.some((e3) => e3.undo === chip));
+}
 function nameOf3(gm, id) {
   if (id === null)
     return "—";
@@ -37714,6 +38364,60 @@ function glanceLines(view, now) {
   return [...alerts, ...soon];
 }
 
+// src/frontend/gm/character-ops.ts
+function moveOp(entity, place) {
+  return place && place.id !== entity.place ? { op: "move", entity: entity.id, to: place.id } : null;
+}
+function homeOp(entity, place) {
+  return { op: "set", entity: entity.id, field: "home", value: place?.id ?? null };
+}
+function bedOp(entity, bed) {
+  return { op: "set", entity: entity.id, field: "bed", value: bedValue(bed) };
+}
+function partySwitchOp(entity, gm, on) {
+  const party = partyOf(entity, gm);
+  return party && party.travels !== on ? party.op : null;
+}
+function routineStanding(role, held, blockPlace, place, places2) {
+  if (role === "off")
+    return "off";
+  if (role === "informative")
+    return "context";
+  if (held)
+    return "held";
+  if (blockPlace === null)
+    return "living";
+  const parent = new Map(places2.map((p3) => [p3.id, p3.parent]));
+  const seen = new Set;
+  for (let at = place;at !== null && !seen.has(at); at = parent.get(at) ?? null) {
+    if (at === blockPlace)
+      return "living";
+    seen.add(at);
+  }
+  return "elsewhere";
+}
+var SHOWN_ON_SHEET = { in: true, [PARTY_RELATION]: true };
+function relationRows(entity, gm, words3) {
+  const detailOf = (relation) => {
+    const defs = gm.relationTypes.find((t3) => t3.id === relation.type)?.fields ?? [];
+    const parts = Object.entries(relation.fields ?? {}).flatMap(([id, v3]) => {
+      const def = defs.find((d3) => d3.id === id);
+      return def ? [`${def.label} ${typeof v3 === "string" ? v3 : JSON.stringify(v3)}`] : [];
+    });
+    if (relation.value !== undefined)
+      parts.push(`now ${relation.value}`);
+    return parts.length > 0 ? parts.join(" · ") : undefined;
+  };
+  if (!words3)
+    return entity.relations.map((relation) => ({ relation, detail: detailOf(relation) }));
+  const worded = words3.flatMap((w3) => {
+    const relation = entity.relations.find((r3) => r3.type === w3.type && r3.to === w3.to.id);
+    return relation ? [{ relation, detail: w3.words !== "" ? w3.words : undefined }] : [];
+  });
+  const rest = entity.relations.filter((r3) => !SHOWN_ON_SHEET[r3.type] && !worded.some((w3) => w3.relation === r3)).map((relation) => ({ relation, detail: detailOf(relation) }));
+  return [...worded, ...rest];
+}
+
 // src/frontend/gm/bed-picker.tsx
 function isItemKind2(kinds, kind) {
   let at = kind;
@@ -38224,13 +38928,6 @@ function Placement(props) {
     ]
   }, undefined, true, undefined, this);
 }
-function relationDetail(r3, gm) {
-  const defs = gm.relationTypes.find((t3) => t3.id === r3.type)?.fields ?? [];
-  const parts = Object.entries(r3.fields ?? {}).map(([id, v3]) => `${defs.find((d3) => d3.id === id)?.label ?? id} ${typeof v3 === "string" ? v3 : JSON.stringify(v3)}`);
-  if (r3.value !== undefined)
-    parts.push(`now ${r3.value}`);
-  return parts.length > 0 ? parts.join(" · ") : undefined;
-}
 function Relations(props) {
   const { entity, editor } = props;
   const types = editor.gm.relationTypes.filter((t3) => t3.id !== "in");
@@ -38241,19 +38938,22 @@ function Relations(props) {
   const typeId = P2();
   const toId = P2();
   const defs = types.find((t3) => t3.id === type)?.fields ?? [];
-  const fields = relationFields(defs, inputs, entity.relations.find((r3) => r3.type === type && r3.to === to)?.fields);
+  const picked = entity.relations.find((r3) => r3.type === type && r3.to === to);
+  const fields = relationFields(defs, inputs, picked?.fields);
   const label = (id) => editor.gm.relationTypes.find((t3) => t3.id === id)?.label ?? id;
+  const rows = relationRows(entity, editor.gm, props.words);
+  const wordsOf2 = (r3) => props.words?.find((w3) => w3.type === r3.type && w3.to.id === r3.to)?.words;
   return /* @__PURE__ */ u3(Section, {
     title: "Relations",
     children: [
-      entity.relations.length === 0 ? /* @__PURE__ */ u3("p", {
+      rows.length === 0 ? /* @__PURE__ */ u3("p", {
         class: "lre-gm-none",
         children: "None yet."
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(ActionRows, {
         label: "Relations",
-        children: entity.relations.map((r3) => /* @__PURE__ */ u3(ActionRow, {
+        children: rows.map(({ relation: r3, detail }) => /* @__PURE__ */ u3(ActionRow, {
           title: `${label(r3.type)} → ${r3.toName}`,
-          subtitle: relationDetail(r3, editor.gm),
+          subtitle: detail,
           id: r3.to,
           actions: /* @__PURE__ */ u3(M, {
             children: [
@@ -38320,6 +39020,15 @@ function Relations(props) {
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
+          picked?.value !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            "data-lre-relation-now": true,
+            children: [
+              "Now ",
+              picked.value,
+              wordsOf2(picked) ? `, ${wordsOf2(picked)}` : ""
+            ]
+          }, undefined, true, undefined, this) : null,
           defs.map((d3) => /* @__PURE__ */ u3(Field, {
             label: `${d3.label}${d3.min !== undefined || d3.max !== undefined ? ` (${d3.min ?? "…"}–${d3.max ?? "…"})` : ""}`,
             children: d3.type === "enum" || d3.type === "bool" ? /* @__PURE__ */ u3("select", {
@@ -43871,6 +44580,62 @@ function send(ctx, op, onDone) {
       onDone();
   });
 }
+function RunEveryone(props) {
+  const [asking, setAsking] = d2(false);
+  const minds = props.count === 1 ? "1 mind" : `${props.count} minds`;
+  return /* @__PURE__ */ u3(Section, {
+    title: "Run minds now",
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-minds-runall": "",
+      children: [
+        /* @__PURE__ */ u3("p", {
+          class: "lre-gm-note",
+          children: "Each mind thinks from the chat so far and its lore, as a turn would. A run is recorded as one edit you can undo."
+        }, undefined, false, undefined, this),
+        asking ? /* @__PURE__ */ u3(Banner, {
+          tone: "gm",
+          icon: "sparkle",
+          title: `Run ${minds} now?`,
+          actions: /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                variant: "primary",
+                icon: "sparkle",
+                disabled: props.disabled,
+                onClick: () => (setAsking(false), props.onRun()),
+                children: `Run ${minds}`
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                variant: "ghost",
+                onClick: () => setAsking(false),
+                children: "Cancel"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          children: "Everyone Live and Near, one model call each, starting now."
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          icon: "sparkle",
+          disabled: props.disabled || props.count === 0,
+          onClick: () => setAsking(true),
+          children: `Run everyone Live and Near (${props.count})…`
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          variant: props.picking ? "secondary" : "ghost",
+          icon: "users",
+          disabled: props.disabled,
+          onClick: props.onPick,
+          children: props.picking ? "Stop choosing" : "Choose who to run"
+        }, undefined, false, undefined, this),
+        props.picking ? /* @__PURE__ */ u3("p", {
+          class: "lre-gm-note",
+          children: "Tap people below to pick them, or pick everyone shown or a whole level in the bar at the bottom; its Run their minds runs them."
+        }, undefined, false, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
 function GmMindsSection(props) {
   const view = props.gm.minds;
   const pages = usePages();
@@ -43944,29 +44709,12 @@ function GmMindsSection(props) {
             minds,
             busy: props.busy
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Section, {
-            title: "Run minds now",
-            flush: true,
-            children: /* @__PURE__ */ u3(List, {
-              children: [
-                /* @__PURE__ */ u3(ListRow, {
-                  icon: "sparkle",
-                  title: `Run everyone Live and Near (${liveNear})`,
-                  subtitle: "From the chat so far and their lore, as a turn would; recorded as one edit you can undo",
-                  chevron: true,
-                  disabled: props.busy || running || liveNear === 0,
-                  onClick: () => void minds.start()
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(ListRow, {
-                  icon: "users",
-                  title: picking.on ? "Stop choosing" : "Choose who to run",
-                  subtitle: picking.on ? "Tap people below to pick them, or pick everyone shown or a level in the bar" : "Pick one or more from the list below",
-                  chevron: true,
-                  disabled: props.busy || running,
-                  onClick: () => picking.on ? picking.stop() : picking.start()
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
+          /* @__PURE__ */ u3(RunEveryone, {
+            count: liveNear,
+            disabled: props.busy || running,
+            picking: picking.on,
+            onRun: () => void minds.start(),
+            onPick: () => picking.on ? picking.stop() : picking.start()
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("div", {
             class: "lre-gm-tools",
@@ -50319,6 +51067,15 @@ function QuestSheet(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/packs/story/ui/objectives.ts
+function objectiveParts(o4) {
+  return typeof o4 === "string" ? { label: "", when: o4 } : { label: o4.label, when: o4.when };
+}
+function objectiveFrom(parts) {
+  const label = parts.label.trim();
+  return label === "" ? parts.when : { label, when: parts.when };
+}
+
 // src/packs/story/ui/track-editor.tsx
 function layoutTrack(track2) {
   const edges = [];
@@ -50492,11 +51249,12 @@ function TrackGraph(props) {
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
 }
-var STAGE_SPECS = [
+var STAGE_HEAD = [
   { kind: "text", key: "label", label: "Label" },
   { kind: "text", key: "cue", label: "Cue (the player sees it)", multiline: true, optional: true },
-  { kind: "text", key: "truth", label: "Secret truth (GM only until it's revealed)", multiline: true, optional: true },
-  { kind: "list", key: "objectives", label: "Objectives", item: { kind: "expr", key: "", label: "Objective" } },
+  { kind: "text", key: "truth", label: "Secret truth (GM only until it's revealed)", multiline: true, optional: true }
+];
+var STAGE_TAIL = [
   { kind: "expr", key: "gate", label: "Gate (it can't be entered until this holds)", optional: true },
   { kind: "list", key: "hints", label: "Hints", item: { kind: "text", key: "", label: "Hint" } },
   { kind: "number", key: "priority", label: "Planner priority (agendas)", optional: true },
@@ -50504,6 +51262,81 @@ var STAGE_SPECS = [
   { kind: "list", key: "rewards", label: "Rewards", item: EFFECT, title: "type" },
   { kind: "json", key: "answer", label: "Puzzle answer", optional: true, hint: '{"expect": ["…"], "normalize": true, "decision": {"threshold": 0.8}}' }
 ];
+function ObjectivesEditor(props) {
+  const list2 = props.stage.objectives ?? [];
+  const put = (i3, parts) => props.onChange(list2.map((o4, j3) => j3 === i3 ? objectiveFrom(parts) : o4));
+  return /* @__PURE__ */ u3(FormGroup, {
+    title: "Objectives",
+    aside: /* @__PURE__ */ u3("span", {
+      class: "lre-small lre-muted",
+      children: "The player sees each label in their quests"
+    }, undefined, false, undefined, this),
+    children: [
+      list2.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "None yet."
+      }, undefined, false, undefined, this) : null,
+      list2.map((o4, i3) => {
+        const parts = objectiveParts(o4);
+        return /* @__PURE__ */ u3("div", {
+          class: "lre-ve-transition",
+          "data-lre-objective": i3,
+          children: [
+            /* @__PURE__ */ u3("div", {
+              class: "lre-ve-transition-head",
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: "grow",
+                  children: [
+                    "Objective ",
+                    i3 + 1
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3(IconButton, {
+                  icon: "trash",
+                  label: `Remove objective ${i3 + 1}`,
+                  onClick: () => props.onChange(list2.filter((_3, j3) => j3 !== i3))
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3(Field, {
+              label: "What the player reads",
+              help: parts.label === "" ? "With none, the player reads the condition itself: give it words." : undefined,
+              children: /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                value: parts.label,
+                placeholder: "Find the spare relay",
+                onChange: (event) => put(i3, { ...parts, label: event.currentTarget.value })
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(ExprEditor, {
+              label: "Met when",
+              value: parts.when,
+              identifiers: props.identifiers,
+              functions: props.functions,
+              doc: props.world,
+              lint: lintAt(props.lint, `${props.path}.objectives.${i3}`),
+              onChange: (when) => put(i3, { ...parts, when })
+            }, undefined, false, undefined, this)
+          ]
+        }, i3, true, undefined, this);
+      }),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "plus",
+          onClick: () => props.onChange([...list2, objectiveFrom({ label: "", when: "" })]),
+          children: "Add objective"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ItemObjectivePicker, {
+        world: props.world,
+        onAdd: (objective) => props.onChange([...list2, objective])
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function StageSheet(props) {
   const { track: track2, id } = props;
   const stage = track2.stages[id];
@@ -50556,14 +51389,25 @@ function StageSheet(props) {
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(SchemaFields, {
-        specs: STAGE_SPECS,
+        specs: STAGE_HEAD,
         value: stage,
         ctx: { doc: props.world, lint: props.lint, path, identifiers: props.identifiers, functions: props.functions },
         onChange: (next) => set(next)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(ItemObjectivePicker, {
+      /* @__PURE__ */ u3(ObjectivesEditor, {
+        stage,
         world: props.world,
-        onAdd: (objective) => set({ ...stage, objectives: [...stage.objectives ?? [], objective] })
+        identifiers: props.identifiers,
+        functions: props.functions,
+        lint: props.lint,
+        path,
+        onChange: (objectives) => set({ ...stage, objectives })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SchemaFields, {
+        specs: STAGE_TAIL,
+        value: stage,
+        ctx: { doc: props.world, lint: props.lint, path, identifiers: props.identifiers, functions: props.functions },
+        onChange: (next) => set(next)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(FormGroup, {
         title: "Next stages",
@@ -50690,7 +51534,24 @@ function StageSheet(props) {
           },
           children: "Delete stage"
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SaveBar, {
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: !props.save.changed || props.save.busy,
+            busy: props.save.busy,
+            onClick: props.save.onSave,
+            children: "Save track to draft"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: !props.save.changed || props.save.busy,
+            onClick: props.save.onRevert,
+            children: "Revert track"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -50970,6 +51831,7 @@ function TrackEditor(props) {
         functions,
         lint,
         path: `tracks.${id}`,
+        save: { changed, busy, onSave: save, onRevert: () => setTrack(stored ? structuredClone(stored) : blank) },
         onChange: setTrack,
         onOpen: openStage,
         onClose: () => setOpen(null)
@@ -51748,6 +52610,7 @@ function StorySection(props) {
 }
 function EditsLog(props) {
   const { gm } = props;
+  const older = gm.edits.some((e3) => e3.undo === null);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-gm-list": "edits",
@@ -51765,36 +52628,96 @@ function EditsLog(props) {
         children: "No fixes or GM edits on this chat's path."
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Section, {
         title: `${gm.edits.length} in force, newest first`,
-        flush: true,
-        children: /* @__PURE__ */ u3(List, {
-          children: gm.edits.map((e3) => /* @__PURE__ */ u3(ListRow, {
-            icon: e3.by ? "user" : "edit",
-            title: e3.by ?? (e3.lines.join(" · ") || "Bookkeeping"),
-            subtitle: e3.by ? `The player's action: ${e3.lines.join(" · ")}` : undefined,
-            id: `${e3.messageId} · ${e3.seq}`
-          }, `${e3.messageId}:${e3.seq}`, false, undefined, this))
+        children: /* @__PURE__ */ u3(ActionRows, {
+          label: "Edits in force",
+          children: gm.edits.map((e3) => {
+            const undo = e3.undo;
+            return /* @__PURE__ */ u3(ActionRow, {
+              title: e3.by ?? (e3.lines.join(" · ") || "Bookkeeping"),
+              subtitle: e3.by ? `The player's action: ${e3.lines.join(" · ")}` : undefined,
+              id: `${e3.messageId} · ${e3.seq}`,
+              actions: undo === null ? undefined : /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "ghost",
+                icon: "undo",
+                disabled: props.busy,
+                onClick: () => props.onUndo(undo),
+                children: "Undo"
+              }, undefined, false, undefined, this)
+            }, `${e3.messageId}:${e3.seq}`, false, undefined, this);
+          })
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      older ? /* @__PURE__ */ u3("p", {
+        class: "lre-gm-note",
+        children: "Only the latest reply's edits can be undone, as in the chat."
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
 }
 
 // src/frontend/gm/batch.tsx
 var LEVELS5 = [0, 1, 2, 3, 4];
-function bulkTargets(editor, ids, change) {
-  if (forCharacters(change))
-    return ids.filter((id) => editor.gm.minds.characters.some((c3) => c3.entity === id));
-  if (change.kind === "move")
-    return ids.filter((id) => editor.gm.entities.some((e3) => e3.id === id && !e3.gone));
-  return [...ids];
+var BLANK_CHOICES = { tier: null, domain: null, level: null, role: null, pin: null, text: "", approach: null, to: null, tierAll: false, levelAll: false };
+function batchChanges(c3) {
+  const intent = c3.text.trim() === "" && c3.approach === null ? null : { kind: "intent", text: c3.text, approach: c3.approach === "mind" || c3.approach === null ? null : c3.approach };
+  return {
+    tier: c3.tier === null ? null : { kind: "tier", tier: c3.tier },
+    level: c3.domain === null || c3.level === null ? null : { kind: "level", domain: c3.domain, level: c3.level === "tier" ? null : c3.level },
+    role: c3.role === null ? null : { kind: "role", role: c3.role === "world" ? null : c3.role },
+    pin: c3.pin === null ? null : { kind: "pin", level: c3.pin === "score" ? null : c3.pin },
+    intent: intent && bulkOps([], intent) !== null ? intent : null,
+    move: c3.to === null ? null : { kind: "move", to: c3.to }
+  };
 }
-function ChangeCard(props) {
+function bulkTargets(editor, ids, kind, everything = false) {
+  if (forCharacters(kind))
+    return ids.filter((id) => editor.gm.minds.characters.some((c3) => c3.entity === id));
+  if (kind === "move")
+    return ids.filter((id) => editor.gm.entities.some((e3) => e3.id === id && !e3.gone));
+  return everything ? [...ids] : ids.filter((id) => editor.gm.entities.some((e3) => e3.id === id && e3.person));
+}
+function pickedSummary(gm, ids) {
+  const picked = gm.entities.filter((e3) => ids.includes(e3.id));
+  const people2 = picked.filter((e3) => e3.person);
+  const you = people2.some((e3) => e3.pov);
+  const things = picked.length - people2.length;
+  const who = people2.length === 0 ? null : you ? people2.length === 1 ? "you" : `${people2.length} people, you among them` : people2.length === 1 ? "1 person" : `${people2.length} people`;
+  return [who, things === 0 ? null : things === 1 ? "1 thing" : `${things} things`].filter((part) => part !== null).join(" and ");
+}
+function bulkDone(gm, change, count) {
+  switch (change.kind) {
+    case "tier":
+      return `Set ${count} to ${gm.tiers.find((t3) => t3.id === change.tier)?.label ?? change.tier}`;
+    case "level": {
+      const area = gm.domains.find((d3) => d3.id === change.domain)?.label ?? change.domain;
+      return change.level === null ? `${area} back to the tier for ${count}` : `${area} set to ${change.level} · ${LEVEL_LABEL[change.level]} for ${count}`;
+    }
+    case "role":
+      return change.role === null ? `Routine back to the world's for ${count}` : `Routine set to ${ROUTINE_ROLE_LABEL[change.role]} for ${count}`;
+    case "pin":
+      return change.level === null ? `Unpinned ${count}` : `Pinned ${count} to ${FIDELITY_LABEL[change.level]}`;
+    case "intent":
+      return change.text.trim() === "" && change.approach === null ? `Cleared the intent of ${count}` : `Gave ${count} your intent`;
+    case "move":
+      return `Moved ${count} to ${gm.places.find((p3) => p3.id === change.to)?.name ?? change.to}`;
+  }
+}
+function ChangeCard2(props) {
+  const { change } = props;
   return /* @__PURE__ */ u3(Section, {
     title: props.title,
     children: /* @__PURE__ */ u3("div", {
       class: "lre-stack",
       children: [
         props.children,
+        props.now ? /* @__PURE__ */ u3("p", {
+          class: "lre-batch-now",
+          children: [
+            "Now: ",
+            props.now
+          ]
+        }, undefined, true, undefined, this) : null,
         /* @__PURE__ */ u3("p", {
           class: "lre-gm-note",
           children: props.note
@@ -51802,9 +52725,9 @@ function ChangeCard(props) {
         /* @__PURE__ */ u3(Button, {
           variant: "primary",
           icon: "check",
-          disabled: props.busy || !props.ready || props.reach === 0,
-          onClick: props.onApply,
-          children: props.reach === 1 ? "Apply to 1" : `Apply to ${props.reach}`
+          disabled: props.busy || change === null || props.reach === 0,
+          onClick: () => change && props.onApply(change),
+          children: change === null ? "Apply" : props.reach === 0 ? "None of them fit" : `Apply to ${props.reach}`
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this)
@@ -51813,41 +52736,47 @@ function ChangeCard(props) {
 function BatchPage(props) {
   const { editor, ids } = props;
   const gm = editor.gm;
-  const [tier, setTier] = d2(gm.tiers[0]?.id ?? "");
-  const [domain, setDomain] = d2(gm.domains[0]?.id ?? "");
-  const [level, setLevel] = d2(null);
-  const [role, setRole] = d2(null);
-  const [pin, setPin] = d2(null);
-  const [text, setText] = d2("");
-  const [approach, setApproach] = d2(null);
-  const [place, setPlace] = d2("");
+  const [choices, setChoices] = d2(BLANK_CHOICES);
   const [outcome, setOutcome] = d2(null);
-  const tierId = P2();
-  const domainId = P2();
-  const levelId = P2();
-  const roleId = P2();
-  const pinId = P2();
-  const textId = P2();
-  const approachId = P2();
-  const placeId = P2();
-  const reach = (change) => bulkTargets(editor, ids, change).length;
-  const apply = (change) => {
-    const ops = bulkOps(bulkTargets(editor, ids, change), change);
+  const field = { tier: P2(), domain: P2(), level: P2(), role: P2(), pin: P2(), text: P2(), approach: P2(), place: P2() };
+  const choose = (patch) => setChoices((c3) => ({ ...c3, ...patch }));
+  const changes = batchChanges(choices);
+  const everything = { tier: choices.tierAll, level: choices.levelAll, role: false, pin: false, intent: false, move: false };
+  const reach = (card3) => bulkTargets(editor, ids, card3, everything[card3]);
+  const entities = (targets) => gm.entities.filter((e3) => targets.includes(e3.id));
+  const characters = (targets) => gm.minds.characters.filter((c3) => targets.includes(c3.entity));
+  const tiered = entities(reach("tier"));
+  const leveled = entities(reach("level"));
+  const others = ids.length - bulkTargets(editor, ids, "tier").length;
+  const chars = characters(reach("pin"));
+  const placed = entities(reach("move"));
+  const tierOf3 = (id) => gm.tiers.find((t3) => t3.id === id)?.label ?? id;
+  const levelOf = (e3) => {
+    const level = LEVELS5.find((n2) => n2 === e3.levels.find((l3) => l3.domain === choices.domain)?.override);
+    return level === undefined ? "from the tier" : `set to ${level} · ${LEVEL_LABEL[level]}`;
+  };
+  const apply = (card3, change) => {
+    const ops = bulkOps(reach(card3), change);
     if (!ops || ops.length === 0)
       return;
-    sendInChunks(ops, editor.edit).then(({ applied, of }) => {
+    editor.editAll(ops, (count) => bulkDone(gm, change, count)).then(({ applied, of }) => {
       if (applied === of)
         props.onBack();
       else
         setOutcome(applied === 0 ? "Nothing changed: the first edit was refused." : `${applied} of ${of} edits applied; the next was refused, so the rest weren't sent. Each applied edit has its own Undo.`);
     });
   };
-  const characters = ids.filter((id) => gm.minds.characters.some((c3) => c3.entity === id)).length;
-  const intent = { kind: "intent", text, approach };
+  const card2 = (name) => ({ change: changes[name], busy: editor.busy, onApply: (change) => apply(name, change) });
+  const widen = (key) => others > 0 ? /* @__PURE__ */ u3(HostSwitch, {
+    checked: choices[key],
+    label: others === 1 ? "Also the 1 picked that isn't a person" : `Also the ${others} picked that aren't people`,
+    onChange: (checked) => choose({ [key]: checked })
+  }, undefined, false, undefined, this) : null;
+  const charactersOnly = "It reaches the characters picked, never your own character.";
   return /* @__PURE__ */ u3(GmPage, {
     name: "batch",
     title: ids.length === 1 ? "Change 1 selected" : `Change ${ids.length} selected`,
-    subtitle: `${characters} of them characters`,
+    subtitle: pickedSummary(gm, ids),
     backLabel: "World",
     onBack: props.onBack,
     children: /* @__PURE__ */ u3("div", {
@@ -51856,67 +52785,84 @@ function BatchPage(props) {
       children: [
         /* @__PURE__ */ u3("p", {
           class: "lre-gm-note",
-          children: "Each change goes to everyone it applies to, as edits of at most 64, each with its own Undo."
+          children: "Pick a value, then Apply. Each change is saved as one edit you can undo (one for every 64 it changes)."
         }, undefined, false, undefined, this),
         outcome ? /* @__PURE__ */ u3(Banner, {
           tone: "warn",
           children: outcome
         }, undefined, false, undefined, this) : null,
-        /* @__PURE__ */ u3(ChangeCard, {
+        /* @__PURE__ */ u3(ChangeCard2, {
           title: "Tier",
-          note: "Their detail band's caps follow the tier.",
-          reach: reach({ kind: "tier", tier }),
-          ready: tier !== "",
-          busy: editor.busy,
-          onApply: () => apply({ kind: "tier", tier }),
-          children: /* @__PURE__ */ u3(Field, {
-            label: "Tier",
-            for: tierId,
-            children: /* @__PURE__ */ u3("select", {
-              id: tierId,
-              class: "lre-input",
-              value: tier,
-              onChange: (event) => setTier(event.currentTarget.value),
-              children: gm.tiers.map((t3) => /* @__PURE__ */ u3("option", {
-                value: t3.id,
-                children: t3.label
-              }, t3.id, false, undefined, this))
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(ChangeCard, {
-          title: "Detail in one domain",
-          note: "A level here wins over their tier's; From the tier hands it back.",
-          reach: domain === "" ? 0 : reach({ kind: "level", domain, level }),
-          ready: domain !== "",
-          busy: editor.busy,
-          onApply: () => domain !== "" && apply({ kind: "level", domain, level }),
+          note: "How important they are to the story, which sets how much detail the engine keeps on them.",
+          reach: tiered.length,
+          now: tiered.length > 0 ? mixOf(tiered.map((e3) => tierOf3(e3.tier))) : null,
+          ...card2("tier"),
           children: [
             /* @__PURE__ */ u3(Field, {
-              label: "Domain",
-              for: domainId,
+              label: "Tier",
+              for: field.tier,
               children: /* @__PURE__ */ u3("select", {
-                id: domainId,
+                id: field.tier,
                 class: "lre-input",
-                value: domain,
-                onChange: (event) => setDomain(event.currentTarget.value),
-                children: gm.domains.map((d3) => /* @__PURE__ */ u3("option", {
-                  value: d3.id,
-                  children: d3.label
-                }, d3.id, false, undefined, this))
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Field, {
-              label: "Level",
-              for: levelId,
-              children: /* @__PURE__ */ u3("select", {
-                id: levelId,
-                class: "lre-input",
-                value: level === null ? "" : String(level),
-                onChange: (event) => setLevel(event.currentTarget.value === "" ? null : Number(event.currentTarget.value)),
+                value: choices.tier ?? "",
+                onChange: (event) => choose({ tier: event.currentTarget.value === "" ? null : event.currentTarget.value }),
                 children: [
                   /* @__PURE__ */ u3("option", {
                     value: "",
+                    children: "Choose a tier…"
+                  }, undefined, false, undefined, this),
+                  gm.tiers.map((t3) => /* @__PURE__ */ u3("option", {
+                    value: t3.id,
+                    children: t3.label
+                  }, t3.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this)
+            }, undefined, false, undefined, this),
+            widen("tierAll")
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3(ChangeCard2, {
+          title: "Detail in one area",
+          note: "How closely the engine follows them in one area, over what their tier gives. “From the tier” goes back to the tier's.",
+          reach: leveled.length,
+          now: choices.domain === null || leveled.length === 0 ? null : mixOf(leveled.map(levelOf)),
+          ...card2("level"),
+          children: [
+            /* @__PURE__ */ u3(Field, {
+              label: "Area",
+              for: field.domain,
+              children: /* @__PURE__ */ u3("select", {
+                id: field.domain,
+                class: "lre-input",
+                value: choices.domain ?? "",
+                onChange: (event) => choose({ domain: gm.domains.find((d3) => d3.id === event.currentTarget.value)?.id ?? null }),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: "Choose an area…"
+                  }, undefined, false, undefined, this),
+                  gm.domains.map((d3) => /* @__PURE__ */ u3("option", {
+                    value: d3.id,
+                    children: d3.label
+                  }, d3.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Field, {
+              label: "Level",
+              for: field.level,
+              children: /* @__PURE__ */ u3("select", {
+                id: field.level,
+                class: "lre-input",
+                value: choices.level === null ? "" : String(choices.level),
+                onChange: (event) => choose({ level: event.currentTarget.value === "tier" ? "tier" : LEVELS5.find((n2) => String(n2) === event.currentTarget.value) ?? null }),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: "Choose a level…"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("option", {
+                    value: "tier",
                     children: "From the tier"
                   }, undefined, false, undefined, this),
                   LEVELS5.map((n2) => /* @__PURE__ */ u3("option", {
@@ -51929,27 +52875,31 @@ function BatchPage(props) {
                   }, n2, true, undefined, this))
                 ]
               }, undefined, true, undefined, this)
-            }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this),
+            widen("levelAll")
           ]
         }, undefined, true, undefined, this),
-        /* @__PURE__ */ u3(ChangeCard, {
+        /* @__PURE__ */ u3(ChangeCard2, {
           title: "Their routine",
-          note: "Characters only: what their routine is to the engine in this chat; As the world has it clears the chat's choice.",
-          reach: reach({ kind: "role", role }),
-          ready: true,
-          busy: editor.busy,
-          onApply: () => apply({ kind: "role", role }),
+          note: `How much their usual day steers them in this chat. “As the world has it” undoes this chat's choice. ${charactersOnly}`,
+          reach: chars.length,
+          now: null,
+          ...card2("role"),
           children: /* @__PURE__ */ u3(Field, {
             label: "Routine role",
-            for: roleId,
+            for: field.role,
             children: /* @__PURE__ */ u3("select", {
-              id: roleId,
+              id: field.role,
               class: "lre-input",
-              value: role ?? "",
-              onChange: (event) => setRole(ROUTINE_ROLES.find((r3) => r3 === event.currentTarget.value) ?? null),
+              value: choices.role ?? "",
+              onChange: (event) => choose({ role: event.currentTarget.value === "world" ? "world" : ROUTINE_ROLES.find((r3) => r3 === event.currentTarget.value) ?? null }),
               children: [
                 /* @__PURE__ */ u3("option", {
                   value: "",
+                  children: "Choose…"
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("option", {
+                  value: "world",
                   children: "As the world has it"
                 }, undefined, false, undefined, this),
                 ROUTINE_ROLES.map((r3) => /* @__PURE__ */ u3("option", {
@@ -51960,24 +52910,27 @@ function BatchPage(props) {
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(ChangeCard, {
+        /* @__PURE__ */ u3(ChangeCard2, {
           title: "Pin their fidelity",
-          note: "Characters only: keeps them at a level in this chat whatever their score; By score unpins.",
-          reach: reach({ kind: "pin", level: pin }),
-          ready: true,
-          busy: editor.busy,
-          onApply: () => apply({ kind: "pin", level: pin }),
+          note: `Keeps their mind at one level of attention in this chat, whatever happens. “By score” lets the engine decide again. ${charactersOnly}`,
+          reach: chars.length,
+          now: chars.length > 0 ? mixOf(chars.map((c3) => c3.fidelity.pin.gm === null ? "by score" : `pinned to ${FIDELITY_LABEL[c3.fidelity.pin.gm]}`)) : null,
+          ...card2("pin"),
           children: /* @__PURE__ */ u3(Field, {
             label: "Fidelity",
-            for: pinId,
+            for: field.pin,
             children: /* @__PURE__ */ u3("select", {
-              id: pinId,
+              id: field.pin,
               class: "lre-input",
-              value: pin ?? "",
-              onChange: (event) => setPin(FIDELITIES.find((f3) => f3 === event.currentTarget.value) ?? null),
+              value: choices.pin ?? "",
+              onChange: (event) => choose({ pin: event.currentTarget.value === "score" ? "score" : FIDELITIES.find((f3) => f3 === event.currentTarget.value) ?? null }),
               children: [
                 /* @__PURE__ */ u3("option", {
                   value: "",
+                  children: "Choose…"
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("option", {
+                  value: "score",
                   children: "By score"
                 }, undefined, false, undefined, this),
                 FIDELITIES.map((f3) => /* @__PURE__ */ u3("option", {
@@ -51988,38 +52941,41 @@ function BatchPage(props) {
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(ChangeCard, {
+        /* @__PURE__ */ u3(ChangeCard2, {
           title: "Your intent for them",
-          note: "Characters only: what each means to do now, which only their own mind reads. Blank text and Their mind decides clear it.",
-          reach: reach(intent),
-          ready: bulkOps([], intent) !== null,
-          busy: editor.busy,
-          onApply: () => apply(intent),
+          note: `What each of them means to do now; only their own mind reads it. Leave the text blank and choose “Their mind decides” to clear it. ${charactersOnly}`,
+          reach: chars.length,
+          now: chars.length > 0 ? mixOf(chars.map((c3) => c3.intent ? "with your intent" : "without your intent")) : null,
+          ...card2("intent"),
           children: [
             /* @__PURE__ */ u3(Field, {
               label: "What they mean to do",
-              for: textId,
-              help: `${text.length} / ${MIND_TEXT_CAPS.gmIntent}`,
+              for: field.text,
+              help: `${choices.text.length} / ${MIND_TEXT_CAPS.gmIntent}`,
               children: /* @__PURE__ */ u3("textarea", {
-                id: textId,
+                id: field.text,
                 class: "lre-input lre-gm-prose",
                 rows: 3,
                 maxLength: MIND_TEXT_CAPS.gmIntent,
-                value: text,
-                onInput: (event) => setText(event.currentTarget.value)
+                value: choices.text,
+                onInput: (event) => choose({ text: event.currentTarget.value })
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(Field, {
               label: "How they go about it",
-              for: approachId,
+              for: field.approach,
               children: /* @__PURE__ */ u3("select", {
-                id: approachId,
+                id: field.approach,
                 class: "lre-input",
-                value: approach ?? "",
-                onChange: (event) => setApproach(MIND_APPROACHES.find((a3) => a3 === event.currentTarget.value) ?? null),
+                value: choices.approach ?? "",
+                onChange: (event) => choose({ approach: event.currentTarget.value === "mind" ? "mind" : MIND_APPROACHES.find((a3) => a3 === event.currentTarget.value) ?? null }),
                 children: [
                   /* @__PURE__ */ u3("option", {
                     value: "",
+                    children: "Choose…"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("option", {
+                    value: "mind",
                     children: "Their mind decides"
                   }, undefined, false, undefined, this),
                   MIND_APPROACHES.map((a3) => /* @__PURE__ */ u3("option", {
@@ -52031,25 +52987,24 @@ function BatchPage(props) {
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this),
-        /* @__PURE__ */ u3(ChangeCard, {
+        /* @__PURE__ */ u3(ChangeCard2, {
           title: "Move to a place",
-          note: "Each one moves as the GM's Move does: anyone not removed.",
-          reach: place === "" ? 0 : reach({ kind: "move", to: place }),
-          ready: place !== "",
-          busy: editor.busy,
-          onApply: () => place !== "" && apply({ kind: "move", to: place }),
+          note: "Moves each of them there, as Move on their page does. Anyone removed stays where they are.",
+          reach: placed.length,
+          now: placed.length > 0 ? mixOf(placed.map((e3) => e3.place === null ? "nowhere" : `at ${gm.places.find((p3) => p3.id === e3.place)?.name ?? e3.place}`)) : null,
+          ...card2("move"),
           children: /* @__PURE__ */ u3(Field, {
             label: "Place",
-            for: placeId,
+            for: field.place,
             children: /* @__PURE__ */ u3("select", {
-              id: placeId,
+              id: field.place,
               class: "lre-input",
-              value: place,
-              onChange: (event) => setPlace(event.currentTarget.value),
+              value: choices.to ?? "",
+              onChange: (event) => choose({ to: event.currentTarget.value === "" ? null : event.currentTarget.value }),
               children: [
                 /* @__PURE__ */ u3("option", {
                   value: "",
-                  children: "Choose a place"
+                  children: "Choose a place…"
                 }, undefined, false, undefined, this),
                 gm.places.map((p3) => /* @__PURE__ */ u3("option", {
                   value: p3.id,
@@ -52064,26 +53019,16 @@ function BatchPage(props) {
   }, undefined, false, undefined, this);
 }
 
-// src/frontend/gm/character-ops.ts
-function moveOp(entity, place) {
-  return place && place.id !== entity.place ? { op: "move", entity: entity.id, to: place.id } : null;
-}
-function homeOp(entity, place) {
-  return { op: "set", entity: entity.id, field: "home", value: place?.id ?? null };
-}
-function bedOp(entity, bed) {
-  return { op: "set", entity: entity.id, field: "bed", value: bedValue(bed) };
-}
-function partySwitchOp(entity, gm, on) {
-  const party = partyOf(entity, gm);
-  return party && party.travels !== on ? party.op : null;
-}
-
 // src/frontend/gm/character.tsx
 function placePath2(place) {
   return place ? [...place.path, place.name].join(" › ") : "Nowhere";
 }
 var SHOWN_ABOVE = { place: true, home: true, bed: true };
+var STANDING_NOTE = {
+  off: "Their routine is switched off: nothing reads it, not even the narrator.",
+  context: "Their routine is context only: the narrator and their mind may draw on it, but it never moves them. What they're doing is above, under Now.",
+  elsewhere: "They aren't where their routine has them right now."
+};
 function carried(entity, editor) {
   const how = (e3) => {
     for (const r3 of e3.relations) {
@@ -52149,6 +53094,7 @@ function CharacterSheet(props) {
   const minutes = editor.gm.minds.now;
   const current2 = routine?.day.blocks.find((b3) => b3.start <= minutes && b3.end > minutes) ?? null;
   const next = routine?.day.blocks.find((b3) => b3.start > minutes) ?? null;
+  const standing = routine ? routineStanding(routine.follow.role, (character?.now?.holds ?? []).length > 0, current2?.place ?? null, character?.place?.id ?? entity.place, places2) : null;
   return /* @__PURE__ */ u3(GmPage, {
     name: "character",
     title: entity.name,
@@ -52353,19 +53299,24 @@ function CharacterSheet(props) {
               label: "Routine",
               children: [
                 current2 ? /* @__PURE__ */ u3(ActionRow, {
-                  title: "Now",
+                  title: "Their routine has now",
                   value: `${current2.label}, ${current2.from}–${current2.to}${current2.placeName ? ` at ${current2.placeName}` : ""}`
                 }, undefined, false, undefined, this) : null,
                 next ? /* @__PURE__ */ u3(ActionRow, {
-                  title: "Next",
+                  title: "Next in their routine",
                   value: `${next.label}, ${next.from}–${next.to}${next.placeName ? ` at ${next.placeName}` : ""}`
                 }, undefined, false, undefined, this) : null,
                 !current2 && !next ? /* @__PURE__ */ u3(ActionRow, {
-                  title: "Today",
+                  title: "Their routine today",
                   value: routine ? "Nothing more today" : "—"
                 }, undefined, false, undefined, this) : null
               ]
             }, undefined, true, undefined, this),
+            standing && standing !== "living" ? /* @__PURE__ */ u3("p", {
+              class: "lre-small lre-muted",
+              "data-lre-routine-standing": standing,
+              children: standing === "held" ? `The story holds them now (${character?.now?.holds[0]?.label ?? ""}), so their routine waits until it lets them go.` : STANDING_NOTE[standing]
+            }, undefined, false, undefined, this) : null,
             /* @__PURE__ */ u3(Button, {
               variant: "secondary",
               iconAfter: "chevron-right",
@@ -52423,7 +53374,8 @@ function CharacterSheet(props) {
         }, undefined, true, undefined, this) : null,
         /* @__PURE__ */ u3(Relations, {
           entity,
-          editor
+          editor,
+          words: character?.relations
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(Simulation, {
           entity,
@@ -52618,6 +53570,7 @@ function WorldSection(props) {
   const list2 = findEntities(editor.gm.entities, query, kind);
   const kinds = editor.gm.kinds.filter((k2) => editor.gm.entities.some((e3) => e3.kind === k2.id));
   const claimed = claimedThings(editor.gm);
+  const levels = new Map(editor.gm.minds.characters.map((c3) => [c3.entity, FIDELITY_LABEL[c3.fidelity.level]]));
   return /* @__PURE__ */ u3("div", {
     ref: pages.host.ref,
     class: "lre-gm-pages",
@@ -52716,7 +53669,7 @@ function WorldSection(props) {
                     label: `Select ${e3.name}`,
                     checked: selection.ids.includes(e3.id)
                   }, undefined, false, undefined, this) : undefined,
-                  subtitle: [editor.gm.kinds.find((k2) => k2.id === e3.kind)?.label ?? e3.kind, e3.agent ? "lives their own day" : null, e3.spawned ? "spawned here" : null].filter((part) => part !== null).join(" · "),
+                  subtitle: [editor.gm.kinds.find((k2) => k2.id === e3.kind)?.label ?? e3.kind, levels.get(e3.id) ?? null, e3.agent ? "lives their own day" : null, e3.spawned ? "spawned here" : null].filter((part) => part !== null).join(" · "),
                   badge: /* @__PURE__ */ u3(EntityBadges, {
                     entity: e3
                   }, undefined, false, undefined, this),
@@ -52786,13 +53739,19 @@ function GmPanel(props) {
   const revealed = useUi((ui) => ui.gm.revealed);
   const section = useUi((ui) => ui.gm.section);
   const [gm, setGm] = d2(null);
+  const [notice, setNotice] = d2(null);
   const [busy, run] = useBusy();
+  const latest = T2(null);
+  latest.current = gm;
   const loads = T2(0);
   const load = async () => {
     const seq = ++loads.current;
     const view = await app.request({ type: "lre.gm", chatId: props.chatId });
-    if (view && seq === loads.current && app.ui.get().gm.revealed)
+    if (!view || !app.ui.get().gm.revealed)
+      return null;
+    if (seq === loads.current)
       setGm(view);
+    return view;
   };
   A(() => {
     if (revealed) {
@@ -52801,25 +53760,59 @@ function GmPanel(props) {
     }
     loads.current++;
     setGm(null);
+    setNotice(null);
   }, [revealed, props.chatId, gmReloadKey(props.state)]);
   if (!revealed)
     return /* @__PURE__ */ u3(Gate, {
       onReveal: () => app.ui.update(revealTruth)
     }, undefined, false, undefined, this);
+  const commit = (sendAll, done) => {
+    const { promise, resolve } = Promise.withResolvers();
+    run(async () => {
+      const before = latest.current?.edits ?? [];
+      let count = 0;
+      let held = false;
+      const outcome = await sendAll(async (ops) => {
+        const result = await app.request(editRequest(props.chatId, ops));
+        if (result)
+          count += ops.length;
+        if (result?.pending)
+          held = true;
+        return result !== null;
+      });
+      if (held)
+        app.toast("Saved — it applies when the reply finishes.", "info");
+      if (outcome.applied > 0) {
+        const made = newEdits(before, (await load())?.edits ?? before);
+        if (made.length > 0)
+          setNotice(editNotice(made, done?.(count)));
+      }
+      resolve(outcome);
+    });
+    return promise;
+  };
+  const undo = (chips) => run(async () => {
+    let all = true;
+    for (const chip of chips) {
+      if (await app.request({ type: "lre.chip", chatId: props.chatId, chip, choice: "undo" }))
+        continue;
+      all = false;
+      break;
+    }
+    if (all)
+      app.toast("Undone.", "info");
+    setNotice(null);
+    await load();
+  });
   const pack = app.catalog.gmSections.find((def) => def.id === section);
   const editor = gm ? {
     gm,
     currency: props.state.currency ?? DEFAULT_CURRENCY,
     busy,
-    edit: (ops) => new Promise((resolve) => run(async () => {
-      const result = await app.request(editRequest(props.chatId, ops));
-      if (result?.pending)
-        app.toast("Saved — it applies when the reply finishes.", "info");
-      if (result)
-        await load();
-      resolve(result !== null);
-    }))
+    edit: (ops, done) => commit(async (send2) => ({ applied: await send2(ops) ? 1 : 0, of: 1 }), done === undefined ? undefined : () => done).then((outcome) => outcome.applied === 1),
+    editAll: (ops, done) => commit((send2) => sendInChunks(ops, send2), done)
   } : null;
+  const shown2 = gm && notice && noticeStands(notice, gm) ? notice : null;
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-gm-truth-view",
     "data-lre-panel": "core.gm",
@@ -52834,19 +53827,27 @@ function GmPanel(props) {
       }, undefined, false, undefined, this) : section === "story" ? /* @__PURE__ */ u3(StorySection, {
         editor
       }, undefined, false, undefined, this) : section === "chat" ? /* @__PURE__ */ u3(EditsLog, {
-        gm: editor.gm
+        gm: editor.gm,
+        busy,
+        onUndo: (chip) => undo([chip])
       }, undefined, false, undefined, this) : pack ? /* @__PURE__ */ u3(pack.component, {
         chatId: props.chatId,
         gm: editor.gm,
         currency: editor.currency,
         busy: editor.busy,
         edit: editor.edit,
-        reload: load,
+        reload: async () => void await load(),
         send: props.send
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(WorldSection, {
         editor,
         chatId: props.chatId
-      }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      shown2 ? /* @__PURE__ */ u3(EditNoticeBar, {
+        notice: shown2,
+        busy,
+        onUndo: () => undo(shown2.undo),
+        onDismiss: () => setNotice(null)
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
 }
@@ -53835,6 +54836,8 @@ class ProtocolClient {
 var BUILD_CSS = `
 .lre-build-root{display:contents}
 .lre-build,.lre-build-page{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
+.lre-character-page .lre-field:not([data-lre-derived]) .lre-form-optional{display:none}
+.lre-character-page .lre-section-body>*+*{margin-top:var(--lre-s3)}
 .lre-build-bar{position:sticky;top:var(--lre-modebar-h,0px);z-index:5;display:flex;flex-direction:column;margin:calc(-1 * var(--lre-s3)) calc(-1 * (var(--lre-s3) + var(--lre-gutter-r,0px))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l,0px)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r,0px)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l,0px));background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline)}
 .lre-build-bar-row{display:flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap-lg);min-width:0}
 .lre-build-bar-row>.lre-iconbtn:first-child{margin-left:calc(-1 * var(--lre-s2))}
@@ -54562,6 +55565,12 @@ var GM_CSS = `
 .lre-gm .lre-section-body,.lre-gm-time .lre-section-body{display:flex;flex-direction:column;gap:var(--lre-s3)}
 .lre-gm .lre-card+.lre-card{margin-top:0}
 .lre-gm-truth-view{gap:var(--lre-s3)}
+.lre-gm .lre-selectbar{bottom:calc(var(--lre-gm-nav-h,0px) + var(--lre-s2))}
+.lre-gm:has(.lre-gm-notice) .lre-selectbar{bottom:calc(var(--lre-gm-nav-h,0px) + var(--lre-gm-notice-h,0px) + 2 * var(--lre-s2))}
+.lre-gm-notice{position:sticky;bottom:calc(var(--lre-gm-nav-h,0px) + var(--lre-s2));z-index:2;display:flex;align-items:center;gap:var(--lre-s2);min-width:0;padding:var(--lre-s1) var(--lre-s1) var(--lre-s1) var(--lre-s3);border:1px solid color-mix(in srgb,var(--lre-gm) 45%,transparent);border-radius:var(--lre-r-xl);background:linear-gradient(var(--lre-gm-soft),var(--lre-gm-soft)),var(--lre-bar-bg);box-shadow:var(--lre-shadow-sm)}
+.lre-gm-notice>.lre-icon{flex:none;color:var(--lre-pos)}
+.lre-gm-notice-text{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;font-size:var(--lre-fs-sm);font-weight:500}
+.lre-gm-notice>.lre-btn{flex:none}
 .lre-gm-gate{display:flex;flex-direction:column;align-items:center;gap:var(--lre-s3);padding:var(--lre-s5) var(--lre-s4);text-align:center;border:1px solid color-mix(in srgb,var(--lre-gm) 40%,transparent);border-radius:var(--lre-r-xl);background:linear-gradient(var(--lre-gm-soft),var(--lre-gm-soft)),var(--lre-card)}
 .lre-gm-gate-icon{width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--lre-gm-soft);color:var(--lre-gm-text);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--lre-gm) 45%,transparent)}
 .lre-gm-gate-title{margin:0;font-size:var(--lre-fs-lg);font-weight:600;color:var(--lre-gm-text)}
@@ -54768,6 +55777,8 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-form-pins-add{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
 .lre-form-pins-add>label{font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-muted)}
 .lre-form-pins-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2);min-width:0}
+.lre-form-pins-keep{min-width:0}
+.lre-form-pins-keep>.lre-input{width:auto;max-width:100%}
 `;
 
 // src/frontend/styles/packs-me.ts
@@ -55052,12 +56063,14 @@ var ROUTINES_GM_CSS = `
 // src/frontend/styles/select.ts
 var SELECT_CSS = `
 .lre-pick{flex:none;width:22px;height:22px;margin:0;accent-color:var(--lre-accent);pointer-events:none}
-.lre-selectbar{position:sticky;bottom:0;z-index:1;display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0;padding:var(--lre-s2) var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-surface);box-shadow:var(--lre-shadow-sm)}
+.lre-selectbar{position:sticky;bottom:0;z-index:1;display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0;padding:var(--lre-s2) var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-sm)}
 .lre-selectbar-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s2);min-width:0}
 .lre-selectbar-count{flex:1 1 auto;min-width:0;font-weight:600;font-variant-numeric:tabular-nums}
-.lre-selectbar-row>select.lre-input{flex:0 1 12em;width:auto}
+.lre-selectbar-groups{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s2);min-width:0}
+.lre-selectbar-groups-label{font-size:var(--lre-fs-sm);color:var(--lre-muted)}
 .lre-selectbar-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2);min-width:0}
 .lre-selectbar-actions>.lre-btn{flex:1 1 auto}
+.lre-batch-now{margin:0;font-size:var(--lre-fs-sm);font-variant-numeric:tabular-nums}
 `;
 
 // src/frontend/styles/settings.ts

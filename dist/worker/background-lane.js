@@ -54,19 +54,38 @@ var PROSE_VARS = ["world", "pov", "place", "clock", "scene", "present", "facts",
 var MIND_VARS = ["character", "world", "pov", "place", "clock"];
 var STEP_VARS = {
   interpret: { phase: "before the reply", vars: ["world", "pov"], note: "None on a Decision connection." },
-  "npc.choose": { phase: "before the reply", vars: [], note: "Sent as written." },
-  judge: { phase: "before the reply", vars: [], note: "Sent as written." },
-  "puzzle.answer": { phase: "before the reply", vars: [], note: "Sent as written." },
+  "npc.choose": { phase: "before the reply", vars: [] },
+  judge: { phase: "before the reply", vars: [] },
+  "puzzle.answer": { phase: "before the reply", vars: [] },
   brief: { phase: "before the reply", vars: PROSE_VARS },
   outline: { phase: "before the reply", vars: [...PROSE_VARS, "sections"] },
   extract: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
   choices: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
-  contradiction: { phase: "after the reply", vars: [], note: "A decision template is sent as written; an effects template gets extract's." },
+  contradiction: { phase: "after the reply", vars: [], note: "A world's effects template for this step gets the reply-reading placeholders (extract's)." },
   mind: { phase: "with the minds", vars: MIND_VARS },
   memory: { phase: "with the minds", vars: MIND_VARS },
   consolidate: { phase: "with the minds", vars: MIND_VARS },
   skip: { phase: "as a time skip starts", vars: MIND_VARS, note: "The beats think for no one: character is empty." },
   skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] }
+};
+var ADDED_BEFORE = {
+  interpret: [
+    "The task: map the player's typed input to the engine actions it takes, in order.",
+    "The world and the player character.",
+    "The scene, the places nearby and the recent messages.",
+    "The action catalog: every action your character can take here, with its details.",
+    "The rules for reading it: ids and amounts, several actions in one message, time passing after them, routine changes.",
+    "The answer format."
+  ].join(`
+`),
+  extract: [
+    "The task: propose the changes the reply's prose says actually happened.",
+    "The world, and the change types switched on.",
+    "The rules: nothing considered, refused or hypothetical; world ids; amounts as written; the strict rule for each change type.",
+    "Where the reply leaves your character, and the usual routines of the people with them.",
+    "The answer format."
+  ].join(`
+`)
 };
 var PURPOSE_PLACEHOLDERS = { extract: ["usual"], contradiction: ["usual"], choices: ["usual"], outline: ["sections"] };
 var STEP_OUTPUTS = {
@@ -12144,6 +12163,7 @@ var calendarPack = {
     r.renderer({
       slot: "scene",
       source: "calendar",
+      label: "The date and time",
       render(ctx) {
         const level = ctx.levelOf(ctx.world.pov, "calendar");
         if (level === 0)
@@ -13344,9 +13364,9 @@ var spacePack = {
       lexicon: ["walk over to", "cross to", "move to"],
       observable: "moves across the area"
     });
-    r.renderer({ slot: "scene", source: "location", render: (ctx) => sceneLines(ctx, "player").map((l) => l.text), feed: sceneLines });
-    r.renderer({ slot: "place", render: (ctx) => placeLines(ctx, "player").map((l) => l.text), feed: placeLines });
-    r.renderer({ slot: "place", source: "place_lore", render: (ctx) => placeLoreLines(ctx, "player").map((l) => l.text), feed: placeLoreLines });
+    r.renderer({ slot: "scene", source: "location", label: "Where your character is, and what's a short walk away", render: (ctx) => sceneLines(ctx, "player").map((l) => l.text), feed: sceneLines });
+    r.renderer({ slot: "place", label: "The place: what it's like, what lies here, the way around", render: (ctx) => placeLines(ctx, "player").map((l) => l.text), feed: placeLines });
+    r.renderer({ slot: "place", source: "place_lore", label: "Lore about the place", render: (ctx) => placeLoreLines(ctx, "player").map((l) => l.text), feed: placeLoreLines });
     r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay) });
     r.proposal({
       type: "location",
@@ -23561,8 +23581,8 @@ function registerRest(r, hooks) {
     }
     return lines;
   };
-  r.renderer({ slot: "money", render: (ctx) => moneyLines(ctx, "player").map((l) => l.text), feed: moneyLines });
-  r.renderer({ slot: "property", render: (ctx) => propertyLines(ctx, "player").map((l) => l.text), feed: propertyLines });
+  r.renderer({ slot: "money", label: "Your character's money", render: (ctx) => moneyLines(ctx, "player").map((l) => l.text), feed: moneyLines });
+  r.renderer({ slot: "property", label: "Property your character holds a part in", render: (ctx) => propertyLines(ctx, "player").map((l) => l.text), feed: propertyLines });
   r.view({ panel: "economy.money", build: (ctx) => buildMoneyView(hooks, ctx) });
   r.proposal({
     type: "purchase",
@@ -24969,8 +24989,8 @@ var gearPack = {
         return out;
       }
     });
-    r.renderer({ slot: "gear", render: (ctx) => gearLines(ctx, "player").map((l) => l.text), feed: gearLines });
-    r.renderer({ slot: "people", source: "present_gear", render: (ctx) => presentGearLines(ctx, "player").map((l) => l.text), feed: presentGearLines });
+    r.renderer({ slot: "gear", label: "What your character carries and wears", render: (ctx) => gearLines(ctx, "player").map((l) => l.text), feed: gearLines });
+    r.renderer({ slot: "people", source: "present_gear", label: "What the people here wear and carry", render: (ctx) => presentGearLines(ctx, "player").map((l) => l.text), feed: presentGearLines });
     r.view({ panel: "gear.gear", build: (ctx) => buildGearView(ctx) });
     r.proposal({
       type: "give",
@@ -25752,7 +25772,7 @@ var vehiclesPack = {
         return out;
       }
     });
-    r.renderer({ slot: "vehicles", render: (ctx) => vehicleLines(ctx, "player").map((l) => l.text), feed: vehicleLines });
+    r.renderer({ slot: "vehicles", label: "Vehicles your character can use, and others nearby", render: (ctx) => vehicleLines(ctx, "player").map((l) => l.text), feed: vehicleLines });
     r.view({ panel: "vehicles.garage", build: (ctx) => buildGarageView(ctx) });
     r.lint({
       code: "vehicles.classes",
@@ -26021,6 +26041,7 @@ var weatherPack = {
     r.renderer({
       slot: "scene",
       source: "weather",
+      label: "The weather",
       render(ctx) {
         const v = buildWeatherView(ctx);
         if (v.level === 0 || v.label === "")
@@ -26057,6 +26078,12 @@ var core_default6 = weatherPack;
 
 // src/shared/needs.ts
 var NEED_IDS = ["hunger", "fatigue", "social", "fun"];
+var NEED_WORDS = {
+  hunger: { name: "Hunger", word: "hungry", metBy: "eating" },
+  fatigue: { name: "Fatigue", word: "tired", metBy: "sleep, a night's or a nap" },
+  social: { name: "Social", word: "lonely", metBy: "a chat, or time with someone you know" },
+  fun: { name: "Fun", word: "bored", metBy: "rest, leisure, exercise or a night out" }
+};
 var NEED_DEFAULTS = {
   hunger: { on: true, rate: 4, tell: 60, alert: 80 },
   fatigue: { on: true, rate: 3, tell: 60, alert: 80 },
@@ -28073,10 +28100,10 @@ function usualRoutineHints(ctx) {
 
 // src/packs/castlife/core/index.ts
 var NEEDS = {
-  hunger: { name: "Hunger", label: "hungry", satisfiedBy: ["eat", "meal", "lunch", "dinner", "breakfast"], daily: [420, 750, 1110] },
-  fatigue: { name: "Fatigue", label: "tired", satisfiedBy: ["sleep"], daily: [420] },
-  social: { name: "Social", label: "lonely", satisfiedBy: ["socialize", "chat", "drinks"], daily: [1140] },
-  fun: { name: "Fun", label: "bored", satisfiedBy: ["leisure", "exercise", "drinks", "socialize", "waiting"], daily: [1200] }
+  hunger: { satisfiedBy: ["eat", "meal", "lunch", "dinner", "breakfast"], daily: [420, 750, 1110] },
+  fatigue: { satisfiedBy: ["sleep"], daily: [420] },
+  social: { satisfiedBy: ["socialize", "chat", "drinks"], daily: [1140] },
+  fun: { satisfiedBy: ["leisure", "exercise", "drinks", "socialize", "waiting"], daily: [1200] }
 };
 function satisfies(activity, need2) {
   return NEEDS[need2].satisfiedBy.some((w) => activity.includes(w));
@@ -28160,7 +28187,8 @@ function buildNeedsView(ctx) {
   return {
     needs: on.map((need2) => {
       const raw = needValue(ctx, pov, need2);
-      return { need: need2, name: NEEDS[need2].name, label: NEEDS[need2].label, value: Math.round(raw), pressing: raw >= tuning[need2].tell };
+      const words3 = NEED_WORDS[need2];
+      return { need: need2, name: words3.name, label: words3.word, value: Math.round(raw), pressing: raw >= tuning[need2].tell, tell: tuning[need2].tell, metBy: words3.metBy };
     })
   };
 }
@@ -28171,7 +28199,7 @@ function needsIssues(world) {
   if (problems.length > 0)
     return problems.map((message) => ({ severity: "error", code: "castlife.needs", message: `Needs settings: ${message}; the engine reads it as its default.`, path: "needs" }));
   const tuning = needsSettingsOf(world);
-  return NEED_IDS.flatMap((need2) => tuning[need2].on && tuning[need2].alert < tuning[need2].tell ? [{ severity: "warning", code: "castlife.needs", message: `${NEEDS[need2].name}'s alert (${tuning[need2].alert}) is below the point the narrator is told of it (${tuning[need2].tell}): a skip may stop for it before the story ever mentions it.`, path: `needs.${need2}` }] : []);
+  return NEED_IDS.flatMap((need2) => tuning[need2].on && tuning[need2].alert < tuning[need2].tell ? [{ severity: "warning", code: "castlife.needs", message: `${NEED_WORDS[need2].name}'s alert (${tuning[need2].alert}) is below the point the narrator is told of it (${tuning[need2].tell}): a skip may stop for it before the story ever mentions it.`, path: `needs.${need2}` }] : []);
 }
 function within3(dayStart, fromH, toH) {
   return { from: dayStart + fromH * 60, to: dayStart + toH * 60 };
@@ -28744,7 +28772,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
     for (const need2 of needsOn(ctx.world)) {
       const alert = tuning[need2].alert;
       if (!met.has(need2) && needValue(ctx, who, need2, slot.end) >= alert && needValue(ctx, who, need2, slot.start) < alert)
-        out.push({ type: ENGINE_EVENTS.signal, data: { class: "needs", text: `You're getting ${NEEDS[need2].label}.`, entity: pov } });
+        out.push({ type: ENGINE_EVENTS.signal, data: { class: "needs", text: `You're getting ${NEED_WORDS[need2].word}.`, entity: pov } });
     }
     return out;
   }
@@ -29218,7 +29246,7 @@ function peopleLines(ctx, scope) {
   const pov = ctx.world.pov;
   const see = (who, id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
   const tuning = tuningOf(ctx);
-  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? needsOn(ctx.world).filter((n) => needValue(ctx, pov, n) >= tuning[n].tell).map((n) => NEEDS[n].label) : [];
+  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? needsOn(ctx.world).filter((n) => needValue(ctx, pov, n) >= tuning[n].tell).map((n) => NEED_WORDS[n].word) : [];
   const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
   const lines = [{ text: urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`, known: "pov" }];
   const here = placeOfEntity(ctx.state, pov);
@@ -29331,12 +29359,12 @@ var castlifePack = {
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed (your own, if you have one) and sleep until morning, or for as long as you say.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.to_bed", args: { entity: "self" } }, { type: "castlife.satisfy", args: { entity: "self", need: `=${NAP_MEETS}`, minutes: "=minutes", activity: "sleep", after: `=${SLEEP_TURN}` } }] }, duration: SLEEP_TURN, activity: { type: "sleep", until: SLEEP_UNTIL }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun", minutes: `=${REST_FOR}`, activity: "waiting", after: `=${REST_TURN}` } }] }, duration: REST_TURN, activity: { type: "waiting", until: `clock + (${REST_FOR})` }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }, { type: "castlife.book_invitation", args: { host: "host" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
-    r.renderer({ slot: "people", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
-    r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });
+    r.renderer({ slot: "people", label: "Who is here and how they feel about your character", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
+    r.renderer({ slot: "people", source: "routines", label: "People's usual routines, as background", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
     r.view({ panel: "castlife.needs", build: (ctx) => buildNeedsView(ctx) });
-    r.renderer({ slot: "stance", render: stanceLines, feed: stanceFeed });
-    r.renderer({ slot: "stance", source: "cues", hint: true, render: stanceCues });
+    r.renderer({ slot: "stance", label: "How the people here stand and what they're about", render: stanceLines, feed: stanceFeed });
+    r.renderer({ slot: "stance", source: "cues", label: "Hints of what people keep to themselves", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
     r.lint({ code: "castlife.needs", check: needsIssues });
     r.lint({
@@ -29609,6 +29637,7 @@ var sheetsPack = {
     r.renderer({
       slot: "outcome",
       source: "conditions",
+      label: "Conditions your character is under",
       render(ctx) {
         const conditions = activeConditions(ctx, ctx.world.pov);
         return conditions.length > 0 ? [`You are ${conditions.map((c) => c.label.toLowerCase()).join(", ")}.`] : [];
@@ -29933,7 +29962,7 @@ var storyPack = {
       lexicon: ["the answer is", "i think it's", "solve", "answer", "the code is", "the combination is", "try the combination", "dial", "enter the code"],
       observable: "answers"
     });
-    r.renderer({ slot: "quest", render: (ctx) => questLines(ctx, "player").map((l) => l.text), feed: questLines });
+    r.renderer({ slot: "quest", label: "Quests and goals your character knows", render: (ctx) => questLines(ctx, "player").map((l) => l.text), feed: questLines });
     r.view({ panel: "story.quests", build: (ctx) => buildQuestLog(ctx) });
     r.lint({
       code: "story.leaky_label",
@@ -32026,7 +32055,7 @@ var mindsPack = {
     r.query("minds.on", mindsOn);
     r.query("minds.intent", (ctx, who) => (readCharacter(ctx.state, who).intent?.text ?? "") !== "");
     r.query("minds.fidelity", (ctx, texts2) => fidelityOf(ctx, texts2));
-    r.renderer({ slot: MINDS_SLOT, render: (ctx) => mindLines(ctx).map((l) => l.line) });
+    r.renderer({ slot: MINDS_SLOT, label: "What the characters' minds are on", render: (ctx) => mindLines(ctx).map((l) => l.line) });
     for (const rule of MINDS_LINTS)
       r.lint(rule);
   }
