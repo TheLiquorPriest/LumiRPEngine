@@ -22,6 +22,8 @@ const MARKET = "alder_market";
 const ANCHOR = "rusty_anchor";
 /** Someone at the shop the POV can't see. */
 const WATCHER = "the_watcher";
+/** Someone the player character hasn't met, in a room inside the shop. */
+const STRANGER = "vera_quill";
 
 /** Port Alder with the POV, Marcus and Danny at the shop, and someone there the POV can't see. */
 async function portAlder(): Promise<{ rig: Rig; chatId: string }> {
@@ -94,6 +96,27 @@ describe("companions", () => {
     expect(placeOfEntity(state, "pov")).toBe(SHOP);
     expect(placeOfEntity(state, MARCUS)).toBe(SHOP);
     expect(placeOfEntity(state, WATCHER)).toBe(MARKET);
+  });
+
+  test("an unmet stranger in a room inside the player character's place isn't offered by name, nor brought along", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const put = async (collection: string, id: string, value: JsonObject): Promise<void> => void rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id, value }));
+    await put("places", "shop_office", { id: "shop_office", name: "Shop office", parent: SHOP, fields: {} });
+    await put("entities", STRANGER, { id: STRANGER, kind: "character", name: "Vera Quill", tier: "background", fields: { place: "shop_office" }, relations: [] });
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "pov", to: SHOP }, { op: "move", entity: MARCUS, to: SHOP }, { op: "move", entity: STRANGER, to: "shop_office" }] }));
+    const go = (await rig.rt.view(chatId, rig.host.userId)).palette?.entries.find((e) => e.action === "go");
+    expect(go?.people?.options.map((o) => o.id)).toEqual([MARCUS]);
+    // A Go naming her anyway leaves her where she is.
+    script(rig, NONE, { proposals: [], where: null });
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "go", params: { to: MARKET, with: [STRANGER, MARCUS] }, source: "palette" }));
+    await rig.turn(chatId, "Let's go.", "You and Marcus head over to the market.");
+    const state = await stateOf(rig, chatId);
+    expect(placeOfEntity(state, MARCUS)).toBe(MARKET);
+    expect(placeOfEntity(state, STRANGER)).toBe("shop_office");
   });
 
   test("a party member follows a narrated move of the player character, unless the reply sends them elsewhere", async () => {
