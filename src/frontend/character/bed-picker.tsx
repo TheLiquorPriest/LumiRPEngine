@@ -10,7 +10,7 @@ import { FormSheet } from "../build/form-kit";
 import { Badge, Button, Empty, List, ListRow, Section } from "../components";
 import { Icon } from "../icons";
 import { PlaceBadge, PlacePath, PlaceSheet } from "./place-picker";
-import { bedOf, bedOptions, isBed, pathLabel, searchThings, type BedOption } from "./places";
+import { bedOf, bedOptions, isBed, pathLabel, SEARCH_LIMIT, searchThings, type BedOption } from "./places";
 
 /** The `bed` field's value for a bed: none for sleeping at home, else the place's or the thing's id. What both pages write. */
 export function bedValue(bed: CharacterBed): string | null {
@@ -71,11 +71,13 @@ function ThingSheet(props: { things: readonly ThingRef[]; bed: CharacterBed; onP
         ) : results.length === 0 ? (
           <Empty icon="search">Nothing matches “{query.trim()}”.</Empty>
         ) : (
-          <List>
-            {results.map((t) => (
-              <ListRow key={t.id} icon="box" title={t.name} subtitle={t.place ? pathLabel(t.place) : "Nowhere"} current={props.bed.kind === "item" && props.bed.item?.id === t.id} onClick={() => props.onPick(t)} />
-            ))}
-          </List>
+          <Section title={results.length === 1 ? "1 thing" : `${results.length} things${results.length === SEARCH_LIMIT ? ", keep typing to narrow" : ""}`} flush>
+            <List>
+              {results.map((t) => (
+                <ListRow key={t.id} icon="box" title={t.name} subtitle={t.place ? pathLabel(t.place) : "Nowhere"} current={props.bed.kind === "item" && props.bed.item?.id === t.id} onClick={() => props.onPick(t)} />
+              ))}
+            </List>
+          </Section>
         )}
       </div>
     </FormSheet>
@@ -99,17 +101,17 @@ export function BedPicker(props: { character: CharacterDTO; places: readonly Pla
       <div class="lre-field">
         <span class="label">{props.label ?? "Sleeps"}</span>
         <div class="lre-cp-value">
-          {bed.kind === "item" && bed.item ? (
-            <span class="lre-cp-path">
-              <span class="lre-cp-path-name">{bed.item.name}</span>
-              {bed.item.place ? <span class="lre-cp-path-up">, in {pathLabel(bed.item.place)}</span> : null}
-            </span>
-          ) : bed.kind === "place" ? (
+          {bed.kind === "place" ? (
             <PlacePath place={bed.place} />
           ) : (
-            <span class="lre-cp-path">
-              <span class="lre-cp-path-name">At home</span>
-              {character.home ? <span class="lre-cp-path-up">, {pathLabel(character.home)}</span> : null}
+            // The bed's name over where it is, so the path never starts a line with a stray comma.
+            <span class="lre-cp-bed">
+              <span class="lre-cp-path-name">{bed.kind === "item" && bed.item ? bed.item.name : "At home"}</span>
+              {bed.kind === "item" && bed.item ? (
+                bed.item.place ? <span class="lre-cp-path-up">in {pathLabel(bed.item.place)}</span> : null
+              ) : character.home ? (
+                <span class="lre-cp-path-up">{pathLabel(character.home)}</span>
+              ) : null}
             </span>
           )}
           <Button size="sm" icon="moon" disabled={props.disabled} onClick={() => setOpen("bed")}>

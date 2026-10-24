@@ -7,6 +7,7 @@ export const CHARACTER_CSS = `
 .lre-cp-value{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s2);min-width:0}
 .lre-cp-value>.lre-cp-path{flex:1 1 12rem}
 .lre-cp-path{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:0 4px;min-width:0;overflow-wrap:anywhere;line-height:1.35}
+.lre-cp-bed{flex:1 1 12rem;display:flex;flex-direction:column;gap:1px;min-width:0;overflow-wrap:anywhere;line-height:1.35}
 .lre-cp-path-up{color:var(--lre-muted);font-size:var(--lre-fs-sm)}
 .lre-cp-path-name{font-weight:600}
 .lre-cp-path>.lre-badge{align-self:center}
