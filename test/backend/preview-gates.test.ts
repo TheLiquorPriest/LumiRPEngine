@@ -122,3 +122,26 @@ describe("no request plays a place the player character can't know of", () => {
     expect(await where(rig, chatId)).toBe(before);
   });
 });
+
+describe("an outline let through is for its one turn", () => {
+  test("after Play, a Re-run swipe plans again and waits on the gate again", async () => {
+    const { rig, chatId } = await alder([{ modelUse: { preset: "full" } }, { gates: { outline: true } }]);
+    let outlines = 0;
+    rig.host.quietReply = (req: QuietRequest) => {
+      if (!(req.messages[0]?.content ?? "").startsWith(OUTLINE_MARK)) return "{}";
+      outlines++;
+      return JSON.stringify({ beats: [`Beat number ${outlines}.`] });
+    };
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 10 } }, source: "palette", now: true }));
+    await rig.host.start(chatId, { type: "normal" });
+    const gate = await chipOf(rig, chatId, "outline_gate");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "play" }));
+    const reply = await rig.host.start(chatId, { type: "regenerate" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, "Time passes.");
+    const swiped = await rig.host.start(chatId, { type: "swipe" });
+    expect(swiped.halted).toBe("cancelled");
+    expect(outlines).toBe(2);
+    expect((await chipOf(rig, chatId, "outline_gate"))?.detail).toContain("Beat number 2.");
+  });
+});

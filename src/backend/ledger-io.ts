@@ -635,16 +635,20 @@ export class LedgerService {
               if (text !== "") await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
               else if (at && diag) diag.skipped(at, "read", "read", "the reply had no new text to read");
             }
-            core.ended({ generationId: e.generationId, ...(e.messageId ? { messageId: e.messageId } : {}), content: e.content }, observed);
-            if (this.hooks && turn) {
-              const hooks = this.hooks;
-              await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: e.content })) : hooks.afterCommit({ ...turn, content: e.content }));
+            // A cancelled read commits as stopped, as a failed generation does: the reply stands unread,
+            // nothing its calls answered applies, and the reply's Retry read reads it again.
+            if (flight.signal.aborted) core.stopped({ generationId: e.generationId, content: e.content }, observed);
+            else {
+              core.ended({ generationId: e.generationId, ...(e.messageId ? { messageId: e.messageId } : {}), content: e.content }, observed);
+              if (this.hooks && turn) {
+                const hooks = this.hooks;
+                await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: e.content })) : hooks.afterCommit({ ...turn, content: e.content }));
+              }
             }
           } finally {
             this.landed(e.chatId, flight);
           }
-          // A cancelled read is its own end: the reply stands, and Re-read reads it again.
-          if (at && diag) diag.end(at, flight.signal.aborted ? { status: "skipped", reason: "you cancelled reading the reply; Re-read reads it again" } : undefined);
+          if (at && diag) diag.end(at, flight.signal.aborted ? { status: "skipped", reason: "you cancelled reading the reply; Retry read reads it again" } : undefined);
         });
       }),
       h.on("GENERATION_STOPPED", (e, userId) => {
@@ -1162,13 +1166,16 @@ export class LedgerService {
         if (held) return waiting(held);
         this.failedStep(at);
         // The book is taken only while the run makes and places its entries: it writes no section.
-        await this.claim(gate.worldId, chatId, halt.id, "turn", at);
+        // A cancel while it waits for another chat's book ends the run there.
+        if (!(await this.claim(gate.worldId, chatId, halt.id, "turn", at, signal))) throw new TurnCancelled();
         claimed = true;
         try {
           delivered = await step("sections", () => hooks.deliver({ chatId, userId, core, observed, generationId: halt.id }));
         } finally {
           this.letGo(gate.worldId, halt.id);
         }
+        // A cancel while the sections were made ends the run before it prepares the turn.
+        going();
         this.failedStep(at);
       } catch (error) {
         core.take(halt.id);

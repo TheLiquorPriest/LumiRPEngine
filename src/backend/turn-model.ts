@@ -484,6 +484,12 @@ export class TurnBridge implements TurnModel {
     return this.outlines.get(userText);
   }
 
+  /** The turn shown at the outline gate was taken: its outline and kept plan go, so the next run of these words plans again. */
+  dropOutline(userText: string): void {
+    this.outlines.delete(userText);
+    this.ownPlans.delete(userText);
+  }
+
   read(input: { state: WorldState; ctx: ReadContext; seed: string; text: string }): LedgerEvent[] {
     const key = hashParts("lre.read", input.text);
     const prepared = this.reads.get(key);
