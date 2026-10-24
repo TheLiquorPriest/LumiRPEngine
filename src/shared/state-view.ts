@@ -374,6 +374,8 @@ export interface GmEntity {
   tier: string;
   agent: boolean;
   pov: boolean;
+  /** A person, who may travel with the player character (its party, DESIGN §9.3). */
+  person: boolean;
   /** Removed by a GM, or inside something that was: out of the world until restored. */
   gone: boolean;
   /** Not in the world document: spawned while this chat ran. */

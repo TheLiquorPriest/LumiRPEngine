@@ -21,6 +21,7 @@ import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
+import { partyAt, relocate } from "../../../engine/relocate";
 import { isMemberOf } from "../../../engine/selector";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
@@ -322,13 +323,19 @@ export const vehiclesPack: PackDef = {
         if (!leg) return reject("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
         if (!fuelOk(ctx, v, leg)) return reject("no_fuel", `${e.name} doesn't have the fuel`);
         const out: LedgerEvent[] = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: to }];
-        // The driver and anyone riding along (people at the same place named in `riders`) arrive too.
-        const riders = Array.isArray(args.riders) ? args.riders.filter((x): x is string => typeof x === "string") : [];
+        // The driver and anyone riding along (people at the same place named in `riders`, and the
+        // player character's party when it drives) arrive too, through the one move path; whoever
+        // rides inside the vehicle goes with it.
+        const named = Array.isArray(args.riders) ? args.riders.filter((x): x is string => typeof x === "string") : [];
+        const riders = driver === ctx.world.pov ? [...named, ...partyAt(ctx, placeOfEntity(ctx.state, driver))] : named;
+        const moved = new Set<string>();
         for (const p of [driver, ...riders]) {
           const pe = own(ctx.state.entities, p);
-          if (!pe || pe.relations.some((x) => x.type === "in" && x.to === v)) continue;
-          for (const rel of pe.relations) if (rel.type === "in") out.push({ type: "unlink", rel: "in", from: p, to: rel.to });
-          out.push({ type: "set", entity: p, field: "place", value: to });
+          if (!pe || moved.has(p) || pe.relations.some((x) => x.type === "in" && x.to === v)) continue;
+          moved.add(p);
+          const events = relocate(ctx, p, to);
+          if ("code" in events) return events;
+          out.push(...events);
         }
         return out;
       },
