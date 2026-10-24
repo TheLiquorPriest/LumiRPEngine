@@ -16779,6 +16779,9 @@ function opensCharacterPage(doc, collection, id) {
   const e3 = hasOwn(doc.entities, id) ? doc.entities[id] : undefined;
   return e3 !== undefined && kindIs(doc, e3.kind, "person");
 }
+function employerPicker(doc, employer) {
+  return employer === "" || hasOwn(doc.places, employer) ? "place" : "business";
+}
 function entityPatch(id, before, after) {
   const ops = [];
   const same = (a3, b3) => JSON.stringify(a3 ?? null) === JSON.stringify(b3 ?? null) && a3 === undefined === (b3 === undefined);
@@ -16976,12 +16979,12 @@ function CharacterPage(props) {
       /* @__PURE__ */ u3(Section, {
         title: "Work and money",
         children: [
-          /* @__PURE__ */ u3(WorksFor, {
+          model ? /* @__PURE__ */ u3(WorksFor, {
             model,
             world: formDoc,
             value: typeof fields.employer === "string" ? fields.employer : "",
             onPick: (v3) => setField("employer", v3)
-          }, undefined, false, undefined, this),
+          }, undefined, false, undefined, this) : null,
           /* @__PURE__ */ u3(SectionFields, {
             section: "work",
             model: character,
@@ -17150,8 +17153,9 @@ var EMPLOYER_KINDS = [
   { value: "business", label: "A business" }
 ];
 function WorksFor(props) {
-  const places2 = props.model?.places ?? [];
-  const [kind, setKind] = d2(props.value !== "" && !places2.some((p3) => p3.id === props.value) && props.model?.character.employer?.kind !== "place" ? "business" : "place");
+  const [chosen, setChosen] = d2(null);
+  const kind = chosen ?? employerPicker(props.world, props.value);
+  const isPlace = props.value !== "" && employerPicker(props.world, props.value) === "place";
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-works-for": "",
@@ -17160,18 +17164,18 @@ function WorksFor(props) {
         label: "Works for",
         value: kind,
         options: EMPLOYER_KINDS,
-        onChange: setKind
+        onChange: setChosen
       }, undefined, false, undefined, this),
       kind === "place" ? /* @__PURE__ */ u3(PlacePicker, {
         title: "Where they work",
         label: "Works at",
-        places: places2,
-        value: places2.some((p3) => p3.id === props.value) ? props.value : null,
+        places: props.model.places,
+        value: isPlace ? props.value : null,
         clearLabel: "No employer",
         onPick: (p3) => props.onPick(p3?.id)
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(RefPicker, {
         label: "Works for",
-        value: places2.some((p3) => p3.id === props.value) ? "" : props.value,
+        value: isPlace ? "" : props.value,
         options: entitiesOfKind(props.world, "business"),
         none: "No employer",
         placeholder: "Pick a business",
@@ -29450,7 +29454,7 @@ var GROUPS4 = [
 ];
 var PRESET_LABEL2 = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 var STATIC_CAVEATS = [
-  "LumiRPEngine does not manage lore; Lumiverse's World Info works as usual in world chats.",
+  "Lumiverse's World Info works as usual in world chats, but for two cases: an entry LumiRPEngine keeps secret stays off until its gate holds, and an entry whose text a section already carries that turn (such as the lore about where your character is, in the Place section) is left out.",
   "Realism, checks and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat in GM → This chat.",
   "Undo covers the latest reply; earlier changes go through Keep or Discard."
 ];
@@ -55585,6 +55589,7 @@ var GM_CSS = `
 .lre-gm-page{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;animation:lre-gm-page-in var(--lre-med)}
 @keyframes lre-gm-page-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
 .lre-gm-page .lre-page-sub>.lre-id{display:block}
+.lre-gm-page:has(>.lre-gm-pages>.lre-gm-page)>.lre-page-header{display:none}
 .lre-gm-tools{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2);min-width:0}
 .lre-gm-search{position:relative;flex:1 1 100%;display:flex;align-items:center;min-width:0}
 .lre-gm-search>.lre-icon{position:absolute;left:var(--lre-s3);color:var(--lre-muted);pointer-events:none}
