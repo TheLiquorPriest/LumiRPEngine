@@ -60738,6 +60738,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 - **Schema-driven editors** for every pack. Four special widgets: **map/grid, schedule/timeline, track graph, expression**; and the **map editor**, a map's \`lre-map-v1\` JSON checked on every keystroke against the schema and the map lint (each problem marked on its line), with a preview drawn as Play's map draws it, and grid and node templates. The expression editor's functions are the registry's (\`formulaFunctions\`, sent with \`lre.world get\`), never a list kept in the frontend; an effect's arguments are edited one at a time, as a value or a \`=\` formula, and only those formulas run the editor in effect mode, which adds \`roll(\`.
 - **Describe a map:** a background job like Refine. The author's prose about a place goes to one helper JSON call whose prompt carries the schema and a short example; the answer, with the requested id and place, is checked against the schema and the map lint on the draft, and errors get one repair call that lists them. The map comes back as one proposal with its preview, ticked when it has no errors; applied, it goes into the draft like any map. An answer that is no map fails the job and says why.
 - **Propose routines from lore:** a background job like Import that proposes people's and groups' routine blocks and schedules from the world's lore and sheets, each resting on what it quotes (§13.1).
+- **Item helpers** (\`shared/items-build.ts\`, \`frontend/build/contents.tsx\`): an entity's page lists its **Contents** (the document's entities \`in\` it) and a place's its **Things here** (the document's entities whose \`place\` it is, held by nothing), each opening its own page and marked when \`discoverable\`; only the author's, never what play adds. **Reveal this item** on a thing's page (\`revealScaffold\`) sets it \`discoverable\` (§7), so the built-in Search finds it, its Known by kept; a thing lying nowhere is refused, as it could never be found. A stage's **Add an item check** (\`itemObjective\`) appends \`carries(pov, 'id')\`, \`has_item(pov, 'id')\` or \`at('id', 'place')\` with ids picked from the world's things and places, which the quest-id lint below checks.
 - **Lint** (live, plain language):
   - refs, types, cycles, unreachable stages; a track condition whose literal id names nothing in the world (\`carries(x, 'id')\` and \`at('id', …)\` an entity, \`at(…, 'id')\` a place, \`knows(x, 'id')\` either), a warning, as it never holds;
   - oversized sections;
@@ -63057,6 +63058,8 @@ The **Stage** button asks for the new stage's **Name** and what it **Comes after
 
 On both pages the **Item actions** button (⋯) holds **Delete**, **JSON (Advanced)** shows the whole schedule or track as the world file keeps it, and **Save to draft** and **Revert** sit in the bar at the bottom.
 
+**Items in Build.** An entity's page lists its **Contents** (what the world puts in a container or on a person), and a place's page lists the **Things here** lying loose there; each row opens its thing, marked **Hidden until searched** when it is. A thing's page has **Reveal this item**: **Hide until searched** makes it Discoverable, so it stays hidden until your character searches where it lies or opens what holds it (it must lie somewhere first). A stage's page has **Add an item check**: pick **Has it with them**, **Has one like it** or **It lies at**, the thing (and the place), and **Add objective** writes the objective with the world's own ids.
+
 ### Routines in Build
 
 A **routine** is how someone's days usually go: when they open the shop, eat with the family or go to the gym. It is something the world can rely on, never a rule, and it never outranks the story. What it is to the engine is the role **Routines and the story** gives each level (below): by default it only informs Live, Near and Far characters, as context their mind and the narrator may weigh while the story and planning decide what they do, and Background characters keep to theirs. Whatever the role, a routine never moves anyone out of a scene with your character, contradicts what's been told or interrupts play, and a chat changes anyone's routine as it goes, through the story or the GM.
@@ -64491,7 +64494,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "2bafc033";
+var BUILD = "10314a7d";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

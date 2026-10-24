@@ -15204,6 +15204,145 @@ function DraftBatchSheet(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/shared/items-build.ts
+function isItemKind(kinds, kind) {
+  let cur = kind;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    if (cur === "item")
+      return true;
+    cur = hasOwn(kinds, cur) ? kinds[cur]?.extends : undefined;
+  }
+  return false;
+}
+function authoredContents(world, id, of) {
+  return Object.values(world.entities).filter((e3) => of === "entities" ? e3.relations.some((r3) => r3.type === "in" && r3.to === id) : e3.fields.place === id && !e3.relations.some((r3) => r3.type === "in")).map((e3) => ({ id: e3.id, name: e3.name, hidden: e3.visibility === "discoverable" })).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.id.localeCompare(b3.id));
+}
+function revealScaffold(entity) {
+  const fields = isRecord(entity.fields) ? entity.fields : {};
+  const placed = typeof fields.place === "string" && fields.place !== "";
+  const held = Array.isArray(entity.relations) && entity.relations.some((r3) => isRecord(r3) && r3.type === "in" && typeof r3.to === "string" && r3.to !== "");
+  if (!placed && !held)
+    return { problem: "Put it somewhere first: a place, or in a container or on someone." };
+  return { entity: { ...entity, visibility: "discoverable" } };
+}
+function itemObjective(check, item, place = "") {
+  const quote = (s3) => `'${s3}'`;
+  return check === "at" ? `at(${quote(item)}, ${quote(place)})` : `${check}(pov, ${quote(item)})`;
+}
+
+// src/frontend/build/contents.tsx
+function ContentsSection(props) {
+  const app = useApp();
+  const rows = authoredContents(props.world, props.id, props.collection);
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-contents": props.id,
+    children: /* @__PURE__ */ u3(Section, {
+      title: props.collection === "places" ? "Things here" : "Contents",
+      children: [
+        rows.length === 0 ? /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: props.collection === "places" ? "Nothing lies here loose." : "Nothing is in it."
+        }, undefined, false, undefined, this) : null,
+        rows.map((row) => /* @__PURE__ */ u3(ItemRow, {
+          title: row.name,
+          badge: row.hidden ? /* @__PURE__ */ u3(Badge, {
+            tone: "gm",
+            children: "Hidden until searched"
+          }, undefined, false, undefined, this) : undefined,
+          openLabel: `Open ${row.name}`,
+          onOpen: () => go(app, { view: "item", worldId: props.world.id, collection: "entities", id: row.id })
+        }, row.id, false, undefined, this))
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function RevealItem(props) {
+  if (typeof props.value.kind !== "string" || !isItemKind(props.kinds, props.value.kind))
+    return null;
+  if (props.value.visibility === "discoverable") {
+    return /* @__PURE__ */ u3(Banner, {
+      tone: "info",
+      icon: "search",
+      children: "Hidden until the player character searches where it lies, or opens what holds it."
+    }, undefined, false, undefined, this);
+  }
+  const made = revealScaffold(props.value);
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-reveal": "",
+    children: /* @__PURE__ */ u3(FormGroup, {
+      title: "Reveal this item",
+      children: [
+        /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: "Keeps it hidden until the player character searches where it lies, or opens what holds it, with Search."
+        }, undefined, false, undefined, this),
+        "problem" in made ? /* @__PURE__ */ u3("span", {
+          class: "lre-small",
+          children: made.problem
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "search",
+          disabled: "problem" in made,
+          onClick: () => ("entity" in made) ? props.onChange(made.entity) : undefined,
+          children: "Hide until searched"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+var CHECKS = [
+  { value: "carries", label: "Has it with them" },
+  { value: "has_item", label: "Has one like it" },
+  { value: "at", label: "It lies at" }
+];
+function ItemObjectivePicker(props) {
+  const app = useApp();
+  const packKinds = useSelect(app.drafts, (d3) => d3?.packKinds);
+  const kinds = b2(() => ({ ...packKinds, ...props.world.kinds }), [packKinds, props.world.kinds]);
+  const [check, setCheck] = d2("carries");
+  const [item, setItem] = d2("");
+  const [place, setPlace] = d2("");
+  const items = b2(() => Object.values(props.world.entities).filter((e3) => isItemKind(kinds, e3.kind)).map((e3) => ({ value: e3.id, label: e3.name, ...e3.visibility === "discoverable" ? { sublabel: "hidden until searched" } : {} })).sort((a3, b3) => a3.label.localeCompare(b3.label)), [props.world.entities, kinds]);
+  const places2 = b2(() => Object.values(props.world.places).map((p3) => ({ value: p3.id, label: p3.name })).sort((a3, b3) => a3.label.localeCompare(b3.label)), [props.world.places]);
+  const ready = item !== "" && (check !== "at" || place !== "");
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-item-objective": "",
+    children: /* @__PURE__ */ u3(FormGroup, {
+      title: "Add an item check",
+      children: [
+        /* @__PURE__ */ u3(Seg, {
+          label: "Check",
+          value: check,
+          options: CHECKS,
+          onChange: setCheck
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(RefPicker, {
+          label: "Item",
+          value: item,
+          options: items,
+          placeholder: "Pick a thing",
+          onChange: setItem
+        }, undefined, false, undefined, this),
+        check === "at" ? /* @__PURE__ */ u3(RefPicker, {
+          label: "Place",
+          value: place,
+          options: places2,
+          placeholder: "Pick a place",
+          onChange: setPlace
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "plus",
+          disabled: !ready,
+          onClick: () => props.onAdd(itemObjective(check, item, place)),
+          children: "Add objective"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
 // src/frontend/build/lookup-editor.tsx
 var SUGGESTIONS_SHOWN = 12;
 function EntryChips(props) {
@@ -23099,6 +23238,16 @@ function SchemaEditor(props) {
         ctx: { doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields },
         onChange: setValue
       }, undefined, false, undefined, this),
+      props.collection === "entities" ? /* @__PURE__ */ u3(RevealItem, {
+        kinds: formDoc.kinds,
+        value,
+        onChange: setValue
+      }, undefined, false, undefined, this) : null,
+      !isNew && (props.collection === "entities" || props.collection === "places") ? /* @__PURE__ */ u3(ContentsSection, {
+        world: props.world,
+        collection: props.collection,
+        id
+      }, undefined, false, undefined, this) : null,
       props.collection === "places" ? app.catalog.placeFields.map((def) => {
         const fields = isRecord(value.fields) ? value.fields : {};
         return /* @__PURE__ */ u3("div", {
@@ -48501,6 +48650,10 @@ function StageSheet(props) {
         value: stage,
         ctx: { doc: props.world, lint: props.lint, path, identifiers: props.identifiers, functions: props.functions },
         onChange: (next) => set(next)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ItemObjectivePicker, {
+        world: props.world,
+        onAdd: (objective) => set({ ...stage, objectives: [...stage.objectives ?? [], objective] })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(FormGroup, {
         title: "Next stages",
