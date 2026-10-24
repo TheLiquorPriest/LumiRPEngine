@@ -3,18 +3,21 @@
 // sheet, from a chat's head world and state (where they are now, and what they're doing). Both are
 // author or GM views, so every place and person is in it with its visibility; nothing is hidden.
 
-import type { CharacterBed, CharacterDTO, CharacterField, CharacterNow, CharacterResult, CharacterSection, PlaceRef, ThingRef, VisibilityValue } from "../shared/character";
+import type { CharacterBed, CharacterDTO, CharacterEmployer, CharacterField, CharacterNow, CharacterRelation, CharacterResult, CharacterSchedule, CharacterSection, PlaceRef, ThingRef, VisibilityValue } from "../shared/character";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { PARTY_RELATION } from "../shared/party";
-import { ALIVE, lifeStateOf, type FieldDef, type RelationInstance, type WorldDoc } from "../shared/world";
-import { calendarOf, formatStamp, placeOffset } from "./calendar";
+import { ALIVE, lifeStateOf, type FieldDef, type Recurrence, type RelationInstance, type RelationTypeDef, type ScheduleDef, type ScheduleSlot, type WorldDoc } from "../shared/world";
+import { calendarOf, formatStamp, formatTimeOfDay, placeOffset, weekdayName } from "./calendar";
 import { lifeOf } from "./life";
-import { own } from "./pack-kit";
+import { optionalQuery, own } from "./pack-kit";
+import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
+import { allSchedules, scheduleOwners } from "./schedules";
 import { isGone, kindDef, kindFields, kindIs } from "./scope";
 import type { WorldState } from "./state";
+import { initialState } from "./world-state";
 
 /** What the builder reads of an entity: the draft's definition and the state's entity alike. */
 interface Body {
@@ -138,6 +141,8 @@ export function buildCharacter(reg: Registry, world: WorldDoc, id: EntityId, sta
   const lifeId = state ? lifeOf(state, id) : (own(world.entities, id)?.life ?? ALIVE);
   const life = lifeId === ALIVE ? null : { state: lifeId, label: lifeStateOf(world, lifeId).label };
   const visibility: VisibilityValue = own(world.entities, id)?.visibility ?? "public";
+  // Build has no chat: its schedules and regard are read from the world as a chat would start.
+  const read = state ?? initialState(world, "character", reg);
   const character: CharacterDTO = {
     id,
     name: e.name,
@@ -152,11 +157,118 @@ export function buildCharacter(reg: Registry, world: WorldDoc, id: EntityId, sta
     home,
     bed,
     bedChoices: bedChoices(bodies, refs, typeof e.fields.home === "string" ? e.fields.home : null, isItem, gone),
-    employer: thingRef(e.fields.employer),
+    employer: employerOf(world, bodies, e.fields.employer, placeRef, thingRef),
+    schedules: schedulesOf(reg, world, read, id),
+    relations: relationsOf(reg, world, reg.context(world, read), id, e),
     ...(state ? { now: nowOf(world, state, id) } : {}),
     sections: sectionsOf(reg, world, e),
   };
   return { character, places: [...refs.values()], things };
+}
+
+/** Who they work for: a place the world has (a shop they run), else an entity (a business); else no one. */
+function employerOf(world: WorldDoc, bodies: Readonly<Record<EntityId, Body>>, value: unknown, placeRef: (p: unknown) => PlaceRef | null, thingRef: (t: unknown) => ThingRef | null): CharacterEmployer | null {
+  if (typeof value !== "string") return null;
+  const place = own(world.places, value) ? placeRef(value) : null;
+  if (place) return { kind: "place", place };
+  const thing = own(bodies, value) ? thingRef(value) : null;
+  return thing ? { kind: "business", thing } : null;
+}
+
+/** The days a recurrence runs, in words ("Weekdays", "Every day", "Mon, Wed and Fri", "On the 1st"). */
+function daysWords(world: WorldDoc, r: Recurrence): string {
+  const cal = calendarOf(world);
+  if (r.every === "day") return "Every day";
+  if (r.every === "year") return "Every year";
+  if (r.every === "month") return r.days && r.days.length > 0 ? `On the ${list(r.days.map(ordinal))} of the month` : "Every month";
+  const days = [...new Set(r.weekdays ?? [])].sort((a, b) => a - b);
+  const key = days.join(",");
+  if (days.length === 0 || days.length === 7) return "Every day";
+  if (key === "1,2,3,4,5") return "Weekdays";
+  if (key === "0,6") return "Weekends";
+  return list(days.map((d) => weekdayName(cal, d).slice(0, 3)));
+}
+
+function ordinal(n: number): string {
+  const tail = n % 100 >= 11 && n % 100 <= 13 ? "th" : (({ 1: "st", 2: "nd", 3: "rd" }) as Record<number, string>)[n % 10] ?? "th";
+  return `${n}${tail}`;
+}
+
+function list(items: readonly string[]): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1) ?? ""}`;
+}
+
+/** A slot's value in words: a place by its name, else the value as words; a weighted slot's options joined by "or". */
+function slotValue(world: WorldDoc, target: string, slot: ScheduleSlot): string {
+  const one = (v: JsonValue | undefined): string => (target === "place" && typeof v === "string" && own(world.places, v) ? (own(world.places, v)?.name ?? v) : typeof v === "string" ? v : v === undefined || v === null ? "nothing" : JSON.stringify(v));
+  if (slot.weighted && slot.weighted.length > 0) {
+    const options = [...new Set(slot.weighted.map((w) => one(w.value)))];
+    return options.length <= 1 ? (options[0] ?? "nothing") : `${options.slice(0, -1).join(", ")} or ${options.at(-1) ?? ""}`;
+  }
+  return one(slot.value);
+}
+
+/** A schedule in words, from its days and slots: "Weekdays 6:30 AM–12:00 PM: Alder Automotive, 12:00 PM–12:45 PM: The Rusty Anchor". */
+export function scheduleSummary(world: WorldDoc, s: Pick<ScheduleDef, "target" | "recurrence" | "slots">): string {
+  const time = (hhmm: string): string => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+    return m ? formatTimeOfDay(Number(m[1]) * 60 + Number(m[2])) : hhmm;
+  };
+  const slots = s.slots.map((slot) => `${time(slot.start)}–${time(slot.end)}: ${slotValue(world, s.target, slot)}`);
+  return `${daysWords(world, s.recurrence)} ${slots.join(", ")}`.trim();
+}
+
+/** The schedules that apply to them (their own, a group's, a kind's or a selector's), each labelled in words. */
+function schedulesOf(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, id: EntityId): CharacterSchedule[] {
+  return allSchedules(reg, world)
+    .filter((s) => s.owner !== undefined && scheduleOwners(reg, world, state, s).includes(id))
+    .map((s) => {
+      const summary = scheduleSummary(world, s);
+      const own_ = (s as ScheduleDef & { label?: unknown }).label;
+      return { id: s.id, label: typeof own_ === "string" && own_.trim() !== "" ? own_.trim() : summary, summary };
+    });
+}
+
+/** Relation types by group: kinship is family, regard and its kin are feelings, membership is groups. */
+const RELATION_GROUP: Record<string, CharacterRelation["group"]> = {
+  parent_of: "family",
+  child_of: "family",
+  sibling_of: "family",
+  spouse_of: "family",
+  partner_of: "family",
+  kin_of: "family",
+  regard: "feelings",
+  drawn_to: "feelings",
+  hostile: "feelings",
+  member_of: "groups",
+};
+
+/** Relation fields that are bookkeeping, never words (regard's last-touched time). */
+const RELATION_INTERNAL = new Set(["t"]);
+
+/**
+ * Their relations as words, each with its type's label and group and who it's to: regard in the
+ * world's band words ("warm"), any other by its own fields ("Role: Owner, Rank: 1"). Containment
+ * and the party are where they are and who they travel with, shown apart.
+ */
+function relationsOf(reg: Registry, world: WorldDoc, ctx: ReadContext, from: EntityId, e: Body): CharacterRelation[] {
+  const types = new Map<string, RelationTypeDef>([...reg.relations.values(), ...Object.values(world.relations)].map((d) => [d.id, d]));
+  const band = optionalQuery(ctx, "regard_band");
+  return e.relations
+    .filter((r) => r.type !== "in" && r.type !== PARTY_RELATION)
+    .map((r) => {
+      const def = types.get(r.type);
+      const fieldDefs = isRecord(def?.fields) ? def.fields : {};
+      const words_ =
+        r.type === "regard" && band
+          ? band(ctx, from, r.to)
+          : Object.entries(r.fields ?? {})
+              .filter(([k, v]) => !RELATION_INTERNAL.has(k) && v !== null && v !== "")
+              .map(([k, v]) => `${own(fieldDefs, k)?.label ?? words(k)}: ${typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : JSON.stringify(v)}`)
+              .join(", ");
+      const to = own(ctx.state.entities, r.to) ?? own(world.entities, r.to);
+      return { type: r.type, typeLabel: def?.label ?? words(r.type), group: RELATION_GROUP[r.type] ?? "other", to: { id: r.to, name: to?.name ?? own(world.places, r.to)?.name ?? r.to }, words: words_ };
+    });
 }
 
 /**
@@ -240,13 +352,38 @@ function sectionsOf(reg: Registry, world: WorldDoc, e: Body): CharacterSection[]
   for (const field of ids) {
     const def = own(defs, field);
     const section: CharacterSection["id"] = def?.locked || def?.derived !== undefined ? "advanced" : (SECTION_OF[field] ?? (sheet.has(field) ? "stats" : authored.has(field) ? "identity" : "advanced"));
-    sections.get(section)?.push(fieldOf(field, def, own(e.fields, field)));
+    sections.get(section)?.push(fieldOf(world, field, def, own(e.fields, field)));
   }
   return SECTION_ORDER.map((id) => ({ id, fields: sections.get(id) ?? [] }));
 }
 
-function fieldOf(id: string, def: FieldDef | undefined, stored: JsonValue | undefined): CharacterField {
-  const { label, help } = plainLabel(def?.label ?? words(id));
+/** Words shared by a field's label and a table's, so "Occupation" and "Occupations" read as the same thing. */
+function stems(text: string): Set<string> {
+  return new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2).map((w) => w.replace(/(ies|es|s)$/, "")));
+}
+
+/** A number's range in words: "3–18", "0 or more", "up to 100"; none without bounds. */
+function rangeHint(def: FieldDef | undefined): string | undefined {
+  if (def?.type !== "number" && def?.type !== "money") return undefined;
+  if (def.min !== undefined && def.max !== undefined) return `${def.min}–${def.max}`;
+  if (def.min !== undefined) return `${def.min} or more`;
+  return def.max !== undefined ? `up to ${def.max}` : undefined;
+}
+
+function fieldOf(world: WorldDoc, id: string, def: FieldDef | undefined, stored: JsonValue | undefined): CharacterField {
+  const plain = plainLabel(def?.label ?? words(id));
+  const label = plain.label;
+  const table = def?.table !== undefined ? own(world.tables, def.table) : undefined;
+  const tableWords = table ? stems(table.label) : new Set<string>();
+  const labelWords = stems(label);
+  // The table tells something only when its name doesn't already say what the field is: "Occupations
+  // and pay" for Occupation says nothing more; "Riverton districts" for Region does.
+  const tells = table !== undefined && ![...labelWords].every((w) => tableWords.has(w));
+  // A label's hint stays when it is words ("MM-DD or YYYY-MM-DD"); a shape ({use, min?, …}) is noise
+  // for the pages, whose own editor reads the shape.
+  const said = plain.help !== undefined && !/[{}[\]]/.test(plain.help) ? plain.help : undefined;
+  const help = [said, tells && table ? `A row of ${table.label}` : undefined].filter((h): h is string => h !== undefined && h !== "").join(" · ") || undefined;
+  const hint = rangeHint(def);
   const type = def?.type ?? (typeof stored === "number" ? "number" : typeof stored === "boolean" ? "bool" : Array.isArray(stored) ? "list" : "text");
   // A list's items: the kind's type, else text when every stored item is text (traits a kind left
   // untyped), so a list of text is edited as its items, never as JSON; a list of shapes (pay_prefs)
@@ -264,5 +401,6 @@ function fieldOf(id: string, def: FieldDef | undefined, stored: JsonValue | unde
     ...(of !== undefined ? { of } : {}),
     ...(def?.locked || def?.derived !== undefined ? { locked: true } : {}),
     ...(help !== undefined ? { help } : {}),
+    ...(hint !== undefined ? { hint } : {}),
   };
 }
