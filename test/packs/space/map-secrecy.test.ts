@@ -233,9 +233,10 @@ describe("routes on the map", () => {
     expect(line?.modes.walk?.minutes).toBe(10);
   });
 
-  test("a closed route isn't drawn, and travel doesn't take it", () => {
+  test("a closed route isn't drawn, and travel under the travel simulation doesn't take it", () => {
     const { world, state } = riverton((w) => {
       w.packs.space!.config.closedRoutes = ["apt_park"];
+      w.mapSettings = { display: "knowledge", grid: { movement: false, sightRadius: 3 }, travelSimulation: true };
     });
     const view = buildMapView(reg.context(world, state));
     const town = view.scopes.find((s) => s.id === "riverton");

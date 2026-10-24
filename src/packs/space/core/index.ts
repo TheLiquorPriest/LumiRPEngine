@@ -32,7 +32,7 @@ import { canSeeEntity, canSeePlace, HIDDEN_PLACE_NAME, knownBySelector, povPlace
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
-import { closedRoutes, NOMINAL_MOVE_MINUTES, nominalRoute, routeAt, type TravelPlan } from "./travel";
+import { closedRoutes, goMinutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
 import { buildMapView } from "./view";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
@@ -250,17 +250,10 @@ export const spacePack: PackDef = {
     r.formula("travel_minutes", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.minutes ?? 0);
     r.formula("distance_km", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.distanceKm ?? 0);
     r.formula("route_exists", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode)) !== null);
-    r.formula("travel_simulation", (ctx) => mapSettingsOf(ctx.world).travelSimulation === true);
-    // Go's time: the walk when one leads there (all the travel simulation allows); else, story first,
-    // the fastest other mode's route, and with none the nominal move, so a Go always arrives.
-    r.formula("go_minutes", (ctx, from, to) => {
-      const a = String(from ?? "");
-      const b = String(to ?? "");
-      const walk = routeAt(ctx, a, b, "walk");
-      if (walk || mapSettingsOf(ctx.world).travelSimulation) return walk?.minutes ?? 0;
-      const times = MODES.flatMap((m) => routeAt(ctx, a, b, m)?.minutes ?? []);
-      return times.length > 0 ? Math.min(...times) : NOMINAL_MOVE_MINUTES;
-    });
+    // Go's time and whether it can go at all (`goMinutes`): story first it always can; the world's
+    // travel simulation needs a walk. One formula for both, so the catalog names no route need.
+    r.formula("go_minutes", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) ?? 0);
+    r.formula("can_go", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) !== null);
     r.formula("within", (ctx, place, ancestor) => placeWithin(ctx.world, String(place ?? ""), String(ancestor ?? "")));
     // Walking on the grid the POV stands on at `place`: its own, or the one it is drawn on.
     r.formula("grid_minutes", (ctx, place, x, y) => {
@@ -279,14 +272,14 @@ export const spacePack: PackDef = {
     r.action({
       id: "go",
       label: "Go to",
-      description: "Walk to another place: a room, a building, a street, another part of town.",
+      description: "Go to another place: a room, a building, a street, another part of town.",
       pack: "space",
       params: { to: { type: "ref", ref: "place", label: "Place" } },
-      // Story first: any travel mode's route, and with none a nominal move. The world's travel
-      // simulation brings back the walk it once needed.
-      requires: ["to != here", "level.space < 2 or not travel_simulation() or route_exists(here, to, 'walk')"],
+      // Story first: the walk, else any mode's route, else a nominal move. The world's travel
+      // simulation brings back the walk it once needed (`can_go`).
+      requires: ["to != here", "can_go(here, to)"],
       outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to" } }] },
-      duration: "level.space < 2 ? (level.space < 1 ? 0 : 15) : go_minutes(here, to)",
+      duration: "go_minutes(here, to)",
       activity: { type: "travel", until: "clock + (level.space < 2 ? 15 : go_minutes(here, to))" },
       lexicon: ["go to", "walk to", "head to", "head over to", "leave for"],
       observable: "leaves",

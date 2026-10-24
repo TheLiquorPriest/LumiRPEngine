@@ -9,6 +9,7 @@ import { toChain } from "../../src/backend/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import type { JsonObject } from "../../src/shared/json";
+import { buildMapView } from "../../src/packs/space/core/view";
 import { Rig } from "../support/rig";
 
 const INTERPRET_MARK = "You map a player's typed input";
@@ -93,6 +94,27 @@ describe("story-first moves", () => {
     const after = await stateOf(rig, chatId);
     expect(placeOfEntity(after, "pov")).toBe("chicago_il");
     expect(after.clock).toBeGreaterThan(before);
+  });
+
+  test("story first, interpret's catalog names no route need for Go and the map offers Go where no walk leads", async () => {
+    const { rig, chatId } = await portAlder();
+    const prompts: string[] = [];
+    rig.host.quietReply = (req: QuietRequest) => {
+      const system = req.messages[0]?.content ?? "";
+      if (system.includes(INTERPRET_MARK)) prompts.push(system);
+      return system.includes(INTERPRET_MARK) ? JSON.stringify(NONE) : "{}";
+    };
+    await rig.turn(chatId, "I look around.", "Gulls wheel over the lot.");
+    const go = (prompts[0] ?? "").split("\n").find((l) => l.startsWith("go — ")) ?? "";
+    expect(go).not.toBe("");
+    expect(go).not.toContain("a way from here");
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const state = await stateOf(rig, chatId);
+    const world = core?.worldAt(state.revision);
+    if (!world) throw new Error("no world");
+    const option = buildMapView(rig.rt.registry.context(world, state)).travel.find((t) => t.action === "go" && t.to === ROCK);
+    expect(option).toBeDefined();
+    expect(option?.disabled).toBeUndefined();
   });
 });
 

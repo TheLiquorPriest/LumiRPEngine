@@ -6,6 +6,7 @@ import type { RouteLeg, WorldDoc } from "../../../shared/world";
 import { objOf, optionalQuery, sliceOf, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { passMemo } from "../../../engine/read-pass";
+import { mapSettingsOf } from "../../../shared/maps";
 
 /** A move at Space level 1 (named places only). */
 export const NOMINAL_MOVE_MINUTES = 15;
@@ -262,4 +263,19 @@ export function nominalRoute(ctx: ReadContext, from: PlaceId, to: PlaceId, mode:
   const level = ctx.levelOf(ctx.world.pov, "space");
   const minutes = level === 0 ? 0 : NOMINAL_MOVE_MINUTES;
   return { mode, legs: [{ from, to, minutes, distanceKm: 0, terrain: null }], minutes, distanceKm: 0 };
+}
+
+const GO_MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water"];
+
+/**
+ * How long Go takes from `from` to `to` (DESIGN §4.1), or null when it can't go: the walk when one
+ * leads there; else, story first, the fastest other mode's route, and with none the nominal move.
+ * Only the world's travel simulation makes a Go with no walk one that can't go.
+ */
+export function goMinutes(ctx: ReadContext, from: PlaceId, to: PlaceId): number | null {
+  const walk = routeAt(ctx, from, to, "walk");
+  if (walk) return walk.minutes;
+  if (mapSettingsOf(ctx.world).travelSimulation === true) return null;
+  const times = GO_MODES.flatMap((m) => routeAt(ctx, from, to, m)?.minutes ?? []);
+  return times.length > 0 ? Math.min(...times) : NOMINAL_MOVE_MINUTES;
 }
