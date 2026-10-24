@@ -32,6 +32,7 @@ export const GM_CSS = `
 .lre-gm-page{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;animation:lre-gm-page-in var(--lre-med)}
 @keyframes lre-gm-page-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
 .lre-gm-page .lre-page-sub>.lre-id{display:block}
+.lre-gm-page:has(>.lre-gm-pages>.lre-gm-page)>.lre-page-header{display:none}
 .lre-gm-tools{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2);min-width:0}
 .lre-gm-search{position:relative;flex:1 1 100%;display:flex;align-items:center;min-width:0}
 .lre-gm-search>.lre-icon{position:absolute;left:var(--lre-s3);color:var(--lre-muted);pointer-events:none}

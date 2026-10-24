@@ -70,7 +70,7 @@ const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
 const PRESET_LABEL: Record<AdjudicationPresetId, string> = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 
 const STATIC_CAVEATS = [
-  "LumiRPEngine does not manage lore; Lumiverse's World Info works as usual in world chats.",
+  "Lumiverse's World Info works as usual in world chats, but for two cases: an entry LumiRPEngine keeps secret stays off until its gate holds, and an entry whose text a section already carries that turn (such as the lore about where your character is, in the Place section) is left out.",
   "Realism, checks and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat in GM → This chat.",
   "Undo covers the latest reply; earlier changes go through Keep or Discard.",
 ];
