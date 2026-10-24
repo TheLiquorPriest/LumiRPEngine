@@ -316,6 +316,11 @@ export class MockBackend {
         lines.push(`Ran ${op.effect.replace(/[._]/g, " ")}`);
         continue;
       }
+      // Section settings shape only the prompt, which the preview doesn't build.
+      if (op.op === "feed") {
+        lines.push(`The ${op.section} section's settings changed`);
+        continue;
+      }
       const id = op.op === "link" || op.op === "unlink" ? op.from : op.op === "adjust" ? op.account : op.entity;
       const entity = find(id);
       if (!entity) return `${id} isn't in the world.`;

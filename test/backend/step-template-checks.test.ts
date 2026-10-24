@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { PLAY_TOOLS } from "../../src/cli/tools-play";
 import { lintWorld } from "../../src/engine/authoring";
-import { EDIT_OPS_MAX } from "../../src/engine/edits";
+import { EDIT_OPS_MAX } from "../../src/shared/protocol";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { isRecord } from "../../src/shared/json";
 import type { StepTemplateDef } from "../../src/shared/world";
