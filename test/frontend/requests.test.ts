@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { adjustOp, chipIntent, convertRequest, editRequest, entityStateOp, fixRequest, paletteRequest, relationFields, resolveMarker, timelapseRequest, timeMarker, travelRequest, upgradeRequest } from "../../src/frontend/requests";
+import { adjustOp, bringOp, chipIntent, convertRequest, editRequest, entityStateOp, fixRequest, paletteRequest, partyOf, placesMatching, relationFields, resolveMarker, timelapseRequest, timeMarker, travelRequest, upgradeRequest, whereFixTarget } from "../../src/frontend/requests";
 import type { UpgradePreview } from "../../src/shared/protocol";
 import type { Chip, GmEntity, PaletteEntry, TimelapseView } from "../../src/shared/state-view";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
@@ -147,6 +147,7 @@ describe("GM edits", () => {
     tier: "principal",
     agent: true,
     pov: false,
+    person: true,
     gone: false,
     spawned: false,
     visibility: "public",
@@ -198,6 +199,27 @@ describe("GM edits", () => {
     expect(adjustOp("dev_checking", "$1,000", DEFAULT_CURRENCY, true)).toEqual({ op: "adjust", account: "dev_checking", cents: -100000 });
     expect(adjustOp("dev_checking", "0", DEFAULT_CURRENCY, false)).toBeNull();
     expect(adjustOp("dev_checking", "a lot", DEFAULT_CURRENCY, false)).toBeNull();
+  });
+
+  test("Bring to moves someone to the player character's place, the party toggle joins or leaves, and the place search narrows by words", () => {
+    const you: GmEntity = { ...rosie, id: "you", name: "You", pov: true, place: "garage" };
+    expect(bringOp(rosie, { entities: [rosie, you] })).toEqual({ op: "move", entity: "npc_rosie", to: "garage" });
+    expect(bringOp(you, { entities: [rosie, you] })).toBeNull();
+    expect(bringOp({ ...rosie, place: "garage" }, { entities: [rosie, you] })).toBeNull();
+    expect(partyOf(rosie, { entities: [rosie, you] })?.op).toEqual({ op: "link", rel: "travels_with", from: "npc_rosie", to: "you" });
+    const member = { ...rosie, relations: [{ type: "travels_with", to: "you", toName: "You" }] };
+    expect(partyOf(member, { entities: [member, you] })).toMatchObject({ travels: true, op: { op: "unlink", rel: "travels_with", from: "npc_rosie", to: "you" } });
+    const places = [{ name: "Daybreak Café" }, { name: "Building garage" }, { name: "Garage bay" }];
+    expect(placesMatching(places, "garage")).toEqual([{ name: "Building garage" }, { name: "Garage bay" }]);
+    expect(placesMatching(places, " bay  garage")).toEqual([{ name: "Garage bay" }]);
+    expect(placesMatching(places, "")).toEqual(places);
+  });
+
+  test("Where are they? aims the player character's place ✎ at someone, from its place only when they're here", () => {
+    const hud = { fixes: { place: { entity: "you", field: "place", type: "ref" as const, value: "diner", options: [{ value: "diner", label: "Diner" }] } } };
+    expect(whereFixTarget(hud, "npc_rosie", true)).toEqual({ entity: "npc_rosie", field: "place", type: "ref", value: "diner", options: [{ value: "diner", label: "Diner" }] });
+    expect(whereFixTarget(hud, "npc_rosie", false)?.value).toBeNull();
+    expect(whereFixTarget({ fixes: {} }, "npc_rosie", true)).toBeNull();
   });
 });
 

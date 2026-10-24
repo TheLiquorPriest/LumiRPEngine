@@ -19,7 +19,7 @@ import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { lifeAwareness, lifeOf } from "./life";
 import { buildEntitySheet } from "./ruleset";
-import { GONE_FIELD, isGone, kindFields, placeOfEntity, scopeEnv } from "./scope";
+import { GONE_FIELD, isGone, kindFields, kindIs, placeOfEntity, scopeEnv } from "./scope";
 import { classValues, tagsOf } from "./selector";
 import type { WorldState } from "./state";
 import { entityVisibility } from "./visibility";
@@ -63,6 +63,7 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
     tier: e.tier,
     agent: e.agent,
     pov: id === world.pov,
+    person: kindIs(reg, world, e.kind, "person"),
     gone: isGone(state, id),
     spawned: !own(world.entities, id),
     visibility: entityVisibility(world, state, id),

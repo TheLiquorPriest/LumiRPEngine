@@ -36,6 +36,7 @@ import { actionOdds, resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
 import { hashParts } from "../shared/hash";
 import { Working } from "../engine/working";
+import { canSeeEntity, canSeePlace } from "../engine/visibility";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { activeRecord } from "../engine/ledger/path";
 import type { StoredChip } from "./chips";
@@ -327,15 +328,15 @@ export class Dispatcher {
           events = fixed.events;
         } else {
           const set = { op: "set" as const, entity: r.entity, field: r.field, value: r.value };
-          // A place fixed with ✎ is a real move, as the GM's Move is: out of whatever holds them, onto
-          // the arrival cell, and their activity left behind where they were (as a narrated move
-          // leaves it). The field is checked as set first, so a locked place stays locked.
-          const checked = resolveEdit(this.rt.registry, world, state, [set], { gm: false, runSeed: this.runSeedOf(r.chatId) });
-          if ("rejection" in checked) throw new RequestError("validation", checked.rejection.reason);
+          // A place fixed with ✎ (the player character's, or where someone in People is) is a real move
+          // through the one move path, as the GM's Move is, and their activity is left behind where they
+          // were (as a narrated move leaves it). Only a place the POV may know, for someone it can see:
+          // anything else reads as no place at all, as the ✎ never offered it.
+          if (r.field === "place" && (typeof r.value !== "string" || !canSeePlace(this.rt.registry, world, state, world.pov, r.value) || !canSeeEntity(this.rt.registry, world, state, world.pov, r.entity))) throw new RequestError("validation", "no such place");
           const doing = state.entities[r.entity]?.fields.activity;
-          const moved = r.field === "place" && typeof r.value === "string" && r.value !== state.entities[r.entity]?.fields.place;
-          const ops = moved ? [{ op: "move" as const, entity: r.entity, to: String(r.value) }, ...(doing !== undefined && doing !== "idle" ? [{ op: "set" as const, entity: r.entity, field: "activity", value: "idle" }] : [])] : null;
-          const edit = ops ? resolveEdit(this.rt.registry, world, state, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) }) : checked;
+          const moved = r.field === "place" && r.value !== state.entities[r.entity]?.fields.place;
+          const ops = moved && doing !== undefined && doing !== "idle" ? [set, { op: "set" as const, entity: r.entity, field: "activity", value: "idle" }] : [set];
+          const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) });
           if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
           events = edit.events;
         }

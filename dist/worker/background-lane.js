@@ -7357,6 +7357,179 @@ function buildEntitySheet(ctx, entity, opts = {}) {
 }
 var SHEET_PREVIEW_LIMITS = Object.freeze({ sections: 32, rows: 64, thresholds: 200, formula: 1024 });
 
+// src/engine/cues.ts
+var SECRET_KINDS = ["lore", "track", "flag"];
+function readCue(raw) {
+  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
+    return null;
+  const keyed = SECRET_KINDS.filter((kind2) => raw[kind2] !== undefined);
+  const kind = keyed[0];
+  const id = kind === undefined ? undefined : raw[kind];
+  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
+}
+function cuesOf(world, who) {
+  const cues = own(world.entities, who)?.cues;
+  return (Array.isArray(cues) ? cues : []).flatMap((raw) => readCue(raw) ?? []);
+}
+
+// src/engine/lore.ts
+var MIN_TERM = 3;
+var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
+function plain(text2) {
+  const words2 = text2.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return words2 === "" ? "" : ` ${words2} `;
+}
+function wordsOf(text2) {
+  return plain(text2).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+}
+var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+function loreHeldBy(world, entry, who) {
+  return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
+}
+function loreReadable(reg, world, state, entry, purpose, effects = false, open = loreGateReader(reg, world, state), as) {
+  if (purpose === "gm")
+    return true;
+  const source = loreSourceOf(entry.source);
+  if (source.kind === "ai" && source.status === "pending")
+    return false;
+  if (as !== undefined && loreIsSecret(entry))
+    return loreHeldBy(world, entry, as);
+  if (loreIsSecret(entry) && !open(entry))
+    return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
+  const v = entry.visibility;
+  if (v === undefined || v === "public")
+    return true;
+  if (v !== "known_by")
+    return false;
+  const reader = as ?? world.pov;
+  const links = listOf(entry.links);
+  return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
+}
+
+// src/engine/lore-pins.ts
+var CHAIN_MAX = 16;
+function placeChain(world, place) {
+  const out = [];
+  for (let at = place ?? undefined;at !== undefined && hasOwn(world.places, at) && !out.includes(at) && out.length < CHAIN_MAX; at = world.places[at]?.parent)
+    out.push(at);
+  return out;
+}
+
+// src/engine/presence.ts
+var LEVELS_APART = 2;
+var INTERIOR_WALK_MINUTES = 10;
+function farRoute(route) {
+  const walk2 = route.modes.walk;
+  return walk2 === undefined || walk2.minutes > INTERIOR_WALK_MINUTES;
+}
+var spreadOf = new WeakMap;
+function joined(parts, part) {
+  let rep = part;
+  for (let next = parts.get(rep);next !== undefined && next !== rep; next = parts.get(rep))
+    rep = next;
+  parts.set(part, rep);
+  return rep;
+}
+function spreadPlaces(world) {
+  const hit = spreadOf.get(world);
+  if (hit)
+    return hit;
+  const out = new Set;
+  const joins = new Map;
+  for (const r of Object.values(world.routes)) {
+    const from = placeChain(world, r.from);
+    const to = placeChain(world, r.to);
+    for (let i = 1;i < from.length; i++) {
+      const place = from[i];
+      const fromPart = from[i - 1];
+      const j = place === undefined ? -1 : to.indexOf(place);
+      const toPart = to[j - 1];
+      if (place === undefined || fromPart === undefined || j < 1 || toPart === undefined)
+        continue;
+      const parts = joins.get(place) ?? new Map;
+      joins.set(place, parts);
+      if (farRoute(r))
+        out.add(place);
+      else
+        parts.set(joined(parts, fromPart), joined(parts, toPart));
+    }
+  }
+  const partsOf = new Map;
+  for (const p of Object.values(world.places)) {
+    if (!p.parent)
+      continue;
+    const parts = partsOf.get(p.parent);
+    if (parts)
+      parts.push(p.id);
+    else
+      partsOf.set(p.parent, [p.id]);
+  }
+  for (const [place, parts] of joins) {
+    if (new Set((partsOf.get(place) ?? []).map((part) => joined(parts, part))).size > 1)
+      out.add(place);
+  }
+  spreadOf.set(world, out);
+  return out;
+}
+function together(world, a, b) {
+  if (a === null || b === null)
+    return false;
+  if (a === b)
+    return true;
+  const within3 = (inner, outer) => {
+    const up = placeChain(world, inner).slice(1, LEVELS_APART + 1);
+    const at = up.indexOf(outer);
+    return at >= 0 && !up.slice(0, at + 1).some((p) => spreadPlaces(world).has(p));
+  };
+  return within3(a, b) || within3(b, a);
+}
+function povLead(name) {
+  return `${name} (you)`;
+}
+
+// src/shared/party.ts
+var PARTY_RELATION = "travels_with";
+
+// src/engine/relocate.ts
+function relocate(ctx, who, to, opts = {}) {
+  const e = own(ctx.state.entities, who);
+  if (!e)
+    return { code: "missing_entity", reason: `no entity ${who}` };
+  const from = placeOfEntity(ctx.state, who);
+  if (opts.route && from && from !== to && mapSettingsOf(ctx.world).travelSimulation === true) {
+    const reach = optionalQuery(ctx, "space.reachable");
+    const named = (id) => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
+    if (reach && !reach(ctx, from, to))
+      return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(to)}` };
+  }
+  const out = moveEvents(ctx, who, to);
+  const doing = e.fields.activity;
+  if (opts.activity !== undefined && from !== to && doing !== undefined && doing !== opts.activity)
+    out.push({ type: "set", entity: who, field: "activity", value: opts.activity });
+  if (opts.party && who === ctx.world.pov) {
+    for (const member of partyAt(ctx, from))
+      if (placeOfEntity(ctx.state, member) !== to)
+        out.push(...moveEvents(ctx, member, to));
+  }
+  return out;
+}
+function moveEvents(ctx, who, to) {
+  const out = [];
+  for (const r of own(ctx.state.entities, who)?.relations ?? [])
+    if (r.type === "in")
+      out.push({ type: "unlink", rel: "in", from: who, to: r.to });
+  out.push({ type: "set", entity: who, field: "place", value: to });
+  out.push(...optionalService(ctx, "space.arrival")?.(ctx, who, to) ?? []);
+  return out;
+}
+function partyAt(ctx, here) {
+  const pov = ctx.world.pov;
+  return Object.keys(ctx.state.entities).sort().filter((id) => {
+    const e = own(ctx.state.entities, id);
+    return !!e && id !== pov && e.relations.some((r) => r.type === PARTY_RELATION && r.to === pov) && !isGone(ctx.state, id) && acts(ctx.world, ctx.state, id) && together(ctx.world, here, placeOfEntity(ctx.state, id));
+  });
+}
+
 // src/engine/effects.ts
 var NESTING_CAP = 8;
 function reject4(code, reason) {
@@ -7472,12 +7645,19 @@ function coreEffect(reg, w, type, args, rng) {
         return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
       if (!own(world.places, to))
         return reject4("missing_place", `no place ${labelOf(w, to)}`);
-      const out = [];
-      for (const r of e.relations)
-        if (r.type === "in")
-          out.push({ type: "unlink", rel: "in", from: entity, to: r.to });
-      out.push({ type: "set", entity, field: "place", value: to });
-      out.push(...optionalService(w.ctx, "space.arrival")?.(w.ctx, entity, to) ?? []);
+      const moved = relocate(w.ctx, entity, to, { party: true, ...typeof args.activity === "string" ? { activity: args.activity } : {}, ...args.route === true ? { route: true } : {} });
+      if (!Array.isArray(moved))
+        return moved;
+      const here = placeOfEntity(state, entity);
+      const along = text2(args.with).split(",").map((s) => s.trim()).filter((id) => id !== "" && id !== entity && own(state.entities, id) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)));
+      const out = [...moved];
+      for (const id of along) {
+        if (out.some((ev) => ev.type === "set" && ev.entity === id && ev.field === "place"))
+          continue;
+        const theirs = relocate(w.ctx, id, to);
+        if (Array.isArray(theirs))
+          out.push(...theirs);
+      }
       return out;
     }
     case "link": {
@@ -7777,6 +7957,21 @@ function prepare(reg, world, state, req) {
         return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
       bindings[name] = id;
       params[name] = id;
+      continue;
+    }
+    if (def.type === "list" && def.ref) {
+      const ids = (Array.isArray(raw) ? raw : String(raw).split(",")).map((x) => String(x).trim()).filter((x) => x !== "");
+      for (const id of ids) {
+        const target = own(state.entities, id);
+        if (!target)
+          return { code: "bad_param", reason: `no entity ${labelOf({ world, state }, id)}` };
+        if (!kindIs(reg, world, target.kind, def.ref))
+          return { code: "bad_param", reason: `${target.name} is not ${/^[aeiou]/i.test(def.ref) ? "an" : "a"} ${(reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase()}` };
+        if (def.of && !selectorMatches(reg, world, state, def.of, id))
+          return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
+      }
+      if (ids.length > 0)
+        params[name] = [...new Set(ids)].join(",");
       continue;
     }
     if (def.type === "text" && def.table !== undefined) {
@@ -8237,55 +8432,6 @@ function resolveTry(reg, w, params, rng, opts = {}) {
   }
   const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: read.attempt, pov: nameOf3(pov), band, dc, against, companions: rolled, share, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
   return { ...res, events: w.events.slice(start), inferred };
-}
-
-// src/engine/cues.ts
-var SECRET_KINDS = ["lore", "track", "flag"];
-function readCue(raw) {
-  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
-    return null;
-  const keyed = SECRET_KINDS.filter((kind2) => raw[kind2] !== undefined);
-  const kind = keyed[0];
-  const id = kind === undefined ? undefined : raw[kind];
-  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
-}
-function cuesOf(world, who) {
-  const cues = own(world.entities, who)?.cues;
-  return (Array.isArray(cues) ? cues : []).flatMap((raw) => readCue(raw) ?? []);
-}
-
-// src/engine/lore.ts
-var MIN_TERM = 3;
-var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
-function plain(text3) {
-  const words2 = text3.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-  return words2 === "" ? "" : ` ${words2} `;
-}
-function wordsOf(text3) {
-  return plain(text3).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
-}
-var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-function loreHeldBy(world, entry, who) {
-  return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
-}
-function loreReadable(reg, world, state, entry, purpose, effects = false, open = loreGateReader(reg, world, state), as) {
-  if (purpose === "gm")
-    return true;
-  const source = loreSourceOf(entry.source);
-  if (source.kind === "ai" && source.status === "pending")
-    return false;
-  if (as !== undefined && loreIsSecret(entry))
-    return loreHeldBy(world, entry, as);
-  if (loreIsSecret(entry) && !open(entry))
-    return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
-  const v = entry.visibility;
-  if (v === undefined || v === "public")
-    return true;
-  if (v !== "known_by")
-    return false;
-  const reader = as ?? world.pov;
-  const links = listOf(entry.links);
-  return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
 }
 
 // src/engine/lore-lint.ts
@@ -9151,7 +9297,12 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
       if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
         continue;
     }
-    out.push({ type: "set", entity, field: schedule.target, value });
+    if (schedule.target === "place" && typeof value === "string") {
+      const moved = relocate(ctx, entity, value);
+      if (!("code" in moved))
+        out.push(...moved);
+    } else
+      out.push({ type: "set", entity, field: schedule.target, value });
   }
   return out;
 }
@@ -12568,6 +12719,7 @@ var spacePack = {
     r.kind(THING);
     r.kind(PERSON);
     r.relation({ id: "in", label: "In", from: "*", to: "*", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
+    r.relation({ id: PARTY_RELATION, label: "Travels with", from: "person", to: "person", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
     r.service("space.travel", travel);
     r.service("space.arrival", arrivalEvents);
     r.service("space.lay", layEvents);
@@ -12648,9 +12800,9 @@ var spacePack = {
       label: "Go to",
       description: "Go to another place: a room, a building, a street, another part of town.",
       pack: "space",
-      params: { to: { type: "ref", ref: "place", label: "Place" } },
+      params: { to: { type: "ref", ref: "place", label: "Place" }, with: { type: "list", ref: "person", optional: true, label: "Who comes along" } },
       requires: ["to != here", "can_go(here, to)"],
-      outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to" } }] },
+      outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to", with: "=params.with" } }] },
       duration: "go_minutes(here, to)",
       activity: { type: "travel", until: "clock + (level.space < 2 ? 15 : go_minutes(here, to))" },
       lexicon: ["go to", "walk to", "head to", "head over to", "leave for"],
@@ -12717,21 +12869,14 @@ var spacePack = {
         }
         if (stopped)
           return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
-        const from = placeOfEntity(ctx.state, entity);
-        const named = (id) => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
-        if (from && mapSettingsOf(ctx.world).travelSimulation && !reachable(ctx, from, place))
-          return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
-        return null;
+        const route = relocate(ctx, entity, place, { route: true });
+        return "code" in route ? route : null;
       },
       toEffects: (p, ctx) => {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
         const to = typeof p.place === "string" ? p.place : "";
-        const move = { type: "move", args: { entity, to } };
-        const doing = own(ctx.state.entities, entity)?.fields.activity;
-        if (to === placeOfEntity(ctx.state, entity) || doing === undefined)
-          return [move];
-        const next = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
-        return next === doing ? [move] : [move, { type: "set", args: { entity, field: "activity", value: next } }];
+        const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
+        return [{ type: "move", args: { entity, to, activity, route: true } }];
       }
     });
     r.lint({
@@ -24586,15 +24731,18 @@ var vehiclesPack = {
         if (!fuelOk(ctx, v, leg))
           return reject10("no_fuel", `${e.name} doesn't have the fuel`);
         const out = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: to }];
-        const riders = Array.isArray(args.riders) ? args.riders.filter((x) => typeof x === "string") : [];
+        const named = Array.isArray(args.riders) ? args.riders.filter((x) => typeof x === "string") : [];
+        const riders = driver === ctx.world.pov ? [...named, ...partyAt(ctx, placeOfEntity(ctx.state, driver))] : named;
+        const moved = new Set;
         for (const p of [driver, ...riders]) {
           const pe = own(ctx.state.entities, p);
-          if (!pe || pe.relations.some((x) => x.type === "in" && x.to === v))
+          if (!pe || moved.has(p) || pe.relations.some((x) => x.type === "in" && x.to === v))
             continue;
-          for (const rel of pe.relations)
-            if (rel.type === "in")
-              out.push({ type: "unlink", rel: "in", from: p, to: rel.to });
-          out.push({ type: "set", entity: p, field: "place", value: to });
+          moved.add(p);
+          const events2 = relocate(ctx, p, to);
+          if ("code" in events2)
+            return events2;
+          out.push(...events2);
         }
         return out;
       }
@@ -25657,87 +25805,6 @@ function routineShapeProblems(v) {
   return out;
 }
 var ROUTINE_SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" };
-
-// src/engine/lore-pins.ts
-var CHAIN_MAX = 16;
-function placeChain(world, place) {
-  const out = [];
-  for (let at = place ?? undefined;at !== undefined && hasOwn(world.places, at) && !out.includes(at) && out.length < CHAIN_MAX; at = world.places[at]?.parent)
-    out.push(at);
-  return out;
-}
-
-// src/engine/presence.ts
-var LEVELS_APART = 2;
-var INTERIOR_WALK_MINUTES = 10;
-function farRoute(route) {
-  const walk2 = route.modes.walk;
-  return walk2 === undefined || walk2.minutes > INTERIOR_WALK_MINUTES;
-}
-var spreadOf = new WeakMap;
-function joined(parts, part) {
-  let rep = part;
-  for (let next = parts.get(rep);next !== undefined && next !== rep; next = parts.get(rep))
-    rep = next;
-  parts.set(part, rep);
-  return rep;
-}
-function spreadPlaces(world) {
-  const hit = spreadOf.get(world);
-  if (hit)
-    return hit;
-  const out = new Set;
-  const joins = new Map;
-  for (const r of Object.values(world.routes)) {
-    const from = placeChain(world, r.from);
-    const to = placeChain(world, r.to);
-    for (let i = 1;i < from.length; i++) {
-      const place = from[i];
-      const fromPart = from[i - 1];
-      const j = place === undefined ? -1 : to.indexOf(place);
-      const toPart = to[j - 1];
-      if (place === undefined || fromPart === undefined || j < 1 || toPart === undefined)
-        continue;
-      const parts = joins.get(place) ?? new Map;
-      joins.set(place, parts);
-      if (farRoute(r))
-        out.add(place);
-      else
-        parts.set(joined(parts, fromPart), joined(parts, toPart));
-    }
-  }
-  const partsOf = new Map;
-  for (const p of Object.values(world.places)) {
-    if (!p.parent)
-      continue;
-    const parts = partsOf.get(p.parent);
-    if (parts)
-      parts.push(p.id);
-    else
-      partsOf.set(p.parent, [p.id]);
-  }
-  for (const [place, parts] of joins) {
-    if (new Set((partsOf.get(place) ?? []).map((part) => joined(parts, part))).size > 1)
-      out.add(place);
-  }
-  spreadOf.set(world, out);
-  return out;
-}
-function together(world, a, b) {
-  if (a === null || b === null)
-    return false;
-  if (a === b)
-    return true;
-  const within3 = (inner, outer) => {
-    const up = placeChain(world, inner).slice(1, LEVELS_APART + 1);
-    const at = up.indexOf(outer);
-    return at >= 0 && !up.slice(0, at + 1).some((p) => spreadPlaces(world).has(p));
-  };
-  return within3(a, b) || within3(b, a);
-}
-function povLead(name) {
-  return `${name} (you)`;
-}
 
 // src/packs/castlife/core/places.ts
 function homeOf(ctx, who) {
@@ -27310,7 +27377,7 @@ function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = 
   if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     if (seen && withPov(ctx, who))
       out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
-    out.push({ type: "set", entity: who, field: "place", value: place });
+    out.push(...movesOf(relocate(ctx, who, place)));
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
       out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
   }
@@ -27323,6 +27390,9 @@ function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = 
       out.push({ type: "set", entity: who, field: "holds", value: kept2 });
   }
   return out;
+}
+function movesOf(moved) {
+  return "code" in moved ? [] : moved;
 }
 function blockActivity(activity) {
   return activity.startsWith("retrieve:") ? "errand" : activity;
@@ -27686,7 +27756,7 @@ function stepTrips(slot, ctx) {
       const away = holding && e.fields.place === place;
       if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place) && !(slot.povRoutine === false && withPov(ctx, who))) {
         holds = { ...holds, place: until, activity: until };
-        out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
+        out.push({ type: "set", entity: who, field: "holds", value: holds }, ...movesOf(relocate(ctx, who, place)), { type: "set", entity: who, field: "activity", value: "trip" });
       }
       if (!(until <= slot.end && (until > slot.start || holding)))
         continue;
@@ -27694,7 +27764,7 @@ function stepTrips(slot, ctx) {
         continue;
       const home = homeOf(ctx, who);
       if ((until > slot.start || away) && home)
-        out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
+        out.push(...movesOf(relocate(ctx, who, home)), { type: "set", entity: who, field: "activity", value: "idle" });
       const kept2 = Object.fromEntries(Object.entries(holds).filter(([target, at]) => !((target === "place" || target === "activity") && at === until)));
       if (Object.keys(kept2).length < Object.keys(holds).length) {
         holds = kept2;
@@ -28182,7 +28252,7 @@ var castlifePack = {
         const out = [];
         if (typeof a.place === "string" && own(ctx.world.places, a.place)) {
           holds.place = until;
-          out.push({ type: "set", entity: who, field: "place", value: a.place });
+          out.push(...movesOf(relocate(ctx, who, a.place)));
         }
         if (typeof a.activity === "string") {
           holds.activity = until;

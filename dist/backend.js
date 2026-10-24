@@ -6428,6 +6428,402 @@ function createRng(seed) {
   };
 }
 
+// src/shared/party.ts
+var PARTY_RELATION = "travels_with";
+
+// src/engine/cues.ts
+var SECRET_KINDS = ["lore", "track", "flag"];
+function readCue(raw) {
+  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
+    return null;
+  const keyed = SECRET_KINDS.filter((kind2) => raw[kind2] !== undefined);
+  const kind = keyed[0];
+  const id = kind === undefined ? undefined : raw[kind];
+  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
+}
+function cuesOf(world, who) {
+  const cues = own(world.entities, who)?.cues;
+  return (Array.isArray(cues) ? cues : []).flatMap((raw) => readCue(raw) ?? []);
+}
+
+// src/engine/lore.ts
+var MIN_TERM = 3;
+var MIN_WORDS = 4;
+var WORD_CAP = 3;
+var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
+function plain(text2) {
+  const words = text2.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return words === "" ? "" : ` ${words} `;
+}
+function wordsOf(text2) {
+  return plain(text2).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+}
+var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+function loreHeldBy(world, entry, who) {
+  return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
+}
+function loreReadable(reg, world, state, entry, purpose, effects = false, open = loreGateReader(reg, world, state), as) {
+  if (purpose === "gm")
+    return true;
+  const source = loreSourceOf(entry.source);
+  if (source.kind === "ai" && source.status === "pending")
+    return false;
+  if (as !== undefined && loreIsSecret(entry))
+    return loreHeldBy(world, entry, as);
+  if (loreIsSecret(entry) && !open(entry))
+    return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
+  const v = entry.visibility;
+  if (v === undefined || v === "public")
+    return true;
+  if (v !== "known_by")
+    return false;
+  const reader = as ?? world.pov;
+  const links = listOf(entry.links);
+  return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
+}
+function readableLore(reg, world, state, purpose, effects = false) {
+  const open = loreGateReader(reg, world, state);
+  return Object.keys(world.lore).filter((id) => {
+    const entry = world.lore[id];
+    return entry !== undefined && hasOwn(world.lore, id) && loreReadable(reg, world, state, entry, purpose, effects, open);
+  }).sort();
+}
+function readsSecrets(reg, world, state, purpose, effects = false) {
+  const open = loreGateReader(reg, world, state);
+  return Object.values(world.lore).some((entry) => loreIsSecret(entry) && !open(entry) && loreReadable(reg, world, state, entry, purpose, effects, open));
+}
+function secretLoreNames(reg, world, state) {
+  const open = loreGateReader(reg, world, state);
+  const secret = Object.entries(world.lore).filter(([, entry]) => loreIsSecret(entry) && !open(entry));
+  const ids = new Set(secret.map(([id]) => id));
+  const names = new Set;
+  const add = (name) => {
+    if (typeof name === "string" && name.trim().length >= MIN_TERM)
+      names.add(name.trim());
+  };
+  for (const [id, entry] of secret)
+    for (const name of [id, entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), ...listOf(entry.topics)])
+      add(name);
+  for (const [term, leads] of Object.entries(world.loreIndex.terms))
+    if (listOf(leads).some((id) => ids.has(id)))
+      add(term);
+  for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
+    if (!isRecord(topic) || !listOf(topic.entries).some((entry) => ids.has(entry)))
+      continue;
+    add(id);
+    add(topic.label);
+  }
+  return [...names];
+}
+function loreSnippet(tokens, entry, budget) {
+  const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
+  const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
+  const whole2 = title === "" ? body : `${title}: ${body}`;
+  const cost = tokens(whole2);
+  if (cost <= budget)
+    return { text: whole2, tokens: cost, cut: false };
+  const head = title === "" ? 0 : title.split(" ").length;
+  const words = whole2.split(" ");
+  const fits = (n) => tokens(`${words.slice(0, n).join(" ")}\u2026`) <= budget;
+  let lo = head + MIN_WORDS;
+  if (lo >= words.length || !fits(lo))
+    return null;
+  let hi = words.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(mid))
+      lo = mid;
+    else
+      hi = mid - 1;
+  }
+  const text2 = `${words.slice(0, lo).join(" ")}\u2026`;
+  return { text: text2, tokens: tokens(text2), cut: true };
+}
+function topicMembers(world, topic) {
+  const filed = hasOwn(world.loreIndex.topics, topic) ? listOf(world.loreIndex.topics[topic]?.entries) : [];
+  const named = Object.keys(world.lore).filter((id) => listOf(world.lore[id]?.topics).some((label) => topicIdOf(label) === topic)).sort();
+  return [...new Set([...filed, ...named])].filter((id) => hasOwn(world.lore, id));
+}
+function loreSearch(r, q) {
+  const { reg, world, state } = r;
+  const open = loreGateReader(reg, world, state);
+  const text2 = plain(q.query ?? "");
+  const exact = new Set((q.terms ?? []).map(plain).filter((t) => t.trim().length >= MIN_TERM));
+  const said = (name) => {
+    if (typeof name !== "string")
+      return null;
+    const p = plain(name);
+    return p.trim().length >= MIN_TERM && (exact.has(p) || text2 !== "" && text2.includes(p)) ? p.trim() : null;
+  };
+  const tableTerms = new Map;
+  for (const [term, ids] of Object.entries(world.loreIndex.terms)) {
+    const hit = said(term);
+    if (hit)
+      for (const id of listOf(ids))
+        tableTerms.set(id, [...tableTerms.get(id) ?? [], hit]);
+  }
+  const topics = new Set((q.topics ?? []).map(topicIdOf).filter((t) => t !== ""));
+  if (!q.exact) {
+    for (const [id, topic] of Object.entries(world.loreIndex.topics))
+      if (isRecord(topic) && said(topic.label))
+        topics.add(id);
+    for (const entry of Object.values(world.lore))
+      for (const label of listOf(entry.topics))
+        if (said(label))
+          topics.add(topicIdOf(label));
+  }
+  const members = new Map([...topics].map((t) => [t, new Set(topicMembers(world, t))]));
+  const links = new Set(q.exact ? [] : q.links ?? []);
+  const words = q.exact ? [] : [...new Set(wordsOf(q.query ?? ""))];
+  const ranked = [];
+  for (const [id, entry] of Object.entries(world.lore)) {
+    if (!loreReadable(reg, world, state, entry, q.purpose, q.effects === true, open, q.as))
+      continue;
+    const terms = new Set(tableTerms.get(id) ?? []);
+    for (const name of [entry.title, ...listOf(entry.aliases), ...listOf(entry.keys)]) {
+      const hit = said(name);
+      if (hit)
+        terms.add(hit);
+    }
+    const linked = listOf(entry.links).filter((l) => links.has(l));
+    const inTopics = [...topics].filter((t) => members.get(t)?.has(id) === true).sort();
+    let tf = 0;
+    if (words.length > 0) {
+      const counts = new Map;
+      for (const w of wordsOf([entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), entry.content].join(" ")))
+        counts.set(w, (counts.get(w) ?? 0) + 1);
+      for (const w of words)
+        tf += Math.min(WORD_CAP, counts.get(w) ?? 0);
+    }
+    if (q.exact ? terms.size === 0 : terms.size + linked.length + inTopics.length + tf === 0)
+      continue;
+    const priority = typeof entry.priority === "number" && Number.isFinite(entry.priority) ? entry.priority : 0;
+    const why = [...[...terms].sort().map((t) => `term:${t}`), ...linked.map((l) => `link:${l}`), ...inTopics.map((t) => `topic:${t}`), ...tf > 0 ? ["words"] : []];
+    ranked.push({ id, entry, key: [terms.size, linked.length, inTopics.length, tf, priority], why });
+  }
+  ranked.sort((a, b) => {
+    for (let i = 0;i < a.key.length; i++) {
+      const d = (b.key[i] ?? 0) - (a.key[i] ?? 0);
+      if (d !== 0)
+        return d;
+    }
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  const groups = new Set;
+  const best = ranked.filter(({ entry }) => {
+    const g = typeof entry.group === "string" ? entry.group.trim() : "";
+    if (g === "")
+      return true;
+    if (groups.has(g))
+      return false;
+    groups.add(g);
+    return true;
+  });
+  const hits = [];
+  let left = Math.max(0, Math.floor(q.tokenBudget));
+  for (const { id, entry, why } of best) {
+    if (q.limit !== undefined && hits.length >= q.limit)
+      break;
+    if (q.skip?.has(id))
+      continue;
+    const snippet = loreSnippet((text3) => r.tokens(text3), entry, left);
+    if (!snippet)
+      break;
+    left -= snippet.tokens;
+    hits.push({ id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why });
+  }
+  return { hits, matched: best.length, secret: best.filter(({ entry }) => loreIsSecret(entry) && !open(entry)).length };
+}
+function loreGet(r, id, purpose, tokenBudget, effects = false) {
+  const entry = hasOwn(r.world.lore, id) ? r.world.lore[id] : undefined;
+  const open = loreGateReader(r.reg, r.world, r.state);
+  if (!entry || !loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open))
+    return null;
+  const snippet = loreSnippet((text2) => r.tokens(text2), entry, Math.max(0, Math.floor(tokenBudget)));
+  if (!snippet)
+    return null;
+  return { id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why: [] };
+}
+function loreList(r, topic, purpose, effects = false) {
+  const open = loreGateReader(r.reg, r.world, r.state);
+  const out = [];
+  for (const id of topicMembers(r.world, topicIdOf(topic))) {
+    const entry = r.world.lore[id];
+    if (entry && loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open))
+      out.push({ id, title: typeof entry.title === "string" ? entry.title : id });
+  }
+  return out;
+}
+
+// src/engine/lore-pins.ts
+var CHAIN_MAX = 16;
+function placeChain(world, place) {
+  const out = [];
+  for (let at = place ?? undefined;at !== undefined && hasOwn(world.places, at) && !out.includes(at) && out.length < CHAIN_MAX; at = world.places[at]?.parent)
+    out.push(at);
+  return out;
+}
+function pinsFor(world, place, who, steps = []) {
+  const pins = lorePinsOf(world);
+  const out = [];
+  const seen = new Set;
+  const add = (list, on) => {
+    for (const pin of list ?? []) {
+      const key = lorePinKey(pin);
+      if (seen.has(key))
+        continue;
+      seen.add(key);
+      out.push({ key, pin, on });
+    }
+  };
+  if (who !== undefined)
+    add(own(pins.characters, who), { character: who });
+  for (const step of steps)
+    add(pins.steps[step], { step });
+  for (const at of placeChain(world, place))
+    add(own(pins.places, at), { place: at });
+  return out;
+}
+function worldPinText(world, ref) {
+  if (!("lore" in ref.pin))
+    return null;
+  const entry = own(world.lore, ref.pin.lore);
+  return entry ? { key: ref.key, on: ref.on, title: typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : ref.pin.lore, content: typeof entry.content === "string" ? entry.content : "", entry } : null;
+}
+function fitPins(r, texts, budget, readable) {
+  const open = loreGateReader(r.reg, r.world, r.state);
+  const out = [];
+  let left = Math.max(0, Math.floor(budget));
+  for (const t of texts) {
+    if (t.entry !== null && !readable(t.entry))
+      continue;
+    const secret = t.entry !== null && loreIsSecret(t.entry) && !open(t.entry);
+    const snippet = loreSnippet((text2) => r.tokens(text2), { title: t.title, content: t.content }, left);
+    if (!snippet) {
+      out.push({ key: t.key, title: t.title, entry: t.entry, snippet: null, tokens: 0, cut: false, secret });
+      continue;
+    }
+    left -= snippet.tokens;
+    out.push({ key: t.key, title: t.title, entry: t.entry, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret });
+  }
+  return out;
+}
+
+// src/engine/presence.ts
+var LEVELS_APART = 2;
+var INTERIOR_WALK_MINUTES = 10;
+function farRoute(route) {
+  const walk2 = route.modes.walk;
+  return walk2 === undefined || walk2.minutes > INTERIOR_WALK_MINUTES;
+}
+var spreadOf = new WeakMap;
+function joined(parts, part) {
+  let rep = part;
+  for (let next = parts.get(rep);next !== undefined && next !== rep; next = parts.get(rep))
+    rep = next;
+  parts.set(part, rep);
+  return rep;
+}
+function spreadPlaces(world) {
+  const hit = spreadOf.get(world);
+  if (hit)
+    return hit;
+  const out = new Set;
+  const joins = new Map;
+  for (const r of Object.values(world.routes)) {
+    const from = placeChain(world, r.from);
+    const to = placeChain(world, r.to);
+    for (let i = 1;i < from.length; i++) {
+      const place = from[i];
+      const fromPart = from[i - 1];
+      const j = place === undefined ? -1 : to.indexOf(place);
+      const toPart = to[j - 1];
+      if (place === undefined || fromPart === undefined || j < 1 || toPart === undefined)
+        continue;
+      const parts = joins.get(place) ?? new Map;
+      joins.set(place, parts);
+      if (farRoute(r))
+        out.add(place);
+      else
+        parts.set(joined(parts, fromPart), joined(parts, toPart));
+    }
+  }
+  const partsOf = new Map;
+  for (const p of Object.values(world.places)) {
+    if (!p.parent)
+      continue;
+    const parts = partsOf.get(p.parent);
+    if (parts)
+      parts.push(p.id);
+    else
+      partsOf.set(p.parent, [p.id]);
+  }
+  for (const [place, parts] of joins) {
+    if (new Set((partsOf.get(place) ?? []).map((part) => joined(parts, part))).size > 1)
+      out.add(place);
+  }
+  spreadOf.set(world, out);
+  return out;
+}
+function together(world, a, b) {
+  if (a === null || b === null)
+    return false;
+  if (a === b)
+    return true;
+  const within2 = (inner, outer) => {
+    const up = placeChain(world, inner).slice(1, LEVELS_APART + 1);
+    const at = up.indexOf(outer);
+    return at >= 0 && !up.slice(0, at + 1).some((p) => spreadPlaces(world).has(p));
+  };
+  return within2(a, b) || within2(b, a);
+}
+function inPovScene(world, state, id) {
+  return id !== world.pov && together(world, placeOfEntity(state, world.pov), placeOfEntity(state, id));
+}
+function povLead(name) {
+  return `${name} (you)`;
+}
+
+// src/engine/relocate.ts
+function relocate(ctx, who, to, opts = {}) {
+  const e = own(ctx.state.entities, who);
+  if (!e)
+    return { code: "missing_entity", reason: `no entity ${who}` };
+  const from = placeOfEntity(ctx.state, who);
+  if (opts.route && from && from !== to && mapSettingsOf(ctx.world).travelSimulation === true) {
+    const reach = optionalQuery(ctx, "space.reachable");
+    const named = (id) => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
+    if (reach && !reach(ctx, from, to))
+      return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(to)}` };
+  }
+  const out = moveEvents(ctx, who, to);
+  const doing = e.fields.activity;
+  if (opts.activity !== undefined && from !== to && doing !== undefined && doing !== opts.activity)
+    out.push({ type: "set", entity: who, field: "activity", value: opts.activity });
+  if (opts.party && who === ctx.world.pov) {
+    for (const member of partyAt(ctx, from))
+      if (placeOfEntity(ctx.state, member) !== to)
+        out.push(...moveEvents(ctx, member, to));
+  }
+  return out;
+}
+function moveEvents(ctx, who, to) {
+  const out = [];
+  for (const r of own(ctx.state.entities, who)?.relations ?? [])
+    if (r.type === "in")
+      out.push({ type: "unlink", rel: "in", from: who, to: r.to });
+  out.push({ type: "set", entity: who, field: "place", value: to });
+  out.push(...optionalService(ctx, "space.arrival")?.(ctx, who, to) ?? []);
+  return out;
+}
+function partyAt(ctx, here) {
+  const pov = ctx.world.pov;
+  return Object.keys(ctx.state.entities).sort().filter((id) => {
+    const e = own(ctx.state.entities, id);
+    return !!e && id !== pov && e.relations.some((r) => r.type === PARTY_RELATION && r.to === pov) && !isGone(ctx.state, id) && acts(ctx.world, ctx.state, id) && together(ctx.world, here, placeOfEntity(ctx.state, id));
+  });
+}
+
 // src/engine/schedules.ts
 function allSchedules(reg, world) {
   const out = Object.keys(world.schedules).sort().map((id) => own(world.schedules, id)).filter((s) => s !== undefined);
@@ -6652,7 +7048,12 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
       if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
         continue;
     }
-    out.push({ type: "set", entity, field: schedule.target, value });
+    if (schedule.target === "place" && typeof value === "string") {
+      const moved = relocate(ctx, entity, value);
+      if (!("code" in moved))
+        out.push(...moved);
+    } else
+      out.push({ type: "set", entity, field: schedule.target, value });
   }
   return out;
 }
@@ -8594,12 +8995,19 @@ function coreEffect(reg, w, type, args, rng) {
         return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
       if (!own(world.places, to))
         return reject4("missing_place", `no place ${labelOf(w, to)}`);
-      const out = [];
-      for (const r of e.relations)
-        if (r.type === "in")
-          out.push({ type: "unlink", rel: "in", from: entity, to: r.to });
-      out.push({ type: "set", entity, field: "place", value: to });
-      out.push(...optionalService(w.ctx, "space.arrival")?.(w.ctx, entity, to) ?? []);
+      const moved = relocate(w.ctx, entity, to, { party: true, ...typeof args.activity === "string" ? { activity: args.activity } : {}, ...args.route === true ? { route: true } : {} });
+      if (!Array.isArray(moved))
+        return moved;
+      const here = placeOfEntity(state, entity);
+      const along = text2(args.with).split(",").map((s) => s.trim()).filter((id) => id !== "" && id !== entity && own(state.entities, id) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)));
+      const out = [...moved];
+      for (const id of along) {
+        if (out.some((ev) => ev.type === "set" && ev.entity === id && ev.field === "place"))
+          continue;
+        const theirs = relocate(w.ctx, id, to);
+        if (Array.isArray(theirs))
+          out.push(...theirs);
+      }
       return out;
     }
     case "link": {
@@ -9813,7 +10221,7 @@ function nextDayPart(cal, now, index) {
 var SPAN_COUNTS = { a: 1, an: 1, one: 1, next: 1, "a couple of": 2, "couple of": 2, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty five": 45, ninety: 90 };
 var SPAN_UNITS = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
 var longestFirst = (words2) => [...words2].sort((a, b) => b.length - a.length).join("|");
-var plain = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+var plain2 = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 var SPAN_TERM = new RegExp(` (${longestFirst(Object.keys(SPAN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?(?= )`, "g");
 var SPAN_NOT_BEFORE = / (?:last|past|previous|every|per|each|\d+(?:\.\d+)?)$/;
 var SPAN_NOT_AFTER = /^ (?:ago|earlier|before|already|back|previously|old)(?= )/;
@@ -9828,8 +10236,8 @@ var ANCHOR_PARTS = { breakfast: ["morning"], lunch: ["midday", "afternoon"], din
 var ANCHOR_SPAN = new RegExp(` (?:until|till|til|to|by)(?: the| my| our)? (${longestFirst(Object.keys(ANCHOR_WORDS))})(?= )`, "g");
 function typedSpan(cal, now, words2, anchorAt) {
   const t = ` ${words2.toLowerCase().replace(/([ap])\.\s?m\.?/g, "$1m").replace(/(?<!\d)[.,;!?]|[.,;!?](?!\d)/g, " | ").replace(/[^a-z0-9.:|]+/g, " ").replace(/\s+/g, " ").trim()} `.replace(/ (?:a |an )?half (?:an? )?hour(?= )/g, " 30 minutes").replace(/ (?:a |an )?quarter (?:of )?(?:an? )?hour(?= )/g, " 15 minutes");
-  const weekdays = cal.system.weekdayNames.map(plain).filter((n) => n.length > 3);
-  const months = cal.system.monthNames.map(plain).filter((n) => n !== "");
+  const weekdays = cal.system.weekdayNames.map(plain2).filter((n) => n.length > 3);
+  const months = cal.system.monthNames.map(plain2).filter((n) => n !== "");
   if (STATED_TIME.test(t) || weekdays.some((d) => t.includes(` ${d} `)) || months.some((m) => new RegExp(` (?:${m} \\d|\\d+ (?:of )?${m} )`).test(t)))
     return null;
   const found = [];
@@ -9872,7 +10280,7 @@ function typedSpan(cal, now, words2, anchorAt) {
     else if (part)
       found.push({ type: "day_part", dayPart: part.id });
   }
-  const named = cal.dayParts.flatMap((p, index) => [p.id, p.label].map((n) => ({ name: plain(n), index }))).filter((n) => n.name !== "");
+  const named = cal.dayParts.flatMap((p, index) => [p.id, p.label].map((n) => ({ name: plain2(n), index }))).filter((n) => n.name !== "");
   const day = dateAt(cal, now);
   const aheadToday = (index) => clockAt(cal, day.dayIndex, cal.partStarts[index] ?? 0) > now ? { type: "day_part", dayPart: cal.dayParts[index]?.id ?? "" } : null;
   for (const m of t.matchAll(new RegExp(` (${longestFirst(Object.keys(PART_LEADS))})(?: the)? (${longestFirst(named.map((n) => n.name))})(?= )`, "g"))) {
@@ -10965,13 +11373,13 @@ function findRoute(world, from, to, mode, opts = {}) {
   const end = ends[0] ?? null;
   if (end === null)
     return null;
-  const plain2 = (node) => node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node;
+  const plain3 = (node) => node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node;
   const legs = [];
   for (let cur = end;cur !== from; ) {
     const p = prev.get(cur);
     if (!p)
       return null;
-    legs.unshift({ from: plain2(p.from), to: plain2(cur), minutes: Math.round(cost(p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null });
+    legs.unshift({ from: plain3(p.from), to: plain3(cur), minutes: Math.round(cost(p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null });
     cur = p.from;
   }
   return { mode, legs, minutes: legs.reduce((a, l) => a + l.minutes, 0), distanceKm: legs.reduce((a, l) => a + l.distanceKm, 0) };
@@ -11328,6 +11736,7 @@ var spacePack = {
     r.kind(THING);
     r.kind(PERSON);
     r.relation({ id: "in", label: "In", from: "*", to: "*", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
+    r.relation({ id: PARTY_RELATION, label: "Travels with", from: "person", to: "person", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
     r.service("space.travel", travel);
     r.service("space.arrival", arrivalEvents);
     r.service("space.lay", layEvents);
@@ -11408,9 +11817,9 @@ var spacePack = {
       label: "Go to",
       description: "Go to another place: a room, a building, a street, another part of town.",
       pack: "space",
-      params: { to: { type: "ref", ref: "place", label: "Place" } },
+      params: { to: { type: "ref", ref: "place", label: "Place" }, with: { type: "list", ref: "person", optional: true, label: "Who comes along" } },
       requires: ["to != here", "can_go(here, to)"],
-      outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to" } }] },
+      outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to", with: "=params.with" } }] },
       duration: "go_minutes(here, to)",
       activity: { type: "travel", until: "clock + (level.space < 2 ? 15 : go_minutes(here, to))" },
       lexicon: ["go to", "walk to", "head to", "head over to", "leave for"],
@@ -11477,21 +11886,14 @@ var spacePack = {
         }
         if (stopped)
           return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
-        const from = placeOfEntity(ctx.state, entity);
-        const named = (id) => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
-        if (from && mapSettingsOf(ctx.world).travelSimulation && !reachable(ctx, from, place))
-          return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
-        return null;
+        const route = relocate(ctx, entity, place, { route: true });
+        return "code" in route ? route : null;
       },
       toEffects: (p, ctx) => {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
         const to = typeof p.place === "string" ? p.place : "";
-        const move = { type: "move", args: { entity, to } };
-        const doing = own(ctx.state.entities, entity)?.fields.activity;
-        if (to === placeOfEntity(ctx.state, entity) || doing === undefined)
-          return [move];
-        const next = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
-        return next === doing ? [move] : [move, { type: "set", args: { entity, field: "activity", value: next } }];
+        const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
+        return [{ type: "move", args: { entity, to, activity, route: true } }];
       }
     });
     r.lint({
@@ -19557,7 +19959,7 @@ function stem(word) {
 function tokens(text3) {
   return text3.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
 }
-function wordsOf(list) {
+function wordsOf2(list) {
   const out = [];
   for (const t of list) {
     if (FILLER[t])
@@ -19581,8 +19983,8 @@ function itemName(text3) {
   const head = noun.findLast((t) => /[a-z]/.test(t));
   if (head === undefined)
     return null;
-  const trailing = at < 0 ? null : { word: base[at] ?? "", words: wordsOf(base.slice(at + 1)) };
-  return { head: stem(head), words: new Set([...wordsOf(noun), ...wordsOf(qualifier)]), trailing };
+  const trailing = at < 0 ? null : { word: base[at] ?? "", words: wordsOf2(base.slice(at + 1)) };
+  return { head: stem(head), words: new Set([...wordsOf2(noun), ...wordsOf2(qualifier)]), trailing };
 }
 function catalogName(id, name) {
   const lower = name.toLowerCase();
@@ -19608,7 +20010,7 @@ function catalogName(id, name) {
     if (word.includes("-"))
       heads.add(stem(word.split("-").at(-1) ?? word));
   }
-  const words2 = new Set([...wordsOf(tokens(lower)), ...wordsOf(id.split("_"))]);
+  const words2 = new Set([...wordsOf2(tokens(lower)), ...wordsOf2(id.split("_"))]);
   const qualifiers = new Set(named.flat().filter((w) => !/^\d/.test(w)).map((w) => stem(w)).filter((w) => !heads.has(w)));
   return { heads, main: stem(last.at(-1) ?? ""), qualifiers, words: words2 };
 }
@@ -23439,15 +23841,18 @@ var vehiclesPack = {
         if (!fuelOk(ctx, v, leg))
           return reject10("no_fuel", `${e.name} doesn't have the fuel`);
         const out = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: to }];
-        const riders = Array.isArray(args.riders) ? args.riders.filter((x) => typeof x === "string") : [];
+        const named = Array.isArray(args.riders) ? args.riders.filter((x) => typeof x === "string") : [];
+        const riders = driver === ctx.world.pov ? [...named, ...partyAt(ctx, placeOfEntity(ctx.state, driver))] : named;
+        const moved = new Set;
         for (const p of [driver, ...riders]) {
           const pe = own(ctx.state.entities, p);
-          if (!pe || pe.relations.some((x) => x.type === "in" && x.to === v))
+          if (!pe || moved.has(p) || pe.relations.some((x) => x.type === "in" && x.to === v))
             continue;
-          for (const rel of pe.relations)
-            if (rel.type === "in")
-              out.push({ type: "unlink", rel: "in", from: p, to: rel.to });
-          out.push({ type: "set", entity: p, field: "place", value: to });
+          moved.add(p);
+          const events2 = relocate(ctx, p, to);
+          if ("code" in events2)
+            return events2;
+          out.push(...events2);
         }
         return out;
       }
@@ -24529,359 +24934,6 @@ function routineSettingsProblems(v) {
     }
     return typeof value === "string" && allowed.includes(value) ? [] : [`${key} is ${allowed.join(", ")}`];
   });
-}
-
-// src/engine/cues.ts
-var SECRET_KINDS = ["lore", "track", "flag"];
-function readCue(raw) {
-  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
-    return null;
-  const keyed = SECRET_KINDS.filter((kind2) => raw[kind2] !== undefined);
-  const kind = keyed[0];
-  const id = kind === undefined ? undefined : raw[kind];
-  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
-}
-function cuesOf(world, who) {
-  const cues = own(world.entities, who)?.cues;
-  return (Array.isArray(cues) ? cues : []).flatMap((raw) => readCue(raw) ?? []);
-}
-
-// src/engine/lore.ts
-var MIN_TERM = 3;
-var MIN_WORDS = 4;
-var WORD_CAP = 3;
-var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
-function plain2(text3) {
-  const words2 = text3.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-  return words2 === "" ? "" : ` ${words2} `;
-}
-function wordsOf2(text3) {
-  return plain2(text3).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
-}
-var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-function loreHeldBy(world, entry, who) {
-  return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
-}
-function loreReadable(reg, world, state2, entry, purpose, effects = false, open = loreGateReader(reg, world, state2), as) {
-  if (purpose === "gm")
-    return true;
-  const source = loreSourceOf(entry.source);
-  if (source.kind === "ai" && source.status === "pending")
-    return false;
-  if (as !== undefined && loreIsSecret(entry))
-    return loreHeldBy(world, entry, as);
-  if (loreIsSecret(entry) && !open(entry))
-    return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
-  const v = entry.visibility;
-  if (v === undefined || v === "public")
-    return true;
-  if (v !== "known_by")
-    return false;
-  const reader = as ?? world.pov;
-  const links = listOf(entry.links);
-  return links.length > 0 && links.every((id) => hasOwn(state2.entities, id) ? playerKnows(reg, world, state2, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state2, reader, id));
-}
-function readableLore(reg, world, state2, purpose, effects = false) {
-  const open = loreGateReader(reg, world, state2);
-  return Object.keys(world.lore).filter((id) => {
-    const entry = world.lore[id];
-    return entry !== undefined && hasOwn(world.lore, id) && loreReadable(reg, world, state2, entry, purpose, effects, open);
-  }).sort();
-}
-function readsSecrets(reg, world, state2, purpose, effects = false) {
-  const open = loreGateReader(reg, world, state2);
-  return Object.values(world.lore).some((entry) => loreIsSecret(entry) && !open(entry) && loreReadable(reg, world, state2, entry, purpose, effects, open));
-}
-function secretLoreNames(reg, world, state2) {
-  const open = loreGateReader(reg, world, state2);
-  const secret = Object.entries(world.lore).filter(([, entry]) => loreIsSecret(entry) && !open(entry));
-  const ids = new Set(secret.map(([id]) => id));
-  const names = new Set;
-  const add = (name) => {
-    if (typeof name === "string" && name.trim().length >= MIN_TERM)
-      names.add(name.trim());
-  };
-  for (const [id, entry] of secret)
-    for (const name of [id, entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), ...listOf(entry.topics)])
-      add(name);
-  for (const [term, leads] of Object.entries(world.loreIndex.terms))
-    if (listOf(leads).some((id) => ids.has(id)))
-      add(term);
-  for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
-    if (!isRecord(topic) || !listOf(topic.entries).some((entry) => ids.has(entry)))
-      continue;
-    add(id);
-    add(topic.label);
-  }
-  return [...names];
-}
-function loreSnippet(tokens2, entry, budget) {
-  const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
-  const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
-  const whole4 = title === "" ? body : `${title}: ${body}`;
-  const cost = tokens2(whole4);
-  if (cost <= budget)
-    return { text: whole4, tokens: cost, cut: false };
-  const head = title === "" ? 0 : title.split(" ").length;
-  const words2 = whole4.split(" ");
-  const fits = (n) => tokens2(`${words2.slice(0, n).join(" ")}\u2026`) <= budget;
-  let lo = head + MIN_WORDS;
-  if (lo >= words2.length || !fits(lo))
-    return null;
-  let hi = words2.length - 1;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    if (fits(mid))
-      lo = mid;
-    else
-      hi = mid - 1;
-  }
-  const text3 = `${words2.slice(0, lo).join(" ")}\u2026`;
-  return { text: text3, tokens: tokens2(text3), cut: true };
-}
-function topicMembers(world, topic) {
-  const filed = hasOwn(world.loreIndex.topics, topic) ? listOf(world.loreIndex.topics[topic]?.entries) : [];
-  const named = Object.keys(world.lore).filter((id) => listOf(world.lore[id]?.topics).some((label) => topicIdOf(label) === topic)).sort();
-  return [...new Set([...filed, ...named])].filter((id) => hasOwn(world.lore, id));
-}
-function loreSearch(r, q) {
-  const { reg, world, state: state2 } = r;
-  const open = loreGateReader(reg, world, state2);
-  const text3 = plain2(q.query ?? "");
-  const exact = new Set((q.terms ?? []).map(plain2).filter((t) => t.trim().length >= MIN_TERM));
-  const said2 = (name) => {
-    if (typeof name !== "string")
-      return null;
-    const p = plain2(name);
-    return p.trim().length >= MIN_TERM && (exact.has(p) || text3 !== "" && text3.includes(p)) ? p.trim() : null;
-  };
-  const tableTerms = new Map;
-  for (const [term, ids] of Object.entries(world.loreIndex.terms)) {
-    const hit = said2(term);
-    if (hit)
-      for (const id of listOf(ids))
-        tableTerms.set(id, [...tableTerms.get(id) ?? [], hit]);
-  }
-  const topics = new Set((q.topics ?? []).map(topicIdOf).filter((t) => t !== ""));
-  if (!q.exact) {
-    for (const [id, topic] of Object.entries(world.loreIndex.topics))
-      if (isRecord(topic) && said2(topic.label))
-        topics.add(id);
-    for (const entry of Object.values(world.lore))
-      for (const label of listOf(entry.topics))
-        if (said2(label))
-          topics.add(topicIdOf(label));
-  }
-  const members = new Map([...topics].map((t) => [t, new Set(topicMembers(world, t))]));
-  const links = new Set(q.exact ? [] : q.links ?? []);
-  const words2 = q.exact ? [] : [...new Set(wordsOf2(q.query ?? ""))];
-  const ranked = [];
-  for (const [id, entry] of Object.entries(world.lore)) {
-    if (!loreReadable(reg, world, state2, entry, q.purpose, q.effects === true, open, q.as))
-      continue;
-    const terms2 = new Set(tableTerms.get(id) ?? []);
-    for (const name of [entry.title, ...listOf(entry.aliases), ...listOf(entry.keys)]) {
-      const hit = said2(name);
-      if (hit)
-        terms2.add(hit);
-    }
-    const linked = listOf(entry.links).filter((l) => links.has(l));
-    const inTopics = [...topics].filter((t) => members.get(t)?.has(id) === true).sort();
-    let tf = 0;
-    if (words2.length > 0) {
-      const counts = new Map;
-      for (const w of wordsOf2([entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), entry.content].join(" ")))
-        counts.set(w, (counts.get(w) ?? 0) + 1);
-      for (const w of words2)
-        tf += Math.min(WORD_CAP, counts.get(w) ?? 0);
-    }
-    if (q.exact ? terms2.size === 0 : terms2.size + linked.length + inTopics.length + tf === 0)
-      continue;
-    const priority = typeof entry.priority === "number" && Number.isFinite(entry.priority) ? entry.priority : 0;
-    const why = [...[...terms2].sort().map((t) => `term:${t}`), ...linked.map((l) => `link:${l}`), ...inTopics.map((t) => `topic:${t}`), ...tf > 0 ? ["words"] : []];
-    ranked.push({ id, entry, key: [terms2.size, linked.length, inTopics.length, tf, priority], why });
-  }
-  ranked.sort((a, b) => {
-    for (let i = 0;i < a.key.length; i++) {
-      const d = (b.key[i] ?? 0) - (a.key[i] ?? 0);
-      if (d !== 0)
-        return d;
-    }
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
-  const groups = new Set;
-  const best = ranked.filter(({ entry }) => {
-    const g = typeof entry.group === "string" ? entry.group.trim() : "";
-    if (g === "")
-      return true;
-    if (groups.has(g))
-      return false;
-    groups.add(g);
-    return true;
-  });
-  const hits = [];
-  let left = Math.max(0, Math.floor(q.tokenBudget));
-  for (const { id, entry, why } of best) {
-    if (q.limit !== undefined && hits.length >= q.limit)
-      break;
-    if (q.skip?.has(id))
-      continue;
-    const snippet = loreSnippet((text4) => r.tokens(text4), entry, left);
-    if (!snippet)
-      break;
-    left -= snippet.tokens;
-    hits.push({ id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why });
-  }
-  return { hits, matched: best.length, secret: best.filter(({ entry }) => loreIsSecret(entry) && !open(entry)).length };
-}
-function loreGet(r, id, purpose, tokenBudget, effects = false) {
-  const entry = hasOwn(r.world.lore, id) ? r.world.lore[id] : undefined;
-  const open = loreGateReader(r.reg, r.world, r.state);
-  if (!entry || !loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open))
-    return null;
-  const snippet = loreSnippet((text3) => r.tokens(text3), entry, Math.max(0, Math.floor(tokenBudget)));
-  if (!snippet)
-    return null;
-  return { id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why: [] };
-}
-function loreList(r, topic, purpose, effects = false) {
-  const open = loreGateReader(r.reg, r.world, r.state);
-  const out = [];
-  for (const id of topicMembers(r.world, topicIdOf(topic))) {
-    const entry = r.world.lore[id];
-    if (entry && loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open))
-      out.push({ id, title: typeof entry.title === "string" ? entry.title : id });
-  }
-  return out;
-}
-
-// src/engine/lore-pins.ts
-var CHAIN_MAX = 16;
-function placeChain(world, place) {
-  const out = [];
-  for (let at = place ?? undefined;at !== undefined && hasOwn(world.places, at) && !out.includes(at) && out.length < CHAIN_MAX; at = world.places[at]?.parent)
-    out.push(at);
-  return out;
-}
-function pinsFor(world, place, who, steps = []) {
-  const pins = lorePinsOf(world);
-  const out = [];
-  const seen = new Set;
-  const add = (list, on) => {
-    for (const pin of list ?? []) {
-      const key = lorePinKey(pin);
-      if (seen.has(key))
-        continue;
-      seen.add(key);
-      out.push({ key, pin, on });
-    }
-  };
-  if (who !== undefined)
-    add(own(pins.characters, who), { character: who });
-  for (const step of steps)
-    add(pins.steps[step], { step });
-  for (const at of placeChain(world, place))
-    add(own(pins.places, at), { place: at });
-  return out;
-}
-function worldPinText(world, ref) {
-  if (!("lore" in ref.pin))
-    return null;
-  const entry = own(world.lore, ref.pin.lore);
-  return entry ? { key: ref.key, on: ref.on, title: typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : ref.pin.lore, content: typeof entry.content === "string" ? entry.content : "", entry } : null;
-}
-function fitPins(r, texts, budget, readable) {
-  const open = loreGateReader(r.reg, r.world, r.state);
-  const out = [];
-  let left = Math.max(0, Math.floor(budget));
-  for (const t of texts) {
-    if (t.entry !== null && !readable(t.entry))
-      continue;
-    const secret = t.entry !== null && loreIsSecret(t.entry) && !open(t.entry);
-    const snippet = loreSnippet((text3) => r.tokens(text3), { title: t.title, content: t.content }, left);
-    if (!snippet) {
-      out.push({ key: t.key, title: t.title, entry: t.entry, snippet: null, tokens: 0, cut: false, secret });
-      continue;
-    }
-    left -= snippet.tokens;
-    out.push({ key: t.key, title: t.title, entry: t.entry, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret });
-  }
-  return out;
-}
-
-// src/engine/presence.ts
-var LEVELS_APART = 2;
-var INTERIOR_WALK_MINUTES = 10;
-function farRoute(route) {
-  const walk2 = route.modes.walk;
-  return walk2 === undefined || walk2.minutes > INTERIOR_WALK_MINUTES;
-}
-var spreadOf = new WeakMap;
-function joined(parts, part) {
-  let rep = part;
-  for (let next = parts.get(rep);next !== undefined && next !== rep; next = parts.get(rep))
-    rep = next;
-  parts.set(part, rep);
-  return rep;
-}
-function spreadPlaces(world) {
-  const hit = spreadOf.get(world);
-  if (hit)
-    return hit;
-  const out = new Set;
-  const joins = new Map;
-  for (const r of Object.values(world.routes)) {
-    const from = placeChain(world, r.from);
-    const to = placeChain(world, r.to);
-    for (let i = 1;i < from.length; i++) {
-      const place = from[i];
-      const fromPart = from[i - 1];
-      const j = place === undefined ? -1 : to.indexOf(place);
-      const toPart = to[j - 1];
-      if (place === undefined || fromPart === undefined || j < 1 || toPart === undefined)
-        continue;
-      const parts = joins.get(place) ?? new Map;
-      joins.set(place, parts);
-      if (farRoute(r))
-        out.add(place);
-      else
-        parts.set(joined(parts, fromPart), joined(parts, toPart));
-    }
-  }
-  const partsOf = new Map;
-  for (const p of Object.values(world.places)) {
-    if (!p.parent)
-      continue;
-    const parts = partsOf.get(p.parent);
-    if (parts)
-      parts.push(p.id);
-    else
-      partsOf.set(p.parent, [p.id]);
-  }
-  for (const [place, parts] of joins) {
-    if (new Set((partsOf.get(place) ?? []).map((part) => joined(parts, part))).size > 1)
-      out.add(place);
-  }
-  spreadOf.set(world, out);
-  return out;
-}
-function together(world, a, b) {
-  if (a === null || b === null)
-    return false;
-  if (a === b)
-    return true;
-  const within3 = (inner, outer) => {
-    const up = placeChain(world, inner).slice(1, LEVELS_APART + 1);
-    const at = up.indexOf(outer);
-    return at >= 0 && !up.slice(0, at + 1).some((p) => spreadPlaces(world).has(p));
-  };
-  return within3(a, b) || within3(b, a);
-}
-function inPovScene(world, state2, id) {
-  return id !== world.pov && together(world, placeOfEntity(state2, world.pov), placeOfEntity(state2, id));
-}
-function povLead(name) {
-  return `${name} (you)`;
 }
 
 // src/packs/castlife/core/places.ts
@@ -26515,7 +26567,7 @@ function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = 
   if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     if (seen && withPov(ctx, who))
       out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
-    out.push({ type: "set", entity: who, field: "place", value: place });
+    out.push(...movesOf(relocate(ctx, who, place)));
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
       out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
   }
@@ -26528,6 +26580,9 @@ function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = 
       out.push({ type: "set", entity: who, field: "holds", value: kept2 });
   }
   return out;
+}
+function movesOf(moved) {
+  return "code" in moved ? [] : moved;
 }
 function blockActivity(activity) {
   return activity.startsWith("retrieve:") ? "errand" : activity;
@@ -26891,7 +26946,7 @@ function stepTrips(slot, ctx) {
       const away = holding && e.fields.place === place;
       if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place) && !(slot.povRoutine === false && withPov(ctx, who))) {
         holds = { ...holds, place: until, activity: until };
-        out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
+        out.push({ type: "set", entity: who, field: "holds", value: holds }, ...movesOf(relocate(ctx, who, place)), { type: "set", entity: who, field: "activity", value: "trip" });
       }
       if (!(until <= slot.end && (until > slot.start || holding)))
         continue;
@@ -26899,7 +26954,7 @@ function stepTrips(slot, ctx) {
         continue;
       const home = homeOf(ctx, who);
       if ((until > slot.start || away) && home)
-        out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
+        out.push(...movesOf(relocate(ctx, who, home)), { type: "set", entity: who, field: "activity", value: "idle" });
       const kept2 = Object.fromEntries(Object.entries(holds).filter(([target, at]) => !((target === "place" || target === "activity") && at === until)));
       if (Object.keys(kept2).length < Object.keys(holds).length) {
         holds = kept2;
@@ -27387,7 +27442,7 @@ var castlifePack = {
         const out = [];
         if (typeof a.place === "string" && own(ctx.world.places, a.place)) {
           holds.place = until;
-          out.push({ type: "set", entity: who, field: "place", value: a.place });
+          out.push(...movesOf(relocate(ctx, who, a.place)));
         }
         if (typeof a.activity === "string") {
           holds.activity = until;
@@ -28058,6 +28113,21 @@ function prepare(reg, world, state2, req) {
         return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
       bindings[name] = id;
       params[name] = id;
+      continue;
+    }
+    if (def.type === "list" && def.ref) {
+      const ids = (Array.isArray(raw) ? raw : String(raw).split(",")).map((x) => String(x).trim()).filter((x) => x !== "");
+      for (const id of ids) {
+        const target = own(state2.entities, id);
+        if (!target)
+          return { code: "bad_param", reason: `no entity ${labelOf({ world, state: state2 }, id)}` };
+        if (!kindIs(reg, world, target.kind, def.ref))
+          return { code: "bad_param", reason: `${target.name} is not ${/^[aeiou]/i.test(def.ref) ? "an" : "a"} ${(reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase()}` };
+        if (def.of && !selectorMatches(reg, world, state2, def.of, id))
+          return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
+      }
+      if (ids.length > 0)
+        params[name] = [...new Set(ids)].join(",");
       continue;
     }
     if (def.type === "text" && def.table !== undefined) {
@@ -29215,9 +29285,9 @@ function puzzlesFor(ctx, ref) {
     return [byId.id];
   const name = idShaped(ref) ? seenName(ctx, ref.trim()) : null;
   const partsOnly = idShaped(ref) && name === null;
-  const want = new Set(wordsOf2(name ?? ref));
+  const want = new Set(wordsOf(name ?? ref));
   const scored = open.map(({ id, shown: shown3 }) => {
-    const seen = new Set(wordsOf2(`${shown3.label} ${shown3.stage} ${shown3.cue ?? ""}`));
+    const seen = new Set(wordsOf(`${shown3.label} ${shown3.stage} ${shown3.cue ?? ""}`));
     return { id, n: [...want].filter((w) => seen.has(w)).length };
   });
   const best = Math.max(0, ...scored.map((s) => s.n));
@@ -58555,6 +58625,8 @@ function setField(reg, w, entity, field, value, opts, rng) {
     if (corrected !== null)
       return Array.isArray(corrected) ? applyAll2(w, corrected) : corrected;
   }
+  if (field === "place" && typeof value === "string" && own(w.world.places, value))
+    return run(reg, w, [{ type: "move", args: { entity, to: value } }], rng);
   return run(reg, w, [{ type: "set", args: { entity, field, value } }], rng);
 }
 function addField(reg, w, entity, field, delta, opts, rng) {
@@ -66331,6 +66403,7 @@ function entityOf(reg, ctx, id) {
     tier: e.tier,
     agent: e.agent,
     pov: id === world.pov,
+    person: kindIs(reg, world, e.kind, "person"),
     gone: isGone(state2, id),
     spawned: !own(world.entities, id),
     visibility: entityVisibility(world, state2, id),
@@ -67153,6 +67226,19 @@ function paramWords(ctx, action, name, def, mayKnow, places2, named) {
     for (const id of ids2)
       named.add(id);
     return `${head} (${kindWords(reg, world, def)}: ${ids2.join(" | ")}${claimed ? `, or ${claimed}` : ""})`;
+  }
+  if (def.type === "list" && def.ref !== undefined) {
+    const here = placeOfEntity(state2, world.pov);
+    const ref = def.ref;
+    const ids2 = Object.keys(state2.entities).sort().filter((id) => {
+      const e = own(state2.entities, id);
+      return !!e && id !== world.pov && kindIs(reg, world, e.kind, ref) && !isGone(state2, id) && mayKnow(id) && together(world, here, placeOfEntity(state2, id));
+    });
+    if (ids2.length === 0)
+      return `${head} (no one here${label})`;
+    for (const id of ids2)
+      named.add(id);
+    return `${head} (${kindWords(reg, world, def)} here, a list of ids: ${ids2.join(" | ")}; "we" is all of them${label})`;
   }
   if (def.table !== undefined)
     return `${head} (one of: ${tableChoices(own(world.tables, def.table)).map((c) => c.key).join(" | ")})`;
@@ -70357,9 +70443,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "14bb2b8748c33c995b1221f51f3b1f330ff067ab32e33c5236e0dfc25a8e5ef3";
+  const sha256 = "9c29ab3ec3081810403dfce8fe8c84e80818584d02ad7950bdd022710bf67561";
   const tools = ["0a9baadf30fa77cf7cb49d886cca019e", "be126719e8971c9663eddb1d75fbe1b9"].filter((f) => f !== undefined);
-  return { id: "b5c0ae1a", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "0de576a8", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -73363,7 +73449,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "b5c0ae1a" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "0de576a8" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -75708,13 +75794,12 @@ class Dispatcher {
           events3 = fixed.events;
         } else {
           const set = { op: "set", entity: r.entity, field: r.field, value: r.value };
-          const checked = resolveEdit(this.rt.registry, world, state2, [set], { gm: false, runSeed: this.runSeedOf(r.chatId) });
-          if ("rejection" in checked)
-            throw new RequestError("validation", checked.rejection.reason);
+          if (r.field === "place" && (typeof r.value !== "string" || !canSeePlace(this.rt.registry, world, state2, world.pov, r.value) || !canSeeEntity(this.rt.registry, world, state2, world.pov, r.entity)))
+            throw new RequestError("validation", "no such place");
           const doing = state2.entities[r.entity]?.fields.activity;
-          const moved = r.field === "place" && typeof r.value === "string" && r.value !== state2.entities[r.entity]?.fields.place;
-          const ops = moved ? [{ op: "move", entity: r.entity, to: String(r.value) }, ...doing !== undefined && doing !== "idle" ? [{ op: "set", entity: r.entity, field: "activity", value: "idle" }] : []] : null;
-          const edit = ops ? resolveEdit(this.rt.registry, world, state2, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) }) : checked;
+          const moved = r.field === "place" && r.value !== state2.entities[r.entity]?.fields.place;
+          const ops = moved && doing !== undefined && doing !== "idle" ? [set, { op: "set", entity: r.entity, field: "activity", value: "idle" }] : [set];
+          const edit = resolveEdit(this.rt.registry, world, state2, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) });
           if ("rejection" in edit)
             throw new RequestError("validation", edit.rejection.reason);
           events3 = edit.events;

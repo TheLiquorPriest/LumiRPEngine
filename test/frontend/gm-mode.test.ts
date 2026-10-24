@@ -29,7 +29,7 @@ describe("the GM gate", () => {
   });
 });
 
-const entity = (id: string, name: string, kind: string, gone = false): GmEntity => ({ id, name, kind, tier: "background", agent: false, pov: false, gone, spawned: false, visibility: "public", place: null, holder: null, claimed: false, fields: [], relations: [], levels: [], class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] } });
+const entity = (id: string, name: string, kind: string, gone = false): GmEntity => ({ id, name, kind, tier: "background", agent: false, pov: false, person: false, gone, spawned: false, visibility: "public", place: null, holder: null, claimed: false, fields: [], relations: [], levels: [], class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] } });
 
 describe("World's search", () => {
   const all = [entity("npc_vic", "Vic Moreau", "npc", true), entity("npc_rosie", "Rosie Alvarez", "npc"), entity("civic", "Honda Civic", "vehicle"), entity("npc_dev", "Dev Patel", "npc")];
