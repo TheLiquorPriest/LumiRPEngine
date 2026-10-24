@@ -112,13 +112,13 @@ describe("a span in the player's own words", () => {
     const { world, state, clock } = monday();
     const read = (span: string) => interpretedTarget({ span }, world, state, "");
     // None stated, one gone by, a rate, an age, or two different ones (a sentence's end keeps lengths apart).
-    for (const span of ["a while", "a few hours", "for some time", "two hours ago", "the last two hours", "every hour", "$20 an hour", "a four day old relationship", "an hour, then until evening", "An hour. Two hours."]) expect(read(span)).toBeNull();
+    for (const span of ["for some time", "two hours ago", "the last two hours", "every hour", "$20 an hour", "a four day old relationship", "an hour, then until evening", "An hour. Two hours."]) expect(read(span)).toBeNull();
     expect(read("cover the next hour of progress (1:45p to 2:45p)")).toBeNull();
     // A day and time is the read's stated time, never half-read as a part of the day.
     expect(interpretedTarget({ span: "tomorrow evening at 8", at: "2026-09-15 20:00" }, world, state, "")).toEqual({ type: "at", at: clock("2026-09-15 20:00") });
     expect(interpretedTarget({ span: "Friday at 6 PM", at: "2026-09-18 18:00" }, world, state, "")).toEqual({ type: "at", at: clock("2026-09-18 18:00") });
     // Words that don't read leave the read's own numbers.
-    expect(interpretedTarget({ span: "a few hours", minutes: 180 }, world, state, "")).toEqual({ type: "duration", minutes: 180 });
+    expect(interpretedTarget({ span: "for some time", minutes: 180 }, world, state, "")).toEqual({ type: "duration", minutes: 180 });
     // A day part the read gives in the player's words reads as one.
     expect(interpretedTarget({ until: "later that evening" }, world, state, "")).toEqual({ type: "day_part", dayPart: "evening" });
     expect(interpretedTarget({ minutes: "90" }, world, state, "")).toEqual({ type: "duration", minutes: 90 });

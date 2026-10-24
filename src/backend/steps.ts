@@ -631,7 +631,7 @@ export function saidPayMethod(text: string): string | null {
 // ---------------------------------------------------------------- extract
 
 export const EXTRACT_STRICT_RULES = [
-  'time_advance only for an explicit jump or stated duration ("an hour later", "the next morning", "for twenty minutes"); never estimate how long described activity took.',
+  'time_advance only for an explicit jump or stated duration ("an hour later", "the next morning", "for twenty minutes"), as all the time the reply says passes from the player\'s message to its end, never less for what the turn already took; never estimate how long described activity took.',
   "knows only when the player character newly learns a public fact from what is said or shown in this reply; not facts already known, not what others learn.",
   "regard only when the prose states a clear change in how one character feels about another.",
   "give only for an explicit handover between two characters; a seller handing over what was bought is part of the purchase; picking something up is not a give.",
@@ -676,7 +676,7 @@ export async function extract(
       .map(([id]) => id)
       .join("|")}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
-  const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, `Minutes already applied this turn: ${appliedMinutes}.`)}\nProposal types: ${types}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
+  const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, "")}\nProposal types: ${types}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
   const moves = channels.length === 0 || channels.includes("location");
   const routines = moves && usual.length > 0;
   const asked = `${moves ? `${system}\n${EXTRACT_WHERE}` : system}${routines ? `\n${EXTRACT_USUAL}` : ""}`;
@@ -685,6 +685,14 @@ export async function extract(
   const proposals: JsonObject[] = [];
   for (const p of list) {
     if (!isRecord(p) || typeof p.type !== "string" || (channels.length > 0 && !channels.includes(p.type))) continue;
+    // Narrated time is the turn's whole (DESIGN §9.4): only what goes beyond the minutes the turn
+    // already applied (`appliedMinutes`) is proposed, so its action's own time is never counted twice,
+    // whatever path applies it (automatically, or on a confirm chip's Apply).
+    if (p.type === "time_advance") {
+      const beyond = typeof p.minutes === "number" && Number.isFinite(p.minutes) ? Math.round(p.minutes - appliedMinutes) : 0;
+      if (beyond > 0) proposals.push({ ...(JSON.parse(JSON.stringify(p)) as JsonObject), minutes: beyond });
+      continue;
+    }
     // Scaled once: a cash give becomes a transfer carrying its scaled amount.
     proposals.push(inMinorUnits(JSON.parse(JSON.stringify(p)) as JsonObject, world.currency));
   }

@@ -29,7 +29,7 @@ import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from ".
 import type { EngineTurnPlan, QueueStop } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
 import { checkOf } from "../engine/checks";
-import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, nextDayPart, parseOverrides, parseTarget, typedSpan } from "../engine/time";
+import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, nextDayPart, parseOverrides, parseTarget, typedSpan, type SpanAnchor } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
 import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
@@ -55,6 +55,7 @@ import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, 
 import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { resolveUsualMoves, usualRoutineForExtract } from "../packs/castlife/core/usual";
+import { dayPlan, type DayPlan } from "../packs/castlife/core/index";
 import { Working } from "../engine/working";
 import type { PresetCard, TemplateInfo } from "../shared/protocol";
 import { Agents, type BuildInfo, thisBuild } from "./agents";
@@ -1199,7 +1200,7 @@ export class Runtime implements TurnHooks {
     // message states when it states exactly one, so a chosen skip isn't lost to a half-filled answer.
     if (result.action === TIMELAPSE_ACTION || (!result.action && result.then !== undefined)) {
       bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
-      const target = (result.action === TIMELAPSE_ACTION ? interpretedTarget(result.params, render.world, render.state, text) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text) : null) ?? typedSpan(calendarOf(render.world), render.state.clock, text);
+      const target = (result.action === TIMELAPSE_ACTION ? interpretedTarget(result.params, render.world, render.state, text, this.registry) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text, this.registry) : null) ?? interpretedTarget({ span: text }, render.world, render.state, text, this.registry);
       if (!target) this.host.log("info", `[LumiRPEngine] interpret: lets time pass but states no span it can read; the turn plays as roleplay`, userId);
       // A short span runs in the turn; a longer one is offered (a misread can't skip days unasked).
       const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
@@ -1283,7 +1284,7 @@ export class Runtime implements TurnHooks {
       take(def, ready, chipText(q.text), q.thing, [q.text, text]);
     }
     bridge.setNext(text, joinActions(next) || null);
-    bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state, text) : null);
+    bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state, text, this.registry) : null);
     // A claim waiting on the player holds the read until it is answered (`TurnBridge.setRead`).
     bridge.setRead(text, { lead: result.action, params, probabilities: result.probabilities, chosen: chosen !== undefined || result.action === TRY_ACTION, ...(then ? { then } : {}), steps, dropped });
   }
@@ -2553,17 +2554,19 @@ export const INTERPRETED_TIMELAPSE_CAP = 1440;
  * `until`, in the player's words ("later that evening", "tomorrow morning") or as a day part (or
  * the next one), shift or commitment; else `minutes`. A stated time that has passed or lies beyond
  * a timelapse's reach is still the target, so the turn refuses it with its note as it does any
- * target it can't reach; text that isn't a day and time the calendar has is no stated time.
+ * target it can't reach; text that isn't a day and time the calendar has is no stated time. With
+ * the registry, "until dinner" and the other anchors run to the POV's own day (`planAnchors`).
  */
-export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, text: string): TimelapseTarget | null {
+export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, text: string, reg?: Registry): TimelapseTarget | null {
   const cal = calendarOf(world);
   const now = state.clock;
-  const said = typeof params.span === "string" ? typedSpan(cal, now, params.span) : null;
+  const anchorAt = reg ? planAnchors(reg, world, state) : undefined;
+  const said = typeof params.span === "string" ? typedSpan(cal, now, params.span, anchorAt) : null;
   if (said) return said;
   const local = typeof params.at === "string" ? clockOfStamp(cal, params.at) : null;
   if (local !== null) return { type: "at", at: local - placeOffset(world, local, placeOfEntity(state, world.pov)) };
   const raw = typeof params.until === "string" ? params.until.trim().toLowerCase() : "";
-  const spoken = raw === "" ? null : typedSpan(cal, now, raw);
+  const spoken = raw === "" ? null : typedSpan(cal, now, raw, anchorAt);
   if (spoken) return spoken;
   const next = /^(the\s+)?(next|tomorrow)\b/.test(raw);
   const until = raw.replace(/^(the\s+)?(next|tomorrow)\s*/, "");
@@ -2580,6 +2583,28 @@ export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Re
   const given = typeof params.minutes === "string" && /^\s*\d+(?:\.\d+)?\s*$/.test(params.minutes) ? Number(params.minutes) : params.minutes;
   const minutes = typeof given === "number" && Number.isFinite(given) ? Math.round(given) : 0;
   return minutes > 0 ? { type: "duration", minutes } : null;
+}
+
+/** The block of the POV's day an anchor starts: a meal, or bed for bedtime. */
+const ANCHOR_ACTIVITY: Record<Exclude<SpanAnchor, "morning">, string> = { breakfast: "breakfast", lunch: "lunch", dinner: "dinner", bedtime: "sleep" };
+
+/**
+ * Where typed time's anchors fall in the POV's own day (DESIGN §9.2 typed time): the next start of
+ * its block for a meal or for bed, in today's plan, else tomorrow's; for the morning, when its
+ * night's sleep ends. Null when its day has none, so the calendar's part of the day stands in. The
+ * plans are laid only when a span names an anchor.
+ */
+function planAnchors(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): (anchor: SpanAnchor) => number | null {
+  if (!reg.packs.some((p) => p.id === "castlife")) return () => null;
+  let laid: DayPlan["blocks"] | null = null;
+  return (anchor) => {
+    const today = dateAt(calendarOf(world), state.clock).dayIndex;
+    const ctx = reg.context(world, state);
+    const blocks = (laid ??= [today, today + 1].flatMap((day) => dayPlan(ctx, world.pov, day).blocks));
+    if (anchor !== "morning") return blocks.find((b) => b.activity === ANCHOR_ACTIVITY[anchor] && b.start > state.clock)?.start ?? null;
+    // A night's sleep is two blocks across midnight: the morning is where the run of sleep ends.
+    return blocks.find((b, i) => b.activity === "sleep" && b.end > state.clock && !(blocks[i + 1]?.activity === "sleep" && blocks[i + 1]?.start === b.end))?.end ?? null;
+  };
 }
 
 /** Why an action couldn't run, for the player: a requirement isn't shown as its expression ("requires to != here"), only in the words its shape has (`failureWords`). */
