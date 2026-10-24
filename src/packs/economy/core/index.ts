@@ -655,7 +655,8 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       const out = [...paid];
       const spawn = PHYSICAL.has(price.category) && args.keep !== false ? optionalService(ctx, "gear.spawn") : null;
       if (spawn && ctx.levelOf(payer, "gear") >= 1) {
-        const made = spawn(ctx, { name, owner: payer, holder: payer, ...(row ? { catalog: row } : {}), category: price.category, qty, salt: `buy:${ctx.rng.seed}` });
+        // A second of the same thing joins the stack the payer has (gear's stacking, DESIGN §9.4).
+        const made = spawn(ctx, { name, owner: payer, holder: payer, ...(row ? { catalog: row } : {}), category: price.category, qty, salt: `buy:${ctx.rng.seed}`, stack: true });
         if (Array.isArray(made)) out.push(...made);
       }
       return out;

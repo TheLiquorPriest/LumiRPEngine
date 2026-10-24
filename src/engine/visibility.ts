@@ -89,9 +89,17 @@ export function canSeeEntity(reg: Registry, world: WorldDoc, state: Readonly<Wor
   if (id === pov) return true;
   // A removed entity is out of the world for the player; the GM view still lists it.
   if (!own(state.entities, id) || isGone(state, id)) return false;
-  const v = entityVisibility(world, state, id);
+  // A `discoverable` thing is hidden until found (a search where it lies, or opening what holds it,
+  // writes the POV's `knows` to it), as a `discoverable` place is until visited; every other reader
+  // takes it for secret, failing closed.
+  const v = isDiscoverable(world, state, id) ? "known_by" : entityVisibility(world, state, id);
   if (v !== "known_by") return v === "public";
   return knows(state, pov, id) || granted(reg, world, state, pov, own(world.entities, id)?.knownBy ?? own(state.entities, id)?.fields.knownBy);
+}
+
+/** Whether a thing is `discoverable`: the world document's declaration, else a spawned one's own field. */
+export function isDiscoverable(world: WorldDoc, state: Readonly<WorldState>, id: EntityId): boolean {
+  return (own(world.entities, id)?.visibility ?? own(state.entities, id)?.fields.visibility) === "discoverable";
 }
 
 /** A field the POV may see: its entity is visible, and the field is public or `known_by` and known (a `knows` relation to the entity, or its `knownBy`). */
