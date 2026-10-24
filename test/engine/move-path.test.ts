@@ -99,4 +99,16 @@ describe("every writer of a place moves alike", () => {
     expect(placeOfEntity(w.state, "rosa")).toBe("garage");
     expect(placeOfEntity(w.state, "truck")).toBe("cafe");
   });
+
+  test("in a Timelapse where the player character follows its routine to work, its party goes along", () => {
+    const t = town((wd) => withRoutines(wd, [routine("r_you", "you", [fixed("work", "09:00", 480, { place: "office" })])]));
+    // Rosa travels with the player character and waits with it at home.
+    const rosa = t.state.entities.rosa;
+    if (!rosa) throw new Error("no Rosa");
+    rosa.fields.place = placeOfEntity(t.state, "you");
+    rosa.relations.push({ type: "travels_with", to: "you" });
+    lapse(t, at(t, 0, "09:30"));
+    expect(placeOfEntity(t.state, "you")).toBe("office");
+    expect(placeOfEntity(t.state, "rosa")).toBe("office");
+  });
 });
