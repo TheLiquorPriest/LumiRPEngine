@@ -455,6 +455,8 @@ For long activities (sleep, a work shift, travel, waiting), the engine can skip 
 - **Offer a timelapse** (the default): the turn takes only the action's own time, and a chip offers a Timelapse to the end of the activity.
 - **Run it**: the turn runs that Timelapse itself, with your interrupt policy and a Montage.
 
+When you say how long ("I sleep for eight hours", "I rest for three hours"), the activity lasts that long, and the same policy decides: a length under the threshold passes within the turn ("sleep for 20 minutes" is a 20-minute turn, "rest for an hour" an hour's), and a longer one takes the action's own few minutes, then offers (or runs) a Timelapse to its end. That Timelapse keeps you doing what you said until it ends: your routine doesn't get you up for dinner.
+
 New settings give every listed activity a policy (offer, past 30 minutes), and a world can set its own for any activity; settings you saved with an earlier version keep the policies they had and aren't filled in. An activity without one (in a chat started before it had one, a world's own activity that the world leaves unset, or one your saved settings don't list) passes within the turn however long it takes: its row says *passes within the turn* and shows no mode or threshold, and picking either gives it a policy.
 
 When the narration implies an activity the engine hadn't seen start, you always get the offer chip, because the engine never starts a generation by itself. Activities shorter than the threshold simply elapse. The offer reads "Timelapse to 07:00 (8 h 55 min)?" (with the weekday when it is another day); the **Timelapse** button on it runs the Timelapse. A threshold can be anything from a minute to a week (1 to 10,080 on the stepper); a threshold outside that, such as a 0 an earlier version let you save, reads as the nearest end.
@@ -611,9 +613,9 @@ From Cast life 4 your character gets hungry, tired, lonely and bored, each from 
 What meets a need meets it when it's done, so the need grows again from then:
 
 - **Eating** meets hunger at the end of the meal (half an hour, or as long as you say: "I eat for an hour").
-- **Resting** meets fun at the end of the rest (half an hour, or as long as you say: "I rest for an hour" takes an hour).
+- **Resting** meets fun at the end of the rest (half an hour, or as long as you say: "I rest for an hour" takes an hour; a longer rest goes to [Speed through](#speed-through-and-timelapse-offers)).
 - **Chatting** with someone meets your social need at the end of the chat (a quarter of an hour, or "I talk to Rosa for two hours").
-- **Sleep** meets fatigue as you sleep through it: **Go to bed** sleeps until 07:00, then the Speed through or Timelapse offer rests you when the night ends; so does any time skip your routine sleeps through. A nap you give a length ("I sleep for 20 minutes") takes that long and rests you as it ends. Going to bed and getting straight up again rests no one.
+- **Sleep** meets fatigue as you sleep through it: **Go to bed** sleeps until 07:00, then the Speed through or Timelapse offer rests you when the night ends; so does any time skip your routine sleeps through. A nap you give a length ("I sleep for 20 minutes") lasts that long and rests you as it ends: a short one within the turn, a long one through its Timelapse. Going to bed and getting straight up again, or turning down the Timelapse, rests no one.
 - **Through a time skip**, what you live during the skip meets your needs: your meals and sleep, time out, and time with someone you know. The time you played before it counts only as you played it.
 
 **Beds.** Anyone can have a **bed**: a place, or an item such as a cot, wherever it stands. Their nights at home happen there, and Go to bed takes your character to yours. Set it in Build (the person's **Bed** field) or in GM mode (the person's page, **Where it is → Bed**). A bed in a secret place stays secret.

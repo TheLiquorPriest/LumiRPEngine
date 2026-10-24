@@ -12,6 +12,7 @@ import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
 import { planTurn, timelapseIntent, type EngineTurnPlan } from "../../../src/engine/turn";
+import { advance } from "../../../src/engine/simulate";
 import { placeOfEntity } from "../../../src/engine/scope";
 import { typedIntent } from "../../../src/engine/typed-intent";
 import { Working } from "../../../src/engine/working";
@@ -161,16 +162,26 @@ describe("company and fun", () => {
 });
 
 describe("stated durations", () => {
-  test("“rest for an hour” takes an hour, and a rest with none stated its usual half hour", () => {
+  test("“rest for an hour” passes within the turn, under its Speed through threshold, and meets fun as it ends", () => {
     const w = setup();
     const read = typedIntent(reg, w.world, w.state, "I rest for an hour");
     expect(read?.action).toBe("rest");
-    const rest = resolveAction(reg, w, { action: "rest", params: read?.params ?? {} }, createRng("r"));
-    expect(rest.duration).toBe(60);
-    expect(rest.activity?.until).toBe(w.state.clock + 60);
-    expect(resolveAction(reg, setup(), { action: "rest", params: {} }, createRng("r")).duration).toBe(30);
+    expect(play(w, "rest", { action: "rest", params: read?.params ?? {}, probabilities: { rest: 1 } }, "I rest for an hour").elapsedMinutes).toBe(60);
+    expect(needValue(w.ctx, "you", "fun")).toBe(0);
+    expect(play(setup(), "rest", { action: "rest", params: {}, probabilities: { rest: 1 } }, "I rest").elapsedMinutes).toBe(30);
     const talk = typedIntent(reg, w.world, w.state, "I talk to Rosa for two hours");
     expect(talk?.params.minutes).toBe(120);
+  });
+
+  test("a rest stated past the threshold plays its half hour and offers the rest; a shorter one takes its own length", () => {
+    const w = setup();
+    const before = needValue(w.ctx, "you", "fun");
+    const long = play(w, "rest", { action: "rest", params: { minutes: 180 }, probabilities: { rest: 1 } }, "I rest for three hours");
+    expect(long.elapsedMinutes).toBe(30);
+    expect(long.chips.some((c) => c.kind === "timelapse_offer")).toBe(true);
+    // Not met yet: the three hours are the Speed through's.
+    expect(needValue(w.ctx, "you", "fun")).toBeGreaterThan(before);
+    expect(play(setup(), "rest", { action: "rest", params: { minutes: 10 }, probabilities: { rest: 1 } }, "I rest for ten minutes").elapsedMinutes).toBe(10);
   });
 });
 
@@ -219,9 +230,9 @@ describe("what a skip meets (the replay review)", () => {
     const w = setup((world) => {
       world.entities.you!.fields.place = "apartment_hall";
     });
-    // A day alone: everyone else at the apartment goes out, and four three-hour rests run it to 19:30.
+    // A day alone in ordinary play: everyone else at the apartment goes out, and the turns run it to 19:30.
     w.applyAll(Object.keys(w.state.entities).filter((id) => id !== "you" && placeOfEntity(w.state, id) === "apartment_hall" && w.state.entities[id]?.kind !== "item").map((id): LedgerEvent => ({ type: "set", entity: id, field: "place", value: "cafe" })));
-    for (let i = 0; i < 4; i++) play(w, `rest${i}`, { action: "rest", params: { minutes: 180 }, probabilities: { rest: 1 } }, "I rest.");
+    advance(reg, w, todayAt(w, 19 * 60 + 30), { runSeed: "run", mode: "turn", cause: "tick" });
     const before = needValue(w.ctx, "you", "social");
     expect(before).toBeGreaterThan(30);
     // Rosa comes over, then half an hour passes: she was no company for the day before she came.
@@ -238,6 +249,37 @@ describe("what a skip meets (the replay review)", () => {
     const nap = play(w, "nap", { action: "sleep", params: { minutes: 20 }, probabilities: { sleep: 1 } }, "I sleep for 20 minutes.");
     expect(nap.elapsedMinutes).toBe(20);
     expect(needValue(w.ctx, "you", "fatigue")).toBeLessThan(before);
+  });
+
+  test("“sleep for eight hours” plays five minutes and offers a Speed through to its end, which rests them as it ends", () => {
+    const w = setup();
+    to(w, todayAt(w, 14 * 60));
+    const end = w.state.clock + 480;
+    const bed = play(w, "nap", { action: "sleep", params: { minutes: 480 }, probabilities: { sleep: 1 } }, "I sleep for eight hours.");
+    expect(bed.elapsedMinutes).toBe(5);
+    const offer = bed.chips.find((c) => c.kind === "timelapse_offer");
+    if (!offer || offer.kind !== "timelapse_offer") throw new Error("no speed-through offered");
+    expect(offer.target).toEqual({ type: "at", at: end });
+    // Not slept yet: going to bed alone meets nothing.
+    expect(needValue(w.ctx, "you", "fatigue")).toBeGreaterThan(30);
+    // Taken as the chip sends it (`dispatch`: its payload's hold), the span is theirs: no routine wakes them for dinner.
+    play(w, "sleep", timelapseIntent(offer.target, undefined, 1, offer.povRoutine !== false));
+    expect(w.state.clock).toBe(end);
+    expect(w.state.entities.you?.fields.activity).toBe("sleep");
+    expect(needValue(w.ctx, "you", "fatigue")).toBe(0);
+  });
+
+  test("under Speed through `auto`, “sleep for eight hours” runs the Timelapse itself", () => {
+    const w = setup();
+    w.state.time.speedThrough = { ...w.state.time.speedThrough, sleep: { mode: "auto", thresholdMinutes: 30 } };
+    to(w, todayAt(w, 14 * 60));
+    const end = w.state.clock + 480;
+    const bed = play(w, "nap", { action: "sleep", params: { minutes: 480 }, probabilities: { sleep: 1 } }, "I sleep for eight hours.");
+    expect(bed.timelapse).not.toBeNull();
+    expect(bed.chips.some((c) => c.kind === "timelapse_offer")).toBe(false);
+    expect(w.state.clock).toBe(end);
+    expect(w.state.entities.you?.fields.activity).toBe("sleep");
+    expect(needValue(w.ctx, "you", "fatigue")).toBe(0);
   });
 
   test("going to bed at 23:00 and speeding through the night is rested by 07:00, when the night ends", () => {
