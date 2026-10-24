@@ -4328,7 +4328,45 @@ function isLorePin(v) {
 function lorePinKey(pin) {
   return "lore" in pin ? `lore:${pin.lore}` : ("entry" in pin) ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
+function pinJson(pin) {
+  const base = "lore" in pin ? { lore: pin.lore } : ("entry" in pin) ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+  if (pin.keep === "end")
+    base.keep = "end";
+  return base;
+}
 var pinsRead = new WeakMap;
+function lorePinsOf(world) {
+  const raw = world.lorePins;
+  if (!isRecord(raw))
+    return { characters: {}, places: {}, steps: {} };
+  const known = pinsRead.get(raw);
+  if (known)
+    return known;
+  const part = (value) => {
+    const out = {};
+    if (!isRecord(value))
+      return out;
+    for (const [id, list] of Object.entries(value)) {
+      if (!safeKey(id) || !Array.isArray(list))
+        continue;
+      const seen = new Set;
+      const pins = [];
+      for (const pin of list) {
+        if (!isLorePin(pin) || seen.has(lorePinKey(pin)))
+          continue;
+        seen.add(lorePinKey(pin));
+        pins.push(pinJson(pin));
+      }
+      if (pins.length > 0)
+        out[id] = pins;
+    }
+    return out;
+  };
+  const steps = part(raw.steps);
+  const read = { characters: part(raw.characters), places: part(raw.places), steps: Object.fromEntries(LORE_AUDIENCE.flatMap((p) => hasOwn(steps, p) ? [[p, steps[p] ?? []]] : [])) };
+  pinsRead.set(raw, read);
+  return read;
+}
 function loreTerm(text) {
   return text.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -7422,6 +7460,7 @@ function cuesOf(world, who) {
 
 // src/engine/lore.ts
 var MIN_TERM = 3;
+var MIN_WORDS = 4;
 var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
 function plain(text2) {
   const words2 = text2.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
@@ -7453,6 +7492,48 @@ function loreReadable(reg, world, state, entry, purpose, effects = false, open =
   const links = listOf(entry.links);
   return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
 }
+function loreSnippet(tokens, entry, budget, keep = "start") {
+  const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
+  const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
+  const whole4 = title === "" ? body : `${title}: ${body}`;
+  const cost = tokens(whole4);
+  if (cost <= budget)
+    return { text: whole4, tokens: cost, cut: false };
+  if (keep === "end") {
+    const words3 = body === "" ? [] : body.split(" ");
+    const lead = title === "" ? "\u2026" : `${title}: \u2026`;
+    const kept2 = (n) => `${lead}${words3.slice(words3.length - n).join(" ")}`;
+    let lo2 = MIN_WORDS;
+    if (lo2 >= words3.length || tokens(kept2(lo2)) > budget)
+      return null;
+    let hi2 = words3.length - 1;
+    while (lo2 < hi2) {
+      const mid = Math.ceil((lo2 + hi2) / 2);
+      if (tokens(kept2(mid)) <= budget)
+        lo2 = mid;
+      else
+        hi2 = mid - 1;
+    }
+    const text3 = kept2(lo2);
+    return { text: text3, tokens: tokens(text3), cut: true };
+  }
+  const head = title === "" ? 0 : title.split(" ").length;
+  const words2 = whole4.split(" ");
+  const fits = (n) => tokens(`${words2.slice(0, n).join(" ")}\u2026`) <= budget;
+  let lo = head + MIN_WORDS;
+  if (lo >= words2.length || !fits(lo))
+    return null;
+  let hi = words2.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(mid))
+      lo = mid;
+    else
+      hi = mid - 1;
+  }
+  const text2 = `${words2.slice(0, lo).join(" ")}\u2026`;
+  return { text: text2, tokens: tokens(text2), cut: true };
+}
 
 // src/engine/lore-pins.ts
 var CHAIN_MAX = 16;
@@ -7460,6 +7541,27 @@ function placeChain(world, place) {
   const out = [];
   for (let at = place ?? undefined;at !== undefined && hasOwn(world.places, at) && !out.includes(at) && out.length < CHAIN_MAX; at = world.places[at]?.parent)
     out.push(at);
+  return out;
+}
+function pinsFor(world, place, who, steps = []) {
+  const pins = lorePinsOf(world);
+  const out = [];
+  const seen = new Set;
+  const add = (list, on) => {
+    for (const pin of list ?? []) {
+      const key = lorePinKey(pin);
+      if (seen.has(key))
+        continue;
+      seen.add(key);
+      out.push({ key, pin, on });
+    }
+  };
+  if (who !== undefined)
+    add(own(pins.characters, who), { character: who });
+  for (const step of steps)
+    add(pins.steps[step], { step });
+  for (const at of placeChain(world, place))
+    add(own(pins.places, at), { place: at });
   return out;
 }
 
@@ -8244,7 +8346,7 @@ function companionCandidates(reg, world, state, action, param, actor = world.pov
   const here = placeOfEntity(state, actor);
   return Object.keys(state.entities).sort().filter((id) => {
     const e = own(state.entities, id);
-    return !!e && id !== actor && kindIs(reg, world, e.kind, ref) && (!def.of || selectorMatches(reg, world, state, def.of, id)) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)) && canSeeEntity(reg, world, state, actor, id);
+    return !!e && id !== actor && kindIs(reg, world, e.kind, ref) && (!def.of || selectorMatches(reg, world, state, def.of, id)) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)) && canSeeEntity(reg, world, state, actor, id) && (actor !== world.pov || povMayKnow(reg, world, state, id));
   });
 }
 function placeCandidates(reg, world, state, actor = world.pov) {
@@ -10157,14 +10259,14 @@ var ALL_NOTE = Object.fromEntries(INTERRUPT_CLASSES.map((c) => [c, "note"]));
 function rngFactory(runSeed, process, slot) {
   return (entity) => createRng(processSeed(runSeed, process, entity, slot));
 }
-function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse) {
+function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse, run) {
   const applied = [];
   for (const def of reg.processes) {
     if (def.scope !== "agent")
       continue;
     if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
       continue;
-    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {} }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
+    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {}, ...run ? { run } : {} }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
   }
   return applied;
 }
@@ -10217,7 +10319,8 @@ function advance(reg, w, to, opts) {
   };
   let cursors = new Map;
   let next = 0;
-  const infoOf = (slot) => ({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {} });
+  const run = { from, to };
+  const infoOf = (slot) => ({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {}, run });
   const agentInstants = (slot, info, until) => {
     const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
     if (timed.length === 0)
@@ -10278,7 +10381,7 @@ function advance(reg, w, to, opts) {
       let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
       while (k < last && stillActs(w, agent)) {
         k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse, run);
         if (applied.length > 0)
           result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
@@ -10964,14 +11067,16 @@ class TimelapseRun {
     w.apply(summary);
     const remaining = result.stop === "cap" ? Math.max(0, this.to - result.to) : 0;
     const montage = buildMontage(this.reg, w.world, this.before, w.state, w.events.slice(this.start), w.state.time.montage);
+    const held2 = this.opts.povRoutine === false ? { povRoutine: false } : {};
     return {
       ok: true,
       result,
       summary,
       remaining,
-      chip: remaining > 0 ? { kind: "continue_timelapse", target: this.target.type === "duration" ? { type: "duration", minutes: remaining } : this.target, remaining } : null,
+      chip: remaining > 0 ? { kind: "continue_timelapse", target: this.target.type === "duration" ? { type: "duration", minutes: remaining } : this.target, remaining, ...held2 } : null,
       montage,
-      ...stop?.by === "mind" ? { mindName: playerKnows(this.reg, w.world, w.state, w.world.pov, stop.entity) ? own(w.state.entities, stop.entity)?.name ?? null : null } : {}
+      ...stop?.by === "mind" ? { mindName: playerKnows(this.reg, w.world, w.state, w.world.pov, stop.entity) ? own(w.state.entities, stop.entity)?.name ?? null : null } : {},
+      ...held2
     };
   }
 }
@@ -11592,6 +11697,13 @@ function onScreen(w) {
     return [];
   return Object.keys(w.state.entities).filter((id) => id !== w.world.pov && own(w.state.entities, id)?.agent && placeOfEntity(w.state, id) === here && !isGone(w.state, id) && acts(w.world, w.state, id));
 }
+function statedSpan(reg, world, step) {
+  const def = step ? findAction(reg, world, step.action) : undefined;
+  return Object.entries(def?.params ?? {}).some(([name, p]) => {
+    const given = step?.params[name];
+    return p.type === "duration" && typeof given === "number" && given > 0;
+  });
+}
 function queueStop(w, res, since, scene, speeding) {
   if (!res.ok || res.rejected.length > 0)
     return "failure";
@@ -11692,17 +11804,22 @@ function planTurn(input) {
       if (act && elapsed && elapsed.source !== "paused" && !fighting) {
         const remaining = act.until - w.state.clock;
         const mode = speedThrough(w.state, act.type, remaining);
+        const stated = statedSpan(reg, w.world, step);
         if (mode !== "elapse") {
           speeding = true;
           const until = { type: "at", at: act.until };
+          const hold = stated ? { povRoutine: false } : {};
+          const offer = { kind: "timelapse_offer", activity: act.type, target: until, remaining, ...hold };
           if (mode === "auto") {
-            const outcome = runTimelapse(reg, w, until, { runSeed: input.runSeed });
+            const outcome = runTimelapse(reg, w, until, { runSeed: input.runSeed, ...hold });
             if ("code" in outcome)
-              chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
+              chips.push(offer);
             else
               timelapse = outcome;
           } else
-            chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
+            chips.push(offer);
+        } else if (stated && remaining > 0) {
+          advance(reg, w, Math.min(act.until, w.state.clock + TIME_LIMITS.timelapseMinutes), { runSeed: input.runSeed, mode: "turn", cause: "action" });
         }
       }
       const left = steps.length - 1 - i;
@@ -12947,6 +13064,7 @@ function placeLines(ctx, scope) {
 
 // src/engine/place-lore.ts
 var PLACE_LORE_CAP = 6;
+var PLACE_LORE_CHARS = 480;
 var NARRATOR_READS = "brief";
 function placeLoreLines(ctx, scope) {
   const { registry, world, state } = ctx;
@@ -12968,15 +13086,23 @@ function placeLoreLines(ctx, scope) {
     found.push({ entry, at, read });
   }
   found.sort((a, b) => a.at - b.at || (b.entry.priority ?? 0) - (a.entry.priority ?? 0) || String(a.entry.title).localeCompare(String(b.entry.title)) || a.entry.id.localeCompare(b.entry.id));
-  const lineOf = (entry, known) => {
-    const text3 = `${typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title.trim() : entry.id}: ${entry.content.replace(/\s+/g, " ").trim()}`;
+  const keeps = new Map(pinsFor(world, here).map((ref) => [ref.key, ref.pin.keep ?? "start"]));
+  const keepOf = (entry) => {
     const source = loreSourceOf(entry.source);
-    return { text: text3, known, ...source.kind === "book" && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {} };
+    return keeps.get(lorePinKey({ lore: entry.id })) ?? (source.kind === "book" ? keeps.get(lorePinKey({ book: source.bookId, entry: source.entryId })) : undefined) ?? "start";
   };
-  const lines = found.filter((f) => f.read).slice(0, PLACE_LORE_CAP).map((f) => lineOf(f.entry, "pov"));
+  const lineOf = (entry, known) => {
+    const title = typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : entry.id;
+    const snippet = loreSnippet((text3) => text3.length, { title, content: entry.content }, PLACE_LORE_CHARS, keepOf(entry));
+    if (!snippet)
+      return [];
+    const source = loreSourceOf(entry.source);
+    return [{ text: snippet.text, known, ...source.kind === "book" && !snippet.cut && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {} }];
+  };
+  const lines = found.filter((f) => f.read).slice(0, PLACE_LORE_CAP).flatMap((f) => lineOf(f.entry, "pov"));
   if (scope !== "gm")
     return lines;
-  return [...lines, ...found.filter((f) => !f.read).slice(0, PLACE_LORE_CAP).map((f) => lineOf(f.entry, "gm"))];
+  return [...lines, ...found.filter((f) => !f.read).slice(0, PLACE_LORE_CAP).flatMap((f) => lineOf(f.entry, "gm"))];
 }
 
 // src/packs/space/core/index.ts
@@ -25941,6 +26067,7 @@ var NEED_SETTING_PARTS = { on: "switch", rate: "rate", tell: "points", alert: "p
 var RATE_MAX = 100;
 var inScale = (v, max) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= max;
 var STATED_MINUTES = { type: "duration", label: "How long, in minutes, when the player says", optional: true };
+var CONVERSATION = "conversation";
 function needsSettingsOf(world) {
   const raw = isRecord(world.needs) ? world.needs : {};
   const one = (need2) => {
@@ -26252,7 +26379,7 @@ var relationshipsPack = {
         return appraise(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"));
       }
     });
-    r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" }, minutes: STATED_MINUTES }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }, { type: "castlife.satisfy", args: { entity: "self", need: "social", minutes: `=${CHAT_FOR}` } }] }, duration: CHAT_FOR, lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
+    r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" }, minutes: STATED_MINUTES }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: CONVERSATION, mutual: true } }] }, duration: CHAT_FOR, activity: { type: "chat", until: `clock + (${CHAT_FOR})` }, lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
     r.action({ id: "give_gift", label: "Give a gift", description: "Give someone here a present.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
     r.proposal({
       type: "regard",
@@ -27949,7 +28076,7 @@ var NEEDS = {
   hunger: { name: "Hunger", label: "hungry", satisfiedBy: ["eat", "meal", "lunch", "dinner", "breakfast"], daily: [420, 750, 1110] },
   fatigue: { name: "Fatigue", label: "tired", satisfiedBy: ["sleep"], daily: [420] },
   social: { name: "Social", label: "lonely", satisfiedBy: ["socialize", "chat", "drinks"], daily: [1140] },
-  fun: { name: "Fun", label: "bored", satisfiedBy: ["leisure", "exercise", "drinks", "socialize"], daily: [1200] }
+  fun: { name: "Fun", label: "bored", satisfiedBy: ["leisure", "exercise", "drinks", "socialize", "waiting"], daily: [1200] }
 };
 function satisfies(activity, need2) {
   return NEEDS[need2].satisfiedBy.some((w) => activity.includes(w));
@@ -28008,9 +28135,21 @@ function metAt(ctx, who, need2, at) {
 }
 var EAT_FOR = "minutes > 0 ? minutes : 30";
 var REST_FOR = "minutes > 0 ? minutes : 30";
+var REST_TURN = "minutes > 0 ? min(minutes, 30) : 30";
+var SLEEP_UNTIL = "minutes > 0 ? clock + minutes : next_time('07:00')";
+var SLEEP_TURN = "minutes > 0 ? min(minutes, 5) : 5";
+var NAP_MEETS = "minutes > 0 ? 'fatigue' : ''";
 function toBed(ctx, who) {
   const to = bedPlace(ctx, who);
   return to === null || placeOfEntity(ctx.state, who) === to ? [] : movesOf(relocate(ctx, who, to));
+}
+function companyMet(ctx, pair) {
+  const pov = ctx.world.pov;
+  const e = own(ctx.state.entities, pov);
+  if (!e || !pair.includes(pov))
+    return [];
+  const until = e.fields.activity === "chat" && typeof e.fields.activity_until === "number" ? Math.max(ctx.state.clock, e.fields.activity_until) : ctx.state.clock;
+  return metAt(ctx, pov, "social", until);
 }
 function buildNeedsView(ctx) {
   const pov = ctx.world.pov;
@@ -28020,8 +28159,8 @@ function buildNeedsView(ctx) {
   const tuning = tuningOf(ctx);
   return {
     needs: on.map((need2) => {
-      const value = Math.round(needValue(ctx, pov, need2));
-      return { need: need2, name: NEEDS[need2].name, label: NEEDS[need2].label, value, pressing: value >= tuning[need2].tell };
+      const raw = needValue(ctx, pov, need2);
+      return { need: need2, name: NEEDS[need2].name, label: NEEDS[need2].label, value: Math.round(raw), pressing: raw >= tuning[need2].tell };
     })
   };
 }
@@ -28385,6 +28524,8 @@ function planMoments(ctx, who, slot) {
       if (inside(a.ask))
         out.push({ at: a.ask, key: `invite:${a.key}` });
   }
+  if (who === ctx.world.pov)
+    out.push(...activityEndMoment(ctx, slot));
   return out;
 }
 function livesEveryBlock(ctx, who, slot) {
@@ -28473,6 +28614,8 @@ function liveSkipBlock(ctx, who, block, at) {
   return takeUp(ctx, who, block.place, block.activity, at, undefined, true, true);
 }
 function atPlanMoment(ctx, who, moment, slot) {
+  if (moment.key === ACTIVITY_END)
+    return povLivedNeeds(ctx, slot, moment.at);
   const cal = calendarOf(ctx.world);
   if (moment.key.startsWith("invite:")) {
     const ask = asksOf(ctx, who, [dateAt(cal, moment.at).dayIndex, dateAt(cal, moment.at).dayIndex + 1]).find((a) => `invite:${a.key}` === moment.key);
@@ -28526,22 +28669,40 @@ function inCompany(ctx) {
     return false;
   return Object.entries(ctx.state.entities).some(([id, e]) => id !== pov && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, id) && acts2(ctx, id) && together(ctx.world, here, placeOfEntity(ctx.state, id)) && playerKnows(ctx.registry, ctx.world, ctx.state, pov, id));
 }
-function povLivedNeeds(ctx, slot) {
+function passedFrom(slot) {
+  return Math.max(slot.start, slot.run?.from ?? slot.start);
+}
+function povLivedNeeds(ctx, slot, at = slot.end) {
   const pov = ctx.world.pov;
+  const since = passedFrom(slot);
+  if (at <= since)
+    return [];
   const activity = strOf(own(ctx.state.entities, pov)?.fields.activity);
-  const end = livedUntil(ctx, activity, slot.start, slot.end, slot.povRoutine !== false);
+  const end = livedUntil(ctx, activity, since, at, slot.povRoutine !== false);
   const met = end === null ? [] : needsMetBy(ctx, activity).map((n) => [n, end]);
-  if (!met.some(([n]) => n === "social") && needsOn(ctx.world).includes("social") && inCompany(ctx))
-    met.push(["social", slot.end]);
-  return met.flatMap(([need2, at]) => metAt(ctx, pov, need2, at));
+  if (at === slot.end && !met.some(([n]) => n === "social") && needsOn(ctx.world).includes("social") && inCompany(ctx))
+    met.push(["social", at]);
+  return met.flatMap(([need2, t]) => metAt(ctx, pov, need2, t));
 }
 function povActivityEnds(ctx, who, at, slot, events2) {
-  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4)
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4 || at <= passedFrom(slot))
     return events2;
   const was = strOf(own(ctx.state.entities, who)?.fields.activity);
   const moved = events2.some((ev) => ev.type === "set" && ev.entity === who && ev.field === "activity" && ev.value !== was);
-  const end = moved ? livedUntil(ctx, was, slot.start, at, slot.povRoutine !== false) : null;
+  const end = moved ? livedUntil(ctx, was, passedFrom(slot), at, slot.povRoutine !== false) : null;
   return end === null ? events2 : [...needsMetBy(ctx, was).flatMap((n) => metAt(ctx, who, n, end)), ...events2];
+}
+var ACTIVITY_END = "needs:end";
+function activityEndMoment(ctx, slot) {
+  const pov = ctx.world.pov;
+  const e = own(ctx.state.entities, pov);
+  if (ctx.levelOf(pov, "castlife") < 4 || needsMetBy(ctx, strOf(e?.fields.activity)).length === 0)
+    return [];
+  const from = passedFrom(slot);
+  const until = e?.fields.activity_until;
+  const ends = [...typeof until === "number" && until > from ? [until] : [], ...slot.run ? [slot.run.to] : []];
+  const at = ends.length > 0 ? Math.min(...ends) : null;
+  return at !== null && at > from && at < slot.end ? [{ at, key: ACTIVITY_END }] : [];
 }
 function stepAgent2(slot, ctx, rngFor, who) {
   const out = [];
@@ -29129,14 +29290,18 @@ var castlifePack = {
     });
     r.effect({
       type: "castlife.satisfy",
-      args: ["need", "entity?", "minutes?"],
+      args: ["need", "entity?", "minutes?", "activity?", "after?"],
       resolve: (a, ctx) => {
         const who = strOf(a.entity) || ctx.world.pov;
         const need2 = strOf(a.need);
-        return isNeedId(need2) && own(ctx.state.entities, who) ? metAt(ctx, who, need2, ctx.state.clock + Math.max(0, Math.round(numOf(a.minutes, 0)))) : [];
+        const minutes = Math.max(0, Math.round(numOf(a.minutes, 0)));
+        const sped = typeof a.activity === "string" && speedThrough(ctx.state, a.activity, minutes - numOf(a.after, 0)) !== "elapse";
+        return isNeedId(need2) && own(ctx.state.entities, who) && !sped ? metAt(ctx, who, need2, ctx.state.clock + minutes) : [];
       }
     });
     r.effect({ type: "castlife.to_bed", args: ["entity?"], resolve: (a, ctx) => toBed(ctx, strOf(a.entity) || ctx.world.pov) });
+    r.effect({ type: "castlife.company", args: ["with", "to"], resolve: (a, ctx) => companyMet(ctx, [strOf(a.with), strOf(a.to)]) });
+    r.rule({ id: "castlife.conversation", pack: "castlife", on: { event: "relationships.regard" }, when: `event.data.why == '${CONVERSATION}'`, do: [{ type: "castlife.company", args: { with: "=event.data.from", to: "=event.data.to" } }] });
     r.effect({ type: "castlife.decide", args: ["key", "choice"], resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
     r.effect({
       type: "castlife.override",
@@ -29163,8 +29328,8 @@ var castlifePack = {
     r.proposal(routineChannel);
     r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?", "by?"], resolve: storyEvents });
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger", minutes: `=${EAT_FOR}` } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: EAT_FOR, lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
-    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed (your own, if you have one) and sleep until morning, or for as long as you say.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.to_bed", args: { entity: "self" } }] }, duration: "5", activity: { type: "sleep", until: "minutes > 0 ? clock + minutes : next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
-    r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun", minutes: `=${REST_FOR}` } }] }, duration: REST_FOR, activity: { type: "waiting", until: `clock + (${REST_FOR})` }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
+    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed (your own, if you have one) and sleep until morning, or for as long as you say.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.to_bed", args: { entity: "self" } }, { type: "castlife.satisfy", args: { entity: "self", need: `=${NAP_MEETS}`, minutes: "=minutes", activity: "sleep", after: `=${SLEEP_TURN}` } }] }, duration: SLEEP_TURN, activity: { type: "sleep", until: SLEEP_UNTIL }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
+    r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun", minutes: `=${REST_FOR}`, activity: "waiting", after: `=${REST_TURN}` } }] }, duration: REST_TURN, activity: { type: "waiting", until: `clock + (${REST_FOR})` }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }, { type: "castlife.book_invitation", args: { host: "host" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
     r.renderer({ slot: "people", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
     r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });

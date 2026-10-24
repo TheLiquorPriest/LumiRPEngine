@@ -12696,9 +12696,9 @@ function ActivityBanner() {
           class: "lre-num lre-activity-time",
           children: elapsedText(now - activity.since)
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(CancelTurn, {
+        activity.cancellable === true ? /* @__PURE__ */ u3(CancelTurn, {
           chatId
-        }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : null
       ]
     }, undefined, true, undefined, this);
   return /* @__PURE__ */ u3("div", {
