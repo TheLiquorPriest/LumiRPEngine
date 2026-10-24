@@ -122,7 +122,7 @@ On the last turn reviewed:
 
 17. **The message's own time wins:** "until dinner" and "a few minutes later" read as spans, and narrated time is netted against what the turn already applied.
 
-## Group 2: after the quick fixes
+## Group 2: after the quick fixes (shipped October 2026)
 
 1. **Positioning overhaul:**
    - one move path for everything that changes a place;
@@ -166,6 +166,50 @@ On the last turn reviewed:
    - world lore's gates, audiences and links stored on World Info entries;
    - secrets switched on through the interceptor;
    - a long pinned timeline that has to be cut keeps its newest part, not its oldest.
+
+**As built:**
+
+- **Lore books:** Spindle doesn't say which books Lumiverse scans for a chat. The helpers and minds read the world's own list (**Build → Lore → Lore books**), the chat's books and your global books. A character's or persona's book is read only when it's on the list.
+- **Secrets:** an entry a secret world entry was indexed from is stored switched off in its book, so it stays out of every prompt until the gate holds, even if the hook fails.
+- **Section order:** the Place and Property sections rank after Stance, so a tight token budget never squeezes out a section that was there before them.
+
+## Characters as their own model (shipped October 2026)
+
+A character is read and edited as one thing, over the existing entities, with no change to the world format:
+
+- **Build's Character page** and **the GM's Character sheet** cover:
+  - who they are;
+  - where they live and sleep, picked by place path;
+  - their day, with routines and schedules in words;
+  - who they work for, a place or a business;
+  - their relations in the world's own words;
+  - their stats, things, secrets and pins.
+- **Everything else** stays in the generic editor, under **All fields**.
+- **Later:** a first-class characters collection.
+
+## UI polish after a check in the real UI (October 2026)
+
+- **GM:**
+  - the bars stay above GM's tab bar;
+  - every GM edit leaves a notice with Undo;
+  - bulk changes start unchosen and show the current mix;
+  - running minds asks first;
+  - a GM edit's chip names only people your character knows.
+- **Sections:**
+  - each section opens as its own page, with its settings in words;
+  - sources are ticked by what they tell.
+- **Build:**
+  - stage objectives show their label and condition;
+  - item checks write a label players can read;
+  - an item's page leaves out what only a person has;
+  - "Hidden until searched" is one switch.
+- **Lore:**
+  - a secret's gate is checked as you type, with examples from the world;
+  - holders and links are picked by name;
+  - books that share a name are told apart.
+- **Steps:** every step's prompt says what it does next to its built-in text, and Step templates use the steps' names.
+- **Needs:** one name per need everywhere, and every number in words.
+- **Not built:** a per-section preview of what each section holds now. It needs its own request, its own timeout and a secrecy review of marked lines.
 
 ## Settings for long chats
 
