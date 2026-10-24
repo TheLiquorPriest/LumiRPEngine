@@ -42,6 +42,7 @@ import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { povLead, together } from "../../../engine/presence";
+import { relocate } from "../../../engine/relocate";
 import { acts as lifeActs, povLife } from "../../../engine/life";
 import { classValues, isGroup, isMemberOf, MEMBER_OF, selectEntities } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
@@ -350,7 +351,7 @@ function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity
   if (!held(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     // Seen as their arrival is: by a POV that can see them, whether or not it holds a `knows` link to them.
     if (seen && withPov(ctx, who)) out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
-    out.push({ type: "set", entity: who, field: "place", value: place });
+    out.push(...movesOf(relocate(ctx, who, place)));
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov)) out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...(quiet ? { stops: false } : {}) } });
   }
   if (activity !== null && !held(ctx.state, who, "activity", at) && e.fields.activity !== activity) out.push({ type: "set", entity: who, field: "activity", value: activity });
@@ -360,6 +361,11 @@ function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity
     if (kept.place !== holds.place || kept.activity !== holds.activity) out.push({ type: "set", entity: who, field: "holds", value: kept });
   }
   return out;
+}
+
+/** A move's events through the one move path (`relocate`); someone the world doesn't have moves nowhere. */
+function movesOf(moved: LedgerEvent[] | Rejection): LedgerEvent[] {
+  return "code" in moved ? [] : moved;
 }
 
 /** The activity a block sets: an overdue loan's retrieval is an errand. */
@@ -845,7 +851,7 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
       // §8): they leave once the scene lets them go. In a timelapse the POV's routine runs in, they go.
       if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place) && !(slot.povRoutine === false && withPov(ctx, who))) {
         holds = { ...holds, place: until, activity: until };
-        out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
+        out.push({ type: "set", entity: who, field: "holds", value: holds }, ...movesOf(relocate(ctx, who, place)), { type: "set", entity: who, field: "activity", value: "trip" });
       }
       if (!(until <= slot.end && (until > slot.start || holding))) continue;
       // Nor does its end take anyone out of a scene the story holds with the POV: they stay, held by
@@ -854,7 +860,7 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
       // Over: home if it ended within the slot, or if it still holds them at its place after slots
       // that couldn't end it (anyone something else took elsewhere meanwhile stays there).
       const home = homeOf(ctx, who);
-      if ((until > slot.start || away) && home) out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
+      if ((until > slot.start || away) && home) out.push(...movesOf(relocate(ctx, who, home)), { type: "set", entity: who, field: "activity", value: "idle" });
       // Its holds have run out (they last until it ends), so dropping them changes nothing they hold:
       // it only keeps the trip from taking them for still away the next time they stand at its place.
       const kept = Object.fromEntries(Object.entries(holds).filter(([target, at]) => !((target === "place" || target === "activity") && at === until)));
@@ -1465,7 +1471,7 @@ export const castlifePack: PackDef = {
         const out: LedgerEvent[] = [];
         if (typeof a.place === "string" && own(ctx.world.places, a.place)) {
           holds.place = until;
-          out.push({ type: "set", entity: who, field: "place", value: a.place });
+          out.push(...movesOf(relocate(ctx, who, a.place)));
         }
         if (typeof a.activity === "string") {
           holds.activity = until;

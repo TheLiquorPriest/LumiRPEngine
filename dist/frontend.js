@@ -5313,6 +5313,9 @@ function chipRegenerates(kind, choice) {
   return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop");
 }
 
+// src/shared/party.ts
+var PARTY_RELATION = "travels_with";
+
 // src/frontend/requests.ts
 function upgradeRequest(chatId, preview, choices) {
   const merge = {};
@@ -5374,6 +5377,10 @@ function stagedRequest(chatId, staged, now) {
 function fixRequest(target, value, chatId) {
   return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
 }
+function whereFixTarget(hud, entity, here) {
+  const pov = hud?.fixes.place;
+  return pov ? { ...pov, entity, value: here ? pov.value : null } : null;
+}
 function timeFixRequest(time, chatId) {
   return { type: "lre.fix", chatId, time };
 }
@@ -5427,6 +5434,21 @@ function relationFields(defs, inputs, held = {}) {
 function adjustOp(account, text, currency, take) {
   const cents = parseMoneyInput(text, currency);
   return cents !== null && cents > 0 ? { op: "adjust", account, cents: take ? -cents : cents } : null;
+}
+function bringOp(entity, gm) {
+  const pov = gm.entities.find((e3) => e3.pov);
+  return pov && pov.id !== entity.id && pov.place && pov.place !== entity.place ? { op: "move", entity: entity.id, to: pov.place } : null;
+}
+function partyOf(entity, gm) {
+  const pov = gm.entities.find((e3) => e3.pov);
+  if (!pov || pov.id === entity.id)
+    return null;
+  const travels = entity.relations.some((r3) => r3.type === PARTY_RELATION && r3.to === pov.id);
+  return { pov, travels, op: travels ? { op: "unlink", rel: PARTY_RELATION, from: entity.id, to: pov.id } : { op: "link", rel: PARTY_RELATION, from: entity.id, to: pov.id } };
+}
+function placesMatching(places2, search) {
+  const words = search.toLowerCase().split(/\s+/).filter((w3) => w3 !== "");
+  return places2.filter((p3) => words.every((w3) => p3.name.toLowerCase().includes(w3)));
 }
 function timeMarker(chatId, control, scope, to, preview = false) {
   return preview ? { type: "lre.marker", chatId, kind: "time", control, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "time", control, scope, to };
@@ -29919,6 +29941,7 @@ function classLabel(view, facetId, valueId) {
 }
 function PersonSheet(props) {
   const app = useApp();
+  const [fixingWhere, setFixingWhere] = d2(false);
   A(() => {
     app.request({ type: "lre.view.open", chatId: props.chatId, panel: "castlife.cast", entity: props.id }).then((result) => {
       if (result?.pending)
@@ -29955,6 +29978,7 @@ function PersonSheet(props) {
   const classes = Object.entries(person.classes).flatMap(([facet, values]) => values.map((value) => ({ facet, value })));
   const facetLabel = (id) => view.facets.find((f3) => f3.id === id)?.label ?? id;
   const where = whereabouts(person);
+  const whereFix = whereFixTarget(props.state.hud, person.id, person.here);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-world",
     "data-lre-sheet-person": person.id,
@@ -30006,6 +30030,22 @@ function PersonSheet(props) {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      whereFix ? fixingWhere ? /* @__PURE__ */ u3("div", {
+        class: "lre-play-fix",
+        onKeyDown: (event) => event.key === "Escape" && (event.stopPropagation(), setFixingWhere(false)),
+        children: /* @__PURE__ */ u3(FixEditor, {
+          label: "Where are they?",
+          target: whereFix,
+          onDone: () => setFixingWhere(false)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+        children: /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "edit",
+          onClick: () => setFixingWhere(true),
+          children: "Where are they?"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
       person.next ? /* @__PURE__ */ u3(Section, {
         title: "Next",
         flush: true,
@@ -35992,10 +36032,14 @@ function SheetRow2(props) {
 function Placement(props) {
   const { entity, editor } = props;
   const [amount, setAmount] = d2("");
+  const [search, setSearch] = d2("");
   const move = P2();
   const put = P2();
   const add = adjustOp(entity.id, amount, editor.currency, false);
   const take = adjustOp(entity.id, amount, editor.currency, true);
+  const bring = bringOp(entity, editor.gm);
+  const party = entity.person && editor.gm.relationTypes.some((t3) => t3.id === PARTY_RELATION) ? partyOf(entity, editor.gm) : null;
+  const found = placesMatching(editor.gm.places, search);
   return /* @__PURE__ */ u3(Section, {
     title: "Where it is",
     children: [
@@ -36003,8 +36047,28 @@ function Placement(props) {
         children: [
           /* @__PURE__ */ u3(ActionRow, {
             title: "At",
-            value: nameOf3(editor.gm, entity.place)
+            value: nameOf3(editor.gm, entity.place),
+            actions: bring ? /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              disabled: editor.busy,
+              onClick: () => void editor.edit([bring]),
+              children: [
+                "Bring to ",
+                nameOf3(editor.gm, editor.gm.entities.find((e3) => e3.pov)?.id ?? null),
+                "'s place"
+              ]
+            }, undefined, true, undefined, this) : undefined
           }, undefined, false, undefined, this),
+          party ? /* @__PURE__ */ u3(ActionRow, {
+            title: `Travels with ${party.pov.name}`,
+            value: party.travels ? "Yes" : "No",
+            actions: /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              disabled: editor.busy,
+              onClick: () => void editor.edit([party.op]),
+              children: party.travels ? "Leave the party" : "Join the party"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
           entity.holder ? /* @__PURE__ */ u3(ActionRow, {
             title: "Inside",
             value: nameOf3(editor.gm, entity.holder),
@@ -36025,24 +36089,36 @@ function Placement(props) {
       /* @__PURE__ */ u3(Field, {
         label: "Move to a place",
         for: move,
-        children: /* @__PURE__ */ u3("select", {
-          id: move,
-          class: "lre-input",
-          value: "",
-          disabled: editor.busy,
-          onChange: (event) => event.currentTarget.value !== "" && void editor.edit([{ op: "move", entity: entity.id, to: event.currentTarget.value }]),
-          children: [
-            /* @__PURE__ */ u3("option", {
-              value: "",
-              children: "Choose a place…"
-            }, undefined, false, undefined, this),
-            editor.gm.places.map((p3) => /* @__PURE__ */ u3("option", {
-              value: p3.id,
-              children: p3.name
-            }, p3.id, false, undefined, this))
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
+        help: "Type to narrow the places, then pick one.",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            type: "search",
+            placeholder: "Search places",
+            "aria-label": "Search places",
+            value: search,
+            onInput: (event) => setSearch(event.currentTarget.value)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            id: move,
+            class: "lre-input",
+            value: "",
+            disabled: editor.busy,
+            onChange: (event) => event.currentTarget.value !== "" && void editor.edit([{ op: "move", entity: entity.id, to: event.currentTarget.value }]),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "",
+                children: found.length === 0 ? "No place matches" : "Choose a place…"
+              }, undefined, false, undefined, this),
+              found.map((p3) => /* @__PURE__ */ u3("option", {
+                value: p3.id,
+                children: p3.name
+              }, p3.id, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      props.children,
       /* @__PURE__ */ u3(Field, {
         label: "Put inside",
         for: put,
