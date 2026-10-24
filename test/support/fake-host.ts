@@ -823,8 +823,19 @@ export class FakeHost implements HostPort {
 
   // ------------------------------------------------------------------ lore books and processes
 
-  /** Books and their entries, each with the outlet the host keeps beside its extension data (reading an entry back doesn't show it). */
-  readonly bookStore = new Map<string, { name: string; entries: Map<string, HostBookEntry & { outlet: string | null }> }>();
+  /**
+   * Books and their entries, each with the outlet the host keeps beside its extension data (reading
+   * an entry back doesn't show it); `character` and `added` as `world_books` reports a book's origin
+   * and age (see `userBook`).
+   */
+  readonly bookStore = new Map<string, { name: string; character?: boolean; added?: number; entries: Map<string, HostBookEntry & { outlet: string | null }> }>();
+
+  /** A book of the user's own, as Lumiverse keeps one: `character` when a character's card brought it, made at `added` (Unix seconds). */
+  userBook(name: string, origin: { character?: boolean; added?: number } = {}): string {
+    const id = this.newId("book");
+    this.bookStore.set(id, { name, ...origin, entries: new Map() });
+    return id;
+  }
 
   /** An entry as the host stores it, outlet included (tests read where it sits). */
   storedEntry(entryId: string): (HostBookEntry & { outlet: string | null }) | undefined {
@@ -850,7 +861,7 @@ export class FakeHost implements HostPort {
       return id;
     },
     exists: async (bookId) => this.bookStore.has(bookId),
-    list: async () => [...this.bookStore.entries()].map(([id, book]) => ({ id, name: book.name, engine: book.name.startsWith("LumiRPEngine · ") })),
+    list: async () => [...this.bookStore.entries()].map(([id, book]) => ({ id, name: book.name, engine: book.name.startsWith("LumiRPEngine · "), character: book.character === true, added: book.added ?? null })),
     global: async () => [...this.globalBooks],
     entries: async (bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map(({ outlet: _outlet, ...e }) => structuredClone(e)),
     entry: async (entryId) => {

@@ -12,11 +12,13 @@ import { calendarOf, clockAt, dateAt } from "../../src/engine/calendar";
 import { worldInfoVerdict } from "../../src/backend/wi-interceptor";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
+import type { LoreBookView } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
 import { bookTextHash } from "../../src/shared/lore";
 import { blankWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
+import { bookLabels } from "../../src/frontend/build/book-lore";
 import { startState } from "../packs/support";
 import { Rig } from "../support/rig";
 
@@ -150,6 +152,32 @@ describe("Build's World Info lore editor", () => {
     expect(ungated.type === "lre.error" && ungated.code).toBe("bad_request");
     rig.body(await write(null));
     expect(rig.host.storedEntry(entryId)).toMatchObject({ disabled: false, extensions: { other_tool: { note: "kept" } } });
+  });
+
+  test("a gate is checked as it is typed: the form is told what Save would refuse, and only that", async () => {
+    const { rig, bookId, ids } = await bookChat([entry("The wreck", `${SECRET}.`)]);
+    const entryId = ids[0] ?? "";
+    const cases: JsonObject[] = [{ secret: true, gate: GATE }, { secret: true, gate: "self.cash >" }, { secret: true, gate: "stage.keeper == 'revealed" }, { secret: true }, { secret: true, gate: "  " }, { secret: false, gate: "self.cash >" }, { links: ["dev"] }];
+    for (const fields of cases) {
+      const problem: unknown = rig.body(await rig.send({ type: "lre.lore", op: "check", fields })).problem;
+      const checked = typeof problem === "string" ? problem : null;
+      const saved = await rig.send({ type: "lre.lore", op: "fields", bookId, entryId, fields });
+      // A problem exactly when Save refuses, in the words of its refusal.
+      expect(checked === null).toBe(saved.type !== "lre.error");
+      if (checked !== null) expect(saved.type === "lre.error" ? saved.message : null).toBe(checked);
+    }
+  });
+
+  test("two books that share a name read apart in every book picker: a character's copy beside the one imported on its own", async () => {
+    const rig = new Rig();
+    const own = rig.host.userBook("TLS - Core", { added: 1792425242 });
+    const copy = rig.host.userBook("TLS - Core", { character: true, added: 1792425595 });
+    const other = rig.host.userBook("Harbor lore", { added: 1792425242 });
+    const labels = bookLabels(rig.body(await rig.send({ type: "lre.lore", op: "books" })).books as LoreBookView[]);
+    expect(new Set([labels[own], labels[copy]]).size).toBe(2);
+    // Told apart by where each came from, not by an id the user never sees.
+    for (const id of [own, copy]) expect(labels[id]?.startsWith("TLS - Core") && !labels[id]?.includes(id)).toBe(true);
+    expect(labels[other]).toBe("Harbor lore");
   });
 });
 

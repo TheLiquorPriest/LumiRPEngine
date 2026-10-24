@@ -17,7 +17,7 @@ import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../share
 import { spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute } from "../app";
 import { LORE_AUDIENCE, lorePinsJson, lorePinsOf } from "../../shared/lore";
-import { LorePinsSection } from "./lore-pins";
+import { KEEP_NOTE, LorePinsSection, PINS_NOTE } from "./lore-pins";
 import { useApp, useUi, useView } from "../app";
 import { Badge, Banner, Button, Empty, Field, IconButton, IdText, JsonView, List, ListRow, PageHeader, SaveBar, Section, useBusy } from "../components";
 import { humanize } from "../format";
@@ -791,11 +791,12 @@ function PartView(props: { part: WorldPart }) {
   if (props.part === "ruleset") return <RulesetEditor />;
   if (props.part === "minds") return <MindsEditor />;
   if (props.part === "lorePins") {
-    // What is pinned to a character or a place is on its own page; each step's pins are here.
+    // What is pinned to a character or a place is on its own page; each step's pins are here, with what holds for all of them said once.
     return (
       <div class="lre-build-page" data-lre-editor="part:lorePins">
         <PageHeader title={PART_INFO.lorePins.label} subtitle={PART_INFO.lorePins.hint} />
-        <p class="lre-build-note">Lore pinned to a character or a place is on its page. Lore pinned to a step below is read by every call of that step.</p>
+        <p class="lre-build-note">Lore pinned to a character or a place is on its page. Every call of a step below reads what is pinned to that step first, whatever the step's lore setting, within its lore tokens (Settings → Steps); a minds step says who reads its pins. {PINS_NOTE}</p>
+        <p class="lre-build-note">{KEEP_NOTE}</p>
         {LORE_AUDIENCE.map((step) => (
           <LorePinsSection key={step} target="steps" id={step} />
         ))}

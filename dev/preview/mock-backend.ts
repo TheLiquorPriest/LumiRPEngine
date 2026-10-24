@@ -23,6 +23,7 @@ import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
 import { findPath, gridMinutes } from "../../src/shared/grid";
 import { decodeMapView } from "../../src/packs/space/ui/view";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
+import { bookLoreProblem } from "../../src/backend/book-lore";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
 import { macroReview, WORLD_COLLECTIONS } from "../../src/backend/worlds";
 import type { StudioCase } from "./fixtures";
@@ -763,8 +764,19 @@ export class MockBackend {
           this.draft.lore[id] = { id, title: "Rosie sets down the coffee pot", content, keys: [], links: [], source: { kind: "chat", chatId: message.chatId, messageId: "m-latest" } };
           return this.result(reqId, "lre.lore", { worldId: WORLDS[0]?.id ?? "", id });
         }
-        // The preview's World Info: one book attached to the chat and one that isn't; the first GM character and where they are have pins.
-        if (message.op === "books") return this.result(reqId, "lre.lore", { books: [ { id: "book_town", name: "Town lore", attached: true }, { id: "book_lost", name: "Lost cities", attached: false } ] });
+        // The preview's World Info: one book attached to the chat and one that isn't, and two that share a name, as a
+        // book imported on its own and the copy a character's card brought; the first GM character and where they are have pins.
+        if (message.op === "books")
+          return this.result(reqId, "lre.lore", {
+            books: [
+              { id: "book_town", name: "Town lore", attached: true, character: false, added: 1792425242 },
+              { id: "book_harbor", name: "Harbor notes", attached: false, character: false, added: 1792425242 },
+              { id: "book_harbor_card", name: "Harbor notes", attached: false, character: true, added: 1792425595 },
+              { id: "book_lost", name: "Lost cities", attached: false, character: false, added: 1792511630 },
+            ],
+          });
+        // As the backend does: what Save would refuse the fields for.
+        if (message.op === "check") return this.result(reqId, "lre.lore", { problem: bookLoreProblem(message.fields) });
         const entriesOf = (bookId: string): LoreBookEntryView[] =>
           (bookId === "book_town" ? [ { id: "e1", title: "Town notice", disabled: true, chars: 120 }, { id: "e2", title: "Harbor hours", disabled: false, chars: 300 } ] : []).map((e) => {
             const lore = this.bookLore[e.id];

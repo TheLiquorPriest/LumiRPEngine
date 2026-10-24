@@ -109,4 +109,6 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-form-pins-add{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
 .lre-form-pins-add>label{font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-muted)}
 .lre-form-pins-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2);min-width:0}
+.lre-form-pins-keep{min-width:0}
+.lre-form-pins-keep>.lre-input{width:auto;max-width:100%}
 `;

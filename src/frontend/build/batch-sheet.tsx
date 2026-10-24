@@ -4,7 +4,7 @@
 // override and a lore pin; places a default scene type and a lore pin. A place a map draws keeps the
 // map's scene type; its pins are the world's, so they're set here as for any place.
 
-import { useEffect, useId, useState } from "preact/hooks";
+import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import type { DomainId, Level } from "../../shared/ids";
 import { DOMAINS } from "../../shared/ids";
 import type { LoreBookEntryView, LoreBookView } from "../../shared/protocol";
@@ -15,6 +15,7 @@ import { draftPatch, sendInChunks } from "../batch";
 import { Banner, Button, Field, Section, useBusy } from "../components";
 import { DOMAIN_LABEL, LEVEL_LABEL } from "../settings/realism";
 import { useSelect } from "../store";
+import { bookLabels } from "./book-lore";
 import { draftSend } from "./draft";
 import { FormSheet } from "./form-kit";
 
@@ -34,6 +35,7 @@ export function DraftBatchSheet(props: { collection: "entities" | "places"; ids:
   const [sceneType, setSceneType] = useState("");
   const [lore, setLore] = useState("");
   const [books, setBooks] = useState<LoreBookView[] | null>(null);
+  const labels = useMemo(() => bookLabels(books ?? []), [books]);
   const [book, setBook] = useState("");
   const [entries, setEntries] = useState<LoreBookEntryView[] | null>(null);
   const [entry, setEntry] = useState("");
@@ -152,7 +154,7 @@ export function DraftBatchSheet(props: { collection: "entities" | "places"; ids:
                 <option value="">{books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"}</option>
                 {(books ?? []).map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.name}
+                    {labels[b.id] ?? b.name}
                   </option>
                 ))}
               </select>

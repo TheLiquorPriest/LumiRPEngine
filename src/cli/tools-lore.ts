@@ -45,7 +45,7 @@ async function saveTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
 export const LORE_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_lore_books",
-    description: "Your Lumiverse World Info books a lore pin may name, whole or by an entry (DESIGN §24.5), with chatId those attached to that chat first and marked attached. The engine's own books (\"LumiRPEngine · <world>\") are left out: a world's lore is its document's.",
+    description: "Your Lumiverse World Info books a lore pin may name, whole or by an entry (DESIGN §24.5), with chatId those attached to that chat first and marked attached. The engine's own books (\"LumiRPEngine · <world>\") are left out: a world's lore is its document's. Two books may share a name, since a character's card brings its own copy of each book it carries: `character` marks such a copy and `added` says when each was made (Unix seconds).",
     inputSchema: object({ chatId: { type: "string", description: "Mark and list first the books attached to this chat." } }),
     write: false,
     run: async (args, ctx) => {

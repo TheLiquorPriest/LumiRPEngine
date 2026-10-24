@@ -538,7 +538,8 @@ export interface WorldChatInfo {
  * books left out). `entries`: one book's entries. `pins`: every pin of the world's draft (with
  * `worldId`) or of the revision the chat plays (with `chatId`), each read now. `fields`: LRE's own
  * fields on one of a book's entries (null takes them off); a secret entry is stored switched off,
- * a secret one made public switched back on; answers the book's entries.
+ * a secret one made public switched back on; answers the book's entries. `check`: what `fields`
+ * would refuse those fields for (a secret's gate missing or not reading), as Build's form is typed.
  */
 export type LoreRequest = Request<"lre.lore"> &
   (
@@ -548,16 +549,24 @@ export type LoreRequest = Request<"lre.lore"> &
     | { op: "entries"; bookId: string }
     | { op: "pins"; worldId?: WorldId; chatId?: ChatId }
     | { op: "fields"; bookId: string; entryId: string; fields: BookLoreFields | null }
+    | { op: "check"; fields: BookLoreFields }
   );
 
 /** A book-sourced lore entry whose World Info entry changed since it was indexed (with its text now), or is gone. */
 export type LoreDrift = { status: "changed"; content: string; hash: string } | { status: "missing" };
 
-/** A World Info book a pin may name an entry of (`lre.lore books`); `attached`: to the chat asked about. */
+/**
+ * A World Info book a pin may name an entry of (`lre.lore books`); `attached`: to the chat asked
+ * about. `character`: a character brought it (Lumiverse makes a book of its own for each one a card
+ * it imports carries, which may share its name with one imported on its own); `added`: when it was
+ * made, in Unix seconds, or null. A picker tells books with the same name apart by these.
+ */
 export interface LoreBookView {
   id: string;
   name: string;
   attached: boolean;
+  character: boolean;
+  added: number | null;
 }
 
 /** One entry of a World Info book, for a pin picker and the lore editor (`lre.lore entries`); `disabled`: switched off in its book, which a pin still reads; `lore`: its LRE fields, when it has any. */
@@ -783,9 +792,10 @@ export interface ResultBodies {
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /**
    * `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are
-   * left out); `save`: the world and the new entry's id; `books`, `entries` and `pins` answer theirs.
+   * left out); `save`: the world and the new entry's id; `books`, `entries` and `pins` answer theirs;
+   * `check`: the problem in words (`problem`), null when `fields` would save.
    */
-  "lre.lore": { drift?: Record<string, LoreDrift>; worldId?: WorldId; id?: string; books?: LoreBookView[]; entries?: LoreBookEntryView[]; pins?: LorePinsView };
+  "lre.lore": { drift?: Record<string, LoreDrift>; worldId?: WorldId; id?: string; books?: LoreBookView[]; entries?: LoreBookEntryView[]; pins?: LorePinsView; problem?: string | null };
   /**
    * `offer`: the offer under review, or null and why there is none (`message`). `install`: what it
    * became, with the macros to review before playing it (`lint`).
