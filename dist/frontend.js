@@ -3809,7 +3809,7 @@ function isMindPurpose(purpose) {
 function worldMindTemplate(world, purpose) {
   return Object.values(world.steps).filter((t3) => t3.purpose === purpose && t3.template.trim() !== "").sort((a3, b3) => a3.id.localeCompare(b3.id))[0];
 }
-var MIND_SOURCES = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "life"];
+var MIND_SOURCES = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life"];
 var DEFAULT_MIND_READS = Object.freeze({
   pinned: { on: true, tokens: "none" },
   activated: { on: true, tokens: 1600 },
@@ -3821,6 +3821,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   thoughts: { on: false, tokens: "none" },
   recall: { on: false },
   routine: { on: true, tokens: 400 },
+  plans: { on: true, tokens: 400 },
   life: { on: false, tokens: "none" }
 });
 var MINDS_PRESETS = Object.freeze({
@@ -25092,7 +25093,8 @@ var READ_LABEL = {
   thoughts: "Their last thoughts",
   recall: "Turns they were there for",
   routine: "Their usual routine",
-  life: "Their life: money, the day, commitments and plans"
+  plans: "Their plans",
+  life: "Their life: money, the day and commitments"
 };
 var READ_NOTE = {
   pinned: "What Build pins to the character, then to every mind (Build → Pinned lore, Character minds), then to their place and each place around it, nearest first; a pinned World Info book or entry is read from the book each time. Within the limit every entry comes whole; the Context panel says what didn't fit.",
@@ -25105,14 +25107,15 @@ var READ_NOTE = {
   thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
   recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
   routine: "What they usually do, from their routine and schedules as the world and the story set them, while their routine isn't off: theirs to weigh, never what they must do. A private block only when it's their own, and never social life the planner made up.",
-  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands."
+  plans: "What they mean to do later, soonest first, with when, where and who else is in it: the plans the story's turns stated for them and the ones you set in GM mode. A plan shared by several people is each one's. Never the day the planner lays.",
+  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings) and their commitments. None of it is the story as it stands."
 };
-var READ_GROUP = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", life: "own" };
-var GROUP_TITLE = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do", own: "Their own memory and life" };
+var READ_GROUP = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", plans: "usual", life: "own" };
+var GROUP_TITLE = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do and mean to do", own: "Their own memory and life" };
 var GROUP_NOTE = {
   story: null,
   chat: "Off unless you turn it on: it tells a mind of turns its character wasn't there for.",
-  usual: "On unless you turn it off: their routine as context, so they can keep to their days without the planner deciding for them.",
+  usual: "On unless you turn them off: their routine as context, and the plans the story made for them, so they can keep to their days and to what they agreed without the planner deciding for them.",
   own: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind."
 };
 function ReadSources(props) {
@@ -49171,6 +49174,7 @@ function decodeMinds(value) {
     pinned: list(t3.pinned, (p3) => ({ title: str(p3.title), tokens: num(p3.tokens), cut: p3.cut === true })),
     activated: list(t3.activated, (p3) => ({ title: str(p3.title), tokens: num(p3.tokens), cut: p3.cut === true })),
     ...num(t3.routine) > 0 ? { routine: num(t3.routine) } : {},
+    ...num(t3.plans) > 0 ? { plans: num(t3.plans) } : {},
     ...num(t3.history) > 0 ? { history: num(t3.history) } : {},
     notes: strings(t3.notes)
   }));
@@ -49406,7 +49410,7 @@ function ContextPanel(props) {
                   tone: MIND_OUTCOME[m2.outcome].tone,
                   children: MIND_OUTCOME[m2.outcome].text
                 }, undefined, false, undefined, this),
-                children: (m2.pinned ?? []).length > 0 || (m2.activated ?? []).length > 0 || (m2.routine ?? 0) > 0 || (m2.history ?? 0) > 0 || (m2.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
+                children: (m2.pinned ?? []).length > 0 || (m2.activated ?? []).length > 0 || (m2.routine ?? 0) > 0 || (m2.plans ?? 0) > 0 || (m2.history ?? 0) > 0 || (m2.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
                   class: "lre-gm-minds-pinned",
                   "data-lre-mind-pins": true,
                   children: [
@@ -49429,6 +49433,13 @@ function ContextPanel(props) {
                         m2.routine,
                         " line",
                         m2.routine === 1 ? "" : "s"
+                      ]
+                    }, undefined, true, undefined, this) : null,
+                    (m2.plans ?? 0) > 0 ? /* @__PURE__ */ u3("span", {
+                      "data-lre-mind-plans": true,
+                      children: [
+                        "Their plans: ",
+                        m2.plans
                       ]
                     }, undefined, true, undefined, this) : null,
                     (m2.history ?? 0) > 0 ? /* @__PURE__ */ u3("span", {

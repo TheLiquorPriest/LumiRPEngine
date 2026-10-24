@@ -85,6 +85,246 @@ var STEP_OUTPUTS = {
   consolidate: ["text"]
 };
 
+// src/shared/hash.ts
+var C1 = 597399067;
+var C2 = 2869860233;
+var C3 = 951274213;
+var C4 = 2716044179;
+function rotl32(x, r) {
+  return x << r | x >>> 32 - r;
+}
+function fmix32(h) {
+  h ^= h >>> 16;
+  h = Math.imul(h, 2246822507);
+  h ^= h >>> 13;
+  h = Math.imul(h, 3266489909);
+  h ^= h >>> 16;
+  return h;
+}
+function mixK1(k) {
+  return Math.imul(rotl32(Math.imul(k, C1), 15), C2);
+}
+function mixK2(k) {
+  return Math.imul(rotl32(Math.imul(k, C2), 16), C3);
+}
+function mixK3(k) {
+  return Math.imul(rotl32(Math.imul(k, C3), 17), C4);
+}
+function mixK4(k) {
+  return Math.imul(rotl32(Math.imul(k, C4), 18), C1);
+}
+function hashBytes(bytes, seed = 0) {
+  const len = bytes.length;
+  const blocks = len >>> 4;
+  let h1 = seed | 0, h2 = seed | 0, h3 = seed | 0, h4 = seed | 0;
+  const word = (i) => bytes[i] | bytes[i + 1] << 8 | bytes[i + 2] << 16 | bytes[i + 3] << 24 | 0;
+  for (let b = 0;b < blocks; b++) {
+    const o = b << 4;
+    h1 ^= mixK1(word(o));
+    h1 = rotl32(h1, 19);
+    h1 = h1 + h2 | 0;
+    h1 = Math.imul(h1, 5) + 1444728091 | 0;
+    h2 ^= mixK2(word(o + 4));
+    h2 = rotl32(h2, 17);
+    h2 = h2 + h3 | 0;
+    h2 = Math.imul(h2, 5) + 197830471 | 0;
+    h3 ^= mixK3(word(o + 8));
+    h3 = rotl32(h3, 15);
+    h3 = h3 + h4 | 0;
+    h3 = Math.imul(h3, 5) + 2530024501 | 0;
+    h4 ^= mixK4(word(o + 12));
+    h4 = rotl32(h4, 13);
+    h4 = h4 + h1 | 0;
+    h4 = Math.imul(h4, 5) + 850148119 | 0;
+  }
+  const t = blocks << 4;
+  const rem = len & 15;
+  let k1 = 0, k2 = 0, k3 = 0, k4 = 0;
+  for (let i = rem - 1;i >= 12; i--)
+    k4 ^= bytes[t + i] << (i - 12 << 3);
+  for (let i = Math.min(rem, 12) - 1;i >= 8; i--)
+    k3 ^= bytes[t + i] << (i - 8 << 3);
+  for (let i = Math.min(rem, 8) - 1;i >= 4; i--)
+    k2 ^= bytes[t + i] << (i - 4 << 3);
+  for (let i = Math.min(rem, 4) - 1;i >= 0; i--)
+    k1 ^= bytes[t + i] << (i << 3);
+  if (rem > 12)
+    h4 ^= mixK4(k4);
+  if (rem > 8)
+    h3 ^= mixK3(k3);
+  if (rem > 4)
+    h2 ^= mixK2(k2);
+  if (rem > 0)
+    h1 ^= mixK1(k1);
+  h1 ^= len;
+  h2 ^= len;
+  h3 ^= len;
+  h4 ^= len;
+  h1 = h1 + h2 | 0;
+  h1 = h1 + h3 | 0;
+  h1 = h1 + h4 | 0;
+  h2 = h2 + h1 | 0;
+  h3 = h3 + h1 | 0;
+  h4 = h4 + h1 | 0;
+  h1 = fmix32(h1);
+  h2 = fmix32(h2);
+  h3 = fmix32(h3);
+  h4 = fmix32(h4);
+  h1 = h1 + h2 | 0;
+  h1 = h1 + h3 | 0;
+  h1 = h1 + h4 | 0;
+  h2 = h2 + h1 | 0;
+  h3 = h3 + h1 | 0;
+  h4 = h4 + h1 | 0;
+  return [h1 >>> 0, h2 >>> 0, h3 >>> 0, h4 >>> 0];
+}
+function encodeUtf8(s) {
+  const pairAt = (i) => (s.charCodeAt(i) & 64512) === 55296 && i + 1 < s.length && (s.charCodeAt(i + 1) & 64512) === 56320;
+  let size = 0;
+  for (let i = 0;i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 128)
+      size += 1;
+    else if (c < 2048)
+      size += 2;
+    else if (pairAt(i)) {
+      size += 4;
+      i++;
+    } else
+      size += 3;
+  }
+  const out = new Uint8Array(size);
+  let o = 0;
+  for (let i = 0;i < s.length; i++) {
+    let c = s.charCodeAt(i);
+    if (c < 128) {
+      out[o++] = c;
+      continue;
+    }
+    if (c < 2048) {
+      out[o++] = 192 | c >> 6;
+      out[o++] = 128 | c & 63;
+      continue;
+    }
+    if (pairAt(i)) {
+      c = 65536 + (c - 55296 << 10) + (s.charCodeAt(++i) - 56320);
+      out[o++] = 240 | c >> 18;
+      out[o++] = 128 | c >> 12 & 63;
+      out[o++] = 128 | c >> 6 & 63;
+      out[o++] = 128 | c & 63;
+      continue;
+    }
+    if (c >= 55296 && c <= 57343)
+      c = 65533;
+    out[o++] = 224 | c >> 12;
+    out[o++] = 128 | c >> 6 & 63;
+    out[o++] = 128 | c & 63;
+  }
+  return out;
+}
+var TAG_STRING = 115;
+var TAG_NUMBER = 110;
+var TAG_BOOLEAN = 98;
+var TAG_NULL = 122;
+function encodeParts(parts) {
+  const payloads = new Array(parts.length);
+  const tags = new Array(parts.length);
+  let size = 0;
+  for (let i = 0;i < parts.length; i++) {
+    const p = parts[i];
+    let payload;
+    if (typeof p === "string") {
+      tags[i] = TAG_STRING;
+      payload = encodeUtf8(p);
+    } else if (typeof p === "number") {
+      if (!Number.isFinite(p))
+        throw new TypeError(`hash part ${i} must be a finite number, got ${p}`);
+      tags[i] = TAG_NUMBER;
+      payload = encodeUtf8(String(p));
+    } else if (typeof p === "boolean") {
+      tags[i] = TAG_BOOLEAN;
+      payload = new Uint8Array([p ? 1 : 0]);
+    } else if (p === null) {
+      tags[i] = TAG_NULL;
+      payload = new Uint8Array(0);
+    } else
+      throw new TypeError(`hash part ${i} must be a string, number, boolean or null`);
+    payloads[i] = payload;
+    size += 5 + payload.length;
+  }
+  const out = new Uint8Array(size);
+  let o = 0;
+  for (let i = 0;i < parts.length; i++) {
+    const n = payloads[i].length;
+    out[o++] = tags[i];
+    out[o++] = n & 255;
+    out[o++] = n >>> 8 & 255;
+    out[o++] = n >>> 16 & 255;
+    out[o++] = n >>> 24 & 255;
+    out.set(payloads[i], o);
+    o += n;
+  }
+  return out;
+}
+function hashWords(...parts) {
+  return hashBytes(encodeParts(parts));
+}
+function hashParts(...parts) {
+  let s = "";
+  for (const w of hashWords(...parts))
+    s += w.toString(16).padStart(8, "0");
+  return s;
+}
+function hash32(...parts) {
+  return hashWords(...parts)[0];
+}
+var MAX_JSON_DEPTH = 128;
+function canonicalJson(v, depth) {
+  if (v === null)
+    return "null";
+  switch (typeof v) {
+    case "string":
+      return JSON.stringify(v);
+    case "boolean":
+      return v ? "true" : "false";
+    case "number":
+      if (!Number.isFinite(v))
+        throw new TypeError(`hashJson: non-finite number ${v}`);
+      return String(v);
+    case "object": {
+      if (depth >= MAX_JSON_DEPTH)
+        throw new TypeError("hashJson: value is cyclic or nested deeper than 128");
+      if (Array.isArray(v)) {
+        let s2 = "[";
+        for (let i = 0;i < v.length; i++) {
+          if (i)
+            s2 += ",";
+          const item = v[i];
+          s2 += item === undefined ? "null" : canonicalJson(item, depth + 1);
+        }
+        return s2 + "]";
+      }
+      const proto = Object.getPrototypeOf(v);
+      if (proto !== Object.prototype && proto !== null)
+        throw new TypeError("hashJson: only plain objects and arrays are supported");
+      const rec = v;
+      const keys = Object.keys(rec).filter((k) => rec[k] !== undefined).sort();
+      let s = "{";
+      for (let i = 0;i < keys.length; i++) {
+        if (i)
+          s += ",";
+        s += JSON.stringify(keys[i]) + ":" + canonicalJson(rec[keys[i]], depth + 1);
+      }
+      return s + "}";
+    }
+    default:
+      throw new TypeError(`hashJson: unsupported ${typeof v} value`);
+  }
+}
+function hashJson(value) {
+  return hashParts("json", canonicalJson(value, 0));
+}
+
 // src/shared/minds.ts
 var FIDELITIES = ["live", "near", "far", "background"];
 var WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory"];
@@ -236,6 +476,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   thoughts: { on: false, tokens: "none" },
   recall: { on: false },
   routine: { on: true, tokens: 400 },
+  plans: { on: true, tokens: 400 },
   life: { on: false, tokens: "none" }
 });
 var MINDS_PRESETS = Object.freeze({
@@ -249,6 +490,12 @@ function defaultMindsSettings(preset = "standard") {
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
 var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+function sharesPlan(p) {
+  return p.with.length > 0 && p.kind !== "pay" && p.kind !== "lend";
+}
+function sharedPlanId(people, from) {
+  return `p_${hashParts("minds.plan.shared", String(from), ...[...new Set(people)].sort()).slice(0, 10)}`;
+}
 function planInForce(p) {
   return p.source !== "mind";
 }
@@ -4003,246 +4250,6 @@ var FINANCE_EVENTS = {
   status: "economy.status",
   accrue: "economy.accrue"
 };
-
-// src/shared/hash.ts
-var C1 = 597399067;
-var C2 = 2869860233;
-var C3 = 951274213;
-var C4 = 2716044179;
-function rotl32(x, r) {
-  return x << r | x >>> 32 - r;
-}
-function fmix32(h) {
-  h ^= h >>> 16;
-  h = Math.imul(h, 2246822507);
-  h ^= h >>> 13;
-  h = Math.imul(h, 3266489909);
-  h ^= h >>> 16;
-  return h;
-}
-function mixK1(k) {
-  return Math.imul(rotl32(Math.imul(k, C1), 15), C2);
-}
-function mixK2(k) {
-  return Math.imul(rotl32(Math.imul(k, C2), 16), C3);
-}
-function mixK3(k) {
-  return Math.imul(rotl32(Math.imul(k, C3), 17), C4);
-}
-function mixK4(k) {
-  return Math.imul(rotl32(Math.imul(k, C4), 18), C1);
-}
-function hashBytes(bytes, seed = 0) {
-  const len = bytes.length;
-  const blocks = len >>> 4;
-  let h1 = seed | 0, h2 = seed | 0, h3 = seed | 0, h4 = seed | 0;
-  const word = (i) => bytes[i] | bytes[i + 1] << 8 | bytes[i + 2] << 16 | bytes[i + 3] << 24 | 0;
-  for (let b = 0;b < blocks; b++) {
-    const o = b << 4;
-    h1 ^= mixK1(word(o));
-    h1 = rotl32(h1, 19);
-    h1 = h1 + h2 | 0;
-    h1 = Math.imul(h1, 5) + 1444728091 | 0;
-    h2 ^= mixK2(word(o + 4));
-    h2 = rotl32(h2, 17);
-    h2 = h2 + h3 | 0;
-    h2 = Math.imul(h2, 5) + 197830471 | 0;
-    h3 ^= mixK3(word(o + 8));
-    h3 = rotl32(h3, 15);
-    h3 = h3 + h4 | 0;
-    h3 = Math.imul(h3, 5) + 2530024501 | 0;
-    h4 ^= mixK4(word(o + 12));
-    h4 = rotl32(h4, 13);
-    h4 = h4 + h1 | 0;
-    h4 = Math.imul(h4, 5) + 850148119 | 0;
-  }
-  const t = blocks << 4;
-  const rem = len & 15;
-  let k1 = 0, k2 = 0, k3 = 0, k4 = 0;
-  for (let i = rem - 1;i >= 12; i--)
-    k4 ^= bytes[t + i] << (i - 12 << 3);
-  for (let i = Math.min(rem, 12) - 1;i >= 8; i--)
-    k3 ^= bytes[t + i] << (i - 8 << 3);
-  for (let i = Math.min(rem, 8) - 1;i >= 4; i--)
-    k2 ^= bytes[t + i] << (i - 4 << 3);
-  for (let i = Math.min(rem, 4) - 1;i >= 0; i--)
-    k1 ^= bytes[t + i] << (i << 3);
-  if (rem > 12)
-    h4 ^= mixK4(k4);
-  if (rem > 8)
-    h3 ^= mixK3(k3);
-  if (rem > 4)
-    h2 ^= mixK2(k2);
-  if (rem > 0)
-    h1 ^= mixK1(k1);
-  h1 ^= len;
-  h2 ^= len;
-  h3 ^= len;
-  h4 ^= len;
-  h1 = h1 + h2 | 0;
-  h1 = h1 + h3 | 0;
-  h1 = h1 + h4 | 0;
-  h2 = h2 + h1 | 0;
-  h3 = h3 + h1 | 0;
-  h4 = h4 + h1 | 0;
-  h1 = fmix32(h1);
-  h2 = fmix32(h2);
-  h3 = fmix32(h3);
-  h4 = fmix32(h4);
-  h1 = h1 + h2 | 0;
-  h1 = h1 + h3 | 0;
-  h1 = h1 + h4 | 0;
-  h2 = h2 + h1 | 0;
-  h3 = h3 + h1 | 0;
-  h4 = h4 + h1 | 0;
-  return [h1 >>> 0, h2 >>> 0, h3 >>> 0, h4 >>> 0];
-}
-function encodeUtf8(s) {
-  const pairAt = (i) => (s.charCodeAt(i) & 64512) === 55296 && i + 1 < s.length && (s.charCodeAt(i + 1) & 64512) === 56320;
-  let size = 0;
-  for (let i = 0;i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c < 128)
-      size += 1;
-    else if (c < 2048)
-      size += 2;
-    else if (pairAt(i)) {
-      size += 4;
-      i++;
-    } else
-      size += 3;
-  }
-  const out = new Uint8Array(size);
-  let o = 0;
-  for (let i = 0;i < s.length; i++) {
-    let c = s.charCodeAt(i);
-    if (c < 128) {
-      out[o++] = c;
-      continue;
-    }
-    if (c < 2048) {
-      out[o++] = 192 | c >> 6;
-      out[o++] = 128 | c & 63;
-      continue;
-    }
-    if (pairAt(i)) {
-      c = 65536 + (c - 55296 << 10) + (s.charCodeAt(++i) - 56320);
-      out[o++] = 240 | c >> 18;
-      out[o++] = 128 | c >> 12 & 63;
-      out[o++] = 128 | c >> 6 & 63;
-      out[o++] = 128 | c & 63;
-      continue;
-    }
-    if (c >= 55296 && c <= 57343)
-      c = 65533;
-    out[o++] = 224 | c >> 12;
-    out[o++] = 128 | c >> 6 & 63;
-    out[o++] = 128 | c & 63;
-  }
-  return out;
-}
-var TAG_STRING = 115;
-var TAG_NUMBER = 110;
-var TAG_BOOLEAN = 98;
-var TAG_NULL = 122;
-function encodeParts(parts) {
-  const payloads = new Array(parts.length);
-  const tags = new Array(parts.length);
-  let size = 0;
-  for (let i = 0;i < parts.length; i++) {
-    const p = parts[i];
-    let payload;
-    if (typeof p === "string") {
-      tags[i] = TAG_STRING;
-      payload = encodeUtf8(p);
-    } else if (typeof p === "number") {
-      if (!Number.isFinite(p))
-        throw new TypeError(`hash part ${i} must be a finite number, got ${p}`);
-      tags[i] = TAG_NUMBER;
-      payload = encodeUtf8(String(p));
-    } else if (typeof p === "boolean") {
-      tags[i] = TAG_BOOLEAN;
-      payload = new Uint8Array([p ? 1 : 0]);
-    } else if (p === null) {
-      tags[i] = TAG_NULL;
-      payload = new Uint8Array(0);
-    } else
-      throw new TypeError(`hash part ${i} must be a string, number, boolean or null`);
-    payloads[i] = payload;
-    size += 5 + payload.length;
-  }
-  const out = new Uint8Array(size);
-  let o = 0;
-  for (let i = 0;i < parts.length; i++) {
-    const n = payloads[i].length;
-    out[o++] = tags[i];
-    out[o++] = n & 255;
-    out[o++] = n >>> 8 & 255;
-    out[o++] = n >>> 16 & 255;
-    out[o++] = n >>> 24 & 255;
-    out.set(payloads[i], o);
-    o += n;
-  }
-  return out;
-}
-function hashWords(...parts) {
-  return hashBytes(encodeParts(parts));
-}
-function hashParts(...parts) {
-  let s = "";
-  for (const w of hashWords(...parts))
-    s += w.toString(16).padStart(8, "0");
-  return s;
-}
-function hash32(...parts) {
-  return hashWords(...parts)[0];
-}
-var MAX_JSON_DEPTH = 128;
-function canonicalJson(v, depth) {
-  if (v === null)
-    return "null";
-  switch (typeof v) {
-    case "string":
-      return JSON.stringify(v);
-    case "boolean":
-      return v ? "true" : "false";
-    case "number":
-      if (!Number.isFinite(v))
-        throw new TypeError(`hashJson: non-finite number ${v}`);
-      return String(v);
-    case "object": {
-      if (depth >= MAX_JSON_DEPTH)
-        throw new TypeError("hashJson: value is cyclic or nested deeper than 128");
-      if (Array.isArray(v)) {
-        let s2 = "[";
-        for (let i = 0;i < v.length; i++) {
-          if (i)
-            s2 += ",";
-          const item = v[i];
-          s2 += item === undefined ? "null" : canonicalJson(item, depth + 1);
-        }
-        return s2 + "]";
-      }
-      const proto = Object.getPrototypeOf(v);
-      if (proto !== Object.prototype && proto !== null)
-        throw new TypeError("hashJson: only plain objects and arrays are supported");
-      const rec = v;
-      const keys = Object.keys(rec).filter((k) => rec[k] !== undefined).sort();
-      let s = "{";
-      for (let i = 0;i < keys.length; i++) {
-        if (i)
-          s += ",";
-        s += JSON.stringify(keys[i]) + ":" + canonicalJson(rec[keys[i]], depth + 1);
-      }
-      return s + "}";
-    }
-    default:
-      throw new TypeError(`hashJson: unsupported ${typeof v} value`);
-  }
-}
-function hashJson(value) {
-  return hashParts("json", canonicalJson(value, 0));
-}
 
 // src/shared/lore.ts
 var LORE_AUDIENCE = Object.keys(STEP_OUTPUTS);
@@ -27467,7 +27474,7 @@ function asksOf(ctx, who, days) {
     for (const p of plans) {
       const first = laid.get(p.id)?.[0];
       if (first)
-        out.push({ key: `${who}:plan:${p.id}`, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null, origin: { type: "plan", plan: p.id } });
+        out.push({ key: p.shared === true ? `plan:${p.id}` : `${who}:plan:${p.id}`, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null, origin: { type: "plan", plan: p.id } });
     }
   }
   if (routineSettingsOf(ctx.world).invitations === "off" || followOf(ctx, who).mode !== "follows" || routineRole(ctx, who) !== "enforced")
@@ -27497,6 +27504,35 @@ function invitation(ctx, who, ask) {
     return [];
   const text4 = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
   return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text: text4, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text: text4, entity: who } }];
+}
+function openInvitations(ctx) {
+  const list = sliceOf(ctx.state, "castlife").invitations;
+  const now = ctx.state.clock;
+  return (Array.isArray(list) ? list : []).map(objOf).filter((inv) => {
+    const at = numOf(inv.at);
+    return povLife(ctx.world, ctx.state, strOf(inv.agent))?.acts !== false && at >= now - 180 && at <= now + MINUTES_PER_DAY;
+  });
+}
+function bookInvitation(ctx, host) {
+  const pov = ctx.world.pov;
+  const inv = openInvitations(ctx).findLast((i) => strOf(i.agent) === host);
+  const e = own(ctx.state.entities, pov);
+  if (!inv || !e)
+    return [];
+  const at = numOf(inv.at);
+  const key = strOf(inv.key) || `${host}:${at}`;
+  const booked = Array.isArray(e.fields.appointments) ? e.fields.appointments : [];
+  if (booked.some((a) => objOf(a).invitation === key))
+    return [];
+  const origin = strOf(inv.origin);
+  const plan2 = origin.startsWith("plan:") ? (optionalQuery(ctx, "minds.plans")?.(ctx, host) ?? []).find((p) => `plan:${p.id}` === origin) : undefined;
+  const cal = calendarOf(ctx.world);
+  const blocks = plan2 ? laidPlans(ctx, host, [plan2]).get(plan2.id) ?? [] : dayPlan(ctx, host, dateAt(cal, at).dayIndex).blocks;
+  const end = blocks.find((b) => b.start === at)?.end;
+  const place = typeof inv.place === "string" && own(ctx.world.places, inv.place) && canSeePlace(ctx.registry, ctx.world, ctx.state, pov, inv.place) ? inv.place : null;
+  const people = [...new Set([host, ...plan2?.with ?? []])].filter((id) => id !== pov);
+  const appointment = { at, minutes: end !== undefined && end > at ? end - at : 60, ...place ? { place } : {}, label: `With ${own(ctx.state.entities, host)?.name ?? host}`, with: people, invitation: key };
+  return [{ type: "set", entity: pov, field: "appointments", value: [...booked, appointment] }];
 }
 function planMoments(ctx, who, slot) {
   const inside = (at) => at > slot.start && at < slot.end;
@@ -28217,14 +28253,7 @@ var castlifePack = {
       }
       return out;
     });
-    const openInvitations = (ctx) => {
-      const list = sliceOf(ctx.state, "castlife").invitations;
-      const now = ctx.state.clock;
-      return (Array.isArray(list) ? list : []).map(objOf).filter((inv) => {
-        const at = numOf(inv.at);
-        return povLife(ctx.world, ctx.state, strOf(inv.agent))?.acts !== false && at >= now - 180 && at <= now + MINUTES_PER_DAY;
-      });
-    };
+    r.effect({ type: "castlife.book_invitation", args: ["host"], resolve: (a, ctx) => bookInvitation(ctx, strOf(a.host)) });
     r.formula("invited", (ctx, host) => openInvitations(ctx).some((inv) => strOf(inv.agent) === String(host ?? "")));
     r.query("castlife.invitations", (ctx, viewer) => openInvitations(ctx).map((inv) => ({ host: strOf(inv.agent), text: invitationText(ctx, strOf(inv.agent), typeof inv.place === "string" ? inv.place : null, numOf(inv.at), viewer) })));
     r.formula("need", (ctx, who, need2) => needValue(ctx, String(who ?? ctx.world.pov), String(need2 ?? "")));
@@ -28266,7 +28295,7 @@ var castlifePack = {
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
-    r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
+    r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }, { type: "castlife.book_invitation", args: { host: "host" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
     r.renderer({ slot: "people", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
     r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
@@ -29992,6 +30021,31 @@ function putPlan(c, plan2) {
     c.plans.push(plan2);
   boundPlans(c);
 }
+function sharePlan(state2, pov, who, plan2) {
+  putPlan(writeCharacter(state2, who), plan2);
+  const people = [who, ...plan2.with.filter((id) => id !== who)];
+  const sharing = plan2.shared === true ? people.filter((id) => id !== who && id !== pov && own(state2.entities, id) !== undefined) : [];
+  const chars = writeSlice(state2).chars;
+  for (const id of Object.keys(chars)) {
+    const c = own(chars, id);
+    if (c && id !== who && !sharing.includes(id) && c.plans.some((p) => p.id === plan2.id))
+      c.plans = c.plans.filter((p) => p.id !== plan2.id);
+  }
+  for (const id of sharing) {
+    const c = writeCharacter(state2, id);
+    const held3 = c.plans.find((p) => p.id === plan2.id) ?? plan2;
+    putPlan(c, { ...plan2, with: people.filter((x) => x !== id), status: held3.status, closed: held3.closed, reason: held3.reason });
+  }
+}
+function dropPlan(state2, who, id) {
+  const chars = writeSlice(state2).chars;
+  const shared = own(chars, who)?.plans.find((p) => p.id === id)?.shared === true;
+  for (const holder of shared ? Object.keys(chars) : [who]) {
+    const c = own(chars, holder);
+    if (c)
+      c.plans = c.plans.filter((p) => p.id !== id);
+  }
+}
 function boundPlans(c) {
   const open = c.plans.filter((p) => p.status === "open");
   const closed = c.plans.filter((p) => p.status !== "open");
@@ -30060,7 +30114,7 @@ function isFidelity(v) {
 function isPlan(v) {
   if (!isRecord(v) || !isRecord(v.when))
     return false;
-  return str13(v.id) && v.id !== "" && str13(v.what) && typeof v.kind === "string" && PLAN_KINDS.includes(v.kind) && finite2(v.when.from) && finite2(v.when.to) && v.when.to >= v.when.from && (v.where === null || str13(v.where)) && ids(v.with) && finite2(v.priority) && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max && (v.status === "open" || v.status === "done" || v.status === "dropped") && finite2(v.made) && (v.source === "mind" || v.source === "memory" || v.source === "gm") && (v.closed === null || finite2(v.closed)) && (v.reason === null || str13(v.reason)) && (v.kind === "pay" || v.kind === "lend" ? finite2(v.cents) && Number.isInteger(v.cents) && v.cents > 0 && v.with.length > 0 : v.cents === undefined);
+  return str13(v.id) && v.id !== "" && str13(v.what) && typeof v.kind === "string" && PLAN_KINDS.includes(v.kind) && finite2(v.when.from) && finite2(v.when.to) && v.when.to >= v.when.from && (v.where === null || str13(v.where)) && ids(v.with) && finite2(v.priority) && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max && (v.status === "open" || v.status === "done" || v.status === "dropped") && finite2(v.made) && (v.source === "mind" || v.source === "memory" || v.source === "gm") && (v.closed === null || finite2(v.closed)) && (v.reason === null || str13(v.reason)) && (v.shared === undefined || v.shared === true && v.with.length > 0 && v.kind !== "pay" && v.kind !== "lend") && (v.by === undefined || str13(v.by) && v.shared === true) && (v.kind === "pay" || v.kind === "lend" ? finite2(v.cents) && Number.isInteger(v.cents) && v.cents > 0 && v.with.length > 0 : v.cents === undefined);
 }
 function isNote(v) {
   return isRecord(v) && str13(v.id) && v.id !== "" && str13(v.text) && finite2(v.salience) && v.salience >= 0 && v.salience <= 5 && finite2(v.at);
@@ -30069,7 +30123,7 @@ function isCommitment(v) {
   return isRecord(v) && str13(v.id) && v.id !== "" && typeof v.kind === "string" && COMMITMENT_KINDS.includes(v.kind) && ids(v.with) && str13(v.text) && (v.due === null || finite2(v.due)) && typeof v.status === "string" && COMMITMENT_STATUSES.includes(v.status) && finite2(v.made) && (v.closed === null || finite2(v.closed));
 }
 function planOf(v) {
-  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason, ...v.cents !== undefined ? { cents: v.cents } : {} };
+  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason, ...v.cents !== undefined ? { cents: v.cents } : {}, ...v.shared === true ? { shared: true } : {}, ...v.by !== undefined ? { by: v.by } : {} };
 }
 function noteOf(v) {
   return { id: v.id, text: v.text, salience: v.salience, at: v.at };
@@ -30159,7 +30213,7 @@ function validMemory(data) {
 var memory = {
   type: MINDS_EVENTS.memory,
   validate: (e, ctx) => person(ctx, e.data) ?? validMemory(e.data),
-  apply: (e, state2) => {
+  apply: (e, state2, ctx) => {
     const d = e.data;
     if (!str13(d.entity))
       return;
@@ -30181,7 +30235,7 @@ var memory = {
     }
     for (const p of Array.isArray(d.plans) ? d.plans : [])
       if (isPlan(p))
-        putPlan(c, planOf(p));
+        sharePlan(state2, ctx.world.pov, who, planOf(p));
     if (str13(d.summary))
       c.summary = d.summary;
     for (const t of Array.isArray(d.told) ? d.told : []) {
@@ -30264,24 +30318,21 @@ function editDef(type, key, valid, list, put, remove) {
         return list(readCharacter(ctx.state, String(d.entity))).some((x) => x.id === id) ? null : { code: `missing_${key}`, reason: `that ${key} isn't theirs any more` };
       return valid(d.value) && isRecord(d.value) && d.value.id === id ? null : bad(`a ${key} edit's value is malformed`);
     },
-    apply: (e, state2) => {
+    apply: (e, state2, ctx) => {
       const d = e.data;
       const who = String(d.entity);
       if (d.value === null)
         remove(state2, who, String(d[key]));
       else if (d.value !== undefined && valid(d.value))
-        put(state2, who, d.value);
+        put(state2, who, d.value, ctx);
     },
     describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s ${key} ${e.data.value === null ? "deleted" : "edited"}`
   };
 }
-var planEdit = editDef(MINDS_EVENTS.planEdit, "plan", isPlan, (c) => c.plans, (state2, who, v) => {
+var planEdit = editDef(MINDS_EVENTS.planEdit, "plan", isPlan, (c) => c.plans, (state2, who, v, ctx) => {
   if (isPlan(v))
-    putPlan(writeCharacter(state2, who), planOf(v));
-}, (state2, who, id) => {
-  const c = writeCharacter(state2, who);
-  c.plans = c.plans.filter((p) => p.id !== id);
-});
+    sharePlan(state2, ctx.world.pov, who, planOf(v));
+}, dropPlan);
 var noteEdit = editDef(MINDS_EVENTS.noteEdit, "note", isNote, (c) => c.notes, (state2, who, v) => {
   if (isNote(v))
     putNote(writeCharacter(state2, who), noteOf(v));
@@ -30465,8 +30516,9 @@ function planFrom(ctx, who, id, v, before) {
   const cents = v.cents === undefined ? before?.cents : typeof v.cents === "number" && Number.isInteger(v.cents) && v.cents > 0 ? v.cents : null;
   if (money4 && (cents === null || cents === undefined || withList.length === 0))
     return reject16("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
+  const shared = sharesPlan({ kind, with: withList });
   return {
-    id: id ?? `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`,
+    id: id ?? (shared ? sharedPlanId([who, ...withList], when2.from) : `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`),
     what,
     kind,
     when: { from: when2.from, to: when2.to },
@@ -30478,7 +30530,9 @@ function planFrom(ctx, who, id, v, before) {
     source: before?.source ?? "gm",
     closed,
     reason: status === "open" ? null : before?.reason ?? "GM edit",
-    ...money4 && cents ? { cents } : {}
+    ...money4 && cents ? { cents } : {},
+    ...shared ? { shared: true } : {},
+    ...shared && v.what === undefined && before?.by !== undefined ? { by: before.by } : {}
   };
 }
 function mindEdit(ctx, op) {
