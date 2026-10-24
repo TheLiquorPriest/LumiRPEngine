@@ -2547,8 +2547,8 @@ var COLLECTION_SPECS = {
     { kind: "life", key: "life", label: "Starts (life state)" },
     { kind: "refs", key: "lifeKnownBy", label: "Who knows how it starts (none: everyone)", collections: ["entities"] },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
-    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
-    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
+    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, optional: true },
+    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by", "discoverable"] } },
     {
       kind: "list",
       key: "cues",
@@ -3809,7 +3809,7 @@ function isMindPurpose(purpose) {
 function worldMindTemplate(world, purpose) {
   return Object.values(world.steps).filter((t3) => t3.purpose === purpose && t3.template.trim() !== "").sort((a3, b3) => a3.id.localeCompare(b3.id))[0];
 }
-var MIND_SOURCES = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "life"];
+var MIND_SOURCES = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life"];
 var DEFAULT_MIND_READS = Object.freeze({
   pinned: { on: true, tokens: "none" },
   activated: { on: true, tokens: 1600 },
@@ -3821,6 +3821,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   thoughts: { on: false, tokens: "none" },
   recall: { on: false },
   routine: { on: true, tokens: 400 },
+  plans: { on: true, tokens: 400 },
   life: { on: false, tokens: "none" }
 });
 var MINDS_PRESETS = Object.freeze({
@@ -5313,6 +5314,9 @@ function chipRegenerates(kind, choice) {
   return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop");
 }
 
+// src/shared/party.ts
+var PARTY_RELATION = "travels_with";
+
 // src/frontend/requests.ts
 function upgradeRequest(chatId, preview, choices) {
   const merge = {};
@@ -5374,6 +5378,10 @@ function stagedRequest(chatId, staged, now) {
 function fixRequest(target, value, chatId) {
   return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
 }
+function whereFixTarget(hud, entity, here) {
+  const pov = hud?.fixes.place;
+  return pov ? { ...pov, entity, value: here ? pov.value : null } : null;
+}
 function timeFixRequest(time, chatId) {
   return { type: "lre.fix", chatId, time };
 }
@@ -5427,6 +5435,21 @@ function relationFields(defs, inputs, held = {}) {
 function adjustOp(account, text, currency, take) {
   const cents = parseMoneyInput(text, currency);
   return cents !== null && cents > 0 ? { op: "adjust", account, cents: take ? -cents : cents } : null;
+}
+function bringOp(entity, gm) {
+  const pov = gm.entities.find((e3) => e3.pov);
+  return pov && pov.id !== entity.id && pov.place && pov.place !== entity.place ? { op: "move", entity: entity.id, to: pov.place } : null;
+}
+function partyOf(entity, gm) {
+  const pov = gm.entities.find((e3) => e3.pov);
+  if (!pov || pov.id === entity.id)
+    return null;
+  const travels = entity.relations.some((r3) => r3.type === PARTY_RELATION && r3.to === pov.id);
+  return { pov, travels, op: travels ? { op: "unlink", rel: PARTY_RELATION, from: entity.id, to: pov.id } : { op: "link", rel: PARTY_RELATION, from: entity.id, to: pov.id } };
+}
+function placesMatching(places2, search) {
+  const words = search.toLowerCase().split(/\s+/).filter((w3) => w3 !== "");
+  return places2.filter((p3) => words.every((w3) => p3.name.toLowerCase().includes(w3)));
 }
 function timeMarker(chatId, control, scope, to, preview = false) {
   return preview ? { type: "lre.marker", chatId, kind: "time", control, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "time", control, scope, to };
@@ -15181,6 +15204,145 @@ function DraftBatchSheet(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/shared/items-build.ts
+function isItemKind(kinds, kind) {
+  let cur = kind;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    if (cur === "item")
+      return true;
+    cur = hasOwn(kinds, cur) ? kinds[cur]?.extends : undefined;
+  }
+  return false;
+}
+function authoredContents(world, id, of) {
+  return Object.values(world.entities).filter((e3) => of === "entities" ? e3.relations.some((r3) => r3.type === "in" && r3.to === id) : e3.fields.place === id && !e3.relations.some((r3) => r3.type === "in")).map((e3) => ({ id: e3.id, name: e3.name, hidden: e3.visibility === "discoverable" })).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.id.localeCompare(b3.id));
+}
+function revealScaffold(entity) {
+  const fields = isRecord(entity.fields) ? entity.fields : {};
+  const placed = typeof fields.place === "string" && fields.place !== "";
+  const held = Array.isArray(entity.relations) && entity.relations.some((r3) => isRecord(r3) && r3.type === "in" && typeof r3.to === "string" && r3.to !== "");
+  if (!placed && !held)
+    return { problem: "Put it somewhere first: a place, or in a container or on someone." };
+  return { entity: { ...entity, visibility: "discoverable" } };
+}
+function itemObjective(check, item, place = "") {
+  const quote = (s3) => `'${s3}'`;
+  return check === "at" ? `at(${quote(item)}, ${quote(place)})` : `${check}(pov, ${quote(item)})`;
+}
+
+// src/frontend/build/contents.tsx
+function ContentsSection(props) {
+  const app = useApp();
+  const rows = authoredContents(props.world, props.id, props.collection);
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-contents": props.id,
+    children: /* @__PURE__ */ u3(Section, {
+      title: props.collection === "places" ? "Things here" : "Contents",
+      children: [
+        rows.length === 0 ? /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: props.collection === "places" ? "Nothing lies here loose." : "Nothing is in it."
+        }, undefined, false, undefined, this) : null,
+        rows.map((row) => /* @__PURE__ */ u3(ItemRow, {
+          title: row.name,
+          badge: row.hidden ? /* @__PURE__ */ u3(Badge, {
+            tone: "gm",
+            children: "Hidden until searched"
+          }, undefined, false, undefined, this) : undefined,
+          openLabel: `Open ${row.name}`,
+          onOpen: () => go(app, { view: "item", worldId: props.world.id, collection: "entities", id: row.id })
+        }, row.id, false, undefined, this))
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function RevealItem(props) {
+  if (typeof props.value.kind !== "string" || !isItemKind(props.kinds, props.value.kind))
+    return null;
+  if (props.value.visibility === "discoverable") {
+    return /* @__PURE__ */ u3(Banner, {
+      tone: "info",
+      icon: "search",
+      children: "Hidden until the player character searches where it lies, or opens what holds it."
+    }, undefined, false, undefined, this);
+  }
+  const made = revealScaffold(props.value);
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-reveal": "",
+    children: /* @__PURE__ */ u3(FormGroup, {
+      title: "Reveal this item",
+      children: [
+        /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: "Keeps it hidden until the player character searches where it lies, or opens what holds it, with Search."
+        }, undefined, false, undefined, this),
+        "problem" in made ? /* @__PURE__ */ u3("span", {
+          class: "lre-small",
+          children: made.problem
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "search",
+          disabled: "problem" in made,
+          onClick: () => ("entity" in made) ? props.onChange(made.entity) : undefined,
+          children: "Hide until searched"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+var CHECKS = [
+  { value: "carries", label: "Has it with them" },
+  { value: "has_item", label: "Has one like it" },
+  { value: "at", label: "It lies at" }
+];
+function ItemObjectivePicker(props) {
+  const app = useApp();
+  const packKinds = useSelect(app.drafts, (d3) => d3?.packKinds);
+  const kinds = b2(() => ({ ...packKinds, ...props.world.kinds }), [packKinds, props.world.kinds]);
+  const [check, setCheck] = d2("carries");
+  const [item, setItem] = d2("");
+  const [place, setPlace] = d2("");
+  const items = b2(() => Object.values(props.world.entities).filter((e3) => isItemKind(kinds, e3.kind)).map((e3) => ({ value: e3.id, label: e3.name, ...e3.visibility === "discoverable" ? { sublabel: "hidden until searched" } : {} })).sort((a3, b3) => a3.label.localeCompare(b3.label)), [props.world.entities, kinds]);
+  const places2 = b2(() => Object.values(props.world.places).map((p3) => ({ value: p3.id, label: p3.name })).sort((a3, b3) => a3.label.localeCompare(b3.label)), [props.world.places]);
+  const ready = item !== "" && (check !== "at" || place !== "");
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-item-objective": "",
+    children: /* @__PURE__ */ u3(FormGroup, {
+      title: "Add an item check",
+      children: [
+        /* @__PURE__ */ u3(Seg, {
+          label: "Check",
+          value: check,
+          options: CHECKS,
+          onChange: setCheck
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(RefPicker, {
+          label: "Item",
+          value: item,
+          options: items,
+          placeholder: "Pick a thing",
+          onChange: setItem
+        }, undefined, false, undefined, this),
+        check === "at" ? /* @__PURE__ */ u3(RefPicker, {
+          label: "Place",
+          value: place,
+          options: places2,
+          placeholder: "Pick a place",
+          onChange: setPlace
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "plus",
+          disabled: !ready,
+          onClick: () => props.onAdd(itemObjective(check, item, place)),
+          children: "Add objective"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
 // src/frontend/build/lookup-editor.tsx
 var SUGGESTIONS_SHOWN = 12;
 function EntryChips(props) {
@@ -23076,6 +23238,16 @@ function SchemaEditor(props) {
         ctx: { doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields },
         onChange: setValue
       }, undefined, false, undefined, this),
+      props.collection === "entities" ? /* @__PURE__ */ u3(RevealItem, {
+        kinds: formDoc.kinds,
+        value,
+        onChange: setValue
+      }, undefined, false, undefined, this) : null,
+      !isNew && (props.collection === "entities" || props.collection === "places") ? /* @__PURE__ */ u3(ContentsSection, {
+        world: props.world,
+        collection: props.collection,
+        id
+      }, undefined, false, undefined, this) : null,
       props.collection === "places" ? app.catalog.placeFields.map((def) => {
         const fields = isRecord(value.fields) ? value.fields : {};
         return /* @__PURE__ */ u3("div", {
@@ -23741,7 +23913,7 @@ var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var TIMELAPSE_REACH_MINUTES = 366 * 1440;
-var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine"];
+var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -23753,7 +23925,13 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   life: "confirm",
   knows: "confirm",
   give: "confirm",
-  purchase: "confirm"
+  purchase: "confirm",
+  take: "confirm",
+  drop: "confirm",
+  use_up: "confirm",
+  wear: "confirm",
+  lose: "confirm",
+  item_condition: "confirm"
 });
 var EXTRACTION_LEARNING = Object.freeze({
   promoteAt: 0.9,
@@ -25070,7 +25248,8 @@ var READ_LABEL = {
   thoughts: "Their last thoughts",
   recall: "Turns they were there for",
   routine: "Their usual routine",
-  life: "Their life: money, the day, commitments and plans"
+  plans: "Their plans",
+  life: "Their life: money, the day and commitments"
 };
 var READ_NOTE = {
   pinned: "What Build pins to the character, then to every mind (Build → Pinned lore, Character minds), then to their place and each place around it, nearest first; a pinned World Info book or entry is read from the book each time. Within the limit every entry comes whole; the Context panel says what didn't fit.",
@@ -25083,14 +25262,15 @@ var READ_NOTE = {
   thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
   recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
   routine: "What they usually do, from their routine and schedules as the world and the story set them, while their routine isn't off: theirs to weigh, never what they must do. A private block only when it's their own, and never social life the planner made up.",
-  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands."
+  plans: "What they mean to do later, soonest first, with when, where and who else is in it: the plans the story's turns stated for them and the ones you set in GM mode. A plan shared by several people is each one's. Never the day the planner lays.",
+  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings) and their commitments. None of it is the story as it stands."
 };
-var READ_GROUP = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", life: "own" };
-var GROUP_TITLE = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do", own: "Their own memory and life" };
+var READ_GROUP = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", plans: "usual", life: "own" };
+var GROUP_TITLE = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do and mean to do", own: "Their own memory and life" };
 var GROUP_NOTE = {
   story: null,
   chat: "Off unless you turn it on: it tells a mind of turns its character wasn't there for.",
-  usual: "On unless you turn it off: their routine as context, so they can keep to their days without the planner deciding for them.",
+  usual: "On unless you turn them off: their routine as context, and the plans the story made for them, so they can keep to their days and to what they agreed without the planner deciding for them.",
   own: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind."
 };
 function ReadSources(props) {
@@ -25701,7 +25881,13 @@ var EXTRACTION_LABEL = {
   quantity: "Quantities",
   spawn: "New people",
   life: "Life and death (dying, dead, collapsed…)",
-  routine: "Routines (a new job, a habit, a move…)"
+  routine: "Routines (a new job, a habit, a move…)",
+  take: "Picking things up or finding them",
+  drop: "Putting things down",
+  use_up: "Using things up",
+  wear: "Putting on or taking off",
+  lose: "Losing things, or having them stolen",
+  item_condition: "Wear and damage to things"
 };
 var MODE_OPTIONS = [
   { value: "auto", label: "Auto" },
@@ -29919,6 +30105,7 @@ function classLabel(view, facetId, valueId) {
 }
 function PersonSheet(props) {
   const app = useApp();
+  const [fixingWhere, setFixingWhere] = d2(false);
   A(() => {
     app.request({ type: "lre.view.open", chatId: props.chatId, panel: "castlife.cast", entity: props.id }).then((result) => {
       if (result?.pending)
@@ -29955,6 +30142,7 @@ function PersonSheet(props) {
   const classes = Object.entries(person.classes).flatMap(([facet, values]) => values.map((value) => ({ facet, value })));
   const facetLabel = (id) => view.facets.find((f3) => f3.id === id)?.label ?? id;
   const where = whereabouts(person);
+  const whereFix = whereFixTarget(props.state.hud, person.id, person.here);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-world",
     "data-lre-sheet-person": person.id,
@@ -30006,6 +30194,22 @@ function PersonSheet(props) {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      whereFix ? fixingWhere ? /* @__PURE__ */ u3("div", {
+        class: "lre-play-fix",
+        onKeyDown: (event) => event.key === "Escape" && (event.stopPropagation(), setFixingWhere(false)),
+        children: /* @__PURE__ */ u3(FixEditor, {
+          label: "Where are they?",
+          target: whereFix,
+          onDone: () => setFixingWhere(false)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+        children: /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "edit",
+          onClick: () => setFixingWhere(true),
+          children: "Where are they?"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
       person.next ? /* @__PURE__ */ u3(Section, {
         title: "Next",
         flush: true,
@@ -35992,10 +36196,14 @@ function SheetRow2(props) {
 function Placement(props) {
   const { entity, editor } = props;
   const [amount, setAmount] = d2("");
+  const [search, setSearch] = d2("");
   const move = P2();
   const put = P2();
   const add = adjustOp(entity.id, amount, editor.currency, false);
   const take = adjustOp(entity.id, amount, editor.currency, true);
+  const bring = bringOp(entity, editor.gm);
+  const party = entity.person && editor.gm.relationTypes.some((t3) => t3.id === PARTY_RELATION) ? partyOf(entity, editor.gm) : null;
+  const found = placesMatching(editor.gm.places, search);
   return /* @__PURE__ */ u3(Section, {
     title: "Where it is",
     children: [
@@ -36003,8 +36211,28 @@ function Placement(props) {
         children: [
           /* @__PURE__ */ u3(ActionRow, {
             title: "At",
-            value: nameOf3(editor.gm, entity.place)
+            value: nameOf3(editor.gm, entity.place),
+            actions: bring ? /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              disabled: editor.busy,
+              onClick: () => void editor.edit([bring]),
+              children: [
+                "Bring to ",
+                nameOf3(editor.gm, editor.gm.entities.find((e3) => e3.pov)?.id ?? null),
+                "'s place"
+              ]
+            }, undefined, true, undefined, this) : undefined
           }, undefined, false, undefined, this),
+          party ? /* @__PURE__ */ u3(ActionRow, {
+            title: `Travels with ${party.pov.name}`,
+            value: party.travels ? "Yes" : "No",
+            actions: /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              disabled: editor.busy,
+              onClick: () => void editor.edit([party.op]),
+              children: party.travels ? "Leave the party" : "Join the party"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
           entity.holder ? /* @__PURE__ */ u3(ActionRow, {
             title: "Inside",
             value: nameOf3(editor.gm, entity.holder),
@@ -36025,24 +36253,36 @@ function Placement(props) {
       /* @__PURE__ */ u3(Field, {
         label: "Move to a place",
         for: move,
-        children: /* @__PURE__ */ u3("select", {
-          id: move,
-          class: "lre-input",
-          value: "",
-          disabled: editor.busy,
-          onChange: (event) => event.currentTarget.value !== "" && void editor.edit([{ op: "move", entity: entity.id, to: event.currentTarget.value }]),
-          children: [
-            /* @__PURE__ */ u3("option", {
-              value: "",
-              children: "Choose a place…"
-            }, undefined, false, undefined, this),
-            editor.gm.places.map((p3) => /* @__PURE__ */ u3("option", {
-              value: p3.id,
-              children: p3.name
-            }, p3.id, false, undefined, this))
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
+        help: "Type to narrow the places, then pick one.",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            type: "search",
+            placeholder: "Search places",
+            "aria-label": "Search places",
+            value: search,
+            onInput: (event) => setSearch(event.currentTarget.value)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            id: move,
+            class: "lre-input",
+            value: "",
+            disabled: editor.busy,
+            onChange: (event) => event.currentTarget.value !== "" && void editor.edit([{ op: "move", entity: entity.id, to: event.currentTarget.value }]),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "",
+                children: found.length === 0 ? "No place matches" : "Choose a place…"
+              }, undefined, false, undefined, this),
+              found.map((p3) => /* @__PURE__ */ u3("option", {
+                value: p3.id,
+                children: p3.name
+              }, p3.id, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      props.children,
       /* @__PURE__ */ u3(Field, {
         label: "Put inside",
         for: put,
@@ -48411,6 +48651,10 @@ function StageSheet(props) {
         ctx: { doc: props.world, lint: props.lint, path, identifiers: props.identifiers, functions: props.functions },
         onChange: (next) => set(next)
       }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ItemObjectivePicker, {
+        world: props.world,
+        onAdd: (objective) => set({ ...stage, objectives: [...stage.objectives ?? [], objective] })
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(FormGroup, {
         title: "Next stages",
         aside: /* @__PURE__ */ u3("span", {
@@ -49095,6 +49339,7 @@ function decodeMinds(value) {
     pinned: list(t3.pinned, (p3) => ({ title: str(p3.title), tokens: num(p3.tokens), cut: p3.cut === true })),
     activated: list(t3.activated, (p3) => ({ title: str(p3.title), tokens: num(p3.tokens), cut: p3.cut === true })),
     ...num(t3.routine) > 0 ? { routine: num(t3.routine) } : {},
+    ...num(t3.plans) > 0 ? { plans: num(t3.plans) } : {},
     ...num(t3.history) > 0 ? { history: num(t3.history) } : {},
     notes: strings(t3.notes)
   }));
@@ -49330,7 +49575,7 @@ function ContextPanel(props) {
                   tone: MIND_OUTCOME[m2.outcome].tone,
                   children: MIND_OUTCOME[m2.outcome].text
                 }, undefined, false, undefined, this),
-                children: (m2.pinned ?? []).length > 0 || (m2.activated ?? []).length > 0 || (m2.routine ?? 0) > 0 || (m2.history ?? 0) > 0 || (m2.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
+                children: (m2.pinned ?? []).length > 0 || (m2.activated ?? []).length > 0 || (m2.routine ?? 0) > 0 || (m2.plans ?? 0) > 0 || (m2.history ?? 0) > 0 || (m2.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
                   class: "lre-gm-minds-pinned",
                   "data-lre-mind-pins": true,
                   children: [
@@ -49353,6 +49598,13 @@ function ContextPanel(props) {
                         m2.routine,
                         " line",
                         m2.routine === 1 ? "" : "s"
+                      ]
+                    }, undefined, true, undefined, this) : null,
+                    (m2.plans ?? 0) > 0 ? /* @__PURE__ */ u3("span", {
+                      "data-lre-mind-plans": true,
+                      children: [
+                        "Their plans: ",
+                        m2.plans
                       ]
                     }, undefined, true, undefined, this) : null,
                     (m2.history ?? 0) > 0 ? /* @__PURE__ */ u3("span", {

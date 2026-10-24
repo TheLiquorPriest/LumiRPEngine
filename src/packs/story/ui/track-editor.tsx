@@ -13,6 +13,7 @@ import type { StageDef, TrackDef, TrackKind, WorldDoc } from "../../../shared/wo
 import { useApp } from "../../../frontend/app";
 import { deleteItem, go, ItemHeader, newItemName } from "../../../frontend/build/chrome";
 import { ExprEditor } from "../../../frontend/build/expr-editor";
+import { ItemObjectivePicker } from "../../../frontend/build/contents";
 import { AddPicker, CheckField, FormGroup, FormSheet, Issues, ItemRow, RefPicker, type RefOption } from "../../../frontend/build/form-kit";
 import { useHeld } from "../../../frontend/build/held";
 import { deriveId, EFFECT, type FieldSpec } from "../../../frontend/build/schema";
@@ -224,6 +225,8 @@ function StageSheet(props: { track: TrackDef; id: string; world: WorldDoc; ident
         </div>
       )}
       <SchemaFields specs={STAGE_SPECS} value={stage as unknown as JsonObject} ctx={{ doc: props.world, lint: props.lint, path, identifiers: props.identifiers, functions: props.functions }} onChange={(next) => set(next as unknown as StageDef)} />
+      {/* An objective about a thing, picked rather than typed, so its ids are the world's (the quest-id lint checks them). */}
+      <ItemObjectivePicker world={props.world} onAdd={(objective) => set({ ...stage, objectives: [...(stage.objectives ?? []), objective] })} />
       <FormGroup title="Next stages" aside={<span class="lre-small lre-muted">The first that holds wins</span>}>
         {stage.next.length === 0 ? <span class="lre-small lre-muted">None: the track ends here.</span> : null}
         {stage.next.map((n, i) => (

@@ -70,7 +70,7 @@ import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
-import { claimFor } from "./claims";
+import { claimFor, outOfHand } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { pinReader } from "./lore-pins";
 import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
@@ -1287,7 +1287,9 @@ export class Runtime implements TurnHooks {
     // §11), since the queue stops at that check, and leaving it in words would offer the same attempt again.
     let rolls = false;
     const take = (def: ActionDef, given: JsonObject, words: string, thing: ThingSort | undefined, said: readonly string[]): void => {
-      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow);
+      // The player character's own thing that the world keeps elsewhere is a tracking gap, not a veto:
+      // it goes to the claims policy rather than failing and stopping the message (DESIGN §9.4).
+      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state);
       if (!ref) {
         steps.push({ action: def.id, params: given, text: words });
         rolls ||= checkOf(render.world, def.check) !== null;
@@ -1649,7 +1651,7 @@ export class Runtime implements TurnHooks {
     // L27: a timelapse or speed-through turn's time passed as its timelapse, so its reply proposes no skip.
     const skipped = facts.timelapse || !!plan?.timelapse;
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent)
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "")
       : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
@@ -2748,6 +2750,12 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   spawn: "New characters",
   life: "Life and death",
   routine: "Routine changes",
+  take: "Things picked up",
+  drop: "Things put down",
+  use_up: "Things used up",
+  wear: "Things put on or off",
+  lose: "Things lost or stolen",
+  item_condition: "Wear and damage",
 };
 
 /**
@@ -3177,6 +3185,19 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
       return `${s("from")} → ${s("to")}: ${s("axis")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "knows":
       return `${s("who")} learns: ${s("fact")}`;
+    // The reply's item changes (DESIGN §9.4), each by who and what, as the POV may know them.
+    case "take":
+      return `${s("entity")} picked up ${s("item")}`;
+    case "drop":
+      return `${s("entity")} put down ${s("item")}`;
+    case "use_up":
+      return `${s("entity")} used up ${s("item")}${typeof p.qty === "number" && p.qty > 1 ? ` ×${p.qty}` : ""}`;
+    case "wear":
+      return `${s("entity")} ${p.off === true ? "took off" : "put on"} ${s("item")}`;
+    case "lose":
+      return typeof p.by === "string" && p.by !== "" ? `${s("by")} stole ${s("item")} from ${s("entity")}` : `${s("entity")} lost ${s("item")}`;
+    case "item_condition":
+      return `${s("item")}: condition ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "spawn":
       return `New: ${s("name")}`;
     case "life":

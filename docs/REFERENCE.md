@@ -34,7 +34,7 @@ Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1,
 | `check` | `check`, `actor?`, `target?`, `outcomes` |
 | `life` | `entity`, `to?`, `tell?` |
 | `link` | `rel`, `from`, `to`, `until?`, `fields?` |
-| `move` | `entity`, `to` |
+| `move` | `entity`, `to`, `activity?`, `route?`, `with?` |
 | `note` | `text`, `visibility?` |
 | `post` | `lines`, `memo?` |
 | `recover` | `entity`, `field`, `amount?`, `full?` |
@@ -142,6 +142,8 @@ The slots a world gets when it defines none, kept in rank order on the section b
 | `outline` | Outline | 8 |
 | `stance` | Stance | 9 |
 | `minds` | Minds | 10 |
+| `place` | Place | 11 |
+| `property` | Property | 12 |
 
 ### Realism
 
@@ -223,6 +225,7 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 
 | Effect | Arguments |
 |---|---|
+| `castlife.book_invitation` | `host` |
 | `castlife.decide` | `key`, `choice` |
 | `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |
 | `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |
@@ -642,7 +645,7 @@ Checks it adds to: `post`.
 
 ### Panels and slots
 
-Panels: `economy.money`. Slots it writes: `money`.
+Panels: `economy.money`. Slots it writes: `money`, `property`.
 
 ### Simulation
 
@@ -738,6 +741,7 @@ Extends `container`.
 | `gear.receive` | `name`, `to`, `from?` |
 | `gear.remove` | `item` |
 | `gear.retrieve` | `item` |
+| `gear.search` | `who`, `target?` |
 | `gear.take_piece` | `kit`, `piece`, `to` |
 | `gear.transfer` | `item`, `to` |
 | `gear.use` | `item`, `user?` |
@@ -762,6 +766,7 @@ Extends `container`.
 | `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |
 | `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
 | `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
+| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |
 | `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |
 | `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |
 | `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |
@@ -771,12 +776,18 @@ Extends `container`.
 
 | Proposal | Bound by |
 |---|---|
+| `drop` | `ref` |
 | `give` | `ref` |
+| `item_condition` | `number` |
+| `lose` | `ref` |
 | `quantity` | `number` |
+| `take` | `ref` |
+| `use_up` | `number` |
+| `wear` | `ref` |
 
 ### Panels and slots
 
-Panels: `gear.gear`. Slots it writes: `gear`.
+Panels: `gear.gear`. Slots it writes: `gear`, `people`.
 
 ### Simulation
 
@@ -987,6 +998,7 @@ Extends `thing`.
 | Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |
 |---|---|---|---|---|---|---|---|
 | `in` | In | `*` | `*` | many_one |  |  | none |
+| `travels_with` | Travels with | `person` | `person` | many_one |  |  | none |
 
 ### Effects
 
@@ -1013,7 +1025,7 @@ Extends `thing`.
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |
+| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |
 | `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |
 
 ### Events
@@ -1028,7 +1040,7 @@ Its own: `space.pos`, `space.route`.
 
 ### Panels and slots
 
-Panels: `space.map`. Slots it writes: `scene`.
+Panels: `space.map`. Slots it writes: `place`, `scene`.
 
 ### Lint codes
 

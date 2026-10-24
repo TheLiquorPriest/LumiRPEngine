@@ -21,9 +21,14 @@ import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
+import { partyAt, relocate } from "../../../engine/relocate";
 import { isMemberOf } from "../../../engine/selector";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
+import { accessOf } from "../../../engine/access";
+import { siteOf, together } from "../../../engine/presence";
+import type { FeedLine } from "../../../engine/registry";
+import type { FeedScope } from "../../../shared/world";
 import { buildGarageView } from "./view";
 import classes from "./tables/modern-us/classes.json";
 import factors from "./tables/modern-us/factors.json";
@@ -95,15 +100,78 @@ function burnsFuel(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId
   return row !== undefined && strOf(row.fuel_type, "gasoline") !== "none";
 }
 
-/** A place's top-level ancestor: the site a vehicle counts as "here" in, as the Vehicles section reads it. */
-function siteOf(world: { places: Record<PlaceId, { parent?: PlaceId }> }, place: PlaceId | null): PlaceId | null {
-  let at = place;
-  for (let depth = 0; at !== null && depth < 32; depth++) {
-    const parent = own(world.places, at)?.parent;
-    if (!parent) return at;
-    at = parent;
+/** At most this many other people's vehicles at the POV's site are told, the rest counted. */
+const OTHERS_CAP = 8;
+
+/**
+ * The Vehicles section (DESIGN §6, §6.11, §9.3): what the player character may use, his own; from
+ * level 2 his groups' (his family's), with whose they are; from level 3 the ones assigned or lent
+ * to him; the ones away from his site folded into one line. Then other people's vehicles at his
+ * site, with whose they are. Owners are named only as he may know them. In `scene` scope a vehicle
+ * here he can't see whose owner is with him is added, marked; in `gm`, every one at his site.
+ */
+export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
+  const pov = ctx.world.pov;
+  const level = ctx.levelOf(pov, "vehicles");
+  if (level === 0) return [];
+  const see = (who: EntityId, id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
+  const cal = calendarOf(ctx.world);
+  const grants = new Map((own(ctx.state.entities, pov)?.relations ?? []).filter((r) => r.type === "uses").map((r) => [r.to, r]));
+  const here = placeOfEntity(ctx.state, pov);
+  const site = siteOf(ctx.world, here);
+  const ownerName = (owner: EntityId): string => (see(pov, owner) ? (own(ctx.state.entities, owner)?.name ?? "someone") : "someone");
+  const placeText = (place: PlaceId | null): string => (!place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere");
+  const lines: FeedLine[] = [];
+  const others: { v: EntityId; owner: EntityId | null; place: PlaceId | null }[] = [];
+  const away = new Map<string, number>();
+  for (const v of Object.keys(ctx.state.entities).sort()) {
+    const e = own(ctx.state.entities, v);
+    if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v)) continue;
+    const owner = accessOf(ctx.state, v).owners[0]?.party ?? null;
+    const grant = grants.get(v);
+    const place = placeOfEntity(ctx.state, v);
+    const whose = owner === pov ? "yours" : level >= 2 && owner !== null && isMemberOf(ctx.state, pov, owner) ? `${ownerName(owner)}'s` : level >= 3 && grant ? `${owner ? `${ownerName(owner)}'s, ` : ""}${grant.until !== undefined ? `lent to you until ${formatClock(cal, grant.until)}` : "assigned to you"}` : null;
+    if (whose === null) {
+      // Someone else's: told when it is at his site.
+      if (site !== null && siteOf(ctx.world, place) === site) others.push({ v, owner, place });
+      continue;
+    }
+    if (owner !== pov && !see(pov, v)) continue;
+    // The narrator hears where it is as the player may: a place the POV can't see is somewhere.
+    const where = placeText(place);
+    if (site !== null && siteOf(ctx.world, place) !== site) {
+      away.set(where, (away.get(where) ?? 0) + 1);
+      continue;
+    }
+    const parts = [`${e.name}: ${where}`];
+    if (level === 1) parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
+    else {
+      parts.push(whose);
+      if (burnsFuel(ctx, v)) {
+        const range = rangeLeft(ctx, v);
+        parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? ` (~${Math.round(range.value)} ${range.unit})` : ""}`);
+      }
+      if (e.fields.status !== "ok" && e.fields.status !== undefined) parts.push(String(e.fields.status).replace(/_/g, " "));
+    }
+    lines.push({ text: `${parts.join(", ")}.`, known: "pov" });
   }
-  return at;
+  const elsewhere = [...away].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
+  const total = elsewhere.reduce((sum, [, n]) => sum + n, 0);
+  if (total > 0) lines.push({ text: `Elsewhere: ${total} (${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}).`, known: "pov" });
+  // Other people's vehicles at his site: the ones he can see with whose they are; past the cap, a count.
+  const seen = others.filter((o) => see(pov, o.v));
+  for (const o of seen.slice(0, OTHERS_CAP)) lines.push({ text: `${own(ctx.state.entities, o.v)?.name ?? o.v}: ${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}.`, known: "pov" });
+  if (seen.length > OTHERS_CAP) lines.push({ text: `And ${seen.length - OTHERS_CAP} more vehicles here.`, known: "pov" });
+  if (scope === "player") return lines;
+  for (const o of others.filter((x) => !see(pov, x.v))) {
+    const name = own(ctx.state.entities, o.v)?.name ?? o.v;
+    const ownerHere = o.owner !== null && see(pov, o.owner) && together(ctx.world, here, placeOfEntity(ctx.state, o.owner));
+    const where = o.place ? (own(ctx.world.places, o.place)?.name ?? o.place) : "somewhere";
+    const text = `${name}: at ${where}, ${o.owner ? `${own(ctx.state.entities, o.owner)?.name ?? o.owner}'s` : "no one's"}.`;
+    if (ownerHere && o.owner) lines.push({ text, known: "scene", who: own(ctx.state.entities, o.owner)?.name ?? o.owner });
+    else if (scope === "gm") lines.push({ text, known: "gm" });
+  }
+  return lines;
 }
 
 /** The class domain: road, marine or offroad. */
@@ -322,13 +390,19 @@ export const vehiclesPack: PackDef = {
         if (!leg) return reject("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
         if (!fuelOk(ctx, v, leg)) return reject("no_fuel", `${e.name} doesn't have the fuel`);
         const out: LedgerEvent[] = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: to }];
-        // The driver and anyone riding along (people at the same place named in `riders`) arrive too.
-        const riders = Array.isArray(args.riders) ? args.riders.filter((x): x is string => typeof x === "string") : [];
+        // The driver and anyone riding along (people at the same place named in `riders`, and the
+        // player character's party when it drives) arrive too, through the one move path; whoever
+        // rides inside the vehicle goes with it.
+        const named = Array.isArray(args.riders) ? args.riders.filter((x): x is string => typeof x === "string") : [];
+        const riders = driver === ctx.world.pov ? [...named, ...partyAt(ctx, placeOfEntity(ctx.state, driver))] : named;
+        const moved = new Set<string>();
         for (const p of [driver, ...riders]) {
           const pe = own(ctx.state.entities, p);
-          if (!pe || pe.relations.some((x) => x.type === "in" && x.to === v)) continue;
-          for (const rel of pe.relations) if (rel.type === "in") out.push({ type: "unlink", rel: "in", from: p, to: rel.to });
-          out.push({ type: "set", entity: p, field: "place", value: to });
+          if (!pe || moved.has(p) || pe.relations.some((x) => x.type === "in" && x.to === v)) continue;
+          moved.add(p);
+          const events = relocate(ctx, p, to);
+          if ("code" in events) return events;
+          out.push(...events);
         }
         return out;
       },
@@ -452,53 +526,7 @@ export const vehiclesPack: PackDef = {
       },
     });
 
-    r.renderer({
-      slot: "vehicles",
-      // What the player character may use (DESIGN §6, §9.3): his own; from level 2 his groups' (his
-      // family's), with whose they are; from level 3 the ones assigned or lent to him. Owners are
-      // named only as he may know them. The ones away from his site fold into one line.
-      render(ctx) {
-        const pov = ctx.world.pov;
-        const level = ctx.levelOf(pov, "vehicles");
-        if (level === 0) return [];
-        const cal = calendarOf(ctx.world);
-        const grants = new Map((own(ctx.state.entities, pov)?.relations ?? []).filter((r) => r.type === "uses").map((r) => [r.to, r]));
-        const site = siteOf(ctx.world, placeOfEntity(ctx.state, pov));
-        const ownerName = (owner: EntityId): string => (canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, owner) ? (own(ctx.state.entities, owner)?.name ?? "someone") : "someone");
-        const lines: string[] = [];
-        const away = new Map<string, number>();
-        for (const v of Object.keys(ctx.state.entities).sort()) {
-          const e = own(ctx.state.entities, v);
-          if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v)) continue;
-          const owner = typeof e.fields.owner === "string" ? e.fields.owner : null;
-          const grant = grants.get(v);
-          const whose = owner === pov ? "yours" : level >= 2 && owner !== null && isMemberOf(ctx.state, pov, owner) ? `${ownerName(owner)}'s` : level >= 3 && grant ? `${owner ? `${ownerName(owner)}'s, ` : ""}${grant.until !== undefined ? `lent to you until ${formatClock(cal, grant.until)}` : "assigned to you"}` : null;
-          if (whose === null || (owner !== pov && !canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, v))) continue;
-          const place = placeOfEntity(ctx.state, v);
-          // The narrator hears where it is as the player may: a place the POV can't see is somewhere.
-          const where = !place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere";
-          if (site !== null && siteOf(ctx.world, place) !== site) {
-            away.set(where, (away.get(where) ?? 0) + 1);
-            continue;
-          }
-          const parts = [`${e.name}: ${where}`];
-          if (level === 1) parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
-          else {
-            parts.push(whose);
-            if (burnsFuel(ctx, v)) {
-              const range = rangeLeft(ctx, v);
-              parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? ` (~${Math.round(range.value)} ${range.unit})` : ""}`);
-            }
-            if (e.fields.status !== "ok" && e.fields.status !== undefined) parts.push(String(e.fields.status).replace(/_/g, " "));
-          }
-          lines.push(`${parts.join(", ")}.`);
-        }
-        const elsewhere = [...away].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
-        const total = elsewhere.reduce((sum, [, n]) => sum + n, 0);
-        if (total > 0) lines.push(`Elsewhere: ${total} (${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}).`);
-        return lines;
-      },
-    });
+    r.renderer({ slot: "vehicles", render: (ctx) => vehicleLines(ctx, "player").map((l) => l.text), feed: vehicleLines });
     r.view({ panel: "vehicles.garage", build: (ctx) => buildGarageView(ctx) as unknown as JsonValue });
 
     r.lint({

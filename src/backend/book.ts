@@ -32,6 +32,9 @@ export const DEFAULT_SECTIONS: Record<SlotId, SectionTemplate> = {
   stance: { id: "stance", label: "Stance", rank: 9, template: "The narrator knows only what the player character knows. These lines say how the people here behave; never state what a cue only hints at.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   // Character minds (DESIGN §24.3): on their own token budget, apart from the section budget.
   [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: MINDS_SECTION_TEMPLATE, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  // Where the POV is and what it owns (DESIGN §6.11): ranked after the other facts, so the first left out on a small budget.
+  place: { id: "place", label: "Place", rank: 11, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  property: { id: "property", label: "Property", rank: 12, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
 };
 
 /** A world's sections in rank order: its own, else the defaults. The Minds section is every world's, so a world with sections of its own gets the default one when it has none. */

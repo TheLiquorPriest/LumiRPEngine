@@ -160,15 +160,17 @@ describe("the lore pinned for a mind: the user's cap is its only limit", () => {
 const secondTurn = (seen: Seen): string => lastFor(seen.minds, "Danny Okafor");
 
 describe("a mind reads the story as it stands, and nothing of another mind", () => {
-  test("by default: the lore pinned for them, the lore the turn names, how the latest reply ended and what the player says; never the planner's day, a plan, a commitment or any of their memory", async () => {
+  test("by default: the lore pinned for them, the lore the turn names, how the latest reply ended, what the player says and their own plans; never the planner's day, a commitment or any of their memory", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     const { chatId, seen } = await storyChat(rig);
     const danny = secondTurn(seen);
     for (const mark of ["PIN-MARK", "ACTIVE-MARK", "The story so far ended: FIRST-REPLY-MARK: Danny nods; Priya waves a clipboard.", `Now Jordan Ellis says or does: ${ASK}`, "- Traits: funny, competitive, loyal"]) expect(danny).toContain(mark);
     // Activation, not a guess at relevance: an entry about Danny, or one sharing the player's words, isn't the turn's lore.
     for (const mark of ["LINK-MARK", "WORDS-MARK"]) expect(danny).not.toContain(mark);
+    // What the turns stated he will do is his to keep: his plans are read by default.
+    expect(danny).toContain("- Plan (meet): PLAN-MARK");
     // Their own memory and life, which the planner and the memory step fill, stay out unless switched on.
-    for (const mark of ["Today ", "Time out", "Plan (", "PLAN-MARK", "Commitment (", "COMMIT-MARK", "NOTE-MARK", "SUMMARY-MARK", "THOUGHT-MARK", "## Your last thoughts", "## Turns you were there for", "You have $"]) expect(danny).not.toContain(mark);
+    for (const mark of ["Today ", "Time out", "Commitment (", "COMMIT-MARK", "NOTE-MARK", "SUMMARY-MARK", "THOUGHT-MARK", "## Your last thoughts", "## Turns you were there for", "You have $"]) expect(danny).not.toContain(mark);
     // Nothing of another mind: what Priya's memory says she told him isn't his.
     expect(danny).not.toContain("TOLD-MARK");
     // Secrecy: a secret the turn names that isn't his stays out; his own is in who he is.

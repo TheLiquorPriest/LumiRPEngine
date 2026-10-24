@@ -41,7 +41,8 @@ const READ_LABEL: Record<MindSource, string> = {
   thoughts: "Their last thoughts",
   recall: "Turns they were there for",
   routine: "Their usual routine",
-  life: "Their life: money, the day, commitments and plans",
+  plans: "Their plans",
+  life: "Their life: money, the day and commitments",
 };
 
 const READ_NOTE: Record<MindSource, string> = {
@@ -55,20 +56,21 @@ const READ_NOTE: Record<MindSource, string> = {
   thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
   recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
   routine: "What they usually do, from their routine and schedules as the world and the story set them, while their routine isn't off: theirs to weigh, never what they must do. A private block only when it's their own, and never social life the planner made up.",
-  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands.",
+  plans: "What they mean to do later, soonest first, with when, where and who else is in it: the plans the story's turns stated for them and the ones you set in GM mode. A plan shared by several people is each one's. Never the day the planner lays.",
+  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings) and their commitments. None of it is the story as it stands.",
 };
 
 /** Where each source is listed: the story as it stands, the chat as the player sees it, what they usually do, or their own memory and life. */
 type ReadGroup = "story" | "chat" | "usual" | "own";
-const READ_GROUP: Readonly<Record<MindSource, ReadGroup>> = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", life: "own" };
+const READ_GROUP: Readonly<Record<MindSource, ReadGroup>> = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", plans: "usual", life: "own" };
 
-const GROUP_TITLE: Record<ReadGroup, string> = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do", own: "Their own memory and life" };
+const GROUP_TITLE: Record<ReadGroup, string> = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do and mean to do", own: "Their own memory and life" };
 
 /** Each group's note; the story as it stands needs none. */
 const GROUP_NOTE: Record<ReadGroup, string | null> = {
   story: null,
   chat: "Off unless you turn it on: it tells a mind of turns its character wasn't there for.",
-  usual: "On unless you turn it off: their routine as context, so they can keep to their days without the planner deciding for them.",
+  usual: "On unless you turn them off: their routine as context, and the plans the story made for them, so they can keep to their days and to what they agreed without the planner deciding for them.",
   own: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind.",
 };
 
