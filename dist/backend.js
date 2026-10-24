@@ -71708,9 +71708,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "e31759e3584640fc998681277fc1eb54842772641ee35da8e86babff96bce7fc";
+  const sha256 = "613d719aa6393ba9457898d9e04498a14aea8aeba3b0ddaa43ced68365417a41";
   const tools = ["24a76a1271330ef57b3b4390f34a5317", "05c19bcfc22755ef976289b6cd342324"].filter((f) => f !== undefined);
-  return { id: "7c0473f2", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "37cfd96d", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -74847,7 +74847,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "7c0473f2" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "37cfd96d" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -77056,6 +77056,211 @@ function upgradePreview(reg, plan2, state2, after, inForce2) {
   return { from: plan2.from, to: plan2.to, entities: rows, tracks };
 }
 
+// src/engine/character.ts
+var SECTION_OF = {
+  birthday: "identity",
+  occupation: "identity",
+  region: "identity",
+  wealth: "identity",
+  place: "where",
+  home: "where",
+  bed: "where",
+  scene: "where",
+  activity: "day",
+  appointments: "day",
+  trips: "day",
+  chores: "day",
+  employer: "work",
+  pay_prefs: "work",
+  filing_status: "work",
+  local_tax: "work",
+  conditions: "stats"
+};
+var SECTION_ORDER = ["identity", "where", "day", "work", "stats", "advanced"];
+var HOLD_WORDS = { place: "Stays where they are", activity: "Keeps doing what they're doing" };
+var BEDLIKE = /\b(bed|beds|bunk|cot|futon|couch|sofa|hammock|sleeping[ _-]?bag)\b/i;
+function placeRefs(world) {
+  const out = new Map;
+  const pathOf = (id) => {
+    const names3 = [];
+    let cur = own(world.places, id)?.parent;
+    for (let guard2 = 0;cur !== undefined && guard2 < 64; guard2++) {
+      const p = own(world.places, cur);
+      if (!p)
+        break;
+      names3.unshift(p.name);
+      cur = p.parent;
+    }
+    return names3;
+  };
+  for (const id of Object.keys(world.places).sort()) {
+    const p = own(world.places, id);
+    if (!p)
+      continue;
+    out.set(id, { id, name: p.name, path: pathOf(id), parent: p.parent !== undefined && own(world.places, p.parent) ? p.parent : null, visibility: p.visibility ?? "public" });
+  }
+  return out;
+}
+function placeOf4(bodies, id) {
+  let cur = id;
+  for (let guard2 = 0;cur !== undefined && guard2 < 32; guard2++) {
+    const e = own(bodies, cur);
+    if (!e)
+      return null;
+    const p = e.fields.place;
+    if (typeof p === "string" && p !== "")
+      return p;
+    cur = e.relations.find((r) => r.type === "in")?.to;
+  }
+  return null;
+}
+function plainLabel(raw) {
+  const m = /^(.*?)\s*\(([^()]*)\)\s*$/.exec(raw);
+  return m && m[1] !== undefined && m[1].trim() !== "" && m[2] !== undefined ? { label: m[1].trim(), help: m[2].trim() } : { label: raw };
+}
+function words5(id) {
+  const text6 = id.replace(/[_-]+/g, " ").trim();
+  return text6 ? `${text6.charAt(0).toUpperCase()}${text6.slice(1)}` : id;
+}
+function buildCharacter(reg, world, id, state2) {
+  const bodies = state2 ? state2.entities : world.entities;
+  const e = own(bodies, id);
+  if (!e || !kindIs(reg, world, e.kind, "person"))
+    return null;
+  const refs = placeRefs(world);
+  const placeRef = (place) => typeof place === "string" ? refs.get(place) ?? null : null;
+  const gone = (thing) => state2 ? isGone(state2, thing) : false;
+  const thingRef = (thing) => {
+    if (typeof thing !== "string")
+      return null;
+    const t = own(bodies, thing);
+    return t ? { id: thing, name: t.name, kind: t.kind, place: placeRef(placeOf4(bodies, thing)) } : null;
+  };
+  const isItem = (thing) => kindIs(reg, world, thing.kind, "item");
+  const things = Object.keys(bodies).sort().flatMap((thing) => {
+    const t = own(bodies, thing);
+    const ref = t && isItem(t) && !gone(thing) ? thingRef(thing) : null;
+    return ref ? [ref] : [];
+  });
+  const home = placeRef(e.fields.home);
+  const bedValue = e.fields.bed;
+  const bed = typeof bedValue === "string" && own(world.places, bedValue) ? { kind: "place", place: placeRef(bedValue), item: null } : typeof bedValue === "string" && own(bodies, bedValue) ? { kind: "item", place: placeRef(placeOf4(bodies, bedValue)), item: thingRef(bedValue) } : { kind: "home", place: home, item: null };
+  const holder = e.relations.find((r) => r.type === "in")?.to;
+  const def = kindDef(reg, world, e.kind);
+  const pov = id === world.pov;
+  const lifeId = state2 ? lifeOf(state2, id) : own(world.entities, id)?.life ?? ALIVE;
+  const life = lifeId === ALIVE ? null : { state: lifeId, label: lifeStateOf(world, lifeId).label };
+  const visibility = own(world.entities, id)?.visibility ?? "public";
+  const character = {
+    id,
+    name: e.name,
+    kind: { id: e.kind, label: def?.label ?? words5(e.kind) },
+    tier: { id: e.tier, label: own(world.tiers, e.tier)?.label ?? words5(e.tier) },
+    pov,
+    agent: state2 ? own(state2.entities, id)?.agent ?? false : own(world.entities, id)?.agent ?? false,
+    life,
+    visibility,
+    place: placeRef(state2 ? placeOf4(bodies, id) : e.fields.place),
+    inside: holder !== undefined ? thingRef(holder) : null,
+    home,
+    bed,
+    bedChoices: bedChoices(bodies, refs, typeof e.fields.home === "string" ? e.fields.home : null, isItem, gone),
+    employer: thingRef(e.fields.employer),
+    ...state2 ? { now: nowOf(world, state2, id) } : {},
+    sections: sectionsOf2(reg, world, e)
+  };
+  return { character, places: [...refs.values()], things };
+}
+function bedChoices(bodies, refs, home, isItem, gone) {
+  const homeRef = home !== null ? refs.get(home) : undefined;
+  if (home === null || !homeRef)
+    return { places: [], items: [] };
+  const under = new Map([[home, { depth: 0, path: [] }]]);
+  for (let grew = true;grew; ) {
+    grew = false;
+    for (const ref of refs.values()) {
+      const parent = ref.parent !== null ? under.get(ref.parent) : undefined;
+      if (!parent || under.has(ref.id))
+        continue;
+      const parentName = refs.get(ref.parent ?? "")?.name ?? "";
+      under.set(ref.id, { depth: parent.depth + 1, path: [...parent.path, parentName] });
+      grew = true;
+    }
+  }
+  const places2 = [...under].filter(([id]) => id !== home).sort((a, b) => a[1].depth - b[1].depth || (refs.get(a[0])?.name ?? "").localeCompare(refs.get(b[0])?.name ?? "")).flatMap(([id, at2]) => {
+    const ref = refs.get(id);
+    return ref ? [{ ...ref, path: at2.path }] : [];
+  });
+  const bedlike = (b) => BEDLIKE.test(b.name) || typeof b.fields.catalog === "string" && BEDLIKE.test(b.fields.catalog.replace(/_/g, " "));
+  const items = Object.keys(bodies).flatMap((id) => {
+    const t = own(bodies, id);
+    const at2 = t && isItem(t) && !gone(id) && typeof t.fields.place === "string" ? t.fields.place : null;
+    if (!t || at2 === null || !under.has(at2))
+      return [];
+    return [{ ref: { id, name: t.name, kind: t.kind, place: refs.get(at2) ?? null }, likely: bedlike(t) }];
+  }).sort((a, b) => Number(b.likely) - Number(a.likely) || a.ref.name.localeCompare(b.ref.name) || (a.ref.id < b.ref.id ? -1 : 1)).map((x) => x.ref);
+  return { places: places2, items };
+}
+function nowOf(world, state2, id) {
+  const e = own(state2.entities, id);
+  const cal = calendarOf(world);
+  const where = typeof e?.fields.place === "string" ? e.fields.place : null;
+  const when2 = (t) => typeof t === "number" && t > state2.clock ? formatStamp(cal, t, placeOffset(world, t, where)) : null;
+  const activity = typeof e?.fields.activity === "string" ? e.fields.activity : "idle";
+  const holds = isRecord(e?.fields.holds) ? e.fields.holds : {};
+  return {
+    activity,
+    activityLabel: words5(activity),
+    until: when2(e?.fields.activity_until),
+    party: e?.relations.some((r) => r.type === PARTY_RELATION && r.to === world.pov) ?? false,
+    holds: Object.keys(holds).sort().flatMap((field) => {
+      const until = when2(holds[field]);
+      return until !== null ? [{ label: HOLD_WORDS[field] ?? words5(field), until }] : [];
+    })
+  };
+}
+function sectionsOf2(reg, world, e) {
+  const defs = kindFields(reg, world, e.kind);
+  const authored2 = new Set;
+  const sheet = new Set;
+  for (let id = e.kind, guard2 = 0;id && guard2 < 32; guard2++) {
+    const k = kindDef(reg, world, id);
+    if (k && own(world.kinds, id) && k.pack === undefined)
+      for (const f of Object.keys(k.fields))
+        authored2.add(f);
+    for (const [f, d] of Object.entries(k?.fields ?? {}))
+      if (d.domain === "sheets" && d.type === "number")
+        sheet.add(f);
+    id = k?.extends;
+  }
+  const sections = new Map(SECTION_ORDER.map((s) => [s, []]));
+  const ids2 = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])];
+  for (const field of ids2) {
+    const def = own(defs, field);
+    const section = def?.locked || def?.derived !== undefined ? "advanced" : SECTION_OF[field] ?? (sheet.has(field) ? "stats" : authored2.has(field) ? "identity" : "advanced");
+    sections.get(section)?.push(fieldOf2(field, def, own(e.fields, field)));
+  }
+  return SECTION_ORDER.map((id) => ({ id, fields: sections.get(id) ?? [] }));
+}
+function fieldOf2(id, def, stored) {
+  const { label, help } = plainLabel(def?.label ?? words5(id));
+  const type = def?.type ?? (typeof stored === "number" ? "number" : typeof stored === "boolean" ? "bool" : Array.isArray(stored) ? "list" : "text");
+  const of = type === "list" ? def?.of ?? (Array.isArray(stored) && stored.length > 0 && stored.every((x) => typeof x === "string") ? "text" : undefined) : undefined;
+  return {
+    id,
+    label,
+    type,
+    value: stored ?? def?.default ?? null,
+    ...def?.values ? { values: [...def.values] } : {},
+    ...def?.min !== undefined ? { min: def.min } : {},
+    ...def?.max !== undefined ? { max: def.max } : {},
+    ...def?.ref !== undefined ? { ref: def.ref } : {},
+    ...of !== undefined ? { of } : {},
+    ...def?.locked || def?.derived !== undefined ? { locked: true } : {},
+    ...help !== undefined ? { help } : {}
+  };
+}
+
 // src/backend/dispatch.ts
 class RequestError extends Error {
   code;
@@ -77375,6 +77580,25 @@ class Dispatcher {
         if (!player)
           throw new RequestError("not_found", "no such character");
         reply("lre.routine", { player });
+        return;
+      }
+      case "lre.character": {
+        if (r.op !== "get" || typeof r.entity !== "string")
+          throw new RequestError("bad_request", "name a character to get");
+        let found;
+        if (r.scope === "build") {
+          if (typeof r.worldId !== "string")
+            throw new RequestError("bad_request", "name the world");
+          found = buildCharacter(this.rt.registry, await this.rt.worlds.working(r.worldId, userId), r.entity);
+        } else if (r.scope === "gm") {
+          await this.requireWorldChat(r.chatId, userId);
+          const { state: state2, world } = await this.head(r.chatId, userId);
+          found = buildCharacter(this.rt.registry, world, r.entity, state2);
+        } else
+          throw new RequestError("bad_request", "the scope is build or gm");
+        if (!found)
+          throw new RequestError("not_found", "no such character");
+        reply("lre.character", found);
         return;
       }
       case "lre.state.get": {

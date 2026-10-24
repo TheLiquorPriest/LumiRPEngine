@@ -5418,6 +5418,9 @@ function timelapseRequest(view, target, overrides, chatId, followRoutine, source
 function travelRequest(action, params, chatId) {
   return { type: "lre.action", chatId, action, params: { ...params }, source: "map" };
 }
+function characterRequest(entity, from) {
+  return "worldId" in from ? { type: "lre.character", op: "get", entity, scope: "build", worldId: from.worldId } : { type: "lre.character", op: "get", entity, scope: "gm", chatId: from.chatId };
+}
 function stagedRequest(chatId, staged, now) {
   return { type: "lre.action", chatId, action: staged.action, params: { ...staged.params }, source: staged.source, ...now ? { now: true } : {} };
 }
@@ -14430,6 +14433,26 @@ function mapTemplate(kind, id, scope) {
   };
 }
 
+// src/frontend/gm/gate.ts
+function revealTruth(ui) {
+  return ui.gm.revealed ? ui : { ...ui, gm: { ...ui.gm, revealed: true } };
+}
+function hideTruth(ui) {
+  return ui.gm.revealed ? { ...ui, gm: { ...ui.gm, revealed: false } } : ui;
+}
+function gmAt(ui, section) {
+  return ui.gm.section === section ? ui : { ...ui, gm: { ...ui.gm, section } };
+}
+function gmOpen(ui, section, entity) {
+  return { ...ui, gm: { ...ui.gm, section, focus: entity } };
+}
+function focusTaken(ui) {
+  if (ui.gm.focus === undefined)
+    return ui;
+  const { focus: _taken, ...gm } = ui.gm;
+  return { ...ui, gm };
+}
+
 // src/frontend/gm/ui.tsx
 function usePages() {
   const [page, setPage] = d2(null);
@@ -14469,6 +14492,26 @@ function usePages() {
       }
     }
   };
+}
+function useGmFocus(open) {
+  const app = useApp();
+  const focus = useUi((ui) => ui.gm.focus);
+  A(() => {
+    if (focus === undefined)
+      return;
+    open(focus);
+    app.ui.update(focusTaken);
+  }, [focus]);
+}
+function SheetLink(props) {
+  const app = useApp();
+  return /* @__PURE__ */ u3(Button, {
+    size: "sm",
+    variant: "secondary",
+    icon: "user",
+    onClick: () => app.ui.update((ui) => gmOpen(ui, "world", props.entity)),
+    children: "Character sheet"
+  }, undefined, false, undefined, this);
 }
 function GmPage(props) {
   return /* @__PURE__ */ u3("div", {
@@ -15334,6 +15377,809 @@ function DraftBatchSheet(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/frontend/character/places.ts
+function wordsOf(text) {
+  return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter((w3) => w3 !== "");
+}
+function placeIndex(places2) {
+  const byId = new Map(places2.map((p3) => [p3.id, p3]));
+  const children = new Map;
+  const words2 = new Map;
+  for (const p3 of places2) {
+    const parent = p3.parent !== null && byId.has(p3.parent) ? p3.parent : null;
+    const list2 = children.get(parent);
+    if (list2)
+      list2.push(p3);
+    else
+      children.set(parent, [p3]);
+    words2.set(p3.id, { name: wordsOf(p3.name), path: p3.path.flatMap(wordsOf) });
+  }
+  for (const list2 of children.values())
+    list2.sort((a3, b3) => a3.name.localeCompare(b3.name));
+  return { byId, children, words: words2 };
+}
+function pathLabel(place) {
+  return [...place.path, place.name].join(" › ");
+}
+function trailTo(index, id) {
+  const out = [];
+  const seen = new Set;
+  for (let at = id === null ? undefined : index.byId.get(id);at && !seen.has(at.id); at = at.parent === null ? undefined : index.byId.get(at.parent)) {
+    seen.add(at.id);
+    out.unshift(at);
+  }
+  return out;
+}
+function browseStart(index, current2) {
+  const place = current2 === null ? undefined : index.byId.get(current2);
+  return place && place.parent !== null && index.byId.has(place.parent) ? place.parent : null;
+}
+var SEARCH_LIMIT = 60;
+function searchPlaces(index, query) {
+  const want = wordsOf(query);
+  if (want.length === 0)
+    return [];
+  const hits = [];
+  for (const place of index.byId.values()) {
+    const w3 = index.words.get(place.id);
+    if (!w3)
+      continue;
+    const inName = (q2) => w3.name.some((n2) => n2.startsWith(q2));
+    if (!want.every((q2) => inName(q2) || w3.path.some((n2) => n2.startsWith(q2))))
+      continue;
+    hits.push({ place, own: want.every(inName) });
+  }
+  hits.sort((a3, b3) => Number(b3.own) - Number(a3.own) || a3.place.path.length - b3.place.path.length || a3.place.name.localeCompare(b3.place.name));
+  return hits.slice(0, SEARCH_LIMIT).map((h3) => h3.place);
+}
+function bedOptions(character) {
+  return [{ kind: "home", place: character.home }, ...character.bedChoices.places.map((place) => ({ kind: "place", place })), ...character.bedChoices.items.map((item) => ({ kind: "item", item }))];
+}
+function bedOf(option) {
+  if (option.kind === "home")
+    return { kind: "home", place: option.place, item: null };
+  if (option.kind === "place")
+    return { kind: "place", place: option.place, item: null };
+  return { kind: "item", place: option.item.place, item: option.item };
+}
+function isBed(bed, option) {
+  if (option.kind === "home")
+    return bed.kind === "home";
+  if (option.kind === "place")
+    return bed.kind === "place" && bed.place?.id === option.place.id;
+  return bed.kind === "item" && bed.item?.id === option.item.id;
+}
+function searchThings(things, query) {
+  const want = wordsOf(query);
+  if (want.length === 0)
+    return [];
+  const hits = [];
+  for (const thing of things) {
+    const name = wordsOf(thing.name);
+    const where = thing.place ? [...thing.place.path, thing.place.name].flatMap(wordsOf) : [];
+    const inName = (q2) => name.some((n2) => n2.startsWith(q2));
+    if (!want.every((q2) => inName(q2) || where.some((n2) => n2.startsWith(q2))))
+      continue;
+    hits.push({ thing, own: want.every(inName) });
+  }
+  hits.sort((a3, b3) => Number(b3.own) - Number(a3.own) || a3.thing.name.localeCompare(b3.thing.name));
+  return hits.slice(0, SEARCH_LIMIT).map((h3) => h3.thing);
+}
+function withText(list2, text) {
+  const t3 = text.trim().replace(/\s+/g, " ");
+  if (t3 === "" || list2.some((x2) => x2.toLowerCase() === t3.toLowerCase()))
+    return [...list2];
+  return [...list2, t3];
+}
+
+// src/frontend/character/place-picker.tsx
+function PlaceBadge(props) {
+  if (props.place.visibility === "secret")
+    return /* @__PURE__ */ u3(Badge, {
+      tone: "gm",
+      children: "Secret"
+    }, undefined, false, undefined, this);
+  if (props.place.visibility === "discoverable")
+    return /* @__PURE__ */ u3(Badge, {
+      children: "Hidden until found"
+    }, undefined, false, undefined, this);
+  return null;
+}
+function PlacePath(props) {
+  const { place } = props;
+  if (!place)
+    return /* @__PURE__ */ u3("span", {
+      class: "lre-cp-path lre-muted",
+      children: props.empty ?? "Not set"
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("span", {
+    class: "lre-cp-path",
+    title: pathLabel(place),
+    children: [
+      place.path.map((name, i3) => /* @__PURE__ */ u3("span", {
+        class: "lre-cp-path-up",
+        children: [
+          name,
+          /* @__PURE__ */ u3("span", {
+            class: "lre-cp-sep",
+            "aria-hidden": "true",
+            children: "›"
+          }, undefined, false, undefined, this)
+        ]
+      }, `${i3}:${name}`, true, undefined, this)),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-cp-path-name",
+        children: place.name
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(PlaceBadge, {
+        place
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PlacePicker(props) {
+  const [open, setOpen] = d2(false);
+  const current2 = b2(() => props.value === null ? null : props.places.find((p3) => p3.id === props.value) ?? null, [props.places, props.value]);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-cp-field",
+    "data-lre-place-picker": props.title,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: props.label ?? props.title
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-cp-value",
+            children: [
+              /* @__PURE__ */ u3(PlacePath, {
+                place: current2,
+                empty: props.value !== null ? `A place this list doesn't have (${props.value})` : undefined
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                icon: "pin",
+                disabled: props.disabled,
+                onClick: () => setOpen(true),
+                children: props.action ?? "Change…"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          props.help !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: props.help
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      open ? /* @__PURE__ */ u3(PlaceSheet, {
+        places: props.places,
+        value: props.value,
+        suggestions: props.suggestions,
+        title: props.title,
+        clearLabel: props.clearLabel,
+        onClose: () => setOpen(false),
+        onPick: (place) => {
+          setOpen(false);
+          props.onPick(place);
+        }
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function BrowseLevel(props) {
+  const { index } = props;
+  const trail = trailTo(index, props.at);
+  const rows = index.children.get(props.at) ?? [];
+  return /* @__PURE__ */ u3(Section, {
+    title: "Browse",
+    flush: true,
+    children: [
+      /* @__PURE__ */ u3("nav", {
+        class: "lre-cp-trail",
+        "aria-label": "Where you are browsing",
+        children: [
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-cp-crumb",
+            "aria-current": props.at === null ? "location" : undefined,
+            onClick: () => props.onOpen(null),
+            children: "All places"
+          }, undefined, false, undefined, this),
+          trail.map((p3) => /* @__PURE__ */ u3("span", {
+            class: "lre-cp-crumb-step",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-cp-sep",
+                "aria-hidden": "true",
+                children: "›"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-cp-crumb",
+                "aria-current": p3.id === props.at ? "location" : undefined,
+                onClick: () => props.onOpen(p3.id),
+                children: p3.name
+              }, undefined, false, undefined, this)
+            ]
+          }, p3.id, true, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      rows.length === 0 ? /* @__PURE__ */ u3("p", {
+        class: "lre-cp-note",
+        children: "Nothing inside."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+        class: "lre-cp-rows",
+        role: "list",
+        "data-lre-browse": props.at ?? "",
+        children: rows.map((p3) => {
+          const inside = index.children.get(p3.id)?.length ?? 0;
+          return /* @__PURE__ */ u3("div", {
+            class: "lre-cp-row",
+            role: "listitem",
+            "aria-current": p3.id === props.value ? "true" : undefined,
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-cp-row-text",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-cp-row-name",
+                    children: [
+                      p3.name,
+                      /* @__PURE__ */ u3(PlaceBadge, {
+                        place: p3
+                      }, undefined, false, undefined, this),
+                      p3.id === props.value ? /* @__PURE__ */ u3(Badge, {
+                        tone: "accent",
+                        children: "Now"
+                      }, undefined, false, undefined, this) : null
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-cp-row-sub",
+                    children: inside === 0 ? "No places inside" : inside === 1 ? "1 place inside" : `${inside} places inside`
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                onClick: () => props.onPick(p3),
+                children: "Choose"
+              }, undefined, false, undefined, this),
+              inside > 0 ? /* @__PURE__ */ u3(IconButton, {
+                icon: "chevron-right",
+                label: `Open ${p3.name}`,
+                onClick: () => props.onOpen(p3.id)
+              }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+                class: "lre-cp-row-gap",
+                "aria-hidden": "true"
+              }, undefined, false, undefined, this)
+            ]
+          }, p3.id, true, undefined, this);
+        })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PlaceSheet(props) {
+  const index = b2(() => placeIndex(props.places), [props.places]);
+  const current2 = props.value === null ? null : index.byId.get(props.value) ?? null;
+  const [query, setQuery] = d2("");
+  const [at, setAt] = d2(() => browseStart(index, props.value));
+  const searchId = P2();
+  const results = b2(() => searchPlaces(index, query), [index, query]);
+  const searching = query.trim() !== "";
+  return /* @__PURE__ */ u3(FormSheet, {
+    title: props.title,
+    subtitle: current2 ? pathLabel(current2) : "Not set",
+    onClose: props.onClose,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-cp-sheet",
+      "data-lre-place-sheet": "",
+      children: [
+        /* @__PURE__ */ u3("div", {
+          class: "lre-cp-now",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "lre-cp-now-label",
+              children: "Now"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(PlacePath, {
+              place: current2
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3("label", {
+          class: "lre-cp-search",
+          for: searchId,
+          children: [
+            /* @__PURE__ */ u3(Icon, {
+              name: "search",
+              size: 16
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("input", {
+              id: searchId,
+              class: "lre-input",
+              type: "search",
+              placeholder: "Search by name or where it is",
+              "aria-label": "Search places by name or where they are",
+              value: query,
+              onInput: (event) => setQuery(event.currentTarget.value),
+              onKeyDown: (event) => {
+                const first = results[0];
+                if (event.key !== "Enter" || !first)
+                  return;
+                event.preventDefault();
+                props.onPick(first);
+              }
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        searching ? results.length === 0 ? /* @__PURE__ */ u3(Empty, {
+          icon: "search",
+          children: [
+            "No place matches “",
+            query.trim(),
+            "”."
+          ]
+        }, undefined, true, undefined, this) : /* @__PURE__ */ u3(Section, {
+          title: results.length === 1 ? "1 place" : `${results.length} places${results.length === SEARCH_LIMIT ? ", keep typing to narrow" : ""}`,
+          flush: true,
+          children: /* @__PURE__ */ u3("div", {
+            "data-lre-place-results": "",
+            children: /* @__PURE__ */ u3(List, {
+              children: results.map((p3) => /* @__PURE__ */ u3(ListRow, {
+                icon: "pin",
+                title: p3.name,
+                subtitle: p3.path.length > 0 ? p3.path.join(" › ") : "At the top",
+                badge: /* @__PURE__ */ u3(PlaceBadge, {
+                  place: p3
+                }, undefined, false, undefined, this),
+                current: p3.id === props.value,
+                onClick: () => props.onPick(p3)
+              }, p3.id, false, undefined, this))
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+          children: [
+            (props.suggestions ?? []).length > 0 ? /* @__PURE__ */ u3(Section, {
+              title: "Suggestions",
+              flush: true,
+              children: /* @__PURE__ */ u3(List, {
+                children: (props.suggestions ?? []).map((s3) => /* @__PURE__ */ u3(ListRow, {
+                  icon: "star",
+                  title: s3.label,
+                  subtitle: pathLabel(s3.place),
+                  badge: /* @__PURE__ */ u3(PlaceBadge, {
+                    place: s3.place
+                  }, undefined, false, undefined, this),
+                  current: s3.place.id === props.value,
+                  onClick: () => props.onPick(s3.place)
+                }, `${s3.label}:${s3.place.id}`, false, undefined, this))
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3(BrowseLevel, {
+              index,
+              at,
+              value: props.value,
+              onOpen: setAt,
+              onPick: props.onPick
+            }, undefined, false, undefined, this),
+            props.clearLabel !== undefined && props.value !== null ? /* @__PURE__ */ u3(Button, {
+              variant: "ghost",
+              icon: "close",
+              onClick: () => props.onPick(null),
+              children: props.clearLabel
+            }, undefined, false, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
+// src/frontend/character/bed-picker.tsx
+function bedValue(bed) {
+  if (bed.kind === "item")
+    return bed.item?.id ?? null;
+  if (bed.kind === "place")
+    return bed.place?.id ?? null;
+  return null;
+}
+function bedWords(character) {
+  const bed = character.bed;
+  if (bed.kind === "item" && bed.item)
+    return bed.item.place ? `${bed.item.name}, in ${pathLabel(bed.item.place)}` : bed.item.name;
+  if (bed.kind === "place" && bed.place)
+    return pathLabel(bed.place);
+  return character.home ? `At home: ${pathLabel(character.home)}` : "At home (they have no home set)";
+}
+function OptionRow(props) {
+  const { option, home } = props;
+  const now = isBed(props.bed, option);
+  if (option.kind === "home") {
+    return /* @__PURE__ */ u3(ListRow, {
+      icon: "home",
+      title: "Sleeps at home",
+      subtitle: option.place ? `No bed of their own · ${pathLabel(option.place)}` : "No bed of their own",
+      badge: now ? /* @__PURE__ */ u3(Badge, {
+        tone: "accent",
+        children: "Now"
+      }, undefined, false, undefined, this) : undefined,
+      current: now,
+      onClick: () => props.onPick(bedOf(option))
+    }, undefined, false, undefined, this);
+  }
+  if (option.kind === "place") {
+    return /* @__PURE__ */ u3(ListRow, {
+      icon: "pin",
+      title: option.place.name,
+      subtitle: option.place.path.length > 0 ? option.place.path.join(" › ") : "In their home",
+      badge: now ? /* @__PURE__ */ u3(Badge, {
+        tone: "accent",
+        children: "Now"
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(PlaceBadge, {
+        place: option.place
+      }, undefined, false, undefined, this),
+      current: now,
+      onClick: () => props.onPick(bedOf(option))
+    }, undefined, false, undefined, this);
+  }
+  const at = option.item.place;
+  const where = at === null ? "Nowhere" : home ? [...at.path, at.name].slice(home.path.length).join(" › ") : pathLabel(at);
+  return /* @__PURE__ */ u3(ListRow, {
+    icon: "box",
+    title: option.item.name,
+    subtitle: where,
+    badge: now ? /* @__PURE__ */ u3(Badge, {
+      tone: "accent",
+      children: "Now"
+    }, undefined, false, undefined, this) : undefined,
+    current: now,
+    onClick: () => props.onPick(bedOf(option))
+  }, undefined, false, undefined, this);
+}
+function ThingSheet(props) {
+  const [query, setQuery] = d2("");
+  const searchId = P2();
+  const results = b2(() => searchThings(props.things, query), [props.things, query]);
+  return /* @__PURE__ */ u3(FormSheet, {
+    title: "A thing somewhere else",
+    subtitle: "A bed, a sofa, a hammock: anything they could sleep in",
+    onClose: props.onClose,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-cp-sheet",
+      "data-lre-thing-sheet": "",
+      children: [
+        /* @__PURE__ */ u3("label", {
+          class: "lre-cp-search",
+          for: searchId,
+          children: [
+            /* @__PURE__ */ u3(Icon, {
+              name: "search",
+              size: 16
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("input", {
+              id: searchId,
+              class: "lre-input",
+              type: "search",
+              placeholder: "Search by name or where it is",
+              "aria-label": "Search things by name or where they are",
+              value: query,
+              onInput: (event) => setQuery(event.currentTarget.value),
+              onKeyDown: (event) => {
+                const first = results[0];
+                if (event.key !== "Enter" || !first)
+                  return;
+                event.preventDefault();
+                props.onPick(first);
+              }
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        query.trim() === "" ? /* @__PURE__ */ u3("p", {
+          class: "lre-cp-note",
+          children: 'Type a word of its name ("bed", "sofa") or of where it is.'
+        }, undefined, false, undefined, this) : results.length === 0 ? /* @__PURE__ */ u3(Empty, {
+          icon: "search",
+          children: [
+            "Nothing matches “",
+            query.trim(),
+            "”."
+          ]
+        }, undefined, true, undefined, this) : /* @__PURE__ */ u3(Section, {
+          title: results.length === 1 ? "1 thing" : `${results.length} things${results.length === SEARCH_LIMIT ? ", keep typing to narrow" : ""}`,
+          flush: true,
+          children: /* @__PURE__ */ u3(List, {
+            children: results.map((t3) => /* @__PURE__ */ u3(ListRow, {
+              icon: "box",
+              title: t3.name,
+              subtitle: t3.place ? pathLabel(t3.place) : "Nowhere",
+              current: props.bed.kind === "item" && props.bed.item?.id === t3.id,
+              onClick: () => props.onPick(t3)
+            }, t3.id, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function BedPicker(props) {
+  const { character } = props;
+  const [open, setOpen] = d2(null);
+  const options = bedOptions(character);
+  const rooms = options.filter((o4) => o4.kind === "place");
+  const homeThings = options.filter((o4) => o4.kind === "item");
+  const pick = (bed2) => {
+    setOpen(null);
+    props.onPick(bed2);
+  };
+  const bed = character.bed;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-cp-field",
+    "data-lre-bed-picker": character.id,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: props.label ?? "Sleeps"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-cp-value",
+            children: [
+              bed.kind === "place" ? /* @__PURE__ */ u3(PlacePath, {
+                place: bed.place
+              }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+                class: "lre-cp-bed",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-cp-path-name",
+                    children: bed.kind === "item" && bed.item ? bed.item.name : "At home"
+                  }, undefined, false, undefined, this),
+                  bed.kind === "item" && bed.item ? bed.item.place ? /* @__PURE__ */ u3("span", {
+                    class: "lre-cp-path-up",
+                    children: [
+                      "in ",
+                      pathLabel(bed.item.place)
+                    ]
+                  }, undefined, true, undefined, this) : null : character.home ? /* @__PURE__ */ u3("span", {
+                    class: "lre-cp-path-up",
+                    children: pathLabel(character.home)
+                  }, undefined, false, undefined, this) : null
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                icon: "moon",
+                disabled: props.disabled,
+                onClick: () => setOpen("bed"),
+                children: "Change…"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      open === "bed" ? /* @__PURE__ */ u3(FormSheet, {
+        title: `Where ${character.name} sleeps`,
+        subtitle: bedWords(character),
+        onClose: () => setOpen(null),
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-cp-sheet",
+          "data-lre-bed-sheet": "",
+          children: [
+            /* @__PURE__ */ u3(Section, {
+              flush: true,
+              children: /* @__PURE__ */ u3(List, {
+                children: /* @__PURE__ */ u3(OptionRow, {
+                  option: options[0] ?? { kind: "home", place: character.home },
+                  home: character.home,
+                  bed,
+                  onPick: pick
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this),
+            rooms.length > 0 ? /* @__PURE__ */ u3(Section, {
+              title: "Rooms in their home",
+              flush: true,
+              children: /* @__PURE__ */ u3(List, {
+                children: rooms.map((o4) => /* @__PURE__ */ u3(OptionRow, {
+                  option: o4,
+                  home: character.home,
+                  bed,
+                  onPick: pick
+                }, o4.kind === "place" ? o4.place.id : "", false, undefined, this))
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this) : null,
+            homeThings.length > 0 ? /* @__PURE__ */ u3(Section, {
+              title: "Things in their home",
+              flush: true,
+              children: /* @__PURE__ */ u3(List, {
+                children: homeThings.map((o4) => /* @__PURE__ */ u3(OptionRow, {
+                  option: o4,
+                  home: character.home,
+                  bed,
+                  onPick: pick
+                }, o4.kind === "item" ? o4.item.id : "", false, undefined, this))
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this) : null,
+            rooms.length + homeThings.length === 0 ? /* @__PURE__ */ u3("p", {
+              class: "lre-cp-note",
+              children: character.home ? "Nothing inside their home to sleep in yet." : "They have no home set, so there's nowhere nearer to offer."
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3(Section, {
+              title: "Somewhere else",
+              flush: true,
+              children: /* @__PURE__ */ u3(List, {
+                children: [
+                  /* @__PURE__ */ u3(ListRow, {
+                    icon: "map",
+                    title: "Another place…",
+                    subtitle: "Any place, by search or by browsing",
+                    chevron: true,
+                    onClick: () => setOpen("place")
+                  }, undefined, false, undefined, this),
+                  props.things ? /* @__PURE__ */ u3(ListRow, {
+                    icon: "search",
+                    title: "A thing somewhere else…",
+                    subtitle: "A bed, sofa or hammock anywhere, by its name or where it is",
+                    chevron: true,
+                    onClick: () => setOpen("thing")
+                  }, undefined, false, undefined, this) : null
+                ]
+              }, undefined, true, undefined, this)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      open === "place" ? /* @__PURE__ */ u3(PlaceSheet, {
+        places: props.places,
+        value: bed.kind === "place" ? bed.place?.id ?? null : null,
+        title: `Where ${character.name} sleeps`,
+        suggestions: character.home ? [{ label: "Their home", place: character.home }] : [],
+        onClose: () => setOpen("bed"),
+        onPick: (place) => place ? pick({ kind: "place", place, item: null }) : pick({ kind: "home", place: character.home, item: null })
+      }, undefined, false, undefined, this) : null,
+      open === "thing" && props.things ? /* @__PURE__ */ u3(ThingSheet, {
+        things: props.things,
+        bed,
+        onClose: () => setOpen("bed"),
+        onPick: (item) => pick({ kind: "item", place: item.place, item })
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/character/text-list.tsx
+function TextListEditor(props) {
+  const [text, setText] = d2("");
+  const inputId = P2();
+  const add = () => {
+    const next = withText(props.value, text);
+    setText("");
+    if (next.length !== props.value.length)
+      props.onChange(next);
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field lre-cp-textlist",
+    "data-lre-text-list": props.label,
+    children: [
+      /* @__PURE__ */ u3("label", {
+        for: inputId,
+        children: props.label
+      }, undefined, false, undefined, this),
+      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-form-chips",
+        role: "list",
+        "aria-label": props.label,
+        children: props.value.map((item, i3) => /* @__PURE__ */ u3("span", {
+          role: "listitem",
+          children: /* @__PURE__ */ u3(Chip, {
+            removeLabel: `Remove ${item}`,
+            disabled: props.disabled,
+            onRemove: () => props.onChange(props.value.filter((_3, j3) => j3 !== i3)),
+            children: item
+          }, undefined, false, undefined, this)
+        }, `${i3}:${item}`, false, undefined, this))
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+        class: "lre-cp-note",
+        children: "None yet."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-cp-textlist-add",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            id: inputId,
+            class: "lre-input",
+            placeholder: props.placeholder ?? "Add one",
+            value: text,
+            disabled: props.disabled,
+            onInput: (event) => setText(event.currentTarget.value),
+            onKeyDown: (event) => {
+              if (event.key !== "Enter")
+                return;
+              event.preventDefault();
+              add();
+            }
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            icon: "plus",
+            disabled: props.disabled || text.trim() === "",
+            onClick: add,
+            children: "Add"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      props.help !== undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: props.help
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/character-model.ts
+function opensCharacterPage(doc, collection, id) {
+  if (collection !== "entities" || id === null || id.startsWith("new:"))
+    return false;
+  const e3 = hasOwn(doc.entities, id) ? doc.entities[id] : undefined;
+  return e3 !== undefined && kindIs(doc, e3.kind, "person");
+}
+function entityPatch(id, before, after) {
+  const ops = [];
+  const same = (a3, b3) => JSON.stringify(a3 ?? null) === JSON.stringify(b3 ?? null) && a3 === undefined === (b3 === undefined);
+  const diff = (base, was2, now2) => {
+    for (const key of new Set([...Object.keys(was2), ...Object.keys(now2)])) {
+      const a3 = was2[key];
+      const b3 = now2[key];
+      if (same(a3, b3))
+        continue;
+      const path = pointerOf([...base, key]);
+      if (b3 === undefined)
+        ops.push({ op: "remove", path });
+      else if (a3 === undefined)
+        ops.push({ op: "add", path, value: b3 });
+      else
+        ops.push({ op: "replace", path, value: b3 });
+    }
+  };
+  const { fields: wasFields, ...was } = before;
+  const { fields: nowFields, ...now } = after;
+  diff(["entities", id], was, now);
+  if (isRecord(wasFields) && isRecord(nowFields))
+    diff(["entities", id, "fields"], wasFields, nowFields);
+  else if (!same(wasFields, nowFields))
+    ops.push(nowFields === undefined ? { op: "remove", path: pointerOf(["entities", id, "fields"]) } : { op: wasFields === undefined ? "add" : "replace", path: pointerOf(["entities", id, "fields"]), value: nowFields });
+  return ops;
+}
+var RELATION_GROUP = {
+  parent_of: "family",
+  child_of: "family",
+  sibling_of: "family",
+  spouse_of: "family",
+  partner_of: "family",
+  kin_of: "family",
+  regard: "feelings",
+  drawn_to: "feelings",
+  knows: "feelings",
+  hostile: "feelings",
+  member_of: "groups"
+};
+var GROUP_LABEL = { family: "Family", feelings: "Feelings", groups: "Groups", other: "Other" };
+function relationGroups(relations) {
+  const out = { family: [], feelings: [], groups: [], other: [] };
+  relations.forEach((r3, index) => {
+    if (!isRecord(r3) || typeof r3.type !== "string" || typeof r3.to !== "string" || HIDDEN_RELATIONS[r3.type] === true)
+      return;
+    out[RELATION_GROUP[r3.type] ?? "other"].push({ index, type: r3.type, to: r3.to });
+  });
+  return out;
+}
+var HIDDEN_RELATIONS = { in: true, worn_by: true, equipped: true, uses: true };
+
 // src/shared/items-build.ts
 function isItemKind(kinds, kind) {
   let cur = kind;
@@ -15358,6 +16204,437 @@ function revealScaffold(entity) {
 function itemObjective(check, item, place = "") {
   const quote = (s3) => `'${s3}'`;
   return check === "at" ? `at(${quote(item)}, ${quote(place)})` : `${check}(pov, ${quote(item)})`;
+}
+
+// src/frontend/build/character.tsx
+var WHO_KEYS = new Set(["name", "kind", "tier", "class", "tags", "life", "lifeKnownBy"]);
+var SECRET_KEYS = new Set(["visibility", "knownBy", "cues"]);
+var fieldsOf = (value) => isRecord(value.fields) ? value.fields : {};
+function bedOf2(bed, places2, things) {
+  if (typeof bed !== "string" || bed === "")
+    return { kind: "home", place: null, item: null };
+  const place = places2.get(bed);
+  if (place)
+    return { kind: "place", place, item: null };
+  return { kind: "item", place: null, item: things.get(bed) ?? null };
+}
+function CharacterPage(props) {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d3) => d3);
+  const id = props.id ?? "";
+  const stored = props.world.entities[id];
+  const initial = isRecord(stored) ? stored : {};
+  const [value, setValue] = d2(initial);
+  const [busy, run] = useBusy();
+  useHeld(value, setValue, initial, `${props.world.id}/entities/${id}`, JSON.stringify(stored ?? null));
+  const [model, setModel] = d2(null);
+  const storedKey = JSON.stringify(stored ?? null);
+  A(() => {
+    let live = true;
+    app.request(characterRequest(id, { worldId: props.world.id })).then((body) => {
+      if (live && body)
+        setModel(body);
+    });
+    return () => {
+      live = false;
+    };
+  }, [app, id, props.world.id, storedKey]);
+  const formDoc = b2(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds }, relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
+  const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
+  const path = `entities.${id}`;
+  const ctx = { doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields };
+  const changed = JSON.stringify(value) !== storedKey;
+  const fields = fieldsOf(value);
+  const setField = (field, next) => {
+    const out = { ...fields };
+    if (next === undefined)
+      delete out[field];
+    else
+      out[field] = next;
+    setValue({ ...value, fields: out });
+  };
+  const save = () => run(async () => {
+    const ops = entityPatch(id, initial, value);
+    if (ops.length > 0)
+      await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "patch", ops });
+  });
+  const character = model?.character ?? null;
+  const name = typeof value.name === "string" && value.name !== "" ? value.name : id;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-page lre-character-page",
+    "data-lre-editor": "character",
+    children: [
+      /* @__PURE__ */ u3(ItemHeader, {
+        title: name,
+        id,
+        subtitle: character ? `${character.kind.label} · ${character.tier.label}` : undefined,
+        actions: character?.pov ? /* @__PURE__ */ u3(Badge, {
+          tone: "accent",
+          children: "Player character"
+        }, undefined, false, undefined, this) : undefined,
+        onDelete: () => run(() => deleteItem(app, props.send, { worldId: props.world.id, collection: "entities", id, name })),
+        busy
+      }, undefined, false, undefined, this),
+      lintAt(draft?.lint ?? [], path).filter((issue) => issue.path === path).map((issue) => /* @__PURE__ */ u3(Banner, {
+        tone: issue.severity === "error" ? "neg" : issue.severity === "warning" ? "warn" : "info",
+        children: issue.message
+      }, issue.code, false, undefined, this)),
+      /* @__PURE__ */ u3(Section, {
+        title: "Who they are",
+        children: [
+          /* @__PURE__ */ u3(SchemaFields, {
+            specs: COLLECTION_SPECS.entities.filter((s3) => WHO_KEYS.has(s3.key)),
+            value,
+            ctx,
+            onChange: setValue
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SectionFields, {
+            section: "identity",
+            model: character,
+            value,
+            ctx,
+            onField: setField
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      model ? /* @__PURE__ */ u3(WhereTheyLive, {
+        model,
+        value,
+        world: formDoc,
+        onField: setField,
+        onChange: setValue
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(TheirDay, {
+        world: props.world,
+        id,
+        value,
+        model: character,
+        ctx,
+        onChange: setValue,
+        onField: setField
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Work and money",
+        children: [
+          /* @__PURE__ */ u3(RefPicker, {
+            label: "Works for",
+            value: typeof fields.employer === "string" ? fields.employer : "",
+            options: entitiesOfKind(formDoc, "business"),
+            none: "No employer",
+            placeholder: "Pick a business",
+            onChange: (v3) => setField("employer", v3 === "" ? undefined : v3)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SectionFields, {
+            section: "work",
+            model: character,
+            value,
+            ctx,
+            onField: setField,
+            skip: ["employer"]
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(People, {
+        world: formDoc,
+        id,
+        value,
+        onChange: setValue
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Stats",
+        children: [
+          (character?.sections.find((s3) => s3.id === "stats")?.fields.length ?? 0) === 0 ? /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: "Their kind has no sheet numbers or conditions."
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(SectionFields, {
+            section: "stats",
+            model: character,
+            value,
+            ctx,
+            onField: setField
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(ThingsTheyHave, {
+        world: props.world,
+        id
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Secrets",
+        children: /* @__PURE__ */ u3(SchemaFields, {
+          specs: COLLECTION_SPECS.entities.filter((s3) => SECRET_KEYS.has(s3.key)),
+          value,
+          ctx,
+          onChange: setValue
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(LorePinsSection, {
+        target: "characters",
+        id
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Disclosure, {
+        summary: "All fields",
+        children: /* @__PURE__ */ u3(SchemaFields, {
+          specs: COLLECTION_SPECS.entities,
+          value,
+          ctx,
+          onChange: setValue
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SaveBar, {
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: !changed,
+            busy,
+            onClick: save,
+            children: "Save to draft"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: busy || !changed,
+            onClick: () => setValue(initial),
+            children: "Revert"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function SectionFields(props) {
+  const kind = typeof props.value.kind === "string" ? props.value.kind : "";
+  const defs = kindFields(props.ctx.doc, kind);
+  const listed = props.model?.sections.find((s3) => s3.id === props.section)?.fields ?? [];
+  const fields = fieldsOf(props.value);
+  return /* @__PURE__ */ u3(M, {
+    children: listed.filter((f3) => !(props.skip ?? []).includes(f3.id)).map((f3) => {
+      const def = defs[f3.id];
+      if (!def)
+        return null;
+      const v3 = fields[f3.id];
+      if (def.type === "list" && (def.of === undefined || def.of === "text") && (v3 === undefined || Array.isArray(v3) && v3.every((x2) => typeof x2 === "string"))) {
+        return /* @__PURE__ */ u3(TextListEditor, {
+          label: f3.label,
+          value: Array.isArray(v3) ? v3.filter((x2) => typeof x2 === "string") : [],
+          onChange: (next) => props.onField(f3.id, next.length > 0 ? next : undefined)
+        }, f3.id, false, undefined, this);
+      }
+      return /* @__PURE__ */ u3(DefInput, {
+        name: f3.id,
+        def: { ...def, label: f3.label, ...f3.help ? { hint: f3.help } : {} },
+        defs,
+        value: v3,
+        ctx: props.ctx,
+        path: `${props.ctx.path}.fields.${f3.id}`,
+        onChange: (next) => props.onField(f3.id, next)
+      }, f3.id, false, undefined, this);
+    })
+  }, undefined, false, undefined, this);
+}
+function WhereTheyLive(props) {
+  const { places: places2, things } = props.model;
+  const byId = b2(() => new Map(places2.map((p3) => [p3.id, p3])), [places2]);
+  const thingsById = b2(() => new Map(things.map((t3) => [t3.id, t3])), [things]);
+  const fields = fieldsOf(props.value);
+  const home = typeof fields.home === "string" ? byId.get(fields.home) ?? null : null;
+  const start = typeof fields.place === "string" ? byId.get(fields.place) ?? null : null;
+  const bed = bedOf2(fields.bed, byId, thingsById);
+  const character = { ...props.model.character, home, bed };
+  const relations = Array.isArray(props.value.relations) ? props.value.relations : [];
+  const inside = relations.find((r3) => isRecord(r3) && r3.type === "in" && typeof r3.to === "string");
+  const setInside = (to) => {
+    const rest = relations.filter((r3) => !(isRecord(r3) && r3.type === "in"));
+    props.onChange({ ...props.value, relations: to === "" ? rest : [...rest, { type: "in", to }] });
+  };
+  return /* @__PURE__ */ u3(Section, {
+    title: "Where they live",
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      children: [
+        /* @__PURE__ */ u3(PlacePicker, {
+          title: "Their home",
+          label: "Home",
+          places: places2,
+          value: home?.id ?? null,
+          clearLabel: "No home",
+          onPick: (p3) => props.onField("home", p3?.id)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(BedPicker, {
+          character,
+          places: places2,
+          things,
+          onPick: (next) => props.onField("bed", bedValue(next) ?? undefined)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(PlacePicker, {
+          title: "Where the story starts them",
+          label: "Where the story starts them",
+          places: places2,
+          value: start?.id ?? null,
+          suggestions: home ? [{ label: "Their home", place: home }] : [],
+          onPick: (p3) => props.onField("place", p3?.id)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(RefPicker, {
+          label: "Starts inside",
+          value: typeof inside?.to === "string" ? inside.to : "",
+          options: entitiesOfKind(props.world, "vehicle"),
+          none: "Nothing (on foot)",
+          placeholder: "Pick a vehicle",
+          onChange: setInside
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function TheirDay(props) {
+  const app = useApp();
+  const routines = Object.values(props.world.routines ?? {}).filter((r3) => r3.owner === props.id);
+  const schedules = Object.values(props.world.schedules).filter((s3) => s3.owner === props.id);
+  return /* @__PURE__ */ u3(Section, {
+    title: "Their day",
+    children: [
+      /* @__PURE__ */ u3(CheckField, {
+        label: "Lives their own day (agendas and plans)",
+        checked: props.value.agent === true,
+        onChange: (on) => props.onChange({ ...props.value, agent: on })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "Routine",
+        children: [
+          routines.length === 0 ? /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: "No routine of their own: they keep the basic needs, and any routine their group or kind has."
+          }, undefined, false, undefined, this) : null,
+          routines.map((r3) => /* @__PURE__ */ u3(ItemRow, {
+            title: r3.label ?? humanize(r3.id),
+            subtitle: `${r3.blocks.length} ${r3.blocks.length === 1 ? "block" : "blocks"}`,
+            openLabel: "Edit their routine",
+            onOpen: () => go(app, { view: "item", worldId: props.world.id, collection: "routines", id: r3.id })
+          }, r3.id, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      schedules.length > 0 ? /* @__PURE__ */ u3(FormGroup, {
+        title: "Schedules",
+        children: schedules.map((s3) => /* @__PURE__ */ u3(ItemRow, {
+          title: humanize(s3.id),
+          subtitle: `Sets ${humanize(s3.target)}`,
+          openLabel: "Edit the schedule",
+          onOpen: () => go(app, { view: "item", worldId: props.world.id, collection: "schedules", id: s3.id })
+        }, s3.id, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(SectionFields, {
+        section: "day",
+        model: props.model,
+        value: props.value,
+        ctx: props.ctx,
+        onField: props.onField
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function entitiesOfKind(doc, kind) {
+  return Object.values(doc.entities).filter((e3) => kindIs(doc, e3.kind, kind)).map((e3) => ({ value: e3.id, label: e3.name })).sort((a3, b3) => a3.label.localeCompare(b3.label));
+}
+function People(props) {
+  const relations = Array.isArray(props.value.relations) ? props.value.relations : [];
+  const groups = relationGroups(relations);
+  const [type, setType] = d2("");
+  const [to, setTo] = d2("");
+  const nameOf3 = (id) => props.world.entities[id]?.name ?? humanize(id);
+  const labelOf = (t3) => props.world.relations[t3]?.label ?? humanize(t3);
+  const types = Object.values(props.world.relations).filter((r3) => r3.id !== "in" && r3.id !== "travels_with" && r3.id !== "worn_by" && r3.id !== "equipped" && r3.id !== "uses").map((r3) => ({ value: r3.id, label: r3.label ?? humanize(r3.id) })).sort((a3, b3) => a3.label.localeCompare(b3.label));
+  const people = Object.values(props.world.entities).filter((e3) => e3.id !== props.id && (kindIs(props.world, e3.kind, "person") || kindIs(props.world, e3.kind, "group"))).map((e3) => ({ value: e3.id, label: e3.name, ...kindIs(props.world, e3.kind, "group") ? { sublabel: "a group" } : {} })).sort((a3, b3) => a3.label.localeCompare(b3.label));
+  const remove = (index) => props.onChange({ ...props.value, relations: relations.filter((_3, i3) => i3 !== index) });
+  const add = () => {
+    props.onChange({ ...props.value, relations: [...relations, { type, to }] });
+    setTo("");
+  };
+  return /* @__PURE__ */ u3(Section, {
+    title: "People",
+    children: [
+      Object.keys(groups).map((g2) => groups[g2].length === 0 ? null : /* @__PURE__ */ u3(FormGroup, {
+        title: GROUP_LABEL[g2],
+        children: groups[g2].map((r3) => /* @__PURE__ */ u3(ItemRow, {
+          title: nameOf3(r3.to),
+          subtitle: labelOf(r3.type),
+          actions: /* @__PURE__ */ u3(IconButton, {
+            icon: "trash",
+            label: `Remove ${labelOf(r3.type)} ${nameOf3(r3.to)}`,
+            onClick: () => remove(r3.index)
+          }, undefined, false, undefined, this)
+        }, r3.index, false, undefined, this))
+      }, g2, false, undefined, this)),
+      relations.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "No one yet."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "Add someone",
+        children: [
+          /* @__PURE__ */ u3(RefPicker, {
+            label: "How they're tied",
+            value: type,
+            options: types,
+            placeholder: "Pick a relation",
+            onChange: setType
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(RefPicker, {
+            label: "To",
+            value: to,
+            options: people,
+            placeholder: "Search people and groups by name",
+            onChange: setTo
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            icon: "plus",
+            disabled: type === "" || to === "",
+            onClick: add,
+            children: "Add"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: "A relation's own details (how warm, since when) are under All fields → Relations."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ThingsTheyHave(props) {
+  const app = useApp();
+  const owns = (e3) => e3.fields.owner === props.id || Array.isArray(e3.fields.owners) && e3.fields.owners.includes(props.id);
+  const owned2 = Object.values(props.world.entities).filter((e3) => (kindIs(props.world, e3.kind, "vehicle") || kindIs(props.world, e3.kind, "property")) && owns(e3));
+  const carried = authoredContents(props.world, props.id, "entities");
+  const open = (id) => go(app, { view: "item", worldId: props.world.id, collection: "entities", id });
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-contents": props.id,
+    children: /* @__PURE__ */ u3(Section, {
+      title: "Things they have",
+      children: [
+        carried.length === 0 && owned2.length === 0 ? /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: "Nothing the world puts on them, and no vehicle or property of theirs."
+        }, undefined, false, undefined, this) : null,
+        carried.map((row) => /* @__PURE__ */ u3(ItemRow, {
+          title: row.name,
+          subtitle: "On them",
+          badge: row.hidden ? /* @__PURE__ */ u3(Badge, {
+            tone: "gm",
+            children: "Hidden until searched"
+          }, undefined, false, undefined, this) : undefined,
+          openLabel: `Open ${row.name}`,
+          onOpen: () => open(row.id)
+        }, row.id, false, undefined, this)),
+        owned2.map((e3) => /* @__PURE__ */ u3(ItemRow, {
+          title: e3.name,
+          subtitle: `Theirs · ${humanize(e3.kind)}`,
+          openLabel: `Open ${e3.name}`,
+          onOpen: () => open(e3.id)
+        }, e3.id, false, undefined, this))
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
 }
 
 // src/frontend/build/contents.tsx
@@ -23775,7 +25052,8 @@ function ItemView(props) {
   if (!draft)
     return null;
   const registered = app.catalog.editors.get(props.collection);
-  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
+  const character = opensCharacterPage({ ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } }, props.collection, props.id);
+  const Editor = registered ? registered.component : character ? CharacterPage : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return /* @__PURE__ */ u3(Editor, {
     world: draft.doc,
     collection: props.collection,
@@ -25235,17 +26513,6 @@ function ThisChat(props) {
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
-}
-
-// src/frontend/gm/gate.ts
-function revealTruth(ui) {
-  return ui.gm.revealed ? ui : { ...ui, gm: { ...ui.gm, revealed: true } };
-}
-function hideTruth(ui) {
-  return ui.gm.revealed ? { ...ui, gm: { ...ui.gm, revealed: false } } : ui;
-}
-function gmAt(ui, section) {
-  return ui.gm.section === section ? ui : { ...ui, gm: { ...ui.gm, section } };
 }
 
 // src/frontend/gm/mode.tsx
@@ -28664,13 +29931,13 @@ class OverlayController {
 }
 
 // src/frontend/palette.tsx
-var GROUP_LABEL = { combat: "Combat", action: "Actions", buy: "Buy", pay: "Pay", transfer: "Transfer", drive: "Drive", lend: "Lend" };
+var GROUP_LABEL2 = { combat: "Combat", action: "Actions", buy: "Buy", pay: "Pay", transfer: "Transfer", drive: "Drive", lend: "Lend" };
 var GROUP_TAB = { combat: "combat", action: "actions", buy: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
 function paletteTabs(palette) {
   const tabs = [];
-  for (const group of Object.keys(GROUP_LABEL)) {
+  for (const group of Object.keys(GROUP_LABEL2)) {
     if (palette.entries.some((entry) => entry.group === group))
-      tabs.push({ id: GROUP_TAB[group], label: GROUP_LABEL[group] });
+      tabs.push({ id: GROUP_TAB[group], label: GROUP_LABEL2[group] });
   }
   if (palette.timelapse)
     tabs.push({ id: "timelapse", label: "Timelapse" });
@@ -28849,7 +30116,7 @@ function OptionOdds(props) {
     ]
   }, undefined, true, undefined, this);
 }
-function OptionRow(props) {
+function OptionRow2(props) {
   const { option } = props;
   const blocked = option.disabled !== undefined;
   return /* @__PURE__ */ u3("button", {
@@ -28955,7 +30222,7 @@ function NextStep(props) {
         ]
       }, undefined, true, undefined, this) : /* @__PURE__ */ u3("div", {
         class: "lre-list",
-        children: props.step.options.map((option) => /* @__PURE__ */ u3(OptionRow, {
+        children: props.step.options.map((option) => /* @__PURE__ */ u3(OptionRow2, {
           option,
           current: samePick(props.chosen, option),
           onPick: () => props.onPick(option)
@@ -29026,7 +30293,7 @@ function ActionList(props) {
               }, undefined, true, undefined, this),
               /* @__PURE__ */ u3("div", {
                 class: "lre-list",
-                children: entry.options.map((option) => /* @__PURE__ */ u3(OptionRow, {
+                children: entry.options.map((option) => /* @__PURE__ */ u3(OptionRow2, {
                   option,
                   current: selected?.entry.action === entry.action && samePick(selected.picks[0], option),
                   onPick: () => pick(entry, 0, option)
@@ -30882,6 +32149,7 @@ function GmRoutinesSection(props) {
   const app = useApp();
   const worldId = useView()?.worldId ?? null;
   const pages = usePages();
+  useGmFocus((id) => pages.open(id));
   const [query, setQuery] = d2("");
   const [filter, setFilter] = d2("");
   const [changed, setChanged] = d2(null);
@@ -31116,6 +32384,9 @@ function CharacterPages(props) {
             ]
           }, undefined, true, undefined, this),
           backLabel: "Routines",
+          actions: /* @__PURE__ */ u3(SheetLink, {
+            entity: row.entity
+          }, undefined, false, undefined, this),
           onBack: props.onBack,
           children: [
             error ? /* @__PURE__ */ u3(Banner, {
@@ -36454,7 +37725,7 @@ function isItemKind2(kinds, kind) {
   }
   return false;
 }
-function BedPicker(props) {
+function BedPicker2(props) {
   const { entity, editor } = props;
   const select = P2();
   const field = entity.fields.find((f3) => f3.id === "bed");
@@ -37353,7 +38624,7 @@ function EntityPage(props) {
         /* @__PURE__ */ u3(Placement, {
           entity,
           editor,
-          children: /* @__PURE__ */ u3(BedPicker, {
+          children: /* @__PURE__ */ u3(BedPicker2, {
             entity,
             editor
           }, undefined, false, undefined, this)
@@ -41698,6 +42969,7 @@ function GmMoneySection(props) {
   const parties = props.gm.money.map((raw) => ({ raw, view: decodeFinanceView(raw) }));
   const [query, setQuery] = d2("");
   const [picked, setPicked] = d2(null);
+  useGmFocus(setPicked);
   if (parties.length === 0)
     return /* @__PURE__ */ u3(Empty, {
       icon: "coins",
@@ -42602,6 +43874,7 @@ function send(ctx, op, onDone) {
 function GmMindsSection(props) {
   const view = props.gm.minds;
   const pages = usePages();
+  useGmFocus((id) => pages.open(id));
   const [query, setQuery] = d2("");
   const [level, setLevel] = d2("");
   const picking = useSelection();
@@ -42863,6 +44136,9 @@ function CharacterPages2(props) {
             ]
           }, undefined, true, undefined, this),
           backLabel: "Minds",
+          actions: /* @__PURE__ */ u3(SheetLink, {
+            entity: c3.entity
+          }, undefined, false, undefined, this),
           onBack: props.onBack,
           children: /* @__PURE__ */ u3("div", {
             class: "lre-gm-minds",
@@ -45685,7 +46961,7 @@ function PlaceDetail(props) {
   }, undefined, true, undefined, this);
 }
 var focusSeq = 0;
-function PlaceSheet(props) {
+function PlaceSheet2(props) {
   const app = useApp();
   const raw = props.state.panels["space.map"];
   const view = b2(() => decodeMapView(raw), [raw]);
@@ -48165,7 +49441,7 @@ function MapSheet(props) {
           children: "This place isn't on the map any more."
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this);
-    return /* @__PURE__ */ u3(PlaceSheet2, {
+    return /* @__PURE__ */ u3(PlaceSheet3, {
       place,
       model,
       facts: props.facts,
@@ -48376,7 +49652,7 @@ function NewPlaceSheet(props) {
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
 }
-function PlaceSheet2(props) {
+function PlaceSheet3(props) {
   const { place, model } = props;
   const [idText, setIdText] = d2(place.id);
   A(() => setIdText(place.id), [place.id]);
@@ -48810,7 +50086,7 @@ var space = {
   id: "space",
   register(r3) {
     r3.panel({ id: "space.map", label: "Map", order: 15, home: "places", component: MapPanel });
-    r3.sheet("place", PlaceSheet);
+    r3.sheet("place", PlaceSheet2);
     r3.editor({ collection: "grids", label: "Grids", component: GridEditor });
     r3.editor({ collection: "places", label: "Places", component: PlaceEditor });
     r3.editor({ collection: "maps", label: "Maps", component: MapEditor });
@@ -50788,6 +52064,420 @@ function BatchPage(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/frontend/gm/character-ops.ts
+function moveOp(entity, place) {
+  return place && place.id !== entity.place ? { op: "move", entity: entity.id, to: place.id } : null;
+}
+function homeOp(entity, place) {
+  return { op: "set", entity: entity.id, field: "home", value: place?.id ?? null };
+}
+function bedOp(entity, bed) {
+  return { op: "set", entity: entity.id, field: "bed", value: bedValue(bed) };
+}
+function partySwitchOp(entity, gm, on) {
+  const party = partyOf(entity, gm);
+  return party && party.travels !== on ? party.op : null;
+}
+
+// src/frontend/gm/character.tsx
+function placePath2(place) {
+  return place ? [...place.path, place.name].join(" › ") : "Nowhere";
+}
+var SHOWN_ABOVE = { place: true, home: true, bed: true };
+function carried(entity, editor) {
+  const how = (e3) => {
+    for (const r3 of e3.relations) {
+      if (r3.to !== entity.id)
+        continue;
+      if (r3.type === "worn_by")
+        return "worn";
+      if (r3.type === "equipped")
+        return "equipped";
+      if (r3.type === "in")
+        return "carried";
+    }
+    return null;
+  };
+  const order = { worn: 0, equipped: 1, carried: 2 };
+  return editor.gm.entities.flatMap((e3) => {
+    const h3 = e3.gone ? null : how(e3);
+    return h3 ? [{ id: e3.id, name: e3.name, how: h3 }] : [];
+  }).sort((a3, b3) => (order[a3.how] ?? 3) - (order[b3.how] ?? 3) || a3.name.localeCompare(b3.name));
+}
+function CharacterSheet(props) {
+  const { entity, editor } = props;
+  const app = useApp();
+  const [read, setRead] = d2(null);
+  const [error, setError] = d2(null);
+  const [routine, setRoutine] = d2(null);
+  const [moving, setMoving] = d2(false);
+  A(() => {
+    let live = true;
+    app.request(characterRequest(entity.id, { chatId: props.chatId })).then((result) => {
+      if (!live)
+        return;
+      if (result === null)
+        return setError("This character couldn't be read.");
+      setError(null);
+      setRead(result);
+    });
+    app.request({ type: "lre.routine", chatId: props.chatId, op: "day", entity: entity.id, view: "gm" }).then((result) => {
+      if (live)
+        setRoutine(result?.gm ?? null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [entity.id, props.chatId, editor.gm]);
+  const edit = (ops) => void editor.edit(ops);
+  const pov = editor.gm.entities.find((e3) => e3.pov) ?? null;
+  const party = partyOf(entity, editor.gm);
+  const bring = bringOp(entity, editor.gm);
+  const mind = editor.gm.minds.characters.find((c3) => c3.entity === entity.id) ?? null;
+  const money2 = editor.gm.money.find((m2) => m2.party === entity.id) ?? null;
+  const things = carried(entity, editor);
+  const character = read?.character ?? null;
+  const places2 = read?.places ?? [];
+  const placeOf3 = (id) => id === null ? null : places2.find((p3) => p3.id === id) ?? null;
+  const povPlace = placeOf3(pov?.place ?? null);
+  const suggestions = [
+    ...character?.home ? [{ label: "Their home", place: character.home }] : [],
+    ...pov && !entity.pov && povPlace ? [{ label: `Where ${pov.name} is`, place: povPlace }] : []
+  ];
+  const plain = new Map((character?.sections ?? []).flatMap((s3) => s3.fields).map((f3) => [f3.id, f3]));
+  const fields = entity.fields.filter((f3) => !SHOWN_ABOVE[f3.id]).map((f3) => ({ ...f3, label: plain.get(f3.id)?.label ?? f3.label }));
+  const minutes = editor.gm.minds.now;
+  const current2 = routine?.day.blocks.find((b3) => b3.start <= minutes && b3.end > minutes) ?? null;
+  const next = routine?.day.blocks.find((b3) => b3.start > minutes) ?? null;
+  return /* @__PURE__ */ u3(GmPage, {
+    name: "character",
+    title: entity.name,
+    subtitle: /* @__PURE__ */ u3(M, {
+      children: [
+        character?.kind.label ?? entity.kind,
+        " · ",
+        editor.gm.tiers.find((t3) => t3.id === entity.tier)?.label ?? entity.tier,
+        /* @__PURE__ */ u3(IdText, {
+          id: entity.id
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this),
+    backLabel: props.backLabel ?? "World",
+    onBack: props.onBack,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-gm-entity lre-gm-character",
+      "data-lre-gm-character": entity.id,
+      children: [
+        /* @__PURE__ */ u3("div", {
+          class: "lre-gm-badges start",
+          "aria-label": "About them",
+          children: [
+            entity.pov ? /* @__PURE__ */ u3(Badge, {
+              tone: "accent",
+              children: "Player character"
+            }, undefined, false, undefined, this) : null,
+            mind ? /* @__PURE__ */ u3(Badge, {
+              tone: mind.fidelity.level === "live" ? "accent" : "neutral",
+              children: FIDELITY_LABEL[mind.fidelity.level]
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3(Badge, {
+              children: editor.gm.tiers.find((t3) => t3.id === entity.tier)?.label ?? entity.tier
+            }, undefined, false, undefined, this),
+            entity.gone ? /* @__PURE__ */ u3(Badge, {
+              tone: "neg",
+              children: "Removed"
+            }, undefined, false, undefined, this) : entity.life.state !== "alive" ? /* @__PURE__ */ u3(Badge, {
+              tone: "neg",
+              children: entity.life.label
+            }, undefined, false, undefined, this) : null,
+            party?.travels ? /* @__PURE__ */ u3(Badge, {
+              tone: "pos",
+              children: [
+                "Travels with ",
+                party.pov.name
+              ]
+            }, undefined, true, undefined, this) : null,
+            entity.agent ? /* @__PURE__ */ u3(Badge, {
+              children: "Lives their own day"
+            }, undefined, false, undefined, this) : null,
+            entity.visibility !== "public" ? /* @__PURE__ */ u3(Badge, {
+              tone: "gm",
+              children: entity.visibility === "secret" ? "Secret" : entity.visibility === "known_by" ? "Known by some" : "Discoverable"
+            }, undefined, false, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this),
+        entity.gone && !entity.pov ? /* @__PURE__ */ u3(Banner, {
+          tone: "neg",
+          title: "Removed from the world",
+          actions: /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            icon: "undo",
+            disabled: editor.busy,
+            onClick: () => edit([{ op: "restore", entity: entity.id }]),
+            children: "Restore"
+          }, undefined, false, undefined, this),
+          children: "Out of the world until restored; their relations were unlinked."
+        }, undefined, false, undefined, this) : null,
+        error ? /* @__PURE__ */ u3(Banner, {
+          tone: "warn",
+          children: error
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(Section, {
+          title: "Now",
+          children: [
+            /* @__PURE__ */ u3(ActionRows, {
+              label: "Now",
+              children: [
+                /* @__PURE__ */ u3(ActionRow, {
+                  title: "Where",
+                  value: character ? placePath2(character.place) : nameOf3(editor.gm, entity.place)
+                }, undefined, false, undefined, this),
+                character?.now ? /* @__PURE__ */ u3(ActionRow, {
+                  title: "Doing",
+                  value: `${character.now.activityLabel}${character.now.until ? `, until ${character.now.until}` : ""}`
+                }, undefined, false, undefined, this) : null,
+                entity.holder ? /* @__PURE__ */ u3(ActionRow, {
+                  title: "Inside",
+                  value: character?.inside?.name ?? nameOf3(editor.gm, entity.holder),
+                  actions: /* @__PURE__ */ u3(Button, {
+                    size: "sm",
+                    disabled: editor.busy,
+                    onClick: () => edit([{ op: "put", entity: entity.id, into: null }]),
+                    children: "Take out"
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this) : null,
+                (character?.now?.holds ?? []).map((h3) => /* @__PURE__ */ u3(ActionRow, {
+                  title: "The story holds",
+                  value: `${h3.label}${h3.until ? `, until ${h3.until}` : ""}`
+                }, h3.label, false, undefined, this))
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3("div", {
+              class: "lre-inline",
+              children: [
+                /* @__PURE__ */ u3(Button, {
+                  icon: "pin",
+                  disabled: editor.busy || character === null,
+                  onClick: () => setMoving(true),
+                  children: "Move them…"
+                }, undefined, false, undefined, this),
+                bring && pov ? /* @__PURE__ */ u3(Button, {
+                  disabled: editor.busy,
+                  onClick: () => edit([bring]),
+                  children: [
+                    "Bring to ",
+                    pov.name,
+                    "'s place"
+                  ]
+                }, undefined, true, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this),
+            party ? /* @__PURE__ */ u3(HostSwitch, {
+              checked: party.travels,
+              label: `Travels with ${party.pov.name}: goes wherever ${party.pov.name} goes`,
+              disabled: editor.busy,
+              onChange: (on) => {
+                const op = partySwitchOp(entity, editor.gm, on);
+                if (op)
+                  edit([op]);
+              }
+            }, undefined, false, undefined, this) : null,
+            moving ? /* @__PURE__ */ u3(PlaceSheet, {
+              title: `Move ${entity.name}`,
+              places: places2,
+              value: character?.place?.id ?? null,
+              suggestions,
+              onClose: () => setMoving(false),
+              onPick: (place) => {
+                setMoving(false);
+                const op = moveOp(entity, place);
+                if (op)
+                  edit([op]);
+              }
+            }, undefined, false, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this),
+        character ? /* @__PURE__ */ u3(Section, {
+          title: "Where they live",
+          children: [
+            /* @__PURE__ */ u3(PlacePicker, {
+              title: "Their home",
+              label: "Home",
+              places: places2,
+              value: character.home?.id ?? null,
+              suggestions: suggestions.filter((s3) => s3.label !== "Their home"),
+              disabled: editor.busy,
+              onPick: (place) => edit([homeOp(entity, place)])
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(BedPicker, {
+              character,
+              places: places2,
+              things: read?.things ?? [],
+              disabled: editor.busy,
+              onPick: (bed) => edit([bedOp(entity, bed)])
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null,
+        mind ? /* @__PURE__ */ u3(Section, {
+          title: "Mind",
+          aside: /* @__PURE__ */ u3(Badge, {
+            tone: mind.fidelity.level === "live" ? "accent" : "neutral",
+            children: FIDELITY_LABEL[mind.fidelity.level]
+          }, undefined, false, undefined, this),
+          children: [
+            /* @__PURE__ */ u3(ActionRows, {
+              label: "Mind",
+              children: [
+                /* @__PURE__ */ u3(ActionRow, {
+                  title: "Means to",
+                  value: mind.intent?.text ? `${mind.intent.text}${mind.intent.approach ? ` (${APPROACH_LABEL[mind.intent.approach].toLowerCase()})` : ""}` : "Nothing the GM set"
+                }, undefined, false, undefined, this),
+                mind.mind ? /* @__PURE__ */ u3(ActionRow, {
+                  title: "Latest mind",
+                  value: mind.mind.clock
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              variant: "secondary",
+              iconAfter: "chevron-right",
+              onClick: () => app.ui.update((ui) => gmOpen(ui, "minds.gm", entity.id)),
+              children: "Open their mind"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null,
+        entity.pov ? null : /* @__PURE__ */ u3(Section, {
+          title: "Routine",
+          children: [
+            /* @__PURE__ */ u3(ActionRows, {
+              label: "Routine",
+              children: [
+                current2 ? /* @__PURE__ */ u3(ActionRow, {
+                  title: "Now",
+                  value: `${current2.label}, ${current2.from}–${current2.to}${current2.placeName ? ` at ${current2.placeName}` : ""}`
+                }, undefined, false, undefined, this) : null,
+                next ? /* @__PURE__ */ u3(ActionRow, {
+                  title: "Next",
+                  value: `${next.label}, ${next.from}–${next.to}${next.placeName ? ` at ${next.placeName}` : ""}`
+                }, undefined, false, undefined, this) : null,
+                !current2 && !next ? /* @__PURE__ */ u3(ActionRow, {
+                  title: "Today",
+                  value: routine ? "Nothing more today" : "—"
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              variant: "secondary",
+              iconAfter: "chevron-right",
+              onClick: () => app.ui.update((ui) => gmOpen(ui, "castlife.routines", entity.id)),
+              children: "Open their routine"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3(Section, {
+          title: "Carrying",
+          children: things.length === 0 ? /* @__PURE__ */ u3("p", {
+            class: "lre-gm-none",
+            children: "Nothing."
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(ActionRows, {
+            label: "Carrying",
+            children: things.map((t3) => /* @__PURE__ */ u3(ActionRow, {
+              title: t3.name,
+              value: t3.how,
+              actions: props.onOpen ? /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "ghost",
+                onClick: () => props.onOpen?.(t3.id),
+                children: "Open"
+              }, undefined, false, undefined, this) : undefined
+            }, t3.id, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        money2 ? /* @__PURE__ */ u3(Section, {
+          title: "Money",
+          children: [
+            /* @__PURE__ */ u3(ActionRows, {
+              label: "Money",
+              children: [
+                money2.cash && "cents" in money2.cash ? /* @__PURE__ */ u3(ActionRow, {
+                  title: "Cash",
+                  value: formatMoney(money2.cash.cents, editor.currency)
+                }, undefined, false, undefined, this) : null,
+                money2.band ? /* @__PURE__ */ u3(ActionRow, {
+                  title: "Wealth",
+                  value: money2.band
+                }, undefined, false, undefined, this) : null,
+                money2.accounts.length > 0 ? /* @__PURE__ */ u3(ActionRow, {
+                  title: "Accounts",
+                  value: String(money2.accounts.length)
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              variant: "secondary",
+              iconAfter: "chevron-right",
+              onClick: () => app.ui.update((ui) => gmOpen(ui, "economy.money", entity.id)),
+              children: "Open their money"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null,
+        /* @__PURE__ */ u3(Relations, {
+          entity,
+          editor
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Simulation, {
+          entity,
+          editor
+        }, `${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`, false, undefined, this),
+        /* @__PURE__ */ u3(Life, {
+          entity,
+          editor
+        }, JSON.stringify(entity.life), false, undefined, this),
+        /* @__PURE__ */ u3(Classification, {
+          entity,
+          editor
+        }, JSON.stringify([entity.class, entity.tags]), false, undefined, this),
+        entity.pov || entity.gone ? null : /* @__PURE__ */ u3(Section, {
+          title: "Remove",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: [
+                "Takes ",
+                entity.name,
+                " out of the world and unlinks their relations. The edit's Undo, or Restore here, brings them back."
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              variant: "danger",
+              icon: "trash",
+              disabled: editor.busy,
+              onClick: () => edit([{ op: "despawn", entity: entity.id }]),
+              children: "Remove from the world"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3(Section, {
+          title: "All fields",
+          children: /* @__PURE__ */ u3(Disclosure, {
+            summary: `Every field (${fields.length})`,
+            children: fields.length === 0 ? /* @__PURE__ */ u3(Empty, {
+              children: "None."
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(ActionRows, {
+              label: "All fields",
+              children: fields.map((f3) => /* @__PURE__ */ u3(FieldRow, {
+                entity,
+                field: f3,
+                editor
+              }, f3.id, false, undefined, this))
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
 // src/frontend/gm/world.tsx
 function FightCard(props) {
   const { fight } = props;
@@ -50913,6 +52603,7 @@ function WorldSection(props) {
   const [query, setQuery] = d2("");
   const [kind, setKind] = d2("");
   const pages = usePages();
+  useGmFocus((id) => pages.open({ entity: id }));
   const selection = useSelection();
   const fight = editor.gm.encounter === null ? null : decodeEncounterView(editor.gm.encounter);
   const turn = fight === null ? "" : fight.yours ? "Your turn" : `${fight.turn.charAt(0).toUpperCase()}${fight.turn.slice(1)}'s turn`;
@@ -51066,7 +52757,13 @@ function WorldSection(props) {
           view: fight
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
-      entity ? /* @__PURE__ */ u3(EntityPage, {
+      entity ? entity.person ? /* @__PURE__ */ u3(CharacterSheet, {
+        entity,
+        editor,
+        chatId: props.chatId,
+        onBack: pages.back,
+        onOpen: (id) => pages.open({ entity: id })
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(EntityPage, {
         entity,
         editor,
         onBack: pages.back
@@ -51147,7 +52844,8 @@ function GmPanel(props) {
         reload: load,
         send: props.send
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(WorldSection, {
-        editor
+        editor,
+        chatId: props.chatId
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -51854,6 +53552,7 @@ var REQUEST_TYPES = {
   "lre.diag": true,
   "lre.minds": true,
   "lre.routine": true,
+  "lre.character": true,
   "lre.agents": true,
   "lre.cancel": true
 };
@@ -52235,6 +53934,44 @@ textarea.lre-input.lre-build-prose{font-family:inherit;font-size:var(--lre-fs-md
 .lre-build-profile-head{display:flex;align-items:center;gap:var(--lre-s2);font-size:var(--lre-fs-sm);font-weight:500}
 .lre-build-chips{display:flex;flex-wrap:wrap;gap:6px}
 .lre-build-profile-conflict{display:flex;flex-direction:column;gap:var(--lre-s1);font-size:var(--lre-fs-sm)}
+`;
+
+// src/frontend/styles/character.ts
+var CHARACTER_CSS = `
+.lre-cp-field{min-width:0}
+.lre-cp-value{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s2);min-width:0}
+.lre-cp-value>.lre-cp-path{flex:1 1 12rem}
+.lre-cp-path{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:0 4px;min-width:0;overflow-wrap:anywhere;line-height:1.35}
+.lre-cp-bed{flex:1 1 12rem;display:flex;flex-direction:column;gap:1px;min-width:0;overflow-wrap:anywhere;line-height:1.35}
+.lre-cp-path-up{color:var(--lre-muted);font-size:var(--lre-fs-sm)}
+.lre-cp-path-name{font-weight:600}
+.lre-cp-path>.lre-badge{align-self:center}
+.lre-cp-sep{margin-left:4px;color:var(--lre-muted)}
+.lre-cp-sheet{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
+.lre-cp-now{display:flex;flex-direction:column;gap:2px;min-width:0;padding:var(--lre-s2) var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-well)}
+.lre-cp-now-label{font-size:var(--lre-fs-xs);font-weight:600;color:var(--lre-muted);text-transform:uppercase;letter-spacing:.04em}
+.lre-cp-search{position:relative;display:flex;align-items:center;min-width:0}
+.lre-cp-search>.lre-icon{position:absolute;left:var(--lre-s3);color:var(--lre-muted);pointer-events:none}
+.lre-cp-search>.lre-input{padding-left:36px}
+.lre-cp-note{margin:0;padding:var(--lre-s2) var(--lre-s3);font-size:var(--lre-fs-sm);color:var(--lre-muted)}
+.lre-cp-trail{display:flex;flex-wrap:wrap;align-items:center;gap:2px;min-width:0;padding:var(--lre-s2) var(--lre-s3);border-bottom:1px solid var(--lre-hairline)}
+.lre-cp-crumb-step{display:inline-flex;align-items:center;min-width:0}
+.lre-cp-crumb{min-height:var(--lre-tap);padding:0 var(--lre-s1);border:0;border-radius:var(--lre-r-sm);background:transparent;color:var(--lre-accent-text);font:inherit;font-size:var(--lre-fs-sm);overflow-wrap:anywhere;text-align:left}
+.lre-cp-crumb:hover{background:var(--lre-hover)}
+.lre-cp-crumb[aria-current=location]{color:var(--lre-fg);font-weight:600}
+.lre-cp-rows{display:flex;flex-direction:column;min-width:0}
+.lre-cp-row{display:flex;align-items:center;gap:var(--lre-s2);min-width:0;min-height:var(--lre-tap-lg);padding:var(--lre-s1) var(--lre-s2) var(--lre-s1) var(--lre-s3)}
+.lre-cp-row+.lre-cp-row{border-top:1px solid var(--lre-hairline)}
+.lre-cp-row[aria-current=true]{background:var(--lre-accent-soft)}
+.lre-cp-row-text{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px}
+.lre-cp-row-name{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1);font-weight:500;overflow-wrap:anywhere}
+.lre-cp-row-sub{font-size:var(--lre-fs-sm);color:var(--lre-muted)}
+.lre-cp-row>.lre-btn{flex:none}
+.lre-cp-row-gap{flex:none;width:var(--lre-tap)}
+.lre-cp-textlist-add{display:flex;gap:var(--lre-s2);min-width:0}
+.lre-cp-textlist-add>.lre-input{flex:1 1 auto;min-width:0}
+.lre-cp-textlist-add>.lre-btn{flex:none}
+.lre-cp-textlist>.lre-cp-note{padding:0}
 `;
 
 // src/frontend/styles/chat.ts
@@ -53547,7 +55284,7 @@ var VISUAL_EDITORS_CSS = `
 `;
 
 // src/frontend/styles.ts
-var CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join(`
+var CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, CHARACTER_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join(`
 `);
 
 // src/frontend/ui-registry.ts
