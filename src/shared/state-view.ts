@@ -394,7 +394,10 @@ export interface GmEntity {
   gone: boolean;
   /** Not in the world document: spawned while this chat ran. */
   spawned: boolean;
-  visibility: string;
+  /** `public`, `known_by`, `secret`, or `discoverable` (a thing hidden until searched for, DESIGN §7). */
+  visibility: "public" | "known_by" | "secret" | "discoverable";
+  /** A `discoverable` thing: whether the player character has found it. */
+  found?: boolean;
   place: PlaceId | null;
   /** What holds it (`in`), if anything. */
   holder: EntityId | null;

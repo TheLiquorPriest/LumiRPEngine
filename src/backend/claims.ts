@@ -67,7 +67,7 @@ function knownBy(registry: Registry, world: WorldDoc, state: Readonly<WorldState
   const rank = (id: EntityId): number => (isInside(state, id, world.pov) ? 0 : placeOfEntity(state, id) === here ? 1 : 2);
   const things = Object.keys(state.entities)
     // The player character's own thing elsewhere isn't taken as is (the action would fail for want of it): it is a claim's (`mineByName`).
-    .filter((id) => id !== world.pov && !isGone(state, id) && mayKnow(id) && !mineElsewhere(world, state, id) && names(own(state.entities, id)?.name ?? ""))
+    .filter((id) => id !== world.pov && !isGone(state, id) && mayKnow(id) && !mineElsewhere(world, state, id, mayKnow) && names(own(state.entities, id)?.name ?? ""))
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   if (things[0] !== undefined) return things[0];
   // A place only by every word of its name ("Bluebird Coffee", never "a coffee"): the reading put a place where a thing goes.
@@ -107,7 +107,7 @@ export function claimFor(input: { registry: Registry; world: WorldDoc; state: Re
   const kind = unfit.def.ref ?? "item";
   if (!at || typeof unfit.value !== "string" || !kindIs(registry, world, kind, "item")) return null;
   // The player character's own thing, named by id (`outOfHand`), that the world has elsewhere.
-  const named = mineElsewhere(world, state, unfit.value) ? unfit.value : null;
+  const named = mineElsewhere(world, state, unfit.value, mayKnow) ? unfit.value : null;
   // A hidden thing's id counts as nothing (it is absent as the POV sees it); a known one keeps its decline.
   if (!named && ((own(state.entities, unfit.value) && mayKnow(unfit.value)) || own(world.places, unfit.value))) return null;
   // A claim makes a thing, never a person or a place: the action's other params must fit.
@@ -153,10 +153,14 @@ export function claimFor(input: { registry: Registry; world: WorldDoc; state: Re
   return { kind: "ask", claim, question: `${title} isn't in this world yet. Add it and ${verb} it?`, detail };
 }
 
-/** Whether `id` is the player character's own thing that the world has neither on them nor where they stand. */
-function mineElsewhere(world: WorldDoc, state: Readonly<WorldState>, id: string): boolean {
+/**
+ * Whether `id` is the player character's own thing that the world has neither on them nor where they
+ * stand, and one the POV may know: a secret or undiscovered thing of theirs is no tracking gap, it is
+ * absent, so a guess at it plays as a made-up claim does and tells nothing.
+ */
+function mineElsewhere(world: WorldDoc, state: Readonly<WorldState>, id: string, mayKnow: (id: EntityId) => boolean): boolean {
   const e = own(state.entities, id);
-  return e !== undefined && id !== world.pov && !isGone(state, id) && e.fields.owner === world.pov && !isInside(state, id, world.pov) && placeOfEntity(state, id) !== placeOfEntity(state, world.pov);
+  return e !== undefined && id !== world.pov && !isGone(state, id) && mayKnow(id) && e.fields.owner === world.pov && !isInside(state, id, world.pov) && placeOfEntity(state, id) !== placeOfEntity(state, world.pov);
 }
 
 /** The player character's own thing elsewhere that `name` names (the same main noun, with every word of it), the first by id; none when none does. */
@@ -164,7 +168,7 @@ function mineByName(registry: Registry, world: WorldDoc, state: Readonly<WorldSt
   const said = itemName(name);
   if (!said) return null;
   const fits = Object.keys(state.entities)
-    .filter((id) => mineElsewhere(world, state, id) && mayKnow(id) && kindIs(registry, world, own(state.entities, id)?.kind ?? "", "item"))
+    .filter((id) => mineElsewhere(world, state, id, mayKnow) && kindIs(registry, world, own(state.entities, id)?.kind ?? "", "item"))
     .filter((id) => {
       const n = itemName(own(state.entities, id)?.name ?? "");
       return n !== null && n.head === said.head && [...said.words].every((w) => n.words.has(w));
@@ -178,10 +182,10 @@ function mineByName(registry: Registry, world: WorldDoc, state: Readonly<WorldSt
  * elsewhere: the action would fail only for want of it in hand (or here), a gap in what the engine
  * tracks, so it goes to the claims policy (`claimFor`) rather than stopping the message. Null when none does.
  */
-export function outOfHand(action: ActionDef, params: JsonObject, world: WorldDoc, state: Readonly<WorldState>): UnfitRef | null {
+export function outOfHand(action: ActionDef, params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, mayKnow: (id: EntityId) => boolean): UnfitRef | null {
   for (const [param, def] of Object.entries(action.params)) {
     const value = params[param];
-    if (def.type === "ref" && def.claim && typeof value === "string" && mineElsewhere(world, state, value)) return { param, def, value };
+    if (def.type === "ref" && def.claim && typeof value === "string" && mineElsewhere(world, state, value, mayKnow)) return { param, def, value };
   }
   return null;
 }
