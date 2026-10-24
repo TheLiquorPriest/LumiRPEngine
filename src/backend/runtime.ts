@@ -2592,6 +2592,12 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   spawn: "New characters",
   life: "Life and death",
   routine: "Routine changes",
+  take: "Things picked up",
+  drop: "Things put down",
+  use_up: "Things used up",
+  wear: "Things put on or off",
+  lose: "Things lost or stolen",
+  item_condition: "Wear and damage",
 };
 
 /** The longest typed timelapse a turn runs on its own (minutes); longer ones are offered as a chip. */
@@ -3024,6 +3030,19 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
       return `${s("from")} → ${s("to")}: ${s("axis")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "knows":
       return `${s("who")} learns: ${s("fact")}`;
+    // The reply's item changes (DESIGN §9.4), each by who and what, as the POV may know them.
+    case "take":
+      return `${s("entity")} picked up ${s("item")}`;
+    case "drop":
+      return `${s("entity")} put down ${s("item")}`;
+    case "use_up":
+      return `${s("entity")} used up ${s("item")}${typeof p.qty === "number" && p.qty > 1 ? ` ×${p.qty}` : ""}`;
+    case "wear":
+      return `${s("entity")} ${p.off === true ? "took off" : "put on"} ${s("item")}`;
+    case "lose":
+      return typeof p.by === "string" && p.by !== "" ? `${s("by")} stole ${s("item")} from ${s("entity")}` : `${s("entity")} lost ${s("item")}`;
+    case "item_condition":
+      return `${s("item")}: condition ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "spawn":
       return `New: ${s("name")}`;
     case "life":

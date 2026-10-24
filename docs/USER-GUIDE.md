@@ -489,6 +489,8 @@ In GM mode, **World** marks each claimed thing **Claimed** and lists them under 
 
 Some things are hidden until you look: a world can mark a thing **Discoverable** (in its editor's **Visibility**). The **Search** action (typed as "I search the room", "I look through the drawer", "I open the chest") finds the hidden things lying loose where you stand, or, when you name a container, what is directly in it; anything in a container stays hidden until you search or open that container. What you find stays known. A container the world filled itself holds just what it was given. A world can make searching roll a check by giving its own **Search** action one.
 
+**What the reply does with things.** Besides handovers, the engine reads the reply for things picked up or found, put down, used up (eaten, drunk, spent), put on or taken off, lost or stolen, and damaged or mended. Each asks with a chip at first (its mode is set like the others, see [Extraction modes](#extraction-modes)), checks the thing is where the reply needs it, and uses up or damages at most a few at a time; something your character can't see is never named.
+
 **Stacks.** Buying something you already carry, or being handed another of it, adds to the one you have (its quantity goes up) instead of making a second.
 
 **Changes you apply from a chip** count at once: a quest that waits on the thing you just took moves on that same turn, and the world's rules about it run.

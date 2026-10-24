@@ -22,6 +22,12 @@ const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   spawn: "New people",
   life: "Life and death (dying, dead, collapsed…)",
   routine: "Routines (a new job, a habit, a move…)",
+  take: "Picking things up or finding them",
+  drop: "Putting things down",
+  use_up: "Using things up",
+  wear: "Putting on or taking off",
+  lose: "Losing things, or having them stolen",
+  item_condition: "Wear and damage to things",
 };
 
 const MODE_OPTIONS: { value: BoundMode; label: string }[] = [

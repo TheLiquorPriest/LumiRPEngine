@@ -220,7 +220,7 @@ export interface TimeSettings {
 }
 
 /** Extraction proposal types with a per-type mode (DESIGN §9.4, §11). */
-export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine"] as const;
+export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition"] as const;
 export type ExtractionType = (typeof EXTRACTION_TYPES)[number];
 
 /**
@@ -241,6 +241,13 @@ export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundM
   knows: "confirm",
   give: "confirm",
   purchase: "confirm",
+  // The item channels have no measured precision yet: they ask, as `give` did before learning.
+  take: "confirm",
+  drop: "confirm",
+  use_up: "confirm",
+  wear: "confirm",
+  lose: "confirm",
+  item_condition: "confirm",
 });
 
 /**

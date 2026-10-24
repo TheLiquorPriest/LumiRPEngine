@@ -639,8 +639,12 @@ export const EXTRACT_STRICT_RULES = [
   "One purchase per item: two things bought are two purchases, each with its own item and price; never one item that names both.",
   "life only when the prose states that someone died, is dying, collapsed or came round, or that the player character is told so; never a threat, a fear or a guess.",
   "routine only when the prose states a lasting change to someone's week: a new job or shift, a new habit, one they gave up, or a move to a new home, with the days and times the prose gives; never a one-off, a plan, a wish, someone's thoughts, or a habit only mentioned.",
+  "take, drop, use_up, wear and lose only for a thing the prose says changed hands or state this reply: picked up or found (take), put down (drop), eaten, drunk or used up (use_up), put on or taken off (wear, off: true), lost or stolen (lose, by: the thief); item_condition only when it says a thing was damaged, worn out or mended.",
   "Never duplicate a change. When unsure, leave it out.",
 ];
+
+/** The reply's item changes (DESIGN §9.4), each by who (`entity`, the player character when left out) and the thing, its id where the state lists it, else its name. */
+const EXTRACT_ITEM_TYPES = "take{entity,item} · drop{entity,item} · use_up{entity,item,qty?} (qty: how many, 1 when not said) · wear{entity,item,off?} · lose{entity,item,by?} (by: who stole it) · item_condition{entity?,item,delta} (delta -25..25: damage negative, mending positive)";
 
 /** What `extract` reads from a reply: the changes it proposes, and the place it leaves the player character in (a place id as the model gave it; null when it doesn't say). */
 export interface ExtractRead {
@@ -677,7 +681,7 @@ export async function extract(
       .map(([id]) => id)
       .join("|")}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
-  const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, "")}\nProposal types: ${types}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
+  const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, "")}\nProposal types: ${types} · ${EXTRACT_ITEM_TYPES}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
   const moves = channels.length === 0 || channels.includes("location");
   const routines = moves && usual.length > 0;
   const asked = `${moves ? `${system}\n${EXTRACT_WHERE}` : system}${routines ? `\n${EXTRACT_USUAL}` : ""}`;

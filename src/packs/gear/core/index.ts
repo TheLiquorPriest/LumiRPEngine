@@ -25,7 +25,8 @@ import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { carriedBy, contentsOf, findPiece, fitProblem, grants, hasItem, holderOf, isInside, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
-import { isDiscoverable, knows } from "../../../engine/visibility";
+import { canSeeEntity, isDiscoverable, knows } from "../../../engine/visibility";
+import type { EntityState } from "../../../engine/state";
 import { buildGearView } from "./view";
 import containers from "./tables/modern-us/containers.json";
 import items from "./tables/modern-us/items.json";
@@ -328,6 +329,30 @@ function heldItem(ctx: ReadContext, item: string, from: EntityId): string {
   const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
   const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
+}
+
+/** The most of a thing one reply may use up, and the most it may move an item's condition (its field's bound): the reply's read is weak at counts. */
+const USE_UP_MAX = 10;
+const CONDITION_STEP_MAX = 25;
+
+/** The one thing lying loose where `who` is by that name (any case, no leading article), as `heldItem` reads a held one; the name itself when none or several fit. */
+function lyingNamed(ctx: ReadContext, item: string, who: EntityId): string {
+  const place = placeOfEntity(ctx.state, who);
+  const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
+  // Only what the player character can see: a hidden or undiscovered thing by that name reads as none, so nothing tells of it.
+  const fits = Object.keys(ctx.state.entities).filter((id) => !isGone(ctx.state, id) && !heldByPerson(ctx, id) && placeOfEntity(ctx.state, id) === place && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
+  return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
+}
+
+/** Whether someone has the thing on them, at any depth (a pocket, a bag): picking it up would be taking it from them. */
+function heldByPerson(ctx: ReadContext, id: EntityId): boolean {
+  let cur = holderOf(ctx.state, id);
+  for (let guard = 0; cur && guard < 32; guard++) {
+    const e = own(ctx.state.entities, cur);
+    if (e && kindIs(ctx.registry, ctx.world, e.kind, "person")) return true;
+    cur = holderOf(ctx.state, cur);
+  }
+  return false;
 }
 
 /** A claimed thing's id: from the turn's seed, the action's place and the name, never the name alone, and never one the state has. */
@@ -689,6 +714,127 @@ export const gearPack: PackDef = {
       toEffects: (p, ctx) => {
         const item = heldItem(ctx, strOf(p.item), strOf(p.from));
         return own(ctx.state.entities, item) ? [{ type: "gear.give", args: { item, from: strOf(p.from), to: strOf(p.to) } }] : [{ type: "gear.receive", args: { name: item, from: strOf(p.from), to: strOf(p.to) } }];
+      },
+    });
+    // The reply's item changes (DESIGN §9.4): each names someone and a thing the world has, by id or by
+    // a name the one it can mean holds or has here (`heldItem`), and is checked against where the
+    // thing is now; what can't happen is refused like any change, never made up.
+    const itemFor = (p: JsonObject, ctx: ReadContext, who: EntityId, near: boolean): { id: EntityId; e: EntityState } | Rejection => {
+      if (!own(ctx.state.entities, who)) return reject("missing_entity", `no one ${labelOf(ctx, who)}`);
+      const named = heldItem(ctx, strOf(p.item), who);
+      const id = near && !own(ctx.state.entities, named) ? lyingNamed(ctx, strOf(p.item), who) : named;
+      const e = own(ctx.state.entities, id);
+      // A thing the player character can't see reads as one nothing has: its refusal can't tell it exists.
+      if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "item") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id)) return reject("missing_entity", `no item ${labelOf(ctx, strOf(p.item))}`);
+      if (e.kind === "account") return reject("is_money", "money changes hands as a transfer");
+      return { id, e };
+    };
+    r.proposal({
+      type: "take",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        if ("code" in found) return found;
+        if (isInside(ctx.state, found.id, who)) return reject("already_held", `${labelOf(ctx, who)} already has ${found.e.name}`);
+        // Picked up where they are, and not out of someone else's hands: that is a give or a theft.
+        if (placeOfEntity(ctx.state, found.id) !== placeOfEntity(ctx.state, who) || heldByPerson(ctx, found.id)) return reject("not_here", `${found.e.name} isn't lying where ${labelOf(ctx, who)} is`);
+        return null;
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        return "code" in found ? [] : [{ type: "gear.transfer", args: { item: found.id, to: who } }];
+      },
+    });
+    r.proposal({
+      type: "drop",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found) return found;
+        if (!isInside(ctx.state, found.id, who)) return reject("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        return placeOfEntity(ctx.state, who) ? null : reject("no_place", `${labelOf(ctx, who)} is nowhere`);
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        return "code" in found ? [] : [{ type: "gear.drop", args: { item: found.id, place: placeOfEntity(ctx.state, who) ?? "" } }];
+      },
+    });
+    r.proposal({
+      type: "use_up",
+      boundField: "number",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found) return found;
+        if (!isInside(ctx.state, found.id, who)) return reject("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        const n = p.qty === undefined ? 1 : p.qty;
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > USE_UP_MAX) return reject("bound", `using up is a whole number from 1 to ${USE_UP_MAX} at a time`);
+        return null;
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found) return [];
+        const left = numOf(found.e.fields.qty, 1) - numOf(p.qty, 1);
+        // The last of it leaves the world as a used-up claim does (`gone`), holder and owner kept.
+        return [left > 0 ? { type: "set", args: { entity: found.id, field: "qty", value: left } } : { type: "set", args: { entity: found.id, field: GONE_FIELD, value: true } }];
+      },
+    });
+    r.proposal({
+      type: "wear",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        if ("code" in found) return found;
+        const worn = found.e.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who);
+        if (p.off === true) return worn ? null : reject("not_worn", `${labelOf(ctx, who)} isn't wearing ${found.e.name}`);
+        if (worn) return reject("already_worn", `${labelOf(ctx, who)} already wears ${found.e.name}`);
+        return isInside(ctx.state, found.id, who) || placeOfEntity(ctx.state, found.id) === placeOfEntity(ctx.state, who) ? null : reject("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        if ("code" in found) return [];
+        return p.off === true ? [{ type: "gear.remove", args: { item: found.id } }] : [{ type: "gear.wear", args: { item: found.id, wearer: who } }];
+      },
+    });
+    r.proposal({
+      type: "lose",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found) return found;
+        if (!isInside(ctx.state, found.id, who) && found.e.fields.owner !== who) return reject("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        const by = strOf(p.by);
+        return by === "" || own(ctx.state.entities, by) ? null : reject("missing_entity", `no thief ${labelOf(ctx, by)}`);
+      },
+      // Stolen (`by`): it goes into the thief's hands, still the owner's; else lost, whereabouts unknown.
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found) return [];
+        return strOf(p.by) !== "" ? [{ type: "gear.transfer", args: { item: found.id, to: strOf(p.by) } }] : [{ type: "gear.lose", args: { item: found.id } }];
+      },
+    });
+    r.proposal({
+      type: "item_condition",
+      boundField: "number",
+      validate(p, ctx) {
+        const holder = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, holder, true);
+        if ("code" in found) return found;
+        if (typeof p.delta !== "number" || !Number.isInteger(p.delta) || p.delta === 0 || Math.abs(p.delta) > CONDITION_STEP_MAX) return reject("bound", `an item's condition moves by a whole number up to ${CONDITION_STEP_MAX} a reply`);
+        return null;
+      },
+      toEffects: (p, ctx) => {
+        const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
+        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: numOf(p.delta, 0) } }];
       },
     });
     r.proposal({
