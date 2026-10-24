@@ -17,7 +17,7 @@ import { currentSignals } from "../shared/steps";
 import type { Limit } from "../shared/minds";
 import { defaultMindsSettings, isMindPurpose, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, timeoutsOf } from "../shared/timeouts";
-import { JOB_SETTINGS_DEFAULTS, jobSettingsOf } from "../shared/settings";
+import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, stepConfigOf } from "../shared/settings";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -327,12 +327,18 @@ function loreOf(v: unknown): StepLore | undefined {
   return policy && tokens !== undefined ? { policy, tokens, ...(transport ? { transport } : {}) } : undefined;
 }
 
+/** The steps whose own prompt is Settings → Minds' (`minds.prompts`), not their card's `template`. */
+const OWN_PROMPT_ELSEWHERE: Partial<Record<StepPurpose, true>> = { mind: true, memory: true, consolidate: true };
+
 /**
  * A step's settings, checked; a signal an earlier build had reads as the one that stands for it now
  * (`currentSignals`), so a step on `classifier` runs on every typed message and anything else the
  * user chose stays. A minds step keeps no lore and no recent history of its own: what a mind reads is
  * Settings → Minds' (`minds.reads`, which an older mind card's lore moved into), the lore pinned to
- * the other minds steps aside, and the recent chat they read is its Recent chat.
+ * the other minds steps aside, and the recent chat they read is its Recent chat. `template` is the
+ * user's own prompt for the step; a mind's, a memory's and consolidation's are Settings → Minds'
+ * (`minds.prompts`), so theirs isn't kept, and the time-skip step's is the skip plan's (its beats'
+ * is Settings → Minds' too).
  */
 function stepOf(v: unknown, base: StepConfig | undefined, purpose: StepPurpose): StepConfig | undefined {
   if (!isRecord(v)) return base;
@@ -344,7 +350,7 @@ function stepOf(v: unknown, base: StepConfig | undefined, purpose: StepPurpose):
     enabled: typeof v.enabled === "boolean" ? v.enabled : (base?.enabled ?? false),
     signals: currentSignals(Array.isArray(v.signals) ? v.signals.filter((s): s is string => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : (base?.signals ?? [])),
     ...(route ? { route } : {}),
-    ...(typeof v.template === "string" ? { template: v.template.slice(0, 20_000) } : {}),
+    ...(typeof v.template === "string" && !OWN_PROMPT_ELSEWHERE[purpose] ? { template: v.template.slice(0, 20_000) } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(lore ? { lore: { ...lore } } : {}),
     ...(recent ? { recent: { ...recent } } : {}),
@@ -464,7 +470,14 @@ function expandPresets(settings: UserSettings, patch: JsonObject): UserSettings 
   if (realism === "story" || realism === "grounded" || realism === "simulation") out.realism = { preset: realism, ...structuredClone(REALISM_PRESETS[realism]) };
   const modelUse = isRecord(patch.modelUse) ? patch.modelUse.preset : undefined;
   if (modelUse === "lean" || modelUse === "standard" || modelUse === "full") {
+    const before = out.modelUse.steps;
     out.modelUse = { preset: modelUse, ...structuredClone(MODEL_USE_PRESETS[modelUse]) };
+    // A preset sets how steps run, never what they say: the user's own prompt for each step stays,
+    // as their minds prompts do.
+    for (const purpose of STEP_PURPOSES) {
+      const template = before[purpose]?.template;
+      if (template !== undefined) out.modelUse.steps[purpose] = { ...stepConfigOf(out.modelUse.steps, purpose), template };
+    }
     // A preset is a whole policy for minds too; what a mind reads, the user's own prompts and memory overrides stay.
     out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), reads: out.minds.reads, memory: out.minds.memory, prompts: out.minds.prompts };
   }

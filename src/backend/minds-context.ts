@@ -4,16 +4,16 @@
 // occasion. Then each source the user has minds read (Settings → Minds → What a mind reads), each
 // within its own limit: the story as it stands (the lore pinned to them and to where they are, the
 // lore the turn activates, how the latest reply ended and what the player says), their usual routine
-// (on by default: habits to weigh, never orders), and, when switched on, their own summary, notes and
-// what they saw, last thoughts, recall of the turns they were there for, and their life (money, the
-// day, commitments and plans). Nothing limits the whole: a part's own
-// limit is the only one, so no room left by the others cuts what the user allowed. Never the GM view
+// (on by default: habits to weigh, never orders), their plans (on by default: what the turns stated
+// and the GM set), and, when switched on, their own summary, notes and what they saw, last thoughts,
+// recall of the turns they were there for, and their life (money, the day and commitments). Nothing
+// limits the whole: a part's own limit is the only one, so no room left by the others cuts what the user allowed. Never the GM view
 // (but for the intent the GM set for them), another mind, what another character's memory says they
 // were told, or a turn they weren't present for.
 
 import type { EntityId, MessageId, PlaceId } from "../shared/ids";
 import type { Limit, MindMoment, MindsCharacter, MindsMemoryConfig, MindsReads } from "../shared/minds";
-import { limitOf } from "../shared/minds";
+import { limitOf, planWords } from "../shared/minds";
 import { loreIsSecret } from "../shared/lore";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
@@ -77,6 +77,7 @@ export interface MindContextReport {
   pinned: GivenLore[];
   activated: GivenLore[];
   routine?: { given: number; left: number };
+  plans?: { given: number; left: number };
   history?: number;
 }
 
@@ -273,9 +274,9 @@ function identityLines(scope: MindScope): string[] {
 /**
  * Their life, when they read it (DESIGN §24.5): their money in their own words, the rest of today as
  * the Cast life planner lays it (their routine and their plans, and whatever the planner fills the
- * free time with), their open commitments and their plans in force. None of it is the story as it
- * stands: the planner's day is the engine's guess, and plans and commitments come from narration
- * that may have depicted another mind, which is why minds don't read it unless the user says so.
+ * free time with) and their open commitments. None of it is the story as it stands: the planner's
+ * day is the engine's guess, and commitments come from narration that may have depicted another mind,
+ * which is why minds don't read it unless the user says so. Their plans are a source of their own.
  */
 function lifeLines(scope: MindScope, c: MindsCharacter): string[] {
   const { reg, world, state, who } = scope;
@@ -290,8 +291,19 @@ function lifeLines(scope: MindScope, c: MindsCharacter): string[] {
     // A world without a working day planner (no Cast life) has no day to tell.
   }
   for (const x of openCommitments(c).slice(0, scope.memory.commitments.show)) out.push(`- Commitment (${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}): ${x.text}${x.due !== null ? `, due ${formatClock(cal, x.due)}` : ""}`);
-  for (const p of openPlans(c).slice(0, 8)) out.push(`- Plan (${p.kind}): ${p.what}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""}, ${formatClock(cal, p.when.from)} to ${formatHHMM(dateAt(cal, p.when.to).minuteOfDay)}${p.where ? ` at ${nameOf(scope, p.where)}` : ""}${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}`);
   return out;
+}
+
+/**
+ * Their plans, when they read them (DESIGN §24.5, on by default): their open plans in force, soonest
+ * first, each with its time, place and who else is in it: what the turns stated they will do and
+ * what the GM set, so a mind keeps to what it agreed. A plan everyone in it shares is each one's own,
+ * in its own words only for the one whose memory recorded it (`planWords`). Never the day the planner
+ * lays, which stays in their life.
+ */
+function planLines(scope: MindScope, c: MindsCharacter): string[] {
+  const cal = calendarOf(scope.world);
+  return openPlans(c).map((p) => `- Plan (${p.kind}): ${planWords(p, scope.who)}${p.cents !== undefined ? `, ${formatMoney(p.cents, scope.world.currency)}` : ""}, ${formatClock(cal, p.when.from)} to ${formatHHMM(dateAt(cal, p.when.to).minuteOfDay)}${p.where ? ` at ${nameOf(scope, p.where)}` : ""}${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}`);
 }
 
 /**
@@ -452,6 +464,9 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
   const usual = reads.routine.on ? routineLines(scope) : [];
   const routine = linesWithin(usual, reads.routine.tokens);
   if (report && usual.length > 0) report.routine = { given: routine.length, left: usual.length - routine.length };
+  const planned = reads.plans.on ? planLines(scope, c) : [];
+  const plans = linesWithin(planned, reads.plans.tokens);
+  if (report && planned.length > 0) report.plans = { given: plans.length, left: planned.length - plans.length };
   // The latest reply, when they read how it ended, is the newest message before the turn: Recent
   // chat gives the messages before it rather than the same reply twice.
   const chat = recentChat(ended !== "" && scope.history?.at(-1)?.isUser === false ? { ...scope, history: scope.history.slice(0, -1) } : scope);
@@ -463,6 +478,7 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
     block("Where you are", sceneLines(scope, place)),
     reads.summary.on && c.summary !== "" ? block("Your story so far", [clip(c.summary, charsOf(reads.summary.tokens))]) : "",
     block("Your usual routine (habits you may weigh, never orders: what is happening now comes first)", routine),
+    block("Your plans", plans),
     reads.life.on ? block("Your own life", linesWithin(lifeLines(scope, c), reads.life.tokens)) : "",
     reads.memory.on ? block("What you remember, and what you saw", linesWithin(memoryLines(scope, c), reads.memory.tokens)) : "",
     reads.thoughts.on ? thoughtsBlock(scope, c) : "",
@@ -499,7 +515,7 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
   const c = readCharacter(state, who);
   const cal = calendarOf(world);
   const commitments = openCommitments(c).map((x) => `- [${x.id}] ${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}: ${x.text}`);
-  const plans = openPlans(c).map((p) => `- ${p.what}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""} (${formatClock(cal, p.when.from)})`);
+  const plans = openPlans(c).map((p) => `- ${planWords(p, who)}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""} (${formatClock(cal, p.when.from)})${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}`);
   const user = turn.user.trim() !== "" ? clip(turn.user, charsOf(scope.reads.message.tokens)) : "";
   const written = [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", user !== "" ? `${povLabel(scope)} (the player character) wrote: ${user}` : "", `Story: ${latestReply(scope, turn.reply)}`];
   return [

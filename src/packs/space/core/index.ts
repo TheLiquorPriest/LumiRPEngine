@@ -27,6 +27,8 @@ import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { GRID_SPACE_FLOOR } from "../../../engine/registry-impl";
 import { acts, lifeOf, povLife } from "../../../engine/life";
 import { placeOfEntity, placeWithin } from "../../../engine/scope";
+import { relocate } from "../../../engine/relocate";
+import { PARTY_RELATION } from "../../../shared/party";
 import { observeCells } from "../../../engine/seen";
 import { canSeeEntity, canSeePlace, knownBySelector } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
@@ -184,6 +186,8 @@ export const spacePack: PackDef = {
     r.kind(THING);
     r.kind(PERSON);
     r.relation({ id: "in", label: "In", from: "*", to: "*", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
+    // The player character's party (DESIGN §9.3): a person who travels with it comes along on every move it makes.
+    r.relation({ id: PARTY_RELATION, label: "Travels with", from: "person", to: "person", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
 
     r.service("space.travel", travel);
     r.service("space.arrival", arrivalEvents);
@@ -275,11 +279,12 @@ export const spacePack: PackDef = {
       label: "Go to",
       description: "Go to another place: a room, a building, a street, another part of town.",
       pack: "space",
-      params: { to: { type: "ref", ref: "place", label: "Place" } },
+      // Who comes along: people with the player character it names ("with Danny"), or all of them for "we".
+      params: { to: { type: "ref", ref: "place", label: "Place" }, with: { type: "list", ref: "person", optional: true, label: "Who comes along" } },
       // Story first: the walk, else any mode's route, else a nominal move. The world's travel
       // simulation brings back the walk it once needed (`can_go`).
       requires: ["to != here", "can_go(here, to)"],
-      outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to" } }] },
+      outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to", with: "=params.with" } }] },
       duration: "go_minutes(here, to)",
       activity: { type: "travel", until: "clock + (level.space < 2 ? 15 : go_minutes(here, to))" },
       lexicon: ["go to", "walk to", "head to", "head over to", "leave for"],
@@ -326,26 +331,19 @@ export const spacePack: PackDef = {
           return { code: "not_moved", reason: `${name} ${known.reads}; that move didn't happen`, gm: stopped ? `${name} is ${truth} and doesn't act` : `${name} is ${truth}, which the POV hasn't learned; it takes them as ${known.id}` };
         }
         if (stopped) return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
-        const from = placeOfEntity(ctx.state, entity);
-        // Moves are story first: a narrated move lands whether or not a route joins the two places.
-        // Only the world's travel simulation makes one across a gap no route spans (off an island with
-        // no boat leg back) a move that didn't happen. The reason reaches the player: a place the POV
-        // can't see is somewhere.
-        const named = (id: PlaceId): string => (canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? (own(ctx.world.places, id)?.name ?? id) : "somewhere");
-        if (from && mapSettingsOf(ctx.world).travelSimulation && !reachable(ctx, from, place)) return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
-        return null;
+        // Moves are story first: the one move path refuses one no route reaches only under the travel
+        // simulation, and says so in what the POV may know.
+        const route = relocate(ctx, entity, place, { route: true });
+        return "code" in route ? route : null;
       },
+      // The one move path, as a told move: a move to another place doesn't carry over what they were
+      // doing where they were (the shift their routine or the planner gave them), so their activity
+      // goes back to idle unless the proposal says what they do there.
       toEffects: (p, ctx) => {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
         const to = typeof p.place === "string" ? p.place : "";
-        const move = { type: "move", args: { entity, to } };
-        // A told move to another place doesn't carry over what they were doing where they were (the
-        // shift their routine or the planner gave them): their activity goes back to idle, unless the
-        // proposal says what they do there.
-        const doing = own(ctx.state.entities, entity)?.fields.activity;
-        if (to === placeOfEntity(ctx.state, entity) || doing === undefined) return [move];
-        const next = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
-        return next === doing ? [move] : [move, { type: "set", args: { entity, field: "activity", value: next } }];
+        const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
+        return [{ type: "move", args: { entity, to, activity, route: true } }];
       },
     });
 

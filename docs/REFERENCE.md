@@ -34,7 +34,7 @@ Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1,
 | `check` | `check`, `actor?`, `target?`, `outcomes` |
 | `life` | `entity`, `to?`, `tell?` |
 | `link` | `rel`, `from`, `to`, `until?`, `fields?` |
-| `move` | `entity`, `to` |
+| `move` | `entity`, `to`, `activity?`, `route?`, `with?` |
 | `note` | `text`, `visibility?` |
 | `post` | `lines`, `memo?` |
 | `recover` | `entity`, `field`, `amount?`, `full?` |
@@ -123,7 +123,7 @@ Built in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `re
 
 Signals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.
 
-Template placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.
+Template placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `gear`, `knowledge`, `money`, `outcome`, `place`, `positions`, `pov`, `present`, `property`, `recent`, `reply`, `scene`, `user`, `world`.
 
 ### Sections
 
@@ -223,6 +223,7 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 
 | Effect | Arguments |
 |---|---|
+| `castlife.book_invitation` | `host` |
 | `castlife.decide` | `key`, `choice` |
 | `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |
 | `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |
@@ -987,6 +988,7 @@ Extends `thing`.
 | Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |
 |---|---|---|---|---|---|---|---|
 | `in` | In | `*` | `*` | many_one |  |  | none |
+| `travels_with` | Travels with | `person` | `person` | many_one |  |  | none |
 
 ### Effects
 
@@ -1013,7 +1015,7 @@ Extends `thing`.
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |
+| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |
 | `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |
 
 ### Events

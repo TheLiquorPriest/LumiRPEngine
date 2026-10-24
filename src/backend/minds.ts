@@ -14,8 +14,8 @@ import type { ChatId, EntityId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { CommitmentKind, Fidelity, Limit, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
-import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf, worldMindTemplate } from "../shared/minds";
+import type { CommitmentKind, Fidelity, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
+import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
 import type { StepPurpose, WorldDoc } from "../shared/world";
@@ -158,7 +158,9 @@ function placeNamed(world: WorldDoc, name: string): string | null {
 /**
  * The plans a memory answer gives, resolved to ids and game minutes; a plan with no time, or wholly
  * past, is left out, and so is a pay or lend plan with no positive amount or no one to hand it to.
- * Only the memory step gives plans (DESIGN §24.8): it reads the turn as written.
+ * Only the memory step gives plans (DESIGN §24.8): it reads the turn as written. One with others in
+ * it is theirs too (`sharesPlan`), under the id its people and start give it (`sharedPlanId`), so the
+ * same plan in another's memory of the turn is the same plan; the answer giving it twice gives it once.
  */
 export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue | undefined): MindPlan[] {
   const now = state.clock;
@@ -179,9 +181,23 @@ export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldS
     const money = kind === "pay" || kind === "lend";
     const cents = !money ? 0 : typeof d.amount === "number" && Number.isFinite(d.amount) ? Math.round(d.amount * 10 ** world.currency.decimals) : (parseMoneyInput(str(d.amount), world.currency) ?? 0);
     if (money && (cents <= 0 || withIds.length === 0)) continue;
-    out.push({ id: `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`, what, kind, when: { from, to }, where: placeNamed(world, str(d.where)), with: withIds, priority, status: "open", made: now, source: "memory", closed: null, reason: null, ...(money ? { cents } : {}) });
+    const shared = sharesPlan({ kind, with: withIds });
+    const id = shared ? sharedPlanId([who, ...withIds], from) : `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`;
+    if (out.some((p) => p.id === id)) continue;
+    // A shared plan's words are this memory's reading of the turn: its author is kept, so no one else in it reads them (`planWords`).
+    out.push({ id, what, kind, when: { from, to }, where: placeNamed(world, str(d.where)), with: withIds, priority, status: "open", made: now, source: "memory", closed: null, reason: null, ...(money ? { cents } : {}), ...(shared ? { shared: true as const, by: who } : {}) });
   }
   return out;
+}
+
+/**
+ * A memory's plans less those its character already holds by id (DESIGN §24.8): a shared plan another
+ * memory of the same turn recorded first reached them already, so theirs records no second copy; nor
+ * does a plan a later turn only states again.
+ */
+export function unheldPlans(state: Readonly<WorldState>, who: EntityId, plans: readonly MindPlan[]): MindPlan[] {
+  const held = readCharacter(state, who).plans;
+  return plans.filter((p) => !held.some((x) => x.id === p.id));
 }
 
 /**
@@ -327,13 +343,16 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const given = shownLore(report.pinned);
     const activated = shownLore(report.activated);
     const routineLeft = report.routine?.left ?? 0;
+    const plansLeft = report.plans?.left ?? 0;
     const notes = [
       ...fitNote("Pinned lore", report.pinned, reads.pinned.tokens),
       ...fitNote("The lore the turn activated", report.activated, reads.activated.tokens),
       ...(routineLeft > 0 ? [`Their usual routine didn't all fit: ${routineLeft} line${routineLeft === 1 ? "" : "s"} left out, over the ${reads.routine.tokens} tokens a mind reads of it; raise that in Settings → Minds → What a mind reads.`] : []),
+      ...(plansLeft > 0 ? [`Their plans didn't all fit: ${plansLeft} left out, over the ${reads.plans.tokens} tokens a mind reads of them; raise that in Settings → Minds → What a mind reads.`] : []),
     ];
     const routine = report.routine?.given ?? 0;
-    const trace: MindCallTrace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...(given.length > 0 ? { pinned: given } : {}), ...(activated.length > 0 ? { activated } : {}), ...(routine > 0 ? { routine } : {}), ...(report.history ? { history: report.history } : {}), ...(notes.length > 0 ? { notes } : {}) };
+    const plans = report.plans?.given ?? 0;
+    const trace: MindCallTrace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...(given.length > 0 ? { pinned: given } : {}), ...(activated.length > 0 ? { activated } : {}), ...(routine > 0 ? { routine } : {}), ...(plans > 0 ? { plans } : {}), ...(report.history ? { history: report.history } : {}), ...(notes.length > 0 ? { notes } : {}) };
     const why = data !== null ? null : raw !== null ? "the answer said nothing: no thoughts, intent or depiction" : failure.reason !== "" ? failure.reason : "the call failed";
     if (why !== null) deps.host.log("warn", `[LumiRPEngine] mind for ${who}: ${why}`, userId);
     const entry: MindsRunEntry = {
@@ -502,7 +521,7 @@ export function turnPresence(reg: Registry, world: WorldDoc, input: Pick<PostMin
 }
 
 /** The `memory` step's answer as event data; what they told reaches only `listeners`, who were with them for the turn. */
-function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, listeners: readonly EntityId[]): JsonObject | null {
+function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, listeners: readonly EntityId[]): MemoryEventData | null {
   if (!isRecord(raw)) return null;
   const now = state.clock;
   const notes: MindNote[] = (Array.isArray(raw.notes) ? raw.notes : []).slice(0, MIND_TEXT_CAPS.notes).flatMap((n, i) => {
@@ -520,7 +539,7 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
     return [{ id: `c_${hashParts("minds.commitment", who, String(now), String(i), text).slice(0, 10)}`, kind, with: withIds, text, due: localTime(world, now, str(x.due)), status: "open" as const, made: now, closed: null }];
   });
   const open = new Set(readCharacter(state, who).commitments.filter((x) => x.status === "open").map((x) => x.id));
-  const resolved = (Array.isArray(raw.resolved) ? raw.resolved : []).flatMap((r) => (isRecord(r) && open.has(str(r.id)) && (r.status === "kept" || r.status === "broken" || r.status === "released") ? [{ id: str(r.id), status: r.status }] : []));
+  const resolved = (Array.isArray(raw.resolved) ? raw.resolved : []).flatMap((r): MemoryEventData["resolved"] => (isRecord(r) && open.has(str(r.id)) && (r.status === "kept" || r.status === "broken" || r.status === "released") ? [{ id: str(r.id), status: r.status }] : []));
   const told = (Array.isArray(raw.told) ? raw.told : []).slice(0, MIND_TEXT_CAPS.tolds).flatMap((t) => {
     if (!isRecord(t)) return [];
     const what = capText(str(t.what), MIND_TEXT_CAPS.told);
@@ -528,7 +547,7 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
     return what === "" || to.length === 0 ? [] : [{ to, what }];
   });
   const summary = capText(str(raw.summary), MIND_TEXT_CAPS.summary);
-  return { entity: who, at: now, notes, commitments, resolved, plans: plansFrom(reg, world, state, who, raw.plans), told, summary: summary === "" ? null : summary } as unknown as JsonObject;
+  return { entity: who, at: now, notes, commitments, resolved, plans: plansFrom(reg, world, state, who, raw.plans), told, summary: summary === "" ? null : summary };
 }
 
 /** How many characters' notes one turn folds at most: consolidation is upkeep, never the turn's work. */
@@ -580,7 +599,8 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   );
   for (const data of remembered) {
     if (!data) continue;
-    const event: LedgerEvent = { type: MINDS_EVENTS.memory, data };
+    // Applied in turn, so a shared plan the first memory recorded is already the others' when theirs records.
+    const event: LedgerEvent = { type: MINDS_EVENTS.memory, data: { ...data, plans: unheldPlans(w.state, data.entity, data.plans) } as unknown as JsonObject };
     if (!w.apply(event)) events.push(event);
   }
   // Consolidation: notes past the number kept, and the faded, folded into the summary.

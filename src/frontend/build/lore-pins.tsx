@@ -17,7 +17,7 @@ import { useApp } from "../app";
 import { Badge, Button, Section, useBusy } from "../components";
 import { ActionRow, ActionRows } from "../gm/ui";
 import { IconButton } from "../components";
-import { STEP_LABEL } from "../settings/steps";
+import { STEP_LABEL } from "../../shared/steps";
 import { useSelect } from "../store";
 import { draftSend } from "./draft";
 import { Issues } from "./form-kit";

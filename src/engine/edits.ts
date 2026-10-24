@@ -154,6 +154,9 @@ function setField(reg: Registry, w: Working, entity: EntityId, field: FieldId, v
     const corrected = optionalService(w.ctx, "economy.set_cash")?.(w.ctx, entity, value) ?? null;
     if (corrected !== null) return Array.isArray(corrected) ? applyAll(w, corrected) : corrected;
   }
+  // A place set from the field editor is a move like any other (the one move path): out of whatever
+  // holds them and onto where they stand there, rather than the field alone.
+  if (field === "place" && typeof value === "string" && own(w.world.places, value)) return run(reg, w, [{ type: "move", args: { entity, to: value } }], rng);
   return run(reg, w, [{ type: "set", args: { entity, field, value } }], rng);
 }
 

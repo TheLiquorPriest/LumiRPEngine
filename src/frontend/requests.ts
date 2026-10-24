@@ -8,9 +8,10 @@ import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level
 import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
 import { parseMoneyInput } from "../shared/money";
 import type { EditOp, UpgradePreview } from "../shared/protocol";
-import type { Chip, FieldFixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, StateView, TimelapseView } from "../shared/state-view";
+import type { Chip, FieldFixTarget, GmEntity, GmView, HudView, PaletteEntry, PaletteOption, StateView, TimelapseView } from "../shared/state-view";
 import { chipRegenerates } from "../shared/state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, WorldCurrency } from "../shared/world";
+import { PARTY_RELATION } from "../shared/party";
 import type { RequestBody } from "./registry";
 
 /** The request body of one protocol type. */
@@ -101,6 +102,16 @@ export function fixRequest(target: FieldFixTarget, value: JsonValue, chatId: Cha
   return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
 }
 
+/**
+ * The ✎ "Where are they?" on someone in People: the player character's own place ✎, aimed at them.
+ * It offers the places that ✎ offers (those the POV may know, never a hidden one) and starts at the
+ * POV's place when they're here, else at no place, since where they are when away isn't shown.
+ */
+export function whereFixTarget(hud: Pick<HudView, "fixes"> | null, entity: EntityId, here: boolean): FieldFixTarget | null {
+  const pov = hud?.fixes.place;
+  return pov ? { ...pov, entity, value: here ? pov.value : null } : null;
+}
+
 /** The clock's ✎ (DESIGN §12): the clock set to `time`, a date and time of day (`YYYY-MM-DD HH:MM`) in the world's calendar, local to where the POV is. */
 export function timeFixRequest(time: string, chatId: ChatId): Req<"lre.fix"> {
   return { type: "lre.fix", chatId, time };
@@ -164,6 +175,26 @@ export function relationFields(defs: GmView["relationTypes"][number]["fields"], 
 export function adjustOp(account: EntityId, text: string, currency: WorldCurrency, take: boolean): EditOp | null {
   const cents = parseMoneyInput(text, currency);
   return cents !== null && cents > 0 ? { op: "adjust", account, cents: take ? -cents : cents } : null;
+}
+
+/** The GM's "Bring to <player character>'s place": a move to where the player character is; null for the player character itself or while it's nowhere. */
+export function bringOp(entity: GmEntity, gm: Pick<GmView, "entities">): EditOp | null {
+  const pov = gm.entities.find((e) => e.pov);
+  return pov && pov.id !== entity.id && pov.place && pov.place !== entity.place ? { op: "move", entity: entity.id, to: pov.place } : null;
+}
+
+/** The player character's party (DESIGN §9.3): whether someone travels with it, and the GM's edit that changes that. */
+export function partyOf(entity: GmEntity, gm: Pick<GmView, "entities">): { pov: GmEntity; travels: boolean; op: EditOp } | null {
+  const pov = gm.entities.find((e) => e.pov);
+  if (!pov || pov.id === entity.id) return null;
+  const travels = entity.relations.some((r) => r.type === PARTY_RELATION && r.to === pov.id);
+  return { pov, travels, op: travels ? { op: "unlink", rel: PARTY_RELATION, from: entity.id, to: pov.id } : { op: "link", rel: PARTY_RELATION, from: entity.id, to: pov.id } };
+}
+
+/** The places a picker offers for a search: each word of it in the name, in the list's order. */
+export function placesMatching<P extends { name: string }>(places: readonly P[], search: string): P[] {
+  const words = search.toLowerCase().split(/\s+/).filter((w) => w !== "");
+  return places.filter((p) => words.every((w) => p.name.toLowerCase().includes(w)));
 }
 
 /** A `time` marker on the running chat (Play → Calendar, HUD ⏸, palette Pause/Resume). */

@@ -26,6 +26,7 @@ import { createRng, type Rng } from "./rng";
 import { acts } from "./life";
 import { optionalQuery, own } from "./pack-kit";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "./scope";
+import { relocate } from "./relocate";
 import { GROUP_KIND, membersOf, selectEntities } from "./selector";
 import type { WorldState } from "./state";
 import { initialState, minutesBetween } from "./world-state";
@@ -301,7 +302,11 @@ export function instantEvents(reg: Registry, ctx: ReadContext, instant: Schedule
       const expected = instant.edge === "end" ? (slot.value ?? null) : lower ? (lower.slot.value ?? null) : valueBefore(reg, ctx, instant, entity);
       if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true)) continue;
     }
-    out.push({ type: "set", entity, field: schedule.target, value });
+    // A place goes through the one move path (out of what holds them, where they then stand), in the shapes rules read.
+    if (schedule.target === "place" && typeof value === "string") {
+      const moved = relocate(ctx, entity, value);
+      if (!("code" in moved)) out.push(...moved);
+    } else out.push({ type: "set", entity, field: schedule.target, value });
   }
   return out;
 }

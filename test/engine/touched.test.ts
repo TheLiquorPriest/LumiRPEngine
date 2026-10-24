@@ -157,7 +157,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "engine.attempt", data: { track: "heist", stage: "on", correct: false } },
   { type: "engine.revealed", data: { track: "heist", stage: "on" } },
   { type: "engine.pause", data: { scene: null } },
-  { type: "engine.feed", data: { section: "people", to: { scope: "gm" } } },
+  { type: "engine.feed", data: { section: "people", to: { maxLines: 3 } } },
   { type: "engine.check", data: { actor: "you", check: "initiative", outcome: "success" } },
   { type: "engine.entity", data: { entity: "dev", tier: "supporting", agent: false, levels: { money: 2 } } },
   { type: "engine.class", data: { entity: "dev", class: {}, tags: ["regular"], was: {} } },

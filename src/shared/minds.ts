@@ -6,6 +6,7 @@
 // background lane never call a model. Everything here is plain data and pure readers.
 
 import type { JsonObject, JsonValue } from "./json";
+import { hashParts } from "./hash";
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { EntityId, MessageId, PlaceId } from "./ids";
 import type { Selector, StepPurpose, StepTemplateDef, WorldDoc } from "./world";
@@ -308,12 +309,13 @@ export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<Mi
  * the player sees it (turns they weren't there for included), then their own summary, notes and what
  * they saw, last thoughts, recall of the turns they were there for, their usual routine (their
  * routine blocks and schedules while their routine is informative or enforced, a private block only
- * when it is their own, never social life the planner made up: `RoutineRole`), and their life (money,
- * the day, commitments and plans). Who they are, where they are and what they mean to do are in every
- * context, outside these.
+ * when it is their own, never social life the planner made up: `RoutineRole`), their plans (the
+ * plans in force the story and the GM gave them, never the day the planner lays), and their life
+ * (money, the day and commitments). Who they are, where they are and what they mean to do are in
+ * every context, outside these.
  */
-export type MindSource = "pinned" | "activated" | "reply" | "message" | "history" | "summary" | "memory" | "thoughts" | "recall" | "routine" | "life";
-export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "life"];
+export type MindSource = "pinned" | "activated" | "reply" | "message" | "history" | "summary" | "memory" | "thoughts" | "recall" | "routine" | "plans" | "life";
+export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life"];
 
 /** One source as the user sets it: whether a mind reads it, and the most it may take, in tokens ("none": no limit). */
 export interface MindRead {
@@ -333,10 +335,11 @@ export type MindsReads = Record<Exclude<MindSource, "recall" | "history">, MindR
 
 /**
  * What a mind reads unless the user says otherwise: the story as it stands, their usual routine as
- * context, and nothing of its own memory or life. Each of those can carry what no story set up: the
- * day the Cast life planner lays (meals, friends, outings), plans and commitments the memory step took
- * from narration that depicted another mind, and older replies and thoughts that acted on them
- * (DESIGN §24.5). Their usual routine is the world's and the story's, never the planner's guesses.
+ * context, their own plans, and nothing else of its own memory or life. Each of those can carry what
+ * no story set up: the day the Cast life planner lays (meals, friends, outings), commitments the
+ * memory step took from narration that depicted another mind, and older replies and thoughts that
+ * acted on them (DESIGN §24.5). Their usual routine is the world's and the story's, never the
+ * planner's guesses; their plans are what the turns stated and the GM set, which they mean to keep.
  */
 export const DEFAULT_MIND_READS: Readonly<MindsReads> = Object.freeze({
   pinned: { on: true, tokens: "none" },
@@ -350,6 +353,7 @@ export const DEFAULT_MIND_READS: Readonly<MindsReads> = Object.freeze({
   thoughts: { on: false, tokens: "none" },
   recall: { on: false },
   routine: { on: true, tokens: 400 },
+  plans: { on: true, tokens: 400 },
   life: { on: false, tokens: "none" },
 });
 
@@ -438,6 +442,8 @@ function readsOf(raw: unknown, base: Readonly<MindsReads>): MindsReads {
     thoughts: readOf(r.thoughts, base.thoughts),
     recall: { on: typeof recall.on === "boolean" ? recall.on : base.recall.on },
     routine: readOf(r.routine, base.routine),
+    // A file saved before minds read their plans on their own takes the default: on.
+    plans: readOf(r.plans, base.plans),
     life: readOf(r.life, base.life),
   };
 }
@@ -535,6 +541,7 @@ export type MindPlan = {
   kind: PlanKind;
   when: { from: number; to: number };
   where: PlaceId | null;
+  /** Everyone else in it, from this holder's side. */
   with: EntityId[];
   priority: number;
   status: PlanStatus;
@@ -546,7 +553,43 @@ export type MindPlan = {
   reason: string | null;
   /** What a `pay` or `lend` plan hands over, in the world currency's minor units; no other kind has one. */
   cents?: number;
+  /**
+   * One plan everyone in it holds (`sharesPlan`): each person in `with` but the player character has
+   * it too, under the same id, from their own side, and settles it as they live it. Absent on a plan
+   * of one person's, and on every plan recorded before plans were shared, which folds as it did.
+   */
+  shared?: true;
+  /**
+   * Whose memory recorded a shared plan (absent for the GM's): its words are that memory's reading of
+   * the turn, so everyone else in it reads its kind, time, place and people, never its words (`planWords`).
+   */
+  by?: EntityId;
 };
+
+/**
+ * What `who`'s mind is told a plan is (DESIGN §24.5): its words when the plan is theirs or the GM's;
+ * for a shared plan another's memory recorded, only its kind, since another memory's reading of a
+ * turn never reaches a mind.
+ */
+export function planWords(p: Pick<MindPlan, "what" | "kind" | "by">, who: EntityId): string {
+  return p.by === undefined || p.by === who ? p.what : `a ${p.kind} plan`;
+}
+
+/**
+ * Whether a plan is one everyone in it shares (DESIGN §24.8): any with others in it but a payment or
+ * a loan, which goes one way, from the planner to the first person it's with.
+ */
+export function sharesPlan(p: Pick<MindPlan, "kind" | "with">): boolean {
+  return p.with.length > 0 && p.kind !== "pay" && p.kind !== "lend";
+}
+
+/**
+ * A shared plan's id: who is in it and when it starts, so the same plan has the same id whoever's
+ * memory writes it, and a second memory of the turn finds it already held (DESIGN §24.8).
+ */
+export function sharedPlanId(people: readonly EntityId[], from: number): string {
+  return `p_${hashParts("minds.plan.shared", String(from), ...[...new Set(people)].sort()).slice(0, 10)}`;
+}
 
 /**
  * Whether a plan drives anything: schedules, money, skip beats, fidelity and what a mind is told it
@@ -931,6 +974,8 @@ export interface MindCallTrace {
   activated?: PinnedTrace[];
   /** How many lines of their usual routine it was given (DESIGN §24.5); absent: none. A count, never the lines: a routine can hold a private block. */
   routine?: number;
+  /** How many of their plans it was given (DESIGN §24.5); absent: none. A count, never the plans: a plan's words are private. */
+  plans?: number;
   /** How many of the chat's latest messages it was given (Recent chat, DESIGN §24.5); absent: none. */
   history?: number;
   /** What the player should know of how it went: lore or routine cut or left out over what a mind reads of it, and why. */

@@ -13,8 +13,12 @@ import type { Limit, MindsReads } from "../shared/minds";
 import type { StepConfig } from "../shared/settings";
 import { firedTimeout, within } from "../shared/timeouts";
 import type { WorldDoc } from "../shared/world";
+import { SKIP_PLAN_ANSWER, SKIP_PLAN_PROMPT } from "../shared/skip-plan";
+import { calendarOf, formatClock } from "../engine/calendar";
+import { own } from "../engine/pack-kit";
+import { unrevealedSecrets } from "../engine/visibility";
 import type { Registry } from "../engine/registry-impl";
-import { isGone, kindIs } from "../engine/scope";
+import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import { pinsFor } from "../engine/lore-pins";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
@@ -30,17 +34,23 @@ import { readPins } from "./lore-pins";
 import { chatBefore } from "./minds";
 import { pinnedLines, recentChat } from "./minds-context";
 import type { Steps } from "./steps";
+import { renderTemplate, safeVars } from "./turn-steps";
 
 /** The most of the latest reply the call reads. */
 const REPLY_CAP = 2_000;
 
-/** The call's instructions; tests tell the call apart by them. */
-export const SKIP_PLAN_SYSTEM = [
-  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, give a few blocks of time, only for what they do other than simply being at home asleep. Gaps are fine: whenever no block covers them, they go home to sleep and eat on their own, so don't plan hour by hour, and never plan a block just to send them home or to bed.",
-  "Their usual routine is background you may follow, bend or ignore as the story suggests; it is never a rule. What the story already set for them comes first. Keep each person in character and consistent with the latest reply.",
-  "Use only the places and activities listed, by id and word as given. Every block lies inside the skip, and one person's blocks never overlap. A label is a few plain words saying what they do, naming no one.",
-  'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.',
-].join("\n");
+/**
+ * The call's instructions: the user's own prompt for the time-skip step (Settings → Steps and
+ * connections, `config.template`), its placeholders filled, else the built-in; then the answer format,
+ * which no prompt replaces.
+ */
+export function skipPlanSystem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, from: number, config: Pick<StepConfig, "template"> | null): string {
+  const mine = config?.template ?? "";
+  if (mine.trim() === "") return `${SKIP_PLAN_PROMPT}\n${SKIP_PLAN_ANSWER}`;
+  const here = placeOfEntity(state, world.pov);
+  const vars = safeVars({ world: world.name, pov: own(state.entities, world.pov)?.name ?? world.pov, place: here ? (own(world.places, here)?.name ?? here) : "", clock: formatClock(calendarOf(world), from) }, unrevealedSecrets(reg, world, state));
+  return `${renderTemplate(mine, vars)}\n${SKIP_PLAN_ANSWER}`;
+}
 
 export interface SkipPlanInput {
   chatId: ChatId;
@@ -103,6 +113,7 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
   const chat = recentChat({ reads: input.reads, hideJson: input.hideJson, history: told !== "" && before.at(-1)?.isUser === false ? before.slice(0, -1) : before }).filter(safe);
   const extra = [pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : "", chat.length > 0 ? `Recent chat (as the player sees it):\n${chat.join("\n")}` : ""].filter((part) => part !== "");
   const signal = within(input.signal, "skipPlanMs", input.limit);
+  const system = skipPlanSystem(deps.registry, input.world, input.state, from, input.config);
   const groups = routineSettingsOf(input.world).skipPlanCalls === "parallel" ? people.map((id) => [id]) : [people];
   // Each call is told only its own people; the calls run at once, each inside the same limit.
   const answers = await Promise.all(
@@ -110,7 +121,7 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
       const brief = skipPlanBrief(ctx, group, from, to);
       const failure = { reason: "" };
       // Spared: a failed plan leaves its people to their basic needs, and the skip runs without it.
-      const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, [skipPlanText(ctx, brief, told, journal), ...extra].join("\n\n"), input.config, input.userId, signal, { failure, spared: true, guidance: input.guidance });
+      const raw = signal.aborted ? null : await deps.steps.helperJson("skip", system, [skipPlanText(ctx, brief, told, journal), ...extra].join("\n\n"), input.config, input.userId, signal, { failure, spared: true, guidance: input.guidance });
       if (raw !== null) return { people: group.length, checked: checkSkipPlan(ctx, brief, raw), why: null };
       const fired = firedTimeout(signal);
       return { people: group.length, checked: null, why: fired ? fired.message : failure.reason || "the call didn't answer" };
