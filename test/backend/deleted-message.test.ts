@@ -4,6 +4,8 @@
 // start any more says so on the chat, with a Retry that runs the engine again, never silently.
 
 import { describe, expect, test } from "bun:test";
+import { toChain } from "../../src/backend/ledger-io";
+import { placeOfEntity } from "../../src/engine/scope";
 import type { JsonObject } from "../../src/shared/json";
 import type { FakeMessage } from "../support/fake-host";
 import { Rig } from "../support/rig";
@@ -182,5 +184,54 @@ describe("Cancel on the activity line", () => {
     expect(waiting?.state).toBe("running");
     expect(waiting?.cancellable).toBeUndefined();
     await rig.host.finish(reply, "Someone waves back.");
+  });
+});
+
+describe("Cancel late in the engine run", () => {
+  test("pressed while the sections are made, it stops the run with no reply; once the turn is prepared there is nothing to cancel", async () => {
+    const rig = new Rig();
+    const chatId = await playedChat(rig);
+    const press: { answered: boolean | null } = { answered: null };
+    const deliver = rig.rt.deliver.bind(rig.rt);
+    rig.rt.deliver = async (input) => {
+      press.answered ??= rig.rt.ledger.cancel(chatId, rig.host.userId);
+      return deliver(input);
+    };
+    const stopped = await send(rig, chatId, "I wave.");
+    expect(press.answered).toBe(true);
+    expect(stopped.halted).toBe("cancelled");
+    expect(await flagOf(rig, chatId)).toBeUndefined();
+    // Played again, the turn is prepared and its reply goes on: Cancel then stops nothing.
+    rig.rt.deliver = deliver;
+    const again = await rig.host.start(chatId, { type: "regenerate" });
+    expect(again.halted).toBeUndefined();
+    expect(rig.rt.ledger.cancel(chatId, rig.host.userId)).toBe(false);
+    await rig.host.finish(again, "Someone waves back.");
+  });
+});
+
+describe("Cancel while the reply is read", () => {
+  test("leaves the reply unread: nothing its read found applies, and Retry read is offered", async () => {
+    const rig = new Rig({ shipped: true });
+    rig.host.quietReply = () => "{}";
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const reply = await send(rig, chatId, "I look around.");
+    expect(reply.halted).toBeUndefined();
+    const press: { answered: boolean | null } = { answered: null };
+    rig.host.quietReply = () => {
+      press.answered ??= rig.rt.ledger.cancel(chatId, rig.host.userId);
+      return JSON.stringify({ proposals: [{ type: "location", entity: "pov", place: "alder_market" }] });
+    };
+    await rig.host.finish(reply, "You walk to the market.");
+    expect(press.answered).toBe(true);
+    const kinds = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === reply.messageId).map((c) => c.kind);
+    expect(kinds).toContain("retry_read");
+    // The reply's move to the market, which the read found, never applies.
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+    expect(state ? placeOfEntity(state, "pov") : null).not.toBe("alder_market");
+    expect(kinds).not.toContain("change");
   });
 });

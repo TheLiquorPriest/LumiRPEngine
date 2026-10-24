@@ -2501,6 +2501,10 @@ export class Runtime implements TurnHooks {
   async adopted(chatId: ChatId, userId: UserId, from: string, to: string): Promise<void> {
     rekey(this.preBudgets, from, to);
     rekey(this.prePhase, from, to);
+    // An outline let through is for the one turn it was shown for: once that turn is taken, a Re-run
+    // swipe of it plans afresh, and gates again (DESIGN §5.1 preview gates).
+    const text = this.prePhase.get(to)?.text;
+    if (text !== undefined) this.bridges.get(chatId)?.dropOutline(text);
     rekey(this.loreTraces, from, to);
     // The reply's steps read the World Info the engine run read, not the books again.
     rekey(this.liveLores, from, to);
