@@ -299,6 +299,8 @@ export const spacePack: PackDef = {
 
     r.renderer({
       slot: "scene",
+      // A section's `include` picks it by this name (DESIGN §6.11).
+      source: "location",
       render(ctx) {
         const level = ctx.levelOf(ctx.world.pov, "space");
         if (level === 0) return [];

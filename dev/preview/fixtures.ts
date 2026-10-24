@@ -396,6 +396,12 @@ export function stateFixture(chatId: string): StateView {
       realism: { preset: "story", levels: { money: 3, gear: 3, vehicles: 3, castlife: 3, relationships: 2, space: 3, calendar: 3, weather: 2, sheets: 2 }, tierCaps: { principal: {}, supporting: {}, background: { money: 1, castlife: 1 } }, bandTiers: { principal: ["Leads"], supporting: ["Regulars", "Supporting"], background: ["Background"] }, floors: { sheets: 3 }, claims: { mode: "real", capped: false } },
       adjudication: presetAdjudication("balanced"),
       inferred: inferredDefaults("story", 3),
+      sections: [
+        { id: "outcome", label: "Outcome", world: {}, chat: null },
+        { id: "scene", label: "Scene", world: {}, chat: null },
+        { id: "people", label: "People", world: { scope: "scene" }, chat: { scope: "gm", maxLines: 12 } },
+        { id: "gear", label: "Gear", world: {}, chat: { enabled: false } },
+      ],
       skills: [
         { id: "athletics", label: "Athletics" },
         { id: "insight", label: "Read People" },
@@ -1296,7 +1302,7 @@ export function settingsFixture(): UserSettings {
       tokens: { sections: 600 },
     },
     realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} }, claims: { mode: "real", capped: false } },
-    time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, scale: 1, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 } },
+    time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, scale: 1, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 }, askBeyondMinutes: 1440 },
     overrideWorldDefaults: false,
     adjudication: presetAdjudication("crunchy"),
     overrideWorldAdjudication: false,

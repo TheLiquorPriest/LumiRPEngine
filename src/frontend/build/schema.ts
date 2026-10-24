@@ -8,6 +8,7 @@ import { DOMAINS } from "../../shared/ids";
 import type { WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnTierOf } from "../../shared/tiers";
 import type { WorldDoc } from "../../shared/world";
+import { FEED_SCOPES } from "../../shared/world";
 
 export type RefCollection = "kinds" | "relations" | "entities" | "places" | "grids" | "checks" | "tracks" | "tables" | "lore";
 
@@ -476,6 +477,12 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "number", key: "rank", label: "Rank (lower is reserved first)", step: 1 },
     { kind: "text", key: "template", label: "Template", multiline: true },
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
+    // The section's feed (DESIGN §6.11): the world's defaults, which the GM can set per chat.
+    { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v) => v !== false },
+    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, optional: true, hint: "player: what the player character knows (default) · scene: also what the people with him know or plainly see · gm: everything, each fact he doesn't know marked for the narrator" },
+    { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
+    { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
+    { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" },
   ],
   steps: [
     { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },

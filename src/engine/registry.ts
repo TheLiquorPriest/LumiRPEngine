@@ -16,7 +16,7 @@ import type { DomainId, EntityId, FieldId, Level, PackId, PanelId, RelationTypeI
 import type { LedgerEvent } from "../shared/ledger";
 import type { LintIssue } from "../shared/protocol";
 import type { ColumnDef, DataTable } from "../shared/tables";
-import type { ActionDef, EffectSpec, FieldType, KindDef, MapDisplay, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
+import type { ActionDef, EffectSpec, FeedScope, FieldType, KindDef, MapDisplay, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
 import type { Value } from "./expr";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
@@ -126,16 +126,40 @@ export interface EffectDef {
   resolve(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection;
 }
 
+/**
+ * One fact of a section as a scope beyond the player's gives it (DESIGN §6.11). `known`: who knows
+ * it, `pov` (the player character: a plain line), `scene` (only people with him: `who` names them
+ * as the narrator may know them) or `gm` (no one there). `source`: the World Info entry the line
+ * carries, so that entry can stay out of the prompt that turn.
+ */
+export interface FeedLine {
+  text: string;
+  known: "pov" | "scene" | "gm";
+  who?: string;
+  source?: { bookId: string; entryId: string };
+}
+
 export interface SectionRenderer {
   slot: SlotId;
+  /**
+   * The name a section's `include` picks it by (DESIGN §6.11); absent, its slot. A section without
+   * `include` takes every renderer of its own slot, whatever their sources.
+   */
+  source?: string;
   /**
    * Its lines are hints that follow what the POV doesn't know (Stance's cues, DESIGN §6.6): they ride
    * once every section has its place on the section budget, in what is left, and no size, clip or
    * total the player sees counts them, so an off-screen change never shows there.
    */
   hint?: true;
-  /** Compact lines, at most one per fact; dynamic values never contain `{{` or `}}` (DESIGN §6.3). */
+  /** Compact lines, at most one per fact; dynamic values never contain `{{` or `}}` (DESIGN §6.3). The player scope's, and every player surface's. */
   render(ctx: ReadContext): string[];
+  /**
+   * Its lines for a section's scope (DESIGN §6.11), for the narrator only: the player scope's facts
+   * as `pov` lines, and in `scene` and `gm` the ones beyond them, each marked with who knows it.
+   * Absent, `render` speaks for every scope.
+   */
+  feed?(ctx: ReadContext, scope: FeedScope): FeedLine[];
 }
 
 export interface MaterializerDef {
