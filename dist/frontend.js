@@ -2368,7 +2368,39 @@ function tierLabel(world, tier) {
   return tierOf(world, tier)?.label ?? (isBand(tier) ? BAND_LABEL[tier] : tier);
 }
 
+// src/shared/needs.ts
+var NEED_IDS = ["hunger", "fatigue", "social", "fun"];
+var NEED_DEFAULTS = {
+  hunger: { on: true, rate: 4, tell: 60, alert: 80 },
+  fatigue: { on: true, rate: 3, tell: 60, alert: 80 },
+  social: { on: true, rate: 1.5, tell: 60, alert: 80 },
+  fun: { on: true, rate: 1, tell: 60, alert: 80 }
+};
+var RATE_MAX = 100;
+var inScale = (v3, max) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= 0 && v3 <= max;
+function needsSettingsOf(world) {
+  const raw = isRecord(world.needs) ? world.needs : {};
+  const one = (need) => {
+    const set = isRecord(raw[need]) ? raw[need] : {};
+    const base = NEED_DEFAULTS[need];
+    return {
+      on: typeof set.on === "boolean" ? set.on : base.on,
+      rate: inScale(set.rate, RATE_MAX) ? set.rate : base.rate,
+      tell: inScale(set.tell, 100) ? set.tell : base.tell,
+      alert: inScale(set.alert, 100) ? set.alert : base.alert
+    };
+  };
+  return { hunger: one("hunger"), fatigue: one("fatigue"), social: one("social"), fun: one("fun") };
+}
+
 // src/frontend/build/schema.ts
+var NEED_LABELS = { hunger: "Hunger", fatigue: "Fatigue", social: "Social", fun: "Fun" };
+var NEED_FIELDS = [
+  { kind: "bool", key: "on", label: "On", hint: "Off: it never grows, shows, is told or alerts" },
+  { kind: "number", key: "rate", label: "Grows an hour", min: 0, max: 100, step: 0.5, hint: "On its scale of 0 (met) to 100 (urgent)" },
+  { kind: "number", key: "tell", label: "Told from", min: 0, max: 100, step: 1, hint: "From here the narrator is told of it and Play marks it" },
+  { kind: "number", key: "alert", label: "Alerts from", min: 0, max: 100, step: 1, hint: "From here it raises the needs alert in a timelapse (Time → Interrupts says what that does)" }
+];
 var FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"];
 var BOUND_MODES = ["auto", "confirm", "never"];
 var VISIBILITY = ["public", "known_by", "secret"];
@@ -2845,6 +2877,7 @@ var PART_SPECS = {
     { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
     { kind: "claims", key: "claims", label: "Player claims" }
   ],
+  needs: NEED_IDS.map((need) => ({ kind: "object", key: need, label: NEED_LABELS[need], fields: NEED_FIELDS })),
   time: [
     { kind: "record", key: "sceneTicks", label: "Default tick per scene type", keyLabel: "Scene type", item: { kind: "duration", key: "", label: "Tick" } },
     { kind: "json", key: "interrupts", label: "Interrupt policy" },
@@ -3011,7 +3044,8 @@ var PART_INFO = {
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
   minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
   lorePins: { label: "Pinned lore", hint: "Lore every call for a character, at a place, or of a step always reads", icon: "pin" },
-  routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" }
+  routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" },
+  needs: { label: "Needs", hint: "Hunger, fatigue, company and fun: each on or off, how fast it grows, when it's told and when it alerts", icon: "sliders" }
 };
 function go(app, build) {
   app.ui.update((ui) => ({ ...ui, build }));
@@ -3268,7 +3302,7 @@ function NewItem(props) {
 
 // src/frontend/build/check.tsx
 var COLLECTIONS = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "routines", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
-var PARTS = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "lorePins", "routineSettings"];
+var PARTS = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "lorePins", "routineSettings", "needs"];
 var META_FIELDS = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "lifeStates", "currency", "mapSettings"];
 function issueTarget(path) {
   const [head, id, pinned] = path.split(".");
@@ -5320,7 +5354,7 @@ function MoneyInput(props) {
 
 // src/shared/state-view.ts
 function chipRegenerates(kind, choice) {
-  return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop");
+  return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop") || (kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit");
 }
 
 // src/shared/party.ts
@@ -12285,6 +12319,8 @@ var ROLE = {
   reread: "decision",
   overdue: "decision",
   refused: "decision",
+  intent_gate: "decision",
+  outline_gate: "decision",
   timelapse_offer: "offer",
   continue_timelapse: "offer",
   choice: "offer",
@@ -12310,6 +12346,8 @@ var TONE = {
   claim: "neutral",
   check: "neutral",
   routine_ask: "neutral",
+  intent_gate: "neutral",
+  outline_gate: "neutral",
   refused: "neg",
   degraded: "warn",
   pending: "warn",
@@ -12568,6 +12606,22 @@ function useActivity() {
   }, [running]);
   return { activity, now };
 }
+function CancelTurn(props) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  if (!props.chatId)
+    return null;
+  const chatId = props.chatId;
+  return /* @__PURE__ */ u3(Button, {
+    size: "sm",
+    variant: "ghost",
+    icon: "close",
+    label: "Cancel the turn",
+    disabled: busy,
+    onClick: () => run(async () => void await app.request({ type: "lre.cancel", chatId })),
+    children: "Cancel"
+  }, undefined, false, undefined, this);
+}
 function ActivityLine(props) {
   const { activity, now } = useActivity();
   if (!activity)
@@ -12641,6 +12695,9 @@ function ActivityBanner() {
         /* @__PURE__ */ u3("span", {
           class: "lre-num lre-activity-time",
           children: elapsedText(now - activity.since)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(CancelTurn, {
+          chatId
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this);
@@ -12998,9 +13055,11 @@ var CHIP_ICON = {
   routine_ask: "calendar",
   routine_added: "calendar",
   fix: "edit",
-  refused: "alert"
+  refused: "alert",
+  intent_gate: "pause",
+  outline_gate: "list"
 };
-var ACTION_ICON = { undo: "undo", regenerate: "refresh", rerun: "refresh", send: "send", timelapse: "fast-forward" };
+var ACTION_ICON = { undo: "undo", regenerate: "refresh", rerun: "refresh", send: "send", timelapse: "fast-forward", play: "play", edit: "edit" };
 var RECEIPT_ORDER = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change"];
 var RECEIPT_SEGMENTS = 3;
 function receiptLine(done) {
@@ -13204,17 +13263,17 @@ function ActionButton(props) {
 }
 function ChipInputForm(props) {
   const { input } = props;
-  const [text, setText] = d2(() => input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : "");
+  const [text, setText] = d2(() => input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : input.type === "text" ? input.value : "");
   const [picked, setPicked] = d2(() => input.type === "choice" ? input.options[0]?.value ?? "" : "");
   const cents = input.type === "money" ? parseMoneyInput(text, props.currency) : null;
-  const ok = input.type === "money" ? cents !== null && cents > 0 : picked !== "";
+  const ok = input.type === "money" ? cents !== null && cents > 0 : input.type === "text" ? text.trim() !== "" : picked !== "";
   return /* @__PURE__ */ u3("form", {
     class: "lre-chat-form",
     "data-lre-chip-input": props.action.id,
     onSubmit: (event) => {
       event.preventDefault();
       if (ok)
-        props.onSend(input.type === "money" ? { cents } : { value: picked });
+        props.onSend(input.type === "money" ? { cents } : input.type === "text" ? { text } : { value: picked });
     },
     onKeyDown: (event) => {
       if (event.key === "Escape")
@@ -13229,6 +13288,14 @@ function ChipInputForm(props) {
           onInput: setText,
           label: input.label,
           invalid: text.trim() !== "" && !ok,
+          autoFocus: true
+        }, undefined, false, undefined, this) : input.type === "text" ? /* @__PURE__ */ u3("textarea", {
+          class: "lre-input",
+          "aria-label": input.label,
+          rows: Math.min(12, Math.max(3, text.split(`
+`).length)),
+          value: text,
+          onInput: (event) => setText(event.currentTarget.value),
           autoFocus: true
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3("select", {
           class: "lre-input",
@@ -23724,6 +23791,8 @@ function partValue(doc, part) {
       return doc.realism;
     case "time":
       return doc.time;
+    case "needs":
+      return structuredClone(needsSettingsOf(doc));
     case "meta":
       return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}), currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) };
   }
@@ -26944,6 +27013,28 @@ function StepsSection(props) {
           onClick: props.openHelper
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Preview before playing",
+        children: [
+          /* @__PURE__ */ u3(HostSwitch, {
+            label: "Show the action read from your message before it plays",
+            checked: props.gates.intent,
+            disabled: props.busy,
+            onChange: (intent) => props.patch({ gates: { intent } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(HostSwitch, {
+            label: "Show the turn's outline before the reply is written",
+            checked: props.gates.outline,
+            disabled: props.busy,
+            onChange: (outline) => props.patch({ gates: { outline } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-small lre-muted",
+            style: { margin: 0 },
+            children: "The turn waits on your message with Play, Edit and Cancel, and nothing is generated until you play it. Edit changes the action's details, or the outline's lines; Cancel leaves the turn unplayed. An action you tap in the palette or on a chip plays at once."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
       Object.keys(STEP_LABEL).map((purpose) => /* @__PURE__ */ u3(StepCard, {
         purpose,
         config: stepConfigOf(props.modelUse.steps, purpose),
@@ -27708,6 +27799,7 @@ function Settings() {
     modelUse: settings.modelUse,
     helper: settings.helper,
     jobs: settings.jobs,
+    gates: settings.gates,
     prompts: settings.minds.prompts,
     patch,
     openHelper: () => go2("helper"),
@@ -30071,6 +30163,42 @@ var combat = {
 };
 var ui_default2 = combat;
 
+// src/packs/castlife/ui/needs.tsx
+function decodeNeedsView(value) {
+  if (!isRecord(value) || !Array.isArray(value.needs))
+    return null;
+  return list(value.needs, (n2) => typeof n2.need === "string" && typeof n2.value === "number" ? { need: n2.need, name: str(n2.name, n2.need), label: str(n2.label), value: n2.value, pressing: n2.pressing === true } : null);
+}
+function NeedsPanel(props) {
+  const needs = decodeNeedsView(props.view);
+  if (!needs)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.view ?? null
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(Section, {
+    title: "Needs",
+    aside: needs.some((n2) => n2.pressing) ? /* @__PURE__ */ u3(Badge, {
+      tone: "warn",
+      children: needs.filter((n2) => n2.pressing).map((n2) => n2.label).join(", ")
+    }, undefined, false, undefined, this) : undefined,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-needs": true,
+      children: needs.map((n2) => /* @__PURE__ */ u3("div", {
+        "data-lre-need": n2.need,
+        "data-lre-pressing": n2.pressing ? "" : undefined,
+        children: /* @__PURE__ */ u3(Meter, {
+          label: n2.pressing ? `${n2.name}: ${n2.label}` : n2.name,
+          value: n2.value,
+          max: 100,
+          tone: n2.pressing ? "warn" : "accent",
+          showValue: true
+        }, undefined, false, undefined, this)
+      }, n2.need, false, undefined, this))
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
 // src/packs/castlife/ui/panel.tsx
 var SLOT_KINDS = ["work", "sleep", "free", "travel", "other"];
 function decodeGroup(g2) {
@@ -31991,6 +32119,7 @@ var castlife = {
   id: "castlife",
   register(r3) {
     r3.panel({ id: "castlife.cast", label: "Cast", order: 60, home: "people", component: CastPanel });
+    r3.panel({ id: "castlife.needs", label: "Needs", order: 25, home: "me", component: NeedsPanel });
     r3.sheet("person", PersonSheet);
     r3.gm({ id: "castlife.routines", label: "Routines", icon: "calendar", order: 25, component: GmRoutinesSection });
   }
@@ -36307,6 +36436,60 @@ function glanceLines(view, now) {
   return [...alerts, ...soon];
 }
 
+// src/frontend/gm/bed-picker.tsx
+function isItemKind2(kinds, kind) {
+  let at = kind;
+  for (let guard = 0;at !== null && guard < 32; guard++) {
+    if (at === "item")
+      return true;
+    const id = at;
+    at = kinds.find((k2) => k2.id === id)?.extends ?? null;
+  }
+  return false;
+}
+function BedPicker(props) {
+  const { entity, editor } = props;
+  const select = P2();
+  const field = entity.fields.find((f3) => f3.id === "bed");
+  if (!field)
+    return null;
+  const bed = typeof field.value === "string" ? field.value : "";
+  const items = editor.gm.entities.filter((e3) => e3.id !== entity.id && isItemKind2(editor.gm.kinds, e3.kind));
+  const set = (value) => void editor.edit([{ op: "set", entity: entity.id, field: "bed", value: value === "" ? null : value }]);
+  return /* @__PURE__ */ u3(Field, {
+    label: "Bed",
+    for: select,
+    help: "Where they sleep: Go to bed and their nights take them there. Without one, they sleep at home.",
+    children: /* @__PURE__ */ u3("select", {
+      id: select,
+      class: "lre-input",
+      value: bed,
+      disabled: editor.busy,
+      onChange: (event) => set(event.currentTarget.value),
+      children: [
+        /* @__PURE__ */ u3("option", {
+          value: "",
+          children: "No bed of their own"
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("optgroup", {
+          label: "Places",
+          children: editor.gm.places.map((p3) => /* @__PURE__ */ u3("option", {
+            value: p3.id,
+            children: p3.name
+          }, p3.id, false, undefined, this))
+        }, undefined, false, undefined, this),
+        items.length > 0 ? /* @__PURE__ */ u3("optgroup", {
+          label: "Items",
+          children: items.map((e3) => /* @__PURE__ */ u3("option", {
+            value: e3.id,
+            children: e3.name
+          }, e3.id, false, undefined, this))
+        }, undefined, false, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
 // src/frontend/gm/entity.tsx
 var LEVELS4 = [0, 1, 2, 3, 4];
 function EntityBadges(props) {
@@ -37162,7 +37345,11 @@ function EntityPage(props) {
         }, section.title, false, undefined, this)),
         /* @__PURE__ */ u3(Placement, {
           entity,
-          editor
+          editor,
+          children: /* @__PURE__ */ u3(BedPicker, {
+            entity,
+            editor
+          }, undefined, false, undefined, this)
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(Relations, {
           entity,
@@ -51660,7 +51847,8 @@ var REQUEST_TYPES = {
   "lre.diag": true,
   "lre.minds": true,
   "lre.routine": true,
-  "lre.agents": true
+  "lre.agents": true,
+  "lre.cancel": true
 };
 function isRequestType(value) {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(REQUEST_TYPES, value);

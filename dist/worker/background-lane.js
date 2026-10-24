@@ -9819,493 +9819,6 @@ function lintStructure(world, reg) {
   return issues;
 }
 
-// src/engine/typed-intent.ts
-var STOP = new Set(["the", "a", "an", "to", "of", "at", "my", "your", "and", "with", "about", "for", "in", "on", "some", "over", "up", "down"]);
-var FILLER = new Set(["down", "up", "over", "back", "out", "across", "along", "around", "right", "straight", "on", "off", "just"]);
-var CLAUSE_WORDS = new Set(["but", "so", "because", "though", "although", "however", "instead"]);
-var NEGATION = new Set(["not", "no", "never", "cannot", "nothing", "nobody", "neither", "nor", "refuse", "refuses", "refused", "avoid", "avoiding"]);
-var HYPOTHETICAL = new Set(["might", "maybe", "perhaps", "whether", "wonder", "wonders", "wondering", "wondered", "consider", "considering", "imagine", "imagining", "suppose", "supposing", "wish", "debating"]);
-var CONDITIONAL = new Set(["if", "unless"]);
-var MUSING = new Set(["think", "thinks", "thinking", "thought"]);
-var MUSING_OBJECT = new Set(["about", "of"]);
-var FIRST_PERSON = new Set(["i", "i'm", "i'll", "i'd", "i've", "me", "myself", "we", "we're", "we'll", "we'd", "we've", "us", "let's", "lets"]);
-var OTHER_PERSON = new Set([
-  "he",
-  "she",
-  "they",
-  "you",
-  "he's",
-  "she's",
-  "they're",
-  "you're",
-  "he'll",
-  "she'll",
-  "they'll",
-  "you'll",
-  "he'd",
-  "she'd",
-  "they'd",
-  "you'd",
-  "they've",
-  "you've",
-  "him",
-  "her",
-  "them",
-  "someone",
-  "somebody",
-  "everyone",
-  "everybody",
-  "anyone",
-  "anybody",
-  "people",
-  "y'all"
-]);
-var AUX = new Set([
-  "will",
-  "would",
-  "shall",
-  "should",
-  "can",
-  "could",
-  "may",
-  "might",
-  "must",
-  "is",
-  "are",
-  "was",
-  "were",
-  "does",
-  "did",
-  "has",
-  "wants",
-  "needs",
-  "decides",
-  "decided",
-  "tries",
-  "tried",
-  "plans",
-  "planned",
-  "says",
-  "said",
-  "tells",
-  "told",
-  "asks",
-  "asked",
-  "agrees",
-  "agreed",
-  "offers",
-  "offered",
-  "starts",
-  "begins",
-  "gets",
-  "likes",
-  "hopes"
-]);
-var BRIDGE = new Set(["to", "going", "gonna", "just", "then", "also", "now", "soon", "finally", "quickly", "slowly", "really", "probably", "already", "still"]);
-var IDIOMS = [
-  ["pay", "attention"],
-  ["pay", "close", "attention"],
-  ["pay", "heed"],
-  ["pay", "no", "mind"],
-  ["pay", "respects"],
-  ["pay", "my", "respects"],
-  ["pay", "a", "visit"],
-  ["pay", "a", "compliment"],
-  ["pay", "the", "price"],
-  ["buy", "time"],
-  ["buy", "some", "time"],
-  ["take", "a", "look"],
-  ["take", "a", "seat"],
-  ["take", "a", "breath"],
-  ["take", "a", "deep", "breath"],
-  ["take", "care"],
-  ["take", "my", "time"],
-  ["take", "your", "time"],
-  ["take", "it", "easy"],
-  ["lend", "a", "hand"],
-  ["lend", "an", "ear"],
-  ["on", "the", "other", "hand"],
-  ["give", "up"],
-  ["give", "it", "a", "try"]
-];
-function tokenize2(text3) {
-  const out = [];
-  let clause = 0;
-  let sentence = 0;
-  for (const m of text3.toLowerCase().replace(/[\u2018\u2019]/g, "'").matchAll(/[a-z0-9]+(?:'[a-z]+)*|[.!?;:,]/g)) {
-    const word = m[0];
-    if (/^[.!?;]$/.test(word)) {
-      sentence++;
-      clause++;
-    } else if (word === "," || word === ":")
-      clause++;
-    else {
-      if (CLAUSE_WORDS.has(word))
-        clause++;
-      out.push({ word, clause, sentence });
-    }
-  }
-  return out;
-}
-function words2(s) {
-  return s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w));
-}
-function byName(said, pool) {
-  let best = null;
-  for (const c of pool) {
-    const n = words2(c.name).filter((w) => said.has(w)).length;
-    if (n > 0 && (!best || n > best.n))
-      best = { id: c.id, n };
-  }
-  return best?.id ?? null;
-}
-function playerSubject(lead, names) {
-  for (let i = lead.length - 1;i >= 0; i--) {
-    const w = lead[i] ?? "";
-    if (FIRST_PERSON.has(w))
-      return true;
-    if (OTHER_PERSON.has(w))
-      return false;
-    const name = w.replace(/'(s|ll|d|re|ve)$/, "");
-    if (!names.has(name))
-      continue;
-    if (/'(ll|d|re|ve)$/.test(w) || lead.slice(i + 1).every((b) => AUX.has(b) || BRIDGE.has(b)))
-      return false;
-  }
-  return !lead.some((w) => AUX.has(w));
-}
-function playerActs(tokens, start, names) {
-  const at = tokens[start];
-  if (!at)
-    return false;
-  const before = tokens.slice(0, start);
-  const lead = before.filter((t) => t.clause === at.clause).map((t) => t.word);
-  if (IDIOMS.some((idiom) => idiom.some((w, offset) => w === at.word && idiom.every((x, k) => tokens[start - offset + k]?.word === x))))
-    return false;
-  if (lead.some((w) => NEGATION.has(w) || w.endsWith("n't")))
-    return false;
-  if (lead.some((w, i) => HYPOTHETICAL.has(w) || MUSING.has(w) && MUSING_OBJECT.has(lead[i + 1] ?? "")))
-    return false;
-  if (before.some((t) => t.sentence === at.sentence && CONDITIONAL.has(t.word)))
-    return false;
-  return playerSubject(lead, names);
-}
-function phraseAt(tokens, phrase, acts2) {
-  for (let start = 0;start < tokens.length; start++) {
-    if (tokens[start] !== phrase[0])
-      continue;
-    let at = start + 1;
-    let skipped = 0;
-    let k = 1;
-    for (;k < phrase.length; k++) {
-      while (at < tokens.length && tokens[at] !== phrase[k] && FILLER.has(tokens[at] ?? "")) {
-        at++;
-        skipped++;
-      }
-      if (tokens[at] !== phrase[k])
-        break;
-      at++;
-    }
-    if (k === phrase.length && acts2(start))
-      return { end: at, skipped };
-  }
-  return null;
-}
-function typedIntent(reg, world, state, text3) {
-  const said = tokenize2(text3);
-  const tokens = said.map((t) => t.word);
-  const actions = new Map;
-  for (const [id, a] of reg.actions)
-    actions.set(id, a);
-  for (const [id, a] of Object.entries(world.actions))
-    actions.set(id, a);
-  const named = new Set(words2(text3));
-  const pov = world.pov;
-  const people = new Set;
-  for (const [id, e] of Object.entries(state.entities))
-    if (id !== pov && kindIs(reg, world, e.kind, "person") && !isGone(state, id))
-      for (const w of words2(e.name))
-        people.add(w);
-  const acts2 = (start) => playerActs(said, start, people);
-  const ctx = reg.context(world, state);
-  const fits = optionalQuery(ctx, "combat.offers");
-  let best = null;
-  const numbers = [...text3.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
-  for (const action of actions.values()) {
-    if (!offersAction(world, action) || fits?.(ctx, action) === false)
-      continue;
-    for (const raw of action.lexicon ?? []) {
-      const phrase = raw.trim().toLowerCase();
-      if (phrase.length <= 2)
-        continue;
-      const at = phraseAt(tokens, tokenize2(phrase).map((t) => t.word), acts2);
-      if (!at)
-        continue;
-      const rest = words2(tokens.slice(at.end).join(" ")).join(" ");
-      const params = {};
-      let textFilled = false;
-      let nextNumber = 0;
-      const ordered = Object.entries(action.params).sort(([, a], [, b]) => Number(a.optional === true) - Number(b.optional === true));
-      for (const [name, def] of ordered) {
-        if (def.type === "ref") {
-          const pool = def.ref === "place" ? Object.values(world.places).filter((p) => canSeePlace(reg, world, state, pov, p.id)) : Object.entries(state.entities).filter(([id2, e]) => id2 !== pov && canSeeEntity(reg, world, state, pov, id2) && (!def.ref || kindIs(reg, world, e.kind, def.ref)) && (!def.of || selectorMatches(reg, world, state, def.of, id2))).map(([id2, e]) => ({ id: id2, name: e.name }));
-          const id = byName(named, pool);
-          if (id)
-            params[name] = id;
-        } else if (def.type === "text" && !textFilled && def.optional !== true && rest !== "") {
-          params[name] = rest;
-          textFilled = true;
-        } else if (def.type === "money" || def.type === "number" || def.type === "duration") {
-          const n = numbers[nextNumber];
-          if (n !== undefined) {
-            params[name] = def.type === "money" ? Math.round(n * 10 ** world.currency.decimals) : n;
-            nextNumber += 1;
-          }
-        }
-      }
-      const filled = Object.entries(action.params).every(([name, def]) => def.optional === true || params[name] !== undefined);
-      const better = !best || (filled !== best.filled ? filled : at.skipped !== best.skipped ? at.skipped < best.skipped : phrase.length > best.length);
-      if (better)
-        best = { action, params, filled, skipped: at.skipped, length: phrase.length };
-    }
-  }
-  return best ? { action: best.action.id, params: best.params, probabilities: { [best.action.id]: 1 } } : null;
-}
-
-// src/engine/authoring.ts
-function isWorldDoc(v) {
-  return isRecord(v) && v.format === WORLD_FORMAT && typeof v.id === "string" && isRecord(v.entities) && isRecord(v.places) && typeof v.pov === "string";
-}
-var TURN_FED_SECTIONS = { outcome: true, montage: true, outline: true, scene: true, [MINDS_SLOT]: true };
-function lintWorld(world, registry) {
-  const issues = [];
-  const err = (path, code, message) => {
-    issues.push({ severity: "error", path, code, message });
-  };
-  if (world.format !== WORLD_FORMAT)
-    err("format", "format", `format must be ${WORLD_FORMAT}`);
-  if (!world.entities[world.pov])
-    err("pov", "missing_pov", `the POV entity "${world.pov}" does not exist`);
-  if (!world.places[world.start.place])
-    err("start.place", "missing_place", `the start place "${world.start.place}" does not exist`);
-  const c = world.currency;
-  if (!Number.isInteger(c.decimals) || c.decimals < 0 || c.decimals > 6)
-    err("currency.decimals", "currency", "decimals must be a whole number from 0 to 6");
-  if (c.format.trim() === "")
-    err("currency.format", "currency", "the currency needs a display format");
-  for (const [id, e] of Object.entries(world.entities)) {
-    if (e.id !== id)
-      err(`entities.${id}.id`, "id_mismatch", "the id must match its key");
-    if (!world.kinds[e.kind] && !registry.kinds.has(e.kind))
-      err(`entities.${id}.kind`, "unknown_kind", `unknown kind "${e.kind}"`);
-  }
-  for (const [id, p] of Object.entries(world.places)) {
-    if (p.parent && !world.places[p.parent])
-      err(`places.${id}.parent`, "missing_place", `unknown parent place "${p.parent}"`);
-  }
-  for (const [id, r] of Object.entries(world.routes)) {
-    if (!world.places[r.from])
-      err(`routes.${id}.from`, "missing_place", `unknown place "${r.from}"`);
-    if (!world.places[r.to])
-      err(`routes.${id}.to`, "missing_place", `unknown place "${r.to}"`);
-  }
-  const warn = (path, code, message) => {
-    issues.push({ severity: "warning", path, code, message });
-  };
-  for (const [id, a] of Object.entries(world.actions)) {
-    if (!a.check && Object.keys(a.outcomes).some((o) => o !== "default"))
-      warn(`actions.${id}.check`, "no_check", `"${a.label}" has outcomes other than default but no check, so only "default" ever applies`);
-  }
-  issues.push(...lintLore(world));
-  for (const [id, s] of Object.entries(world.sections)) {
-    if (macroHazards(s.template, ["{{lines}}"]).length > 0)
-      err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
-  }
-  const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
-  for (const [id, s] of Object.entries(world.sections)) {
-    const feed = readSectionFeed(Object.fromEntries(SECTION_FEED_KEYS.flatMap((k) => s[k] !== undefined ? [[k, s[k]]] : [])));
-    if (!feed) {
-      err(`sections.${id}`, "section_feed", `"${s.label}": enabled is on or off, maxTokens and maxLines are whole numbers from 1, include is a list of sources, scope is player, scene or gm`);
-      continue;
-    }
-    for (const source of feed.include ?? [])
-      if (!sources.has(source))
-        warn(`sections.${id}.include`, "section_source", `"${s.label}" includes "${source}", which no pack renders`);
-    const fed = feed.include ? feed.include.some((source) => sources.has(source)) : registry.renderers.some((r) => r.slot === id);
-    if (!hasOwn(TURN_FED_SECTIONS, id) && !fed)
-      warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}"${feed.include ? " or one it includes" : ""}, so it never goes in`);
-  }
-  for (const [id, t] of Object.entries(world.steps)) {
-    if (t.id !== id)
-      err(`steps.${id}.id`, "id_mismatch", "the id must match its key");
-    if (!(STEP_OUTPUTS[t.purpose] ?? []).includes(t.output))
-      warn(`steps.${id}.output`, "step_output", `a ${t.purpose} template can't produce ${t.output}; it would never run`);
-    else if (t.purpose === "contradiction" && t.output !== "decision")
-      warn(`steps.${id}.output`, "step_contradiction_output", `a contradiction template with output ${t.output} takes the place of the built-in contradiction check, so no reply is checked against the facts; make it a decision to keep the check`);
-    for (const s of t.signals)
-      if (!knownSignal(s))
-        warn(`steps.${id}.signals`, "unknown_signal", `unknown signal "${s}"`);
-    if (t.template.trim() === "" && !MIND_PURPOSES.includes(t.purpose))
-      warn(`steps.${id}.template`, "step_blank", `this ${t.purpose} template is blank: it takes the place of the built-in instructions with none`);
-    const known = [...STEP_PLACEHOLDERS, ...PURPOSE_PLACEHOLDERS[t.purpose] ?? []];
-    for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g))
-      if (!known.includes((m[1] ?? "").toLowerCase()))
-        warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder for a ${t.purpose} step; it renders empty`);
-  }
-  issues.push(...lintStructure(world, registry));
-  for (const rule of registry.lints)
-    issues.push(...rule.check(world, registry));
-  return issues;
-}
-function applyAll(registry, world, state, events2) {
-  const dropped = [];
-  for (const e of events2) {
-    const ctx = registry.context(world, state);
-    const rejection = validateEvent(registry, e, ctx);
-    if (rejection) {
-      dropped.push(`dropped ${e.type}: ${rejection.reason}`);
-      continue;
-    }
-    applyEvent(registry, e, state, ctx);
-  }
-  return dropped;
-}
-function playtestStart(registry, world, revision) {
-  return initialState(world, revision, registry);
-}
-function playtestTurn(registry, pipeline, world, state, user, runSeed, index) {
-  const next = structuredClone(state);
-  const intent = typedIntent(registry, world, next, user);
-  const plan2 = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}`, kind: "normal", userTexts: [user], intent });
-  const notes = applyAll(registry, world, next, plan2.events);
-  const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}:post`, appliedMinutes: plan2.elapsedMinutes, extracted: [] });
-  notes.push(...applyAll(registry, world, next, post));
-  const lines = playerLines(registry, world, next, world.pov, [...plan2.events, ...post], 40);
-  const action = intent?.action ? [`read as ${registry.actions.get(intent.action)?.label ?? world.actions[intent.action]?.label ?? intent.action}`] : ["not an action"];
-  return { turn: { user, reply: lines.length > 0 ? lines.join(`
-`) : "(nothing changed)", notes: [`+${plan2.elapsedMinutes} min`, ...action, ...notes] }, state: next };
-}
-var CHECK_DAY_MINUTES = 24 * 60;
-function checkWorldDay(registry, pipeline, world, state, runSeed, day, intent) {
-  const next = structuredClone(state);
-  const label = `Day ${day + 1}`;
-  const notes = [];
-  let events2 = [];
-  try {
-    const plan2 = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}`, kind: "normal", userTexts: [`(Timelapse: ${label})`], intent });
-    notes.push(...applyAll(registry, world, next, plan2.events));
-    const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}:post`, appliedMinutes: plan2.elapsedMinutes, extracted: [] });
-    notes.push(...applyAll(registry, world, next, post));
-    events2 = [...plan2.events, ...post];
-    notes.unshift(`+${plan2.elapsedMinutes} min, ${events2.length} events`);
-  } catch (error) {
-    notes.push(`failed: ${error instanceof Error ? error.message : String(error)}`);
-    return { turn: { user: label, reply: "(the simulation failed)", notes }, state };
-  }
-  const secrets = unrevealedSecrets(registry, world, next);
-  const ctx = registry.context(world, next);
-  for (const r of registry.renderers) {
-    try {
-      for (const line2 of r.render(ctx))
-        for (const leak of findLeaks(line2, secrets))
-          notes.push(`leak in ${r.slot}: "${leak}"`);
-    } catch (error) {
-      notes.push(`section ${r.slot} failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  const lines = authorLines(registry, world, next, events2, 40);
-  return { turn: { user: label, reply: lines.length > 0 ? lines.join(`
-`) : "(nothing happened)", notes }, state: next };
-}
-
-// src/engine/beats.ts
-var MAX_BEATS = 6;
-function storylets(events2) {
-  const out = [];
-  for (const e of events2) {
-    if (e.type !== ENGINE_EVENTS.beat)
-      continue;
-    const d = asObject("data" in e ? e.data : undefined);
-    if (typeof d.hint === "string" && d.hint !== "")
-      out.push({ hint: d.hint, weight: typeof d.weight === "number" && d.weight > 0 ? d.weight : 1 });
-  }
-  return out;
-}
-function weightedOrder(items, rng) {
-  const pool = [...items];
-  const out = [];
-  while (pool.length > 0) {
-    const pick = rng.weighted(pool.map((value, i) => ({ value: i, weight: value.weight })));
-    out.push(pool[pick]);
-    pool.splice(pick, 1);
-  }
-  return out;
-}
-function outline(reg, world, state, input, rng, max = MAX_BEATS) {
-  const pov = world.pov;
-  const lines = [];
-  for (const r of input.resolutions ?? []) {
-    const label = r.inferred?.label ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
-    if (!r.ok)
-      lines.push(`${label} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
-    else if (r.check || r.adjudged)
-      lines.push(`${label}: the result is decided \u2014 ${r.outcome}.`);
-    else
-      lines.push(`${label} happens.`);
-  }
-  const tl = input.timelapse;
-  if (tl) {
-    const stop = tl.result.stops[0];
-    if (stop && signalVisible(reg, world, state, pov, stop))
-      lines.push(`Time passes until it's interrupted: ${stop.text}. Narrate the interval from the Montage; don't add events.`);
-    else if (tl.summary.stoppedBy === "mind")
-      lines.push(`Time passes until ${tl.mindName ?? "someone"} steps in; how they do is in the Minds section. Narrate the interval from the Montage; don't add events.`);
-    else
-      lines.push("Time passes. Narrate the interval from the Montage; don't add events.");
-  }
-  for (const e of input.events) {
-    if (e.type === "stage") {
-      const t = playerTrack(reg, world, state, pov, e.track);
-      if (t && own(world.tracks, e.track)?.visibility !== "secret")
-        lines.push(t.cue ? t.cue : `${t.label}: ${t.stage}.`);
-      continue;
-    }
-    const s = "data" in e ? signalOf(e) : null;
-    if (s && s.text && !tl && signalVisible(reg, world, state, pov, s))
-      lines.push(s.text);
-  }
-  for (const b of weightedOrder(storylets(input.events), rng.fork("storylets")).slice(0, 2))
-    lines.push(b.hint);
-  const here = placeOfEntity(state, pov);
-  const ctx = reg.context(world, state);
-  if (here) {
-    const shownActivity = optionalQuery(ctx, "castlife.activity");
-    for (const id of Object.keys(state.entities).sort()) {
-      const e = own(state.entities, id);
-      if (!e || id === pov || !e.agent || placeOfEntity(state, id) !== here || !canSeeEntity(reg, world, state, pov, id))
-        continue;
-      const life = povLife(world, state, id);
-      const act = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
-      if (life)
-        lines.push(`${e.name} ${life.reads}.`);
-      else if (typeof act === "string" && act !== "" && act !== "idle")
-        lines.push(`${e.name} is ${(shownActivity ? shownActivity(ctx, id, act) : act).replace(/_/g, " ")}.`);
-    }
-  }
-  const cal = calendarOf(world);
-  for (const s of allSchedules(reg, world)) {
-    if (s.target !== "activity" || !scheduleOwners(reg, world, state, s).includes(pov))
-      continue;
-    const n = nextStartFor(reg, ctx, s, pov, state.clock, 1);
-    const v = n?.slot.value;
-    if (n && typeof v === "string" && n.at - state.clock <= 60) {
-      lines.push(`${v.replace(/_/g, " ")} starts at ${formatHHMM(dateAt(cal, n.at).minuteOfDay)}.`);
-      break;
-    }
-  }
-  return [...new Set(lines)].slice(0, max);
-}
-
 // src/engine/rules.ts
 var CASCADE_CAP = 8;
 var FIRING_CAP = 256;
@@ -11247,14 +10760,105 @@ function resolveTarget(reg, world, state, target) {
     return { code: "too_long", reason: `a timelapse reaches at most ${TIME_LIMITS.timelapseMinutes / MINUTES_PER_DAY} days ahead` };
   return { to, label, ...stopWhen ? { stopWhen } : {} };
 }
+var NEXT_DAY_PART_GAP = 180;
+function nextDayPart(cal, now, index) {
+  const start = cal.partStarts[index] ?? 0;
+  const at = nextTimeOfDay(cal, now, start);
+  return { type: "at", at: at - now < NEXT_DAY_PART_GAP ? nextTimeOfDay(cal, at, start) : at };
+}
 var SPAN_COUNTS = { a: 1, an: 1, one: 1, next: 1, "a couple of": 2, "couple of": 2, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty five": 45, ninety: 90 };
 var SPAN_UNITS = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
-var longestFirst = (words3) => [...words3].sort((a, b) => b.length - a.length).join("|");
+var longestFirst = (words2) => [...words2].sort((a, b) => b.length - a.length).join("|");
+var plain2 = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 var SPAN_TERM = new RegExp(` (${longestFirst(Object.keys(SPAN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?(?= )`, "g");
+var SPAN_NOT_BEFORE = / (?:last|past|previous|every|per|each|\d+(?:\.\d+)?)$/;
+var SPAN_NOT_AFTER = /^ (?:ago|earlier|before|already|back|previously|old)(?= )/;
+var SPAN_CONTEXT = 24;
+var STATED_TIME = / \d{1,2}:\d{2}| (?:\d{1,2} ?(?:am|pm)|o clock|at \d+|noon|midnight|\d{1,2}(?:st|nd|rd|th)|\d{4} \d{1,2} \d{1,2})(?= )/;
+var PART_LEADS = { until: "until", till: "until", til: "until", to: "until", by: "until", "later that": "today", "later this": "today", "later in the": "today", that: "today", this: "today", next: "next", following: "next", tomorrow: "tomorrow" };
+var COMMITMENT_SPAN = / (?:until|till|til)(?: my| the| our)?(?: next)? (shift|work|commitment|appointment)s?(?= )/g;
 var VAGUE_SPANS = { "a moment": 5, "a few moments": 5, "a few minutes": 5, "a little while": 15, "a while": 30, "a few hours": 180 };
 var VAGUE_SPAN = new RegExp(` (${longestFirst(Object.keys(VAGUE_SPANS))})(?= )`, "g");
 var ANCHOR_WORDS = { breakfast: "breakfast", lunch: "lunch", dinner: "dinner", supper: "dinner", bedtime: "bedtime", morning: "morning" };
+var ANCHOR_PARTS = { breakfast: ["morning"], lunch: ["midday", "afternoon"], dinner: ["evening"], bedtime: ["night"], morning: ["morning"] };
 var ANCHOR_SPAN = new RegExp(` (?:until|till|til|to|by)(?: the| my| our)? (${longestFirst(Object.keys(ANCHOR_WORDS))})(?= )`, "g");
+function typedSpan(cal, now, words2, anchorAt) {
+  const t = ` ${words2.toLowerCase().replace(/([ap])\.\s?m\.?/g, "$1m").replace(/(?<!\d)[.,;!?]|[.,;!?](?!\d)/g, " | ").replace(/[^a-z0-9.:|]+/g, " ").replace(/\s+/g, " ").trim()} `.replace(/ (?:a |an )?half (?:an? )?hour(?= )/g, " 30 minutes").replace(/ (?:a |an )?quarter (?:of )?(?:an? )?hour(?= )/g, " 15 minutes");
+  const weekdays = cal.system.weekdayNames.map(plain2).filter((n) => n.length > 3);
+  const months = cal.system.monthNames.map(plain2).filter((n) => n !== "");
+  if (STATED_TIME.test(t) || weekdays.some((d) => t.includes(` ${d} `)) || months.some((m) => new RegExp(` (?:${m} \\d|\\d+ (?:of )?${m} )`).test(t)))
+    return null;
+  const found = [];
+  const lengths = [];
+  for (const m of t.matchAll(SPAN_TERM)) {
+    const count = m[1] ?? "";
+    const unit = SPAN_UNITS[m[3] ?? ""] ?? 0;
+    if (count === "next" && unit >= MINUTES_PER_DAY || SPAN_NOT_BEFORE.test(t.slice(Math.max(0, m.index - SPAN_CONTEXT), m.index)))
+      continue;
+    lengths.push({ start: m.index, end: m.index + m[0].length, minutes: ((SPAN_COUNTS[count] ?? Number(count)) + (m[2] || m[4] ? 0.5 : 0)) * unit });
+  }
+  for (const m of t.matchAll(VAGUE_SPAN)) {
+    if (SPAN_NOT_BEFORE.test(t.slice(Math.max(0, m.index - SPAN_CONTEXT), m.index)))
+      continue;
+    lengths.push({ start: m.index, end: m.index + m[0].length, minutes: VAGUE_SPANS[m[1] ?? ""] ?? 0 });
+  }
+  lengths.sort((a, b) => a.start - b.start);
+  const runs = [];
+  for (const length of lengths) {
+    const last = runs.at(-1);
+    if (last && /^(?: and)?$/.test(t.slice(last.end, length.start))) {
+      last.end = length.end;
+      last.minutes += length.minutes;
+    } else
+      runs.push({ end: length.end, minutes: length.minutes });
+  }
+  for (const run of runs)
+    if (run.minutes > 0 && !SPAN_NOT_AFTER.test(t.slice(run.end, run.end + SPAN_CONTEXT)))
+      found.push({ type: "duration", minutes: Math.round(run.minutes) });
+  const anchored = new Set;
+  for (const m of t.matchAll(ANCHOR_SPAN)) {
+    const anchor = ANCHOR_WORDS[m[1] ?? ""];
+    if (!anchor)
+      continue;
+    anchored.add(m.index);
+    const at = anchorAt?.(anchor) ?? null;
+    const part = ANCHOR_PARTS[anchor].map((id) => cal.dayParts.find((p) => p.id === id)).find((p) => p !== undefined);
+    if (at !== null && at > now)
+      found.push({ type: "at", at });
+    else if (part)
+      found.push({ type: "day_part", dayPart: part.id });
+  }
+  const named = cal.dayParts.flatMap((p, index) => [p.id, p.label].map((n) => ({ name: plain2(n), index }))).filter((n) => n.name !== "");
+  const day = dateAt(cal, now);
+  const aheadToday = (index) => clockAt(cal, day.dayIndex, cal.partStarts[index] ?? 0) > now ? { type: "day_part", dayPart: cal.dayParts[index]?.id ?? "" } : null;
+  for (const m of t.matchAll(new RegExp(` (${longestFirst(Object.keys(PART_LEADS))})(?: the)? (${longestFirst(named.map((n) => n.name))})(?= )`, "g"))) {
+    const index = named.find((n) => n.name === m[2])?.index ?? -1;
+    const lead = PART_LEADS[m[1] ?? ""];
+    if (index < 0 || anchored.has(m.index))
+      continue;
+    if (lead === "until")
+      found.push({ type: "day_part", dayPart: cal.dayParts[index]?.id ?? "" });
+    else if (lead === "next")
+      found.push(nextDayPart(cal, now, index));
+    else if (lead === "tomorrow") {
+      const base = day.minuteOfDay < (cal.partStarts[0] ?? 0) ? day.dayIndex - 1 : day.dayIndex;
+      found.push({ type: "at", at: clockAt(cal, base + 1, cal.partStarts[index] ?? 0) });
+    } else {
+      const ahead = aheadToday(index);
+      if (ahead)
+        found.push(ahead);
+    }
+  }
+  if (/ tonight(?= )/.test(t)) {
+    const ahead = cal.dayParts.map((p, index) => p.id === "evening" || p.id === "night" ? aheadToday(index) : null).find((target) => target !== null);
+    if (ahead)
+      found.push(ahead);
+  }
+  for (const m of t.matchAll(COMMITMENT_SPAN))
+    found.push({ type: m[1] === "shift" || m[1] === "work" ? "shift" : "commitment" });
+  const distinct = [...new Map(found.map((f) => [JSON.stringify(f), f])).values()];
+  return distinct.length === 1 ? distinct[0] ?? null : null;
+}
 function parseOverrides(v) {
   const out = {};
   if (!isRecord(v))
@@ -11472,6 +11076,497 @@ function buildMontage(reg, world, before, after, events2, granularity) {
     }),
     bands
   };
+}
+
+// src/engine/typed-intent.ts
+var STOP = new Set(["the", "a", "an", "to", "of", "at", "my", "your", "and", "with", "about", "for", "in", "on", "some", "over", "up", "down"]);
+var FILLER = new Set(["down", "up", "over", "back", "out", "across", "along", "around", "right", "straight", "on", "off", "just"]);
+var CLAUSE_WORDS = new Set(["but", "so", "because", "though", "although", "however", "instead"]);
+var NEGATION = new Set(["not", "no", "never", "cannot", "nothing", "nobody", "neither", "nor", "refuse", "refuses", "refused", "avoid", "avoiding"]);
+var HYPOTHETICAL = new Set(["might", "maybe", "perhaps", "whether", "wonder", "wonders", "wondering", "wondered", "consider", "considering", "imagine", "imagining", "suppose", "supposing", "wish", "debating"]);
+var CONDITIONAL = new Set(["if", "unless"]);
+var MUSING = new Set(["think", "thinks", "thinking", "thought"]);
+var MUSING_OBJECT = new Set(["about", "of"]);
+var FIRST_PERSON = new Set(["i", "i'm", "i'll", "i'd", "i've", "me", "myself", "we", "we're", "we'll", "we'd", "we've", "us", "let's", "lets"]);
+var OTHER_PERSON = new Set([
+  "he",
+  "she",
+  "they",
+  "you",
+  "he's",
+  "she's",
+  "they're",
+  "you're",
+  "he'll",
+  "she'll",
+  "they'll",
+  "you'll",
+  "he'd",
+  "she'd",
+  "they'd",
+  "you'd",
+  "they've",
+  "you've",
+  "him",
+  "her",
+  "them",
+  "someone",
+  "somebody",
+  "everyone",
+  "everybody",
+  "anyone",
+  "anybody",
+  "people",
+  "y'all"
+]);
+var AUX = new Set([
+  "will",
+  "would",
+  "shall",
+  "should",
+  "can",
+  "could",
+  "may",
+  "might",
+  "must",
+  "is",
+  "are",
+  "was",
+  "were",
+  "does",
+  "did",
+  "has",
+  "wants",
+  "needs",
+  "decides",
+  "decided",
+  "tries",
+  "tried",
+  "plans",
+  "planned",
+  "says",
+  "said",
+  "tells",
+  "told",
+  "asks",
+  "asked",
+  "agrees",
+  "agreed",
+  "offers",
+  "offered",
+  "starts",
+  "begins",
+  "gets",
+  "likes",
+  "hopes"
+]);
+var BRIDGE = new Set(["to", "going", "gonna", "just", "then", "also", "now", "soon", "finally", "quickly", "slowly", "really", "probably", "already", "still"]);
+var IDIOMS = [
+  ["pay", "attention"],
+  ["pay", "close", "attention"],
+  ["pay", "heed"],
+  ["pay", "no", "mind"],
+  ["pay", "respects"],
+  ["pay", "my", "respects"],
+  ["pay", "a", "visit"],
+  ["pay", "a", "compliment"],
+  ["pay", "the", "price"],
+  ["buy", "time"],
+  ["buy", "some", "time"],
+  ["take", "a", "look"],
+  ["take", "a", "seat"],
+  ["take", "a", "breath"],
+  ["take", "a", "deep", "breath"],
+  ["take", "care"],
+  ["take", "my", "time"],
+  ["take", "your", "time"],
+  ["take", "it", "easy"],
+  ["lend", "a", "hand"],
+  ["lend", "an", "ear"],
+  ["on", "the", "other", "hand"],
+  ["give", "up"],
+  ["give", "it", "a", "try"]
+];
+function tokenize2(text3) {
+  const out = [];
+  let clause = 0;
+  let sentence = 0;
+  for (const m of text3.toLowerCase().replace(/[\u2018\u2019]/g, "'").matchAll(/[a-z0-9]+(?:'[a-z]+)*|[.!?;:,]/g)) {
+    const word = m[0];
+    if (/^[.!?;]$/.test(word)) {
+      sentence++;
+      clause++;
+    } else if (word === "," || word === ":")
+      clause++;
+    else {
+      if (CLAUSE_WORDS.has(word))
+        clause++;
+      out.push({ word, clause, sentence });
+    }
+  }
+  return out;
+}
+function words2(s) {
+  return s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w));
+}
+function byName(said, pool) {
+  let best = null;
+  for (const c of pool) {
+    const n = words2(c.name).filter((w) => said.has(w)).length;
+    if (n > 0 && (!best || n > best.n))
+      best = { id: c.id, n };
+  }
+  return best?.id ?? null;
+}
+function playerSubject(lead, names) {
+  for (let i = lead.length - 1;i >= 0; i--) {
+    const w = lead[i] ?? "";
+    if (FIRST_PERSON.has(w))
+      return true;
+    if (OTHER_PERSON.has(w))
+      return false;
+    const name = w.replace(/'(s|ll|d|re|ve)$/, "");
+    if (!names.has(name))
+      continue;
+    if (/'(ll|d|re|ve)$/.test(w) || lead.slice(i + 1).every((b) => AUX.has(b) || BRIDGE.has(b)))
+      return false;
+  }
+  return !lead.some((w) => AUX.has(w));
+}
+function playerActs(tokens, start, names) {
+  const at = tokens[start];
+  if (!at)
+    return false;
+  const before = tokens.slice(0, start);
+  const lead = before.filter((t) => t.clause === at.clause).map((t) => t.word);
+  if (IDIOMS.some((idiom) => idiom.some((w, offset) => w === at.word && idiom.every((x, k) => tokens[start - offset + k]?.word === x))))
+    return false;
+  if (lead.some((w) => NEGATION.has(w) || w.endsWith("n't")))
+    return false;
+  if (lead.some((w, i) => HYPOTHETICAL.has(w) || MUSING.has(w) && MUSING_OBJECT.has(lead[i + 1] ?? "")))
+    return false;
+  if (before.some((t) => t.sentence === at.sentence && CONDITIONAL.has(t.word)))
+    return false;
+  return playerSubject(lead, names);
+}
+function phraseAt(tokens, phrase, acts2) {
+  for (let start = 0;start < tokens.length; start++) {
+    if (tokens[start] !== phrase[0])
+      continue;
+    let at = start + 1;
+    let skipped = 0;
+    let k = 1;
+    for (;k < phrase.length; k++) {
+      while (at < tokens.length && tokens[at] !== phrase[k] && FILLER.has(tokens[at] ?? "")) {
+        at++;
+        skipped++;
+      }
+      if (tokens[at] !== phrase[k])
+        break;
+      at++;
+    }
+    if (k === phrase.length && acts2(start))
+      return { end: at, skipped };
+  }
+  return null;
+}
+function typedIntent(reg, world, state, text3) {
+  const said = tokenize2(text3);
+  const tokens = said.map((t) => t.word);
+  const actions = new Map;
+  for (const [id, a] of reg.actions)
+    actions.set(id, a);
+  for (const [id, a] of Object.entries(world.actions))
+    actions.set(id, a);
+  const named = new Set(words2(text3));
+  const pov = world.pov;
+  const people = new Set;
+  for (const [id, e] of Object.entries(state.entities))
+    if (id !== pov && kindIs(reg, world, e.kind, "person") && !isGone(state, id))
+      for (const w of words2(e.name))
+        people.add(w);
+  const acts2 = (start) => playerActs(said, start, people);
+  const ctx = reg.context(world, state);
+  const fits = optionalQuery(ctx, "combat.offers");
+  let best = null;
+  const numbers = [...text3.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
+  for (const action of actions.values()) {
+    if (!offersAction(world, action) || fits?.(ctx, action) === false)
+      continue;
+    for (const raw of action.lexicon ?? []) {
+      const phrase = raw.trim().toLowerCase();
+      if (phrase.length <= 2)
+        continue;
+      const at = phraseAt(tokens, tokenize2(phrase).map((t) => t.word), acts2);
+      if (!at)
+        continue;
+      const rest = words2(tokens.slice(at.end).join(" ")).join(" ");
+      const params = {};
+      let textFilled = false;
+      let nextNumber = 0;
+      const ordered = Object.entries(action.params).sort(([, a], [, b]) => Number(a.optional === true) - Number(b.optional === true));
+      for (const [name, def] of ordered) {
+        if (def.type === "ref") {
+          const pool = def.ref === "place" ? Object.values(world.places).filter((p) => canSeePlace(reg, world, state, pov, p.id)) : Object.entries(state.entities).filter(([id2, e]) => id2 !== pov && canSeeEntity(reg, world, state, pov, id2) && (!def.ref || kindIs(reg, world, e.kind, def.ref)) && (!def.of || selectorMatches(reg, world, state, def.of, id2))).map(([id2, e]) => ({ id: id2, name: e.name }));
+          const id = byName(named, pool);
+          if (id)
+            params[name] = id;
+        } else if (def.type === "text" && !textFilled && def.optional !== true && rest !== "") {
+          params[name] = rest;
+          textFilled = true;
+        } else if (def.type === "duration") {
+          const span = typedSpan(calendarOf(world), state.clock, text3);
+          if (span?.type === "duration")
+            params[name] = span.minutes;
+        } else if (def.type === "money" || def.type === "number") {
+          const n = numbers[nextNumber];
+          if (n !== undefined) {
+            params[name] = def.type === "money" ? Math.round(n * 10 ** world.currency.decimals) : n;
+            nextNumber += 1;
+          }
+        }
+      }
+      const filled = Object.entries(action.params).every(([name, def]) => def.optional === true || params[name] !== undefined);
+      const better = !best || (filled !== best.filled ? filled : at.skipped !== best.skipped ? at.skipped < best.skipped : phrase.length > best.length);
+      if (better)
+        best = { action, params, filled, skipped: at.skipped, length: phrase.length };
+    }
+  }
+  return best ? { action: best.action.id, params: best.params, probabilities: { [best.action.id]: 1 } } : null;
+}
+
+// src/engine/authoring.ts
+function isWorldDoc(v) {
+  return isRecord(v) && v.format === WORLD_FORMAT && typeof v.id === "string" && isRecord(v.entities) && isRecord(v.places) && typeof v.pov === "string";
+}
+var TURN_FED_SECTIONS = { outcome: true, montage: true, outline: true, scene: true, [MINDS_SLOT]: true };
+function lintWorld(world, registry) {
+  const issues = [];
+  const err = (path, code, message) => {
+    issues.push({ severity: "error", path, code, message });
+  };
+  if (world.format !== WORLD_FORMAT)
+    err("format", "format", `format must be ${WORLD_FORMAT}`);
+  if (!world.entities[world.pov])
+    err("pov", "missing_pov", `the POV entity "${world.pov}" does not exist`);
+  if (!world.places[world.start.place])
+    err("start.place", "missing_place", `the start place "${world.start.place}" does not exist`);
+  const c = world.currency;
+  if (!Number.isInteger(c.decimals) || c.decimals < 0 || c.decimals > 6)
+    err("currency.decimals", "currency", "decimals must be a whole number from 0 to 6");
+  if (c.format.trim() === "")
+    err("currency.format", "currency", "the currency needs a display format");
+  for (const [id, e] of Object.entries(world.entities)) {
+    if (e.id !== id)
+      err(`entities.${id}.id`, "id_mismatch", "the id must match its key");
+    if (!world.kinds[e.kind] && !registry.kinds.has(e.kind))
+      err(`entities.${id}.kind`, "unknown_kind", `unknown kind "${e.kind}"`);
+  }
+  for (const [id, p] of Object.entries(world.places)) {
+    if (p.parent && !world.places[p.parent])
+      err(`places.${id}.parent`, "missing_place", `unknown parent place "${p.parent}"`);
+  }
+  for (const [id, r] of Object.entries(world.routes)) {
+    if (!world.places[r.from])
+      err(`routes.${id}.from`, "missing_place", `unknown place "${r.from}"`);
+    if (!world.places[r.to])
+      err(`routes.${id}.to`, "missing_place", `unknown place "${r.to}"`);
+  }
+  const warn = (path, code, message) => {
+    issues.push({ severity: "warning", path, code, message });
+  };
+  for (const [id, a] of Object.entries(world.actions)) {
+    if (!a.check && Object.keys(a.outcomes).some((o) => o !== "default"))
+      warn(`actions.${id}.check`, "no_check", `"${a.label}" has outcomes other than default but no check, so only "default" ever applies`);
+  }
+  issues.push(...lintLore(world));
+  for (const [id, s] of Object.entries(world.sections)) {
+    if (macroHazards(s.template, ["{{lines}}"]).length > 0)
+      err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
+  }
+  const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
+  for (const [id, s] of Object.entries(world.sections)) {
+    const feed = readSectionFeed(Object.fromEntries(SECTION_FEED_KEYS.flatMap((k) => s[k] !== undefined ? [[k, s[k]]] : [])));
+    if (!feed) {
+      err(`sections.${id}`, "section_feed", `"${s.label}": enabled is on or off, maxTokens and maxLines are whole numbers from 1, include is a list of sources, scope is player, scene or gm`);
+      continue;
+    }
+    for (const source of feed.include ?? [])
+      if (!sources.has(source))
+        warn(`sections.${id}.include`, "section_source", `"${s.label}" includes "${source}", which no pack renders`);
+    const fed = feed.include ? feed.include.some((source) => sources.has(source)) : registry.renderers.some((r) => r.slot === id);
+    if (!hasOwn(TURN_FED_SECTIONS, id) && !fed)
+      warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}"${feed.include ? " or one it includes" : ""}, so it never goes in`);
+  }
+  for (const [id, t] of Object.entries(world.steps)) {
+    if (t.id !== id)
+      err(`steps.${id}.id`, "id_mismatch", "the id must match its key");
+    if (!(STEP_OUTPUTS[t.purpose] ?? []).includes(t.output))
+      warn(`steps.${id}.output`, "step_output", `a ${t.purpose} template can't produce ${t.output}; it would never run`);
+    else if (t.purpose === "contradiction" && t.output !== "decision")
+      warn(`steps.${id}.output`, "step_contradiction_output", `a contradiction template with output ${t.output} takes the place of the built-in contradiction check, so no reply is checked against the facts; make it a decision to keep the check`);
+    for (const s of t.signals)
+      if (!knownSignal(s))
+        warn(`steps.${id}.signals`, "unknown_signal", `unknown signal "${s}"`);
+    if (t.template.trim() === "" && !MIND_PURPOSES.includes(t.purpose))
+      warn(`steps.${id}.template`, "step_blank", `this ${t.purpose} template is blank: it takes the place of the built-in instructions with none`);
+    const known = [...STEP_PLACEHOLDERS, ...PURPOSE_PLACEHOLDERS[t.purpose] ?? []];
+    for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g))
+      if (!known.includes((m[1] ?? "").toLowerCase()))
+        warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder for a ${t.purpose} step; it renders empty`);
+  }
+  issues.push(...lintStructure(world, registry));
+  for (const rule of registry.lints)
+    issues.push(...rule.check(world, registry));
+  return issues;
+}
+function applyAll(registry, world, state, events2) {
+  const dropped = [];
+  for (const e of events2) {
+    const ctx = registry.context(world, state);
+    const rejection = validateEvent(registry, e, ctx);
+    if (rejection) {
+      dropped.push(`dropped ${e.type}: ${rejection.reason}`);
+      continue;
+    }
+    applyEvent(registry, e, state, ctx);
+  }
+  return dropped;
+}
+function playtestStart(registry, world, revision) {
+  return initialState(world, revision, registry);
+}
+function playtestTurn(registry, pipeline, world, state, user, runSeed, index) {
+  const next = structuredClone(state);
+  const intent = typedIntent(registry, world, next, user);
+  const plan2 = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}`, kind: "normal", userTexts: [user], intent });
+  const notes = applyAll(registry, world, next, plan2.events);
+  const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}:post`, appliedMinutes: plan2.elapsedMinutes, extracted: [] });
+  notes.push(...applyAll(registry, world, next, post));
+  const lines = playerLines(registry, world, next, world.pov, [...plan2.events, ...post], 40);
+  const action = intent?.action ? [`read as ${registry.actions.get(intent.action)?.label ?? world.actions[intent.action]?.label ?? intent.action}`] : ["not an action"];
+  return { turn: { user, reply: lines.length > 0 ? lines.join(`
+`) : "(nothing changed)", notes: [`+${plan2.elapsedMinutes} min`, ...action, ...notes] }, state: next };
+}
+var CHECK_DAY_MINUTES = 24 * 60;
+function checkWorldDay(registry, pipeline, world, state, runSeed, day, intent) {
+  const next = structuredClone(state);
+  const label = `Day ${day + 1}`;
+  const notes = [];
+  let events2 = [];
+  try {
+    const plan2 = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}`, kind: "normal", userTexts: [`(Timelapse: ${label})`], intent });
+    notes.push(...applyAll(registry, world, next, plan2.events));
+    const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}:post`, appliedMinutes: plan2.elapsedMinutes, extracted: [] });
+    notes.push(...applyAll(registry, world, next, post));
+    events2 = [...plan2.events, ...post];
+    notes.unshift(`+${plan2.elapsedMinutes} min, ${events2.length} events`);
+  } catch (error) {
+    notes.push(`failed: ${error instanceof Error ? error.message : String(error)}`);
+    return { turn: { user: label, reply: "(the simulation failed)", notes }, state };
+  }
+  const secrets = unrevealedSecrets(registry, world, next);
+  const ctx = registry.context(world, next);
+  for (const r of registry.renderers) {
+    try {
+      for (const line2 of r.render(ctx))
+        for (const leak of findLeaks(line2, secrets))
+          notes.push(`leak in ${r.slot}: "${leak}"`);
+    } catch (error) {
+      notes.push(`section ${r.slot} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const lines = authorLines(registry, world, next, events2, 40);
+  return { turn: { user: label, reply: lines.length > 0 ? lines.join(`
+`) : "(nothing happened)", notes }, state: next };
+}
+
+// src/engine/beats.ts
+var MAX_BEATS = 6;
+function storylets(events2) {
+  const out = [];
+  for (const e of events2) {
+    if (e.type !== ENGINE_EVENTS.beat)
+      continue;
+    const d = asObject("data" in e ? e.data : undefined);
+    if (typeof d.hint === "string" && d.hint !== "")
+      out.push({ hint: d.hint, weight: typeof d.weight === "number" && d.weight > 0 ? d.weight : 1 });
+  }
+  return out;
+}
+function weightedOrder(items, rng) {
+  const pool = [...items];
+  const out = [];
+  while (pool.length > 0) {
+    const pick = rng.weighted(pool.map((value, i) => ({ value: i, weight: value.weight })));
+    out.push(pool[pick]);
+    pool.splice(pick, 1);
+  }
+  return out;
+}
+function outline(reg, world, state, input, rng, max = MAX_BEATS) {
+  const pov = world.pov;
+  const lines = [];
+  for (const r of input.resolutions ?? []) {
+    const label = r.inferred?.label ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
+    if (!r.ok)
+      lines.push(`${label} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
+    else if (r.check || r.adjudged)
+      lines.push(`${label}: the result is decided \u2014 ${r.outcome}.`);
+    else
+      lines.push(`${label} happens.`);
+  }
+  const tl = input.timelapse;
+  if (tl) {
+    const stop = tl.result.stops[0];
+    if (stop && signalVisible(reg, world, state, pov, stop))
+      lines.push(`Time passes until it's interrupted: ${stop.text}. Narrate the interval from the Montage; don't add events.`);
+    else if (tl.summary.stoppedBy === "mind")
+      lines.push(`Time passes until ${tl.mindName ?? "someone"} steps in; how they do is in the Minds section. Narrate the interval from the Montage; don't add events.`);
+    else
+      lines.push("Time passes. Narrate the interval from the Montage; don't add events.");
+  }
+  for (const e of input.events) {
+    if (e.type === "stage") {
+      const t = playerTrack(reg, world, state, pov, e.track);
+      if (t && own(world.tracks, e.track)?.visibility !== "secret")
+        lines.push(t.cue ? t.cue : `${t.label}: ${t.stage}.`);
+      continue;
+    }
+    const s = "data" in e ? signalOf(e) : null;
+    if (s && s.text && !tl && signalVisible(reg, world, state, pov, s))
+      lines.push(s.text);
+  }
+  for (const b of weightedOrder(storylets(input.events), rng.fork("storylets")).slice(0, 2))
+    lines.push(b.hint);
+  const here = placeOfEntity(state, pov);
+  const ctx = reg.context(world, state);
+  if (here) {
+    const shownActivity = optionalQuery(ctx, "castlife.activity");
+    for (const id of Object.keys(state.entities).sort()) {
+      const e = own(state.entities, id);
+      if (!e || id === pov || !e.agent || placeOfEntity(state, id) !== here || !canSeeEntity(reg, world, state, pov, id))
+        continue;
+      const life = povLife(world, state, id);
+      const act = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
+      if (life)
+        lines.push(`${e.name} ${life.reads}.`);
+      else if (typeof act === "string" && act !== "" && act !== "idle")
+        lines.push(`${e.name} is ${(shownActivity ? shownActivity(ctx, id, act) : act).replace(/_/g, " ")}.`);
+    }
+  }
+  const cal = calendarOf(world);
+  for (const s of allSchedules(reg, world)) {
+    if (s.target !== "activity" || !scheduleOwners(reg, world, state, s).includes(pov))
+      continue;
+    const n = nextStartFor(reg, ctx, s, pov, state.clock, 1);
+    const v = n?.slot.value;
+    if (n && typeof v === "string" && n.at - state.clock <= 60) {
+      lines.push(`${v.replace(/_/g, " ")} starts at ${formatHHMM(dateAt(cal, n.at).minuteOfDay)}.`);
+      break;
+    }
+  }
+  return [...new Set(lines)].slice(0, max);
 }
 
 // src/engine/turn.ts
@@ -12438,13 +12533,13 @@ function findRoute(world, from, to, mode, opts = {}) {
   const end = ends[0] ?? null;
   if (end === null)
     return null;
-  const plain2 = (node) => node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node;
+  const plain3 = (node) => node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node;
   const legs = [];
   for (let cur = end;cur !== from; ) {
     const p = prev.get(cur);
     if (!p)
       return null;
-    legs.unshift({ from: plain2(p.from), to: plain2(cur), minutes: Math.round(cost(p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null });
+    legs.unshift({ from: plain3(p.from), to: plain3(cur), minutes: Math.round(cost(p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null });
     cur = p.from;
   }
   return { mode, legs, minutes: legs.reduce((a, l) => a + l.minutes, 0), distanceKm: legs.reduce((a, l) => a + l.distanceKm, 0) };
@@ -12896,7 +12991,8 @@ var PERSON = {
     appointments: { type: "list", label: "Appointments", domain: "castlife", level: 2 },
     trips: { type: "list", label: "Trips", domain: "castlife", level: 1 },
     chores: { type: "list", label: "Chores", domain: "castlife", level: 3 },
-    birthday: { type: "date", label: "Birthday (MM-DD or YYYY-MM-DD)", domain: "castlife", level: 3 }
+    birthday: { type: "date", label: "Birthday (MM-DD or YYYY-MM-DD)", domain: "castlife", level: 3 },
+    bed: { type: "ref", label: "Bed (a place or an item)", domain: "castlife", level: 1 }
   }
 };
 function asMode(v) {
@@ -25758,6 +25854,60 @@ var weatherPack = {
 };
 var core_default6 = weatherPack;
 
+// src/shared/needs.ts
+var NEED_IDS = ["hunger", "fatigue", "social", "fun"];
+var NEED_DEFAULTS = {
+  hunger: { on: true, rate: 4, tell: 60, alert: 80 },
+  fatigue: { on: true, rate: 3, tell: 60, alert: 80 },
+  social: { on: true, rate: 1.5, tell: 60, alert: 80 },
+  fun: { on: true, rate: 1, tell: 60, alert: 80 }
+};
+var NEED_SETTING_PARTS = { on: "switch", rate: "rate", tell: "points", alert: "points" };
+var RATE_MAX = 100;
+var inScale = (v, max) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= max;
+var STATED_MINUTES = { type: "duration", label: "How long, in minutes, when the player says", optional: true };
+function needsSettingsOf(world) {
+  const raw = isRecord(world.needs) ? world.needs : {};
+  const one = (need2) => {
+    const set = isRecord(raw[need2]) ? raw[need2] : {};
+    const base = NEED_DEFAULTS[need2];
+    return {
+      on: typeof set.on === "boolean" ? set.on : base.on,
+      rate: inScale(set.rate, RATE_MAX) ? set.rate : base.rate,
+      tell: inScale(set.tell, 100) ? set.tell : base.tell,
+      alert: inScale(set.alert, 100) ? set.alert : base.alert
+    };
+  };
+  return { hunger: one("hunger"), fatigue: one("fatigue"), social: one("social"), fun: one("fun") };
+}
+function needsOn(world) {
+  const tuned = needsSettingsOf(world);
+  return NEED_IDS.filter((n) => tuned[n].on);
+}
+function isNeedId(v) {
+  return typeof v === "string" && NEED_IDS.includes(v);
+}
+function needsSettingsProblems(v) {
+  if (!isRecord(v))
+    return ["needs settings are an object, one entry per need"];
+  return Object.entries(v).flatMap(([need2, set]) => {
+    if (!isNeedId(need2))
+      return [`there's no need ${need2} (${NEED_IDS.join(", ")})`];
+    if (!isRecord(set))
+      return [`${need2} is an object: on, rate, tell, alert`];
+    return Object.entries(set).flatMap(([part, value]) => {
+      const takes = hasOwn(NEED_SETTING_PARTS, part) ? NEED_SETTING_PARTS[part] : undefined;
+      if (takes === undefined)
+        return [`${need2} has no setting ${part} (${Object.keys(NEED_SETTING_PARTS).join(", ")})`];
+      if (takes === "switch")
+        return typeof value === "boolean" ? [] : [`${need2}.${part} is true or false`];
+      if (takes === "rate")
+        return inScale(value, RATE_MAX) ? [] : [`${need2}.${part} is a number from 0 to ${RATE_MAX}, its growth an hour`];
+      return inScale(value, 100) ? [] : [`${need2}.${part} is a number from 0 to 100`];
+    });
+  });
+}
+
 // src/packs/relationships/core/index.ts
 var DEFAULT_AXES = [
   { id: "warmth", label: "Warmth", min: -100, max: 100 },
@@ -25788,6 +25938,7 @@ var APPRAISALS = {
 var DEFAULT_HALF_LIFE_DAYS = 30;
 var HISTORY = 8;
 var REGARD_CHANNEL_CAP = 10;
+var CHAT_FOR = "minutes > 0 ? minutes : 15";
 function config(ctx) {
   return ctx.world.packs.relationships?.config ?? {};
 }
@@ -26026,7 +26177,7 @@ var relationshipsPack = {
         return appraise(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"));
       }
     });
-    r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }] }, duration: "15", lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
+    r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" }, minutes: STATED_MINUTES }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }, { type: "castlife.satisfy", args: { entity: "self", need: "social", minutes: `=${CHAT_FOR}` } }] }, duration: CHAT_FOR, lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
     r.action({ id: "give_gift", label: "Give a gift", description: "Give someone here a present.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
     r.proposal({
       type: "regard",
@@ -26339,6 +26490,14 @@ function routineShapeProblems(v) {
 var ROUTINE_SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" };
 
 // src/packs/castlife/core/places.ts
+function bedPlace(ctx, who) {
+  const bed = own(ctx.state.entities, who)?.fields.bed;
+  if (typeof bed !== "string" || bed === "")
+    return null;
+  if (own(ctx.world.places, bed))
+    return bed;
+  return own(ctx.state.entities, bed) && !isGone(ctx.state, bed) ? placeOfEntity(ctx.state, bed) : null;
+}
 function homeOf(ctx, who) {
   const h = own(ctx.state.entities, who)?.fields.home;
   return typeof h === "string" ? h : null;
@@ -26580,7 +26739,7 @@ function blockPlace(ctx, who, block, occasion) {
   if (p === "here")
     return null;
   if (p === "home")
-    return home;
+    return block.activity === "sleep" ? bedPlace(ctx, who) ?? home : home;
   if (p === "work")
     return workPlace(ctx, who) ?? home;
   if (p === "with") {
@@ -27712,24 +27871,40 @@ function usualRoutineHints(ctx) {
 
 // src/packs/castlife/core/index.ts
 var NEEDS = {
-  hunger: { rate: 4, satisfiedBy: ["eat", "meal", "lunch", "dinner", "breakfast"], label: "hungry", daily: [420, 750, 1110] },
-  fatigue: { rate: 3, satisfiedBy: ["sleep"], label: "tired", daily: [420] },
-  social: { rate: 1.5, satisfiedBy: ["socialize", "chat", "drinks"], label: "lonely", daily: [1140] },
-  fun: { rate: 1, satisfiedBy: ["leisure", "exercise", "drinks", "socialize"], label: "bored", daily: [1200] }
+  hunger: { name: "Hunger", label: "hungry", satisfiedBy: ["eat", "meal", "lunch", "dinner", "breakfast"], daily: [420, 750, 1110] },
+  fatigue: { name: "Fatigue", label: "tired", satisfiedBy: ["sleep"], daily: [420] },
+  social: { name: "Social", label: "lonely", satisfiedBy: ["socialize", "chat", "drinks"], daily: [1140] },
+  fun: { name: "Fun", label: "bored", satisfiedBy: ["leisure", "exercise", "drinks", "socialize"], daily: [1200] }
 };
-var NEED_ALERT = 80;
 function satisfies(activity, need2) {
-  return own(NEEDS, need2)?.satisfiedBy.some((w) => activity.includes(w)) ?? false;
+  return NEEDS[need2].satisfiedBy.some((w) => activity.includes(w));
+}
+function needsMetBy(ctx, activity) {
+  return needsOn(ctx.world).filter((n) => satisfies(activity, n));
 }
 var SOCIABILITY_RATE = { reserved: 0.5, usual: 1, outgoing: 1.5 };
+var TUNINGS = new WeakMap;
+function tuningOf(ctx, legacy = false) {
+  const set = ctx.world.needs;
+  if (legacy || set === undefined)
+    return NEED_DEFAULTS;
+  const known = TUNINGS.get(set);
+  if (known)
+    return known;
+  const read = needsSettingsOf(ctx.world);
+  TUNINGS.set(set, read);
+  return read;
+}
 function rateOf(ctx, who, need2, rate) {
   return who === ctx.world.pov || need2 !== "social" && need2 !== "fun" ? rate : rate * SOCIABILITY_RATE[routineSettingsOf(ctx.world).sociability];
 }
-function needIn(ctx, who, need2, at, blocks) {
-  const def = own(NEEDS, need2);
-  if (!def)
+function needIn(ctx, who, need2, at, blocks, legacy = false) {
+  if (!isNeedId(need2))
     return 0;
-  const rate = rateOf(ctx, who, need2, def.rate);
+  const tuned = tuningOf(ctx, legacy)[need2];
+  if (!tuned.on)
+    return 0;
+  const rate = rateOf(ctx, who, need2, tuned.rate);
   const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need2));
   if (typeof n.t === "number" || who === ctx.world.pov) {
     const v = numOf(n.v, 20);
@@ -27742,7 +27917,7 @@ function needIn(ctx, who, need2, at, blocks) {
       met = Math.max(met, Math.min(b.end, at));
   if (met === -Infinity) {
     const minute = dateAt(calendarOf(ctx.world), at).minuteOfDay;
-    met = at - Math.min(...def.daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
+    met = at - Math.min(...NEEDS[need2].daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
   }
   return Math.min(100, rate * (at - met) / 60);
 }
@@ -27750,7 +27925,39 @@ function needValue(ctx, who, need2, at = ctx.state.clock, legacy = false) {
   const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need2)).t === "number";
   const planned = !recorded && livesPlans(ctx, who);
   const day2 = dateAt(calendarOf(ctx.world), at).dayIndex;
-  return needIn(ctx, who, need2, at, planned ? (legacy ? legacyDayPlan(ctx, who, day2) : dayPlan(ctx, who, day2)).blocks : []);
+  return needIn(ctx, who, need2, at, planned ? (legacy ? legacyDayPlan(ctx, who, day2) : dayPlan(ctx, who, day2)).blocks : [], legacy);
+}
+function metAt(ctx, who, need2, at) {
+  const v = needValue(ctx, who, need2, at);
+  return v > 0 ? [{ type: "castlife.need", data: { entity: who, need: need2, delta: -v, at, from: v } }] : [];
+}
+var EAT_FOR = "minutes > 0 ? minutes : 30";
+var REST_FOR = "minutes > 0 ? minutes : 30";
+function toBed(ctx, who) {
+  const to = bedPlace(ctx, who);
+  return to === null || placeOfEntity(ctx.state, who) === to ? [] : movesOf(relocate(ctx, who, to));
+}
+function buildNeedsView(ctx) {
+  const pov = ctx.world.pov;
+  const on = needsOn(ctx.world);
+  if (ctx.levelOf(pov, "castlife") < 4 || on.length === 0 || !acts2(ctx, pov))
+    return null;
+  const tuning = tuningOf(ctx);
+  return {
+    needs: on.map((need2) => {
+      const value = Math.round(needValue(ctx, pov, need2));
+      return { need: need2, name: NEEDS[need2].name, label: NEEDS[need2].label, value, pressing: value >= tuning[need2].tell };
+    })
+  };
+}
+function needsIssues(world) {
+  if (world.needs === undefined)
+    return [];
+  const problems = needsSettingsProblems(world.needs);
+  if (problems.length > 0)
+    return problems.map((message) => ({ severity: "error", code: "castlife.needs", message: `Needs settings: ${message}; the engine reads it as its default.`, path: "needs" }));
+  const tuning = needsSettingsOf(world);
+  return NEED_IDS.flatMap((need2) => tuning[need2].on && tuning[need2].alert < tuning[need2].tell ? [{ severity: "warning", code: "castlife.needs", message: `${NEEDS[need2].name}'s alert (${tuning[need2].alert}) is below the point the narrator is told of it (${tuning[need2].tell}): a skip may stop for it before the story ever mentions it.`, path: `needs.${need2}` }] : []);
 }
 function within3(dayStart, fromH, toH) {
   return { from: dayStart + fromH * 60, to: dayStart + toH * 60 };
@@ -27793,7 +28000,7 @@ function legacyDayOptions(ctx, who, dayStart) {
   const home = homeOf(ctx, who);
   const cal = calendarOf(ctx.world);
   const hourOf = (t) => dateAt(cal, t).minuteOfDay / 60;
-  const need2 = (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0;
+  const need2 = (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid, true) : 0;
   const pressed = (n, word) => (t, laid) => {
     const v = need2(n, t, laid);
     return v >= 50 ? [`${word} (${n} ${Math.round(v)})`] : [];
@@ -27871,7 +28078,7 @@ function planFor(ctx, who, day2, rng, legacy = false) {
   const fixed = commitments(ctx, who, start, end);
   const person = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
   const level = ctx.levelOf(who, "castlife");
-  const routine = !legacy && person ? routineDay(ctx, who, day2, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => Object.keys(NEEDS).filter((n) => satisfies(activity, n)) }) : { fixed: [], options: [] };
+  const routine = !legacy && person ? routineDay(ctx, who, day2, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => needsMetBy(ctx, activity) }) : { fixed: [], options: [] };
   const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day2, [...fixed, ...routine.fixed]);
   const options = legacy ? legacyDayOptions(ctx, who, start) : [...routine.options, ...groundedOptions(ctx, who, start)];
   const plan2 = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
@@ -28225,6 +28432,42 @@ function atPlanMoment(ctx, who, moment, slot) {
   }
   return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), blockActivity(block.activity), moment.at, block.option.startsWith("plan:") ? block.end : undefined, skipLife, skipLife);
 }
+function livedUntil(ctx, activity, since, at, routine) {
+  if (activity === "")
+    return null;
+  const pov = ctx.world.pov;
+  if (routine) {
+    const plan2 = dayPlan(ctx, pov, dateAt(calendarOf(ctx.world), at - 1).dayIndex);
+    if (plan2.blocks.some((b) => b.start < at && at <= b.end && blockActivity(b.activity) === activity))
+      return at;
+  }
+  const until = own(ctx.state.entities, pov)?.fields.activity_until;
+  return typeof until === "number" && until > since ? Math.min(until, at) : null;
+}
+function inCompany(ctx) {
+  const pov = ctx.world.pov;
+  const here = placeOfEntity(ctx.state, pov);
+  if (here === null)
+    return false;
+  return Object.entries(ctx.state.entities).some(([id, e]) => id !== pov && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, id) && acts2(ctx, id) && together(ctx.world, here, placeOfEntity(ctx.state, id)) && playerKnows(ctx.registry, ctx.world, ctx.state, pov, id));
+}
+function povLivedNeeds(ctx, slot) {
+  const pov = ctx.world.pov;
+  const activity = strOf(own(ctx.state.entities, pov)?.fields.activity);
+  const end = livedUntil(ctx, activity, slot.start, slot.end, slot.povRoutine !== false);
+  const met = end === null ? [] : needsMetBy(ctx, activity).map((n) => [n, end]);
+  if (!met.some(([n]) => n === "social") && needsOn(ctx.world).includes("social") && inCompany(ctx))
+    met.push(["social", slot.end]);
+  return met.flatMap(([need2, at]) => metAt(ctx, pov, need2, at));
+}
+function povActivityEnds(ctx, who, at, slot, events2) {
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4)
+    return events2;
+  const was = strOf(own(ctx.state.entities, who)?.fields.activity);
+  const moved = events2.some((ev) => ev.type === "set" && ev.entity === who && ev.field === "activity" && ev.value !== was);
+  const end = moved ? livedUntil(ctx, was, slot.start, at, slot.povRoutine !== false) : null;
+  return end === null ? events2 : [...needsMetBy(ctx, was).flatMap((n) => metAt(ctx, who, n, end)), ...events2];
+}
 function stepAgent2(slot, ctx, rngFor, who) {
   const out = [];
   const e = own(ctx.state.entities, who);
@@ -28258,9 +28501,14 @@ function stepAgent2(slot, ctx, rngFor, who) {
   if (level < 4)
     return out;
   if (who === pov) {
-    for (const need2 of Object.keys(NEEDS)) {
-      if (needValue(ctx, who, need2, slot.end) >= NEED_ALERT && needValue(ctx, who, need2, slot.start) < NEED_ALERT)
-        out.push({ type: ENGINE_EVENTS.signal, data: { class: "needs", text: `You're getting ${own(NEEDS, need2)?.label ?? need2}.`, entity: pov } });
+    const lived = povLivedNeeds(ctx, slot);
+    out.push(...lived);
+    const met = new Set(lived.map((ev) => ("data" in ev) ? strOf(ev.data.need) : ""));
+    const tuning = tuningOf(ctx);
+    for (const need2 of needsOn(ctx.world)) {
+      const alert = tuning[need2].alert;
+      if (!met.has(need2) && needValue(ctx, who, need2, slot.end) >= alert && needValue(ctx, who, need2, slot.start) < alert)
+        out.push({ type: ENGINE_EVENTS.signal, data: { class: "needs", text: `You're getting ${NEEDS[need2].label}.`, entity: pov } });
     }
     return out;
   }
@@ -28364,6 +28612,7 @@ var EVENTS3 = [
       who.fields.needs = { ...objOf(who.fields.needs), [need2]: { v, t: at } };
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
+    coarsen: { key: (e) => typeof e.data.from === "number" ? `${strOf(e.data.entity)}:${strOf(e.data.need)}` : null, merge: (_earlier, later) => later },
     describe: (e) => `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`
   },
   {
@@ -28622,7 +28871,6 @@ function buildCastView(ctx) {
       p.next = { at: formatClock(cal, next.start), label: next.label };
     people.push(p);
   }
-  const needs = level >= 4 ? Object.entries(NEEDS).map(([need2, def]) => ({ need: need2, value: Math.round(needValue(ctx, pov, need2)), label: def.label })) : [];
   const group = (id) => {
     const g = own(ctx.state.entities, id);
     return { id, name: g?.name ?? id, kind: kindDef(ctx.registry, ctx.world, g?.kind ?? "")?.label ?? g?.kind ?? "" };
@@ -28633,7 +28881,6 @@ function buildCastView(ctx) {
   const tiers = [...tiersInOrder(ctx.world).map(([id]) => id).filter((id) => tierIds.has(id)), ...[...tierIds].filter((id) => !tierOf(ctx.world, id)).sort()];
   return {
     level,
-    needs,
     people,
     facets: facets.map(([id, f]) => ({ id, label: f.label, multiple: f.multiple === true, values: facetTree(f.values).map((v) => ({ id: v.id, label: v.value.label, ...v.value.parent !== undefined ? { parent: v.value.parent } : {} })) })),
     tiers: tiers.map((id) => ({ id, label: tierLabel(ctx.world, id) })),
@@ -28729,7 +28976,8 @@ function stanceCues(ctx) {
 function peopleLines(ctx, scope) {
   const pov = ctx.world.pov;
   const see = (who, id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
-  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
+  const tuning = tuningOf(ctx);
+  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? needsOn(ctx.world).filter((n) => needValue(ctx, pov, n) >= tuning[n].tell).map((n) => NEEDS[n].label) : [];
   const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
   const lines = [{ text: urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`, known: "pov" }];
   const here = placeOfEntity(ctx.state, pov);
@@ -28775,7 +29023,7 @@ var castlifePack = {
     r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
-    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: atPlanMoment });
+    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)) });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     r.process({ id: "castlife.plans", domain: "castlife", minLevel: 0, step: (slot, ctx) => dropUnlived(slot, ctx) });
     r.query("castlife.activity", shownActivity);
@@ -28799,12 +29047,16 @@ var castlifePack = {
       const id = String(who ?? "");
       return commitments(ctx, id, ctx.state.clock, ctx.state.clock + 1).length > 0;
     });
-    r.effect({ type: "castlife.satisfy", args: ["need", "entity?"], resolve: (a, ctx) => {
-      const who = strOf(a.entity) || ctx.world.pov;
-      const need2 = strOf(a.need);
-      const v = needValue(ctx, who, need2);
-      return own(NEEDS, need2) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need: need2, delta: -v, at: ctx.state.clock, from: v } }] : [];
-    } });
+    r.effect({
+      type: "castlife.satisfy",
+      args: ["need", "entity?", "minutes?"],
+      resolve: (a, ctx) => {
+        const who = strOf(a.entity) || ctx.world.pov;
+        const need2 = strOf(a.need);
+        return isNeedId(need2) && own(ctx.state.entities, who) ? metAt(ctx, who, need2, ctx.state.clock + Math.max(0, Math.round(numOf(a.minutes, 0)))) : [];
+      }
+    });
+    r.effect({ type: "castlife.to_bed", args: ["entity?"], resolve: (a, ctx) => toBed(ctx, strOf(a.entity) || ctx.world.pov) });
     r.effect({ type: "castlife.decide", args: ["key", "choice"], resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
     r.effect({
       type: "castlife.override",
@@ -28830,16 +29082,18 @@ var castlifePack = {
     });
     r.proposal(routineChannel);
     r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?", "by?"], resolve: storyEvents });
-    r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
-    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
-    r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
+    r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger", minutes: `=${EAT_FOR}` } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: EAT_FOR, lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
+    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed (your own, if you have one) and sleep until morning, or for as long as you say.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.to_bed", args: { entity: "self" } }] }, duration: "5", activity: { type: "sleep", until: "minutes > 0 ? clock + minutes : next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
+    r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun", minutes: `=${REST_FOR}` } }] }, duration: REST_FOR, activity: { type: "waiting", until: `clock + (${REST_FOR})` }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }, { type: "castlife.book_invitation", args: { host: "host" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
     r.renderer({ slot: "people", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
     r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
+    r.view({ panel: "castlife.needs", build: (ctx) => buildNeedsView(ctx) });
     r.renderer({ slot: "stance", render: stanceLines, feed: stanceFeed });
     r.renderer({ slot: "stance", source: "cues", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
+    r.lint({ code: "castlife.needs", check: needsIssues });
     r.lint({
       code: "castlife.birthday",
       check: (world) => {
