@@ -26,9 +26,13 @@ import { minorUnitPlural } from "../../../shared/money";
 import { calendarOf } from "../../../engine/calendar";
 import { isMaterialized } from "../../../engine/materialize";
 import { labelOf, numOf, objOf, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
-import type { CoreRegistry, EffectContext, PackDef, ReadContext, Rejection } from "../../../engine/registry";
+import type { CoreRegistry, EffectContext, FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
-import { kindIs, placeOfEntity } from "../../../engine/scope";
+import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
+import { together } from "../../../engine/presence";
+import { canSeeEntity } from "../../../engine/visibility";
+import type { FeedScope } from "../../../shared/world";
+import { propertyLines } from "./feed";
 import { FINANCE_MODULES } from "./modules";
 import type { FinanceApi, FinanceHooks, FinanceKind, FinanceRegistry, Payment, PostMeta } from "./module";
 import { applyForCredit, closeAccount, createFlow, creditApplication, deposit, editFlow, interestsOf, landsInReach, openAccount, paysFor, releaseHold, replaceCard, setAutopay, setCardState, setFlowStatus, setPayPrefs, setStatus, updateFlow, withdraw } from "./actions";
@@ -493,13 +497,17 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   r.process({ id: "economy.plans", domain: "money", minLevel: 0, step: (slot, ctx, rng) => planStep(hooks, slot, ctx, rng) });
   r.materializer({ domain: "money", version: 2, versions: [1, 2], materialize: (entity, ctx, rng, version) => materializeMoney(entity, ctx, rng, version) });
 
-  r.renderer({
-    slot: "money",
-    render(ctx) {
-      const pov = ctx.world.pov;
-      const level = ctx.levelOf(pov, "money");
-      if (level === 0) return [];
-      if (level === 1 || !hasLedger(ctx, pov)) return [`Money: ${wealthOf(hooks, ctx, pov)}.`];
+  /**
+   * The Money section (DESIGN §6, §6.11): the POV's money at its Money level. In `scene` scope, the
+   * money of each person with it, as theirs to know (their wealth band); in `gm`, that of anyone there.
+   */
+  const moneyLines = (ctx: ReadContext, scope: FeedScope): FeedLine[] => {
+    const pov = ctx.world.pov;
+    const level = ctx.levelOf(pov, "money");
+    if (level === 0) return [];
+    const lines: FeedLine[] = [];
+    if (level === 1 || !hasLedger(ctx, pov)) lines.push({ text: `Money: ${wealthOf(hooks, ctx, pov)}.`, known: "pov" });
+    else {
       const mine = accountsOf(ctx, pov);
       const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
       const shown = mine.filter((id) => level >= 3 || classOf(ctx, id) === "cash" || id === firstTransactional);
@@ -508,9 +516,21 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
         const name = own(ctx.state.entities, id)?.name ?? id;
         return traitsOf(ctx, id)?.liability ? `${name} owes ${formatMoney(-b, ctx.world.currency)}` : `${name} ${formatMoney(b, ctx.world.currency)}`;
       });
-      return parts.length > 0 ? [`Money: ${parts.join("; ")}.`] : [];
-    },
-  });
+      if (parts.length > 0) lines.push({ text: `Money: ${parts.join("; ")}.`, known: "pov" });
+    }
+    if (scope === "player") return lines;
+    const here = placeOfEntity(ctx.state, pov);
+    for (const id of Object.keys(ctx.state.entities).sort()) {
+      const e = own(ctx.state.entities, id);
+      if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id) || !together(ctx.world, here, placeOfEntity(ctx.state, id))) continue;
+      const text = `${e.name}'s money: ${wealthOf(hooks, ctx, id)}.`;
+      if (canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) lines.push({ text, known: "scene", who: e.name });
+      else if (scope === "gm") lines.push({ text, known: "gm" });
+    }
+    return lines;
+  };
+  r.renderer({ slot: "money", render: (ctx) => moneyLines(ctx, "player").map((l) => l.text), feed: moneyLines });
+  r.renderer({ slot: "property", render: (ctx) => propertyLines(ctx, "player").map((l) => l.text), feed: propertyLines });
   r.view({ panel: "economy.money", build: (ctx) => buildMoneyView(hooks, ctx) as unknown as JsonValue });
 
   r.proposal({

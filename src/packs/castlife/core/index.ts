@@ -1326,6 +1326,23 @@ export function stanceLines(ctx: ReadContext): string[] {
 }
 
 /**
+ * Stance by scope (DESIGN §6.11): its people's lines as the POV may read them; in `scene` and `gm`
+ * scopes, each one's agendas that aren't public, at their stage, as theirs to know.
+ */
+export function stanceFeed(ctx: ReadContext, scope: FeedScope): FeedLine[] {
+  const lines: FeedLine[] = stanceLines(ctx).map((text) => ({ text, known: "pov" }));
+  if (scope === "player") return lines;
+  for (const id of stanceCast(ctx).people) {
+    const name = own(ctx.state.entities, id)?.name ?? id;
+    for (const a of agendaFor(ctx.world, ctx.state, id).filter((x) => !publicTrack(ctx.world, x.track))) {
+      const track = own(ctx.world.tracks, a.track);
+      lines.push({ text: `${name}'s private agenda, ${track?.label ?? a.track}: ${a.stageLabel}.`, known: "scene", who: name });
+    }
+  }
+  return lines;
+}
+
+/**
  * The Stance section's hints (DESIGN §6.6): a line of cues for each person it tells of who has any
  * kept. They follow what the POV doesn't know, so they ride last on the section budget (`hint`).
  */
@@ -1489,7 +1506,7 @@ export const castlifePack: PackDef = {
     // rides last on the budget and stays out of the helpers' facts.
     r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) as unknown as JsonValue });
-    r.renderer({ slot: "stance", render: stanceLines });
+    r.renderer({ slot: "stance", render: stanceLines, feed: stanceFeed });
     r.renderer({ slot: "stance", source: "cues", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
     // A birthday the planner can't read is no occasion: say so where it is written.
