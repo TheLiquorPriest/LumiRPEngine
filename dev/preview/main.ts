@@ -10,6 +10,8 @@
 //   &money=<party>: Play's money is that Port Alder party's and GM → Money everyone's there, as the engine keeps
 //     them nine days into a chat (`marcus_delgado`: a business, a house and credit; `helen_kowalczyk`: a
 //     household; `pov`: a job and investments).
+//   ?pickers: the character pickers alone in the drawer (place, bed, a list of text) over a 320-place world,
+//     in place of the app (dev/preview/pickers.tsx).
 
 import { setup } from "../../src/frontend/setup";
 import type { FrontendToBackend } from "../../src/shared/protocol";
@@ -18,6 +20,7 @@ import type { StudioCase } from "./fixtures";
 import { STARTER_MAPS } from "./fixtures";
 import { MockBackend } from "./mock-backend";
 import { createMockHost } from "./mock-host";
+import { mountPickers } from "./pickers";
 import { DARK_THEME, LIGHT_THEME } from "./themes";
 
 const params = new URLSearchParams(location.search);
@@ -38,7 +41,7 @@ const activityParam = params.get("activity");
 const activity = activityParam === "busy" || activityParam === "failed" ? activityParam : undefined;
 const backend = new MockBackend((payload) => host.deliver(payload), { scenario, studio, ...(starter ? { map: starter } : {}), ...(money ? { money } : {}), ...(draftElsewhereMs !== undefined ? { draftElsewhereMs } : {}), ...(activity ? { activity } : {}), closeDrawer: () => host.setDrawer(false) });
 host.onSend = (payload) => backend.receive(payload as FrontendToBackend);
-const teardown = setup(host.ctx);
+const teardown = params.has("pickers") ? mountPickers() : setup(host.ctx);
 // As the Studio's frontend does when it has a world waiting (DESIGN §15).
 if (studio !== "none") window.dispatchEvent(new CustomEvent(STUDIO_OFFER_EVENT, { detail: { offerId: `offer-${studio}` } }));
 
