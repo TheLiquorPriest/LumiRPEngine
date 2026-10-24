@@ -187,22 +187,24 @@ describe("limits in every mode", () => {
     expect((await state(rig, chatId)).entities.shop_office_key?.relations.some((r) => r.type === "in" && r.to === "marcus_delgado")).toBe(true);
   });
 
-  test("a guessed hidden thing gives a new claimed thing, and nothing the player sees tells of the hidden one", async () => {
+  test("in every mode a guessed hidden thing plays as any made-up thing does, and nothing the player sees tells of the hidden one", async () => {
     const hidden: JsonObject = { id: "hidden_coat", kind: "item", name: "Smuggler's Oilskin", tier: "background", fields: { place: HERE }, relations: [], visibility: "secret" };
-    const seen: string[][] = [];
-    for (const puts of [[["entities", hidden]], []] as [string, JsonObject][][]) {
-      const { rig, chatId } = await chat(undefined, puts);
-      reading(rig, give("oilskin", "other"));
-      await rig.turn(chatId, "I hand Danny the oilskin.", "Danny shrugs it on.");
-      const [[id, made] = []] = await claimed(rig, chatId);
-      expect(id).not.toBe("hidden_coat");
-      expect(made?.fields.owner).toBe(DANNY);
-      if (puts.length > 0) expect((await state(rig, chatId)).entities.hidden_coat?.fields).toMatchObject({ place: HERE });
-      const view = JSON.stringify(await rig.rt.view(chatId, rig.host.userId));
-      expect(`${view}\n${rig.host.section("Outcome")}`).not.toMatch(/smuggler|hidden_coat/i);
-      seen.push((await chips(rig, chatId)).map((c) => `${c.kind} ${c.label} ${c.detail ?? ""}`).sort());
+    for (const mode of ["real", "ask", "hold"] as const) {
+      const seen: JsonObject[] = [];
+      for (const puts of [[["entities", hidden]], []] as [string, JsonObject][][]) {
+        const { rig, chatId } = await chat({ mode, capped: false }, puts);
+        reading(rig, give("oilskin", "other"));
+        const started = await send(rig, chatId, "I hand Danny the oilskin.");
+        if (!started.halted) await rig.host.finish(started, "Danny shrugs it on.");
+        const made = await claimed(rig, chatId);
+        expect(made.map(([id]) => id)).not.toContain("hidden_coat");
+        if (puts.length > 0) expect((await state(rig, chatId)).entities.hidden_coat?.fields).toEqual({ place: HERE });
+        const view = JSON.stringify(await rig.rt.view(chatId, rig.host.userId));
+        expect(`${view}\n${rig.host.section("Outcome")}`).not.toMatch(/smuggler|hidden_coat/i);
+        seen.push({ halted: started.halted ?? null, made: made.map(([, e]) => `${e.name} ${String(e.fields.owner)}`), chips: (await chips(rig, chatId)).map((c) => `${c.kind} ${c.label} ${c.detail ?? ""}`).sort() });
+      }
+      expect({ mode, ...seen[0] }).toEqual({ mode, ...seen[1] });
     }
-    expect(seen[0]).toEqual(seen[1]);
   });
 });
 

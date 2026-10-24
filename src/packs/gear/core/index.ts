@@ -245,7 +245,8 @@ function spawnId(ctx: ReadContext, spec: GearSpawn): string {
 
 const spawn = (ctx: ReadContext, spec: GearSpawn): Events => {
   const row = spec.catalog ? (rowOf(ctx, "gear.items", spec.catalog) ?? rowOf(ctx, "gear.containers", spec.catalog)) : undefined;
-  const fields: JsonObject = {};
+  // What comes into play (found, bought, handed over) is notable, so Gear 1 shows it as it shows authored notable things.
+  const fields: JsonObject = { notable: true };
   if (spec.owner) fields.owner = spec.owner;
   if (spec.catalog) fields.catalog = spec.catalog;
   if (spec.category ?? row?.category) fields.category = spec.category ?? strOf(row?.category);
@@ -276,6 +277,18 @@ function usedUp(ctx: ReadContext, item: EntityId, done: boolean): LedgerEvent[] 
   return done && e?.fields.claimed === true && e.fields.consumable === true && e.fields[GONE_FIELD] !== true ? [{ type: "set", entity: item, field: GONE_FIELD, value: true }] : [];
 }
 
+/**
+ * The thing a narrated hand-over names (DESIGN §9.4 `give`): an id as given, else the one thing
+ * the giver holds by that name, any case and without a leading article, so "the brass key" is the
+ * key they carry rather than a new one. A name that fits none or several stays as it was.
+ */
+function heldItem(ctx: ReadContext, item: string, from: EntityId): string {
+  if (own(ctx.state.entities, item) || from === "") return item;
+  const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
+  const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
+  return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
+}
+
 /** A claimed thing's id: from the turn's seed, the action's place and the name, never the name alone, and never one the state has. */
 function claimId(ctx: ReadContext, c: GearClaim): EntityId {
   for (let n = 0; ; n++) {
@@ -302,7 +315,8 @@ const claim = (ctx: ReadContext, c: GearClaim): { entity: EntityId; events: Ledg
   const place = placeOfEntity(ctx.state, c.by);
   if (c.at === "here" && !place) return reject("no_place", `${labelOf(ctx, c.by)} is nowhere`);
   const row = c.like ? (rowOf(ctx, "gear.items", c.like) ?? rowOf(ctx, "gear.containers", c.like)) : undefined;
-  const fields: JsonObject = { claimed: true };
+  // Notable, so Gear 1 shows what the player said they have.
+  const fields: JsonObject = { claimed: true, notable: true };
   if (c.at === "held") fields.owner = c.by;
   else if (place) fields.place = place;
   if (c.catalog) fields.catalog = c.catalog;
@@ -605,7 +619,7 @@ export const gearPack: PackDef = {
       type: "give",
       boundField: "ref",
       validate(p, ctx) {
-        const item = strOf(p.item);
+        const item = heldItem(ctx, strOf(p.item), strOf(p.from));
         const e = own(ctx.state.entities, item);
         if (!own(ctx.state.entities, strOf(p.to))) return reject("missing_entity", `no recipient ${labelOf(ctx, strOf(p.to))}`);
         if (!e) {
@@ -618,7 +632,10 @@ export const gearPack: PackDef = {
         if (e.kind === "account") return reject("is_money", "a cash give is a transfer");
         return null;
       },
-      toEffects: (p, ctx) => (own(ctx.state.entities, strOf(p.item)) ? [{ type: "gear.give", args: { item: strOf(p.item), from: strOf(p.from), to: strOf(p.to) } }] : [{ type: "gear.receive", args: { name: strOf(p.item), from: strOf(p.from), to: strOf(p.to) } }]),
+      toEffects: (p, ctx) => {
+        const item = heldItem(ctx, strOf(p.item), strOf(p.from));
+        return own(ctx.state.entities, item) ? [{ type: "gear.give", args: { item, from: strOf(p.from), to: strOf(p.to) } }] : [{ type: "gear.receive", args: { name: item, from: strOf(p.from), to: strOf(p.to) } }];
+      },
     });
     r.proposal({
       type: "quantity",

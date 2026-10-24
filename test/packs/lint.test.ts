@@ -42,6 +42,16 @@ describe("§13 lint", () => {
     expect(issues.every((i) => i.message.length > 10 && !i.message.includes("undefined"))).toBe(true);
   });
 
+  test("a quest condition naming an id the world doesn't have is warned at its stage", () => {
+    const w = modernUsWorld("w", "R");
+    const at = (): string[] => lintStructure(w, reg).filter((i) => i.code === "unknown_condition_ref").map((i) => i.path);
+    expect(at()).toEqual([]);
+    w.tracks.first_week!.stages.coffee!.objectives = ["carries(pov, 'phnoe') and at('maya', 'cafe') and knows(pov, 'maya')"];
+    expect(at()).toEqual(["tracks.first_week.stages.coffee"]);
+    w.tracks.first_week!.stages.coffee!.objectives = ["carries(pov, 'phone') and at('maya', 'cafee') or knows(pov, 'jordann')"];
+    expect(at()).toEqual(["tracks.first_week.stages.coffee", "tracks.first_week.stages.coffee"]);
+  });
+
   test("double-booked commitments: an appointment inside a shift, and two appointments that overlap", () => {
     const w = modernUsWorld("w", "R");
     const cal = calendarOf(w);
