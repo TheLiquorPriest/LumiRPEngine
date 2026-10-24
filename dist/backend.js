@@ -11866,6 +11866,40 @@ function placeLines(ctx, scope) {
   return lines;
 }
 
+// src/engine/place-lore.ts
+var PLACE_LORE_CAP = 6;
+var NARRATOR_READS = "brief";
+function placeLoreLines(ctx, scope) {
+  const { registry, world, state } = ctx;
+  const here = placeOfEntity(state, world.pov);
+  if (!here)
+    return [];
+  const chain = placeChain(world, here);
+  const open = loreGateReader(registry, world, state);
+  const found = [];
+  for (const entry of Object.values(world.lore)) {
+    const links = Array.isArray(entry.links) ? entry.links : [];
+    const at = chain.findIndex((place) => links.includes(place));
+    if (at < 0 || typeof entry.content !== "string" || entry.content.trim() === "")
+      continue;
+    const read = canSeePlace(registry, world, state, world.pov, chain[at] ?? here) && loreReadable(registry, world, state, entry, NARRATOR_READS, false, open);
+    const source = loreSourceOf(entry.source);
+    if (source.kind === "ai" && source.status === "pending")
+      continue;
+    found.push({ entry, at, read });
+  }
+  found.sort((a, b) => a.at - b.at || (b.entry.priority ?? 0) - (a.entry.priority ?? 0) || String(a.entry.title).localeCompare(String(b.entry.title)) || a.entry.id.localeCompare(b.entry.id));
+  const lineOf = (entry, known) => {
+    const text3 = `${typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title.trim() : entry.id}: ${entry.content.replace(/\s+/g, " ").trim()}`;
+    const source = loreSourceOf(entry.source);
+    return { text: text3, known, ...source.kind === "book" && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {} };
+  };
+  const lines = found.filter((f) => f.read).slice(0, PLACE_LORE_CAP).map((f) => lineOf(f.entry, "pov"));
+  if (scope !== "gm")
+    return lines;
+  return [...lines, ...found.filter((f) => !f.read).slice(0, PLACE_LORE_CAP).map((f) => lineOf(f.entry, "gm"))];
+}
+
 // src/packs/space/core/index.ts
 var MODES = ["walk", "road", "offroad", "water"];
 function reachable(ctx, from, to) {
@@ -12106,6 +12140,7 @@ var spacePack = {
     });
     r.renderer({ slot: "scene", source: "location", render: (ctx) => sceneLines(ctx, "player").map((l) => l.text), feed: sceneLines });
     r.renderer({ slot: "place", render: (ctx) => placeLines(ctx, "player").map((l) => l.text), feed: placeLines });
+    r.renderer({ slot: "place", source: "place_lore", render: (ctx) => placeLoreLines(ctx, "player").map((l) => l.text), feed: placeLoreLines });
     r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay) });
     r.proposal({
       type: "location",
@@ -71490,9 +71525,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "fd004b120725bbe6599a6bc3d35723a3f0d852bd17ac3db2bd59c78374bb6390";
+  const sha256 = "575ac011ab16206dfcbeb91cb1ef01cda328829a4ba64efba5268fa444281e5c";
   const tools = ["24a76a1271330ef57b3b4390f34a5317", "05c19bcfc22755ef976289b6cd342324"].filter((f) => f !== undefined);
-  return { id: "74e5e20c", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "77f19348", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -74589,7 +74624,7 @@ class Runtime {
   lastPlace = new Map;
   prePhase = new Map;
   loreTraces = new Map;
-  liveWorlds = new Map;
+  liveLores = new Map;
   carriedEntries = new Map;
   mindTraces = new Map;
   answeredMinds = new Map;
@@ -74625,7 +74660,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "74e5e20c" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "77f19348" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -74839,7 +74874,7 @@ class Runtime {
         start.applyAll(bridge.prePlan(text6));
         const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
         const log = (message) => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
-        bridge.setSkipPlan(text6, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: from.world, state: start.state, intent: intent2, runSeed: bridge.runSeed, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: stepConfigOf(settings.modelUse.steps, "skip"), guidance: preset.guidance.skip ?? "" }));
+        bridge.setSkipPlan(text6, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: await this.liveWorld(p.generationId, input.chatId, input.userId, from.world), state: start.state, intent: intent2, runSeed: bridge.runSeed, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: stepConfigOf(settings.modelUse.steps, "skip"), guidance: preset.guidance.skip ?? "" }));
       }
     }
     const base = intent2?.action === TIMELAPSE_ACTION2 && mindsOn2(settings) ? input.core.planState(p.generationId, input.observed) : null;
@@ -74854,7 +74889,7 @@ class Runtime {
         return ran;
       };
       try {
-        skip2 = await runSkip({ registry: this.registry, steps: this.steps, minds: beatMinds, host: this.host }, { chatId: input.chatId, userId: input.userId, world: base.world, state: start.state, intent: intent2, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
+        skip2 = await runSkip({ registry: this.registry, steps: this.steps, minds: beatMinds, host: this.host }, { chatId: input.chatId, userId: input.userId, world: await this.liveWorld(p.generationId, input.chatId, input.userId, base.world), state: start.state, intent: intent2, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
       } catch (error) {
         this.diag.failed(runAt, "skip", "skip", `the time skip didn't run: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -75816,7 +75851,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const render = input.core.renderState(input.observed);
     if (!render)
       throw new Error("the chat's world revision isn't loaded");
-    const { world, state: state2 } = render;
+    const { world: folded, state: state2 } = render;
+    const world = await this.liveWorld(input.generationId, input.chatId, input.userId, folded);
     const index = await this.worlds.index(run2.worldId, input.userId);
     if (!index)
       throw new Error("the chat's world is gone");
@@ -76035,11 +76071,11 @@ ${rules.join(`
       await this.book.vacate(bookId, userId);
   }
   async liveWorld(key, chatId, userId, world) {
-    const kept2 = this.liveWorlds.get(key);
+    const kept2 = this.liveLores.get(key);
     if (kept2)
-      return kept2;
+      return kept2 === world.lore ? world : { ...world, lore: kept2 };
     const live = await liveLore(this.host, world, chatId, userId);
-    lruSet(this.liveWorlds, key, live, 64);
+    lruSet(this.liveLores, key, live.lore, 64);
     return live;
   }
   worldInfoGate() {
@@ -76058,7 +76094,7 @@ ${rules.join(`
     rekey(this.preBudgets, from, to);
     rekey(this.prePhase, from, to);
     rekey(this.loreTraces, from, to);
-    rekey(this.liveWorlds, from, to);
+    rekey(this.liveLores, from, to);
     rekey(this.mindTraces, from, to);
     const own2 = this.runLines.get(from);
     this.runLines.delete(from);

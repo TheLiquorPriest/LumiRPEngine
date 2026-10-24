@@ -12888,6 +12888,40 @@ function placeLines(ctx, scope) {
   return lines;
 }
 
+// src/engine/place-lore.ts
+var PLACE_LORE_CAP = 6;
+var NARRATOR_READS = "brief";
+function placeLoreLines(ctx, scope) {
+  const { registry, world, state } = ctx;
+  const here = placeOfEntity(state, world.pov);
+  if (!here)
+    return [];
+  const chain = placeChain(world, here);
+  const open = loreGateReader(registry, world, state);
+  const found = [];
+  for (const entry of Object.values(world.lore)) {
+    const links = Array.isArray(entry.links) ? entry.links : [];
+    const at = chain.findIndex((place) => links.includes(place));
+    if (at < 0 || typeof entry.content !== "string" || entry.content.trim() === "")
+      continue;
+    const read = canSeePlace(registry, world, state, world.pov, chain[at] ?? here) && loreReadable(registry, world, state, entry, NARRATOR_READS, false, open);
+    const source = loreSourceOf(entry.source);
+    if (source.kind === "ai" && source.status === "pending")
+      continue;
+    found.push({ entry, at, read });
+  }
+  found.sort((a, b) => a.at - b.at || (b.entry.priority ?? 0) - (a.entry.priority ?? 0) || String(a.entry.title).localeCompare(String(b.entry.title)) || a.entry.id.localeCompare(b.entry.id));
+  const lineOf = (entry, known) => {
+    const text3 = `${typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title.trim() : entry.id}: ${entry.content.replace(/\s+/g, " ").trim()}`;
+    const source = loreSourceOf(entry.source);
+    return { text: text3, known, ...source.kind === "book" && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {} };
+  };
+  const lines = found.filter((f) => f.read).slice(0, PLACE_LORE_CAP).map((f) => lineOf(f.entry, "pov"));
+  if (scope !== "gm")
+    return lines;
+  return [...lines, ...found.filter((f) => !f.read).slice(0, PLACE_LORE_CAP).map((f) => lineOf(f.entry, "gm"))];
+}
+
 // src/packs/space/core/index.ts
 var MODES = ["walk", "road", "offroad", "water"];
 function reachable(ctx, from, to) {
@@ -13128,6 +13162,7 @@ var spacePack = {
     });
     r.renderer({ slot: "scene", source: "location", render: (ctx) => sceneLines(ctx, "player").map((l) => l.text), feed: sceneLines });
     r.renderer({ slot: "place", render: (ctx) => placeLines(ctx, "player").map((l) => l.text), feed: placeLines });
+    r.renderer({ slot: "place", source: "place_lore", render: (ctx) => placeLoreLines(ctx, "player").map((l) => l.text), feed: placeLoreLines });
     r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay) });
     r.proposal({
       type: "location",
