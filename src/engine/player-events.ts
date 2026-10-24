@@ -446,6 +446,48 @@ export function authorLines(reg: Registry, world: WorldDoc, state: Readonly<Worl
   return wordedLines(reg, world, state, world.pov, events, max, false);
 }
 
+/** Whose change an event is: the entity a field or relation changes on, the one spawned, the track whose stage moved; a pack event's `entity`, `agent` or `who`. */
+function subjectOf(e: LedgerEvent): string | null {
+  switch (e.type) {
+    case "set":
+    case "add":
+      return e.entity;
+    case "link":
+    case "unlink":
+      return e.from;
+    case "spawn":
+      return e.entity.id;
+    case "stage":
+      return e.track;
+    case "post":
+      return null;
+    default: {
+      if (!("data" in e) || !isRecord(e.data)) return null;
+      const who = e.data.entity ?? e.data.agent ?? e.data.who;
+      return typeof who === "string" ? who : null;
+    }
+  }
+}
+
+/**
+ * Who the events are about, by name, in order, as far as the POV knows them: the people and things it
+ * knows and the tracks it is shown, the POV as `you`. Never what a change set (a place someone went
+ * to, a value) and nothing the POV doesn't know of: how a change it didn't see is named on a player
+ * surface (a GM edit's chip).
+ */
+export function knownSubjects(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, events: readonly LedgerEvent[], you = "you"): string[] {
+  const secrets = [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)];
+  const names: string[] = [];
+  for (const e of events) {
+    const id = bookkeeping(e.type) ? null : subjectOf(e);
+    if (id === null) continue;
+    const known = hasOwn(state.entities, id) ? playerKnows(reg, world, state, pov, id) : hasOwn(world.tracks, id) && trackShown(reg, world, state, pov, id);
+    const name = nameOf(world, state, pov, id, you);
+    if (known && !names.includes(name) && findLeaks(name, secrets).length === 0) names.push(name);
+  }
+  return names;
+}
+
 /** What anyone in the POV's scene sees of its events: people coming and going and what they do, things taken, handed over or lent, and someone appearing. */
 function witnessed(e: LedgerEvent): boolean {
   if (e.type === "set") return e.field === "place" || e.field === "activity";

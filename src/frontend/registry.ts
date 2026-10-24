@@ -149,7 +149,7 @@ export interface GmSectionProps {
   gm: GmView;
   currency: WorldCurrency;
   busy: boolean;
-  /** Sends the operations as one `lre.edit` (all or none, one Corrected chip), then reloads the view; true when it was accepted. */
+  /** Sends the operations as one `lre.edit` (all or none, one GM edit chip), then reloads the view; true when it was accepted. The GM view then says what it did, with its Undo. */
   edit(ops: EditOp[]): Promise<boolean>;
   /** Asks for the GM view again (after a request other than an edit changed the chat). */
   reload(): Promise<void>;

@@ -23,7 +23,7 @@ import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
 import { optionalQuery, own } from "../engine/pack-kit";
-import { playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
+import { knownSubjects, playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
 import { readPass } from "../engine/read-pass";
 import { claimsOf, presetOf } from "../engine/realism";
@@ -346,12 +346,27 @@ export function clockFixLine(events: readonly LedgerEvent[]): string | null {
 }
 
 /**
- * A ✎ fix's or GM edit's lines, as its Corrected chip and its Journal line word them: how a fix of
- * the time moved the clock first, then the changes the POV may see (`turnLines`).
+ * A ✎ fix's or GM edit's lines, as its chip and its Journal line word them: how a fix of the time
+ * moved the clock first, then the changes the POV may see (`turnLines`).
  */
 export function fixLines(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, events: readonly LedgerEvent[]): string[] {
   const clock = clockFixLine(events);
   return [...(clock ? [clock] : []), ...turnLines(registry, world, state, events)];
+}
+
+/** How many people and things the line for an unseen fix names; past that it counts them. */
+const UNSEEN_NAMES = 3;
+
+/**
+ * A ✎ fix's or GM edit's chip line when the POV may see none of its changes: who it was about, as
+ * far as the POV knows them ("About Sam Reyes"), never where they went or what was set; with no one
+ * the POV knows, that it happened behind the scenes.
+ */
+function unseenFixLine(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, events: readonly LedgerEvent[]): string {
+  const names = knownSubjects(registry, world, state, world.pov, events);
+  if (names.length === 0) return "Behind the scenes";
+  const more = names.length - UNSEEN_NAMES;
+  return `About ${names.slice(0, UNSEEN_NAMES).join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
 }
 
 /** An event's ref as a key, to match `Rec.undone` and the fold's drop notes. */
@@ -367,7 +382,7 @@ function refKey(ref: EventRef): string {
  * line and Undo chip. The change chip and the Journal list these, so an undone purchase, or one an
  * earlier switch dropped, isn't shown as made.
  */
-export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: { action: string; label: string } }[] } {
+export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: { action: string; label: string }; gm?: true }[] } {
   const result = fold.messages[index];
   // A bare record folds as a plain message, and its live entries apply all the same.
   if (!result || (result.fold !== "on_path" && result.fold !== "view" && result.fold !== "plain")) return { events: [], post: [], fixes: [] };
@@ -377,11 +392,11 @@ export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { even
   const live = rec.post
     .filter((p) => isLive(p.at, result.parentPath, recPath))
     .sort((a, b) => a.seq - b.seq)
-    .map((p) => ({ seq: p.seq, kind: p.kind, events: p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))), ...(p.by ? { by: p.by } : {}) }));
+    .map((p) => ({ seq: p.seq, kind: p.kind, events: p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))), ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}) }));
   return {
     events: rec.events.filter((_, i) => !skipped.has(refKey({ in: "events", index: i }))),
     post: live.filter((p) => p.kind !== "fix").flatMap((p) => p.events),
-    fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events, ...(p.by ? { by: p.by } : {}) })),
+    fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events, ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}) })),
   };
 }
 
@@ -559,11 +574,13 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     const lines = turnLines(registry, world, state, applied.events);
     // One change: the label says it all; several: "N changes" with the list as detail.
     if (lines.length > 0) chips.push({ id: `change:${m.id}:${m.swipeId}`, kind: "change", messageId: m.id, label: lines.length === 1 ? (lines[0] ?? "Changed") : `${lines.length} changes`, ...(lines.length > 1 ? { detail: lines.join("\n") } : {}), actions: [], expires: "next_send" });
-    // Each ✎ fix or GM edit on the head: "Corrected …" with Undo, worded for the player (DESIGN §12).
+    // Each ✎ fix or GM edit on the head, with Undo, worded for the player (DESIGN §12): what the POV
+    // may see of it, else who it was about as far as the POV knows them. Another person's moves and
+    // doings are never worded for the player, and a mind or a section's settings has no player line.
     for (const fix of applied.fixes) {
       const fixed = fixLines(registry, world, state, fix.events);
       // A mechanical action of the player's (DESIGN §11) is named as theirs, never as a correction.
-      chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: fix.by?.label ?? "Corrected", detail: fixed.length > 0 ? fixed.join(" · ") : "something you haven't come across", actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+      chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), detail: fixed.length > 0 ? fixed.join(" · ") : unseenFixLine(registry, world, state, fix.events), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
     }
     chips.push(...overdueChips(m.id, ctx, state, world));
   });

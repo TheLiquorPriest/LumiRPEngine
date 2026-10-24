@@ -2,9 +2,11 @@
 // Story, each pack's tab in its order, This chat) over the GM panels. The truth (World, Places,
 // Story, the packs' tabs, the Fight and the Edits log) is the `core.gm` panel, behind the gate in UI
 // state; This chat's rules and the Inspector (`core.context` and any other GM panel) aren't behind
-// it. Leaving GM mode, or moving to another chat, closes the gate again.
+// it. Leaving GM mode, or moving to another chat, closes the gate again. The bar's height is
+// published (`--lre-gm-nav-h`) so what a list pins at the bottom (its selection bar, an edit's
+// notice) sits above the bar, never under it.
 
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { GmSection } from "../app";
 import { useApp, useUi } from "../app";
 import { BottomNav, Button, Empty } from "../components";
@@ -26,6 +28,17 @@ export function GmMode() {
   const section = useUi((ui) => ui.gm.section);
   // Unmounting is leaving GM mode: the next visit asks again before showing the truth.
   useEffect(() => () => app.ui.update(hideTruth), []);
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const nav = root.current?.querySelector<HTMLElement>(":scope > .lre-bottomnav");
+    const el = root.current;
+    if (!nav || !el) return;
+    const publish = () => el.style.setProperty("--lre-gm-nav-h", `${nav.offsetHeight}px`);
+    publish();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    observer?.observe(nav);
+    return () => observer?.disconnect();
+  });
   // The gate was opened for one chat's truth, not the next one's.
   const chat = useRef(sync.chatId);
   useEffect(() => {
@@ -53,7 +66,7 @@ export function GmMode() {
   const others = panels.filter((panel) => panel !== truth);
   const dot = others.some((panel) => view.pending.some((mark) => mark.panel === panel.id));
   return (
-    <div class="lre-gm" data-lre-section="gm" data-lre-gm-section={section}>
+    <div ref={root} class="lre-gm" data-lre-section="gm" data-lre-gm-section={section}>
       <div class="lre-gm-body">
         {section === "chat" ? (
           <ThisChat view={view} truth={truth} panels={others} />

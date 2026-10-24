@@ -3,7 +3,7 @@
 // commitments, notes, what they witnessed and their summary. It lives in GM mode behind the gate, and
 // its data comes with `lre.gm` only. A character opens as a page over the list, and each change opens
 // as its own page over theirs: the pin, a refresh, their intent, and adding, editing or deleting a
-// plan, commitment or note. Every change is one `lre.edit` (one Corrected chip with its Undo), and
+// plan, commitment or note. Every change is one `lre.edit` (one GM edit chip with its Undo), and
 // success goes back to the character's page.
 
 import type { ComponentChildren } from "preact";
@@ -112,6 +112,49 @@ function send(ctx: Ctx, op: EditOp, onDone: () => void): void {
   });
 }
 
+/**
+ * Running minds now: everyone Live and Near behind a button that says how many it runs and asks
+ * before it spends a model call on each, and choosing who to run from the list below.
+ */
+function RunEveryone(props: { count: number; disabled: boolean; picking: boolean; onRun(): void; onPick(): void }) {
+  const [asking, setAsking] = useState(false);
+  const minds = props.count === 1 ? "1 mind" : `${props.count} minds`;
+  return (
+    <Section title="Run minds now">
+      <div class="lre-stack" data-lre-minds-runall="">
+        <p class="lre-gm-note">Each mind thinks from the chat so far and its lore, as a turn would. A run is recorded as one edit you can undo.</p>
+        {asking ? (
+          <Banner
+            tone="gm"
+            icon="sparkle"
+            title={`Run ${minds} now?`}
+            actions={
+              <>
+                <Button variant="primary" icon="sparkle" disabled={props.disabled} onClick={() => (setAsking(false), props.onRun())}>
+                  {`Run ${minds}`}
+                </Button>
+                <Button variant="ghost" onClick={() => setAsking(false)}>
+                  Cancel
+                </Button>
+              </>
+            }
+          >
+            Everyone Live and Near, one model call each, starting now.
+          </Banner>
+        ) : (
+          <Button variant="primary" icon="sparkle" disabled={props.disabled || props.count === 0} onClick={() => setAsking(true)}>
+            {`Run everyone Live and Near (${props.count})…`}
+          </Button>
+        )}
+        <Button variant={props.picking ? "secondary" : "ghost"} icon="users" disabled={props.disabled} onClick={props.onPick}>
+          {props.picking ? "Stop choosing" : "Choose who to run"}
+        </Button>
+        {props.picking ? <p class="lre-gm-note">Tap people below to pick them, or pick everyone shown or a whole level in the bar at the bottom; its Run their minds runs them.</p> : null}
+      </div>
+    </Section>
+  );
+}
+
 // ---------------------------------------------------------------- the list
 
 export function GmMindsSection(props: GmSectionProps) {
@@ -167,12 +210,7 @@ export function GmMindsSection(props: GmSectionProps) {
           </Section>
         </div>
         <RunCard minds={minds} busy={props.busy} />
-        <Section title="Run minds now" flush>
-          <List>
-            <ListRow icon="sparkle" title={`Run everyone Live and Near (${liveNear})`} subtitle="From the chat so far and their lore, as a turn would; recorded as one edit you can undo" chevron disabled={props.busy || running || liveNear === 0} onClick={() => void minds.start()} />
-            <ListRow icon="users" title={picking.on ? "Stop choosing" : "Choose who to run"} subtitle={picking.on ? "Tap people below to pick them, or pick everyone shown or a level in the bar" : "Pick one or more from the list below"} chevron disabled={props.busy || running} onClick={() => (picking.on ? picking.stop() : picking.start())} />
-          </List>
-        </Section>
+        <RunEveryone count={liveNear} disabled={props.busy || running} picking={picking.on} onRun={() => void minds.start()} onPick={() => (picking.on ? picking.stop() : picking.start())} />
         <div class="lre-gm-tools">
           <label class="lre-gm-search">
             <Icon name="search" size={16} />
@@ -585,7 +623,7 @@ function Submit(props: { ctx: Ctx; ready: boolean; icon: "check" | "plus" | "pin
   );
 }
 
-/** Deleting an item from its page; the Corrected chip's Undo brings it back. */
+/** Deleting an item from its page; the GM edit chip's Undo brings it back. */
 function DeleteItem(props: { ctx: Ctx; op: EditOp; noun: string; onDone(): void }) {
   return (
     <Section title="Delete">

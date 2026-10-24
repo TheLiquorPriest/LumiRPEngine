@@ -382,6 +382,13 @@ export class MockBackend {
           entity.gone = op.op === "despawn";
           lines.push(`${entity.name} is ${entity.gone ? "gone" : "back"}`);
           break;
+        case "mind_pin": {
+          // As the minds pack's pin: the level they're held at, or back to going by their score.
+          const c = gm.minds.characters.find((x) => x.entity === op.entity);
+          if (c) c.fidelity = { ...c.fidelity, level: op.level ?? c.fidelity.level, pin: { ...c.fidelity.pin, gm: op.level } };
+          lines.push(op.level === null ? `${entity.name}'s mind: unpinned` : `${entity.name}'s mind: pinned to ${op.level.charAt(0).toUpperCase()}${op.level.slice(1)}`);
+          break;
+        }
         case "routine_follow":
         case "routine_block":
         case "schedule_override":
@@ -507,11 +514,11 @@ export class MockBackend {
         if (typeof lines === "string") return this.error(reqId, "validation", lines);
         const seq = (before.gm.edits[0]?.seq ?? 0) + 1;
         const chip = `fix:m4:0:${seq}`;
-        this.gm.edits.unshift({ messageId: "m4", seq, lines });
+        this.gm.edits.unshift({ messageId: "m4", seq, lines, undo: chip });
         this.beforeEdit.set(chip, before);
         this.result(reqId, "lre.edit", { pending: false });
         this.mutate((view) => {
-          view.chips.push({ id: chip, kind: "fix", messageId: "m4", label: "Corrected", detail: lines.join(" · "), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+          view.chips.push({ id: chip, kind: "fix", messageId: "m4", label: "GM edit", detail: lines.join(" · "), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
           view.journal.push({ kind: "fix", messageId: "m4", ref: { in: "post", seq, index: 0 }, text: lines.join(" · ") });
         }, 40);
         return;

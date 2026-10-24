@@ -4,8 +4,8 @@
 // reply), recall by presence from the chat's messages, and lore read as each of them with what is
 // pinned first. It answers the request at once and goes on in the background, at most a few calls at
 // a time, pushing its progress to the session that started it; its minds are recorded as one GM edit
-// (a `fix` entry, with the Corrected chip's Undo). Nothing reaches a player surface: the edit's lines
-// word nothing for a player, and the progress is GM data shown behind the gate.
+// (a `fix` entry marked as the GM's, with the GM edit chip's Undo). Nothing reaches a player surface:
+// the edit's lines word nothing for a player, and the progress is GM data shown behind the gate.
 
 import type { ChatId, EntityId, UserId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
@@ -125,9 +125,9 @@ export class MindsRuns {
     run.view.message = message;
   }
 
-  /** Writes the minds as one GM edit on the head, and finds the Corrected chip that undoes it. */
+  /** Writes the minds as one GM edit on the head, and finds the GM edit chip that undoes it. */
   private async record(chatId: ChatId, userId: UserId, run: Run, events: LedgerEvent[]): Promise<void> {
-    const written = await this.rt.ledger.write(chatId, userId, { kind: "post", id: `${run.view.runId}w`, target: "head", entry: { kind: "fix", events } });
+    const written = await this.rt.ledger.write(chatId, userId, { kind: "post", id: `${run.view.runId}w`, target: "head", entry: { kind: "fix", gm: true, events } });
     if (written.reason === "paused") return this.end(run, "failed", "An earlier message was edited: Keep or Discard it first, then run the minds again.");
     if (!written.applied && !written.pending) return this.end(run, "failed", `The minds weren't recorded: ${written.reason ?? "the edit was refused"}.`);
     this.rt.push.changed(chatId, userId);

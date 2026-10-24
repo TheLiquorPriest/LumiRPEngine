@@ -6,12 +6,12 @@
 
 import { useId } from "preact/hooks";
 import type { GmView } from "../../shared/state-view";
-import { Badge, Banner, Empty, Field, List, ListRow, Section } from "../components";
+import { Badge, Banner, Button, Empty, Field, List, ListRow, Section } from "../components";
 import { humanize } from "../format";
 import { Icon } from "../icons";
 import type { Editor } from "./editor";
 import { nameOf } from "./editor";
-import { BuildLink, GmCard } from "./ui";
+import { ActionRow, ActionRows, BuildLink, GmCard } from "./ui";
 
 type Place = GmView["places"][number];
 type Track = GmView["tracks"][number];
@@ -112,9 +112,10 @@ export function StorySection(props: { editor: Editor }) {
   );
 }
 
-/** The ✎ fixes and GM edits in force on this chat's path, newest first, and writes a reply refused. */
-export function EditsLog(props: { gm: GmView }) {
+/** The ✎ fixes and GM edits in force on this chat's path, newest first, each on the latest reply with its Undo, and writes a reply refused. */
+export function EditsLog(props: { gm: GmView; busy: boolean; onUndo(chip: string): void }) {
   const { gm } = props;
+  const older = gm.edits.some((e) => e.undo === null);
   return (
     <div class="lre-stack" data-lre-gm-list="edits">
       {gm.refused.length > 0 ? (
@@ -127,15 +128,31 @@ export function EditsLog(props: { gm: GmView }) {
       {gm.edits.length === 0 ? (
         <Empty icon="edit" title="No corrections">No fixes or GM edits on this chat's path.</Empty>
       ) : (
-        <Section title={`${gm.edits.length} in force, newest first`} flush>
-          <List>
-            {gm.edits.map((e) => (
-              // The player's own bookkeeping (a trade, a transfer) is their action, not a correction.
-              <ListRow key={`${e.messageId}:${e.seq}`} icon={e.by ? "user" : "edit"} title={e.by ?? (e.lines.join(" · ") || "Bookkeeping")} subtitle={e.by ? `The player's action: ${e.lines.join(" · ")}` : undefined} id={`${e.messageId} · ${e.seq}`} />
-            ))}
-          </List>
+        <Section title={`${gm.edits.length} in force, newest first`}>
+          <ActionRows label="Edits in force">
+            {gm.edits.map((e) => {
+              const undo = e.undo;
+              return (
+                // The player's own bookkeeping (a trade, a transfer) is their action, not a correction.
+                <ActionRow
+                  key={`${e.messageId}:${e.seq}`}
+                  title={e.by ?? (e.lines.join(" · ") || "Bookkeeping")}
+                  subtitle={e.by ? `The player's action: ${e.lines.join(" · ")}` : undefined}
+                  id={`${e.messageId} · ${e.seq}`}
+                  actions={
+                    undo === null ? undefined : (
+                      <Button size="sm" variant="ghost" icon="undo" disabled={props.busy} onClick={() => props.onUndo(undo)}>
+                        Undo
+                      </Button>
+                    )
+                  }
+                />
+              );
+            })}
+          </ActionRows>
         </Section>
       )}
+      {older ? <p class="lre-gm-note">Only the latest reply's edits can be undone, as in the chat.</p> : null}
     </div>
   );
 }

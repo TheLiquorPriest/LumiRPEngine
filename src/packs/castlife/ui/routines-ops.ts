@@ -1,7 +1,7 @@
 // GM → Routines (DESIGN §8): the per-chat routine controls as `lre.edit` operations, and what the tab
 // reads from the read model (`lre.routine`): how much a character's routine binds them now, who
 // changed whose routine in this chat, and the changes the story made. Every control is one edit, so
-// one Corrected chip with its Undo; the backend stamps the change as the GM's, at the chat's time.
+// one GM edit chip with its Undo; the backend stamps the change as the GM's, at the chat's time.
 // A form's draft is refused (null) when it wouldn't make a valid change, so its Save says so first.
 
 import type { EntityId, ScheduleId } from "../../../shared/ids";

@@ -55,6 +55,19 @@ export async function sendInChunks<T>(items: readonly T[], send: (chunk: T[]) =>
   return { applied, of: all.length };
 }
 
+/**
+ * How a selection stands on one setting now, the most common first: "3 Leads, 2 Supporting"; past
+ * `max` values, the rest counted together ("… and 4 more"). Shown on a bulk change before it applies.
+ */
+export function mixOf(labels: readonly string[], max = 3): string {
+  const counts = new Map<string, number>();
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
+  const groups = [...counts].sort((a, b) => b[1] - a[1]);
+  const shown = groups.slice(0, max).map(([label, n]) => `${n} ${label}`);
+  const rest = groups.slice(max).reduce((sum, [, n]) => sum + n, 0);
+  return rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
+}
+
 // ---------------------------------------------------------------- GM mode
 
 /** A change the GM view applies to everyone selected, as the GM edit op that makes it for one. */
@@ -70,9 +83,9 @@ export type BulkChange =
   | { kind: "intent"; text: string; approach: MindApproach | null }
   | { kind: "move"; to: PlaceId };
 
-/** Whether a change is a character's (their mind or routine): it applies only to the characters among those selected. */
-export function forCharacters(change: BulkChange): boolean {
-  return change.kind === "role" || change.kind === "pin" || change.kind === "intent";
+/** Whether a kind of change is a character's (their mind or routine): it applies only to the characters among those selected. */
+export function forCharacters(kind: BulkChange["kind"]): boolean {
+  return kind === "role" || kind === "pin" || kind === "intent";
 }
 
 /** The ops that make a change for each entity, in order; null when the change can't be made (an intent over its cap). */

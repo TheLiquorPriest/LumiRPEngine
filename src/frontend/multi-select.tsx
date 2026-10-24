@@ -1,8 +1,9 @@
 // A list's multi-select mode (GM → World and Minds, Build → Entities and Places): while choosing, a
 // row's tap picks it instead of opening it, and a bar under the list says how many are picked, picks
 // every row the list shows (its search and filters as they stand) or exactly one group (by level or
-// tier), clears, and holds the list's actions. The selection is the list's own state: in GM mode it
-// lives behind the GM gate and goes when the gate closes, and no player surface ever reads it.
+// tier, a button each, so they never pass for the list's own filters), clears, and holds the list's
+// actions. The selection is the list's own state: in GM mode it lives behind the GM gate and goes
+// when the gate closes, and no player surface ever reads it.
 
 import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
@@ -41,6 +42,20 @@ export function PickBox(props: { label: string; checked: boolean }) {
   return <input type="checkbox" class="lre-pick" aria-label={props.label} checked={props.checked} tabIndex={-1} />;
 }
 
+/** A selection bar's group picks: one button per level or tier, which selects exactly its rows. */
+export function GroupPicks(props: { label: string; groups: readonly SelectGroup[]; onPick(group: SelectGroup): void }) {
+  return (
+    <div class="lre-selectbar-groups" role="group" aria-label={props.label}>
+      <span class="lre-selectbar-groups-label">{props.label}</span>
+      {props.groups.map((g) => (
+        <Button key={g.id} size="sm" variant="secondary" onClick={() => props.onPick(g)}>
+          {`${g.label} · ${g.ids.length}`}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
 /**
  * The bar under a choosing list. `all` is every row the list has, so a row its search hides stays
  * picked and counts; `shown` is what the list shows now, which Select all adds; a group replaces the
@@ -56,28 +71,11 @@ export function SelectBar(props: { label: string; selection: Selection; all: rea
         <Button size="sm" variant="ghost" icon="checklist" disabled={props.shown.length === 0} onClick={() => selection.set([...selection.ids, ...props.shown])}>
           {`Select all ${props.shown.length}`}
         </Button>
-        {props.groups && props.groups.length > 0 ? (
-          <select
-            class="lre-input"
-            aria-label={props.groupLabel ?? "Select by level"}
-            value=""
-            onChange={(event) => {
-              const group = props.groups?.find((g) => g.id === event.currentTarget.value);
-              if (group) selection.set(group.ids);
-            }}
-          >
-            <option value="">{props.groupLabel ?? "Select by level"}</option>
-            {props.groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {`${g.label} (${g.ids.length})`}
-              </option>
-            ))}
-          </select>
-        ) : null}
         <Button size="sm" variant="ghost" disabled={count === 0} onClick={() => selection.set([])}>
           Clear
         </Button>
       </div>
+      {props.groups && props.groups.length > 0 ? <GroupPicks label={props.groupLabel ?? "Select a level"} groups={props.groups} onPick={(group) => selection.set(group.ids)} /> : null}
       {props.children !== undefined ? <div class="lre-selectbar-actions">{props.children}</div> : null}
     </div>
   );

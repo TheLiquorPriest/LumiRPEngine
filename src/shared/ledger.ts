@@ -193,6 +193,8 @@ export interface PostEntry {
   events: LedgerEvent[];
   /** A `fix` the player's own mechanical action made (DESIGN §11), not a correction: the action and how it reads ("Buy or sell investments: 10, …"). */
   by?: { action: string; label: string };
+  /** A `fix` the GM made (`lre.edit`, a GM's minds run), not a ✎ correction of the player's: its chip says it was a GM edit (DESIGN §7). */
+  gm?: true;
 }
 
 /** A level change for everyone, for one detail band (stored under `tier`, the key the band ids had as tiers) or for one entity. */

@@ -1015,8 +1015,8 @@ export function gmFixture(): GmView {
     ],
     encounter: null,
     edits: [
-      { messageId: "m4", seq: 12, lines: ["Rosie Alvarez's mood: tense"] },
-      { messageId: "m2", seq: 7, lines: ["Vic Moreau is gone"] },
+      { messageId: "m4", seq: 12, lines: ["Rosie Alvarez's mood: tense"], undo: null },
+      { messageId: "m2", seq: 7, lines: ["Vic Moreau is gone"], undo: null },
     ],
     refused: [{ id: "w-17", reason: "Dev Patel's energy must be between 0 and 100." }],
     minds: gmMinds(),

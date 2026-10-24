@@ -33,7 +33,7 @@ Open **Play → GM view** and tap **Show the GM view** past its spoiler gate. It
 - **Places:** every place with its visibility.
 - **Tracks:** every quest, secret, puzzle and agenda, with all its stages and every truth.
 - **Money:** each person's money at their own Money level: their band, accounts, bills and latest transactions.
-- **Edits:** the corrections in force on this version of the story, and every change that didn't apply after a reply, with the exact reason.
+- **Edits:** the corrections in force on this version of the story, each on the latest reply with its **Undo**, and every change that didn't apply after a reply, with the exact reason.
 
 ## GM edits
 
@@ -48,7 +48,7 @@ Anything the GM view shows, you can change: a field (set it, or add to a number)
 - **Classify for this chat.** An entity's **Classification** card sets its value of each of the world's classifications, hidden ones included, and its tags, for a person spawned in play as much as for one the world defines. A classification or value the world doesn't have is refused. What you set holds in this chat over the world's definition, so rules, schedules and **Known by** selectors match it from then on, and an Upgrade keeps it by default (below). A classification players can't see stays out of their Journal, and tags never reach Play.
 - **The world's definitions stay in Build.** Kinds and the world's places are edited in Build and reach the chat through an Upgrade (below).
 
-Each save is one correction: a **Corrected** chip on the latest reply, with **Undo**, worded as the Journal words it. A save made while a reply is streaming waits for the reply and lands right after it.
+Each save is one edit: a notice in the GM view says what it did ("Pinned 3 to Near") with **Undo**, and a **GM edit** chip on the latest reply has the same **Undo**. The chip says only what the player's character could know: the change when they see it, else whom it was about if they know them ("About Sam Reyes"), never where someone went or what was set, and otherwise that it happened behind the scenes. A save made while a reply is streaming waits for the reply and lands right after it.
 
 ## Fixes and Undo
 

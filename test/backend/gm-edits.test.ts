@@ -266,6 +266,29 @@ describe("GM edits", () => {
     for (const word of [...hidden, "Townsfolk"]) expect(now.chip).not.toContain(word);
     for (const line of now.journal) for (const word of hidden) expect(line).not.toContain(word);
   });
+
+  test("a GM edit's chip is the GM's, and for what the player didn't see it names only whom they know, never where they went", async () => {
+    const latest = async (rig: Rig, chatId: string) => (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "fix").at(-1);
+    const rig = new Rig();
+    const chatId = await chat(rig);
+    // Moving someone the player knows: another person's moves are never worded for the player, so
+    // the chip says whom it was about, and not the cellar they were moved to.
+    await edit(rig, chatId, { op: "link", rel: "knows", from: POV, to: "dev" });
+    await edit(rig, chatId, { op: "move", entity: "dev", to: "cellar" });
+    const moved = await latest(rig, chatId);
+    expect(moved?.detail).toContain("Dev");
+    expect(moved?.detail).not.toContain("Cellar");
+    // A ✎ correction of the player's reads as theirs, not as the GM's.
+    rig.body(await rig.send({ type: "lre.fix", chatId, entity: POV, field: "mood", value: "calm" }));
+    expect((await latest(rig, chatId))?.label).not.toBe(moved?.label);
+    // Someone the player has never met is named nowhere on it.
+    const other = new Rig();
+    const otherChat = await chat(other);
+    await edit(other, otherChat, { op: "move", entity: "dev", to: "cellar" });
+    const unseen = await latest(other, otherChat);
+    for (const word of ["Dev", "Cellar"]) expect(unseen?.detail).not.toContain(word);
+    expect(unseen?.label).toBe(moved?.label);
+  });
 });
 
 describe("GM view", () => {
