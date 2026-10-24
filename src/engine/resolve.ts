@@ -26,6 +26,7 @@ import { selectorMatches } from "./selector";
 import type { WorldState } from "./state";
 import { Working } from "./working";
 import { canSeeEntity, canSeePlace } from "./visibility";
+import { povMayKnow } from "./player-events";
 import { acts } from "./life";
 import { together } from "./presence";
 import { labelOf, optionalService, own } from "./pack-kit";
@@ -373,7 +374,9 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
 /**
  * Who may come along on a list-of-refs param (Go's `with`): people of its kind in the actor's scene
  * (`together`, so a room's people and its building's alike) whom it can see and who act, in id
- * order. The palette's With picker and interpret's catalog offer the same people.
+ * order; for the player character, only those it may be told of (`povMayKnow`), so a stranger in a
+ * room inside its place, whom Scene → Present withholds, is never named. The palette's With
+ * picker, interpret's catalog and Go itself take the same people.
  */
 export function companionCandidates(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, param: string, actor: EntityId = world.pov): EntityId[] {
   const def = own(action.params, param);
@@ -384,7 +387,7 @@ export function companionCandidates(reg: Registry, world: WorldDoc, state: Reado
     .sort()
     .filter((id) => {
       const e = own(state.entities, id);
-      return !!e && id !== actor && kindIs(reg, world, e.kind, ref) && (!def.of || selectorMatches(reg, world, state, def.of, id)) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)) && canSeeEntity(reg, world, state, actor, id);
+      return !!e && id !== actor && kindIs(reg, world, e.kind, ref) && (!def.of || selectorMatches(reg, world, state, def.of, id)) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)) && canSeeEntity(reg, world, state, actor, id) && (actor !== world.pov || povMayKnow(reg, world, state, id));
     });
 }
 
