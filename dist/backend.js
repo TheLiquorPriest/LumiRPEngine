@@ -68,6 +68,42 @@ function objectiveWhen(o) {
 function objectiveLabel(o) {
   return typeof o === "string" ? o : o.label;
 }
+var FEED_SCOPES = ["player", "scene", "gm"];
+var SECTION_FEED_KEYS = ["enabled", "maxTokens", "maxLines", "include", "scope"];
+function readSectionFeed(raw) {
+  if (!isRecord(raw))
+    return null;
+  const out = {};
+  for (const key of Object.keys(raw))
+    if (!SECTION_FEED_KEYS.some((k) => k === key))
+      return null;
+  if (raw.enabled !== undefined) {
+    if (typeof raw.enabled !== "boolean")
+      return null;
+    out.enabled = raw.enabled;
+  }
+  for (const key of ["maxTokens", "maxLines"]) {
+    const v = raw[key];
+    if (v === undefined)
+      continue;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 1)
+      return null;
+    out[key] = v;
+  }
+  if (raw.include !== undefined) {
+    if (!Array.isArray(raw.include) || !raw.include.every((s) => typeof s === "string" && s.trim() !== ""))
+      return null;
+    if (raw.include.length > 0)
+      out.include = raw.include;
+  }
+  if (raw.scope !== undefined) {
+    const scope = FEED_SCOPES.find((s) => s === raw.scope);
+    if (!scope)
+      return null;
+    out.scope = scope;
+  }
+  return out;
+}
 var DEFAULT_CURRENCY = { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" };
 var DEFAULT_SPAWN_CAP = 24;
 var MAX_SPAWN_CAP = 500;
@@ -5756,6 +5792,71 @@ function initialState(world, revision, types) {
   return state;
 }
 
+// src/engine/feed.ts
+var FEED_KEY = "feed";
+var FEED_EVENT = "engine.feed";
+function chatFeed(state) {
+  const raw = engineSlice(state)[FEED_KEY];
+  const out = {};
+  if (!isRecord(raw))
+    return out;
+  for (const [slot, v] of Object.entries(raw)) {
+    const feed = readSectionFeed(v);
+    if (feed)
+      out[slot] = feed;
+  }
+  return out;
+}
+function worldFeed(section) {
+  const authored = {};
+  for (const key of SECTION_FEED_KEYS)
+    if (section[key] !== undefined)
+      authored[key] = section[key];
+  return readSectionFeed(authored) ?? {};
+}
+function feedOf(section, state) {
+  return { ...worldFeed(section), ...chatFeed(state)[section.id] ?? {} };
+}
+function sourceOf(r) {
+  return r.source ?? r.slot;
+}
+function renderersOf(renderers, section, feed) {
+  const include = feed.include;
+  return include ? renderers.filter((r) => include.includes(sourceOf(r))) : renderers.filter((r) => r.slot === section.id);
+}
+function linesOf(r, ctx, scope) {
+  if (r.feed)
+    return r.feed(ctx, scope);
+  return r.render(ctx).map((text2) => ({ text: text2, known: "pov" }));
+}
+function markedText(line) {
+  if (line.known === "pov")
+    return line.text;
+  return line.known === "scene" ? `${line.text} [unknown to you; known to ${line.who ?? "others here"}]` : `${line.text} [unknown to you; GM only]`;
+}
+var MARKED_FACTS_RULE = "Facts marked [unknown to you] are not known to the player character. Use them only to steer the story and the people in it; never reveal them, narrate them as known, or let the player character act on them.";
+var feedEvent = {
+  type: FEED_EVENT,
+  validate: (e) => {
+    if (typeof e.data.section !== "string" || e.data.section.trim() === "")
+      return { code: "bad_event", reason: "a section override names its section" };
+    return e.data.to === null || readSectionFeed(e.data.to) ? null : { code: "bad_event", reason: "a section override is enabled, maxTokens, maxLines, include or scope" };
+  },
+  apply: (e, state) => {
+    const section = typeof e.data.section === "string" ? e.data.section : "";
+    const s = state.packs.engine ?? {};
+    state.packs.engine = s;
+    const current = isRecord(s[FEED_KEY]) ? { ...s[FEED_KEY] } : {};
+    const to = e.data.to === null ? null : readSectionFeed(e.data.to);
+    if (to && Object.keys(to).length > 0)
+      current[section] = to;
+    else
+      delete current[section];
+    s[FEED_KEY] = current;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `the ${typeof e.data.section === "string" ? e.data.section : "?"} section's settings in this chat`
+};
+
 // src/engine/engine-pack.ts
 var ENGINE_PACK = "engine";
 var ENGINE_EVENTS = {
@@ -6159,6 +6260,7 @@ var enginePack = {
   register(r) {
     for (const def of events)
       r.event(def);
+    r.event(feedEvent);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);
@@ -10305,6 +10407,7 @@ var calendarPack = {
     r.formula("weekday_name", (ctx) => weekdayName(calendarOf(ctx.world), dateAt(calendarOf(ctx.world), ctx.state.clock).weekday));
     r.renderer({
       slot: "scene",
+      source: "calendar",
       render(ctx) {
         const level = ctx.levelOf(ctx.world.pov, "calendar");
         if (level === 0)
@@ -11289,6 +11392,7 @@ var spacePack = {
     });
     r.renderer({
       slot: "scene",
+      source: "location",
       render(ctx) {
         const level = ctx.levelOf(ctx.world.pov, "space");
         if (level === 0)
@@ -23754,6 +23858,7 @@ var weatherPack = {
     r.process({ id: "weather.climate", domain: "weather", minLevel: 2, step: (slot, ctx, rng) => stepRegions(slot, ctx, rng) });
     r.renderer({
       slot: "scene",
+      source: "weather",
       render(ctx) {
         const v = buildWeatherView(ctx);
         if (v.level === 0 || v.label === "")
@@ -27144,6 +27249,42 @@ function stanceCues(ctx) {
     return cues.length > 0 ? [listed(`${own(ctx.state.entities, id)?.name ?? id}'s cues`, cues)] : [];
   });
 }
+function peopleLines(ctx, scope) {
+  const pov = ctx.world.pov;
+  const see = (who, id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
+  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
+  const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
+  const lines = [{ text: urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`, known: "pov" }];
+  const here = placeOfEntity(ctx.state, pov);
+  const voice = optionalQuery(ctx, "relationships.voice");
+  const present2 = Object.keys(ctx.state.entities).sort().filter((id) => {
+    const e = own(ctx.state.entities, id);
+    return !!e && id !== pov && together(ctx.world, here, placeOfEntity(ctx.state, id)) && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, id);
+  });
+  for (const id of present2) {
+    const e = own(ctx.state.entities, id);
+    if (!e)
+      continue;
+    if (!see(pov, id)) {
+      if (scope === "player")
+        continue;
+      const knowers = present2.filter((k) => k !== id && see(pov, k) && see(k, id)).map((k) => own(ctx.state.entities, k)?.name ?? k);
+      const act2 = typeof e.fields.activity === "string" && e.fields.activity !== "idle" ? ` (${e.fields.activity.replace(/_/g, " ")})` : "";
+      if (knowers.length > 0)
+        lines.push({ text: `${e.name}${act2} is here.`, known: "scene", who: knowers.join(", ") });
+      else if (scope === "gm")
+        lines.push({ text: `${e.name}${act2} is here.`, known: "gm" });
+      continue;
+    }
+    const life = povLife(ctx.world, ctx.state, id);
+    const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
+    lines.push({ text: life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`, known: "pov" });
+    const regard = life && !life.acts ? null : voice?.(ctx, id) ?? null;
+    if (regard)
+      lines.push({ text: regard, known: "pov" });
+  }
+  return lines;
+}
 var castlifePack = {
   id: "castlife",
   label: "Cast life",
@@ -27223,35 +27364,11 @@ var castlifePack = {
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
-    r.renderer({
-      slot: "people",
-      render(ctx) {
-        const pov = ctx.world.pov;
-        const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
-        const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
-        const lines = [urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`];
-        const here = placeOfEntity(ctx.state, pov);
-        const voice = optionalQuery(ctx, "relationships.voice");
-        for (const id of Object.keys(ctx.state.entities).sort()) {
-          const e = own(ctx.state.entities, id);
-          if (!e || id === pov || !together(ctx.world, here, placeOfEntity(ctx.state, id)) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id))
-            continue;
-          if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id))
-            continue;
-          const life = povLife(ctx.world, ctx.state, id);
-          const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
-          lines.push(life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
-          const regard = life && !life.acts ? null : voice?.(ctx, id) ?? null;
-          if (regard)
-            lines.push(regard);
-        }
-        return lines;
-      }
-    });
-    r.renderer({ slot: "people", hint: true, render: usualRoutineHints });
+    r.renderer({ slot: "people", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
+    r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
     r.renderer({ slot: "stance", render: stanceLines });
-    r.renderer({ slot: "stance", hint: true, render: stanceCues });
+    r.renderer({ slot: "stance", source: "cues", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
     r.lint({
       code: "castlife.birthday",
@@ -27522,6 +27639,7 @@ var sheetsPack = {
     });
     r.renderer({
       slot: "outcome",
+      source: "conditions",
       render(ctx) {
         const conditions = activeConditions(ctx, ctx.world.pov);
         return conditions.length > 0 ? [`You are ${conditions.map((c) => c.label.toLowerCase()).join(", ")}.`] : [];
@@ -58229,9 +58347,19 @@ function lintWorld(world, registry) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0)
       err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
   }
+  const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
   for (const [id, s] of Object.entries(world.sections)) {
-    if (!hasOwn(TURN_FED_SECTIONS, id) && !registry.renderers.some((r) => r.slot === id))
-      warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}", so it never goes in`);
+    const feed = readSectionFeed(Object.fromEntries(SECTION_FEED_KEYS.flatMap((k) => s[k] !== undefined ? [[k, s[k]]] : [])));
+    if (!feed) {
+      err(`sections.${id}`, "section_feed", `"${s.label}": enabled is on or off, maxTokens and maxLines are whole numbers from 1, include is a list of sources, scope is player, scene or gm`);
+      continue;
+    }
+    for (const source of feed.include ?? [])
+      if (!sources.has(source))
+        warn(`sections.${id}.include`, "section_source", `"${s.label}" includes "${source}", which no pack renders`);
+    const fed = feed.include ? feed.include.some((source) => sources.has(source)) : registry.renderers.some((r) => r.slot === id);
+    if (!hasOwn(TURN_FED_SECTIONS, id) && !fed)
+      warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}"${feed.include ? " or one it includes" : ""}, so it never goes in`);
   }
   for (const [id, t] of Object.entries(world.steps)) {
     if (t.id !== id)
@@ -58658,6 +58786,8 @@ function applyOp(reg, w, op, opts, rng) {
     }
     case "effect":
       return effectOp(reg, w, op, opts, rng);
+    case "feed":
+      return w.apply({ type: FEED_EVENT, data: { section: op.section, to: op.to } });
   }
 }
 function resolveEdit(reg, world, state2, ops, opts) {
@@ -58760,6 +58890,14 @@ function parseEditOps(raw) {
           return { op: "schedule_override", entity: o.entity, schedule: o.schedule, value: o.value };
         case "effect":
           return str14(o.effect) && isRecord(o.args) ? { op: "effect", effect: o.effect, args: o.args } : null;
+        case "feed": {
+          if (!str14(o.section) || o.section.trim() === "")
+            return null;
+          if (o.to === null)
+            return { op: "feed", section: o.section, to: null };
+          const to = readSectionFeed(o.to);
+          return to ? { op: "feed", section: o.section, to } : null;
+        }
         default:
           return null;
       }
@@ -66490,6 +66628,7 @@ function controls(world, state2, sceneType2, registry) {
     adjudication: policyOf(world, state2),
     inferred: inferredOf(world, state2),
     skills: worldSkills(registry, world, state2),
+    sections: sectionsOf(world).map((s) => ({ id: s.id, label: s.label, world: worldFeed(s), chat: chatFeed(state2)[s.id] ?? null })),
     time: {
       sceneType: sceneType2,
       sceneTicks: { ...state2.time.sceneTicks },
@@ -70144,9 +70283,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "7f6696e0a7dceb3a9bc8eed3a8936269a75b881f371f8424449e534f75c26026";
-  const tools = ["13e905eca8066aa2f4b354dc04dbcc38", "be126719e8971c9663eddb1d75fbe1b9"].filter((f) => f !== undefined);
-  return { id: "e6150c88", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  const sha256 = "81fbd5aad063525a74dc67975c2df76ade36ce521b9ea3f39ad406a3f58109f5";
+  const tools = ["0a9baadf30fa77cf7cb49d886cca019e", "be126719e8971c9663eddb1d75fbe1b9"].filter((f) => f !== undefined);
+  return { id: "e32361f4", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -73143,7 +73282,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "e6150c88" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "e32361f4" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -73424,8 +73563,8 @@ class Runtime {
   narratorSections(world, state2, plan2) {
     return readPass(() => {
       const ctx = this.registry.context(world, state2);
-      const has = (slot) => this.registry.renderers.some((r) => {
-        if (r.slot !== slot || r.hint)
+      const has = (section) => renderersOf(this.registry.renderers, section, feedOf(section, state2)).some((r) => {
+        if (r.hint)
           return false;
         try {
           return r.render(ctx).length > 0;
@@ -73434,7 +73573,7 @@ class Runtime {
         }
       });
       const montage = plan2 ? planLines(plan2, world, this.registry).montage.length > 0 : false;
-      return sectionsOf(world).filter((s) => s.id === "outcome" || s.id === "scene" || s.id === "outline" ? true : s.id === MINDS_SLOT ? mindLines(ctx).length > 0 : s.id === "montage" && montage || has(s.id)).map((s) => s.label);
+      return sectionsOf(world).filter((s) => feedOf(s, state2).enabled !== false).filter((s) => s.id === "outcome" || s.id === "scene" || s.id === "outline" ? true : s.id === MINDS_SLOT ? mindLines(ctx).length > 0 : s.id === "montage" && montage || has(s)).map((s) => s.label);
     });
   }
   addMindTraces(chatId, generationId, traces, replace = false) {
@@ -74330,6 +74469,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const uncounted = [];
     const fills = [];
     const hinted = [];
+    const sources = [];
     const entryOf3 = (section) => {
       const twin = entries3.twins.get(section.id);
       return twin !== undefined && preset.outlets.has(outletOf(section.id)) ? twin : entries3.slots.get(section.id) ?? null;
@@ -74345,17 +74485,40 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       const ctx = this.registry.context(world, state2, { "minds.minded": () => mindsFit.map((l) => l.entity) });
       const filled = new Set;
       for (const section of sectionsOf(world)) {
+        const feed = feedOf(section, state2);
+        if (feed.enabled === false)
+          continue;
         const entryId = entryOf3(section);
         if (!entryId)
           continue;
         const minds = section.id === MINDS_SLOT;
+        const scope = feed.scope ?? "player";
         const lines2 = minds ? mindsFit.map((l) => l.line) : [];
+        const lineSources = lines2.map(() => {
+          return;
+        });
         const hints = [];
-        for (const r of this.registry.renderers) {
-          if (r.slot !== section.id || minds)
+        const marked = [];
+        for (const r of renderersOf(this.registry.renderers, section, feed)) {
+          if (minds)
             continue;
           try {
-            (r.hint ? hints : lines2).push(...r.render(ctx));
+            if (r.hint) {
+              hints.push(...r.render(ctx));
+              continue;
+            }
+            for (const l of linesOf(r, ctx, scope)) {
+              if (l.known === "pov") {
+                lines2.push(l.text);
+                lineSources.push(l.source);
+                continue;
+              }
+              if (scope === "player" || l.known === "gm" && scope !== "gm")
+                continue;
+              if (scope !== "gm" && findLeaks(l.text, secrets).length > 0)
+                continue;
+              marked.push({ text: markedText(l), ...l.source ? { source: l.source } : {} });
+            }
           } catch (error) {
             this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
           }
@@ -74366,14 +74529,30 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
           const minutes2 = clockMinutes(plan2.events);
           lines2.push(minutes2 > 0 ? `This turn took ${spanText(minutes2)}.` : "No time passes this turn.");
         }
-        if (section.id === "outcome")
+        if (section.id === "outcome") {
           lines2.unshift(...planned.outcome);
+          lineSources.unshift(...planned.outcome.map(() => {
+            return;
+          }));
+        }
         if (section.id === "montage")
           lines2.push(...planned.montage);
-        const safe = minds ? lines2 : lines2.filter((l) => findLeaks(l, secrets).length === 0);
+        while (lineSources.length < lines2.length)
+          lineSources.push(undefined);
+        const screened = lines2.map((text6, i) => ({ text: text6, source: lineSources[i] })).filter((l) => minds || findLeaks(l.text, secrets).length === 0);
+        const capped = feed.maxLines !== undefined ? screened.slice(0, feed.maxLines) : [...screened];
+        const markedRoom = feed.maxLines !== undefined ? Math.max(0, feed.maxLines - capped.length) : marked.length;
+        if (feed.maxTokens !== undefined)
+          while (capped.length > 0 && sectionCost(renderSection(section.label, section.template, capped.map((l) => l.text))) > feed.maxTokens)
+            capped.pop();
+        const safe = capped.map((l) => l.text);
+        const facts = marked.slice(0, markedRoom);
+        const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
         if (safe.length === 0) {
           if (minds && allMinds.length > 0)
             record3.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
+          if (facts.length > 0)
+            hinted.push({ fill: null, entryId, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens });
           continue;
         }
         const content = renderSection(section.label, section.template, safe);
@@ -74383,7 +74562,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
           uncounted.push(content);
         const cost = counted ?? sectionTokens(content);
         const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
-        record3.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...minds && mindsFit.length < allMinds.length ? { cut: allMinds.length - mindsFit.length } : {}, delivery: "unchecked" });
+        const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - capped.length);
+        record3.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...cut > 0 ? { cut } : {}, delivery: "unchecked" });
         if (clipped)
           continue;
         if (!minds)
@@ -74392,35 +74572,65 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         fills.push(fill);
         filled.add(section.id);
         (record3.entries ??= {})[section.id] = entryId;
-        const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
-        if (safeHints.length > 0)
-          hinted.push({ fill, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
+        sources.push(...capped.flatMap((l) => l.source ? [l.source] : []));
+        if (safeHints.length > 0 || facts.length > 0)
+          hinted.push({ fill, entryId, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens });
       }
     });
-    const rules = preset.guidance.narrator;
-    const rulesAt = entries3.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries3.narratorOutlet : entries3.narrator;
-    if (rules && rulesAt)
-      fills.push({ id: rulesAt, content: `[Narrator rules]
-${rules}` });
     record3.budget.used = settings.modelUse.tokens.sections - budget;
+    let markedSent = false;
     for (const h of hinted) {
-      const content = renderSection(h.label, h.template, [...h.lines, ...h.hints]);
-      const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content));
-      if (counted === undefined)
-        uncounted.push(content);
-      const extra = Math.max(0, (counted ?? sectionTokens(content)) - h.cost);
-      if (extra > budget)
+      const fits2 = (extra, total) => extra <= budget && (h.maxTokens === undefined || total <= h.maxTokens);
+      const costOf3 = (body2) => {
+        const content2 = renderSection(h.label, h.template, body2);
+        const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content2));
+        if (counted === undefined)
+          uncounted.push(content2);
+        return counted ?? sectionTokens(content2);
+      };
+      const body = [...h.lines];
+      let cost = h.cost;
+      const carried = [];
+      for (const m of h.marked) {
+        const next = costOf3([...body, m.text]);
+        if (!fits2(next - cost, next))
+          break;
+        budget -= next - cost;
+        cost = next;
+        body.push(m.text);
+        if (m.source)
+          carried.push(m.source);
+        markedSent = true;
+      }
+      if (h.hints.length > 0) {
+        const next = costOf3([...body, ...h.hints]);
+        if (fits2(Math.max(0, next - cost), next)) {
+          budget -= Math.max(0, next - cost);
+          body.push(...h.hints);
+        }
+      }
+      if (body.length === h.lines.length)
         continue;
-      budget -= extra;
-      h.fill.content = content;
+      const content = renderSection(h.label, h.template, body);
+      if (h.fill)
+        h.fill.content = content;
+      else
+        fills.push({ id: h.entryId, content });
+      sources.push(...carried);
     }
+    const rules = [markedSent ? MARKED_FACTS_RULE : null, preset.guidance.narrator ?? null].filter((r) => r !== null && r !== "");
+    const rulesAt = entries3.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries3.narratorOutlet : entries3.narrator;
+    if (rules.length > 0 && rulesAt)
+      fills.push({ id: rulesAt, content: `[Narrator rules]
+${rules.join(`
+`)}` });
     this.countLater(input.userId, uncounted);
     record3.forced = fills.map((f) => f.id);
     await this.inspector.add(input.chatId, input.userId, record3);
     this.push.changed(input.chatId, input.userId);
     const sent2 = new Set(record3.sections.filter((s) => !s.clipped).map((s) => s.slot));
     this.diag.sections({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, `${pending?.kind ?? "continue"} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent2.has(s.id) })), started);
-    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\x00${this.book.placedAs(bookId)}` };
+    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\x00${this.book.placedAs(bookId)}`, sources };
   }
   async fill(chatId, userId, delivered) {
     const now = (await this.presets.current(chatId, userId)).placed;

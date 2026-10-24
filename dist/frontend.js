@@ -1018,6 +1018,7 @@ var WORLD_FORMAT = "lre-world-v1";
 var ENGINE_VERSION = "0.1.0";
 var EFFECT_ONLY_FUNCTIONS = ["roll"];
 var BUILTIN_RELATIONS = ["in", "owns", "uses", "worn_by", "equipped", "knows", "member_of", "regard", "route"];
+var FEED_SCOPES = ["player", "scene", "gm"];
 var DEFAULT_CURRENCY = { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" };
 var DEFAULT_SPAWN_CAP = 24;
 var MAX_SPAWN_CAP = 500;
@@ -2671,7 +2672,12 @@ var COLLECTION_SPECS = {
     { kind: "text", key: "label", label: "Label" },
     { kind: "number", key: "rank", label: "Rank (lower is reserved first)", step: 1 },
     { kind: "text", key: "template", label: "Template", multiline: true },
-    { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' }
+    { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
+    { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v3) => v3 !== false },
+    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, optional: true, hint: "player: what the player character knows (default) · scene: also what the people with him know or plainly see · gm: everything, each fact he doesn't know marked for the narrator" },
+    { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
+    { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
+    { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" }
   ],
   steps: [
     { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
@@ -25375,6 +25381,169 @@ function PinsAndUpgrade(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/gm/feed.tsx
+var SCOPE_LABEL = {
+  player: "What the player character knows",
+  scene: "Also what the people with him know",
+  gm: "Everything, marked for the narrator"
+};
+function feedSummary(feed) {
+  const parts = [];
+  if (feed.enabled === false)
+    parts.push("off");
+  if (feed.scope && feed.scope !== "player")
+    parts.push(feed.scope === "scene" ? "scene scope" : "GM scope");
+  if (feed.maxLines !== undefined)
+    parts.push(`≤ ${feed.maxLines} lines`);
+  if (feed.maxTokens !== undefined)
+    parts.push(`≤ ${feed.maxTokens} tokens`);
+  if (feed.include)
+    parts.push(`sources: ${feed.include.join(", ")}`);
+  return parts.length > 0 ? parts.join(" · ") : "as the world has it";
+}
+function SectionFeedForm(props) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  const start = { ...props.row.world, ...props.row.chat ?? {} };
+  const [draft, setDraft] = d2(start);
+  const [sources, setSources] = d2((start.include ?? []).join(", "));
+  const set = (patch) => setDraft((d3) => ({ ...d3, ...patch }));
+  const send = (to) => run(async () => {
+    const result = await app.request(editRequest(props.chatId, [{ op: "feed", section: props.row.id, to }]));
+    if (result?.pending)
+      app.toast("Saved — it applies when the reply finishes.", "info");
+    if (result)
+      props.onDone();
+  });
+  const save = () => {
+    const include = sources.split(",").map((s3) => s3.trim()).filter((s3) => s3 !== "");
+    const to = {};
+    if (draft.enabled === false)
+      to.enabled = false;
+    if (draft.scope && draft.scope !== "player")
+      to.scope = draft.scope;
+    if (draft.maxLines !== undefined)
+      to.maxLines = draft.maxLines;
+    if (draft.maxTokens !== undefined)
+      to.maxTokens = draft.maxTokens;
+    if (include.length > 0)
+      to.include = include;
+    if (props.row.world.enabled === false && to.enabled === undefined)
+      to.enabled = true;
+    if (props.row.world.scope && props.row.world.scope !== "player" && to.scope === undefined)
+      to.scope = "player";
+    send(to);
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-feed-form": props.row.id,
+    children: [
+      /* @__PURE__ */ u3(HostSwitch, {
+        checked: draft.enabled !== false,
+        label: "In the prompt",
+        onChange: (on) => set({ enabled: on })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Whose knowledge",
+        children: /* @__PURE__ */ u3(HostSelect, {
+          label: "Whose knowledge",
+          value: draft.scope ?? "player",
+          options: FEED_SCOPES.map((s3) => ({ value: s3, label: SCOPE_LABEL[s3] })),
+          onChange: (v3) => set({ scope: FEED_SCOPES.find((s3) => s3 === v3) ?? "player" })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "At most lines",
+        help: "Empty: no cap",
+        children: /* @__PURE__ */ u3(NumberStepper, {
+          label: "At most lines",
+          value: draft.maxLines ?? null,
+          min: 1,
+          integer: true,
+          onChange: (v3) => set({ maxLines: v3 })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "At most tokens",
+        help: "Lines past it are cut from the end",
+        children: /* @__PURE__ */ u3(NumberStepper, {
+          label: "At most tokens",
+          value: draft.maxTokens ?? null,
+          min: 1,
+          integer: true,
+          onChange: (v3) => set({ maxTokens: v3 })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Sources",
+        help: "Comma-separated renderer sources; empty: its own section's",
+        children: /* @__PURE__ */ u3("input", {
+          class: "lre-input",
+          "aria-label": "Sources",
+          value: sources,
+          onInput: (e3) => setSources(e3.currentTarget.value)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-row",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            busy,
+            onClick: save,
+            children: "Save for this chat"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "secondary",
+            disabled: busy || props.row.chat === null,
+            onClick: () => send(null),
+            children: "Use the world's"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function FeedThisChat(props) {
+  const [open, setOpen] = d2(null);
+  const rows = props.controls?.sections ?? [];
+  if (rows.length === 0)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "scroll",
+      children: "Section settings appear once the chat has started."
+    }, undefined, false, undefined, this);
+  const row = rows.find((r3) => r3.id === open);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "What goes into each section the narrator reads in this chat. A change is a GM edit with its own Undo; the world's settings are in Build → Sections."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        flush: true,
+        children: /* @__PURE__ */ u3(List, {
+          children: rows.map((r3) => /* @__PURE__ */ u3(ListRow, {
+            icon: "scroll",
+            title: r3.label,
+            subtitle: `${r3.chat ? "This chat: " : "World: "}${feedSummary(r3.chat ?? r3.world)}`,
+            chevron: true,
+            onClick: () => setOpen(open === r3.id ? null : r3.id)
+          }, r3.id, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      row ? /* @__PURE__ */ u3(Section, {
+        title: row.label,
+        children: /* @__PURE__ */ u3(SectionFeedForm, {
+          chatId: props.chatId,
+          row,
+          onDone: () => setOpen(null)
+        }, row.id, false, undefined, this)
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/gm/chat.tsx
 function TimeThisChat(props) {
   const app = useApp();
@@ -25449,6 +25618,13 @@ function ThisChat(props) {
                   subtitle: controls ? `${controls.time.scale}× time scale · montage ${controls.time.montage === "key" ? "by key events" : `per ${controls.time.montage}`}${controls.time.paused ? " · clock paused" : ""}` : "Ticks, interrupts, Speed through, Montage",
                   chevron: true,
                   onClick: () => pages.open("time")
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(ListRow, {
+                  icon: "scroll",
+                  title: "Sections",
+                  subtitle: "What goes into each section the narrator reads, and whose knowledge",
+                  chevron: true,
+                  onClick: () => pages.open("sections")
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(ListRow, {
                   icon: "layers",
@@ -25527,6 +25703,16 @@ function ThisChat(props) {
         onBack: pages.back,
         children: /* @__PURE__ */ u3(TimeThisChat, {
           view
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : page === "sections" ? /* @__PURE__ */ u3(GmPage, {
+        name: "sections",
+        title: "Sections",
+        subtitle: "This chat",
+        backLabel: "This chat",
+        onBack: pages.back,
+        children: /* @__PURE__ */ u3(FeedThisChat, {
+          chatId: view.chatId,
+          controls
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : page === "pins" ? /* @__PURE__ */ u3(GmPage, {
         name: "pins",
