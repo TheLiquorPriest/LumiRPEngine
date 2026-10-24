@@ -39,14 +39,13 @@ import type { AgentInstant, EventTypeDef, FeedLine, PackDef, ReadContext, Reject
 import type { PlayerBlock, RoutineEditOp, RoutineSociability, SkipBlock } from "../../../shared/routines";
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
 import type { NeedId, NeedTuning } from "../../../shared/needs";
-import { isNeedId, NEED_DEFAULTS, NEED_IDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
+import { CONVERSATION, isNeedId, NEED_DEFAULTS, NEED_IDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { povLead, together } from "../../../engine/presence";
 import { relocate } from "../../../engine/relocate";
-import { CONVERSATION } from "../../relationships/core/index";
 import { acts as lifeActs, povLife } from "../../../engine/life";
 import { classValues, isGroup, isMemberOf, MEMBER_OF, selectEntities } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";

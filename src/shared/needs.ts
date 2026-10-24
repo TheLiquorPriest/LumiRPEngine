@@ -52,6 +52,11 @@ const inScale = (v: unknown, max: number): v is number => typeof v === "number" 
  * hours"): eat, rest, sleep and chat take it as `minutes`, which interpret fills, and their own time without it.
  */
 export const STATED_MINUTES: ParamDef = { type: "duration", label: "How long, in minutes, when the player says", optional: true };
+/**
+ * The appraisal a chat makes (relationships' `chat_with`), and so the `why` of the regard it records:
+ * what Cast life reads a conversation by to meet the social need, so neither pack imports the other.
+ */
+export const CONVERSATION = "conversation";
 
 /**
  * Every need as a world tunes it: a part a world doesn't give, or gives a value the engine doesn't
