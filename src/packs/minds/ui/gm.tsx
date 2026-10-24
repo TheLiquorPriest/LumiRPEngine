@@ -19,6 +19,8 @@ import { Badge, Banner, Button, Empty, Field, IdText, List, ListRow, Section, Se
 import { formatMinutes } from "../../../frontend/format";
 import { GmPage, usePages } from "../../../frontend/gm/ui";
 import { Icon } from "../../../frontend/icons";
+import { fidelityGroups } from "../../../frontend/batch";
+import { PickBox, SelectBar, useSelection } from "../../../frontend/multi-select";
 import { MoneyInput } from "../../../frontend/money-input";
 import type { GmSectionProps, Send } from "../../../frontend/registry";
 import type { GmView } from "../../../shared/state-view";
@@ -118,8 +120,7 @@ export function GmMindsSection(props: GmSectionProps) {
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<Fidelity | "">("");
   // Choosing who to run: tapping a row picks them instead of opening their page.
-  const [picking, setPicking] = useState(false);
-  const [picked, setPicked] = useState<EntityId[]>([]);
+  const picking = useSelection();
   const minds = useMindsRun(props.chatId, props.send, props.reload);
   const running = minds.run?.status === "running";
   const pov = props.gm.entities.find((e) => e.pov);
@@ -144,6 +145,8 @@ export function GmMindsSection(props: GmSectionProps) {
   });
   const q = query.trim().toLowerCase();
   const list = view.characters.filter((c) => (level === "" || c.fidelity.level === level) && (q === "" || c.name.toLowerCase().includes(q)));
+  // Those picked who are still characters (an Undo can take back a spawn), in the list's order.
+  const chosen = view.characters.filter((c) => picking.ids.includes(c.entity)).map((c) => c.entity);
   const secrecy = SECRECY[view.secrecy];
   return (
     <div ref={pages.host.ref} class="lre-gm-pages" onKeyDown={pages.host.onKeyDown} data-lre-gm-section="minds">
@@ -165,7 +168,7 @@ export function GmMindsSection(props: GmSectionProps) {
         <Section title="Run minds now" flush>
           <List>
             <ListRow icon="sparkle" title={`Run everyone Live and Near (${liveNear})`} subtitle="From the chat so far and their lore, as a turn would; recorded as one edit you can undo" chevron disabled={props.busy || running || liveNear === 0} onClick={() => void minds.start()} />
-            <ListRow icon="users" title={picking ? "Stop choosing" : "Choose who to run"} subtitle={picking ? "Tap people below to pick them" : "Pick one or more from the list below"} chevron disabled={props.busy || running} onClick={() => (setPicking(!picking), setPicked([]))} />
+            <ListRow icon="users" title={picking.on ? "Stop choosing" : "Choose who to run"} subtitle={picking.on ? "Tap people below to pick them, or pick everyone shown or a level in the bar" : "Pick one or more from the list below"} chevron disabled={props.busy || running} onClick={() => (picking.on ? picking.stop() : picking.start())} />
           </List>
         </Section>
         <div class="lre-gm-tools">
@@ -195,7 +198,7 @@ export function GmMindsSection(props: GmSectionProps) {
                     key={c.entity}
                     id={c.entity}
                     title={c.name}
-                    leading={picking ? <input type="checkbox" class="lre-gm-minds-pick" aria-label={`Pick ${c.name}`} checked={picked.includes(c.entity)} tabIndex={-1} /> : undefined}
+                    leading={picking.on ? <PickBox label={`Pick ${c.name}`} checked={picking.ids.includes(c.entity)} /> : undefined}
                     subtitle={
                       <span class="lre-gm-minds-sub">
                         <span>{c.mind ? `Last mind ${c.mind.clock}` : "No mind yet"}</span>
@@ -211,21 +214,20 @@ export function GmMindsSection(props: GmSectionProps) {
                         <span class="lre-gm-minds-score-k">score</span>
                       </span>
                     }
-                    chevron={!picking}
-                    onClick={() => (picking ? setPicked(picked.includes(c.entity) ? picked.filter((id) => id !== c.entity) : [...picked, c.entity]) : pages.open(c.entity))}
+                    chevron={!picking.on}
+                    onClick={() => (picking.on ? picking.toggle(c.entity) : pages.open(c.entity))}
                   />
                 ))}
               </List>
             </div>
           )}
         </Section>
-        {picking ? (
-          <div class="lre-gm-minds-pickbar" role="group" aria-label="Run the chosen minds">
-            <span>{picked.length === 1 ? "1 chosen" : `${picked.length} chosen`}</span>
-            <Button variant="primary" icon="sparkle" disabled={picked.length === 0 || running || props.busy} onClick={() => void minds.start(picked).then((ok) => ok && (setPicking(false), setPicked([])))}>
+        {picking.on ? (
+          <SelectBar label="Run the chosen minds" selection={picking} all={view.characters.map((c) => c.entity)} shown={list.map((c) => c.entity)} groups={fidelityGroups(view.characters, FIDELITY_LABEL)} groupLabel="Select a level">
+            <Button variant="primary" icon="sparkle" disabled={chosen.length === 0 || running || props.busy} onClick={() => void minds.start(chosen).then((ok) => ok && picking.stop())}>
               Run their minds
             </Button>
-          </div>
+          </SelectBar>
         ) : null}
       </div>
       {selected ? <CharacterPages ctx={ctx} c={selected} onBack={pages.back} /> : null}

@@ -10,7 +10,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
 import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
+import { ASK_BEYOND_DEFAULT, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
@@ -195,6 +195,7 @@ export function defaultSettings(): UserSettings {
       speedThrough: Object.fromEntries(SPEED_ACTIVITIES.map((activity) => [activity, { ...SPEED_DEFAULT }])),
       montage: "key",
       unitCap: { agentDays: 600, events: 5000 },
+      askBeyondMinutes: ASK_BEYOND_DEFAULT,
     },
     // New chats start from the world's own realism and time defaults (DESIGN §9.1).
     overrideWorldDefaults: false,
@@ -260,6 +261,14 @@ const int = (v: unknown, lo: number, hi: number): number | undefined => (typeof 
 /** A token or call budget: a whole number from `lo` (below it the budget can't work), with no ceiling. */
 const atLeast = (v: unknown, lo: number): number | undefined => int(v, lo, Number.MAX_SAFE_INTEGER);
 const real = (v: unknown, lo: number, hi: number): number | undefined => (typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : undefined);
+/**
+ * How long a skip runs without asking, as stored: whole minutes from 0 (every skip asks) up to the
+ * timelapse's 366-day reach, the only ceiling, so a longer one keeps that much; anything else isn't one.
+ */
+function askBeyondOf(v: unknown): number | undefined {
+  const minutes = real(v, 0, Number.POSITIVE_INFINITY);
+  return minutes === undefined ? undefined : Math.min(TIMELAPSE_REACH_MINUTES, Math.round(minutes));
+}
 const oneOf = <T extends string>(v: unknown, values: readonly T[]): T | undefined => values.find((x) => x === v);
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 const level = (v: unknown): Level | undefined => LEVELS.find((l) => l === v);
@@ -416,6 +425,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     speedThrough: isRecord(t.speedThrough) ? entries(t.speedThrough, 64, speedOf) : d.time.speedThrough,
     montage: oneOf(t.montage, ["key", "day", "week"] as const) ?? d.time.montage,
     unitCap: { agentDays: int(unitCap.agentDays, 1, 1_000_000) ?? d.time.unitCap.agentDays, events: int(unitCap.events, 1, 10_000_000) ?? d.time.unitCap.events },
+    askBeyondMinutes: askBeyondOf(t.askBeyondMinutes) ?? d.time.askBeyondMinutes,
   };
   const rawBounds = isRecord(v.extraction) ? v.extraction : {};
   const extraction: ExtractionBounds = {};

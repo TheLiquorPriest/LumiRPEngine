@@ -389,6 +389,11 @@ export interface Delivered {
   bookId: string;
   fills: ReadonlyMap<string, string>;
   placed: string;
+  /**
+   * The World Info entries the turn's sections carried (DESIGN §6.11): a section line that tells an
+   * entry's text names it, so that entry can stay out of the same prompt. Empty when none did.
+   */
+  sources: readonly { bookId: string; entryId: string }[];
 }
 
 /** One message as the chat's events last showed it: what the guard checks a prepared turn's chain against. */

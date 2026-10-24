@@ -28,7 +28,7 @@ import type {
 } from "./ids";
 import type { FinanceView } from "./finance";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
-import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, StepPurpose, WorldCurrency } from "./world";
+import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, SectionFeed, StepPurpose, WorldCurrency } from "./world";
 import type { LorePolicy } from "./settings";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
@@ -304,6 +304,11 @@ export interface ControlsView {
   inferred: InferredChecks;
   /** The skills the chat's world's sheet has, in sheet order: what an inferred check may roll, and what its skills list may name. */
   skills: SheetSkill[];
+  /**
+   * The chat's sections in rank order with their feed (DESIGN §6.11): the world's settings and the
+   * GM's in this chat (null when the chat follows the world's). Settings, never what a section holds.
+   */
+  sections: { id: string; label: string; world: SectionFeed; chat: SectionFeed | null }[];
 }
 
 export interface StateView {

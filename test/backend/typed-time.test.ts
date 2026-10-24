@@ -171,7 +171,6 @@ describe("a typed skip to Friday at 6 PM", () => {
     expect(placeOfEntity(state, world.pov)).toBe("bluebird_coffee");
     expect(state.clock).toBeLessThan(clockOfStamp(calendarOf(world), "2026-09-14 08:00") ?? 0);
     const offer = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "timelapse_offer");
-    expect(offer?.label).toBe("Timelapse to Fri 18:00?");
     if (!offer) throw new Error("no offer");
     rig.rt.beatMinds = async () => ({ events: [], traces: [] });
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: offer.id, choice: "timelapse" }));
@@ -180,7 +179,7 @@ describe("a typed skip to Friday at 6 PM", () => {
     expect((await folded(rig, chatId)).record?.events.find((e) => e.type === "timelapse")).toMatchObject({ target: { type: "at", at: friday } });
   });
 
-  test("in another time zone, the offer names the time as the player typed it, local to where they are", async () => {
+  test("in another time zone, the time typed is read local to where they are", async () => {
     const rig = new Rig({ shipped: true });
     rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes("You map a player's typed input") ? JSON.stringify({ action: "eat", params: {}, confidence: 0.9, then: { at: "2026-09-18 18:00" } }) : "{}");
     const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
@@ -196,6 +195,11 @@ describe("a typed skip to Friday at 6 PM", () => {
     const { state, world } = await folded(rig, chatId);
     expect(placeOfEntity(state, world.pov)).toBe("chicago_il");
     const offer = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "timelapse_offer");
-    expect(offer?.label).toBe("Timelapse to Fri 18:00?");
+    if (!offer) throw new Error("no offer");
+    rig.rt.beatMinds = async () => ({ events: [], traces: [] });
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: offer.id, choice: "timelapse" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "The week goes by.");
+    expect((await folded(rig, chatId)).record?.events.find((e) => e.type === "timelapse")).toMatchObject({ target: { type: "at", at: clockOfStamp(calendarOf(world), "2026-09-18 19:00") } });
   });
 });

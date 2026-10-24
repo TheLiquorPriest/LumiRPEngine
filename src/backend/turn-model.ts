@@ -28,6 +28,8 @@ export interface PreparedRead {
   events?: LedgerEvent[];
   /** The minds' post phase (DESIGN §24.4): presence, memory and consolidation, applied after the post steps. */
   minds?: LedgerEvent[];
+  /** How long a narrated skip may run without asking (the user's `time.askBeyondMinutes`, DESIGN §9.4): one longer becomes a Timelapse chip. */
+  askBeyond: number;
 }
 
 /** The plan-phase prose steps' output for one plan (DESIGN §5.2): the brief and the prose outline. */
@@ -92,9 +94,6 @@ function clockMinutes(events: readonly LedgerEvent[]): number {
   for (const e of events) if (e.type === "clock") minutes += e.minutes;
   return minutes;
 }
-
-/** Narrated `time.advance` applies whole up to this many minutes per turn; beyond, it becomes a Timelapse chip (DESIGN §9.4). */
-export const TIME_ADVANCE_CAP = 240;
 
 /** The simulation's turn pipeline as the bridge uses it: the engine plan carries chips and outline lines too. */
 export interface EnginePipeline {
@@ -446,14 +445,14 @@ export class TurnBridge implements TurnModel {
     w.applyAll(prepared?.events ?? []);
     const chips: ReadChip[] = [];
     const proposals: JsonObject[] = [];
-    for (const p of prepared?.auto ?? []) {
+    if (prepared) for (const p of prepared.auto) {
       if (p.type !== "time_advance") {
         proposals.push(p);
         continue;
       }
       const minutes = typeof p.minutes === "number" ? Math.round(p.minutes) : 0;
       // During a fight it applies nothing and offers nothing: the read's preparation declined it already.
-      const outcome = applyTimeAdvance(this.registry, w, minutes, { runSeed: this.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+      const outcome = applyTimeAdvance(this.registry, w, minutes, { runSeed: this.runSeed, capMinutes: prepared.askBeyond, unitCap: w.state.time.unitCap });
       if (outcome.chip) chips.push({ target: outcome.chip.target, reason: outcome.reason === "unit_cap" ? "unit_cap" : "over_cap" });
     }
     applyProposals(this.registry, w, proposals, input.seed, this.runSeed);
