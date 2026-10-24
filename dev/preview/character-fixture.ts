@@ -93,11 +93,12 @@ export const PICKER_CHARACTER: CharacterDTO = {
   home: byId(HOME),
   bed: { kind: "home", place: byId(HOME), item: null },
   bedChoices: {
+    // Nearest first, then by name; then everything lying in the home, the likely beds first: as `lre.character` answers.
     places: [inHome(`${HOME}_bedroom`), inHome(`${HOME}_kitchen`), inHome(`${HOME}_bedroom_closet`)],
-    items: PICKER_THINGS.filter((t) => t.id === "maya_bed" || t.id === "maya_futon"),
+    items: PICKER_THINGS.filter((t) => t.place?.id.startsWith(HOME)),
   },
   employer: null,
-  sections: [{ id: "identity", fields: [{ id: "traits", label: "Traits", type: "list", value: ["patient", "night owl"] }] }],
+  sections: [{ id: "identity", fields: [{ id: "traits", label: "Traits", type: "list", of: "text", value: ["patient", "night owl"] }] }],
 };
 
 /** Where the player character is, for the pickers' "Where Sam is" suggestion. */

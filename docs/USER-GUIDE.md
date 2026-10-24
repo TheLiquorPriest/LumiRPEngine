@@ -1037,7 +1037,7 @@ A character's places (their home, where the story starts them, where they are) s
 - **Secret** marks a place the player doesn't see, and **Hidden until found** one they find by going there or being told of it.
 - Where the place may be left empty, a button at the bottom clears it (**No home**, say).
 
-**Sleeps** shows where they sleep, with its own **Change…**. Its picker offers what's likely first: **Sleeps at home** (no bed of their own; they sleep in their home, the default), then **Rooms in their home** and **Beds there** (the things in their home they could sleep in), then **Somewhere else**: **Another place…** opens the place picker, and **A thing somewhere else…** finds a bed, a sofa or a hammock anywhere by its name or by where it is, each with its place's path.
+**Sleeps** shows where they sleep, with its own **Change…**. Its picker offers what's likely first: **Sleeps at home** (no bed of their own; they sleep in their home, the default), then **Rooms in their home** and **Things in their home** (the beds, bunks, sofas and hammocks first), then **Somewhere else**: **Another place…** opens the place picker, and **A thing somewhere else…** finds a bed, a sofa or a hammock anywhere by its name or by where it is, each with its place's path.
 
 **A list of words** (traits, likes, things they'd say) shows as chips. Type one and press **Enter** or tap **Add**; **✕** on a chip removes it. Spaces are tidied, and a word already there, in any case, isn't added twice.
 

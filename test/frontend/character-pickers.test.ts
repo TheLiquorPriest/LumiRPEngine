@@ -1,7 +1,7 @@
 // The character pickers (DESIGN §7, the Character model) over the preview's 320-place world: a
 // search finds places by any word of their name or of the places around them, browsing drills down
-// by parent ids (names repeat), the bed picker offers home, then the rooms there, then the beds, and
-// a list of text changes a word at a time.
+// by parent ids (names repeat), the bed picker offers home, then the rooms there, then the things
+// lying there, and a list of text changes a word at a time.
 
 import { describe, expect, test } from "bun:test";
 import { bedValue } from "../../src/frontend/character/bed-picker";
@@ -60,11 +60,11 @@ describe("the place picker", () => {
 });
 
 describe("the bed picker", () => {
-  test("it offers sleeping at home first, then the rooms in their home, then the beds lying there", () => {
+  test("it offers sleeping at home first, then the rooms in their home, then the things lying there in the op's order", () => {
     const options = bedOptions(PICKER_CHARACTER);
-    expect(options.map((o) => (o.kind === "home" ? "home" : o.kind === "place" ? `room:${o.place.name}` : `item:${o.item.name}`))).toEqual(["home", "room:Bedroom", "room:Kitchen", "room:Closet", "item:Double bed", "item:Futon"]);
+    expect(options.map((o) => (o.kind === "home" ? "home" : o.kind === "place" ? `room:${o.place.name}` : `item:${o.item.name}`))).toEqual(["home", "room:Bedroom", "room:Kitchen", "room:Closet", "item:Double bed", "item:Futon", "item:Kettle"]);
     // What each choice writes to the bed field: nothing for home, else the place's or the thing's id.
-    expect(options.map((o) => bedValue(bedOf(o)))).toEqual([null, "riverton_elm_street_b1_f1_u2_bedroom", "riverton_elm_street_b1_f1_u2_kitchen", "riverton_elm_street_b1_f1_u2_bedroom_closet", "maya_bed", "maya_futon"]);
+    expect(options.map((o) => bedValue(bedOf(o)))).toEqual([null, "riverton_elm_street_b1_f1_u2_bedroom", "riverton_elm_street_b1_f1_u2_kitchen", "riverton_elm_street_b1_f1_u2_bedroom_closet", "maya_bed", "maya_futon", "maya_kettle"]);
   });
 
   test("a thing somewhere else is found by its name or where it lies, with its place's path", () => {
