@@ -43,6 +43,32 @@ export async function writeBookLore(host: Pick<HostPort, "books">, e: HostBookEn
 }
 
 /**
+ * Keeps the book entry each secret world entry was indexed from stored switched off, with LRE's
+ * secret fields and the world entry's gate (DESIGN §4.2, §6.1): the host then never activates it by
+ * itself, whatever happens to the interceptor (a throw, a state it can't read, the host's time running
+ * out), and its gate switches it on for a prompt as any LRE-secret entry's does. `only` limits it to
+ * some of the world's entries. A book entry already so stored, gone, in another book or written by
+ * the engine is left alone, and one that can't be written is logged.
+ */
+export async function secureIndexedSecrets(host: Pick<HostPort, "books" | "log">, world: WorldDoc, userId: UserId, only?: (id: string) => boolean): Promise<void> {
+  for (const [id, entry] of Object.entries(world.lore)) {
+    const source = loreSourceOf(entry.source);
+    if (source.kind !== "book" || !loreIsSecret(entry) || (only && !only(id))) continue;
+    try {
+      const e = await host.books.entry(source.entryId, userId);
+      if (!e || e.bookId !== source.bookId || engineWroteEntry(e.extensions)) continue;
+      const own = bookLoreFieldsOf(e.extensions);
+      const gate = typeof entry.gate === "string" ? entry.gate : undefined;
+      if (e.disabled && own !== null && loreIsSecret(own) && own.gate === gate) continue;
+      const { gate: _theirs, ...rest } = own ?? {};
+      await writeBookLore(host, e, { ...rest, secret: true, ...(gate !== undefined ? { gate } : {}) }, userId);
+    } catch (error) {
+      host.log("warn", `[LumiRPEngine] the World Info entry secret lore ${id} was indexed from wasn't switched off: ${error instanceof Error ? error.message : String(error)}`, userId);
+    }
+  }
+}
+
+/**
  * A World Info entry as lore: null when it isn't any, because the engine wrote it, it holds no text,
  * or its author switched it off and gave it no LRE fields. An entry with LRE fields reads whether it
  * is stored on or off: a secret one is stored off and read only through its gate.

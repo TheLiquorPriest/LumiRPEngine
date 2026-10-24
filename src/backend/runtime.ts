@@ -73,7 +73,7 @@ import { startMarkersFrom } from "./start-markers";
 import { claimFor, outOfHand } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { pinReader } from "./lore-pins";
-import { liveLore } from "./book-lore";
+import { liveLore, secureIndexedSecrets } from "./book-lore";
 import { worldInfoVerdict, type WorldInfoGate } from "./wi-interceptor";
 import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
 import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
@@ -2451,12 +2451,14 @@ export class Runtime implements TurnHooks {
   /**
    * `world` with the lore its World Info books hold now (DESIGN §4.2, `liveLore`), read once per
    * engine run, under its turn id, so its phases, its sections, its time skip and its checks read the
-   * same entries; each caller keeps its own world, with that lore.
+   * same entries; each caller keeps its own world, with that lore. The same first read also keeps the
+   * World Info entries the world's secrets were indexed from switched off, a revision committed before
+   * that was done included.
    */
   private async liveWorld(key: string, chatId: ChatId, userId: UserId, world: WorldDoc): Promise<WorldDoc> {
     const kept = this.liveLores.get(key);
     if (kept) return kept === world.lore ? world : { ...world, lore: kept };
-    const live = await liveLore(this.host, world, chatId, userId);
+    const [live] = await Promise.all([liveLore(this.host, world, chatId, userId), secureIndexedSecrets(this.host, world, userId)]);
     lruSet(this.liveLores, key, live.lore, 64);
     return live;
   }
