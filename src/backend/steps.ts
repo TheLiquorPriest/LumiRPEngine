@@ -670,6 +670,7 @@ export async function extract(
   guidance = "",
   usual: readonly string[] = [],
   recent: readonly string[] = [],
+  said = "",
 ): Promise<ExtractRead> {
   const types =
     `time_advance{minutes} · location{entity,place} · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) · knows{who,fact} (public facts only) · spawn{kind,name,place?,role?} · life{entity,state} (state: ${lifeStatesOf(world)
@@ -680,7 +681,10 @@ export async function extract(
   const moves = channels.length === 0 || channels.includes("location");
   const routines = moves && usual.length > 0;
   const asked = `${moves ? `${system}\n${EXTRACT_WHERE}` : system}${routines ? `\n${EXTRACT_USUAL}` : ""}`;
-  const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\n${routines ? `Usual routines (where a described move goes; never a move by itself):\n${usual.join("\n")}\n` : ""}Narration:\n${narration}`, config, userId, signal, { lore, guidance, recent });
+  // The player's message is what the reply answers ("I put on my coat" → "she shrugs it on"): context
+  // for what the reply means, never a change of its own, since only what the reply states happened.
+  const message = said.trim() !== "" ? `The player's message this reply answers (context only; propose only what the narration states happened):\n${said.trim()}\n` : "";
+  const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\n${routines ? `Usual routines (where a described move goes; never a move by itself):\n${usual.join("\n")}\n` : ""}${message}Narration:\n${narration}`, config, userId, signal, { lore, guidance, recent });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals: JsonObject[] = [];
   for (const p of list) {

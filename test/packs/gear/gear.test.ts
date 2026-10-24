@@ -187,6 +187,16 @@ describe("gear: containment, slots and use grants", () => {
     expect(formatClock(cal, untilOf("truck") ?? 0)).toEndWith(", 7:00 PM");
   });
 
+  test("a second bought or received thing joins the stack its holder has", () => {
+    const w = setup();
+    const mine = (name: string): [string, number][] => Object.entries(w.state.entities).filter(([, e]) => e.name === name && e.relations.some((r) => r.type === "in" && r.to === "you")).map(([id, e]) => [id, typeof e.fields.qty === "number" ? e.fields.qty : 1]);
+    for (const i of [1, 2]) expect(resolveAction(reg, w, { action: "buy", params: { item: "earbuds_wireless" } }, createRng(`buy:${i}`)).ok).toBe(true);
+    const bought = mine(w.state.entities[Object.keys(w.state.entities).find((id) => w.state.entities[id]?.fields.catalog === "earbuds_wireless") ?? ""]?.name ?? "");
+    expect(bought.map(([, qty]) => qty)).toEqual([2]);
+    for (const from of ["maya", "jordan"]) expect(applyEffects(reg, w, [{ type: "gear.receive", args: { name: "Apple", to: "you", from } }], { bindings: {}, rng: createRng(from) }).rejected).toEqual([]);
+    expect(mine("Apple").map(([, qty]) => qty)).toEqual([2]);
+  });
+
   test("gear level 0 makes transfers no-ops; level 1 renders notable items only", () => {
     const w = setup((wd) => {
       wd.realism.levels.gear = 1;

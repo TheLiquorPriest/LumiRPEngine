@@ -483,6 +483,16 @@ It is set in three places, each with the same control (the three modes, and the 
 
 In GM mode, **World** marks each claimed thing **Claimed** and lists them under **Claimed by the player** with who holds each, so you can find one and remove it (see [The GM bar](#the-gm-bar)).
 
+**Your own things kept elsewhere.** When the world has something of yours somewhere else ("I put on my clothes" while it keeps them at home), the action doesn't fail and stop the rest of your message: it goes by the same setting. Make it real brings that very thing to you, never a second one; Ask first asks first; Hold me to the world leaves the action out with a chip, and the rest still plays.
+
+### Finding things
+
+Some things are hidden until you look: a world can mark a thing **Discoverable** (in its editor's **Visibility**). The **Search** action (typed as "I search the room", "I look through the drawer", "I open the chest") finds the hidden things lying loose where you stand, or, when you name a container, what is directly in it; anything in a container stays hidden until you search or open that container. What you find stays known. A container the world filled itself holds just what it was given. A world can make searching roll a check by giving its own **Search** action one.
+
+**Stacks.** Buying something you already carry, or being handed another of it, adds to the one you have (its quantity goes up) instead of making a second.
+
+**Changes you apply from a chip** count at once: a quest that waits on the thing you just took moves on that same turn, and the world's rules about it run.
+
 ### Tiers and bands
 
 Not everyone needs to be simulated in depth. Every character has a **tier**, one of the world's own (a new world has **Leads**, **Supporting** and **Background**; an author can rename them, add more and reorder them in **Build → Tiers**). Each tier belongs to one of three **bands**, Leads, Supporting or Background, and each band has a cap per domain. A character's **effective level** is the lower of the domain level and its band's cap, unless you set a per-character override (**Level overrides** in the character's editor), which can never go above the domain level. Your own character is never capped. In Simulation, Leads run at level 4 while a Background shopkeeper runs at 2.

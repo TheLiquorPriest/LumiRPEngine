@@ -25,6 +25,7 @@ import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { carriedBy, contentsOf, findPiece, fitProblem, grants, hasItem, holderOf, isInside, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
+import { isDiscoverable, knows } from "../../../engine/visibility";
 import { buildGearView } from "./view";
 import containers from "./tables/modern-us/containers.json";
 import items from "./tables/modern-us/items.json";
@@ -48,6 +49,8 @@ export interface GearSpawn {
   kind?: "item" | "container";
   /** Disambiguates spawns that share every other input. */
   salt?: string;
+  /** A bought or received thing joins a matching stack its holder has (DESIGN §9.4 stacking) rather than making another. */
+  stack?: boolean;
 }
 
 /** A thing the player says they have, made real for their action (DESIGN §9.4 player claims). */
@@ -63,6 +66,8 @@ export interface GearClaim {
   consumable: boolean;
   /** A gear item or container row it takes its weight, size and wear slot from. */
   like?: string;
+  /** The claimer's own thing the world had elsewhere: brought to hand (or where they are) instead of made. */
+  existing?: EntityId;
   /** The turn's seed and the action's place in it: the id's source, never the name alone. */
   salt: string;
 }
@@ -243,7 +248,26 @@ function spawnId(ctx: ReadContext, spec: GearSpawn): string {
   return `item:${hashParts(spec.name, spec.owner ?? "", spec.holder ?? "", spec.catalog ?? "", ctx.state.clock, spec.salt ?? "", Object.keys(ctx.state.entities).length).slice(0, 12)}`;
 }
 
+/**
+ * The stack a bought or received thing joins: an item its holder has, carried or in a bag, not worn
+ * and not gone, of the same catalog row (else, with no row, the same name), with the same owner.
+ */
+function stackFor(ctx: ReadContext, spec: GearSpawn): EntityId | null {
+  if (!spec.holder || !own(ctx.state.entities, spec.holder)) return null;
+  const name = spec.name.trim().toLowerCase();
+  return (
+    carriedBy(ctx.state, spec.holder).find((id) => {
+      const e = own(ctx.state.entities, id);
+      if (!e || e.kind !== "item" || isGone(ctx.state, id) || e.relations.some((r) => r.type === "worn_by" || r.type === "equipped")) return false;
+      if ((e.fields.owner ?? null) !== (spec.owner ?? null)) return false;
+      return spec.catalog ? e.fields.catalog === spec.catalog : e.fields.catalog === undefined && e.name.trim().toLowerCase() === name;
+    }) ?? null
+  );
+}
+
 const spawn = (ctx: ReadContext, spec: GearSpawn): Events => {
+  const stack = spec.stack ? stackFor(ctx, spec) : null;
+  if (stack) return [{ type: "set", entity: stack, field: "qty", value: numOf(own(ctx.state.entities, stack)?.fields.qty, 1) + (spec.qty ?? 1) }];
   const row = spec.catalog ? (rowOf(ctx, "gear.items", spec.catalog) ?? rowOf(ctx, "gear.containers", spec.catalog)) : undefined;
   // What comes into play (found, bought, handed over) is notable, so Gear 1 shows it as it shows authored notable things.
   const fields: JsonObject = { notable: true };
@@ -278,6 +302,23 @@ function usedUp(ctx: ReadContext, item: EntityId, done: boolean): LedgerEvent[] 
 }
 
 /**
+ * A search (DESIGN §7 discoverable things): what `who` finds that is `discoverable` and not known to
+ * them yet, each then known for good (`knows`). With a `target` it is what lies directly in it (a
+ * container opened or searched); without, what lies loose where they stand, containers included but
+ * never what is in them or on anyone. Finding nothing is no failure: the room is searched.
+ */
+function search(ctx: ReadContext, who: EntityId, target: EntityId | null): Events {
+  if (!own(ctx.state.entities, who)) return reject("missing_entity", `no searcher ${labelOf(ctx, who)}`);
+  const place = placeOfEntity(ctx.state, who);
+  if (target !== null) {
+    if (!own(ctx.state.entities, target)) return reject("missing_entity", `no ${labelOf(ctx, target)} to search`);
+    if (placeOfEntity(ctx.state, target) !== place) return reject("not_here", `${labelOf(ctx, target)} isn't here`);
+  } else if (!place) return reject("no_place", `${labelOf(ctx, who)} is nowhere`);
+  const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place).sort();
+  return found.filter((id) => id !== who && !isGone(ctx.state, id) && isDiscoverable(ctx.world, ctx.state, id) && !knows(ctx.state, who, id)).map((id) => ({ type: "link" as const, rel: "knows", from: who, to: id }));
+}
+
+/**
  * The thing a narrated hand-over names (DESIGN §9.4 `give`): an id as given, else the one thing
  * the giver holds by that name, any case and without a leading article, so "the brass key" is the
  * key they carry rather than a new one. A name that fits none or several stays as it was.
@@ -305,6 +346,12 @@ function claimId(ctx: ReadContext, c: GearClaim): EntityId {
 const claim = (ctx: ReadContext, c: GearClaim): { entity: EntityId; events: LedgerEvent[] } | Rejection => {
   if (!own(ctx.state.entities, c.by)) return reject("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
   const name = c.name.trim();
+  // A tracking gap closed: their own thing comes to them as the story has it, never a second one.
+  if (c.existing && own(ctx.state.entities, c.existing)) {
+    const place = placeOfEntity(ctx.state, c.by);
+    const moved = c.at === "held" ? transfer(ctx, c.existing, c.by) : place ? drop(ctx, c.existing, place) : reject("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    return Array.isArray(moved) ? { entity: c.existing, events: moved } : moved;
+  }
   if (c.at === "held") {
     const held = carriedBy(ctx.state, c.by).find((id) => {
       const e = own(ctx.state.entities, id);
@@ -452,7 +499,8 @@ export const gearPack: PackDef = {
     wrap("gear.drop", ["item", "place?"], (a, ctx) => drop(ctx, strOf(a.item), strOf(a.place) || (placeOfEntity(ctx.state, strOf(a.item)) ?? "")));
     wrap("gear.give", ["item", "from", "to"], (a, ctx) => give(ctx, strOf(a.item), strOf(a.from), strOf(a.to)));
     // An NPC hands over something the world hadn't tracked yet: it comes into being, held by the recipient.
-    wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}` }));
+    wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}`, stack: true }));
+    wrap("gear.search", ["who", "target?"], (a, ctx) => search(ctx, strOf(a.who) || ctx.world.pov, strOf(a.target) || null));
     wrap("gear.take_piece", ["kit", "piece", "to"], (a, ctx) => takePiece(ctx, strOf(a.kit), strOf(a.piece), strOf(a.to)));
     // A loan's end: the time the player said (`said`: "7 tonight", "tomorrow", "for 3 hours"), else
     // `until` (a clock, from the days). A said time nothing in it reads as falls back to the days;
@@ -525,6 +573,10 @@ export const gearPack: PackDef = {
     });
     r.action({ id: "lose", label: "Lose something", description: "Something you own or carry is lost or gone, whereabouts unknown.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self or carries(self, item)", "item.lost != true"], outcomes: { default: [{ type: "gear.lose", args: { item: "item" } }] }, duration: "1", lexicon: ["lost my", "lose", "can't find my", "is gone", "is missing"], observable: "searches their pockets" });
     r.action({ id: "drop", label: "Drop", description: "Put down something you carry, here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
+    // Search or examine (DESIGN §3, §7): finds the `discoverable` things lying here, or in a container
+    // searched or opened. A world that wants a roll for it authors its own `search` action with a check
+    // whose passing outcomes run `gear.search`; it replaces this one by id.
+    r.action({ id: "search", label: "Search", description: "Search where you are, or look through a container, for what isn't in plain sight.", pack: "gear", params: { target: { type: "ref", ref: "item", optional: true, label: "What to look through (none: around here)" } }, requires: [], outcomes: { default: [{ type: "gear.search", args: { who: "self", target: "=params.target" } }] }, duration: "5", lexicon: ["search", "look around", "examine", "look through", "look inside", "open", "rummage"], observable: "searches the place" });
     r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
     // Days or a said end, at least one: interpret fills whichever the player said ("until 7 tonight");
     // the palette always sends days.
@@ -569,7 +621,9 @@ export const gearPack: PackDef = {
           return out;
         }
         const stock = e.fields.stock;
-        if (typeof stock === "string" && e.fields.sampled !== true) {
+        // A container the world filled itself keeps what it was given: random stock is for those it left empty.
+        const authored = Object.values(ctx.world.entities).some((d) => d.relations.some((x) => x.type === "in" && x.to === entity));
+        if (typeof stock === "string" && e.fields.sampled !== true && !authored) {
           const rows = Object.entries(ctx.tables.get("gear.items")?.rows ?? {}).filter(([, row]) => row.category === stock).map(([id]) => id).sort();
           const n = rows.length === 0 ? 0 : rng.int(2, 4);
           for (let i = 0; i < n; i++) {
