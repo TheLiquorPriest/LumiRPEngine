@@ -47,6 +47,8 @@ export interface CharacterField {
   min?: number;
   max?: number;
   ref?: string;
+  /** A list's item type (text when the kind doesn't say): a list of text is edited as its items, never as JSON. */
+  of?: FieldType;
   locked?: boolean;
   help?: string;
 }
