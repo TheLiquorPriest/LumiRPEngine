@@ -2247,7 +2247,7 @@ export class Runtime implements TurnHooks {
     const fills: { id: string; content: string }[] = [];
     // Sections with lines that ride once every section has its place: hints (Stance's cues, §6.6) and
     // facts beyond the POV's that a scope adds (§6.11), neither counted in what the player sees.
-    const hinted: { fill: { id: string; content: string } | null; entryId: string; label: string; template: string; lines: string[]; marked: { text: string; source?: { bookId: string; entryId: string } }[]; hints: string[]; cost: number; maxTokens: number | undefined }[] = [];
+    const hinted: { fill: { id: string; content: string } | null; entryId: string; label: string; template: string; lines: string[]; marked: { text: string; source?: { bookId: string; entryId: string } }[]; hints: string[]; cost: number; maxTokens: number | undefined; maxLines: number | undefined }[] = [];
     // The World Info entries the delivered lines carry (§6.11): that entry can stay out of the prompt.
     const sources: { bookId: string; entryId: string }[] = [];
     // The entry a section fills: the preset places the section itself when an enabled block holds
@@ -2333,7 +2333,7 @@ export class Runtime implements TurnHooks {
           if (minds && allMinds.length > 0) record.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
           // Hints alone never make a section: its being there would tell of them. Marked facts may,
           // in what the budget leaves, with no trace the player sees.
-          if (facts.length > 0) hinted.push({ fill: null, entryId, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens });
+          if (facts.length > 0) hinted.push({ fill: null, entryId, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
           continue;
         }
         const content = renderSection(section.label, section.template, safe);
@@ -2352,7 +2352,7 @@ export class Runtime implements TurnHooks {
         filled.add(section.id);
         (record.entries ??= {})[section.id] = entryId;
         sources.push(...capped.flatMap((l) => (l.source ? [l.source] : [])));
-        if (safeHints.length > 0 || facts.length > 0) hinted.push({ fill, entryId, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens });
+        if (safeHints.length > 0 || facts.length > 0) hinted.push({ fill, entryId, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
       }
     });
     record.budget.used = settings.modelUse.tokens.sections - budget;
@@ -2381,7 +2381,8 @@ export class Runtime implements TurnHooks {
         if (m.source) carried.push(m.source);
         markedSent = true;
       }
-      if (h.hints.length > 0) {
+      // The section's line cap holds for its hints too: they go in whole or not at all.
+      if (h.hints.length > 0 && (h.maxLines === undefined || body.length + h.hints.length <= h.maxLines)) {
         const next = costOf([...body, ...h.hints]);
         if (fits(Math.max(0, next - cost), next)) {
           budget -= Math.max(0, next - cost);
@@ -2401,7 +2402,12 @@ export class Runtime implements TurnHooks {
     const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
     if (rules.length > 0 && rulesAt) fills.push({ id: rulesAt, content: `[Narrator rules]\n${rules.join("\n")}` });
     this.countLater(input.userId, uncounted);
-    record.forced = fills.map((f) => f.id);
+    // Activation is confirmed from the entries the player's record shows (a section's row) and the
+    // preset's own narrator rules: an entry filled only for marked facts, or rules filled only for the
+    // marked-facts rule, would make the badge a trace of them when the host left it out (§6.11).
+    const traced = new Set(Object.values(record.entries ?? {}));
+    if (preset.guidance.narrator && rulesAt) traced.add(rulesAt);
+    record.forced = fills.map((f) => f.id).filter((id) => traced.has(id));
     await this.inspector.add(input.chatId, input.userId, record);
     this.push.changed(input.chatId, input.userId);
     // Diagnostics: each section, the outlet the preset gives it, and whether it went out with text.

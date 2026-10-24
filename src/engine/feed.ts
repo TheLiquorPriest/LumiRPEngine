@@ -1,7 +1,7 @@
 // The engine feed (DESIGN §6.11): what goes into each section and whose knowledge it comes from.
 // A section's feed is its world defaults (`SectionTemplate`'s `enabled`, `maxTokens`, `maxLines`,
-// `include`, `scope`) with the GM's per-chat override over them, held in the engine's state slice
-// by an `engine.feed` event, so the override is a GM edit with its own Undo. Pure.
+// `include`, `scope`), or the GM's settings for it in this chat in their place, held in the
+// engine's state slice by an `engine.feed` event, so the override is a GM edit with its own Undo. Pure.
 
 import type { SlotId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
@@ -35,9 +35,12 @@ export function worldFeed(section: SectionTemplate): SectionFeed {
   return readSectionFeed(authored) ?? {};
 }
 
-/** A section's feed in this chat: the world's defaults, each part the GM set over them. */
+/**
+ * A section's feed in this chat: the GM's settings for it when it has any, whole, else the world's.
+ * Whole, so the GM can lift a cap or a source list the world set, which a merge couldn't.
+ */
 export function feedOf(section: SectionTemplate, state: Readonly<WorldState>): SectionFeed {
-  return { ...worldFeed(section), ...(chatFeed(state)[section.id] ?? {}) };
+  return chatFeed(state)[section.id] ?? worldFeed(section);
 }
 
 /** A renderer's name for `include`. */
@@ -80,7 +83,8 @@ export const feedEvent: EventTypeDef<PackEvent> = {
     state.packs.engine = s;
     const current: JsonObject = isRecord(s[FEED_KEY]) ? { ...(s[FEED_KEY] as JsonObject) } : {};
     const to = e.data.to === null ? null : readSectionFeed(e.data.to);
-    if (to && Object.keys(to).length > 0) current[section] = to as JsonObject;
+    // An empty override still stands: it is the plain section in place of the world's settings.
+    if (to) current[section] = to as JsonObject;
     else delete current[section];
     s[FEED_KEY] = current;
   },

@@ -28,11 +28,33 @@ export function feedSummary(feed: SectionFeed): string {
   return parts.length > 0 ? parts.join(" · ") : "as the world has it";
 }
 
-/** One section's settings in this chat, saved whole as one edit; "Use the world's" clears them. */
+/**
+ * The settings a save sends: the form's, whole, since the chat's settings replace the world's for
+ * the section. A part left plain (on, the player's knowledge, no cap, its own sources) is left out.
+ */
+export function chatFeedOf(draft: SectionFeed, sources: string): SectionFeed {
+  const include = sources
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+  const to: SectionFeed = {};
+  if (draft.enabled === false) to.enabled = false;
+  if (draft.scope && draft.scope !== "player") to.scope = draft.scope;
+  if (draft.maxLines !== undefined) to.maxLines = draft.maxLines;
+  if (draft.maxTokens !== undefined) to.maxTokens = draft.maxTokens;
+  if (include.length > 0) to.include = include;
+  return to;
+}
+
+/** A cap's default when it is switched on. */
+const CAP_START = { maxLines: 12, maxTokens: 400 } as const;
+
+/** One section's settings in this chat, saved whole as one edit in place of the world's; "Use the world's" clears them. */
 function SectionFeedForm(props: { chatId: string; row: SectionRow; onDone(): void }) {
   const app = useApp();
   const [busy, run] = useBusy();
-  const start: SectionFeed = { ...props.row.world, ...(props.row.chat ?? {}) };
+  // The settings in force: the chat's when it has its own, else the world's.
+  const start: SectionFeed = props.row.chat ?? props.row.world;
   const [draft, setDraft] = useState<SectionFeed>(start);
   const [sources, setSources] = useState((start.include ?? []).join(", "));
   const set = (patch: Partial<SectionFeed>): void => setDraft((d) => ({ ...d, ...patch }));
@@ -42,34 +64,25 @@ function SectionFeedForm(props: { chatId: string; row: SectionRow; onDone(): voi
       if (result?.pending) app.toast("Saved — it applies when the reply finishes.", "info");
       if (result) props.onDone();
     });
-  const save = (): void => {
-    const include = sources
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== "");
-    const to: SectionFeed = {};
-    if (draft.enabled === false) to.enabled = false;
-    if (draft.scope && draft.scope !== "player") to.scope = draft.scope;
-    if (draft.maxLines !== undefined) to.maxLines = draft.maxLines;
-    if (draft.maxTokens !== undefined) to.maxTokens = draft.maxTokens;
-    if (include.length > 0) to.include = include;
-    // The chat's settings replace the world's whole, so a part left at its plain value is said outright.
-    if (props.row.world.enabled === false && to.enabled === undefined) to.enabled = true;
-    if (props.row.world.scope && props.row.world.scope !== "player" && to.scope === undefined) to.scope = "player";
-    send(to);
-  };
+  const save = (): void => send(chatFeedOf(draft, sources));
   return (
     <div class="lre-stack" data-lre-feed-form={props.row.id}>
       <HostSwitch checked={draft.enabled !== false} label="In the prompt" onChange={(on) => set({ enabled: on })} />
       <Field label="Whose knowledge">
         <HostSelect label="Whose knowledge" value={draft.scope ?? "player"} options={FEED_SCOPES.map((s) => ({ value: s, label: SCOPE_LABEL[s] }))} onChange={(v) => set({ scope: FEED_SCOPES.find((s) => s === v) ?? "player" })} />
       </Field>
-      <Field label="At most lines" help="Empty: no cap">
-        <NumberStepper label="At most lines" value={draft.maxLines ?? null} min={1} integer onChange={(v) => set({ maxLines: v })} />
-      </Field>
-      <Field label="At most tokens" help="Lines past it are cut from the end">
-        <NumberStepper label="At most tokens" value={draft.maxTokens ?? null} min={1} integer onChange={(v) => set({ maxTokens: v })} />
-      </Field>
+      <HostSwitch checked={draft.maxLines !== undefined} label="Cap its lines" onChange={(on) => set({ maxLines: on ? (draft.maxLines ?? CAP_START.maxLines) : undefined })} />
+      {draft.maxLines !== undefined ? (
+        <Field label="At most lines">
+          <NumberStepper label="At most lines" value={draft.maxLines} min={1} integer onChange={(v) => set({ maxLines: v })} />
+        </Field>
+      ) : null}
+      <HostSwitch checked={draft.maxTokens !== undefined} label="Cap its tokens" onChange={(on) => set({ maxTokens: on ? (draft.maxTokens ?? CAP_START.maxTokens) : undefined })} />
+      {draft.maxTokens !== undefined ? (
+        <Field label="At most tokens" help="Lines past it are cut from the end">
+          <NumberStepper label="At most tokens" value={draft.maxTokens} min={1} integer onChange={(v) => set({ maxTokens: v })} />
+        </Field>
+      ) : null}
       <Field label="Sources" help="Comma-separated renderer sources; empty: its own section's">
         <input class="lre-input" aria-label="Sources" value={sources} onInput={(e) => setSources(e.currentTarget.value)} />
       </Field>

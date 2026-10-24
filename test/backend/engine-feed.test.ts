@@ -83,6 +83,38 @@ describe("section settings", () => {
     await rig.turn(chatId, "And again.", "Nothing new.");
     expect(sent(rig).has(label)).toBe(false);
   });
+
+  test("the GM's settings replace the world's: a chat with no cap lifts the world's line cap, and its Undo brings it back", async () => {
+    const rig = new Rig({ shipped: true });
+    const people = DEFAULT_SECTIONS.people;
+    if (!people) throw new Error("no shipped People");
+    const crowd = Object.fromEntries(["ana", "ben", "cal", "dee"].map((id): [string, JsonObject] => [id, { id, kind: "person", name: `${id.toUpperCase()} Neighbour`, tier: "background", fields: { place: "harbor_street_114" }, relations: [] }]));
+    const chatId = await alder(rig, { ...DEFAULT_SECTIONS, people: { ...people, maxLines: 3 } }, crowd);
+    await edit(rig, chatId, { op: "feed", section: "people", to: {} });
+    await undoLatest(rig, chatId);
+    await rig.turn(chatId, "I look around.", "Quiet.");
+    expect(sent(rig).get(people.label)).toHaveLength(3);
+    await edit(rig, chatId, { op: "feed", section: "people", to: {} });
+    await rig.turn(chatId, "I look around again.", "Still quiet.");
+    expect((sent(rig).get(people.label) ?? []).length).toBeGreaterThan(3);
+  });
+
+  test("a section of marked facts alone that the host leaves out doesn't keep the turn's activation from reading confirmed", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await alder(rig, null);
+    // The player character owns no property, so the GM-scoped Property section holds marked facts alone.
+    await edit(rig, chatId, { op: "feed", section: "property", to: { scope: "gm" } });
+    const prior = rig.host.worldInfoInterceptor;
+    rig.host.worldInfoInterceptor = async (input) => {
+      const verdict = prior ? await prior(input) : { disabled: [], enabled: [] };
+      const books = [...rig.host.bookStore.values()].flatMap((b) => [...b.entries.values()]);
+      const out = books.filter((e) => e.comment === "LRE · Property" || e.comment === "LRE · Narrator rules").map((e) => e.id);
+      return { ...verdict, disabled: [...verdict.disabled, ...out] };
+    };
+    await rig.turn(chatId, "I look around.", "Quiet.");
+    expect(rig.host.assembled.some((e) => e.content.startsWith("[Property]"))).toBe(false);
+    expect(rig.rt.inspectorRecords(chatId)?.at(-1)?.activation).toBe("confirmed");
+  });
 });
 
 describe("feed scopes", () => {
@@ -111,9 +143,10 @@ describe("feed scopes", () => {
   test("a scene-scope fact reaches the narrator marked, and no player surface, Journal line or panel", async () => {
     const rig = new Rig({ shipped: true });
     const FLASK = "Engraved silver flask";
+    // Hers to know by the visibility rules (`known_by`, and she knows it); the player character doesn't.
     const chatId = await alder(rig, null, {
-      nora: { id: "nora", kind: "person", name: "Nora Pell", tier: "supporting", fields: { place: "harbor_street_114" }, relations: [] },
-      flask: { id: "flask", kind: "item", name: FLASK, tier: "background", fields: { owner: "nora" }, relations: [{ type: "in", to: "nora" }], visibility: "secret" },
+      nora: { id: "nora", kind: "person", name: "Nora Pell", tier: "supporting", fields: { place: "harbor_street_114" }, relations: [{ type: "knows", to: "flask" }] },
+      flask: { id: "flask", kind: "item", name: FLASK, tier: "background", fields: { owner: "nora" }, relations: [{ type: "in", to: "nora" }], visibility: "known_by" },
     });
     await edit(rig, chatId, { op: "feed", section: "people", to: { scope: "scene" } });
     await rig.turn(chatId, "I look around.", "Quiet.");

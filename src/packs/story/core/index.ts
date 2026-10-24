@@ -15,7 +15,7 @@ import type { Registry } from "../../../engine/registry-impl";
 import { effectLists } from "../../../engine/ruleset-lint";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { checkAnswer } from "../../../engine/tracks";
-import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, trackKnown, type PlayerTrack } from "../../../engine/visibility";
+import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, trackKnown, visibilityOf, type PlayerTrack } from "../../../engine/visibility";
 import { together } from "../../../engine/presence";
 
 declare module "../../../engine/registry" {
@@ -38,9 +38,9 @@ export interface QuestLogView {
 
 /**
  * The Quest section (DESIGN §6, §6.11): each active track the POV can see, with its objectives
- * still open, the hints it has earned and the truths revealed. In `scene` scope, a quest or secret
- * the POV doesn't know of (or knows only as "something is going on") whose owner or someone it lets
- * know is with the POV, as theirs to know; in `gm`, every such one, with its stage.
+ * still open, the hints it has earned and the truths revealed. In `scene` scope, a `known_by` quest
+ * the POV doesn't know of whose owner or someone it lets know is with the POV, at its stage, as
+ * theirs to know; a secret track and any truth are the GM's alone, told only in `gm` scope.
  */
 export function questLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const lines: FeedLine[] = [];
@@ -64,10 +64,10 @@ export function questLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     if (shown && shown.label === t.label) continue;
     const stage = own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start);
     if (!stage || (stage.next.length === 0 && !stage.fail)) continue;
-    const text = `${t.label}: ${stage.label}${stage.truth ? ` (the truth: ${stage.truth})` : ""}.`;
-    const who = withHim.filter((k) => trackKnown(ctx.registry, ctx.world, ctx.state, k, t)).map((k) => own(ctx.state.entities, k)?.name ?? k);
-    if (who.length > 0) lines.push({ text, known: "scene", who: who.join(", ") });
-    else if (scope === "gm") lines.push({ text, known: "gm" });
+    // A secret track is no one's to know but the GM's (`trackKnown` reads only `known_by`), and so is a truth.
+    const who = visibilityOf(t.visibility) === "secret" ? [] : withHim.filter((k) => trackKnown(ctx.registry, ctx.world, ctx.state, k, t)).map((k) => own(ctx.state.entities, k)?.name ?? k);
+    if (who.length > 0) lines.push({ text: `${t.label}: ${stage.label}.`, known: "scene", who: who.join(", ") });
+    else if (scope === "gm") lines.push({ text: `${t.label}: ${stage.label}${stage.truth ? ` (the truth: ${stage.truth})` : ""}.`, known: "gm" });
   }
   return lines;
 }
