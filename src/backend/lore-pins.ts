@@ -137,13 +137,17 @@ export async function pinViews(host: Pick<HostPort, "books" | "log">, world: Wor
   return { characters: part(pins.characters), places: part(pins.places), steps: part(pins.steps) };
 }
 
-/** The World Info books a pin may name an entry of (`lre.lore books`): the engine's own left out, those attached to the chat first, then by name. */
+/**
+ * The World Info books a pin may name an entry of (`lre.lore books`): the engine's own left out,
+ * those attached to the chat first, then by name. Each says whether a character brought it and when
+ * it was made, which tells apart books that share a name (a character's card brings its own copy).
+ */
 export async function pinBooks(host: Pick<HostPort, "books" | "chats">, chatId: ChatId | null, userId: UserId): Promise<LoreBookView[]> {
   const meta = chatId === null ? {} : await host.chats.chatMetadata(chatId, userId);
   const attached = new Set(Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids.filter((id): id is string => typeof id === "string") : []);
   return (await host.books.list(userId))
     .filter((b) => !b.engine)
-    .map((b) => ({ id: b.id, name: b.name, attached: attached.has(b.id) }))
+    .map((b) => ({ id: b.id, name: b.name, attached: attached.has(b.id), character: b.character, added: b.added }))
     .sort((a, b) => Number(b.attached) - Number(a.attached) || a.name.localeCompare(b.name));
 }
 

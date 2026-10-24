@@ -2,15 +2,15 @@
 // the lookup table and the indexing jobs a tap away, and + New, which names a new entry; and the
 // entry page: its title and text, how lookups find it (aliases, topics and keywords as chips, then
 // links, group and priority), the source (read-only; an entry indexed from a World Info book whose
-// entry changed since can take the book's new text), and secrecy: who may read it, the gate, whose
-// own secret it is, and the helpers that may read the secret, with a note on those whose output
-// reaches the player.
+// entry changed since can take the book's new text), and secrecy: who may read it, the gate (with
+// examples made of the world's names), whose own secret it is, and the helpers that may read the
+// secret, those whose output reaches the player not offered.
 // Styles: the lore block of styles/forms.ts.
 
-import { useEffect, useId, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
-import { LORE_AUDIENCE, loreIsSecret, loreSourceOf, PROSE_STEPS } from "../../shared/lore";
+import { LORE_AUDIENCE, loreIsSecret, loreSourceOf } from "../../shared/lore";
 import type { LoreDrift } from "../../shared/protocol";
 import type { LoreEntryDef, LoreSource, StepPurpose, WorldDoc } from "../../shared/world";
 import type { App } from "../app";
@@ -19,22 +19,21 @@ import { Badge, Banner, Button, Empty, List, ListRow, PageHeader, SaveBar, Secti
 import { strings } from "../decode";
 import { Icon } from "../icons";
 import type { EditorProps } from "../registry";
-import { STEP_LABEL } from "../../shared/steps";
 import { useSelect } from "../store";
 import { deleteItem, go, ItemHeader, NewItem, newItemName } from "./chrome";
-import { CheckField, Issues } from "./form-kit";
+import { Issues } from "./form-kit";
 import { useHeld } from "./held";
 import { COLLECTION_SPECS, newItem } from "./schema";
-import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
+import { FieldInput, lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { TagListInput } from "./selector-editor";
-import { BookEntriesSection, LoreBooksSection } from "./book-lore";
+import { BookEntriesSection, GateExamples, LoreBooksSection, SecretAudience, SECRET_GATE_SPEC } from "./book-lore";
 
 const specs = (keys: readonly string[]) => COLLECTION_SPECS.lore.filter((s) => keys.includes(s.key));
 const TEXT = specs(["title", "content"]);
 // Keywords (`keys`) are laid out as chips beside the aliases and topics, so they aren't here.
 const MORE = specs(["links", "group", "priority"]);
 const SECRET = specs(["visibility", "secret"]);
-const GATE = specs(["gate", "holders"]);
+const HOLDERS = specs(["holders"]);
 
 /** The world's book-sourced entries (or just `id`) whose book entry changed or is gone: asked again whenever their sources change. */
 function useDrift(app: App, worldId: string, lore: Readonly<Record<string, LoreEntryDef>>, id?: string): Record<string, LoreDrift> | null {
@@ -82,7 +81,7 @@ export function LoreList(props: { worldId: string }) {
   );
   return (
     <div class="lre-build-page" data-lre-lore-list>
-      <PageHeader title="Lore" subtitle="Kept in the world. The engine's helpers read it. The narrator gets no lore section, but the brief and the prose outline draw on public entries in what they write for its Outline." actions={add} />
+      <PageHeader title="Lore" subtitle="Kept in the world. The engine's helpers read it, and the narrator gets the entries about where your character is in the Place section; the brief and the prose outline draw on the other public entries for its Outline." actions={add} />
       {adding ? <NewItem worldId={draft.worldId} collection="lore" taken={new Set(Object.keys(doc.lore))} onDone={() => setAdding(false)} /> : null}
       <Section title="Tools" flush>
         <List>
@@ -244,14 +243,13 @@ export function LoreEditor(props: EditorProps) {
   const [busy, run] = useBusy();
   useHeld(value, setValue, initial, `${props.world.id}/lore/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = useMemo(() => worldIdentifiers(props.world), [props.world]);
-  const audienceLabel = useId();
   const lint = draft?.lint ?? [];
   const path = `lore.${id}`;
   const ctx = { doc: props.world, lint, path, identifiers, functions: draft?.functions ?? [] };
   const changed = JSON.stringify(value) !== JSON.stringify(stored ?? null);
   const secret = loreIsSecret(value);
   const audience = strings(value.audience).filter((s): s is StepPurpose => (LORE_AUDIENCE as readonly string[]).includes(s));
-  const prose = audience.filter((s) => PROSE_STEPS.includes(s));
+  const gate = typeof value.gate === "string" ? value.gate : "";
   const topicsInUse = useMemo(() => [...new Set(Object.values(props.world.lore).flatMap((l) => l.topics ?? []))].sort((a, b) => a.localeCompare(b)), [props.world.lore]);
   const keywordsInUse = useMemo(
     () =>
@@ -329,27 +327,23 @@ export function LoreEditor(props: EditorProps) {
           <SchemaFields specs={SECRET} value={value} ctx={ctx} onChange={setValue} />
           {secret ? (
             <div class="lre-form-lore-fields" data-lre-lore-audience>
-              <SchemaFields specs={GATE} value={value} ctx={ctx} onChange={setValue} />
-              <div class="lre-field" role="group" aria-labelledby={audienceLabel}>
-                <span class="label" id={audienceLabel}>
-                  Helpers that may read it before the gate holds
-                </span>
-                {LORE_AUDIENCE.map((purpose) => (
-                  <CheckField
-                    key={purpose}
-                    label={STEP_LABEL[purpose]}
-                    help={PROSE_STEPS.includes(purpose) ? "Writes for the player: never reads a secret" : undefined}
-                    checked={audience.includes(purpose)}
-                    onChange={() => set("audience", audience.includes(purpose) ? audience.filter((p) => p !== purpose) : LORE_AUDIENCE.filter((p) => p === purpose || audience.includes(p)))}
-                  />
-                ))}
-              </div>
-              {prose.length > 0 ? (
-                <Banner tone="warn">
-                  {prose.map((p) => STEP_LABEL[p]).join(", ")} write{prose.length === 1 ? "s" : ""} what the narrator or the player sees, so {prose.length === 1 ? "it never reads" : "they never read"} this secret before its gate holds.
-                </Banner>
-              ) : null}
-              <Issues issues={lintAt(lint, `${path}.audience`)} />
+              {/* An emptied gate leaves the entry, as the stored field's own editor does. */}
+              <FieldInput
+                spec={SECRET_GATE_SPEC}
+                value={value.gate}
+                ctx={ctx}
+                path={path}
+                parent={value}
+                onChange={(next) => {
+                  const out = { ...value };
+                  if (typeof next === "string" && next !== "") out.gate = next;
+                  else delete out.gate;
+                  setValue(out);
+                }}
+              />
+              {gate.trim() === "" ? <GateExamples doc={props.world} onPick={(formula) => setValue({ ...value, gate: formula })} /> : null}
+              <SchemaFields specs={HOLDERS} value={value} ctx={ctx} onChange={setValue} />
+              <SecretAudience audience={audience} issues={lintAt(lint, `${path}.audience`)} onChange={(next) => set("audience", next)} />
             </div>
           ) : null}
         </div>

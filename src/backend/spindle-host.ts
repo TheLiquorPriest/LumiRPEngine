@@ -528,10 +528,14 @@ export function createSpindleHost(): HostPort {
         return (await spindle.world_books.get(bookId, userId)) !== null;
       },
       async list(userId) {
-        const out: { id: string; name: string; engine: boolean }[] = [];
+        const out: { id: string; name: string; engine: boolean; character: boolean; added: number | null }[] = [];
         for (let offset = 0; offset < 100_000; offset += 200) {
           const page = await spindle.world_books.list({ limit: 200, offset, userId });
-          for (const b of page.data) out.push({ id: b.id, name: b.name, engine: isRecord(b.metadata) && b.metadata.lumi_rp_engine === true });
+          for (const b of page.data) {
+            const meta: Record<string, unknown> = isRecord(b.metadata) ? b.metadata : {};
+            // Core marks a book it made from a character's card with that character (`source_character_id`).
+            out.push({ id: b.id, name: b.name, engine: meta.lumi_rp_engine === true, character: typeof meta.source_character_id === "string" && meta.source_character_id !== "", added: typeof b.created_at === "number" && Number.isFinite(b.created_at) ? b.created_at : null });
+          }
           if (page.data.length < 200 || out.length >= page.total) break;
         }
         return out;

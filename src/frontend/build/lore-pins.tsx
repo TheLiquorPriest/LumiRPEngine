@@ -6,7 +6,8 @@
 // or a whole book, the books attached to the open chat listed first. Pins are the world's `lorePins`
 // part: each change goes to the draft at once, and a chat uses it once committed and the chat
 // Upgraded; a book's text is read from the book whenever a call reads it. A map-drawn place is pinned
-// here too.
+// here too. The Pinned lore page says once what holds for every step's pins and for keeping a cut
+// pin's end; a character's or a place's page, with one section, says it there.
 
 import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import { lorePinKey, lorePinsJson, lorePinsOf } from "../../shared/lore";
@@ -19,6 +20,7 @@ import { ActionRow, ActionRows } from "../gm/ui";
 import { IconButton } from "../components";
 import { STEP_LABEL } from "../../shared/steps";
 import { useSelect } from "../store";
+import { bookLabels } from "./book-lore";
 import { draftSend } from "./draft";
 import { Issues } from "./form-kit";
 import { lintAt } from "./schema-form";
@@ -26,8 +28,13 @@ import { lintAt } from "./schema-form";
 const HINT = {
   characters: "Their mind reads these first, every time they think, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
   places: "Every helper and mind call here, or in a place inside it, reads these first, within its lore tokens.",
-  steps: "Every call of this step reads these first, whatever its lore setting, within its lore tokens (Settings → Steps).",
 } as const;
+
+/** When a chat reads a pin: said once on each page that pins. */
+export const PINS_NOTE = "Pins go to the draft as you change them; a chat uses them once you commit and Upgrade it.";
+
+/** What a cut pin keeps, and when to keep its end instead of its start: said once on each page that pins. */
+export const KEEP_NOTE = "A pin that doesn't fit is cut, and keeps its start. Choose “When it doesn't fit, keep the end” for an entry written oldest first, such as a running timeline, a log or a journal, whose newest part matters most.";
 
 /** The minds steps have no lore setting: their pins read within the pinned lore a mind reads. */
 const MIND_STEP_HINT: Record<MindPurpose, string> = {
@@ -51,6 +58,7 @@ export function LorePinsSection(props: PinTarget) {
   const [views, setViews] = useState<Record<string, LorePinView>>({});
   const [adding, setAdding] = useState<"lore" | "book" | null>(null);
   const [books, setBooks] = useState<LoreBookView[] | null>(null);
+  const labels = useMemo(() => bookLabels(books ?? []), [books]);
   const [book, setBook] = useState("");
   const [entries, setEntries] = useState<LoreBookEntryView[] | null>(null);
   const [choice, setChoice] = useState("");
@@ -97,12 +105,14 @@ export function LorePinsSection(props: PinTarget) {
   };
   const taken = new Set(list.map(lorePinKey));
   const lore = Object.values(draft.doc.lore).filter((l) => !taken.has(`lore:${l.id}`)).sort((a, b) => a.title.localeCompare(b.title));
-  const hint = props.target === "steps" ? (isMindPurpose(props.id) ? MIND_STEP_HINT[props.id] : HINT.steps) : HINT[props.target];
+  // A step's pins are on the Pinned lore page, which says once what every step's are; a minds step says who reads its own.
+  const hint = props.target === "steps" ? (isMindPurpose(props.id) ? MIND_STEP_HINT[props.id] : null) : HINT[props.target];
   return (
     <div data-lre-lore-pins={`${props.target}:${props.id}`}>
       <Section title={props.target === "steps" ? STEP_LABEL[props.id] : "Pinned lore"} aside={list.length > 0 ? <Badge>{list.length}</Badge> : undefined}>
         <div class="lre-stack">
-          <p class="lre-build-note">{hint} Pins go to the draft as you change them; a chat uses them once you commit and Upgrade it.</p>
+          {hint ? <p class="lre-build-note">{props.target === "steps" ? hint : `${hint} ${PINS_NOTE}`}</p> : null}
+          {props.target !== "steps" && list.length > 0 ? <p class="lre-build-note">{KEEP_NOTE}</p> : null}
           {list.length > 0 ? (
             <ActionRows label="Pinned lore">
               {list.map((pin, i) => {
@@ -113,17 +123,16 @@ export function LorePinsSection(props: PinTarget) {
                     title={t.title}
                     subtitle={t.source}
                     value={t.badge ? <Badge tone={t.badge === "Missing" ? "neg" : t.badge === "Secret" ? "gm" : "neutral"}>{t.badge}</Badge> : undefined}
-                    actions={
-                      <>
-                        {/* A long timeline written oldest first keeps its newest events when its end is kept. */}
-                        <select class="lre-input" aria-label={`When ${t.title} doesn't fit, keep`} value={pin.keep ?? "start"} disabled={busy} onChange={(event) => save(list.map((p, j) => (j === i ? { ...p, keep: event.currentTarget.value === "end" ? "end" : "start" } : p)))}>
-                          <option value="start">When it doesn't fit, keep the start</option>
-                          <option value="end">When it doesn't fit, keep the end</option>
-                        </select>
-                        <IconButton icon="close" label={`Unpin ${t.title}`} disabled={busy} onClick={() => save(list.filter((_, j) => j !== i))} />
-                      </>
-                    }
-                  />
+                    actions={<IconButton icon="close" label={`Unpin ${t.title}`} disabled={busy} onClick={() => save(list.filter((_, j) => j !== i))} />}
+                  >
+                    {/* Under the title, not beside it: beside it the choice's words left a phone's title a letter wide. */}
+                    <div class="lre-form-pins-keep">
+                      <select class="lre-input" aria-label={`When ${t.title} doesn't fit, keep`} value={pin.keep ?? "start"} disabled={busy} onChange={(event) => save(list.map((p, j) => (j === i ? { ...p, keep: event.currentTarget.value === "end" ? "end" : "start" } : p)))}>
+                        <option value="start">When it doesn't fit, keep the start</option>
+                        <option value="end">When it doesn't fit, keep the end</option>
+                      </select>
+                    </div>
+                  </ActionRow>
                 );
               })}
             </ActionRows>
@@ -156,7 +165,7 @@ export function LorePinsSection(props: PinTarget) {
                 <option value="">{books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"}</option>
                 {(books ?? []).map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.attached ? `${b.name} (in this chat)` : b.name}
+                    {labels[b.id] ?? b.name}
                   </option>
                 ))}
               </select>

@@ -556,6 +556,13 @@ export class Dispatcher {
           reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
           return;
         }
+        if (r.op === "check") {
+          const fields = bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: r.fields } });
+          if (fields === null) throw new RequestError("bad_request", "give the fields as an object");
+          // Build's form asks as it is typed, so it says what Save would refuse before Save is pressed.
+          reply("lre.lore", { problem: bookLoreProblem(fields) });
+          return;
+        }
         if (r.op === "fields") {
           if (typeof r.bookId !== "string" || r.bookId === "" || typeof r.entryId !== "string" || r.entryId === "") throw new RequestError("bad_request", "name the book and its entry");
           const entry = await this.rt.host.books.entry(r.entryId, userId);

@@ -445,8 +445,13 @@ export interface HostPort {
   books: {
     create(name: string, description: string, userId: UserId): Promise<string>;
     exists(bookId: string, userId: UserId): Promise<boolean>;
-    /** Every World Info book of the user's (`world_books.list`, paged through); `engine`: one the engine made for a world. */
-    list(userId: UserId): Promise<{ id: string; name: string; engine: boolean }[]>;
+    /**
+     * Every World Info book of the user's (`world_books.list`, paged through); `engine`: one the
+     * engine made for a world; `character`: one a character brought (Lumiverse makes a book of its
+     * own for each one a card it imports carries, so it may share a name with one the user imported);
+     * `added`: when it was made, in Unix seconds (null when the host doesn't say).
+     */
+    list(userId: UserId): Promise<{ id: string; name: string; engine: boolean; character: boolean; added: number | null }[]>;
     entries(bookId: string, userId: UserId): Promise<HostBookEntry[]>;
     /** One entry by id (`world_books.entries.get`), or null when it is gone. */
     entry(entryId: string, userId: UserId): Promise<HostBookEntry | null>;

@@ -34,7 +34,7 @@ export function bookLoreProblem(fields: BookLoreFields): string | null {
   try {
     compile(fields.gate);
   } catch (error) {
-    return `its gate doesn't read: ${error instanceof Error ? error.message : String(error)}`;
+    return `the gate doesn't read: ${error instanceof Error ? error.message : String(error)}`;
   }
   return null;
 }

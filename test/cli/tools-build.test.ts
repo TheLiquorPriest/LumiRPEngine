@@ -26,7 +26,7 @@ describe("lore through the tools", () => {
     const { rig, call, raw } = await cliRig();
     const bookId = await rig.host.books.create("Harbor lore", "", rig.host.userId);
     const entryId = await rig.host.books.createEntry(bookId, bookEntry("The pier", "Boats tie up here."), rig.host.userId);
-    expect((await call("lre_lore_books")).books).toEqual([{ id: bookId, name: "Harbor lore", attached: false }]);
+    expect((await call("lre_lore_books")).books).toEqual([{ id: bookId, name: "Harbor lore", attached: false, character: false, added: null }]);
     expect((body((await raw("lre_lore_entries", { bookId })).text) as { entries: unknown[] }).entries).toEqual([expect.objectContaining({ id: entryId, disabled: false })]);
 
     const chatId = await rig.worldChat();

@@ -13,7 +13,7 @@ import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { addToLoreIndex, loreIndexJson, loreSourceOf } from "../../shared/lore";
-import type { JobKind, JobProposal, JobResult, JobSummary } from "../../shared/protocol";
+import type { JobKind, JobProposal, JobResult, JobSummary, LoreBookView } from "../../shared/protocol";
 import type { LoreIndex } from "../../shared/world";
 import type { App } from "../app";
 import { useApp } from "../app";
@@ -26,6 +26,7 @@ import { Icon } from "../icons";
 import type { ProtocolClient } from "../protocol-client";
 import type { Req } from "../requests";
 import { createStore, useSelect } from "../store";
+import { bookLabels } from "./book-lore";
 import { IssueRow } from "./check";
 import { COLLECTION_INFO, itemLabel } from "./chrome";
 import { draftSend } from "./draft";
@@ -114,7 +115,7 @@ export function JobStatusBadge(props: { status: JobState["status"] }) {
 function JobInput(props: { kind: JobKind; onStart(input: Record<string, string | number | string[]>): void; busy: boolean }) {
   const app = useApp();
   const showIds = useShowIds();
-  const [books, setBooks] = useState<{ id: string; name: string }[] | null>(null);
+  const [books, setBooks] = useState<LoreBookView[] | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [days, setDays] = useState(3);
@@ -125,8 +126,10 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
   const placeId = useId();
   const mapIdId = useId();
   useEffect(() => {
-    if (props.kind === "import_lore" || props.kind === "index_book") void app.host.worldBooks().then(setBooks, () => setBooks([]));
+    // The books every lore picker lists, so two that share a name read apart here too.
+    if (props.kind === "import_lore" || props.kind === "index_book") void app.request({ type: "lre.lore", op: "books" }).then((body) => setBooks(body?.books ?? []));
   }, [props.kind]);
+  const labels = useMemo(() => bookLabels(books ?? []), [books]);
   if (props.kind === "propose_routines") return <RoutineJobStart busy={props.busy} onStart={(start) => props.onStart(start.owners ? { owners: start.owners } : {})} />;
   if (props.kind === "index_book") {
     return (
@@ -141,7 +144,7 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
             {books.map((book) => (
               <label key={book.id} class="lre-build-pick">
                 <input type="radio" name="lre-index-book" checked={picked[0] === book.id} onChange={() => setPicked([book.id])} />
-                <span>{book.name}</span>
+                <span>{labels[book.id] ?? book.name}</span>
               </label>
             ))}
           </div>
@@ -177,7 +180,7 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
             {books.map((book) => (
               <label key={book.id} class="lre-build-pick">
                 <input type="checkbox" checked={picked.includes(book.id)} onChange={() => setPicked(picked.includes(book.id) ? picked.filter((id) => id !== book.id) : [...picked, book.id])} />
-                <span>{book.name}</span>
+                <span>{labels[book.id] ?? book.name}</span>
               </label>
             ))}
           </div>

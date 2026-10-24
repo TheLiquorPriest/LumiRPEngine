@@ -101,7 +101,7 @@ Every answer is text, JSON for data, of at most about 24,000 characters; a large
 | `lre_preset` / `lre_preset_add_blocks` | The active preset's outlets and engine guidance blocks (missing, empty, read or enabled); add the missing ones, switched off. |
 | `lre_diag {chatId, spoilers?, last?, failures?}` | A chat's activity line, and its diagnostics records (steps, model calls, failures, sections, slow requests) only with `spoilers`. |
 | `lre_diag_clear {chatId}` / `lre_activity_dismiss {chatId}` | Forget a chat's records; clear a failure from its activity line. |
-| `lre_lore_books {chatId?}` / `lre_lore_entries {bookId, offset?}` | The World Info books a pin may name, and one book's entries with their LumiRPEngine fields. |
+| `lre_lore_books {chatId?}` / `lre_lore_entries {bookId, offset?}` | The World Info books a pin may name, each saying whether a character's card brought it and when it was added (two can share a name), and one book's entries with their LumiRPEngine fields. |
 | `lre_lore_fields {bookId, entryId, fields}` | Set LumiRPEngine's fields on a World Info entry (`fields: null` takes them off): a secret one, with its gate, is stored switched off and reaches a prompt or a helper only once its gate holds. |
 | `lre_lore_pins {worldId? \| chatId?, spoilers?, offset?}` | A world draft's lore pins, or a chat's (with `spoilers`), each read now: title, source, status. |
 | `lre_lore_drift {worldId, id?, offset?}` / `lre_lore_save {chatId, text?}` | Book-sourced lore whose book entry changed or went; the chat's latest reply (or an excerpt) as a new lore entry in the draft. |
