@@ -34,7 +34,7 @@ Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1,
 | `check` | `check`, `actor?`, `target?`, `outcomes` |
 | `life` | `entity`, `to?`, `tell?` |
 | `link` | `rel`, `from`, `to`, `until?`, `fields?` |
-| `move` | `entity`, `to`, `activity?`, `route?`, `with?` |
+| `move` | `entity`, `to`, `activity?`, `told?`, `with?` |
 | `note` | `text`, `visibility?` |
 | `post` | `lines`, `memo?` |
 | `recover` | `entity`, `field`, `amount?`, `full?` |
