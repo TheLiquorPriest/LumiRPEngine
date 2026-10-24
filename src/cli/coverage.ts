@@ -90,7 +90,7 @@ export const COVERAGE: Coverage = {
   "lre.ui": { close_drawer: { excluded: "Closes the drawer on the user's screen: the page's own presentation, which nothing an agent does needs." } },
   "lre.map": { display: { tools: ["lre_map_display"] }, walk: { tools: ["lre_map_walk"] } },
   "lre.job": { start: { tools: ["lre_job_start"] }, cancel: { tools: ["lre_job_cancel"] }, list: { tools: ["lre_jobs", "lre_job", "lre_job_apply"] }, dismiss: { tools: ["lre_job_dismiss"] } },
-  "lre.lore": { drift: { tools: ["lre_lore_drift"] }, save: { tools: ["lre_lore_save"] }, books: { tools: ["lre_lore_books"] }, entries: { tools: ["lre_lore_entries"] }, pins: { tools: ["lre_lore_pins"] } },
+  "lre.lore": { drift: { tools: ["lre_lore_drift"] }, save: { tools: ["lre_lore_save"] }, books: { tools: ["lre_lore_books"] }, entries: { tools: ["lre_lore_entries"] }, pins: { tools: ["lre_lore_pins"] }, fields: { tools: ["lre_lore_fields"] } },
   "lre.studio": { offer: { tools: ["lre_studio_offer"] }, install: { tools: ["lre_studio_install"] } },
   "lre.preset": {
     get: { tools: ["lre_preset", "lre_preset_add_blocks"] },

@@ -19,7 +19,7 @@
 import type { EntityId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
 import { loreIsSecret, loreSourceOf, PROSE_STEPS, topicIdOf } from "../shared/lore";
-import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
+import type { LoreEntryDef, LoreKeep, StepPurpose, WorldDoc } from "../shared/world";
 import { cuesOf } from "./cues";
 import { playerKnows } from "./player-events";
 import type { Registry } from "./registry-impl";
@@ -188,14 +188,31 @@ export function secretLoreNames(reg: Registry, world: WorldDoc, state: Readonly<
 
 /**
  * An entry as `Title: text`, cut at a word to fit `budget` tokens by `tokens`; null when not even its
- * title and a few words fit. World lore and pinned book entries (DESIGN §24.5) are cut alike.
+ * title and a few words fit. World lore and pinned book entries (DESIGN §24.5) are cut alike. With
+ * `keep` "end" the cut keeps the text's end (`Title: …words`), so a timeline written oldest first
+ * keeps its newest events.
  */
-export function loreSnippet(tokens: (text: string) => number, entry: { readonly title?: unknown; readonly content?: unknown }, budget: number): { text: string; tokens: number; cut: boolean } | null {
+export function loreSnippet(tokens: (text: string) => number, entry: { readonly title?: unknown; readonly content?: unknown }, budget: number, keep: LoreKeep = "start"): { text: string; tokens: number; cut: boolean } | null {
   const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
   const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
   const whole = title === "" ? body : `${title}: ${body}`;
   const cost = tokens(whole);
   if (cost <= budget) return { text: whole, tokens: cost, cut: false };
+  if (keep === "end") {
+    const words = body === "" ? [] : body.split(" ");
+    const lead = title === "" ? "…" : `${title}: …`;
+    const kept = (n: number): string => `${lead}${words.slice(words.length - n).join(" ")}`;
+    let lo = MIN_WORDS;
+    if (lo >= words.length || tokens(kept(lo)) > budget) return null;
+    let hi = words.length - 1;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (tokens(kept(mid)) <= budget) lo = mid;
+      else hi = mid - 1;
+    }
+    const text = kept(lo);
+    return { text, tokens: tokens(text), cut: true };
+  }
   const head = title === "" ? 0 : title.split(" ").length;
   const words = whole.split(" ");
   const fits = (n: number): boolean => tokens(`${words.slice(0, n).join(" ")}…`) <= budget;

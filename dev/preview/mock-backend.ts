@@ -9,7 +9,8 @@ import type { DiagCall, DiagRecord } from "../../src/shared/diagnostics";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import type { MindsRunView } from "../../src/shared/minds";
-import type { LorePinView } from "../../src/shared/protocol";
+import type { LoreBookEntryView, LorePinView } from "../../src/shared/protocol";
+import type { BookLoreFields } from "../../src/shared/lore";
 import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LintIssue, LoreDrift, PresetCard, ResultBodies, StudioOfferView } from "../../src/shared/protocol";
 import { AGENT_API } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
@@ -102,6 +103,8 @@ const LORE_PROPOSALS: JobProposal[] = [
 export class MockBackend {
   /** The chat's latest minds run (`lre.minds`): the preview runs it one mind at a time, and the third fails as a cut-off call does. */
   private mindsRun: MindsRunView | null = null;
+  /** LRE's fields on the preview's World Info entries, by entry id (Build → Lore → World Info). */
+  private readonly bookLore: Record<string, BookLoreFields> = {};
   private view: StateView | null = null;
   private rev = 0;
   private settings: UserSettings = settingsFixture();
@@ -739,7 +742,17 @@ export class MockBackend {
         }
         // The preview's World Info: one book attached to the chat and one that isn't; the first GM character and where they are have pins.
         if (message.op === "books") return this.result(reqId, "lre.lore", { books: [ { id: "book_town", name: "Town lore", attached: true }, { id: "book_lost", name: "Lost cities", attached: false } ] });
-        if (message.op === "entries") return this.result(reqId, "lre.lore", { entries: message.bookId === "book_town" ? [ { id: "e1", title: "Town notice", disabled: true, chars: 120 }, { id: "e2", title: "Harbor hours", disabled: false, chars: 300 } ] : [] });
+        const entriesOf = (bookId: string): LoreBookEntryView[] =>
+          (bookId === "book_town" ? [ { id: "e1", title: "Town notice", disabled: true, chars: 120 }, { id: "e2", title: "Harbor hours", disabled: false, chars: 300 } ] : []).map((e) => {
+            const lore = this.bookLore[e.id];
+            return lore ? { ...e, lore, disabled: lore.secret === true ? true : e.disabled } : e;
+          });
+        if (message.op === "entries") return this.result(reqId, "lre.lore", { entries: entriesOf(message.bookId) });
+        if (message.op === "fields") {
+          if (message.fields === null) delete this.bookLore[message.entryId];
+          else this.bookLore[message.entryId] = structuredClone(message.fields);
+          return this.result(reqId, "lre.lore", { entries: entriesOf(message.bookId) });
+        }
         if (message.op === "pins") {
           const who = this.gm.minds.characters[0]?.entity;
           const place = this.gm.entities.find((e) => e.id === who)?.place ?? this.gm.places[0]?.id;

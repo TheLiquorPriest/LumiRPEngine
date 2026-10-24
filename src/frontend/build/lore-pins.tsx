@@ -113,7 +113,16 @@ export function LorePinsSection(props: PinTarget) {
                     title={t.title}
                     subtitle={t.source}
                     value={t.badge ? <Badge tone={t.badge === "Missing" ? "neg" : t.badge === "Secret" ? "gm" : "neutral"}>{t.badge}</Badge> : undefined}
-                    actions={<IconButton icon="close" label={`Unpin ${t.title}`} disabled={busy} onClick={() => save(list.filter((_, j) => j !== i))} />}
+                    actions={
+                      <>
+                        {/* A long timeline written oldest first keeps its newest events when its end is kept. */}
+                        <select class="lre-input" aria-label={`When ${t.title} doesn't fit, keep`} value={pin.keep ?? "start"} disabled={busy} onChange={(event) => save(list.map((p, j) => (j === i ? { ...p, keep: event.currentTarget.value === "end" ? "end" : "start" } : p)))}>
+                          <option value="start">When it doesn't fit, keep the start</option>
+                          <option value="end">When it doesn't fit, keep the end</option>
+                        </select>
+                        <IconButton icon="close" label={`Unpin ${t.title}`} disabled={busy} onClick={() => save(list.filter((_, j) => j !== i))} />
+                      </>
+                    }
                   />
                 );
               })}

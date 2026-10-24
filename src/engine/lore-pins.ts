@@ -7,7 +7,7 @@
 import type { EntityId, PlaceId } from "../shared/ids";
 import { hasOwn } from "../shared/json";
 import { loreIsSecret, lorePinKey, lorePinsOf } from "../shared/lore";
-import type { LoreEntryDef, LorePin, StepPurpose, WorldDoc } from "../shared/world";
+import type { LoreEntryDef, LoreKeep, LorePin, StepPurpose, WorldDoc } from "../shared/world";
 import { loreSnippet, type LoreReader } from "./lore";
 import { own } from "./pack-kit";
 import { loreGateReader } from "./visibility";
@@ -52,20 +52,21 @@ export function pinsFor(world: WorldDoc, place: PlaceId | null, who?: EntityId, 
   return out;
 }
 
-/** A pinned entry with its text as read now: one of the world's (`entry`, whose secrecy applies), or a book's (`entry` null). */
+/** A pinned entry with its text as read now: one of the world's (`entry`, whose secrecy applies), or a book's (`entry` null), and the part of it a cut keeps. */
 export interface PinnedText {
   key: string;
   on: PinRef["on"];
   title: string;
   content: string;
   entry: LoreEntryDef | null;
+  keep: LoreKeep;
 }
 
 /** A pinned world entry as text; null for a book's pin, or one naming an entry the world doesn't have (lint names it). */
 export function worldPinText(world: WorldDoc, ref: PinRef): PinnedText | null {
   if (!("lore" in ref.pin)) return null;
   const entry = own(world.lore, ref.pin.lore);
-  return entry ? { key: ref.key, on: ref.on, title: typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : ref.pin.lore, content: typeof entry.content === "string" ? entry.content : "", entry } : null;
+  return entry ? { key: ref.key, on: ref.on, title: typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : ref.pin.lore, content: typeof entry.content === "string" ? entry.content : "", entry, keep: ref.pin.keep ?? "start" } : null;
 }
 
 /** A pinned entry as a call was given it (`snippet`), or left out over its lore tokens (`snippet` null). */
@@ -92,7 +93,7 @@ export function fitPins(r: LoreReader, texts: readonly PinnedText[], budget: num
   for (const t of texts) {
     if (t.entry !== null && !readable(t.entry)) continue;
     const secret = t.entry !== null && loreIsSecret(t.entry) && !open(t.entry);
-    const snippet = loreSnippet((text) => r.tokens(text), { title: t.title, content: t.content }, left);
+    const snippet = loreSnippet((text) => r.tokens(text), { title: t.title, content: t.content }, left, t.keep);
     if (!snippet) {
       out.push({ key: t.key, title: t.title, entry: t.entry, snippet: null, tokens: 0, cut: false, secret });
       continue;

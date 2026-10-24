@@ -72,6 +72,7 @@
     "lore": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/loreEntry" } },
     "loreIndex": { "$ref": "#/$defs/loreIndex" },
     "lorePins": { "$ref": "#/$defs/lorePins" },
+    "loreBooks": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "description": "World Info book ids the world reads lore from live, beside a chat's own books and the user's global ones; a character's or persona's book is read only when listed here. Each entry is lore, with LumiRPEngine's fields from its extension data (extensions.lumi_rp_engine.lore). Absent: none listed." },
     "mapSettings": {
       "type": "object",
       "description": "How the map shows the world, the optional grid system, and the optional travel simulation. Absent: knowledge display, movement off, sight 3, no travel simulation.",
@@ -1023,11 +1024,12 @@
     },
     "lorePin": {
       "anyOf": [
-        { "title": "{\"lore\": id}", "type": "object", "required": ["lore"], "additionalProperties": false, "properties": { "lore": { "$ref": "#/$defs/id", "description": "one of the world's lore entries" } } },
-        { "title": "{\"book\": id, \"entry\": id}", "type": "object", "required": ["book", "entry"], "additionalProperties": false, "properties": { "book": { "type": "string", "minLength": 1, "description": "one of the user's Lumiverse World Info books" }, "entry": { "type": "string", "minLength": 1, "description": "an entry of that book, read from it whenever it is used" } } },
-        { "title": "{\"book\": id}", "type": "object", "required": ["book"], "additionalProperties": false, "properties": { "book": { "type": "string", "minLength": 1, "description": "a whole World Info book: its switched-on entries, read in the book's order whenever it is used" } } }
+        { "title": "{\"lore\": id}", "type": "object", "required": ["lore"], "additionalProperties": false, "properties": { "lore": { "$ref": "#/$defs/id", "description": "one of the world's lore entries" }, "keep": { "$ref": "#/$defs/loreKeep" } } },
+        { "title": "{\"book\": id, \"entry\": id}", "type": "object", "required": ["book", "entry"], "additionalProperties": false, "properties": { "book": { "type": "string", "minLength": 1, "description": "one of the user's Lumiverse World Info books" }, "entry": { "type": "string", "minLength": 1, "description": "an entry of that book, read from it whenever it is used" }, "keep": { "$ref": "#/$defs/loreKeep" } } },
+        { "title": "{\"book\": id}", "type": "object", "required": ["book"], "additionalProperties": false, "properties": { "book": { "type": "string", "minLength": 1, "description": "a whole World Info book: its switched-on entries, read in the book's order whenever it is used" }, "keep": { "$ref": "#/$defs/loreKeep" } } }
       ]
     },
+    "loreKeep": { "enum": ["start", "end"], "description": "When a pinned entry doesn't fit, the part kept: its start (the default) or its end, so a timeline written oldest first keeps its newest events." },
     "lorePins": {
       "type": "object",
       "description": "Lore pinned where calls always read it first, within their lore tokens: a character's mind calls, every helper and mind call at a place or inside it, and every call of a step. Absent: none.",

@@ -3,7 +3,7 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import type { GenerationReasoningOverrideDTO, PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO } from "lumiverse-spindle-types";
+import type { GenerationReasoningOverrideDTO, PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO, WorldInfoInterceptorCtxDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import { MCP_PERMISSION } from "../shared/agents";
 import type { HostPresetBlockInput } from "./host";
@@ -28,6 +28,7 @@ import type {
   HostRegexScript,
   QuietToolCall,
   SwipeAction,
+  WorldInfoCandidate,
 } from "./host";
 
 declare const spindle: HostSpindleAPI;
@@ -432,6 +433,13 @@ export function createSpindleHost(): HostPort {
         { timeoutMs: options.timeoutMs, required: options.required },
       );
     },
+    registerWorldInfoInterceptor(handler) {
+      spindle.registerWorldInfoInterceptor(async (ctx: WorldInfoInterceptorCtxDTO) => {
+        if (!ctx.userId) return {};
+        const entries = ctx.entries.map((e): WorldInfoCandidate => ({ id: e.id, bookId: e.world_book_id, disabled: e.disabled, extensions: isRecord(e.extensions) ? (e.extensions as JsonObject) : {} }));
+        return await handler({ chatId: ctx.chatId, userId: ctx.userId, entries, chatMetadata: ctx.chatMetadata as JsonObject });
+      }, 100);
+    },
     models: {
       async quiet(request, userId, signal) {
         // The host merges these over the connection's preset parameters, so one left out stays the connection's own.
@@ -541,6 +549,9 @@ export function createSpindleHost(): HostPort {
         const e = await spindle.world_books.entries.get(entryId, userId);
         return e ? bookEntryOf(e) : null;
       },
+      async global(userId) {
+        return await spindle.world_books.getGlobal(userId);
+      },
       async createEntry(bookId, entry, userId) {
         const created = await spindle.world_books.entries.create(bookId, entryInput(entry), userId);
         return created.id;
@@ -552,6 +563,9 @@ export function createSpindleHost(): HostPort {
       async fill(entryId, content, userId) {
         // Only these three fields: where the entry sits, its outlet and its extension data stay.
         await spindle.world_books.entries.update(entryId, content === null ? { content: "", disabled: true, constant: false } : { content, disabled: false, constant: true }, userId);
+      },
+      async setExtensions(entryId, extensions, disabled, userId) {
+        await spindle.world_books.entries.update(entryId, disabled === null ? { extensions } : { extensions, disabled }, userId);
       },
       async deleteEntry(entryId, userId) {
         await spindle.world_books.entries.delete(entryId, userId);

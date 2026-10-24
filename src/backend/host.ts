@@ -178,6 +178,28 @@ export interface ContextHandlerInput {
 /** What a context handler tells the host: go on to the prompt, or stop the generation before it (`cancelGeneration`). */
 export type ContextVerdict = "go" | "cancel";
 
+/** A World Info entry as the interceptor sees it before activation (DESIGN §6.1): its book, whether it is off for this prompt so far, and its extension data. */
+export interface WorldInfoCandidate {
+  id: string;
+  bookId: string;
+  disabled: boolean;
+  extensions: JsonObject;
+}
+
+/** What the interceptor is asked, in every prompt assembly: the entries the host scans for the chat's prompt, and the chat's metadata. */
+export interface WorldInfoInput {
+  chatId: ChatId;
+  userId: UserId;
+  entries: WorldInfoCandidate[];
+  chatMetadata: JsonObject;
+}
+
+/** Its answer, for this prompt only: entries to switch off, and entries stored switched off to switch on (an off vote anywhere wins). */
+export interface WorldInfoVerdict {
+  disabled: string[];
+  enabled: string[];
+}
+
 /** What the running Lumiverse does with a context handler's answer (DESIGN §5.1). */
 export interface HostCapabilities {
   /** `cancelGeneration` stops the generation (the `preAssemblyGenerationContext` contract). */
@@ -402,6 +424,8 @@ export interface HostPort {
   readonly capabilities: HostCapabilities;
   /** The one context handler (the guard, DESIGN §5.1): `required` asks the host to stop the generation when it fails or runs out of time. */
   registerContextHandler(handler: (input: ContextHandlerInput, signal: AbortSignal) => Promise<ContextVerdict>, options: { timeoutMs: number; required: boolean }): void;
+  /** The one World Info interceptor (DESIGN §6.1), asked before activation in every prompt assembly; on a throw or past the host's time, the entries go on as stored. */
+  registerWorldInfoInterceptor(handler: (input: WorldInfoInput) => Promise<WorldInfoVerdict>): void;
   models: {
     quiet(request: QuietRequest, userId: UserId, signal: AbortSignal): Promise<QuietResult>;
     decide(request: DecideRequest, userId: UserId, signal: AbortSignal): Promise<DecideResult>;
@@ -426,11 +450,15 @@ export interface HostPort {
     entries(bookId: string, userId: UserId): Promise<HostBookEntry[]>;
     /** One entry by id (`world_books.entries.get`), or null when it is gone. */
     entry(entryId: string, userId: UserId): Promise<HostBookEntry | null>;
+    /** The ids of the user's global books (`world_books.getGlobal`), which the host scans in every chat. */
+    global(userId: UserId): Promise<string[]>;
     createEntry(bookId: string, entry: HostBookEntryInput, userId: UserId): Promise<string>;
     /** Moves an entry (its position, depth, role and outlet) and rewrites its extension data. */
     place(entryId: string, placement: HostEntryPlacement, extensions: JsonObject, userId: UserId): Promise<void>;
     /** Fills an entry and switches it on as a constant one, or with null empties it and switches it off; where it sits stays. */
     fill(entryId: string, content: string | null, userId: UserId): Promise<void>;
+    /** Rewrites an entry's extension data and, unless null, whether it is stored switched off; nothing else of it changes. */
+    setExtensions(entryId: string, extensions: JsonObject, disabled: boolean | null, userId: UserId): Promise<void>;
     deleteEntry(entryId: string, userId: UserId): Promise<void>;
   };
   /** A dry-run assembly of the chat's next prompt (deliverability check, DESIGN §4.2; the D32 preset lint). */
