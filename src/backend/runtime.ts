@@ -1033,8 +1033,10 @@ export class Runtime implements TurnHooks {
     const pre = this.prePhase.get(input.generationId);
     if (!bridge || !p?.planned || p.renarrateOf || !pre) return;
     const plan = bridge.planFor(p.seed);
-    const render = input.core.renderState(input.observed);
-    if (!render) return;
+    const folded = input.core.renderState(input.observed);
+    if (!folded) return;
+    // The brief, the outline, their leak checks and the outline gate read the run's lore, World Info included (DESIGN §4.2).
+    const render = { ...folded, world: await this.liveWorld(input.generationId, input.chatId, input.userId, folded.world) };
     lruSet(this.lastPlace, input.chatId, placeOfEntity(render.state, render.world.pov), 256);
     // The outline the player let through is the one the reply is told, with no brief or outline call.
     const shown = bridge.outlineOf(pre.text);
@@ -1633,6 +1635,8 @@ export class Runtime implements TurnHooks {
     // whole message when `before` holds the text a Continue went on from (DESIGN §6.7).
     const text = readableReply(before + content, settings.hideJsonBlocks, before.length);
     if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && READ_CHIP_KINDS.has(c.kind) && !isUnfitId(c.id, messageId, swipeId));
+    // A read that replaces an earlier one (Re-read, Retry read) reads World Info as it is now, not as that read did under the same key.
+    if (replace) this.liveLores.delete(key);
     const bridge = this.bridges.get(chatId);
     if (!bridge) return;
     const input = { chatId, userId, messageId, generationId: key, content };
@@ -1648,7 +1652,8 @@ export class Runtime implements TurnHooks {
     // Under the reply read's signal when the turn has one, so Cancel skips the reads still waiting.
     const budget = phaseBudget(settings, "post", signal);
     // The secrets the reply's steps may not repeat include the World Info ones this run reads (DESIGN §4.2, §7).
-    const secrets = unrevealedSecrets(this.registry, await this.liveWorld(key, chatId, userId, context.world), context.state);
+    const live = await this.liveWorld(key, chatId, userId, context.world);
+    const secrets = unrevealedSecrets(this.registry, live, context.state);
     // The usual routines of the people with the POV, as it may know them: extract's own input, never a
     // fact, only to tell where a move the reply describes is going (DESIGN §9.4, §6.10). A world's own
     // extract or effects template reads them as `{{usual}}`.
@@ -1677,7 +1682,8 @@ export class Runtime implements TurnHooks {
     const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([])));
     // The minds' post phase (DESIGN §24.4): who was present, their memory of what was written, and
     // consolidation, beside the reply's other steps, on the phase's wall clock.
-    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: context.world, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
+    // Their memory and consolidation read pinned lore as the run read it, World Info's secrecy included (DESIGN §4.2).
+    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: live, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
     const [extracted, effects, decisions, contradicted, choices, minded] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks), mindsTask]);
     this.timeLimits({ chatId, userId, turn: key }, "read", budget);
     this.addMindTraces(chatId, key, minded.traces);
@@ -2483,10 +2489,7 @@ export class Runtime implements TurnHooks {
     return {
       registry: this.registry,
       playsWorld: (meta) => readRun(meta) !== null,
-      head: async (chatId, userId) => {
-        const core = await this.ledger.core(chatId, userId);
-        return core ? core.renderState(toChain(await this.host.chats.messages(chatId, userId))) : null;
-      },
+      head: (chatId, userId) => this.ledger.narratorState(chatId, userId),
       carried: (chatId) => this.carriedEntries.get(chatId) ?? new Set(),
       log: (message, userId) => this.host.log("warn", `[LumiRPEngine] ${message}`, userId),
     };

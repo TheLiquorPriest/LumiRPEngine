@@ -443,8 +443,9 @@ export class WorldStore {
     }
     const version = draft.version + 1;
     await this.writeJson(`${worldDir(worldId)}draft.json`, { base, doc, version }, userId);
-    // A secret entry the save made or changed keeps the World Info entry it was indexed from off at once.
-    await secureIndexedSecrets(this.host, doc, userId, (id) => !jsonEqual(doc.lore[id], draft.doc.lore[id]));
+    // A secret entry the save made or changed keeps the World Info entry it was indexed from off at
+    // once; the draft before the save says which gate on that entry was the world entry's own.
+    await secureIndexedSecrets(this.host, doc, userId, (id) => !jsonEqual(doc.lore[id], draft.doc.lore[id]), draft.doc);
     changed?.(worldId, { version, stored: true, base });
     return { draft: doc, lint, base, stored: true, version };
   }

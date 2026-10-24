@@ -6,11 +6,21 @@
 
 import type { ChatId, UserId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
-import { bookLoreFieldsOf, bookTextHash, engineWroteEntry, loreBooksOf, loreIsSecret, loreSourceOf, withBookLoreFields, type BookLoreFields } from "../shared/lore";
-import type { LoreEntryDef, WorldDoc } from "../shared/world";
+import { bookLoreFieldsOf, bookTextHash, engineWroteEntry, LORE_AUDIENCE, loreBooksOf, loreIsSecret, loreSourceOf, withBookLoreFields, type BookLoreFields } from "../shared/lore";
+import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import { compile } from "../engine/expr";
 import type { HostBookEntry, HostPort } from "./host";
-import { bookEntryTitle } from "./lore-pins";
+
+/** The words a book entry with no comment is titled by. */
+const TITLE_WORDS = 8;
+
+/** A book entry's title: its comment, else its text's first words. */
+export function bookEntryTitle(e: Pick<HostBookEntry, "comment" | "content">): string {
+  const comment = e.comment.replace(/\s+/g, " ").trim();
+  if (comment !== "") return comment;
+  const words = e.content.replace(/\s+/g, " ").trim().split(" ").filter((w) => w !== "");
+  return words.length === 0 ? "Untitled entry" : words.length > TITLE_WORDS ? `${words.slice(0, TITLE_WORDS).join(" ")}…` : words.join(" ");
+}
 
 /** A book entry's id as a lore entry, the same as its pin's key, so it reads once however it comes. */
 export function bookLoreId(bookId: string, entryId: string): string {
@@ -44,13 +54,15 @@ export async function writeBookLore(host: Pick<HostPort, "books">, e: HostBookEn
 
 /**
  * Keeps the book entry each secret world entry was indexed from stored switched off, with LRE's
- * secret fields and the world entry's gate (DESIGN §4.2, §6.1): the host then never activates it by
- * itself, whatever happens to the interceptor (a throw, a state it can't read, the host's time running
- * out), and its gate switches it on for a prompt as any LRE-secret entry's does. `only` limits it to
- * some of the world's entries. A book entry already so stored, gone, in another book or written by
- * the engine is left alone, and one that can't be written is logged.
+ * secret fields (DESIGN §4.2, §6.1): the host then never activates it by itself, whatever happens to
+ * the interceptor (a throw, a state it can't read, the host's time running out). One with no secrecy
+ * of its own takes the world entry's gate, which opens it as any LRE-secret entry's does; one the
+ * author made secret in the book keeps its own gate, and both must hold (`indexedEntry`), unless
+ * that gate is the one the world entry had `before` this write, which this keeps in step. `only`
+ * limits it to some of the world's entries. A book entry gone, in another book or written by the
+ * engine is left alone, and one that can't be written is logged.
  */
-export async function secureIndexedSecrets(host: Pick<HostPort, "books" | "log">, world: WorldDoc, userId: UserId, only?: (id: string) => boolean): Promise<void> {
+export async function secureIndexedSecrets(host: Pick<HostPort, "books" | "log">, world: WorldDoc, userId: UserId, only?: (id: string) => boolean, before?: WorldDoc): Promise<void> {
   for (const [id, entry] of Object.entries(world.lore)) {
     const source = loreSourceOf(entry.source);
     if (source.kind !== "book" || !loreIsSecret(entry) || (only && !only(id))) continue;
@@ -59,13 +71,43 @@ export async function secureIndexedSecrets(host: Pick<HostPort, "books" | "log">
       if (!e || e.bookId !== source.bookId || engineWroteEntry(e.extensions)) continue;
       const own = bookLoreFieldsOf(e.extensions);
       const gate = typeof entry.gate === "string" ? entry.gate : undefined;
-      if (e.disabled && own !== null && loreIsSecret(own) && own.gate === gate) continue;
-      const { gate: _theirs, ...rest } = own ?? {};
+      const was = before && hasOwn(before.lore, id) ? before.lore[id]?.gate : undefined;
+      const kept = own !== null && loreIsSecret(own) && own.gate !== gate && (was === undefined || own.gate !== was);
+      if (kept || (own !== null && loreIsSecret(own) && own.gate === gate)) {
+        if (!e.disabled) await host.books.setExtensions(e.id, e.extensions, true, userId);
+        continue;
+      }
+      const { gate: _mirrored, ...rest } = own ?? {};
       await writeBookLore(host, e, { ...rest, secret: true, ...(gate !== undefined ? { gate } : {}) }, userId);
     } catch (error) {
       host.log("warn", `[LumiRPEngine] the World Info entry secret lore ${id} was indexed from wasn't switched off: ${error instanceof Error ? error.message : String(error)}`, userId);
     }
   }
+}
+
+/**
+ * A world entry indexed from a book entry, as read now (DESIGN §4.2): the book's text, and the
+ * stricter secrecy of the two, since the author may make either secret: secret when either is, open
+ * only once every secret side's gate holds (a missing gate never does), its audience and holders
+ * joined; Known by when either is, about what both link.
+ */
+export function indexedEntry(entry: LoreEntryDef, e: HostBookEntry): LoreEntryDef {
+  const out: LoreEntryDef = e.content.trim() === "" ? { ...entry } : { ...entry, content: e.content };
+  const fields = bookLoreFieldsOf(e.extensions);
+  if (fields === null) return out;
+  const gates = [...(loreIsSecret(entry) ? [typeof entry.gate === "string" ? entry.gate : ""] : []), ...(loreIsSecret(fields) ? [fields.gate ?? ""] : [])];
+  if (gates.length > 0) {
+    out.secret = true;
+    out.gate = gates.some((g) => g.trim() === "") ? "" : [...new Set(gates)].map((g) => `(${g})`).join(" && ");
+  }
+  const joined = (a: unknown, b: readonly string[] | undefined): string[] => [...new Set([...(Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : []), ...(b ?? [])])];
+  if (fields.audience) out.audience = joined(entry.audience, fields.audience).filter((p): p is StepPurpose => (LORE_AUDIENCE as readonly string[]).includes(p));
+  if (fields.holders) out.holders = joined(entry.holders, fields.holders);
+  if (fields.visibility === "known_by" || entry.visibility === "known_by" || (entry.visibility !== undefined && entry.visibility !== "public")) {
+    out.visibility = "known_by";
+    out.links = joined(entry.links, fields.links);
+  }
+  return out;
 }
 
 /**
@@ -107,31 +149,40 @@ export async function loreBookIds(host: Pick<HostPort, "books" | "chats">, world
 
 /**
  * The world as its helpers and minds read lore now (DESIGN §4.2): its own entries, one indexed from a
- * book reading that entry's text as the book has it now, then every lore entry of the books the chat
+ * book read from that book entry as it is now (`indexedEntry`: its text and the stricter secrecy of
+ * the two), whether or not the chat reads its book, then every lore entry of the books the chat
  * reads, live. An entry indexed into the world is read once, as the world's. A book that can't be
  * read gives nothing, and the log says so; a listed book that is gone is named too.
  */
 export async function liveLore(host: Pick<HostPort, "books" | "chats" | "log">, world: WorldDoc, chatId: ChatId | null, userId: UserId): Promise<WorldDoc> {
   const books = await loreBookIds(host, world, chatId, userId);
   for (const id of books.gone) host.log("warn", `[LumiRPEngine] lore book ${id} the world lists is gone: no call reads it (Build → Lore → Lore books)`, userId);
-  if (books.read.length === 0) return world;
-  const read = await Promise.all(
-    books.read.map((id) =>
-      host.books.entries(id, userId).catch((error: unknown) => {
-        host.log("warn", `[LumiRPEngine] lore book ${id} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
-        return [];
-      }),
-    ),
-  );
+  // The books entries of the world were indexed from, read for those entries alone.
+  const sources = [...new Set(Object.values(world.lore).flatMap((entry) => {
+    const source = loreSourceOf(entry.source);
+    return source.kind === "book" && !books.read.includes(source.bookId) ? [source.bookId] : [];
+  }))];
+  if (books.read.length === 0 && sources.length === 0) return world;
+  const entriesOf = (ids: readonly string[]): Promise<HostBookEntry[][]> =>
+    Promise.all(
+      ids.map((id) =>
+        host.books.entries(id, userId).catch((error: unknown) => {
+          host.log("warn", `[LumiRPEngine] lore book ${id} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
+          return [];
+        }),
+      ),
+    );
+  const [read, sourced] = await Promise.all([entriesOf(books.read), entriesOf(sources)]);
   const live = new Map(read.flat().map((e) => [bookLoreId(e.bookId, e.id), e]));
+  const fromBooks = new Map([...live, ...sourced.flat().map((e): [string, HostBookEntry] => [bookLoreId(e.bookId, e.id), e])]);
   const lore: Record<string, LoreEntryDef> = {};
   const indexed = new Set<string>();
   for (const [id, entry] of Object.entries(world.lore)) {
     const source = loreSourceOf(entry.source);
     const key = source.kind === "book" ? bookLoreId(source.bookId, source.entryId) : null;
-    const now = key ? live.get(key) : undefined;
+    const now = key ? fromBooks.get(key) : undefined;
     if (key && now) indexed.add(key);
-    lore[id] = now && now.content.trim() !== "" ? { ...entry, content: now.content } : entry;
+    lore[id] = now && !engineWroteEntry(now.extensions) ? indexedEntry(entry, now) : entry;
   }
   for (const [key, e] of live) {
     if (indexed.has(key) || hasOwn(lore, key)) continue;
