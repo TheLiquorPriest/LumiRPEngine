@@ -19,6 +19,7 @@ import type { ChainMessage } from "../engine/ledger/chain";
 import { recentMessages } from "./interpret-context";
 import type { StepSignal } from "../shared/steps";
 import { limitOf, MINDS_SLOT } from "../shared/minds";
+import { PROSE_PROMPTS } from "../shared/steps";
 import type { Timeout } from "../shared/timeouts";
 import { within } from "../shared/timeouts";
 import type { ActionDef, ParamDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
@@ -72,6 +73,37 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
       if (out.length >= 40) break;
     }
     return out.slice(0, 40);
+  });
+}
+
+/**
+ * The vars a prompted step reads of what the player character has and knows (DESIGN §5.2), each the
+ * lines the sections that tell it have now, as the narrator reads them, so each is only what the POV
+ * may know: `gear` what it carries and wears, `money` its money, `property` what it owns or may use,
+ * `positions` who is where in the scene with it, `knowledge` what it knows of the quests. A var
+ * whose section the world doesn't have is empty. The caller still passes them through `safeVars`.
+ */
+const VAR_SLOTS = { gear: ["gear"], money: ["money"], property: ["property", "vehicles"], positions: ["people"], knowledge: ["quest"] } as const satisfies Record<string, readonly string[]>;
+
+/** The section slots the vars read, so only their renderers run. */
+const VAR_SLOT_SET: ReadonlySet<string> = new Set(Object.values(VAR_SLOTS).flat());
+
+export function slotVars(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): Record<keyof typeof VAR_SLOTS, string> {
+  return readPass(() => {
+    const ctx = registry.context(world, state);
+    const lines = new Map<string, string[]>();
+    for (const r of registry.renderers) {
+      if (r.hint || !VAR_SLOT_SET.has(r.slot)) continue;
+      try {
+        const own = lines.get(r.slot) ?? [];
+        for (const line of r.render(ctx)) if (!own.includes(line)) own.push(line);
+        lines.set(r.slot, own);
+      } catch {
+        // A renderer that can't render this state contributes nothing.
+      }
+    }
+    const of = (slots: readonly string[]): string => [...new Set(slots.flatMap((s) => lines.get(s) ?? []))].join("\n");
+    return { gear: of(VAR_SLOTS.gear), money: of(VAR_SLOTS.money), property: of(VAR_SLOTS.property), positions: of(VAR_SLOTS.positions), knowledge: of(VAR_SLOTS.knowledge) };
   });
 }
 
@@ -295,7 +327,7 @@ export function phaseBudget(settings: Pick<UserSettings, "modelUse" | "timeouts"
 export interface StepRun {
   purpose: StepPurpose;
   config: StepConfig;
-  /** The world's template for this run; null for the built-in prompt. */
+  /** The template this run prompts with: the user's own (Settings → Steps and connections), else the world's; null for the built-in prompt. */
   template: StepTemplateDef | null;
   /** The active preset's style and rules for the step, appended after the prompt (DESIGN §6.8); "" for none. */
   guidance: string;
@@ -311,17 +343,33 @@ function templatesFor(world: WorldDoc, purpose: StepPurpose): StepTemplateDef[] 
 }
 
 /**
- * The runs of a purpose this phase: one per world template (its own signals, else the step's),
- * or the built-in prompt; with `output`, only the templates with that output. The user's step
- * settings decide whether the purpose runs at all (`stepConfigOf`: `puzzle.answer` is the author's
- * opt-in, so it runs unless the user turned it off). Each run carries the preset's guidance for it.
+ * What the user's own prompt for a step is, as a world template of the step's own kind: the
+ * question of a decision step (only a decision contradiction template is the check), else text, with
+ * the effect a world template of that output has on the purpose.
+ */
+const OWN_OUTPUT: Record<StepPurpose, StepTemplateDef["output"]> = { interpret: "text", "npc.choose": "decision", contradiction: "decision", "puzzle.answer": "decision", judge: "decision", brief: "text", outline: "text", extract: "text", choices: "text", mind: "text", memory: "text", skip: "text", consolidate: "text" };
+
+/** The user's own prompt for a step as the template it runs with; null when it's blank (the world's, else the built-in, prompts). */
+export function ownTemplate(purpose: StepPurpose, config: Pick<StepConfig, "template">): StepTemplateDef | null {
+  const text = config.template ?? "";
+  return text.trim() === "" ? null : { id: "", purpose, template: text, output: OWN_OUTPUT[purpose], signals: [] };
+}
+
+/**
+ * The runs of a purpose this phase: the user's own prompt, else one per world template (its own
+ * signals, else the step's), else the built-in prompt; with `output`, only the templates with that
+ * output. The user's prompt takes the place of the world's templates, except the world's `effects`
+ * ones, which are calls of their own. The user's step settings decide whether the purpose runs at
+ * all (`stepConfigOf`: `puzzle.answer` is the author's opt-in, so it runs unless the user turned it
+ * off). Each run carries the preset's guidance for it.
  */
 export function runsOf(modelUse: ModelUseSettings, world: WorldDoc, purpose: StepPurpose, facts: SignalFacts, options: { output?: StepTemplateDef["output"]; guidance?: Guidance } = {}): StepRun[] {
   const config = stepConfigOf(modelUse.steps, purpose);
   if (!config.enabled) return [];
   const guidance = options.guidance?.[purpose] ?? "";
   const recent = purpose === "interpret" ? [] : recentMessages(facts.earlier.messages, recentOf(purpose, config), facts.earlier.hideJson);
-  const templates = templatesFor(world, purpose).filter((t) => options.output === undefined || t.output === options.output);
+  const own = ownTemplate(purpose, config);
+  const templates = [...(own ? [own] : []), ...templatesFor(world, purpose).filter((t) => own === null || t.output === "effects")].filter((t) => options.output === undefined || t.output === options.output);
   if (templates.length === 0) return options.output === "effects" ? [] : fires(config.signals, facts) ? [{ purpose, config, template: null, guidance, recent }] : [];
   return templates.filter((t) => fires(t.signals.length > 0 ? t.signals : config.signals, facts)).map((template) => ({ purpose, config, template, guidance, recent }));
 }
@@ -339,12 +387,6 @@ export function safeVars(vars: Readonly<Record<string, string>>, secrets: readon
   for (const [k, v] of Object.entries(vars)) out[k] = v.split("\n").filter((line) => findLeaks(line, secrets).length === 0).join("\n");
   return out;
 }
-
-const BUILTIN: Record<"brief" | "outline" | "choices", string> = {
-  brief: "You brief a roleplay narrator before their next reply. In two or three sentences, say what matters right now in {{world}}: where {{pov}} is, who is present, what the player just did and how it turned out, and anything pressing. Use only the facts given; invent nothing.",
-  outline: "You outline a roleplay narrator's next reply. Expand the engine's beats into two to four short beats, in order, consistent with the facts and the outcome. Don't decide anything the facts don't settle, and don't add events.",
-  choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts. Each under twelve words, first person, as the player would type it.",
-};
 
 const CONTRACT: Record<"brief" | "outline" | "choices" | "effects", string> = {
   brief: 'Output JSON only: {"text": string}.',
@@ -393,7 +435,7 @@ function proseLines(v: JsonValue | undefined, max: number, secrets: readonly str
  * the call fails.
  */
 export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "outline" | "choices", vars: Readonly<Record<string, string>>, secrets: readonly string[], userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string[] | null> {
-  const instructions = renderTemplate(run.template?.template ?? BUILTIN[kind], vars);
+  const instructions = renderTemplate(run.template?.template ?? PROSE_PROMPTS[kind], vars);
   const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent });
   if (!isRecord(raw)) return null;
   // A brief or an outline beat may run long and is cut, once checked whole. A suggestion is a chip's

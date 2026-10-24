@@ -357,7 +357,7 @@
         "life": { "$ref": "#/$defs/id", "description": "the life state it starts in; absent: alive" },
         "lifeKnownBy": { "$ref": "#/$defs/ids", "description": "who knows the life state it starts in, besides itself; everyone else takes it for alive. Absent or empty: everyone" },
         "characterId": { "type": "string" },
-        "visibility": { "$ref": "#/$defs/visibility" },
+        "visibility": { "enum": ["public", "known_by", "secret", "discoverable"], "description": "discoverable: hidden until the player character searches where it is or opens what holds it" },
         "knownBy": { "$ref": "#/$defs/selector" },
         "tags": { "$ref": "#/$defs/strings" },
         "class": { "type": "object", "description": "facet → values", "additionalProperties": { "$ref": "#/$defs/ids" } },

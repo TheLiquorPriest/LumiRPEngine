@@ -243,9 +243,15 @@ export class FakeHost implements HostPort {
 
   /** The user's default connection (`connections.list`, `is_default`). */
   activeConnection: { id: string; name: string } | null = null;
+  /** The user's other connection profiles, each with the models its provider lists (null: it can't list them); and their Decisions API profiles. */
+  connectionProfiles: { id: string; name: string; models: string[] | null }[] = [];
+  decisionProfiles: { id: string; name: string }[] = [];
 
   connections: HostPort["connections"] = {
     active: async () => this.activeConnection,
+    list: async () => [...(this.activeConnection ? [this.activeConnection] : []), ...this.connectionProfiles.map(({ id, name }) => ({ id, name }))],
+    models: async (connectionId) => this.connectionProfiles.find((c) => c.id === connectionId)?.models ?? null,
+    decisionList: async () => [...this.decisionProfiles],
   };
 
   /** `mcp_servers`, granted or not; Lumiverse's MCP server profiles, each with what its client holds; and each Spindle read, in order. */

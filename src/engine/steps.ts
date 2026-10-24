@@ -86,6 +86,8 @@ export interface Claim {
   consumable: boolean;
   /** A gear item row it takes its weight, size and wear slot from. */
   like?: string;
+  /** The player character's own thing the world had elsewhere: brought to hand (or here) rather than made (DESIGN §9.4). Absent in older records. */
+  existing?: string;
 }
 
 /** One of the input's actions after the first, as `interpret` read it: an engine action, its params, and its words. */

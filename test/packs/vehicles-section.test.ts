@@ -42,19 +42,24 @@ describe("the Vehicles section", () => {
     expect(of("Shop van")).toContain("Rosa Delgado");
     expect(of("Black sedan")).toBeDefined();
     expect(out.join("\n")).not.toContain("Victor");
-    // A vehicle he may not use isn't his to list.
-    expect(of("Someone's hatchback")).toBeUndefined();
+    // Someone else's at his site is told as theirs, never as one he may use.
+    expect(of("Someone's hatchback")).toContain("Jordan Price");
+    expect(of("Someone's hatchback")).not.toMatch(/yours|to you/);
   });
 
-  test("his family's at level 2 but not what is lent; at level 1 only his own", () => {
+  test("his family's at level 2 but not what is lent; at level 1 only his own in the short form", () => {
     const patch = (w: WorldDoc): void => {
       w.entities.riveras = { id: "riveras", kind: "household", name: "The Riveras", tier: "background", fields: {}, relations: [] };
       w.entities.you?.relations.push({ type: "member_of", to: "riveras" }, { type: "uses", to: "van" });
       w.entities.family_car = vehicle("family_car", "Family wagon", { owner: "riveras", place: "garage" });
       w.entities.van = vehicle("van", "Shop van", { owner: "rosa", place: "garage" });
     };
-    expect(lines(patch, 2).map((l) => l.split(":")[0])).toEqual(["Family wagon", "Pickup truck"]);
-    expect(lines(patch, 1).map((l) => l.split(":")[0])).toEqual(["Pickup truck"]);
+    const two = lines(patch, 2);
+    expect(two.find((l) => l.startsWith("Family wagon:"))).toMatch(/The Riveras.*fuel/);
+    expect(two.find((l) => l.startsWith("Shop van:"))).not.toMatch(/to you/);
+    const one = lines(patch, 1);
+    expect(one.find((l) => l.startsWith("Pickup truck:"))).toContain("runs fine");
+    expect(one.join("\n")).not.toMatch(/to you|fuel/);
   });
 
   test("the ones away from his site fold into one line, by where they are", () => {

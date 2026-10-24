@@ -10,8 +10,10 @@
 import { useEffect, useState } from "preact/hooks";
 import { useApp } from "../../../frontend/app";
 import { Avatar, Badge, Button, Disclosure, Empty, IdText, List, ListRow, PageHeader, Section } from "../../../frontend/components";
+import { FixEditor } from "../../../frontend/fix-editor";
 import { Icon } from "../../../frontend/icons";
 import type { SheetProps } from "../../../frontend/registry";
+import { whereFixTarget } from "../../../frontend/requests";
 import type { ChatId, EntityId } from "../../../shared/ids";
 import type { PlayerBlock, RoutinePlayerView } from "../../../shared/routines";
 import { decodeCastView, SLOT_KINDS, whereabouts, type CastPerson, type CastView, type SlotKind } from "./panel";
@@ -166,6 +168,7 @@ function classLabel(view: CastView, facetId: string, valueId: string): string {
 
 export function PersonSheet(props: SheetProps) {
   const app = useApp();
+  const [fixingWhere, setFixingWhere] = useState(false);
   useEffect(() => {
     void app.request({ type: "lre.view.open", chatId: props.chatId, panel: "castlife.cast", entity: props.id }).then((result) => {
       if (result?.pending) app.toast("Details appear when the reply finishes.", "info");
@@ -193,6 +196,8 @@ export function PersonSheet(props: SheetProps) {
   const classes = Object.entries(person.classes).flatMap(([facet, values]) => values.map((value) => ({ facet, value })));
   const facetLabel = (id: string): string => view.facets.find((f) => f.id === id)?.label ?? id;
   const where = whereabouts(person);
+  // "Where are they?": a ✎ that moves them through the one move path, with the fix's own Undo.
+  const whereFix = whereFixTarget(props.state.hud, person.id, person.here);
   return (
     <div class="lre-stack lre-world" data-lre-sheet-person={person.id}>
       <PageHeader title={person.name} subtitle={person.role || undefined} onBack={props.close} />
@@ -210,6 +215,19 @@ export function PersonSheet(props: SheetProps) {
           </span>
         </div>
       </div>
+      {whereFix ? (
+        fixingWhere ? (
+          <div class="lre-play-fix" onKeyDown={(event) => event.key === "Escape" && (event.stopPropagation(), setFixingWhere(false))}>
+            <FixEditor label="Where are they?" target={whereFix} onDone={() => setFixingWhere(false)} />
+          </div>
+        ) : (
+          <div>
+            <Button size="sm" icon="edit" onClick={() => setFixingWhere(true)}>
+              Where are they?
+            </Button>
+          </div>
+        )
+      ) : null}
       {person.next ? (
         <Section title="Next" flush>
           <List>

@@ -423,7 +423,7 @@ Beyond a world's document, the tools reach what the user sets up once and what B
 
 - A named preset expands: `{"realism": {"preset": "grounded"}}` sets every level and band cap, `{"modelUse": {"preset": "standard"}}` every step, budget and the minds' policy. A change to what a named preset sets makes it `custom`, as Settings does; the answer's `presets` says so.
 - LumiRPEngine keeps every value within what it takes. `adjusted` lists what came out other than sent (a value out of range, a key it doesn't know, a preset's own values): read it, don't assume the patch landed as written.
-- A step's route names a Lumiverse connection by id (`route.connectionId`, null for the helper model's); its template (`template`) is the step's prompt. A world's own step templates are its document's `/steps`, written with `lre_edit`.
+- A step's route names a Lumiverse connection by id (`route.connectionId`, null for the helper model's); its template (`template`) is the user's own prompt for the step, which wins over the world's step template for the purpose (the time-skip step's is the skip plan's; a mind's, a memory's and consolidation's are `minds.prompts`). A world's own step templates are its document's `/steps`, written with `lre_edit`.
 - Realism, checks and time seed new chats only. A running chat changes through its own markers (GM → This chat).
 - The answer carries the caveats as they read now; `lre_settings_caveats` reads them alone. They dry-run the chat the user plays, which takes a while on a long chat: "still checking" means ask again in a moment.
 

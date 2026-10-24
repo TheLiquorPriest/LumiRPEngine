@@ -70,7 +70,7 @@ import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
-import { claimFor } from "./claims";
+import { claimFor, outOfHand } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { pinReader } from "./lore-pins";
 import { liveLore } from "./book-lore";
@@ -89,12 +89,14 @@ import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
-import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
+import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, slotVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { StudioBridge } from "./studio";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
 import { CANNOT_STOP, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
+// The steps by their Settings names, apart from the activity line's in-flight labels above.
+import { STEP_LABEL as STEP_NAME } from "../shared/steps";
 
 export interface RuntimeOptions {
   host: HostPort;
@@ -1110,6 +1112,8 @@ export class Runtime implements TurnHooks {
       user,
       reply,
       recent: recent.join("\n"),
+      // What the player character has and knows, as the sections tell it (`slotVars`).
+      ...slotVars(this.registry, world, state),
     };
   }
 
@@ -1255,7 +1259,9 @@ export class Runtime implements TurnHooks {
     // §11), since the queue stops at that check, and leaving it in words would offer the same attempt again.
     let rolls = false;
     const take = (def: ActionDef, given: JsonObject, words: string, thing: ThingSort | undefined, said: readonly string[]): void => {
-      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow);
+      // The player character's own thing that the world keeps elsewhere is a tracking gap, not a veto:
+      // it goes to the claims policy rather than failing and stopping the message (DESIGN §9.4).
+      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state);
       if (!ref) {
         steps.push({ action: def.id, params: given, text: words });
         rolls ||= checkOf(render.world, def.check) !== null;
@@ -1618,7 +1624,7 @@ export class Runtime implements TurnHooks {
     // L27: a timelapse or speed-through turn's time passed as its timelapse, so its reply proposes no skip.
     const skipped = facts.timelapse || !!plan?.timelapse;
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent)
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "")
       : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
@@ -2559,7 +2565,7 @@ export class Runtime implements TurnHooks {
    */
   async presetCaveats(userId: UserId, waitMs = CAVEATS_WAIT_MS): Promise<PresetCaveat[]> {
     // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1).
-    const host: PresetCaveat[] = this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }];
+    const host: PresetCaveat[] = [...(this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop" as const, message: CANNOT_STOP }]), ...(await this.stepCaveats(userId))];
     const open = await this.host.chats.active(userId).catch(() => null);
     const chatId = open && (await this.runOf(open, userId)) ? open : this.lastWorldChat.get(userId);
     if (!chatId) return host;
@@ -2585,6 +2591,41 @@ export class Runtime implements TurnHooks {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Caveats' pre-flight (DESIGN §5.3): the helper model's connection and every enabled step's own
+   * name a connection the user has (a Decision step's, a Decisions API one), and its model one that
+   * connection lists, since either gone fails the turn's call. A list the host can't give says
+   * nothing; neither does a model list a provider doesn't answer.
+   */
+  private async stepCaveats(userId: UserId): Promise<PresetCaveat[]> {
+    const settings = await this.settings.get(userId);
+    const [helpers, decisions] = await Promise.all([this.host.connections.list(userId).catch(() => null), this.host.connections.decisionList(userId).catch(() => null)]);
+    const gone: string[] = [];
+    const unlisted: string[] = [];
+    const check = async (label: string, connectionId: string | null, model: string | null, decision: boolean): Promise<void> => {
+      const list = decision ? decisions : helpers;
+      if (connectionId === null || list === null) return;
+      const connection = list.find((c) => c.id === connectionId);
+      if (!connection) {
+        gone.push(label);
+        return;
+      }
+      if (decision || model === null || model === "") return;
+      const models = await this.host.connections.models(connectionId, userId);
+      if (models && !models.includes(model)) unlisted.push(`${label} (${model} on ${connection.name})`);
+    };
+    await check("Helper model", settings.helper.connectionId, settings.helper.model, false);
+    for (const purpose of Object.keys(STEP_NAME) as StepPurpose[]) {
+      const config = stepConfigOf(settings.modelUse.steps, purpose);
+      if (!config.enabled || !config.route) continue;
+      await check(STEP_NAME[purpose], config.route.connectionId, config.route.model, config.route.provider === "decision");
+    }
+    return [
+      ...(gone.length > 0 ? [{ code: "step_connection_missing" as const, message: `These name a connection you no longer have, so their calls would fail the turn: ${gone.join(", ")}. Pick another in Settings → Steps and connections.` }] : []),
+      ...(unlisted.length > 0 ? [{ code: "step_model_missing" as const, message: `These name a model their connection doesn't list, so their calls may fail the turn: ${unlisted.join(", ")}. Pick another in Settings → Steps and connections.` }] : []),
+    ];
   }
 
   private async lintOf(chatId: ChatId, assembly: DryRun, userId: UserId): Promise<PresetCaveat[]> {
@@ -2703,6 +2744,12 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   spawn: "New characters",
   life: "Life and death",
   routine: "Routine changes",
+  take: "Things picked up",
+  drop: "Things put down",
+  use_up: "Things used up",
+  wear: "Things put on or off",
+  lose: "Things lost or stolen",
+  item_condition: "Wear and damage",
 };
 
 /**
@@ -3132,6 +3179,19 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
       return `${s("from")} → ${s("to")}: ${s("axis")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "knows":
       return `${s("who")} learns: ${s("fact")}`;
+    // The reply's item changes (DESIGN §9.4), each by who and what, as the POV may know them.
+    case "take":
+      return `${s("entity")} picked up ${s("item")}`;
+    case "drop":
+      return `${s("entity")} put down ${s("item")}`;
+    case "use_up":
+      return `${s("entity")} used up ${s("item")}${typeof p.qty === "number" && p.qty > 1 ? ` ×${p.qty}` : ""}`;
+    case "wear":
+      return `${s("entity")} ${p.off === true ? "took off" : "put on"} ${s("item")}`;
+    case "lose":
+      return typeof p.by === "string" && p.by !== "" ? `${s("by")} stole ${s("item")} from ${s("entity")}` : `${s("entity")} lost ${s("item")}`;
+    case "item_condition":
+      return `${s("item")}: condition ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "spawn":
       return `New: ${s("name")}`;
     case "life":

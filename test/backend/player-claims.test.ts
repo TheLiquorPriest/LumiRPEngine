@@ -65,6 +65,19 @@ async function send(rig: Rig, chatId: string, text: string) {
   return rig.host.start(chatId, { type: "normal" });
 }
 
+describe("tracking gaps", () => {
+  test("'I put on my clothes' with the clothes kept elsewhere plays through the claim, and the rest of the message plays", async () => {
+    const clothes: JsonObject = { id: "pov_clothes", kind: "item", name: "Clothes", tier: "background", fields: { owner: "pov", place: "lakefront_park", slot: "torso", notable: true }, relations: [] };
+    for (const item of ["pov_clothes", "clothes"]) {
+      const { rig, chatId } = await chat(undefined, [["entities", clothes]]);
+      reading(rig, { action: "wear", params: { item }, thing: "other", more: [{ action: "go", params: { to: "alder_harbor_marina" }, text: "I walk down to the marina" }] });
+      await rig.turn(chatId, "I put on my clothes and walk down to the marina.", "You dress and head out.");
+      const after = await state(rig, chatId);
+      expect({ item, worn: after.entities.pov_clothes?.relations.some((r) => r.type === "worn_by" && r.to === "pov"), made: (await claimed(rig, chatId)).length, place: after.entities.pov?.fields.place }).toEqual({ item, worn: true, made: 0, place: "alder_harbor_marina" });
+    }
+  });
+});
+
 describe("Make it real", () => {
   test("'I pour Danny a coffee' with no coffee makes one in hand, gives it, says Added with Undo, tells the narrator nothing failed, and clears it once given", async () => {
     const { rig, chatId } = await chat();

@@ -118,6 +118,19 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
       params[name] = id;
       continue;
     }
+    // A list of refs (Go's `with`): each one an entity of the param's kind and selector, kept as
+    // their ids joined by commas, the one scalar form an effect's argument can carry.
+    if (def.type === "list" && def.ref) {
+      const ids = (Array.isArray(raw) ? raw : String(raw).split(",")).map((x) => String(x).trim()).filter((x) => x !== "");
+      for (const id of ids) {
+        const target = own(state.entities, id);
+        if (!target) return { code: "bad_param", reason: `no entity ${labelOf({ world, state }, id)}` };
+        if (!kindIs(reg, world, target.kind, def.ref)) return { code: "bad_param", reason: `${target.name} is not ${/^[aeiou]/i.test(def.ref) ? "an" : "a"} ${(reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase()}` };
+        if (def.of && !selectorMatches(reg, world, state, def.of, id)) return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
+      }
+      if (ids.length > 0) params[name] = [...new Set(ids)].join(",");
+      continue;
+    }
     // A text param naming a table row (a skill, a save) takes the row's id or its label, and keeps the id.
     if (def.type === "text" && def.table !== undefined) {
       const key = typeof raw === "string" ? tableRowKey(own(world.tables, def.table), raw) : null;
