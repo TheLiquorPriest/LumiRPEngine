@@ -42,7 +42,7 @@ describe("the Character model", () => {
     expect(field(marcus, "activity_until")?.locked).toBe(true);
     // No label is a shape: a type hint is help.
     for (const f of marcus.sections.flatMap((s) => s.fields)) expect([f.id, /[{}()?]/.test(f.label)]).toEqual([f.id, false]);
-    expect(field(marcus, "pay_prefs")?.help).toBeTruthy();
+    expect(field(marcus, "pay_prefs")?.help ?? "").not.toMatch(/[{}]/);
     expect(field(marcus, "birthday")?.help).toBeTruthy();
     expect(field(marcus, "traits")).toMatchObject({ type: "list", of: "text" });
     expect(marcus).toMatchObject({ kind: { id: "character" }, home: { id: "birch_lane_12" }, bed: { kind: "home" }, pov: false });
@@ -87,5 +87,54 @@ describe("the Character model", () => {
     // Build's read has no now.
     expect(buildCharacter(reg, world, "maya")?.character.now).toBeUndefined();
     expect(buildCharacter(reg, world, "truck")).toBeNull();
+  });
+});
+
+describe("the Character model in words", () => {
+  test("who they work for is a place, with its path, or a business", async () => {
+    const marcus = character(await portAlder(), "marcus_delgado");
+    expect(marcus.employer).toMatchObject({ kind: "place", place: { id: "alder_automotive", path: ["Lakeshore County", "Port Alder"] } });
+    const you = character(migrateWorld(modernUsWorld("w", "R")), "you");
+    expect(you.employer).toMatchObject({ kind: "business", thing: { id: "brightline" } });
+  });
+
+  test("their schedules read as days, times and places, never as ids", async () => {
+    const world = await portAlder();
+    const marcus = character(world, "marcus_delgado");
+    const ids = Object.values(world.schedules).filter((s) => s.owner === "marcus_delgado").map((s) => s.id).sort();
+    expect(marcus.schedules.map((s) => s.id).sort()).toEqual(ids);
+    for (const s of marcus.schedules) {
+      expect(s.label).not.toContain(s.id);
+      expect(s.summary).not.toContain("_");
+    }
+    // The weekday place schedule names the shop by name, at the times its slots give.
+    const place = marcus.schedules.find((s) => s.id === "marcus_delgado_place_1");
+    expect(place?.summary).toContain(world.places.alder_automotive?.name ?? "");
+    expect(place?.summary).toMatch(/6:30/);
+  });
+
+  test("their relations read as words: regard in the world's band words, the rest by their fields, each in its group", () => {
+    const world = modernUsWorld("w", "R");
+    // The world's own band words for regard.
+    world.packs.relationships = { ...(world.packs.relationships ?? {}), config: { bands: [{ label: "frosty", max: 0 }, { label: "chummy", min: 0 }] } };
+    const you = world.entities.you;
+    if (!you) throw new Error("fixture");
+    you.relations.push({ type: "regard", to: "maya", fields: { warmth: 60, trust: 60, respect: 60 } }, { type: "parent_of", to: "rosa" }, { type: "member_of", to: "chen_household", fields: { role: "Lodger" } });
+    world.entities.chen_household = { id: "chen_household", kind: "household", name: "The Chens", tier: "background", fields: {}, relations: [] };
+    const built = buildCharacter(reg, migrateWorld(world), "you");
+    const rel = (type: string) => built?.character.relations.find((r) => r.type === type);
+    expect(rel("regard")).toMatchObject({ group: "feelings", to: { id: "maya", name: "Maya Chen" }, words: "chummy" });
+    expect(rel("parent_of")?.group).toBe("family");
+    expect(rel("member_of")).toMatchObject({ group: "groups", to: { name: "The Chens" } });
+    expect(rel("member_of")?.words).toContain("Lodger");
+  });
+
+  test("a field's help says only what tells something, and a number's range is its hint", async () => {
+    const marcus = character(await portAlder(), "marcus_delgado");
+    expect(field(marcus, "might")).toMatchObject({ hint: "3–18" });
+    expect(field(marcus, "might")?.help).toBeUndefined();
+    // A table named as the field is ("Occupation", "Occupations") says nothing more.
+    expect(field(marcus, "occupation")?.help).toBeUndefined();
+    for (const f of marcus.sections.flatMap((s) => s.fields)) expect([f.id, /optional|From level/i.test(f.help ?? "")]).toEqual([f.id, false]);
   });
 });
