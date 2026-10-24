@@ -14881,7 +14881,7 @@ function mergeLeaves(patch, at = []) {
 function mergeAdjusted(patch, after) {
   return mergeLeaves(patch).flatMap(({ tokens, value }) => {
     const now = getAt(after, tokens);
-    return (value === null ? now === undefined : jsonEqual(now, value)) ? [] : [{ pointer: pointerOf(tokens), sent: value, now }];
+    return (value === null ? now === undefined || now === null : jsonEqual(now, value)) ? [] : [{ pointer: pointerOf(tokens), sent: value, now }];
   });
 }
 
@@ -24885,10 +24885,26 @@ function feedSummary(feed) {
     parts.push(`sources: ${feed.include.join(", ")}`);
   return parts.length > 0 ? parts.join(" · ") : "as the world has it";
 }
+function chatFeedOf(draft, sources) {
+  const include = sources.split(",").map((s3) => s3.trim()).filter((s3) => s3 !== "");
+  const to = {};
+  if (draft.enabled === false)
+    to.enabled = false;
+  if (draft.scope && draft.scope !== "player")
+    to.scope = draft.scope;
+  if (draft.maxLines !== undefined)
+    to.maxLines = draft.maxLines;
+  if (draft.maxTokens !== undefined)
+    to.maxTokens = draft.maxTokens;
+  if (include.length > 0)
+    to.include = include;
+  return to;
+}
+var CAP_START = { maxLines: 12, maxTokens: 400 };
 function SectionFeedForm(props) {
   const app = useApp();
   const [busy, run] = useBusy();
-  const start = { ...props.row.world, ...props.row.chat ?? {} };
+  const start = props.row.chat ?? props.row.world;
   const [draft, setDraft] = d2(start);
   const [sources, setSources] = d2((start.include ?? []).join(", "));
   const set = (patch) => setDraft((d3) => ({ ...d3, ...patch }));
@@ -24899,25 +24915,7 @@ function SectionFeedForm(props) {
     if (result)
       props.onDone();
   });
-  const save = () => {
-    const include = sources.split(",").map((s3) => s3.trim()).filter((s3) => s3 !== "");
-    const to = {};
-    if (draft.enabled === false)
-      to.enabled = false;
-    if (draft.scope && draft.scope !== "player")
-      to.scope = draft.scope;
-    if (draft.maxLines !== undefined)
-      to.maxLines = draft.maxLines;
-    if (draft.maxTokens !== undefined)
-      to.maxTokens = draft.maxTokens;
-    if (include.length > 0)
-      to.include = include;
-    if (props.row.world.enabled === false && to.enabled === undefined)
-      to.enabled = true;
-    if (props.row.world.scope && props.row.world.scope !== "player" && to.scope === undefined)
-      to.scope = "player";
-    send(to);
-  };
+  const save = () => send(chatFeedOf(draft, sources));
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-feed-form": props.row.id,
@@ -24936,28 +24934,37 @@ function SectionFeedForm(props) {
           onChange: (v3) => set({ scope: FEED_SCOPES.find((s3) => s3 === v3) ?? "player" })
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Field, {
+      /* @__PURE__ */ u3(HostSwitch, {
+        checked: draft.maxLines !== undefined,
+        label: "Cap its lines",
+        onChange: (on) => set({ maxLines: on ? draft.maxLines ?? CAP_START.maxLines : undefined })
+      }, undefined, false, undefined, this),
+      draft.maxLines !== undefined ? /* @__PURE__ */ u3(Field, {
         label: "At most lines",
-        help: "Empty: no cap",
         children: /* @__PURE__ */ u3(NumberStepper, {
           label: "At most lines",
-          value: draft.maxLines ?? null,
+          value: draft.maxLines,
           min: 1,
           integer: true,
           onChange: (v3) => set({ maxLines: v3 })
         }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(HostSwitch, {
+        checked: draft.maxTokens !== undefined,
+        label: "Cap its tokens",
+        onChange: (on) => set({ maxTokens: on ? draft.maxTokens ?? CAP_START.maxTokens : undefined })
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Field, {
+      draft.maxTokens !== undefined ? /* @__PURE__ */ u3(Field, {
         label: "At most tokens",
         help: "Lines past it are cut from the end",
         children: /* @__PURE__ */ u3(NumberStepper, {
           label: "At most tokens",
-          value: draft.maxTokens ?? null,
+          value: draft.maxTokens,
           min: 1,
           integer: true,
           onChange: (v3) => set({ maxTokens: v3 })
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
+      }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(Field, {
         label: "Sources",
         help: "Comma-separated renderer sources; empty: its own section's",
@@ -36509,7 +36516,7 @@ function EntityBadges(props) {
     }, "life", false, undefined, this) : null,
     entity.visibility !== "public" ? /* @__PURE__ */ u3(Badge, {
       tone: "gm",
-      children: humanize(entity.visibility)
+      children: entity.visibility === "discoverable" ? entity.found ? "Discoverable · found" : "Discoverable · not found" : humanize(entity.visibility)
     }, "vis", false, undefined, this) : null,
     entity.claimed ? /* @__PURE__ */ u3(Badge, {
       children: "Claimed"

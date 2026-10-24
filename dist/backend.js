@@ -5966,7 +5966,7 @@ function worldFeed(section) {
   return readSectionFeed(authored) ?? {};
 }
 function feedOf(section, state) {
-  return { ...worldFeed(section), ...chatFeed(state)[section.id] ?? {} };
+  return chatFeed(state)[section.id] ?? worldFeed(section);
 }
 function sourceOf(r) {
   return r.source ?? r.slot;
@@ -5999,7 +5999,7 @@ var feedEvent = {
     state.packs.engine = s;
     const current = isRecord(s[FEED_KEY]) ? { ...s[FEED_KEY] } : {};
     const to = e.data.to === null ? null : readSectionFeed(e.data.to);
-    if (to && Object.keys(to).length > 0)
+    if (to)
       current[section] = to;
     else
       delete current[section];
@@ -6933,20 +6933,21 @@ function relocate(ctx, who, to, opts = {}) {
   if (!e)
     return { code: "missing_entity", reason: `no entity ${who}` };
   const from = placeOfEntity(ctx.state, who);
-  if (opts.route && from && from !== to && mapSettingsOf(ctx.world).travelSimulation === true) {
+  if (opts.told && from && from !== to && mapSettingsOf(ctx.world).travelSimulation === true) {
     const reach = optionalQuery(ctx, "space.reachable");
     const named = (id) => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
     if (reach && !reach(ctx, from, to))
       return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(to)}` };
   }
+  const next = opts.told ? from !== to ? opts.activity ?? "idle" : opts.activity : opts.along && from !== to ? "idle" : undefined;
   const out = moveEvents(ctx, who, to);
-  const doing = e.fields.activity;
-  if (opts.activity !== undefined && from !== to && doing !== undefined && doing !== opts.activity)
-    out.push({ type: "set", entity: who, field: "activity", value: opts.activity });
-  if (opts.party && who === ctx.world.pov) {
-    for (const member of partyAt(ctx, from))
-      if (placeOfEntity(ctx.state, member) !== to)
-        out.push(...moveEvents(ctx, member, to));
+  out.push(...activityEvents(ctx, who, next));
+  if (opts.party && who === ctx.world.pov && from !== to) {
+    for (const member of partyAt(ctx, from)) {
+      if (opts.stayed?.has(member) || placeOfEntity(ctx.state, member) === to)
+        continue;
+      out.push(...moveEvents(ctx, member, to), ...activityEvents(ctx, member, "idle"));
+    }
   }
   return out;
 }
@@ -6959,12 +6960,23 @@ function moveEvents(ctx, who, to) {
   out.push(...optionalService(ctx, "space.arrival")?.(ctx, who, to) ?? []);
   return out;
 }
+function activityEvents(ctx, who, next) {
+  const doing = own(ctx.state.entities, who)?.fields.activity;
+  return next !== undefined && doing !== undefined && doing !== next ? [{ type: "set", entity: who, field: "activity", value: next }] : [];
+}
 function partyAt(ctx, here) {
   const pov = ctx.world.pov;
   return Object.keys(ctx.state.entities).sort().filter((id) => {
     const e = own(ctx.state.entities, id);
     return !!e && id !== pov && e.relations.some((r) => r.type === PARTY_RELATION && r.to === pov) && !isGone(ctx.state, id) && acts(ctx.world, ctx.state, id) && together(ctx.world, here, placeOfEntity(ctx.state, id));
   });
+}
+function movedElsewhere(events2, here) {
+  const last = new Map;
+  for (const ev of events2)
+    if (ev.type === "set" && ev.field === "place")
+      last.set(ev.entity, ev.value);
+  return new Set([...last].filter(([, place]) => place !== here).map(([id]) => id));
 }
 
 // src/engine/schedules.ts
@@ -7192,7 +7204,7 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
         continue;
     }
     if (schedule.target === "place" && typeof value === "string") {
-      const moved = relocate(ctx, entity, value);
+      const moved = relocate(ctx, entity, value, { party: true });
       if (!("code" in moved))
         out.push(...moved);
     } else
@@ -9133,16 +9145,17 @@ function coreEffect(reg, w, type, args, rng) {
         return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
       if (!own(world.places, to))
         return reject4("missing_place", `no place ${labelOf(w, to)}`);
-      const moved = relocate(w.ctx, entity, to, { party: true, ...typeof args.activity === "string" ? { activity: args.activity } : {}, ...args.route === true ? { route: true } : {} });
+      const here = placeOfEntity(state, entity);
+      const stayed = entity === world.pov ? movedElsewhere(w.events, here) : undefined;
+      const moved = relocate(w.ctx, entity, to, { party: true, ...stayed ? { stayed } : {}, ...typeof args.activity === "string" ? { activity: args.activity } : {}, ...args.told === true ? { told: true } : {} });
       if (!Array.isArray(moved))
         return moved;
-      const here = placeOfEntity(state, entity);
       const along = text2(args.with).split(",").map((s) => s.trim()).filter((id) => id !== "" && id !== entity && own(state.entities, id) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)));
       const out = [...moved];
       for (const id of along) {
         if (out.some((ev) => ev.type === "set" && ev.entity === id && ev.field === "place"))
           continue;
-        const theirs = relocate(w.ctx, id, to);
+        const theirs = relocate(w.ctx, id, to, { along: true });
         if (Array.isArray(theirs))
           out.push(...theirs);
       }
@@ -11738,6 +11751,37 @@ function buildMapView(ctx, chosen = null) {
   return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes, travel };
 }
 
+// src/engine/access.ts
+function accessOf(state, id) {
+  const e = own(state.entities, id);
+  if (!e)
+    return { owners: [], users: [] };
+  const owners = ownersIn(e.fields);
+  const worth = worthShares(owners);
+  const users = [];
+  for (const [who, other] of Object.entries(state.entities)) {
+    for (const r of other.relations) {
+      if (r.type !== "uses" || r.to !== id)
+        continue;
+      if (typeof r.until === "number" && r.until < state.clock)
+        continue;
+      users.push(typeof r.until === "number" ? { who, until: r.until } : { who });
+    }
+  }
+  return { owners: owners.map((o) => ({ ...o, worth: worth[o.party] ?? 0 })), users };
+}
+function owns(state, who, id) {
+  const e = own(state.entities, id);
+  if (!e)
+    return false;
+  if (heldBy(state.entities, id, who))
+    return true;
+  return ownersIn(e.fields).some((o) => isMemberOf(state, who, o.party));
+}
+function mayUse(state, who, id) {
+  return owns(state, who, id) || accessOf(state, id).users.some((u) => u.who === who);
+}
+
 // src/packs/space/core/feed.ts
 var THINGS_CAP = 12;
 var EXITS_CAP = 6;
@@ -11824,8 +11868,13 @@ function placeLines(ctx, scope) {
   const seePlace = (who, id) => canSeePlace(ctx.registry, ctx.world, ctx.state, who, id);
   const lines = [];
   const description = place.fields.description;
-  if (typeof description === "string" && description.trim() !== "")
-    lines.push({ text: `${povPlace(ctx.registry, ctx.world, ctx.state)?.name ?? HIDDEN_PLACE_NAME}: ${description.trim()}`, known: "pov" });
+  if (typeof description === "string" && description.trim() !== "") {
+    const shown2 = povPlace(ctx.registry, ctx.world, ctx.state);
+    if (shown2?.id)
+      lines.push({ text: `${shown2.name}: ${description.trim()}`, known: "pov" });
+    else if (scope === "gm")
+      lines.push({ text: `${place.name}: ${description.trim()}`, known: "gm" });
+  }
   const things = Object.keys(ctx.state.entities).sort().filter((id) => {
     const e = own(ctx.state.entities, id);
     if (!e || isGone(ctx.state, id) || e.fields.place !== here || e.relations.some((r) => r.type === "in"))
@@ -11833,8 +11882,16 @@ function placeLines(ctx, scope) {
     return !["person", "vehicle", "account", "property"].some((k) => kindIs(ctx.registry, ctx.world, e.kind, k));
   });
   const seen = things.filter((id) => seeThing(pov, id));
+  const whose = (id) => {
+    if (owns(ctx.state, pov, id))
+      return " (yours)";
+    if (mayUse(ctx.state, pov, id))
+      return " (yours to use)";
+    const owner = accessOf(ctx.state, id).owners.map((o) => o.party).find((p) => seeThing(pov, p));
+    return owner ? ` (${nameOf3(ctx, owner)}'s)` : "";
+  };
   if (seen.length > 0)
-    lines.push({ text: `Here: ${seen.slice(0, THINGS_CAP).map((id) => nameOf3(ctx, id)).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
+    lines.push({ text: `Here: ${seen.slice(0, THINGS_CAP).map((id) => `${nameOf3(ctx, id)}${whose(id)}`).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
   for (const id of things.filter((t) => !seeThing(pov, t))) {
     const line2 = beyond(ctx, scope, `Here: ${nameOf3(ctx, id)}.`, (who) => seeThing(who, id));
     if (line2)
@@ -12072,7 +12129,8 @@ var spacePack = {
           observeCells(state, ctx.world);
       },
       touches: (e) => [{ entity: strOf(e.data.entity), field: "x" }, { entity: strOf(e.data.entity), field: "y" }],
-      describe: () => ""
+      describe: () => "",
+      coarsen: { key: (e) => strOf(e.data.entity), merge: (earlier, later) => ({ ...later, data: { ...later.data, from: earlier.data.from ?? null } }) }
     });
     r.effect({
       type: "space.step",
@@ -12161,14 +12219,14 @@ var spacePack = {
         }
         if (stopped)
           return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
-        const route = relocate(ctx, entity, place, { route: true });
+        const route = relocate(ctx, entity, place, { told: true });
         return "code" in route ? route : null;
       },
       toEffects: (p, ctx) => {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
         const to = typeof p.place === "string" ? p.place : "";
-        const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
-        return [{ type: "move", args: { entity, to, activity, route: true } }];
+        const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : null;
+        return [{ type: "move", args: { entity, to, told: true, ...activity !== null ? { activity } : {} } }];
       }
     });
     r.lint({
@@ -12307,34 +12365,6 @@ function materializeAll(reg, w, entity, runSeed) {
       out.push(ev);
   }
   return out;
-}
-
-// src/engine/access.ts
-function accessOf(state, id) {
-  const e = own(state.entities, id);
-  if (!e)
-    return { owners: [], users: [], home: null };
-  const owners = ownersIn(e.fields);
-  const worth = worthShares(owners);
-  const users = [];
-  for (const [who, other] of Object.entries(state.entities)) {
-    for (const r of other.relations) {
-      if (r.type !== "uses" || r.to !== id)
-        continue;
-      if (typeof r.until === "number" && r.until < state.clock)
-        continue;
-      users.push(typeof r.until === "number" ? { who, until: r.until } : { who });
-    }
-  }
-  return { owners: owners.map((o) => ({ ...o, worth: worth[o.party] ?? 0 })), users, home: typeof e.fields.home === "string" && e.fields.home !== "" ? e.fields.home : null };
-}
-function owns(state, who, id) {
-  const e = own(state.entities, id);
-  if (!e)
-    return false;
-  if (heldBy(state.entities, id, who))
-    return true;
-  return ownersIn(e.fields).some((o) => isMemberOf(state, who, o.party));
 }
 
 // src/packs/economy/core/pricing.ts
@@ -15448,7 +15478,7 @@ function propertyLines(ctx, scope) {
     if (isGone(ctx.state, id))
       continue;
     const access = accessOf(ctx.state, id);
-    if (!owns(ctx.state, pov, id)) {
+    if (!owns(ctx.state, pov, id) || !see(pov, id)) {
       others.push(id);
       continue;
     }
@@ -15471,12 +15501,13 @@ function propertyLines(ctx, scope) {
     const owners = accessOf(ctx.state, id).owners;
     if (owners.length === 0)
       continue;
-    const text3 = `${name(id)}${where(id, null)}: ${owners.map((o) => `${name(o.party)}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`;
-    const knowers = owners.filter((o) => withHim(o.party)).map((o) => name(o.party));
-    if (knowers.length > 0)
-      lines.push({ text: text3, known: "scene", who: knowers.join(", ") });
-    else if (scope === "gm")
-      lines.push({ text: text3, known: "gm" });
+    const knowers = owners.filter((o) => withHim(o.party) && see(o.party, id)).map((o) => o.party);
+    const knower = knowers[0];
+    if (knower !== undefined) {
+      const text3 = `${name(id)}${where(id, knower)}: ${owners.map((o) => `${see(knower, o.party) || o.party === knower ? name(o.party) : "someone"}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`;
+      lines.push({ text: text3, known: "scene", who: knowers.map(name).join(", ") });
+    } else if (scope === "gm")
+      lines.push({ text: `${name(id)}${where(id, null)}: ${owners.map((o) => `${name(o.party)}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`, known: "gm" });
     else
       continue;
     told++;
@@ -18570,7 +18601,7 @@ function charge(hooks, ctx, payer, rawCents, memo, opts = {}) {
 function moverOf(ctx, from, to) {
   return holdersOf(ctx.state, from).find((p) => canSpend(ctx.state, from, p) && rightsOf(ctx.state, to, p) !== null) ?? null;
 }
-function mayUse(ctx, party, account, side) {
+function mayUse2(ctx, party, account, side) {
   const t = traitsOf(ctx, account);
   if (own(ctx.state.entities, account)?.kind !== "account" || !t)
     return reject6("missing_account", `there's no account ${labelOf(ctx, account)}`);
@@ -18607,7 +18638,7 @@ function move(ctx, from, to, cents, memo, opts = {}) {
   const toTraits = traitsOf(ctx, to);
   if (!fromTraits || !toTraits)
     return reject6("missing_account", "both accounts must exist");
-  const unusable = mayUse(ctx, party, from, "from") ?? mayUse(ctx, party, to, "into");
+  const unusable = mayUse2(ctx, party, from, "from") ?? mayUse2(ctx, party, to, "into");
   if (unusable)
     return unusable;
   let c = Math.round(cents);
@@ -19626,7 +19657,7 @@ function deposit(ctx, who, account, raw) {
   const cents = Math.round(raw);
   if (!(cents > 0))
     return reject6("bad_amount", "the amount must be positive");
-  const unusable = mayUse(ctx, who, account, "into");
+  const unusable = mayUse2(ctx, who, account, "into");
   if (unusable)
     return unusable;
   if (traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked)
@@ -20030,7 +20061,7 @@ function creditApplication(ctx, who, app) {
   if (!decision.approved)
     return { decision, events: inquiry };
   if (app.into !== undefined && own(ctx.state.entities, app.into)) {
-    const unusable = mayUse(ctx, who, app.into, "into");
+    const unusable = mayUse2(ctx, who, app.into, "into");
     if (unusable)
       return unusable;
   }
@@ -22270,7 +22301,7 @@ function makeApi(hooks) {
     partyKind: (ctx, id) => partyKindOf2(ctx, id),
     feature: (ctx, party, feature2) => featureFor(ctx, party, feature2),
     outside: (id) => external(id),
-    mayUse: (ctx, party, account, side) => mayUse(ctx, party, account, side),
+    mayUse: (ctx, party, account, side) => mayUse2(ctx, party, account, side),
     pay: (ctx, p) => payWith(hooks, ctx, p),
     post: (ctx, lines, meta) => postWith(ctx, lines, meta),
     note: (ctx, who, cls, text3) => [signal(cls, text3, who, ctx.state.clock)],
@@ -22683,7 +22714,7 @@ function registerEffects(r, hooks) {
       const from = strOf(a.from) || depositAccount(ctx, who, card) || "";
       if (from === "")
         return reject6("missing_account", `${labelOf(ctx, who)} has no account to pay ${labelOf(ctx, card)} from`);
-      const unusable = mayUse(ctx, who, from, "from");
+      const unusable = mayUse2(ctx, who, from, "from");
       if (unusable)
         return unusable;
       const owed = Math.max(0, -balance(ctx.state, card));
@@ -23317,8 +23348,12 @@ function presentGearLines(ctx, scope) {
     if (scope === "player")
       continue;
     const hidden = [...worn, ...held2].filter((id) => !see(pov, id));
-    if (hidden.length > 0)
-      lines.push({ text: `${person.name} has ${say(hidden)}.`, known: "scene", who: person.name });
+    const theirs = hidden.filter((id) => see(who, id));
+    const gms = hidden.filter((id) => !see(who, id));
+    if (theirs.length > 0)
+      lines.push({ text: `${person.name} has ${say(theirs)}.`, known: "scene", who: person.name });
+    if (scope === "gm" && gms.length > 0)
+      lines.push({ text: `${person.name} has ${say(gms)}.`, known: "gm" });
   }
   return lines;
 }
@@ -23474,6 +23509,8 @@ function stackFor(ctx, spec) {
     const e = own(ctx.state.entities, id);
     if (!e || e.kind !== "item" || isGone(ctx.state, id) || e.relations.some((r) => r.type === "worn_by" || r.type === "equipped"))
       return false;
+    if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id))
+      return false;
     if ((e.fields.owner ?? null) !== (spec.owner ?? null))
       return false;
     return spec.catalog ? e.fields.catalog === spec.catalog : e.fields.catalog === undefined && e.name.trim().toLowerCase() === name;
@@ -23481,8 +23518,10 @@ function stackFor(ctx, spec) {
 }
 var spawn = (ctx, spec) => {
   const stack = spec.stack ? stackFor(ctx, spec) : null;
-  if (stack)
-    return [{ type: "set", entity: stack, field: "qty", value: numOf(own(ctx.state.entities, stack)?.fields.qty, 1) + (spec.qty ?? 1) }];
+  if (stack) {
+    const stored = own(ctx.state.entities, stack)?.fields.qty;
+    return [typeof stored === "number" ? { type: "add", entity: stack, field: "qty", delta: spec.qty ?? 1 } : { type: "set", entity: stack, field: "qty", value: 1 + (spec.qty ?? 1) }];
+  }
   const row = spec.catalog ? rowOf(ctx, "gear.items", spec.catalog) ?? rowOf(ctx, "gear.containers", spec.catalog) : undefined;
   const fields = { notable: true };
   if (spec.owner)
@@ -23537,7 +23576,7 @@ function heldItem(ctx, item, from) {
   if (own(ctx.state.entities, item) || from === "")
     return item;
   const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
-  const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
+  const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
 }
 var USE_UP_MAX = 10;
@@ -23972,7 +24011,8 @@ var gearPack = {
         if ("code" in found)
           return [];
         const left = numOf(found.e.fields.qty, 1) - numOf(p.qty, 1);
-        return [left > 0 ? { type: "set", args: { entity: found.id, field: "qty", value: left } } : { type: "set", args: { entity: found.id, field: GONE_FIELD, value: true } }];
+        const step = left > 0 ? { type: "add", args: { entity: found.id, field: "qty", delta: -numOf(p.qty, 1) } } : { type: "set", args: { entity: found.id, field: GONE_FIELD, value: true } };
+        return [step];
       }
     });
     r.proposal({
@@ -24292,13 +24332,13 @@ function vehicleLines(ctx, scope) {
     return lines;
   for (const o of others.filter((x) => !see(pov, x.v))) {
     const name = own(ctx.state.entities, o.v)?.name ?? o.v;
-    const ownerHere = o.owner !== null && see(pov, o.owner) && together(ctx.world, here, placeOfEntity(ctx.state, o.owner));
-    const where = o.place ? own(ctx.world.places, o.place)?.name ?? o.place : "somewhere";
-    const text3 = `${name}: at ${where}, ${o.owner ? `${own(ctx.state.entities, o.owner)?.name ?? o.owner}'s` : "no one's"}.`;
-    if (ownerHere && o.owner)
-      lines.push({ text: text3, known: "scene", who: own(ctx.state.entities, o.owner)?.name ?? o.owner });
-    else if (scope === "gm")
-      lines.push({ text: text3, known: "gm" });
+    const ownerName2 = o.owner ? own(ctx.state.entities, o.owner)?.name ?? o.owner : null;
+    const knower = o.owner !== null && see(pov, o.owner) && see(o.owner, o.v) && together(ctx.world, here, placeOfEntity(ctx.state, o.owner)) ? o.owner : null;
+    if (knower && ownerName2) {
+      const where = o.place && canSeePlace(ctx.registry, ctx.world, ctx.state, knower, o.place) ? `at ${own(ctx.world.places, o.place)?.name ?? o.place}` : "somewhere";
+      lines.push({ text: `${name}: ${where}, ${ownerName2}'s.`, known: "scene", who: ownerName2 });
+    } else if (scope === "gm")
+      lines.push({ text: `${name}: at ${o.place ? own(ctx.world.places, o.place)?.name ?? o.place : "an unknown place"}, ${ownerName2 ? `${ownerName2}'s` : "no one's"}.`, known: "gm" });
   }
   return lines;
 }
@@ -24521,7 +24561,7 @@ var vehiclesPack = {
           if (!pe || moved.has(p) || pe.relations.some((x) => x.type === "in" && x.to === v))
             continue;
           moved.add(p);
-          const events2 = relocate(ctx, p, to);
+          const events2 = relocate(ctx, p, to, p === driver ? {} : { along: true });
           if ("code" in events2)
             return events2;
           out.push(...events2);
@@ -27318,7 +27358,7 @@ function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = 
   if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     if (seen && withPov(ctx, who))
       out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
-    out.push(...movesOf(relocate(ctx, who, place)));
+    out.push(...movesOf(relocate(ctx, who, place, { party: true })));
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
       out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
   }
@@ -27767,7 +27807,7 @@ function stepTrips(slot, ctx) {
       const away = holding && e.fields.place === place;
       if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place) && !(slot.povRoutine === false && withPov(ctx, who))) {
         holds = { ...holds, place: until, activity: until };
-        out.push({ type: "set", entity: who, field: "holds", value: holds }, ...movesOf(relocate(ctx, who, place)), { type: "set", entity: who, field: "activity", value: "trip" });
+        out.push({ type: "set", entity: who, field: "holds", value: holds }, ...movesOf(relocate(ctx, who, place, { party: true })), { type: "set", entity: who, field: "activity", value: "trip" });
       }
       if (!(until <= slot.end && (until > slot.start || holding)))
         continue;
@@ -27775,7 +27815,7 @@ function stepTrips(slot, ctx) {
         continue;
       const home = homeOf(ctx, who);
       if ((until > slot.start || away) && home)
-        out.push(...movesOf(relocate(ctx, who, home)), { type: "set", entity: who, field: "activity", value: "idle" });
+        out.push(...movesOf(relocate(ctx, who, home, { party: true })), { type: "set", entity: who, field: "activity", value: "idle" });
       const kept2 = Object.fromEntries(Object.entries(holds).filter(([target, at]) => !((target === "place" || target === "activity") && at === until)));
       if (Object.keys(kept2).length < Object.keys(holds).length) {
         holds = kept2;
@@ -28163,7 +28203,12 @@ function stanceFeed(ctx, scope) {
     const name = own(ctx.state.entities, id)?.name ?? id;
     for (const a of agendaFor(ctx.world, ctx.state, id).filter((x) => !publicTrack(ctx.world, x.track))) {
       const track = own(ctx.world.tracks, a.track);
-      lines.push({ text: `${name}'s private agenda, ${track?.label ?? a.track}: ${a.stageLabel}.`, known: "scene", who: name });
+      const secret = visibilityOf(track?.visibility) === "secret";
+      const text4 = `${name}'s private agenda, ${track?.label ?? a.track}: ${a.stageLabel}.`;
+      if (!secret)
+        lines.push({ text: text4, known: "scene", who: name });
+      else if (scope === "gm")
+        lines.push({ text: text4, known: "gm" });
     }
   }
   return lines;
@@ -29996,12 +30041,11 @@ function questLines(ctx, scope) {
     const stage = own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start);
     if (!stage || stage.next.length === 0 && !stage.fail)
       continue;
-    const text4 = `${t.label}: ${stage.label}${stage.truth ? ` (the truth: ${stage.truth})` : ""}.`;
-    const who = withHim.filter((k) => trackKnown(ctx.registry, ctx.world, ctx.state, k, t)).map((k) => own(ctx.state.entities, k)?.name ?? k);
+    const who = visibilityOf(t.visibility) === "secret" ? [] : withHim.filter((k) => trackKnown(ctx.registry, ctx.world, ctx.state, k, t)).map((k) => own(ctx.state.entities, k)?.name ?? k);
     if (who.length > 0)
-      lines.push({ text: text4, known: "scene", who: who.join(", ") });
+      lines.push({ text: `${t.label}: ${stage.label}.`, known: "scene", who: who.join(", ") });
     else if (scope === "gm")
-      lines.push({ text: text4, known: "gm" });
+      lines.push({ text: `${t.label}: ${stage.label}${stage.truth ? ` (the truth: ${stage.truth})` : ""}.`, known: "gm" });
   }
   return lines;
 }
@@ -67465,7 +67509,7 @@ function entityOf(reg, ctx, id) {
     person: kindIs(reg, world, e.kind, "person"),
     gone: isGone(state2, id),
     spawned: !own(world.entities, id),
-    visibility: entityVisibility(world, state2, id),
+    ...isDiscoverable(world, state2, id) ? { visibility: "discoverable", found: knows(state2, world.pov, id) } : { visibility: entityVisibility(world, state2, id) },
     place: placeOfEntity(state2, id),
     holder: e.relations.find((r) => r.type === "in")?.to ?? null,
     claimed: e.fields.claimed === true,
@@ -70978,8 +71022,7 @@ function skipPlanSystem(reg, world, state2, from, config3) {
   if (mine.trim() === "")
     return `${SKIP_PLAN_PROMPT}
 ${SKIP_PLAN_ANSWER}`;
-  const here = placeOfEntity(state2, world.pov);
-  const vars = safeVars({ world: world.name, pov: own(state2.entities, world.pov)?.name ?? world.pov, place: here ? own(world.places, here)?.name ?? here : "", clock: formatClock(calendarOf(world), from) }, unrevealedSecrets(reg, world, state2));
+  const vars = safeVars({ world: world.name, pov: own(state2.entities, world.pov)?.name ?? world.pov, place: povPlace(reg, world, state2)?.name ?? "", clock: formatClock(calendarOf(world), from) }, unrevealedSecrets(reg, world, state2));
   return `${renderTemplate(mine, vars)}
 ${SKIP_PLAN_ANSWER}`;
 }
@@ -71525,9 +71568,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "82a3e463b9d74f5a1d5b93a1cd8ee5ba3e4dc91f0be8887aca8e97b7802a2efc";
+  const sha256 = "f6ee5ba9a589da8c1b941822b4646ea28953fdbce30ae2e9a3e545e6a5bd87dc";
   const tools = ["24a76a1271330ef57b3b4390f34a5317", "05c19bcfc22755ef976289b6cd342324"].filter((f) => f !== undefined);
-  return { id: "30a30132", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "52db560a", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72999,7 +73042,7 @@ function knownBy(registry, world, state2, name, mayKnow) {
   };
   const here = placeOfEntity(state2, world.pov);
   const rank = (id) => isInside(state2, id, world.pov) ? 0 : placeOfEntity(state2, id) === here ? 1 : 2;
-  const things = Object.keys(state2.entities).filter((id) => id !== world.pov && !isGone(state2, id) && mayKnow(id) && !mineElsewhere(world, state2, id) && names2(own(state2.entities, id)?.name ?? "")).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const things = Object.keys(state2.entities).filter((id) => id !== world.pov && !isGone(state2, id) && mayKnow(id) && !mineElsewhere(world, state2, id, mayKnow) && names2(own(state2.entities, id)?.name ?? "")).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   if (things[0] !== undefined)
     return things[0];
   const place = Object.values(world.places).some((p) => {
@@ -73031,7 +73074,7 @@ function claimFor(input) {
   const kind = unfit.def.ref ?? "item";
   if (!at2 || typeof unfit.value !== "string" || !kindIs(registry, world, kind, "item"))
     return null;
-  const named = mineElsewhere(world, state2, unfit.value) ? unfit.value : null;
+  const named = mineElsewhere(world, state2, unfit.value, mayKnow) ? unfit.value : null;
   if (!named && (own(state2.entities, unfit.value) && mayKnow(unfit.value) || own(world.places, unfit.value)))
     return null;
   if (unfitRef(registry, action, input.params, world, state2, mayKnow, unfit.param))
@@ -73070,24 +73113,24 @@ function claimFor(input) {
     return { kind: "real", claim: claim2 };
   return { kind: "ask", claim: claim2, question: `${title} isn't in this world yet. Add it and ${verb} it?`, detail };
 }
-function mineElsewhere(world, state2, id) {
+function mineElsewhere(world, state2, id, mayKnow) {
   const e = own(state2.entities, id);
-  return e !== undefined && id !== world.pov && !isGone(state2, id) && e.fields.owner === world.pov && !isInside(state2, id, world.pov) && placeOfEntity(state2, id) !== placeOfEntity(state2, world.pov);
+  return e !== undefined && id !== world.pov && !isGone(state2, id) && mayKnow(id) && e.fields.owner === world.pov && !isInside(state2, id, world.pov) && placeOfEntity(state2, id) !== placeOfEntity(state2, world.pov);
 }
 function mineByName(registry, world, state2, name, mayKnow) {
   const said2 = itemName(name);
   if (!said2)
     return null;
-  const fits2 = Object.keys(state2.entities).filter((id) => mineElsewhere(world, state2, id) && mayKnow(id) && kindIs(registry, world, own(state2.entities, id)?.kind ?? "", "item")).filter((id) => {
+  const fits2 = Object.keys(state2.entities).filter((id) => mineElsewhere(world, state2, id, mayKnow) && kindIs(registry, world, own(state2.entities, id)?.kind ?? "", "item")).filter((id) => {
     const n = itemName(own(state2.entities, id)?.name ?? "");
     return n !== null && n.head === said2.head && [...said2.words].every((w) => n.words.has(w));
   }).sort();
   return fits2[0] ?? null;
 }
-function outOfHand(action, params, world, state2) {
+function outOfHand(action, params, world, state2, mayKnow) {
   for (const [param, def] of Object.entries(action.params)) {
     const value = params[param];
-    if (def.type === "ref" && def.claim && typeof value === "string" && mineElsewhere(world, state2, value))
+    if (def.type === "ref" && def.claim && typeof value === "string" && mineElsewhere(world, state2, value, mayKnow))
       return { param, def, value };
   }
   return null;
@@ -74289,7 +74332,7 @@ class StudioBridge {
 var ACTIVE_CONNECTION = "active";
 var READ_CHIP_KINDS = new Set(["undo", "confirm", "decline", "choice", "contradiction"]);
 var TOKEN_COUNT_CAP = 4;
-var CAVEATS_WAIT_MS = 20000;
+var LATE = Symbol("late");
 function readRun(meta) {
   const raw = meta[LEDGER_NAMESPACE];
   if (!isRecord(raw) || raw.v !== 1 || typeof raw.worldId !== "string" || typeof raw.revision !== "string" || typeof raw.runSeed !== "string")
@@ -74660,7 +74703,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "30a30132" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "52db560a" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -75130,7 +75173,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     const steps = [];
     let rolls = false;
     const take = (def, given, words5, thing, said2) => {
-      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state);
+      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state, mayKnow);
       if (!ref) {
         steps.push({ action: def.id, params: given, text: words5 });
         rolls ||= checkOf(render.world, def.check) !== null;
@@ -75971,7 +76014,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
           if (minds && allMinds.length > 0)
             record3.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
           if (facts.length > 0)
-            hinted.push({ fill: null, entryId, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens });
+            hinted.push({ fill: null, entryId, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
           continue;
         }
         const content = renderSection(section.label, section.template, safe);
@@ -75993,7 +76036,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         (record3.entries ??= {})[section.id] = entryId;
         sources.push(...capped.flatMap((l) => l.source ? [l.source] : []));
         if (safeHints.length > 0 || facts.length > 0)
-          hinted.push({ fill, entryId, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens });
+          hinted.push({ fill, entryId, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
       }
     });
     record3.budget.used = settings.modelUse.tokens.sections - budget;
@@ -76021,7 +76064,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
           carried.push(m.source);
         markedSent = true;
       }
-      if (h.hints.length > 0) {
+      if (h.hints.length > 0 && (h.maxLines === undefined || body.length + h.hints.length <= h.maxLines)) {
         const next = costOf3([...body, ...h.hints]);
         if (fits2(Math.max(0, next - cost), next)) {
           budget -= Math.max(0, next - cost);
@@ -76044,7 +76087,10 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
 ${rules.join(`
 `)}` });
     this.countLater(input.userId, uncounted);
-    record3.forced = fills.map((f) => f.id);
+    const traced2 = new Set(Object.values(record3.entries ?? {}));
+    if (preset.guidance.narrator && rulesAt)
+      traced2.add(rulesAt);
+    record3.forced = fills.map((f) => f.id).filter((id) => traced2.has(id));
     await this.inspector.add(input.chatId, input.userId, record3);
     this.push.changed(input.chatId, input.userId);
     const sent2 = new Set(record3.sections.filter((s) => !s.clipped).map((s) => s.slot));
@@ -76188,62 +76234,82 @@ ${rules.join(`
       this.host.log("warn", `[LumiRPEngine] JSON-hiding regex scripts: ${error instanceof Error ? error.message : String(error)}`, userId);
     }
   }
-  async presetCaveats(userId, waitMs = CAVEATS_WAIT_MS) {
-    const host = [...this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }], ...await this.stepCaveats(userId)];
-    const open = await this.host.chats.active(userId).catch(() => null);
-    const chatId = open && await this.runOf(open, userId) ? open : this.lastWorldChat.get(userId);
-    if (!chatId)
-      return host;
-    const preset = (await this.presets.current(chatId, userId)).preset;
-    const key = `${userId}\x00${chatId}\x00${preset?.id ?? ""}\x00${preset?.revision ?? ""}\x00${this.settings.revision(userId)}`;
-    let run2 = this.caveatRuns.get(key);
-    if (!run2) {
-      run2 = this.host.dryRun(chatId, userId).then((assembly) => this.lintOf(chatId, assembly, userId)).catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.host.log("warn", `[LumiRPEngine] preset lint: ${message}`, userId);
-        this.caveatRuns.delete(key);
-        return [{ code: "preset_lint_failed", message: `The preset check couldn't build a test prompt for this chat (${message.slice(0, 200)}), so its warnings aren't known. Open Caveats again to retry.` }];
-      });
-      lruSet(this.caveatRuns, key, run2, 64);
-    }
-    const pending = Promise.withResolvers();
-    const timer = setTimeout(() => pending.resolve([{ code: "preset_lint_pending", message: "The preset check is still building a test prompt for this chat, which takes a while on a long chat. Open Caveats again in a moment." }]), waitMs);
+  async presetCaveats(userId, waitMs) {
+    const settings = await this.settings.get(userId);
+    const ms = waitMs ?? timerMs(settings.timeouts.caveatsMs);
+    const late = Promise.withResolvers();
+    const timer = ms === null ? null : setTimeout(() => late.resolve(LATE), ms);
     try {
-      return [...host, ...await Promise.race([run2, pending.promise])];
+      const host = [...this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }], ...await this.stepCaveats(userId, settings, late.promise)];
+      const open = await this.host.chats.active(userId).catch(() => null);
+      const chatId = open && await this.runOf(open, userId) ? open : this.lastWorldChat.get(userId);
+      if (!chatId)
+        return host;
+      const preset = (await this.presets.current(chatId, userId)).preset;
+      const key = `${userId}\x00${chatId}\x00${preset?.id ?? ""}\x00${preset?.revision ?? ""}\x00${this.settings.revision(userId)}`;
+      let run2 = this.caveatRuns.get(key);
+      if (!run2) {
+        run2 = this.host.dryRun(chatId, userId).then((assembly) => this.lintOf(chatId, assembly, userId)).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          this.host.log("warn", `[LumiRPEngine] preset lint: ${message}`, userId);
+          this.caveatRuns.delete(key);
+          return [{ code: "preset_lint_failed", message: `The preset check couldn't build a test prompt for this chat (${message.slice(0, 200)}), so its warnings aren't known. Open Caveats again to retry.` }];
+        });
+        lruSet(this.caveatRuns, key, run2, 64);
+      }
+      const pending = [{ code: "preset_lint_pending", message: "The preset check is still building a test prompt for this chat, which takes a while on a long chat. Open Caveats again in a moment." }];
+      return [...host, ...await Promise.race([run2, late.promise.then(() => pending)])];
     } finally {
-      clearTimeout(timer);
+      clearTimeout(timer ?? undefined);
     }
   }
-  async stepCaveats(userId) {
-    const settings = await this.settings.get(userId);
-    const [helpers, decisions2] = await Promise.all([this.host.connections.list(userId).catch(() => null), this.host.connections.decisionList(userId).catch(() => null)]);
+  async stepCaveats(userId, settings, late) {
+    const named = [
+      { label: "Helper model", connectionId: settings.helper.connectionId, model: settings.helper.model, decision: false },
+      ...Object.keys(STEP_LABEL).flatMap((purpose) => {
+        const config3 = stepConfigOf(settings.modelUse.steps, purpose);
+        return config3.enabled && config3.route ? [{ label: STEP_LABEL[purpose], connectionId: config3.route.connectionId, model: config3.route.model, decision: config3.route.provider === "decision" }] : [];
+      })
+    ].filter((n) => n.connectionId !== null);
+    const lists = await Promise.race([Promise.all([this.host.connections.list(userId).catch(() => null), this.host.connections.decisionList(userId).catch(() => null)]), late]);
     const gone = [];
     const unlisted = [];
-    const check = async (label, connectionId, model, decision) => {
-      const list = decision ? decisions2 : helpers;
-      if (connectionId === null || list === null)
-        return;
-      const connection = list.find((c) => c.id === connectionId);
-      if (!connection) {
-        gone.push(label);
-        return;
+    const unchecked = [];
+    if (lists === LATE)
+      unchecked.push(...named.map((n) => n.label));
+    else {
+      const [helpers, decisions2] = lists;
+      const lookups = new Map;
+      const checks = named.flatMap((n) => {
+        const list = n.decision ? decisions2 : helpers;
+        if (list === null)
+          return [];
+        const connection = list.find((c) => c.id === n.connectionId);
+        if (!connection) {
+          gone.push(n.label);
+          return [];
+        }
+        if (n.decision || n.model === null || n.model === "")
+          return [];
+        let lookup = lookups.get(n.connectionId);
+        if (!lookup) {
+          lookup = Promise.race([this.host.connections.models(n.connectionId, userId).catch(() => null), late]);
+          lookups.set(n.connectionId, lookup);
+        }
+        return [{ ...n, model: n.model, connection: connection.name, lookup }];
+      });
+      for (const c of checks) {
+        const models = await c.lookup;
+        if (models === LATE)
+          unchecked.push(c.label);
+        else if (models && !models.includes(c.model))
+          unlisted.push(`${c.label} (${c.model} on ${c.connection})`);
       }
-      if (decision || model === null || model === "")
-        return;
-      const models = await this.host.connections.models(connectionId, userId);
-      if (models && !models.includes(model))
-        unlisted.push(`${label} (${model} on ${connection.name})`);
-    };
-    await check("Helper model", settings.helper.connectionId, settings.helper.model, false);
-    for (const purpose of Object.keys(STEP_LABEL)) {
-      const config3 = stepConfigOf(settings.modelUse.steps, purpose);
-      if (!config3.enabled || !config3.route)
-        continue;
-      await check(STEP_LABEL[purpose], config3.route.connectionId, config3.route.model, config3.route.provider === "decision");
     }
     return [
       ...gone.length > 0 ? [{ code: "step_connection_missing", message: `These name a connection you no longer have, so their calls would fail the turn: ${gone.join(", ")}. Pick another in Settings \u2192 Steps and connections.` }] : [],
-      ...unlisted.length > 0 ? [{ code: "step_model_missing", message: `These name a model their connection doesn't list, so their calls may fail the turn: ${unlisted.join(", ")}. Pick another in Settings \u2192 Steps and connections.` }] : []
+      ...unlisted.length > 0 ? [{ code: "step_model_missing", message: `These name a model their connection doesn't list, so their calls may fail the turn: ${unlisted.join(", ")}. Pick another in Settings \u2192 Steps and connections.` }] : [],
+      ...unchecked.length > 0 ? [{ code: "step_model_unchecked", message: `Their connections didn't answer within the Preset check timeout, so these weren't checked: ${unchecked.join(", ")}. Open Caveats again in a moment.` }] : []
     ];
   }
   async lintOf(chatId, assembly, userId) {
