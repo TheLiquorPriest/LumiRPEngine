@@ -74,6 +74,8 @@ const HISTORY = 8;
 export const REGARD_CHANNEL_CAP = 10;
 /** A chat's time: the stated length, else a quarter of an hour. */
 const CHAT_FOR = "minutes > 0 ? minutes : 15";
+/** The appraisal a chat makes, and the `why` of its regard: what other packs read the chat by (Cast life's company). */
+export const CONVERSATION = "conversation";
 
 export type AppraiseService = (ctx: ReadContext, from: EntityId, to: EntityId, appraisal: string | Record<string, number>, why?: string, mutual?: boolean) => LedgerEvent[];
 
@@ -359,8 +361,9 @@ export const relationshipsPack: PackDef = {
     });
 
     // A stated length ("talk for two hours", `minutes`) is the chat's time, a quarter of an hour without
-    // one; the company meets the speaker's social need as it ends (Cast life's needs, DESIGN §8).
-    r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" }, minutes: STATED_MINUTES }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }, { type: "castlife.satisfy", args: { entity: "self", need: "social", minutes: `=${CHAT_FOR}` } }] }, duration: CHAT_FOR, lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
+    // one, and the speaker's activity for that span. Relationships needs nothing more: Cast life,
+    // when a world has it, meets the speaker's social need from the conversation's regard as the chat ends.
+    r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" }, minutes: STATED_MINUTES }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: CONVERSATION, mutual: true } }] }, duration: CHAT_FOR, activity: { type: "chat", until: `clock + (${CHAT_FOR})` }, lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
     r.action({ id: "give_gift", label: "Give a gift", description: "Give someone here a present.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
 
     r.proposal({

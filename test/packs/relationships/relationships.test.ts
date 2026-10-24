@@ -4,6 +4,7 @@ import { buildGmWorld } from "../../../src/engine/gm-view";
 import { applyEffects } from "../../../src/engine/effects";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { createRng } from "../../../src/engine/rng";
+import { resolveAction } from "../../../src/engine/resolve";
 import { Working } from "../../../src/engine/working";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { regardAxes, regardBand, regardValue, voiceLine } from "../../../src/packs/relationships/core/index";
@@ -87,5 +88,19 @@ describe("relationships", () => {
     expect(effects[0]?.args.delta).toBe(10);
     w.state.realism.levels.relationships = 0;
     expect(w.ctx.service("relationship.appraise")(w.ctx, "maya", "you", "gift")).toEqual([]);
+  });
+});
+
+describe("relationships without Cast life", () => {
+  test("Chat with plays in a registry that has no Cast life: relationships needs nothing of it", () => {
+    const lean = createRegistry(ALL_PACKS.filter((p) => p.id !== "castlife"));
+    const world = modernUsWorld("w", "R");
+    world.entities.you!.fields.place = "apartment_hall";
+    const w = new Working(lean, world, startState(world));
+    const chat = resolveAction(lean, w, { action: "chat_with", params: { target: "rosa", minutes: 30 } }, createRng("c"));
+    expect(chat.ok).toBe(true);
+    expect(chat.rejected).toEqual([]);
+    expect(chat.duration).toBe(30);
+    expect(w.events.some((e) => e.type === "relationships.regard")).toBe(true);
   });
 });

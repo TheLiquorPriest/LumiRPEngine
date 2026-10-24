@@ -11,6 +11,7 @@ import { createRegistry } from "../../../src/engine/registry-impl";
 import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
+import { planTurn } from "../../../src/engine/turn";
 import { typedIntent } from "../../../src/engine/typed-intent";
 import { Working } from "../../../src/engine/working";
 import { destinations } from "../../../src/frontend/play/play";
@@ -141,16 +142,20 @@ describe("needs met when what meets them ends", () => {
 });
 
 describe("company and fun", () => {
-  test("chatting with someone meets the social need as the chat ends", () => {
+  test("a chat in a turn meets the social need as it ends, for as long as it was said to last", () => {
     const w = setup((world) => {
       world.entities.you!.fields.place = "apartment_hall";
     });
     to(w, todayAt(w, 18 * 60));
     expect(needValue(w.ctx, "you", "social")).toBeGreaterThan(30);
-    const chat = resolveAction(reg, w, { action: "chat_with", params: { target: "rosa" } }, createRng("c"));
-    expect(chat.ok).toBe(true);
-    to(w, w.state.clock + chat.duration);
+    const plan = planTurn({ registry: reg, world: w.world, state: w.state, runSeed: "run", seed: "chat", kind: "normal", userTexts: ["I talk to Rosa for an hour"], intent: { action: "chat_with", params: { target: "rosa", minutes: 60 }, probabilities: { chat_with: 1 } } });
+    expect(plan.elapsedMinutes).toBe(60);
+    const end = w.state.clock + 60;
+    w.applyAll(plan.events);
+    expect(w.state.clock).toBe(end);
     expect(needValue(w.ctx, "you", "social")).toBe(0);
+    // Met as the chat ended, not as it began: it grows again from the end.
+    expect(needValue(w.ctx, "you", "social", end + 120)).toBeCloseTo(3, 5);
   });
 });
 
