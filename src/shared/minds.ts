@@ -1015,7 +1015,7 @@ export interface MindsRunEntry {
 /**
  * A GM's minds run (`lre.minds`, DESIGN §24.9): the minds asked, each with how it went, and how the
  * run ended. `message` says why it failed or how it ended when nothing was recorded; `pending`: its
- * edit was held while a reply was written and lands when it finishes; `undo`: the Corrected chip
+ * edit was held while a reply was written and lands when it finishes; `undo`: the GM edit chip
  * that takes the recorded minds back, once there is one.
  */
 export interface MindsRunView {

@@ -5,7 +5,7 @@
 // by block, each with its source and whose it is; their schedules, with which owner wins; today as
 // the planner laid it, with reasons; the invitations they made and received, with their grounds;
 // and the changes the story made, with their turns. Each control (how they follow their routine and
-// its role, one block, one schedule) is one `lre.edit`, so one Corrected chip with its Undo. A routine or a
+// its role, one block, one schedule) is one `lre.edit`, so one GM edit chip with its Undo. A routine or a
 // schedule is only ever a default: the story leads whoever shares a scene with the player. The
 // world's own routines and schedules are Build's.
 

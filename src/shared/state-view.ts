@@ -440,8 +440,11 @@ export interface GmView {
   money: FinanceView[];
   /** The fight under way as the GM sees it, everyone named and HP exact (the combat pack's `combat.gm`); null without one. Its shape is the Encounter card's. */
   encounter: JsonValue | null;
-  /** The ✎ fixes and GM edits in force on this chat's path, newest first, worded in full; `by`: a mechanical action of the player's, by how it reads, rather than a correction (DESIGN §11). */
-  edits: { messageId: string; seq: number; lines: string[]; by?: string }[];
+  /**
+   * The ✎ fixes and GM edits in force on this chat's path, newest first, worded in full; `by`: a mechanical action of the player's, by how it reads,
+   * rather than a correction (DESIGN §11); `undo`: the chat's chip that undoes it, for one on the latest reply (Undo covers the latest reply), else null.
+   */
+  edits: { messageId: string; seq: number; lines: string[]; by?: string; undo: string | null }[];
   /** Writes held during a reply that didn't apply when it finished, with the validator's reason. */
   refused: { id: string; reason: string }[];
   /** Character minds (DESIGN §24.9): every character's fidelity and why, their latest mind, plans, notes, commitments and summary. */

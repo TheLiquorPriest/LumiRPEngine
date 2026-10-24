@@ -1,7 +1,8 @@
 // The GM view (DESIGN §7), built when it is asked for (`lre.gm`), never pushed with the player's
 // state: the world as it stands on the head (an in-flight turn's plan included, as GM edits are
-// checked against it), every ✎ fix and GM edit in force on the chat's path worded in full, and the
-// held writes that didn't apply, with their reasons.
+// checked against it), every ✎ fix and GM edit in force on the chat's path worded in full, those on
+// the latest reply with the chip that undoes them, and the held writes that didn't apply, with their
+// reasons.
 
 import type { GmView } from "../shared/state-view";
 import { effectiveMemory, type MindsSettings } from "../shared/minds";
@@ -26,13 +27,15 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
   // Everything else only reads the folded states, many times over: one read pass (DESIGN §9.6).
   return readPass(() => {
     const edits: GmView["edits"] = [];
+    // Undo covers the latest reply (DESIGN §12): its edits carry the chat's chip for them.
+    const head = chain.findLastIndex((m) => !m.isUser);
     chain.forEach((m, i) => {
       const rec = m.isUser ? null : activeRecord(m, core.journal.tombstones);
       if (!rec) return;
       // A fix of the time leads with how it moved the clock, which no event line words.
       for (const fix of appliedEvents(rec, fold, i).fixes) {
         const clock = clockFixLine(fix.events);
-        edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)], ...(fix.by ? { by: fix.by.label } : {}) });
+        edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)], ...(fix.by ? { by: fix.by.label } : {}), undo: i === head ? `fix:${m.id}:${m.swipeId}:${fix.seq}` : null });
       }
     });
     return {
