@@ -8,6 +8,7 @@ import type { ComponentChildren } from "preact";
 import { useId, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import { formatMoneyInput, parseMoneyInput } from "../../shared/money";
+import type { CharacterRelation } from "../../shared/character";
 import type { GmEntity, GmField, GmRelation, GmView, SheetRowView } from "../../shared/state-view";
 import { formatMoney, type WorldCurrency } from "../../shared/world";
 import { ClassesInput } from "../build/facet-editor";
@@ -23,6 +24,7 @@ import { LEVEL_LABEL } from "../settings/realism";
 import type { Editor } from "./editor";
 import { nameOf } from "./editor";
 import { ActionRow, ActionRows, GmPage } from "./ui";
+import { relationRows } from "./character-ops";
 import { BedPicker } from "./bed-picker";
 
 const LEVELS = [0, 1, 2, 3, 4] as const;
@@ -316,15 +318,8 @@ function Placement(props: { entity: GmEntity; editor: Editor; children?: Compone
   );
 }
 
-/** A relation's fields as the row shows them: by their labels, with a regard's current value. */
-function relationDetail(r: GmRelation, gm: GmView): string | undefined {
-  const defs = gm.relationTypes.find((t) => t.id === r.type)?.fields ?? [];
-  const parts = Object.entries(r.fields ?? {}).map(([id, v]) => `${defs.find((d) => d.id === id)?.label ?? id} ${typeof v === "string" ? v : JSON.stringify(v)}`);
-  if (r.value !== undefined) parts.push(`now ${r.value}`);
-  return parts.length > 0 ? parts.join(" · ") : undefined;
-}
-
-export function Relations(props: { entity: GmEntity; editor: Editor }) {
+/** Relations, each with its edit and remove; `words` (a character's sheet) shows each in the world's words, its numbers on the edit form. */
+export function Relations(props: { entity: GmEntity; editor: Editor; words?: readonly CharacterRelation[] }) {
   const { entity, editor } = props;
   // Containment is Placement's (move, put), not a relation to add here.
   const types = editor.gm.relationTypes.filter((t) => t.id !== "in");
@@ -335,19 +330,22 @@ export function Relations(props: { entity: GmEntity; editor: Editor }) {
   const typeId = useId();
   const toId = useId();
   const defs = types.find((t) => t.id === type)?.fields ?? [];
-  const fields = relationFields(defs, inputs, entity.relations.find((r) => r.type === type && r.to === to)?.fields);
+  const picked = entity.relations.find((r) => r.type === type && r.to === to);
+  const fields = relationFields(defs, inputs, picked?.fields);
   const label = (id: string): string => editor.gm.relationTypes.find((t) => t.id === id)?.label ?? id;
+  const rows = relationRows(entity, editor.gm, props.words);
+  const wordsOf = (r: GmRelation): string | undefined => props.words?.find((w) => w.type === r.type && w.to.id === r.to)?.words;
   return (
     <Section title="Relations">
-      {entity.relations.length === 0 ? (
+      {rows.length === 0 ? (
         <p class="lre-gm-none">None yet.</p>
       ) : (
         <ActionRows label="Relations">
-          {entity.relations.map((r) => (
+          {rows.map(({ relation: r, detail }) => (
             <ActionRow
               key={`${r.type}:${r.to}`}
               title={`${label(r.type)} → ${r.toName}`}
-              subtitle={relationDetail(r, editor.gm)}
+              subtitle={detail}
               id={r.to}
               actions={
                 <>
@@ -394,6 +392,12 @@ export function Relations(props: { entity: GmEntity; editor: Editor }) {
               ))}
           </select>
         </Field>
+        {picked?.value !== undefined ? (
+          <span class="lre-small lre-muted" data-lre-relation-now>
+            Now {picked.value}
+            {wordsOf(picked) ? `, ${wordsOf(picked)}` : ""}
+          </span>
+        ) : null}
         {defs.map((d) => (
           <Field key={d.id} label={`${d.label}${d.min !== undefined || d.max !== undefined ? ` (${d.min ?? "…"}–${d.max ?? "…"})` : ""}`}>
             {d.type === "enum" || d.type === "bool" ? (

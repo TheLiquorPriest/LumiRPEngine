@@ -301,7 +301,8 @@ A person in **World** opens their **character sheet**, a page made for running t
 - **Routine**: what their routine has them doing now and next in today's laid day, with **Open their routine**, their page in **Routines**. When that isn't what they're doing, a line under it says why: their routine is context only (informative) or switched off, so it never moves them; the story holds them (named); or they simply aren't where it has them yet.
 - **Carrying**: what they wear, have equipped and carry, each with **Open**.
 - **Money**: their cash or wealth and how many accounts they hold, with **Open their money**, their hub in **Money**.
-- **Relations**, **Simulation**, **Life**, **Classes and tags** and **Remove from the world**, as on an entity's page.
+- **Relations**: each in the world's own words ("Regard → Priya Nair: warm", "Member of → Rosie's crew: Role: owner, Rank: 1"), never the numbers behind them; the party and what holds them aren't repeated, since **Now** shows them. A relation's edit button loads it into **Add or change a relation**, which shows a regard's value now with its word ("Now 32, warm") above the fields it rests on, as on an entity's page.
+- **Simulation**, **Life**, **Classes and tags** and **Remove from the world**, as on an entity's page.
 - **All fields**, folded: every other field under a plain name, each with its edit button. Place, home and bed aren't repeated there.
 
 Their pages in **Minds** and **Routines** have **Character sheet** at the top, which brings you back here. Every change on the sheet is one edit with its own **Undo**, like any GM edit.

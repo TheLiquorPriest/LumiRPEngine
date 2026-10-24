@@ -273,7 +273,7 @@ export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId
             </Button>
           </Section>
         ) : null}
-        <Relations entity={entity} editor={editor} />
+        <Relations entity={entity} editor={editor} words={character?.relations} />
         <Simulation key={`${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`} entity={entity} editor={editor} />
         <Life key={JSON.stringify(entity.life)} entity={entity} editor={editor} />
         <Classification key={JSON.stringify([entity.class, entity.tags])} entity={entity} editor={editor} />

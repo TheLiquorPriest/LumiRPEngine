@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { initialUi } from "../../src/frontend/app";
-import { bedOp, gmPageFor, homeOp, moveOp, partySwitchOp, routineStanding } from "../../src/frontend/gm/character-ops";
+import { bedOp, gmPageFor, homeOp, moveOp, partySwitchOp, relationRows, routineStanding } from "../../src/frontend/gm/character-ops";
 import { focusTaken, gmOpen, revealTruth } from "../../src/frontend/gm/gate";
 import type { PlaceRef, ThingRef } from "../../src/shared/character";
 import { PARTY_RELATION } from "../../src/shared/party";
@@ -63,5 +63,24 @@ describe("the GM character sheet", () => {
     expect(routineStanding("enforced", false, "diner", "counter", places)).toBe("living");
     expect(routineStanding("enforced", false, "diner", "home", places)).toBe("elsewhere");
     expect(routineStanding("enforced", false, null, "home", places)).toBe("living");
+  });
+
+  test("relations read as the world's words on the sheet, and an undeclared field never shows on either page", () => {
+    const regard = { type: "regard", to: "priya", toName: "Priya", fields: { warmth: 25, t: 0 }, value: 27.7 };
+    const party = { type: PARTY_RELATION, to: "sam", toName: "Sam" };
+    const knows = { type: "knows", to: "dev", toName: "Dev" };
+    const gm = { relationTypes: [{ id: "regard", label: "Regard", from: "person", to: "person", fields: [{ id: "warmth", label: "warmth", type: "number" as const }] }] };
+    const rosie = person("rosie", { relations: [knows, regard, party] });
+    // The sheet: the model's words first, in its order; one it has no words for still listed after;
+    // the party, shown as its switch, left out.
+    const sheet = relationRows(rosie, gm, [{ type: "regard", typeLabel: "Regard", group: "feelings", to: { id: "priya", name: "Priya" }, words: "warm" }]);
+    expect(sheet.map((r) => r.relation)).toEqual([regard, knows]);
+    expect(sheet[0]?.detail).toBe("warm");
+    // An entity's page: every relation, its declared fields and value, never the bookkeeping `t`.
+    const page = relationRows(rosie, gm);
+    expect(page.map((r) => r.relation.type)).toEqual(["knows", "regard", PARTY_RELATION]);
+    expect(page[1]?.detail).toContain("25");
+    expect(page[1]?.detail).not.toMatch(/\bt\b/);
+    expect(page[2]?.detail).toBeUndefined();
   });
 });
