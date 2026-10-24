@@ -21,7 +21,7 @@ import { cellsSeen, placeVisit } from "../../../engine/seen";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { byShownId, defaultScope, hasGrid, placeChildren, placePath, scopeView, shownName, WORLD_SCOPE_NAME, type CellView, type MapItemView, type MapScopeView, type ScopeFilter } from "./map-scope";
 import { hiddenCells } from "./positions";
-import { closedRoutes, routeAt } from "./travel";
+import { closedRoutes, goMinutes, routeAt } from "./travel";
 
 export type { MapGridView, MapItemView, MapPlaceView, MapRouteView, MapScopeView } from "./map-scope";
 
@@ -157,9 +157,10 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
   if (here && level >= 1) {
     for (const id of targets) {
       if (id === here) continue;
-      const plan = routeAt(ctx, here, id, "walk");
+      // Story first, a Go leads anywhere (`goMinutes`); only the travel simulation leaves one with no walk disabled.
+      const minutes = goMinutes(ctx, here, id);
       const name = own(world.places, id)?.name ?? id;
-      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: plan?.minutes ?? 0, action: "go", params: { to: id }, ...(plan ? {} : { disabled: "no walking route" }) });
+      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: minutes ?? 0, action: "go", params: { to: id }, ...(minutes !== null ? {} : { disabled: "no walking route" }) });
     }
     const vehicles = optionalQuery(ctx, "vehicles.travel_options");
     if (vehicles) for (const o of vehicles(ctx, here)) if (targets.has(o.to)) travel.push(o);

@@ -32,7 +32,7 @@ import { canSeeEntity, canSeePlace, HIDDEN_PLACE_NAME, knownBySelector, povPlace
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
-import { closedRoutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
+import { closedRoutes, goMinutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
 import { buildMapView } from "./view";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
@@ -80,13 +80,14 @@ function gridLint(world: WorldDoc): LintIssue[] {
   const err = (path: string, message: string): void => void issues.push({ severity: "error", path, code: "space.grid", message });
   const raw: unknown = world.mapSettings;
   const grid = isRecord(raw) ? raw.grid : undefined;
-  if (raw !== undefined && !isRecord(raw)) err("mapSettings", "Map settings are an object: display, and the grid system's movement and sightRadius.");
+  if (raw !== undefined && !isRecord(raw)) err("mapSettings", "Map settings are an object: display, the grid system's movement and sightRadius, and travelSimulation.");
   else if (isRecord(raw)) {
     if (raw.display !== undefined && raw.display !== "knowledge" && raw.display !== "fog") err("mapSettings.display", 'The map shows "knowledge" (what the POV knows) or "fog".');
     if (grid !== undefined && !isRecord(grid)) err("mapSettings.grid", "The grid system's settings are an object: movement and sightRadius.");
     if (isRecord(grid) && grid.movement !== undefined && typeof grid.movement !== "boolean") err("mapSettings.grid.movement", "Grid movement is on (true) or off (false).");
     const radius = isRecord(grid) ? grid.sightRadius : undefined;
     if (radius !== undefined && (typeof radius !== "number" || !Number.isInteger(radius) || radius < 0 || radius > SIGHT_MAX)) err("mapSettings.grid.sightRadius", `The sight radius is a whole number of cells from 0 to ${SIGHT_MAX}.`);
+    if (raw.travelSimulation !== undefined && typeof raw.travelSimulation !== "boolean") err("mapSettings.travelSimulation", "The travel simulation is on (true) or off (false).");
   }
   const movement = mapSettingsOf(world).grid.movement;
   if (movement && world.realism.levels.space < GRID_SPACE_FLOOR) issues.push({ severity: "info", path: "mapSettings.grid.movement", code: "level_floor", message: `The realism defaults put space at ${world.realism.levels.space}; the grid system plays it at ${GRID_SPACE_FLOOR}, for positions.` });
@@ -249,6 +250,10 @@ export const spacePack: PackDef = {
     r.formula("travel_minutes", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.minutes ?? 0);
     r.formula("distance_km", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.distanceKm ?? 0);
     r.formula("route_exists", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode)) !== null);
+    // Go's time and whether it can go at all (`goMinutes`): story first it always can; the world's
+    // travel simulation needs a walk. One formula for both, so the catalog names no route need.
+    r.formula("go_minutes", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) ?? 0);
+    r.formula("can_go", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) !== null);
     r.formula("within", (ctx, place, ancestor) => placeWithin(ctx.world, String(place ?? ""), String(ancestor ?? "")));
     // Walking on the grid the POV stands on at `place`: its own, or the one it is drawn on.
     r.formula("grid_minutes", (ctx, place, x, y) => {
@@ -267,13 +272,15 @@ export const spacePack: PackDef = {
     r.action({
       id: "go",
       label: "Go to",
-      description: "Walk to another place: a room, a building, a street, another part of town.",
+      description: "Go to another place: a room, a building, a street, another part of town.",
       pack: "space",
       params: { to: { type: "ref", ref: "place", label: "Place" } },
-      requires: ["to != here", "level.space < 2 or route_exists(here, to, 'walk')"],
+      // Story first: the walk, else any mode's route, else a nominal move. The world's travel
+      // simulation brings back the walk it once needed (`can_go`).
+      requires: ["to != here", "can_go(here, to)"],
       outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to" } }] },
-      duration: "level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')",
-      activity: { type: "travel", until: "clock + (level.space < 2 ? 15 : travel_minutes(here, to, 'walk'))" },
+      duration: "go_minutes(here, to)",
+      activity: { type: "travel", until: "clock + (level.space < 2 ? 15 : go_minutes(here, to))" },
       lexicon: ["go to", "walk to", "head to", "head over to", "leave for"],
       observable: "leaves",
     });
@@ -342,10 +349,12 @@ export const spacePack: PackDef = {
         }
         if (stopped) return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
         const from = placeOfEntity(ctx.state, entity);
-        // A narrated move across a gap no route spans (off an island with no boat leg back) didn't
-        // happen. The reason reaches the player: a place the POV can't see is somewhere.
+        // Moves are story first: a narrated move lands whether or not a route joins the two places.
+        // Only the world's travel simulation makes one across a gap no route spans (off an island with
+        // no boat leg back) a move that didn't happen. The reason reaches the player: a place the POV
+        // can't see is somewhere.
         const named = (id: PlaceId): string => (canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? (own(ctx.world.places, id)?.name ?? id) : "somewhere");
-        if (from && !reachable(ctx, from, place)) return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
+        if (from && mapSettingsOf(ctx.world).travelSimulation && !reachable(ctx, from, place)) return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
         return null;
       },
       toEffects: (p, ctx) => {

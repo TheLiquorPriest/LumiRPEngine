@@ -1037,11 +1037,14 @@ export type MapDisplay = "knowledge" | "fog";
  * A world's map settings (DESIGN §4.1, §12); a world without them plays with `DEFAULT_MAP_SETTINGS`
  * (`shared/maps` `mapSettingsOf`). The grid system is optional: with `movement` on, walls and doors
  * steer the POV across grids, things lie in cells, cells and zones trigger rules, and the POV sees
- * `sightRadius` cells around it.
+ * `sightRadius` cells around it. `travelSimulation` (off unless set) makes a move need a route: a
+ * narrated move no route reaches is refused, and Go needs a walking route; off, moves are story first.
  */
 export interface MapSettings {
   display: MapDisplay;
   grid: { movement: boolean; sightRadius: number };
+  /** Absent: off. */
+  travelSimulation?: boolean;
 }
 
 export interface WorldDoc {

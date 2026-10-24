@@ -38,7 +38,7 @@ describe("space: routes", () => {
     expect(routeAt(reg.context(world, s), "riverton", "trailhead", "offroad")?.minutes).toBe(Math.round(40 * 1.4));
   });
 
-  test("the go action takes the route's time and moves the POV", () => {
+  test("the go action takes the walk's time and moves the POV; story first, it goes where only a road leads, and under the travel simulation it needs the walk", () => {
     const world = modernUsWorld("w", "R");
     world.realism.levels.space = 2;
     const w = new Working(reg, world, startState(world));
@@ -46,7 +46,10 @@ describe("space: routes", () => {
     expect(r.ok).toBe(true);
     expect(r.duration).toBe(17);
     expect(w.state.entities.you?.fields.place).toBe("cafe");
-    const nowhere = resolveAction(reg, w, { action: "go", params: { to: "lake" } }, createRng("g2"));
+    const lake = resolveAction(reg, new Working(reg, world, w.state), { action: "go", params: { to: "lake" } }, createRng("g2"));
+    expect(lake.ok).toBe(true);
+    world.mapSettings = { display: "knowledge", grid: { movement: false, sightRadius: 3 }, travelSimulation: true };
+    const nowhere = resolveAction(reg, new Working(reg, world, w.state), { action: "go", params: { to: "lake" } }, createRng("g2"));
     expect(nowhere.failed?.code).toBe("requirement");
   });
 
@@ -65,7 +68,7 @@ describe("space: routes", () => {
     expect(resolveAction(reg, w, { action: "go", params: { to: "maya" } }, createRng("g3")).failed?.code).toBe("bad_param");
   });
 
-  test("the location proposal rejects unknown places and declines unreachable ones", () => {
+  test("the location proposal rejects unknown places; a move no route reaches lands, unless the travel simulation is on", () => {
     const world = modernUsWorld("w", "R");
     world.realism.levels.space = 2;
     const s = startState(world);
@@ -76,6 +79,8 @@ describe("space: routes", () => {
     expect(ch?.toEffects({ entity: "you", place: "cafe" }, ctx)).toEqual([{ type: "move", args: { entity: "you", to: "cafe" } }]);
     world.places.islet = { id: "islet", name: "The islet", fields: {} };
     s.entities.you!.fields.place = "islet";
+    expect(ch?.validate({ entity: "you", place: "cafe" }, reg.context(world, s))).toBeNull();
+    world.mapSettings = { display: "knowledge", grid: { movement: false, sightRadius: 3 }, travelSimulation: true };
     // A move's own refusal, never a payment's decline (`declined`): its chip ends the sentence.
     expect(ch?.validate({ entity: "you", place: "cafe" }, reg.context(world, s))).toEqual({ code: "no_route", reason: `There's no way from The islet to ${world.places.cafe?.name}` });
   });

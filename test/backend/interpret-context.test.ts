@@ -128,7 +128,6 @@ describe("interpret's catalog and scene", () => {
     const catalog = block(prompts[0] ?? "", "Action catalog");
     const line = (id: string): string => catalog.find((l) => l.startsWith(`${id} — `)) ?? "";
     expect(line("feed_gulls")).toBe("feed_gulls — Feed the gulls: Toss bread crusts to the gulls along the waterfront.");
-    expect(line("go")).toStartWith("go — Go to: Walk to another place: a room, a building, a street, another part of town. Params: to (a place id from Places). Needs: `to` isn't where you are; a way from here to `to`.");
     // A required param lists the ids that may fill it, each named once in the scene; its needs are
     // words, never an expression.
     expect(line("give")).toContain("to (person: ");
@@ -174,7 +173,6 @@ describe("interpret's catalog and scene", () => {
     const decision = asked.find((r) => isChoiceOver(r, "feed_gulls"));
     const question = decision?.questions.action;
     expect(question?.type === "choice" ? question.criteria.feed_gulls : null).toBe("Feed the gulls: Toss bread crusts to the gulls along the waterfront.");
-    expect(question?.type === "choice" ? question.criteria.go : null).toStartWith("Go to: Walk to another place");
     const state = JSON.stringify(decision?.state);
     expect(state).toContain("at 114 Harbor Street (harbor_street_114)");
     expect(state).toContain('"recent":["Story: Morning."]');
