@@ -21,7 +21,9 @@ import { UI_PACKS } from "../../../src/frontend/packs";
 import { buildCatalog } from "../../../src/frontend/ui-registry";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { buildNeedsView, dayPlan, needValue } from "../../../src/packs/castlife/core/index";
-import { decodeNeedsView } from "../../../src/packs/castlife/ui/needs";
+import { decodeNeedsView, NeedsPanel } from "../../../src/packs/castlife/ui/needs";
+import type { PanelProps } from "../../../src/frontend/registry";
+import { propsOf } from "../../support/tree";
 import type { StateView } from "../../../src/shared/state-view";
 import { modernUsWorld } from "../riverton";
 import { startState } from "../support";
@@ -103,6 +105,26 @@ describe("Needs in Play", () => {
       world.realism.levels.castlife = 3;
     });
     expect(buildNeedsView(story.ctx)).toBeNull();
+  });
+
+  test("each need on Me says from which point it's told, or that it is, and what meets it", () => {
+    const w = setup((world) => {
+      world.needs = { hunger: { tell: 25 } };
+    });
+    to(w, w.state.clock + 120);
+    const view = buildNeedsView(w.ctx) as unknown as JsonValue;
+    const rows = decodeNeedsView(view) ?? [];
+    expect(rows.find((r) => r.need === "hunger")?.pressing).toBe(true);
+    const tree = NeedsPanel({ chatId: "c", view, state: {} as StateView, send: async () => ({}) } as unknown as PanelProps);
+    const lines = propsOf(tree, "p").filter((p) => String(p.class).includes("lre-need-line")).map((p) => String(p.children));
+    expect(lines).toHaveLength(rows.length);
+    rows.forEach((row, i) => {
+      expect(row.metBy).not.toBe("");
+      expect(lines[i]).toContain(row.metBy);
+      // Not yet pressing: the world's own point it's told from; pressing: the narrator's word for it.
+      expect(lines[i]).toContain(row.pressing ? row.label : String(row.tell));
+    });
+    expect(rows.find((r) => r.need === "fatigue")?.tell).toBe(60);
   });
 });
 

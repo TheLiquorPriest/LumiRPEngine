@@ -12,7 +12,6 @@ import type { WorldId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
 import { mapSettingsOf } from "../../shared/maps";
-import { needsSettingsOf } from "../../shared/needs";
 import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute } from "../app";
@@ -38,6 +37,7 @@ import { ChangedElsewhere, useHeld } from "./held";
 import { JOB_INFO, jobStore, JobStatusBadge, JobView, keptJobs } from "./jobs";
 import { LookupTableEditor } from "./lookup-editor";
 import { MindsEditor } from "./minds-editor";
+import { NeedsEditor } from "./needs-editor";
 import { LoreEditor, LoreList } from "./lore-editor";
 import { RoutineEditor, RoutineList } from "./routine-editor";
 import { RoutineSettingsEditor } from "./routine-settings";
@@ -764,7 +764,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 
-function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings">): JsonObject {
+function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings" | "needs">): JsonObject {
   switch (part) {
     case "calendar":
       return doc.calendar as unknown as JsonObject;
@@ -772,9 +772,6 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
       return doc.realism as unknown as JsonObject;
     case "time":
       return doc.time as unknown as JsonObject;
-    case "needs":
-      // Each need as the world plays it, the defaults filled in; a save stores only what differs from them.
-      return structuredClone(needsSettingsOf(doc)) as unknown as JsonObject;
     case "meta":
       // Map settings and the spawn cap show as the world plays them: a world without them, with the defaults.
       return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
@@ -806,10 +803,11 @@ function PartView(props: { part: WorldPart }) {
     );
   }
   if (props.part === "routineSettings") return <RoutineSettingsEditor />;
+  if (props.part === "needs") return <NeedsEditor />;
   return <SchemaPartView part={props.part} />;
 }
 
-function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings"> }) {
+function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings" | "needs"> }) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const send = useMemo(() => draftSend(app), [app]);

@@ -9,6 +9,18 @@ import type { ParamDef } from "./world";
 export type NeedId = "hunger" | "fatigue" | "social" | "fun";
 export const NEED_IDS: readonly NeedId[] = ["hunger", "fatigue", "social", "fun"];
 
+/**
+ * Each need in words, the one set every surface uses (Build, Play, Check world, the narrator): its
+ * name; the word the narrator is told it in once it's pressing ("you: hungry"); and what meets it,
+ * to finish "met by …".
+ */
+export const NEED_WORDS: Readonly<Record<NeedId, { name: string; word: string; metBy: string }>> = {
+  hunger: { name: "Hunger", word: "hungry", metBy: "eating" },
+  fatigue: { name: "Fatigue", word: "tired", metBy: "sleep, a night's or a nap" },
+  social: { name: "Social", word: "lonely", metBy: "a chat, or time with someone you know" },
+  fun: { name: "Fun", word: "bored", metBy: "rest, leisure, exercise or a night out" },
+};
+
 /** One need as a world tunes it (`world.needs`); a part left out keeps its default. */
 export interface NeedSetting {
   /** Off: the need never grows, never shows, is never told and never alerts. On by default. */
