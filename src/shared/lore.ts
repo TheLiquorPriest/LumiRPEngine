@@ -57,7 +57,9 @@ export function loreSourceOf(raw: unknown): LoreSource {
 /** Whether a value is a lore pin: `{lore}` naming one of the world's entries, `{book, entry}` naming a World Info book's, or `{book}` naming a whole book (DESIGN §24.5). */
 export function isLorePin(v: unknown): v is LorePin {
   if (!isRecord(v)) return false;
-  const keys = Object.keys(v).length;
+  // A pin's `keep` is its own field beside what it names.
+  if (v.keep !== undefined && v.keep !== "start" && v.keep !== "end") return false;
+  const keys = Object.keys(v).length - (v.keep === undefined ? 0 : 1);
   if (v.lore !== undefined) return typeof v.lore === "string" && v.lore !== "" && keys === 1;
   if (typeof v.book !== "string" || v.book === "") return false;
   return v.entry === undefined ? keys === 1 : typeof v.entry === "string" && v.entry !== "" && keys === 2;
@@ -68,9 +70,11 @@ export function lorePinKey(pin: LorePin): string {
   return "lore" in pin ? `lore:${pin.lore}` : "entry" in pin ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
 
-/** A pin as plain JSON, its own fields only. */
+/** A pin as plain JSON, its own fields only; keeping the start, the default, is left unsaid. */
 function pinJson(pin: LorePin): LorePin & JsonObject {
-  return "lore" in pin ? { lore: pin.lore } : "entry" in pin ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+  const base: LorePin & JsonObject = "lore" in pin ? { lore: pin.lore } : "entry" in pin ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+  if (pin.keep === "end") base.keep = "end";
+  return base;
 }
 
 const pinsRead = new WeakMap<object, LorePins>();
@@ -115,7 +119,7 @@ export function lorePinsJson(pins: LorePins): JsonObject {
 
 /** The lint codes lore pins raise (DESIGN §24.5), with what each means; the reference lists them. */
 export const LORE_PIN_LINTS: Readonly<Record<string, string>> = {
-  pin_shape: 'a pin that is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}: it is ignored',
+  pin_shape: 'a pin that is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}, each with an optional "keep" of "start" or "end": it is ignored',
   pin_missing: "a pin naming a lore entry the world doesn't have",
   pin_target: "pins under a character, place or step the world doesn't have: no call reads them",
   pin_duplicate: "the same entry or book pinned twice to one character, place or step",

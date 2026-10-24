@@ -73,9 +73,9 @@ async function bookReads(host: Pick<HostPort, "books" | "log">, pins: readonly L
   return out;
 }
 
-/** A book entry as pinned text, under the key a pin of that one entry has, so a call reads it once however it is pinned. */
-function bookText(e: HostBookEntry, on: PinRef["on"]): PinnedText {
-  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on, title: bookEntryTitle(e), content: e.content, entry: null };
+/** A book entry as pinned text, under the key a pin of that one entry has, so a call reads it once however it is pinned; it keeps the part its pin keeps. */
+function bookText(e: HostBookEntry, ref: PinRef): PinnedText {
+  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on: ref.on, title: bookEntryTitle(e), content: e.content, entry: null, keep: ref.pin.keep ?? "start" };
 }
 
 /**
@@ -98,8 +98,8 @@ export async function pinReader(host: Pick<HostPort, "books" | "log">, world: Wo
       if ("lore" in ref.pin) give(worldPinText(world, ref));
       else if ("entry" in ref.pin) {
         const e = read.entries.get(ref.key);
-        give(e ? bookText(e, ref.on) : null);
-      } else for (const e of read.books.get(ref.pin.book) ?? []) if (!e.disabled) give(bookText(e, ref.on));
+        give(e ? bookText(e, ref) : null);
+      } else for (const e of read.books.get(ref.pin.book) ?? []) if (!e.disabled) give(bookText(e, ref));
     }
     return out;
   };

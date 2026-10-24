@@ -857,8 +857,13 @@ export interface LoreIndex {
  * (`lore`, an entry id), an entry of one of the user's Lumiverse World Info books (`book` and
  * `entry`, the host's ids), or a whole book (`book` alone), read from the book whenever it is used: a
  * whole book's switched-on entries in the book's own order, so one added to the book is read unasked.
+ * `keep: "end"`: when the entry doesn't fit, its end is kept rather than its start, so a timeline
+ * written oldest first keeps its newest events (absent: the start).
  */
-export type LorePin = { lore: string } | { book: string; entry: string } | { book: string };
+export type LorePin = ({ lore: string } | { book: string; entry: string } | { book: string }) & { keep?: LoreKeep };
+
+/** Which part of a long entry a cut keeps: its start, or its end. */
+export type LoreKeep = "start" | "end";
 
 /**
  * Lore pinned where calls always read it (DESIGN §24.5, §5.4): `characters` by entity id, read by
