@@ -19,7 +19,7 @@ import { chipRegenerates } from "../shared/state-view";
 import type { AdjudicationDef } from "../shared/world";
 import { TIME_CONTROLS } from "../engine/events";
 // The one limit on a GM edit's operations: the schemas take no more than the engine accepts.
-import { EDIT_OPS_MAX } from "../engine/edits";
+import { EDIT_OPS_MAX } from "../shared/protocol";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
 import type { RequestFields, RequestType } from "./connection";

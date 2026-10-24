@@ -8,13 +8,17 @@ import { useEffect, useId, useState } from "preact/hooks";
 import type { EncounterView } from "../../packs/combat/ui/panel";
 import { decodeEncounterView, EncounterCard } from "../../packs/combat/ui/panel";
 import { Button, Empty, Field, List, ListRow, Section } from "../components";
+import { fidelityGroups } from "../batch";
 import { Icon } from "../icons";
+import { PickBox, SelectBar, useSelection } from "../multi-select";
+import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
+import { BatchPage } from "./batch";
 import type { Editor } from "./editor";
 import { claimedThings, findEntities } from "./editor";
 import { EntityBadges, EntityPage } from "./entity";
 import { BuildLink, GmPage, usePages } from "./ui";
 
-type WorldPage = { entity: string } | "spawn" | "fight";
+type WorldPage = { entity: string } | "spawn" | "fight" | "batch";
 
 function FightCard(props: { fight: EncounterView; turn: string; onOpen(): void }) {
   const { fight } = props;
@@ -96,12 +100,16 @@ export function WorldSection(props: { editor: Editor }) {
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("");
   const pages = usePages<WorldPage>();
+  // Choosing several to change at once: a row's tap picks it instead of opening its page.
+  const selection = useSelection();
   const fight = editor.gm.encounter === null ? null : decodeEncounterView(editor.gm.encounter);
   // Whose turn it is, as the Encounter card says it.
   const turn = fight === null ? "" : fight.yours ? "Your turn" : `${fight.turn.charAt(0).toUpperCase()}${fight.turn.slice(1)}'s turn`;
   const page = pages.page;
   const entity = page !== null && typeof page === "object" ? editor.gm.entities.find((e) => e.id === page.entity) : undefined;
-  const open = page === "spawn" || (page === "fight" && fight !== null) || entity !== undefined;
+  // Those picked still in the world's list (an Undo can take back a spawn), in its order.
+  const chosen = editor.gm.entities.filter((e) => selection.ids.includes(e.id)).map((e) => e.id);
+  const open = page === "spawn" || (page === "fight" && fight !== null) || (page === "batch" && chosen.length > 0) || entity !== undefined;
   // A page whose subject is gone (the fight ended, an Undo took back a spawn) gives way to the list.
   useEffect(() => {
     if (page !== null && !open) pages.back();
@@ -140,6 +148,9 @@ export function WorldSection(props: { editor: Editor }) {
           <Button icon="user-plus" onClick={() => pages.open("spawn")}>
             Spawn
           </Button>
+          <Button icon="checklist" variant={selection.on ? "primary" : "secondary"} onClick={() => (selection.on ? selection.stop() : selection.start())}>
+            {selection.on ? "Done" : "Select"}
+          </Button>
         </div>
         <Section title={`${list.length} of ${editor.gm.entities.length}`} flush>
           {list.length === 0 ? (
@@ -152,17 +163,26 @@ export function WorldSection(props: { editor: Editor }) {
                     key={e.id}
                     id={e.id}
                     title={e.name}
+                    leading={selection.on ? <PickBox label={`Select ${e.name}`} checked={selection.ids.includes(e.id)} /> : undefined}
                     subtitle={[editor.gm.kinds.find((k) => k.id === e.kind)?.label ?? e.kind, e.agent ? "lives their own day" : null, e.spawned ? "spawned here" : null].filter((part) => part !== null).join(" · ")}
                     badge={<EntityBadges entity={e} />}
-                    chevron
-                    onClick={() => pages.open({ entity: e.id })}
+                    chevron={!selection.on}
+                    onClick={() => (selection.on ? selection.toggle(e.id) : pages.open({ entity: e.id }))}
                   />
                 ))}
               </List>
             </div>
           )}
         </Section>
-        <BuildLink />
+        {selection.on ? (
+          <SelectBar label="Change the selected" selection={selection} all={editor.gm.entities.map((e) => e.id)} shown={list.map((e) => e.id)} groups={fidelityGroups(editor.gm.minds.characters, FIDELITY_LABEL)} groupLabel="Select a level">
+            <Button variant="primary" icon="edit" disabled={chosen.length === 0 || editor.busy} onClick={() => pages.open("batch")}>
+              {chosen.length === 1 ? "Change 1…" : `Change ${chosen.length}…`}
+            </Button>
+          </SelectBar>
+        ) : (
+          <BuildLink />
+        )}
       </div>
       {page === "spawn" ? <SpawnPage editor={editor} onBack={pages.back} /> : null}
       {page === "fight" && fight ? (
@@ -171,6 +191,7 @@ export function WorldSection(props: { editor: Editor }) {
         </GmPage>
       ) : null}
       {entity ? <EntityPage entity={entity} editor={editor} onBack={pages.back} /> : null}
+      {page === "batch" && chosen.length > 0 ? <BatchPage editor={editor} ids={chosen} onBack={pages.back} /> : null}
     </div>
   );
 }

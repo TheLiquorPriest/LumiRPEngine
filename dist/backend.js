@@ -58278,9 +58278,13 @@ function stamped(world) {
   return { ...world, engineVersion: ENGINE_VERSION };
 }
 
+// src/shared/protocol.ts
+var PROTOCOL_VERSION = 1;
+var AGENT_API = 2;
+var EDIT_OPS_MAX = 64;
+
 // src/engine/edits.ts
 var CORRECTION = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
-var EDIT_OPS_MAX = 64;
 function reject17(code, reason2) {
   return { code, reason: reason2 };
 }
@@ -58925,10 +58929,6 @@ function routineChanges(ctx) {
     schedules: Object.entries(chatSchedules(ctx.state, id)).map(([schedule, c]) => ({ schedule, source: c.source, off: "off" in c.value }))
   }));
 }
-
-// src/shared/protocol.ts
-var PROTOCOL_VERSION = 1;
-var AGENT_API = 2;
 
 // src/shared/timeouts.ts
 var TIMER_MAX_MS = 2147483647;
@@ -70142,9 +70142,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "3007f18a52e5f42d61d886b7771ca2ce8fbf80ac0bec92b73049db7cc2c20896";
+  const sha256 = "2b5a2359eb6b0fed7ad5589f525dddb2c9b02e49e4bee2f2382e52ff46c0958d";
   const tools = ["900afa8b920c04258682d2153c987c9e", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
-  return { id: "d9e948e9", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "3c0d32e8", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -73135,7 +73135,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "d9e948e9" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "3c0d32e8" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
