@@ -84,6 +84,19 @@ describe("section settings", () => {
     expect(sent(rig).has(label)).toBe(false);
   });
 
+  test("the GM's sources to tick are every renderer's, each once, each in words and filling its own section", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await alder(rig, null);
+    const sources = (await rig.rt.view(chatId, rig.host.userId)).controls?.sources ?? [];
+    const ids = sources.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    // The shipped packs' sources as `include` names them, people's own and those riding beside them.
+    for (const id of ["people", "present_gear", "routines", "location", "weather", "place_lore"]) expect(ids).toContain(id);
+    expect(sources.find((s) => s.id === "present_gear")?.slot).toBe("people");
+    // Every shipped renderer says what it tells: none falls back to its bare name.
+    for (const s of sources) expect(s.label).not.toBe(s.id.replace(/_/g, " "));
+  });
+
   test("the GM's settings replace the world's: a chat with no cap lifts the world's line cap, and its Undo brings it back", async () => {
     const rig = new Rig({ shipped: true });
     const people = DEFAULT_SECTIONS.people;

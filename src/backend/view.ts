@@ -9,7 +9,7 @@ import { isRecord } from "../shared/json";
 import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
-import { chatFeed, worldFeed } from "../engine/feed";
+import { chatFeed, sourceOf, worldFeed } from "../engine/feed";
 import { sectionsOf } from "./book";
 import type { ActionDef, MapDisplay, WorldDoc } from "../shared/world";
 import { tableChoices } from "../shared/tables";
@@ -311,6 +311,8 @@ function controls(world: WorldDoc, state: WorldState, sceneType: string, registr
     inferred: inferredOf(world, state),
     skills: worldSkills(registry, world, state),
     sections: sectionsOf(world).map((s) => ({ id: s.id, label: s.label, world: worldFeed(s), chat: chatFeed(state)[s.id] ?? null })),
+    // One row per source, as `include` names them; a source with no words of its own reads as its name.
+    sources: [...new Map(registry.renderers.map((r) => [sourceOf(r), { id: sourceOf(r), slot: r.slot, label: r.label ?? sourceOf(r).replace(/_/g, " ") }])).values()],
     time: {
       sceneType,
       sceneTicks: { ...state.time.sceneTicks },

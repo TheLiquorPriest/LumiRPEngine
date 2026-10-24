@@ -340,6 +340,7 @@ export const weatherPack: PackDef = {
       slot: "scene",
       // A section's `include` picks it by this name (DESIGN §6.11).
       source: "weather",
+      label: "The weather",
       render(ctx) {
         const v = buildWeatherView(ctx);
         if (v.level === 0 || v.label === "") return [];

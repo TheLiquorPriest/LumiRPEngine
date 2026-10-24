@@ -757,9 +757,9 @@ export const gearPack: PackDef = {
       },
     });
 
-    r.renderer({ slot: "gear", render: (ctx) => gearLines(ctx, "player").map((l) => l.text), feed: gearLines });
+    r.renderer({ slot: "gear", label: "What your character carries and wears", render: (ctx) => gearLines(ctx, "player").map((l) => l.text), feed: gearLines });
     // What the people with the POV visibly wear and carry (DESIGN §6.11), beside them in People.
-    r.renderer({ slot: "people", source: "present_gear", render: (ctx) => presentGearLines(ctx, "player").map((l) => l.text), feed: presentGearLines });
+    r.renderer({ slot: "people", source: "present_gear", label: "What the people here wear and carry", render: (ctx) => presentGearLines(ctx, "player").map((l) => l.text), feed: presentGearLines });
 
     r.view({ panel: "gear.gear", build: (ctx) => buildGearView(ctx) as unknown as JsonValue });
 

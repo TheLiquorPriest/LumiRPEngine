@@ -366,7 +366,7 @@ export const storyPack: PackDef = {
       observable: "answers",
     });
 
-    r.renderer({ slot: "quest", render: (ctx) => questLines(ctx, "player").map((l) => l.text), feed: questLines });
+    r.renderer({ slot: "quest", label: "Quests and goals your character knows", render: (ctx) => questLines(ctx, "player").map((l) => l.text), feed: questLines });
     r.view({ panel: "story.quests", build: (ctx) => buildQuestLog(ctx) as unknown as JsonValue });
 
     r.lint({

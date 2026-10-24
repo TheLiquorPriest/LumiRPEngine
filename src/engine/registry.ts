@@ -146,6 +146,8 @@ export interface SectionRenderer {
    * `include` takes every renderer of its own slot, whatever their sources.
    */
   source?: string;
+  /** What it tells, in the GM's plain words ("What people here wear and carry"): its name where a section's sources are picked. */
+  label?: string;
   /**
    * Its lines are hints that follow what the POV doesn't know (Stance's cues, DESIGN §6.6): they ride
    * once every section has its place on the section budget, in what is left, and no size, clip or

@@ -529,8 +529,8 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     }
     return lines;
   };
-  r.renderer({ slot: "money", render: (ctx) => moneyLines(ctx, "player").map((l) => l.text), feed: moneyLines });
-  r.renderer({ slot: "property", render: (ctx) => propertyLines(ctx, "player").map((l) => l.text), feed: propertyLines });
+  r.renderer({ slot: "money", label: "Your character's money", render: (ctx) => moneyLines(ctx, "player").map((l) => l.text), feed: moneyLines });
+  r.renderer({ slot: "property", label: "Property your character holds a part in", render: (ctx) => propertyLines(ctx, "player").map((l) => l.text), feed: propertyLines });
   r.view({ panel: "economy.money", build: (ctx) => buildMoneyView(hooks, ctx) as unknown as JsonValue });
 
   r.proposal({

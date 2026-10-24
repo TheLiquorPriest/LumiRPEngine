@@ -318,6 +318,8 @@ export interface ControlsView {
    * GM's in this chat (null when the chat follows the world's). Settings, never what a section holds.
    */
   sections: { id: string; label: string; world: SectionFeed; chat: SectionFeed | null }[];
+  /** Every renderer source a section can take (`include`), with the section it fills by itself and what it tells in plain words. */
+  sources: { id: string; slot: string; label: string }[];
 }
 
 export interface StateView {

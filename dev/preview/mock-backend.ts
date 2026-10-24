@@ -485,7 +485,7 @@ export class MockBackend {
         return this.result(reqId, "lre.gm", structuredClone(this.gm));
       case "lre.character": {
         // The real builder: Build's from the draft; GM's from the preview world as a chat starts it,
-        // with each entity's place, holder and party as the GM fixture has them now, so edits show.
+        // with each entity's place, holder and relations as the GM fixture has them now, so edits show.
         if (message.scope === "build") {
           const built = buildCharacter(REGISTRY, migrateWorld(structuredClone(this.draft)), message.entity);
           return built ? this.result(reqId, "lre.character", built) : this.error(reqId, "not_found", "no such character");
@@ -496,7 +496,7 @@ export class MockBackend {
           const e = state.entities[g.id];
           if (!e) continue;
           if (g.place !== null) e.fields.place = g.place;
-          e.relations = [...e.relations.filter((r) => r.type !== "in" && r.type !== "travels_with"), ...(g.holder ? [{ type: "in", to: g.holder }] : []), ...g.relations.filter((r) => r.type === "travels_with").map((r) => ({ type: r.type, to: r.to }))];
+          e.relations = [...(g.holder ? [{ type: "in", to: g.holder }] : []), ...g.relations.filter((r) => r.type !== "in").map((r) => ({ type: r.type, to: r.to, ...(r.fields ? { fields: structuredClone(r.fields) } : {}) }))];
         }
         const built = buildCharacter(REGISTRY, world, message.entity, state);
         return built ? this.result(reqId, "lre.character", built) : this.error(reqId, "not_found", "no such character");
