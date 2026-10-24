@@ -1300,7 +1300,7 @@ export class Runtime implements TurnHooks {
     const take = (def: ActionDef, given: JsonObject, words: string, thing: ThingSort | undefined, said: readonly string[]): void => {
       // The player character's own thing that the world keeps elsewhere is a tracking gap, not a veto:
       // it goes to the claims policy rather than failing and stopping the message (DESIGN §9.4).
-      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state);
+      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state, mayKnow);
       if (!ref) {
         steps.push({ action: def.id, params: given, text: words });
         rolls ||= checkOf(render.world, def.check) !== null;

@@ -22,7 +22,7 @@ import { buildEntitySheet } from "./ruleset";
 import { GONE_FIELD, isGone, kindFields, kindIs, placeOfEntity, scopeEnv } from "./scope";
 import { classValues, tagsOf } from "./selector";
 import type { WorldState } from "./state";
-import { entityVisibility } from "./visibility";
+import { entityVisibility, isDiscoverable, knows } from "./visibility";
 
 function fieldOf(reg: Registry, ctx: ReadContext, entity: string, id: string, def: FieldDef, stored: JsonValue | undefined): GmField {
   const numeric = def.type === "number" || def.type === "money" || def.type === "duration";
@@ -66,7 +66,8 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
     person: kindIs(reg, world, e.kind, "person"),
     gone: isGone(state, id),
     spawned: !own(world.entities, id),
-    visibility: entityVisibility(world, state, id),
+    // A discoverable thing reads as itself, with whether the player character has found it, not as the secret every other reader takes it for.
+    ...(isDiscoverable(world, state, id) ? { visibility: "discoverable", found: knows(state, world.pov, id) } : { visibility: entityVisibility(world, state, id) }),
     place: placeOfEntity(state, id),
     holder: e.relations.find((r) => r.type === "in")?.to ?? null,
     claimed: e.fields.claimed === true,

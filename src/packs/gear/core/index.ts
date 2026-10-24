@@ -18,7 +18,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import { hashParts } from "../../../shared/hash";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable } from "../../../shared/tables";
-import type { EntityDef, KindDef, WorldCurrency } from "../../../shared/world";
+import type { EffectSpec, EntityDef, KindDef, WorldCurrency } from "../../../shared/world";
 import { calendarOf, clockOfPhrase } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
@@ -343,6 +343,8 @@ function stackFor(ctx: ReadContext, spec: GearSpawn): EntityId | null {
     carriedBy(ctx.state, spec.holder).find((id) => {
       const e = own(ctx.state.entities, id);
       if (!e || e.kind !== "item" || isGone(ctx.state, id) || e.relations.some((r) => r.type === "worn_by" || r.type === "equipped")) return false;
+      // Only a stack the player character can see: joining a hidden one would make the new thing vanish into it.
+      if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id)) return false;
       if ((e.fields.owner ?? null) !== (spec.owner ?? null)) return false;
       return spec.catalog ? e.fields.catalog === spec.catalog : e.fields.catalog === undefined && e.name.trim().toLowerCase() === name;
     }) ?? null
@@ -351,7 +353,12 @@ function stackFor(ctx: ReadContext, spec: GearSpawn): EntityId | null {
 
 const spawn = (ctx: ReadContext, spec: GearSpawn): Events => {
   const stack = spec.stack ? stackFor(ctx, spec) : null;
-  if (stack) return [{ type: "set", entity: stack, field: "qty", value: numOf(own(ctx.state.entities, stack)?.fields.qty, 1) + (spec.qty ?? 1) }];
+  // A stored count grows by what came, so the entry folds right over another parent (a rebase, a
+  // swipe of an earlier message); an unstored one (1 by default) is set, as `change` does.
+  if (stack) {
+    const stored = own(ctx.state.entities, stack)?.fields.qty;
+    return [typeof stored === "number" ? { type: "add", entity: stack, field: "qty", delta: spec.qty ?? 1 } : { type: "set", entity: stack, field: "qty", value: 1 + (spec.qty ?? 1) }];
+  }
   const row = spec.catalog ? (rowOf(ctx, "gear.items", spec.catalog) ?? rowOf(ctx, "gear.containers", spec.catalog)) : undefined;
   // What comes into play (found, bought, handed over) is notable, so Gear 1 shows it as it shows authored notable things.
   const fields: JsonObject = { notable: true };
@@ -410,7 +417,8 @@ function search(ctx: ReadContext, who: EntityId, target: EntityId | null): Event
 function heldItem(ctx: ReadContext, item: string, from: EntityId): string {
   if (own(ctx.state.entities, item) || from === "") return item;
   const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
-  const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
+  // Only what the player character can see: a hidden thing by that name is none, so it neither hides a visible one nor tells of itself.
+  const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
 }
 
@@ -838,7 +846,9 @@ export const gearPack: PackDef = {
         if ("code" in found) return [];
         const left = numOf(found.e.fields.qty, 1) - numOf(p.qty, 1);
         // The last of it leaves the world as a used-up claim does (`gone`), holder and owner kept.
-        return [left > 0 ? { type: "set", args: { entity: found.id, field: "qty", value: left } } : { type: "set", args: { entity: found.id, field: GONE_FIELD, value: true } }];
+        // `add` counts down from whatever the parent holds when the entry folds (`change`), never a stale total.
+        const step: EffectSpec = left > 0 ? { type: "add", args: { entity: found.id, field: "qty", delta: -numOf(p.qty, 1) } } : { type: "set", args: { entity: found.id, field: GONE_FIELD, value: true } };
+        return [step];
       },
     });
     r.proposal({

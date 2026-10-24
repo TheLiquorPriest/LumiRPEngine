@@ -76,6 +76,24 @@ describe("tracking gaps", () => {
       expect({ item, worn: after.entities.pov_clothes?.relations.some((r) => r.type === "worn_by" && r.to === "pov"), made: (await claimed(rig, chatId)).length, place: after.entities.pov?.fields.place }).toEqual({ item, worn: true, made: 0, place: "alder_harbor_marina" });
     }
   });
+
+  test("a secret thing of theirs kept elsewhere plays as a made-up claim does, in every mode, and nothing names or moves it", async () => {
+    const ring: JsonObject = { id: "pov_ring", kind: "item", name: "Grandmother's Signet Ring", tier: "background", fields: { owner: "pov", place: "lakefront_park", slot: "finger" }, relations: [], visibility: "secret" };
+    for (const mode of ["real", "ask", "hold"] as const) {
+      const seen: JsonObject[] = [];
+      for (const puts of [[["entities", ring]], []] as [string, JsonObject][][]) {
+        const { rig, chatId } = await chat({ mode, capped: false }, puts);
+        reading(rig, { action: "wear", params: { item: "pov_ring" }, thing: "other" });
+        const started = await send(rig, chatId, "I put on my ring.");
+        if (!started.halted) await rig.host.finish(started, "You slip it on.");
+        if (puts.length > 0) expect((await state(rig, chatId)).entities.pov_ring).toMatchObject({ fields: { place: "lakefront_park" }, relations: [] });
+        const view = JSON.stringify(await rig.rt.view(chatId, rig.host.userId));
+        expect(`${view}\n${rig.host.section("Outcome")}`).not.toMatch(/signet|grandmother/i);
+        seen.push({ halted: started.halted ?? null, made: (await claimed(rig, chatId)).length, chips: (await chips(rig, chatId)).map((c) => `${c.kind} ${c.label} ${c.detail ?? ""}`).sort() });
+      }
+      expect({ mode, ...seen[0] }).toEqual({ mode, ...seen[1] });
+    }
+  });
 });
 
 describe("Make it real", () => {
