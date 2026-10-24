@@ -32,6 +32,8 @@ import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixtu
 import { isWorldDoc, lintWorld, migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
+import { buildCharacter } from "../../src/engine/character";
+import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS } from "../../src/packs/index";
 import { applyProfile, profileChoices, profileOf } from "../../src/shared/profiles/index";
 import { modernSheetFixture } from "./profile-fixture";
@@ -480,6 +482,24 @@ export class MockBackend {
         return;
       case "lre.gm":
         return this.result(reqId, "lre.gm", structuredClone(this.gm));
+      case "lre.character": {
+        // The real builder: Build's from the draft; GM's from the preview world as a chat starts it,
+        // with each entity's place, holder and party as the GM fixture has them now, so edits show.
+        if (message.scope === "build") {
+          const built = buildCharacter(REGISTRY, migrateWorld(structuredClone(this.draft)), message.entity);
+          return built ? this.result(reqId, "lre.character", built) : this.error(reqId, "not_found", "no such character");
+        }
+        const world = migrateWorld(structuredClone(this.world));
+        const state = initialState(world, "preview", REGISTRY);
+        for (const g of this.gm.entities) {
+          const e = state.entities[g.id];
+          if (!e) continue;
+          if (g.place !== null) e.fields.place = g.place;
+          e.relations = [...e.relations.filter((r) => r.type !== "in" && r.type !== "travels_with"), ...(g.holder ? [{ type: "in", to: g.holder }] : []), ...g.relations.filter((r) => r.type === "travels_with").map((r) => ({ type: r.type, to: r.to }))];
+        }
+        const built = buildCharacter(REGISTRY, world, message.entity, state);
+        return built ? this.result(reqId, "lre.character", built) : this.error(reqId, "not_found", "no such character");
+      }
       case "lre.edit": {
         const before = { gm: structuredClone(this.gm), routines: structuredClone(this.routines) };
         const lines = this.applyEdit(message.ops);
