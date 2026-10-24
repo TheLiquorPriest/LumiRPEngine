@@ -24,6 +24,7 @@ import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world"
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
 import { loreBooksOf, lorePinsOf } from "../shared/lore";
 import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, routineShapeProblems } from "../shared/routines";
+import { needsSettingsOf, needsSettingsProblems, storedNeedsSettings } from "../shared/needs";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
@@ -82,7 +83,7 @@ export const NOTE_CAP = 200;
 const PATCH_PROTECTED = ["id", "format", "engineVersion", "pins", "suppressed"] as const;
 
 /** Every part `set` writes: any other name is refused, so a set never reaches the rest of the document. */
-const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true, lorePins: true, routineSettings: true };
+const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true, lorePins: true, routineSettings: true, needs: true };
 
 export class WorldError extends Error {
   constructor(
@@ -529,6 +530,10 @@ export class WorldStore {
       const problem = settingsProblem(after.routineSettings);
       if (problem !== null) throw refusal(["routineSettings"], problem);
     }
+    if (!jsonEqual(was.needs, after.needs) && after.needs !== undefined) {
+      const problem = needsProblem(after.needs);
+      if (problem !== null) throw refusal(["needs"], problem);
+    }
     const shape = shapeIssues(after);
     if (shape.length > 0 || !isWorldDoc(after)) throw new WorldError("validation", "the patch leaves the world malformed", shape);
     try {
@@ -634,6 +639,12 @@ function routineProblem(id: string, value: unknown): string | null {
 function settingsProblem(value: unknown): string | null {
   const problems = routineSettingsProblems(value);
   return problems.length === 0 ? null : `routine settings: ${problems.join("; ")}`;
+}
+
+/** Needs settings as a write sends them, refused when one names no need, no setting or no value it takes: a stored bad value would quietly read as the default. */
+function needsProblem(value: unknown): string | null {
+  const problems = needsSettingsProblems(value);
+  return problems.length === 0 ? null : `needs settings: ${problems.join("; ")}`;
 }
 
 /** A collection of the document as a mutable JSON record (the editors write raw JSON values). */
@@ -775,6 +786,16 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     const settings = routineSettingsOf({ routineSettings: value });
     if (JSON.stringify(settings) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS)) delete doc.routineSettings;
     else doc.routineSettings = settings;
+    return;
+  }
+  // `world.needs` as the engine reads it (DESIGN §8): refused when it holds what the engine doesn't
+  // take, and stored as only what differs from the defaults, so a world saved untouched stays as it was.
+  if (part === "needs") {
+    const problem = needsProblem(value);
+    if (problem !== null) throw new WorldError("bad_request", problem);
+    const stored = storedNeedsSettings(needsSettingsOf({ needs: value }));
+    if (Object.keys(stored).length === 0) delete doc.needs;
+    else doc.needs = stored;
     return;
   }
   // `calendar`, `realism` and `time` are whole singletons, written as the editors send them.

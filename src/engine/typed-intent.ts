@@ -16,6 +16,8 @@ import { offersAction } from "../shared/world";
 import { optionalQuery } from "./pack-kit";
 import type { Registry } from "./registry-impl";
 import { isGone, kindIs } from "./scope";
+import { calendarOf } from "./calendar";
+import { typedSpan } from "./time";
 import { selectorMatches } from "./selector";
 import type { WorldState } from "./state";
 import type { InterpretOutput } from "./steps";
@@ -235,7 +237,13 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
         } else if (def.type === "text" && !textFilled && def.optional !== true && rest !== "") {
           params[name] = rest;
           textFilled = true;
-        } else if (def.type === "money" || def.type === "number" || def.type === "duration") {
+        } else if (def.type === "duration") {
+          // A length is read as words say one ("for an hour", "two hours and a half"), from the text as
+          // typed (its filler words count: "an hour"), not as the first number: "rest for 1 hour" is 60
+          // minutes. None stated, or two, none filled: the action's own time.
+          const span = typedSpan(calendarOf(world), state.clock, text);
+          if (span?.type === "duration") params[name] = span.minutes;
+        } else if (def.type === "money" || def.type === "number") {
           // A typed amount is in the world's currency: "5" is 5 bits, or $5.00 (500 cents).
           const n = numbers[nextNumber];
           if (n !== undefined) {

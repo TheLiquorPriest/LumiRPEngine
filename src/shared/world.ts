@@ -55,6 +55,7 @@ import type { InferredChecks } from "./inferred";
 import type { DataTable } from "./tables";
 import type { WorldMindsConfig } from "./minds";
 import type { RoutineDef, RoutineId, RoutineSettings, WorldRoutineSource } from "./routines";
+import type { NeedsSettings } from "./needs";
 
 export const WORLD_FORMAT = "lre-world-v1";
 
@@ -1142,6 +1143,8 @@ export interface WorldDoc {
   routines?: Record<RoutineId, RoutineDef>;
   /** How strictly people keep to routine against the story, whom routines invite, how social people are, how plans bend routine, each level's routine role, the narrator's soft routine context and the palette Timelapse's Follow my routine default; absent, the defaults (`routineSettingsOf`). */
   routineSettings?: RoutineSettings;
+  /** Each need on or off, its rate an hour and the points it is told and alerts at (DESIGN §8, `shared/needs`); absent, every need on as earlier builds had them (`needsSettingsOf`). */
+  needs?: NeedsSettings;
   tracks: Record<TrackId, TrackDef>;
   tables: Record<TableId, DataTable>;
   realism: RealismDefaults;

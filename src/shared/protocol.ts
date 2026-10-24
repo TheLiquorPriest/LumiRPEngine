@@ -435,9 +435,10 @@ export type WorldCollection =
  * optional: an empty one removes it; `loreIndex` is the lore lookup table `{terms, topics}`, whole;
  * `minds` is `world.minds` (DESIGN §24.2), whole: the defaults remove it; `lorePins` is
  * `world.lorePins` (DESIGN §24.5), whole: one that pins nothing removes it; `routineSettings` is
- * `world.routineSettings` (DESIGN §8), whole: the defaults remove it.
+ * `world.routineSettings` (DESIGN §8), whole: the defaults remove it; `needs` is `world.needs`
+ * (DESIGN §8), whole: only what differs from the defaults is stored, and the defaults remove it.
  */
-export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex" | "minds" | "lorePins" | "routineSettings";
+export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex" | "minds" | "lorePins" | "routineSettings" | "needs";
 
 /** One RFC 6902 operation, its paths RFC 6901 JSON Pointers into the whole world document. */
 export type JsonPatchOp =

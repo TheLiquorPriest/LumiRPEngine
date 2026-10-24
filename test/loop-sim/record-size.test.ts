@@ -68,9 +68,10 @@ describe("a dense timelapse segment run to the unit cap records ≤ 32 KB, exact
       const world = denseWorld(preset);
       const s0 = startState(world);
       const plan = planTurn({ registry: reg, world, state: s0, runSeed: "bench", seed: "s1", kind: "normal", userTexts: [""], intent: timelapseIntent({ type: "duration", minutes: 30 * 1440 }, ALL_NOTE_OVERRIDES(world)) });
-      // The unit cap's 5,000 events end the segment after 23 days for 20 agents plus the POV (33,390
-      // minutes when measured), before its 600 agent-days: a denser world stops sooner (§9.6).
-      expect(plan.elapsedMinutes).toBeGreaterThanOrEqual(23 * 1440);
+      // The unit cap's 5,000 events end the segment after 22 days for 20 agents plus the POV, whose
+      // needs it records as the POV lives them (32,670 and 33,030 minutes when measured), before its
+      // 600 agent-days: a denser world stops sooner (§9.6).
+      expect(plan.elapsedMinutes).toBeGreaterThanOrEqual(22 * 1440);
       expect(JSON.stringify(plan.events).length).toBeLessThanOrEqual(RECORD_CAP);
 
       // Exactness: the same segment uncoarsened folds to the state the record folds to.

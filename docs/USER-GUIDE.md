@@ -79,6 +79,7 @@ What you can see is always filtered to what your point-of-view character knows. 
 | Tab | What it shows |
 |---|---|
 | **You** | Your name, where you are and what you're doing, and your tier; your conditions; then your character sheet in sections: stats, skills and derived values, as numbers or as words, depending on the level. A pool such as HP is a bar of current over max that turns red at a quarter or less, and a level shows a bar of XP toward the next one. A value you can correct has an edit button. |
+| **Needs** | From Cast life 4: your hunger, fatigue, social and fun, each a gauge from met to urgent, named in words ("hungry") once it's pressing, which is when the narrator hears of it too. A need the world switches off isn't shown. See [Needs](#needs). |
 | **Money** | Your money hub (see [Your money](#your-money)): an overview, then a row for each piece of your money you have (accounts and cards, standing payments, jobs, businesses, investments, property, credit and your household), each opening its own page, shown as simply or as fully as your Money level says. In a new chat it shows the balances the world gives you to start with, under a **Not opened yet** banner, and the cash in the status line and the pill matches; opening the tab puts those amounts on your books, so the figures don't change when it does (during a reply they go on when the reply finishes). |
 | **Garage** | A card for each vehicle: fuel (marked low when it is), condition, location and home base, odometer or engine hours, who has it on loan (with **Overdue**), and upcoming service. A location or home base you don't know about reads **Somewhere**. |
 | **Gear** | What you have, sorted into **Owned**, **Worn**, **Carried** (the one that opens first) and **Stored**, with container loads, kits ("Kit 3 of 5") and what you have lent out (shown under **Owned**, without your equip slot, since it is with the borrower). A container's chevron button opens and closes what's inside it. A container whose contents haven't been listed yet offers **Look inside**, which opens it (and, once shown, what's in it stays). Tap an item for its item sheet: where it is and what holds it, its owner, slot and quantity, whom it is lent to and until when, its condition, a kit's pieces and what's missing, and a container's load and contents. |
@@ -602,6 +603,22 @@ Where you meet them:
 - **Play → People**: someone's usual day, as far as you may know it, and why each block is there ([People](#people)).
 - **GM → Routines**: everyone's routine, schedules and day as this chat has them, with what the story changed and the GM's changes ([Routines in GM mode](#routines-in-gm-mode)).
 - **Build → Routines**: the world's routines and their settings ([Routines in Build](#routines-in-build)), and routines proposed from the world's lore ([Proposing routines from lore](#proposing-routines-from-lore)). A routine Build can't read, or a setting it doesn't take, isn't saved: the message names the field to fix. Outside agents edit them the same way, with the same checks ([MCP.md](MCP.md)).
+
+### Needs
+
+From Cast life 4 your character gets hungry, tired, lonely and bored, each from 0 (met) to 100 (urgent). Once a need is pressing (60 by default) the narrator is told of it ("Alex Rivera (you): hungry") and **Me → Needs** marks it; at its alert point (80) it raises the needs alert in a timelapse, which by default is ignored ([Interrupts](#timelapse)).
+
+What meets a need meets it when it's done, so the need grows again from then:
+
+- **Eating** meets hunger at the end of the meal (half an hour, or as long as you say: "I eat for an hour").
+- **Resting** meets fun at the end of the rest (half an hour, or as long as you say: "I rest for an hour" takes an hour).
+- **Chatting** with someone meets your social need at the end of the chat (a quarter of an hour, or "I talk to Rosa for two hours").
+- **Sleep** meets fatigue as you sleep through it: **Go to bed** (until 07:00, or "I sleep for two hours"), then the Speed through or Timelapse offer; or any time skip your routine sleeps through. Going to bed and getting straight up again rests no one.
+- **Through a time skip**, what you live meets your needs: your meals and sleep, time out, and time with someone you know.
+
+**Beds.** Anyone can have a **bed**: a place, or an item such as a cot, wherever it stands. Their nights at home happen there, and Go to bed takes your character to yours. Set it in Build (the person's **Bed** field) or in GM mode (the person's page, **Where it is → Bed**). A bed in a secret place stays secret.
+
+**Needs settings** (**Build → Needs**): for each need, whether it's on, how much it grows an hour, the point it's told from and the point it alerts from. A world without settings plays as before: hunger 4, fatigue 3, social 1.5 and fun 1 an hour, told from 60 and alerting from 80. A setting the engine can't read is refused when you save it, and **Check world** warns about an alert set below the point its need is told from.
 
 ## How checks are decided
 

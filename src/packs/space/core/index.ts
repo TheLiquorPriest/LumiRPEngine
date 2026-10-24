@@ -155,6 +155,8 @@ export const PERSON: KindDef = {
     trips: { type: "list", label: "Trips", domain: "castlife", level: 1 },
     chores: { type: "list", label: "Chores", domain: "castlife", level: 3 },
     birthday: { type: "date", label: "Birthday (MM-DD or YYYY-MM-DD)", domain: "castlife", level: 3 },
+    // Where they sleep (Cast life, DESIGN §8): a place, or an item such as a bed, wherever it stands.
+    bed: { type: "ref", label: "Bed (a place or an item)", domain: "castlife", level: 1 },
   },
 };
 
