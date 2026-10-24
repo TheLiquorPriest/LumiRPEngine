@@ -46,6 +46,7 @@ import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "..
 import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { povLead, together } from "../../../engine/presence";
 import { relocate } from "../../../engine/relocate";
+import { CONVERSATION } from "../../relationships/core/index";
 import { acts as lifeActs, povLife } from "../../../engine/life";
 import { classValues, isGroup, isMemberOf, MEMBER_OF, selectEntities } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
@@ -175,6 +176,19 @@ const REST_FOR = "minutes > 0 ? minutes : 30";
 function toBed(ctx: ReadContext, who: EntityId): LedgerEvent[] {
   const to = bedPlace(ctx, who);
   return to === null || placeOfEntity(ctx.state, who) === to ? [] : movesOf(relocate(ctx, who, to));
+}
+
+/**
+ * A conversation the POV is in meets its social need as it ends (DESIGN §8): at the end of the chat's
+ * span while the chat is its activity (`activity_until`: the length it was stated, else the chat's
+ * own), else at once. Nothing for a conversation between others: only the POV's needs are recorded.
+ */
+function companyMet(ctx: ReadContext, pair: readonly EntityId[]): LedgerEvent[] {
+  const pov = ctx.world.pov;
+  const e = own(ctx.state.entities, pov);
+  if (!e || !pair.includes(pov)) return [];
+  const until = e.fields.activity === "chat" && typeof e.fields.activity_until === "number" ? Math.max(ctx.state.clock, e.fields.activity_until) : ctx.state.clock;
+  return metAt(ctx, pov, "social", until);
 }
 
 /** The player character's needs as Play's Me shows them (DESIGN §8): each the world has on, from Cast life 4. */
@@ -1668,6 +1682,10 @@ export const castlifePack: PackDef = {
     // Going to bed takes the sleeper to their bed (DESIGN §8): nothing when they have none, it's
     // nowhere, or they're there already.
     r.effect({ type: "castlife.to_bed", args: ["entity?"], resolve: (a, ctx) => toBed(ctx, strOf(a.entity) || ctx.world.pov) });
+    // A conversation is company (DESIGN §8): the regard a chat makes (relationships' `chat_with`) meets
+    // the POV's social need as the chat ends. Cast life reads the chat, so relationships needs nothing of it.
+    r.effect({ type: "castlife.company", args: ["with", "to"], resolve: (a, ctx) => companyMet(ctx, [strOf(a.with), strOf(a.to)]) });
+    r.rule({ id: "castlife.conversation", pack: "castlife", on: { event: "relationships.regard" }, when: `event.data.why == '${CONVERSATION}'`, do: [{ type: "castlife.company", args: { with: "=event.data.from", to: "=event.data.to" } }] });
     r.effect({ type: "castlife.decide", args: ["key", "choice"], resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
     r.effect({
       type: "castlife.override",
