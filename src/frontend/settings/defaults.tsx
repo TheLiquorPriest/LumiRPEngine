@@ -5,8 +5,10 @@
 import type { SheetSkill } from "../../shared/inferred";
 import type { JsonObject } from "../../shared/json";
 import type { UserSettings } from "../../shared/settings";
+import { TIMELAPSE_REACH_MINUTES } from "../../shared/settings";
 import { useApp } from "../app";
-import { Banner, Button, Section } from "../components";
+import { Banner, Button, NumberStepper, Section } from "../components";
+import { formatMinutes } from "../format";
 import { settingsTimePatch, TimeControlsEditor } from "../time-controls";
 import { AdjudicationSeed } from "./adjudication";
 import { InferredSeed } from "./inferred";
@@ -68,7 +70,7 @@ export function TimePage(props: DefaultsProps) {
   const { time } = props.settings;
   return (
     <div class="lre-stack" data-lre-settings-page="time">
-      <p class="lre-set-lead">How fast time passes in a scene, what stops a timelapse, and how much a long one may cover, for chats you start from now on.</p>
+      <p class="lre-set-lead">How fast time passes in a scene, what stops a timelapse, and how much a long one may cover, for chats you start from now on; and, for every chat, how long a skip runs without asking.</p>
       <ThisChatPointer />
       <Section>
         <div class="lre-stack">
@@ -86,6 +88,22 @@ export function TimePage(props: DefaultsProps) {
           if (Object.keys(body).length > 0) props.patch(body);
         }}
       />
+      {/* Read by every chat as it plays, so it sits apart from the seeds above (DESIGN §9.2, §9.4). */}
+      <Section title="Skips without asking">
+        <p class="lre-small lre-muted" style={{ margin: 0 }}>
+          A length of time you type ("for the next three hours") or a jump a reply tells ("three hours later") runs in the turn up to this long; a longer one is offered as a Timelapse chip instead. A skip until something ("until dinner", "until my shift") always runs. Every chat follows it from its next turn, up to {formatMinutes(TIMELAPSE_REACH_MINUTES)}.
+        </p>
+        <NumberStepper
+          label={`Run skips up to (min): ${time.askBeyondMinutes > 0 ? formatMinutes(time.askBeyondMinutes) : "every skip asks"}`}
+          value={time.askBeyondMinutes}
+          min={0}
+          max={TIMELAPSE_REACH_MINUTES}
+          step={60}
+          integer
+          disabled={props.busy}
+          onChange={(askBeyondMinutes) => props.patch({ time: { askBeyondMinutes } })}
+        />
+      </Section>
     </div>
   );
 }

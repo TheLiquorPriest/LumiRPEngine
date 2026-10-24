@@ -24,6 +24,9 @@ import { Icon } from "../icons";
 import type { EditorProps } from "../registry";
 import { scrollParent } from "../scroll";
 import { useSelect } from "../store";
+import { tierGroups } from "../batch";
+import { PickBox, SelectBar, useSelection } from "../multi-select";
+import { DraftBatchSheet } from "./batch-sheet";
 import { CheckView, issuePart, IssueRow } from "./check";
 import { COLLECTION_INFO, deleteItem, go, ItemHeader, itemLabel, NewItem, newItemName, OverflowMenu, PART_INFO } from "./chrome";
 import { commitDraft, discardDraft, draftSend, loadDraft } from "./draft";
@@ -101,7 +104,7 @@ function BuildPage(props: { route: BuildRoute }) {
     case "collection":
       return (
         <WithDraft worldId={route.worldId}>
-          {route.collection === "lore" ? <LoreList worldId={route.worldId} /> : route.collection === "routines" ? <RoutineList worldId={route.worldId} /> : <CollectionView collection={route.collection} />}
+          {route.collection === "lore" ? <LoreList worldId={route.worldId} /> : route.collection === "routines" ? <RoutineList worldId={route.worldId} /> : <CollectionView key={route.collection} collection={route.collection} />}
         </WithDraft>
       );
     case "item":
@@ -533,12 +536,18 @@ function CollectionView(props: { collection: WorldCollection }) {
   const draft = useSelect(app.drafts, (d) => d);
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
+  // Entities and places take bulk changes: while choosing, a row's tap picks it instead of opening it.
+  const selection = useSelection();
+  const [changing, setChanging] = useState(false);
   if (!draft) return null;
+  const bulk = props.collection === "entities" || props.collection === "places" ? props.collection : null;
   const doc = draft.doc;
   const info = COLLECTION_INFO[props.collection];
   const items = Object.entries(doc[props.collection] as Record<string, unknown>).map(([id, value]) => ({ id, value, label: itemLabel(props.collection, id, value, doc.places) }));
   const q = query.trim().toLowerCase();
   const shown = items.filter((item) => !q || item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q));
+  // Those picked still in the draft (a change elsewhere can remove one), in the list's order.
+  const chosen = items.filter((item) => selection.ids.includes(item.id)).map((item) => item.id);
   const kinds = { ...draft.packKinds, ...doc.kinds };
   // Data tables come from packs: a world edits its copy of one and never starts one.
   const canAdd = props.collection !== "tables";
@@ -561,11 +570,18 @@ function CollectionView(props: { collection: WorldCollection }) {
         title={info.label}
         subtitle={info.hint}
         actions={
-          canAdd && !adding ? (
-            <Button size="sm" variant="primary" icon="plus" label={`New ${info.noun}`} onClick={() => setAdding(true)}>
-              New
-            </Button>
-          ) : undefined
+          <>
+            {bulk && items.length > 0 ? (
+              <Button size="sm" variant={selection.on ? "primary" : "secondary"} icon="checklist" onClick={() => (selection.on ? selection.stop() : selection.start())}>
+                {selection.on ? "Done" : "Select"}
+              </Button>
+            ) : null}
+            {canAdd && !adding ? (
+              <Button size="sm" variant="primary" icon="plus" label={`New ${info.noun}`} onClick={() => setAdding(true)}>
+                New
+              </Button>
+            ) : null}
+          </>
         }
       />
       {adding ? <NewItem worldId={draft.worldId} collection={props.collection} taken={new Set(items.map((item) => item.id))} onDone={() => setAdding(false)} /> : null}
@@ -595,14 +611,23 @@ function CollectionView(props: { collection: WorldCollection }) {
                 title={item.label}
                 subtitle={detail(item.value)}
                 id={item.id}
+                leading={selection.on ? <PickBox label={`Select ${item.label}`} checked={selection.ids.includes(item.id)} /> : undefined}
                 badge={<IssueBadge issues={lintAt(draft.lint, `${props.collection}.${item.id}`)} />}
-                chevron
-                onClick={() => go(app, { view: "item", worldId: draft.worldId, collection: props.collection, id: item.id })}
+                chevron={!selection.on}
+                onClick={() => (selection.on ? selection.toggle(item.id) : go(app, { view: "item", worldId: draft.worldId, collection: props.collection, id: item.id }))}
               />
             ))}
           </List>
         </Section>
       )}
+      {bulk && selection.on ? (
+        <SelectBar label={`Change the selected ${info.label.toLowerCase()}`} selection={selection} all={items.map((item) => item.id)} shown={shown.map((item) => item.id)} groups={bulk === "entities" ? tierGroups(doc) : undefined} groupLabel="Select a tier">
+          <Button variant="primary" icon="edit" disabled={chosen.length === 0} onClick={() => setChanging(true)}>
+            {chosen.length === 1 ? "Change 1…" : `Change ${chosen.length}…`}
+          </Button>
+        </SelectBar>
+      ) : null}
+      {bulk && changing && chosen.length > 0 ? <DraftBatchSheet collection={bulk} ids={chosen} onClose={() => setChanging(false)} /> : null}
     </div>
   );
 }

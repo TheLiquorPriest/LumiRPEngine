@@ -9,6 +9,8 @@ import { isRecord } from "../shared/json";
 import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
+import { chatFeed, worldFeed } from "../engine/feed";
+import { sectionsOf } from "./book";
 import type { ActionDef, MapDisplay, WorldDoc } from "../shared/world";
 import { tableChoices } from "../shared/tables";
 import { routineSettingsOf } from "../shared/routines";
@@ -304,6 +306,7 @@ function controls(world: WorldDoc, state: WorldState, sceneType: string, registr
     adjudication: policyOf(world, state),
     inferred: inferredOf(world, state),
     skills: worldSkills(registry, world, state),
+    sections: sectionsOf(world).map((s) => ({ id: s.id, label: s.label, world: worldFeed(s), chat: chatFeed(state)[s.id] ?? null })),
     time: {
       sceneType,
       sceneTicks: { ...state.time.sceneTicks },

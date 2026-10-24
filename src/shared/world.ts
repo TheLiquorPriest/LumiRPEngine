@@ -740,8 +740,62 @@ export type SlotPosition =
   | { type: "outlet"; name: string }
   | { type: "chat_depth"; role: "system" | "user" | "assistant"; depth: number; direction: "from_start" | "from_end" };
 
-/** A slot section in the engine-managed lore book (DESIGN §4.2, §6.3). */
-export interface SectionTemplate {
+/**
+ * Whose knowledge a section's facts come from (DESIGN §6.11): `player`, what the player character
+ * knows (the default); `scene`, also what the characters with him know or plainly see; `gm`,
+ * everything. A fact beyond the player character's is marked for the narrator, never for a player surface.
+ */
+export type FeedScope = "player" | "scene" | "gm";
+export const FEED_SCOPES: readonly FeedScope[] = ["player", "scene", "gm"];
+
+/**
+ * What goes into a section (DESIGN §6.11): the world's defaults on its section, the GM's per chat
+ * over them. Every part is optional; a section with none delivers as it always has.
+ */
+export interface SectionFeed {
+  /** False leaves the section out of the prompt. */
+  enabled?: boolean;
+  /** At most this many tokens of the section: lines past it are cut from the end. */
+  maxTokens?: number;
+  /** At most this many lines. */
+  maxLines?: number;
+  /** The renderer sources that fill it (`SectionRenderer.source`); absent, the renderers of its own slot. */
+  include?: string[];
+  scope?: FeedScope;
+}
+
+export const SECTION_FEED_KEYS: readonly (keyof SectionFeed)[] = ["enabled", "maxTokens", "maxLines", "include", "scope"];
+
+/** A section's feed read from outside data: null when any part is malformed. Counts are whole and at least 1; sources are non-empty words. */
+export function readSectionFeed(raw: unknown): SectionFeed | null {
+  if (!isRecord(raw)) return null;
+  const out: SectionFeed = {};
+  for (const key of Object.keys(raw)) if (!SECTION_FEED_KEYS.some((k) => k === key)) return null;
+  if (raw.enabled !== undefined) {
+    if (typeof raw.enabled !== "boolean") return null;
+    out.enabled = raw.enabled;
+  }
+  for (const key of ["maxTokens", "maxLines"] as const) {
+    const v = raw[key];
+    if (v === undefined) continue;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 1) return null;
+    out[key] = v;
+  }
+  if (raw.include !== undefined) {
+    if (!Array.isArray(raw.include) || !raw.include.every((s): s is string => typeof s === "string" && s.trim() !== "")) return null;
+    // No sources is the default (its own slot's renderers), not a section nothing fills.
+    if (raw.include.length > 0) out.include = raw.include;
+  }
+  if (raw.scope !== undefined) {
+    const scope = FEED_SCOPES.find((s) => s === raw.scope);
+    if (!scope) return null;
+    out.scope = scope;
+  }
+  return out;
+}
+
+/** A slot section in the engine-managed lore book (DESIGN §4.2, §6.3), with its feed defaults (§6.11). */
+export interface SectionTemplate extends SectionFeed {
   id: SlotId;
   label: string;
   /** Lower ranks are reserved first on the section budget; Outcome is never evicted. */

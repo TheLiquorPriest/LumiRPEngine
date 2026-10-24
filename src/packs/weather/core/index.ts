@@ -338,6 +338,8 @@ export const weatherPack: PackDef = {
 
     r.renderer({
       slot: "scene",
+      // A section's `include` picks it by this name (DESIGN §6.11).
+      source: "weather",
       render(ctx) {
         const v = buildWeatherView(ctx);
         if (v.level === 0 || v.label === "") return [];

@@ -35,7 +35,8 @@ function people(w: WorldDoc, state: WorldState): string[] {
 /**
  * Riverton and, apart from it, Eastport: a town whose two halves only a drive joins, with a mill in
  * its north drawn room by room, every room a one-minute walk from the next and the floors joined by
- * stairs, and on the top floor a suite with a bath in it.
+ * stairs, and on the top floor a suite with a bath in it. A bakery stands beside the mill in North
+ * Eastport with no route to it: the half's sites are each their own island.
  */
 function eastport(): WorldDoc {
   const w = modernUsWorld("w", "R");
@@ -51,6 +52,7 @@ function eastport(): WorldDoc {
   place("eastport_south", "South Eastport", "eastport");
   w.routes.eastport_drive = { id: "eastport_drive", from: "eastport_north", to: "eastport_south", modes: { road: { minutes: 9, distanceKm: 7 } }, bidirectional: true };
   place("mill", "The Mill", "eastport_north");
+  place("bakery", "The Bakery", "eastport_north");
   for (const floor of ["f1", "f2"]) {
     place(`mill_${floor}`, `Floor ${floor}`, "mill");
     for (let i = 1; i <= 6; i++) place(`mill_${floor}_room${i}`, `Room ${i}`, `mill_${floor}`);
@@ -76,6 +78,16 @@ describe("who is with the player character", () => {
     const lines = people(w, s);
     expect(lines.some((l) => l.includes("Maya Chen"))).toBe(true);
     expect(lines.some((l) => l.includes("Jordan Price"))).toBe(false);
+  });
+
+  test("someone placed at a town whose sites are each their own island isn't with the player character at one of them, nor on a floor of it", () => {
+    const w = eastport();
+    // No walk joins the mill and the bakery: being somewhere in North Eastport isn't being at the mill.
+    expect(together(w, "mill", "eastport_north")).toBe(false);
+    expect(together(w, "mill_f2", "eastport_north")).toBe(false);
+    // Short walks join the mill's floors and the floor's rooms, so the mill stays one building.
+    expect(together(w, "mill_f2", "mill")).toBe(true);
+    expect(together(w, "mill_f2_bath", "mill_f2")).toBe(true);
   });
 
   test("a companion in a room inside the player character's place is with them: Minds and People tell of her", () => {

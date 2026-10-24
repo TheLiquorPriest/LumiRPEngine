@@ -107,6 +107,8 @@ export const calendarPack: PackDef = {
 
     r.renderer({
       slot: "scene",
+      // A section's `include` picks it by this name (DESIGN §6.11).
+      source: "calendar",
       render(ctx) {
         const level = ctx.levelOf(ctx.world.pov, "calendar");
         if (level === 0) return [];
