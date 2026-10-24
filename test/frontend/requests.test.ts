@@ -93,6 +93,14 @@ describe("palette and map actions", () => {
     expect(truck.params).toEqual({ vehicle: "pov_truck" });
   });
 
+  test("Go's With picks merge as a list, only of the people the picker offered, and none sends no list", () => {
+    const go: PaletteEntry = { action: "go", label: "Go to", group: "action", options: [{ label: "Market", params: { to: "market" } }], people: { param: "with", label: "Who comes along", options: [{ id: "danny", name: "Danny" }, { id: "marcus", name: "Marcus" }] } };
+    const market = go.options[0];
+    if (!market) throw new Error("fixture");
+    expect(paletteRequest(go, [market], "c1", undefined, undefined, ["marcus", "stranger"]).params).toEqual({ to: "market", with: ["marcus"] });
+    expect(paletteRequest(go, [market], "c1").params).toEqual({ to: "market" });
+  });
+
   test("Lend's required number merges under its param", () => {
     const lend: PaletteEntry = { action: "gear.lend", label: "Lend", group: "lend", options: [{ label: "Pocketknife", params: { item: "pov_knife" } }], number: { param: "days", label: "days", min: 1, max: null, default: 1 } };
     const knife = lend.options[0];

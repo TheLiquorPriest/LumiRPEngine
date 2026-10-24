@@ -252,6 +252,8 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
   const [amount, setAmount] = useState("");
   // The entry's required number (Lend's days); null shows and sends its default.
   const [count, setCount] = useState<string | null>(null);
+  // Who comes along (Go's With), ticked for the selected entry; cleared when the action changes.
+  const [people, setPeople] = useState<string[]>([]);
   const [busy, run] = useBusy();
   // Amounts are typed in the world's currency, with its own decimals (5 is 5 bits, or $5.00).
   const currency = props.view.currency ?? DEFAULT_CURRENCY;
@@ -268,13 +270,16 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
     const same = selected?.entry.action === entry.action;
     const picks = same ? selected.picks.slice(0, depth) : [];
     const again = same && samePick(selected.picks[depth], option);
-    if (!same) setCount(null);
+    if (!same) {
+      setCount(null);
+      setPeople([]);
+    }
     setSelected(again ? (depth === 0 ? null : { entry, picks }) : { entry, picks: [...picks, option] });
   };
   const go = () => {
     if (!selected || pending || !amountOk || !countOk) return;
     run(async () => {
-      const result = await app.request(paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined));
+      const result = await app.request(paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people));
       if (result) props.onSent();
     });
   };
@@ -299,6 +304,17 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
             {selected?.entry.action === entry.action
               ? selected.picks.map((chosen, depth) => (chosen.next ? <NextStep key={`${depth}:${JSON.stringify(chosen.params)}`} after={chosen} step={chosen.next} chosen={selected.picks[depth + 1]} onPick={(option) => pick(entry, depth + 1, option)} /> : null))
               : null}
+            {selected?.entry.action === entry.action && entry.people ? (
+              <div class="lre-chat-next" data-lre-palette-people={entry.people.param}>
+                <div class="lre-chat-next-head">
+                  <Icon name="users" size={16} />
+                  <span>{entry.people.label}</span>
+                </div>
+                {entry.people.options.map((person) => (
+                  <HostSwitch key={person.id} label={person.name} checked={people.includes(person.id)} onChange={(on) => setPeople(on ? [...people, person.id] : people.filter((id) => id !== person.id))} />
+                ))}
+              </div>
+            ) : null}
           </section>
         ))}
       </div>

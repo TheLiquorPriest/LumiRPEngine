@@ -78,6 +78,14 @@
           "properties": { "place": { "$ref": "#/$defs/id" } }
         },
         {
+          "title": "{\"door\": true, \"place\": …}",
+          "description": "A door on a room's edge: walked through as a door, and part of `place`'s area, so whoever stands in it is in that room. One that touches another room's area joins the two.",
+          "type": "object",
+          "required": ["door", "place"],
+          "additionalProperties": false,
+          "properties": { "door": { "enum": [true] }, "place": { "$ref": "#/$defs/id" } }
+        },
+        {
           "title": "{\"zone\": …}",
           "type": "object",
           "required": ["zone"],

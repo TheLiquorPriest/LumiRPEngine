@@ -138,6 +138,7 @@ function compileGrid(key: MapId, map: MapDoc, mine: readonly MapPlaceDef[], plac
   const zones = new Map<string, number[]>();
   const rooms = new Map<number, PlaceId>();
   const things: { id: EntityId; index: number; place: PlaceId | null }[] = [];
+  const doors = new Set<number>();
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const index = y * width + x;
@@ -147,7 +148,16 @@ function compileGrid(key: MapId, map: MapDoc, mine: readonly MapPlaceDef[], plac
         terrain.push("wall");
         blocked.push(index);
       } else if (cell === "floor" || cell === "door") terrain.push(cell);
-      else if ("terrain" in cell) {
+      else if ("door" in cell) {
+        // A door on a room's edge: walked as a door, and in the room's area, so whoever stands in it
+        // is in the room; touching another room's area, it joins the two (`compileFloorRoutes`).
+        terrain.push("door");
+        if (ids.has(cell.place)) {
+          zones.set(cell.place, [...(zones.get(cell.place) ?? []), index]);
+          rooms.set(index, cell.place);
+          doors.add(index);
+        }
+      } else if ("terrain" in cell) {
         terrain.push(cell.terrain);
         if (cell.blocked === true) blocked.push(index);
       } else if ("item" in cell) {
@@ -180,7 +190,10 @@ function compileGrid(key: MapId, map: MapDoc, mine: readonly MapPlaceDef[], plac
   for (const p of mine) {
     const def = places[p.id];
     if (!def) continue;
-    const cell = p.at ? (p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null) : nearestMiddle(zones.get(p.id) ?? [], width);
+    // A place stands at the middle of its area: its floor, not a door on its edge, while it has floor.
+    const area = zones.get(p.id) ?? [];
+    const floor = area.filter((i) => !doors.has(i));
+    const cell = p.at ? (p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null) : nearestMiddle(floor.length > 0 ? floor : area, width);
     if (cell) places[p.id] = { ...def, cell };
   }
 }
@@ -397,6 +410,20 @@ export function mapProblems(world: WorldDoc): Map<MapId, MapProblem[]> {
         else if (drawn > 1) err(["legend", ch, "item"], "map_item", `${thing.name} is drawn on ${drawn} cells; a thing lies on one`);
         else if (drawn > 0 && other) problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} already lies on the map "${other.map ?? other.id}"` });
       }
+      // A room door sits on its room's edge: one that touches none of the room's area is a room of a
+      // single doorway, which is never what was meant.
+      const roomOf = (x: number, y: number): PlaceId | null => {
+        const cell = cellOf(map, rows[y]?.[x] ?? " ");
+        return typeof cell === "object" && "place" in cell && !("item" in cell) && cell.place !== undefined ? cell.place : null;
+      };
+      rows.forEach((row, y) =>
+        row.forEach((ch, x) => {
+          const cell = cellOf(map, ch);
+          if (typeof cell !== "object" || !("door" in cell) || !ids.includes(cell.place)) return;
+          const beside = [roomOf(x - 1, y), roomOf(x + 1, y), roomOf(x, y - 1), roomOf(x, y + 1)];
+          if (!beside.includes(cell.place)) problems.push({ severity: "warning", path: ["layout", y], code: "map_door", message: `The door of ${placeName(cell.place)} at [${x}, ${y}] touches none of its room: put it on the room's edge` });
+        }),
+      );
       (map.places ?? []).forEach((p, i) => {
         if (p.at && (p.at[0] >= width || p.at[1] >= height)) err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${width} × ${height} layout`);
       });

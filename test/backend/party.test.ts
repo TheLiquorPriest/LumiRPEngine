@@ -8,7 +8,7 @@ import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
-import { bringOp } from "../../src/frontend/requests";
+import { bringOp, paletteRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";
 import type { GmView } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
@@ -20,17 +20,20 @@ const DANNY = "danny_okafor";
 const SHOP = "alder_automotive";
 const MARKET = "alder_market";
 const ANCHOR = "rusty_anchor";
+/** Someone at the shop the POV can't see. */
+const WATCHER = "the_watcher";
 
-/** Port Alder with the POV, Marcus and Danny at the shop. */
+/** Port Alder with the POV, Marcus and Danny at the shop, and someone there the POV can't see. */
 async function portAlder(): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   // A place the POV doesn't know of, which no ✎ may name.
   rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "places", id: "smugglers_den", value: { id: "smugglers_den", name: "Smugglers' Den", parent: "port_alder", visibility: "secret", fields: {} } }));
+  rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: WATCHER, value: { id: WATCHER, kind: "character", name: "The Watcher", tier: "background", visibility: "secret", fields: { place: SHOP }, relations: [] } }));
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-  rig.body(await rig.send({ type: "lre.edit", chatId, ops: ["pov", MARCUS, DANNY].map((entity) => ({ op: "move", entity, to: SHOP })) }));
+  rig.body(await rig.send({ type: "lre.edit", chatId, ops: ["pov", MARCUS, DANNY, WATCHER].map((entity) => ({ op: "move", entity, to: SHOP })) }));
   return { rig, chatId };
 }
 
@@ -66,6 +69,31 @@ describe("companions", () => {
     expect(placeOfEntity(state, "pov")).toBe(MARKET);
     expect(placeOfEntity(state, DANNY)).toBe(MARKET);
     expect(placeOfEntity(state, MARCUS)).toBe(SHOP);
+  });
+
+  test("the Actions sheet's With picker offers the people here the player character can see, and Go brings the ones ticked", async () => {
+    const { rig, chatId } = await portAlder();
+    const view = await rig.rt.view(chatId, rig.host.userId);
+    const go = view.palette?.entries.find((e) => e.action === "go");
+    expect(go?.people?.options.map((o) => o.id)).toEqual([DANNY, MARCUS]);
+    const market = go?.options.find((o) => o.params.to === MARKET);
+    if (!go || !market) throw new Error("no Go to the market");
+    // Staged by the sheet, it runs on the next message.
+    script(rig, NONE, { proposals: [], where: null });
+    rig.body(await rig.send(paletteRequest(go, [market], chatId, undefined, undefined, [MARCUS])));
+    await rig.turn(chatId, "Come on, Marcus.", "You and Marcus head over to the market.");
+    let state = await stateOf(rig, chatId);
+    expect(placeOfEntity(state, "pov")).toBe(MARKET);
+    expect(placeOfEntity(state, MARCUS)).toBe(MARKET);
+    expect(placeOfEntity(state, DANNY)).toBe(SHOP);
+    // A hand-made request naming someone hidden with the player character doesn't bring them.
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: WATCHER, to: MARKET }] }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "go", params: { to: SHOP, with: [WATCHER, MARCUS] }, source: "palette" }));
+    await rig.turn(chatId, "Back to the shop.", "You and Marcus walk back to the shop.");
+    state = await stateOf(rig, chatId);
+    expect(placeOfEntity(state, "pov")).toBe(SHOP);
+    expect(placeOfEntity(state, MARCUS)).toBe(SHOP);
+    expect(placeOfEntity(state, WATCHER)).toBe(MARKET);
   });
 
   test("a party member follows a narrated move of the player character, unless the reply sends them elsewhere", async () => {

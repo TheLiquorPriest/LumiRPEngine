@@ -82,7 +82,9 @@ describe("a secret place the POV stands in", () => {
     // Back in the building's garage, the truck's place is named again; only its home base isn't.
     state.entities.truck!.fields.place = "garage";
     expect(buildGarageView(reg.context(world, state)).vehicles.find((v) => v.id === "truck")).toMatchObject({ place: "Building garage", home: HIDDEN_PLACE_NAME });
-    expect(factLines(reg, world, state, []).some((l) => l.startsWith("Pickup truck: at Building garage,"))).toBe(true);
+    const back = factLines(reg, world, state, []).join("\n");
+    expect(back).toContain("Building garage");
+    expect(back).not.toContain("Smugglers");
   });
 });
 

@@ -83,4 +83,20 @@ describe("every writer of a place moves alike", () => {
     lapse(t, at(t, 0, "18:30"));
     expect(where(t.state, "maya")).toEqual({ in: [], place: "pub", cell: null });
   });
+
+  test("the player character's party rides along when it drives; someone not in the party stays", () => {
+    const { world, state } = riverton("you");
+    // Maya travels with the player character and Rosa doesn't; both wait with it in the garage.
+    for (const id of ["maya", "rosa"]) {
+      const e = state.entities[id];
+      if (e) e.fields.place = "garage";
+    }
+    state.entities.maya?.relations.push({ type: "travels_with", to: "you" });
+    const w = new Working(reg, world, state);
+    const out = applyEffects(reg, w, [{ type: "vehicles.drive", args: { vehicle: "truck", to: "cafe", driver: "you" } }], { bindings: { self: "you" }, rng: createRng("m") });
+    expect(out.rejected).toEqual([]);
+    expect(where(w.state, "maya")).toEqual({ in: [], place: "cafe", cell: null });
+    expect(placeOfEntity(w.state, "rosa")).toBe("garage");
+    expect(placeOfEntity(w.state, "truck")).toBe("cafe");
+  });
 });

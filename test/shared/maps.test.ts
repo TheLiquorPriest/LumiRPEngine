@@ -4,6 +4,8 @@
 
 import { describe, expect, test } from "bun:test";
 import type { MapDoc, WorldDoc } from "../../src/shared/world";
+import { areaPlaceAt } from "../../src/shared/grid";
+import { hashJson } from "../../src/shared/hash";
 import { compileMaps, formatMap, mapLint, mapProblems, mapTemplate, readMap } from "../../src/shared/maps";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -128,6 +130,54 @@ describe("maps compile into places, grids and routes", () => {
       const w = world({ m: mapTemplate(kind, "m", "home") });
       expect(readMap(w.maps.m).problems).toEqual([]);
       expect(issuesOf(w, "m")).toEqual([]);
+    }
+  });
+});
+
+describe("doors on a room's edge", () => {
+  /** Two rooms with a wall between them and, in it, the parlour's own door (`d`). */
+  const ROOMS: MapDoc = {
+    id: "house",
+    scope: "home",
+    layout: ["#########", "#pppdsss#", "#ppp#sss#", "#########"],
+    legend: { p: { place: "parlour" }, s: { place: "study" }, d: { door: true, place: "parlour" } },
+    places: [{ id: "parlour" }, { id: "study" }],
+  };
+  const walking = (maps: Record<string, unknown>): WorldDoc => ({ ...world(maps), mapSettings: { display: "knowledge", grid: { movement: true, sightRadius: 3 } } });
+
+  test("a door cell inside a room's area keeps the room's place and joins the two rooms", () => {
+    const doc = migrateWorld(walking({ house: ROOMS }));
+    const grid = doc.grids.house;
+    if (!grid) throw new Error("no grid");
+    const door = 1 * 9 + 4;
+    expect(grid.terrain[door]).toBe("door");
+    expect(grid.blocked).not.toContain(door);
+    expect(areaPlaceAt(doc, "home", grid, door)).toBe("parlour");
+    // The parlour stands on its floor, not in its doorway.
+    expect(doc.places.parlour?.cell).not.toEqual({ x: 4, y: 1 });
+    const route = Object.values(doc.routes).find((r) => [r.from, r.to].sort().join() === "parlour,study");
+    expect(route?.modes.walk?.minutes).toBeGreaterThan(0);
+    expect(issuesOf(walking({ house: ROOMS }), "house")).toEqual([]);
+  });
+
+  test("a room door that touches none of its room is a warning", () => {
+    const w = walking({ house: { ...ROOMS, layout: ["#########", "#ppp#sss#", "#ppp#sds#", "#########"] } });
+    expect(issuesOf(w, "house").map((p) => [p.severity, p.code])).toContainEqual(["warning", "map_door"]);
+  });
+
+  test("an old map, with every kind of cell but a room door, compiles exactly as before", () => {
+    const OLD: MapDoc = {
+      id: "cottage",
+      scope: "home",
+      layout: ["#########", "#kkk+bbb#", "#kzk#bbb#", "##+###+##", "#hhhh~hh#", "####+####"],
+      legend: { k: { place: "kitchen" }, b: { place: "bedroom" }, h: { place: "hall" }, z: { zone: "hearth" }, "~": { terrain: "water", blocked: true } },
+      places: [{ id: "kitchen" }, { id: "bedroom", name: "Back bedroom" }, { id: "hall", at: [1, 4] }],
+    };
+    // What the compiler made of it before room doors, with the grid system off and on.
+    const before: Record<string, string> = { off: "8df0d9fb0d894d7d7b43830669c4b476", on: "f960aeddd741505320ed775ec4031963" };
+    for (const movement of [false, true]) {
+      const doc = compileMaps({ ...world({ cottage: OLD }), mapSettings: { display: "knowledge", grid: { movement, sightRadius: 3 } } });
+      expect(hashJson({ places: doc.places, routes: doc.routes, grids: doc.grids })).toBe(before[movement ? "on" : "off"] ?? "");
     }
   });
 });

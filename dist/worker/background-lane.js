@@ -708,6 +708,14 @@ var lre_map_v1_schema_default = {
           properties: { place: { $ref: "#/$defs/id" } }
         },
         {
+          title: '{"door": true, "place": \u2026}',
+          description: "A door on a room's edge: walked through as a door, and part of `place`'s area, so whoever stands in it is in that room. One that touches another room's area joins the two.",
+          type: "object",
+          required: ["door", "place"],
+          additionalProperties: false,
+          properties: { door: { enum: [true] }, place: { $ref: "#/$defs/id" } }
+        },
+        {
           title: '{"zone": \u2026}',
           type: "object",
           required: ["zone"],
@@ -1223,6 +1231,7 @@ function compileGrid(key, map, mine, places, grids) {
   const zones = new Map;
   const rooms = new Map;
   const things = [];
+  const doors = new Set;
   for (let y = 0;y < height; y += 1) {
     for (let x = 0;x < width; x += 1) {
       const index = y * width + x;
@@ -1232,7 +1241,14 @@ function compileGrid(key, map, mine, places, grids) {
         blocked.push(index);
       } else if (cell === "floor" || cell === "door")
         terrain.push(cell);
-      else if ("terrain" in cell) {
+      else if ("door" in cell) {
+        terrain.push("door");
+        if (ids.has(cell.place)) {
+          zones.set(cell.place, [...zones.get(cell.place) ?? [], index]);
+          rooms.set(index, cell.place);
+          doors.add(index);
+        }
+      } else if ("terrain" in cell) {
         terrain.push(cell.terrain);
         if (cell.blocked === true)
           blocked.push(index);
@@ -1271,7 +1287,9 @@ function compileGrid(key, map, mine, places, grids) {
     const def = places[p.id];
     if (!def)
       continue;
-    const cell = p.at ? p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null : nearestMiddle(zones.get(p.id) ?? [], width);
+    const area = zones.get(p.id) ?? [];
+    const floor = area.filter((i) => !doors.has(i));
+    const cell = p.at ? p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null : nearestMiddle(floor.length > 0 ? floor : area, width);
     if (cell)
       places[p.id] = { ...def, cell };
   }
@@ -1487,6 +1505,18 @@ function mapProblems(world) {
         else if (drawn > 0 && other)
           problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} already lies on the map "${other.map ?? other.id}"` });
       }
+      const roomOf = (x, y) => {
+        const cell = cellOf(map, rows[y]?.[x] ?? " ");
+        return typeof cell === "object" && "place" in cell && !("item" in cell) && cell.place !== undefined ? cell.place : null;
+      };
+      rows.forEach((row, y) => row.forEach((ch, x) => {
+        const cell = cellOf(map, ch);
+        if (typeof cell !== "object" || !("door" in cell) || !ids.includes(cell.place))
+          return;
+        const beside = [roomOf(x - 1, y), roomOf(x + 1, y), roomOf(x, y - 1), roomOf(x, y + 1)];
+        if (!beside.includes(cell.place))
+          problems.push({ severity: "warning", path: ["layout", y], code: "map_door", message: `The door of ${placeName(cell.place)} at [${x}, ${y}] touches none of its room: put it on the room's edge` });
+      }));
       (map.places ?? []).forEach((p, i) => {
         if (p.at && (p.at[0] >= width || p.at[1] >= height))
           err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${width} \xD7 ${height} layout`);
@@ -4286,7 +4316,9 @@ function loreSourceOf(raw) {
 function isLorePin(v) {
   if (!isRecord(v))
     return false;
-  const keys = Object.keys(v).length;
+  if (v.keep !== undefined && v.keep !== "start" && v.keep !== "end")
+    return false;
+  const keys = Object.keys(v).length - (v.keep === undefined ? 0 : 1);
   if (v.lore !== undefined)
     return typeof v.lore === "string" && v.lore !== "" && keys === 1;
   if (typeof v.book !== "string" || v.book === "")
@@ -7988,16 +8020,8 @@ function prepare(reg, world, state, req) {
       continue;
     }
     if (def.type === "list" && def.ref) {
-      const ids = (Array.isArray(raw) ? raw : String(raw).split(",")).map((x) => String(x).trim()).filter((x) => x !== "");
-      for (const id of ids) {
-        const target = own(state.entities, id);
-        if (!target)
-          return { code: "bad_param", reason: `no entity ${labelOf({ world, state }, id)}` };
-        if (!kindIs(reg, world, target.kind, def.ref))
-          return { code: "bad_param", reason: `${target.name} is not ${/^[aeiou]/i.test(def.ref) ? "an" : "a"} ${(reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase()}` };
-        if (def.of && !selectorMatches(reg, world, state, def.of, id))
-          return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
-      }
+      const may = new Set(companionCandidates(reg, world, state, action, name, actor));
+      const ids = (Array.isArray(raw) ? raw : String(raw).split(",")).map((x) => String(x).trim()).filter((x) => may.has(x));
       if (ids.length > 0)
         params[name] = [...new Set(ids)].join(",");
       continue;
@@ -8198,6 +8222,17 @@ function paramCandidates(reg, world, state, action, param, actor = world.pov) {
     out.push(id);
   }
   return out;
+}
+function companionCandidates(reg, world, state, action, param, actor = world.pov) {
+  const def = own(action.params, param);
+  if (!def || def.type !== "list" || def.ref === undefined)
+    return [];
+  const ref = def.ref;
+  const here = placeOfEntity(state, actor);
+  return Object.keys(state.entities).sort().filter((id) => {
+    const e = own(state.entities, id);
+    return !!e && id !== actor && kindIs(reg, world, e.kind, ref) && (!def.of || selectorMatches(reg, world, state, def.of, id)) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)) && canSeeEntity(reg, world, state, actor, id);
+  });
 }
 function placeCandidates(reg, world, state, actor = world.pov) {
   const here = placeOfEntity(state, actor);
@@ -8543,6 +8578,25 @@ function lintLore(world) {
         push("warning", path, "missing_ref", `"${entry}" is not a lore entry`);
   }
   issues.push(...lintLorePins(world));
+  issues.push(...lintLoreBooks(world));
+  return issues;
+}
+function lintLoreBooks(world) {
+  const raw = world.loreBooks;
+  if (raw === undefined)
+    return [];
+  if (!Array.isArray(raw))
+    return [{ severity: "error", path: "loreBooks", code: "lore_books_shape", message: "Lore books are a list of World Info book ids; none are read." }];
+  const issues = [];
+  const seen = new Set;
+  raw.forEach((id, i) => {
+    if (typeof id !== "string" || id.trim() === "")
+      issues.push({ severity: "warning", path: `loreBooks.${i}`, code: "lore_books_shape", message: "Not a World Info book id: it is ignored." });
+    else if (seen.has(id))
+      issues.push({ severity: "warning", path: `loreBooks.${i}`, code: "lore_books_duplicate", message: "This book is listed twice: it is read once." });
+    else
+      seen.add(id);
+  });
   return issues;
 }
 function lintLorePins(world) {

@@ -969,10 +969,16 @@ function loreSourceOf(raw) {
     return { kind: "ai", status: raw.status };
   return { kind: "authored" };
 }
+function loreBooksOf(world) {
+  const raw = world.loreBooks;
+  return Array.isArray(raw) ? [...new Set(raw.filter((id) => typeof id === "string" && id.trim() !== ""))] : [];
+}
 function isLorePin(v3) {
   if (!isRecord(v3))
     return false;
-  const keys = Object.keys(v3).length;
+  if (v3.keep !== undefined && v3.keep !== "start" && v3.keep !== "end")
+    return false;
+  const keys = Object.keys(v3).length - (v3.keep === undefined ? 0 : 1);
   if (v3.lore !== undefined)
     return typeof v3.lore === "string" && v3.lore !== "" && keys === 1;
   if (typeof v3.book !== "string" || v3.book === "")
@@ -983,7 +989,10 @@ function lorePinKey(pin) {
   return "lore" in pin ? `lore:${pin.lore}` : ("entry" in pin) ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
 function pinJson(pin) {
-  return "lore" in pin ? { lore: pin.lore } : ("entry" in pin) ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+  const base = "lore" in pin ? { lore: pin.lore } : ("entry" in pin) ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+  if (pin.keep === "end")
+    base.keep = "end";
+  return base;
 }
 var pinsRead = new WeakMap;
 function lorePinsOf(world) {
@@ -5353,12 +5362,15 @@ function convertRequest(line, chatId) {
     return null;
   return { type: "lre.keep", chatId, choice: "convert", messageId: line.messageId, parentPath: line.parentPath, refs: [line.ref] };
 }
-function paletteRequest(entry, picks, chatId, amountCents, count) {
+function paletteRequest(entry, picks, chatId, amountCents, count, people = []) {
   const params = Object.assign({}, ...picks.map((pick) => pick.params));
   if (entry.amount && amountCents !== undefined)
     params[entry.amount.param] = Math.round(amountCents);
   if (entry.number && count !== undefined)
     params[entry.number.param] = count;
+  const along = entry.people ? people.filter((id) => entry.people?.options.some((o4) => o4.id === id)) : [];
+  if (entry.people && along.length > 0)
+    params[entry.people.param] = along;
   return { type: "lre.action", chatId, action: entry.action, params, source: "palette" };
 }
 function timelapseRequest(view, target, overrides, chatId, followRoutine, source = "palette") {
@@ -13609,6 +13621,14 @@ var lre_map_v1_schema_default = {
           properties: { place: { $ref: "#/$defs/id" } }
         },
         {
+          title: '{"door": true, "place": …}',
+          description: "A door on a room's edge: walked through as a door, and part of `place`'s area, so whoever stands in it is in that room. One that touches another room's area joins the two.",
+          type: "object",
+          required: ["door", "place"],
+          additionalProperties: false,
+          properties: { door: { enum: [true] }, place: { $ref: "#/$defs/id" } }
+        },
+        {
           title: '{"zone": …}',
           type: "object",
           required: ["zone"],
@@ -13953,6 +13973,7 @@ function compileGrid(key, map, mine, places2, grids) {
   const zones = new Map;
   const rooms = new Map;
   const things = [];
+  const doors = new Set;
   for (let y3 = 0;y3 < height; y3 += 1) {
     for (let x2 = 0;x2 < width; x2 += 1) {
       const index = y3 * width + x2;
@@ -13962,7 +13983,14 @@ function compileGrid(key, map, mine, places2, grids) {
         blocked.push(index);
       } else if (cell === "floor" || cell === "door")
         terrain.push(cell);
-      else if ("terrain" in cell) {
+      else if ("door" in cell) {
+        terrain.push("door");
+        if (ids.has(cell.place)) {
+          zones.set(cell.place, [...zones.get(cell.place) ?? [], index]);
+          rooms.set(index, cell.place);
+          doors.add(index);
+        }
+      } else if ("terrain" in cell) {
         terrain.push(cell.terrain);
         if (cell.blocked === true)
           blocked.push(index);
@@ -14001,7 +14029,9 @@ function compileGrid(key, map, mine, places2, grids) {
     const def = places2[p3.id];
     if (!def)
       continue;
-    const cell = p3.at ? p3.at[0] < width && p3.at[1] < height ? { x: p3.at[0], y: p3.at[1] } : null : nearestMiddle(zones.get(p3.id) ?? [], width);
+    const area = zones.get(p3.id) ?? [];
+    const floor = area.filter((i3) => !doors.has(i3));
+    const cell = p3.at ? p3.at[0] < width && p3.at[1] < height ? { x: p3.at[0], y: p3.at[1] } : null : nearestMiddle(floor.length > 0 ? floor : area, width);
     if (cell)
       places2[p3.id] = { ...def, cell };
   }
@@ -14217,6 +14247,18 @@ function mapProblems(world) {
         else if (drawn > 0 && other)
           problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} already lies on the map "${other.map ?? other.id}"` });
       }
+      const roomOf = (x2, y3) => {
+        const cell = cellOf(map, rows[y3]?.[x2] ?? " ");
+        return typeof cell === "object" && "place" in cell && !("item" in cell) && cell.place !== undefined ? cell.place : null;
+      };
+      rows.forEach((row, y3) => row.forEach((ch, x2) => {
+        const cell = cellOf(map, ch);
+        if (typeof cell !== "object" || !("door" in cell) || !ids.includes(cell.place))
+          return;
+        const beside = [roomOf(x2 - 1, y3), roomOf(x2 + 1, y3), roomOf(x2, y3 - 1), roomOf(x2, y3 + 1)];
+        if (!beside.includes(cell.place))
+          problems.push({ severity: "warning", path: ["layout", y3], code: "map_door", message: `The door of ${placeName(cell.place)} at [${x2}, ${y3}] touches none of its room: put it on the room's edge` });
+      }));
       (map.places ?? []).forEach((p3, i3) => {
         if (p3.at && (p3.at[0] >= width || p3.at[1] >= height))
           err(["places", i3, "at"], "map_place", `[${p3.at[0]}, ${p3.at[1]}] is outside the ${width} × ${height} layout`);
@@ -14566,12 +14608,33 @@ function LorePinsSection(props) {
                   tone: t3.badge === "Missing" ? "neg" : t3.badge === "Secret" ? "gm" : "neutral",
                   children: t3.badge
                 }, undefined, false, undefined, this) : undefined,
-                actions: /* @__PURE__ */ u3(IconButton, {
-                  icon: "close",
-                  label: `Unpin ${t3.title}`,
-                  disabled: busy,
-                  onClick: () => save(list2.filter((_3, j3) => j3 !== i3))
-                }, undefined, false, undefined, this)
+                actions: /* @__PURE__ */ u3(M, {
+                  children: [
+                    /* @__PURE__ */ u3("select", {
+                      class: "lre-input",
+                      "aria-label": `When ${t3.title} doesn't fit, keep`,
+                      value: pin.keep ?? "start",
+                      disabled: busy,
+                      onChange: (event) => save(list2.map((p3, j3) => j3 === i3 ? { ...p3, keep: event.currentTarget.value === "end" ? "end" : "start" } : p3)),
+                      children: [
+                        /* @__PURE__ */ u3("option", {
+                          value: "start",
+                          children: "When it doesn't fit, keep the start"
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ u3("option", {
+                          value: "end",
+                          children: "When it doesn't fit, keep the end"
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ u3(IconButton, {
+                      icon: "close",
+                      label: `Unpin ${t3.title}`,
+                      disabled: busy,
+                      onClick: () => save(list2.filter((_3, j3) => j3 !== i3))
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
               }, lorePinKey(pin), false, undefined, this);
             })
           }, undefined, false, undefined, this) : null,
@@ -15198,6 +15261,145 @@ function DraftBatchSheet(props) {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
+// src/shared/items-build.ts
+function isItemKind(kinds, kind) {
+  let cur = kind;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    if (cur === "item")
+      return true;
+    cur = hasOwn(kinds, cur) ? kinds[cur]?.extends : undefined;
+  }
+  return false;
+}
+function authoredContents(world, id, of) {
+  return Object.values(world.entities).filter((e3) => of === "entities" ? e3.relations.some((r3) => r3.type === "in" && r3.to === id) : e3.fields.place === id && !e3.relations.some((r3) => r3.type === "in")).map((e3) => ({ id: e3.id, name: e3.name, hidden: e3.visibility === "discoverable" })).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.id.localeCompare(b3.id));
+}
+function revealScaffold(entity) {
+  const fields = isRecord(entity.fields) ? entity.fields : {};
+  const placed = typeof fields.place === "string" && fields.place !== "";
+  const held = Array.isArray(entity.relations) && entity.relations.some((r3) => isRecord(r3) && r3.type === "in" && typeof r3.to === "string" && r3.to !== "");
+  if (!placed && !held)
+    return { problem: "Put it somewhere first: a place, or in a container or on someone." };
+  return { entity: { ...entity, visibility: "discoverable" } };
+}
+function itemObjective(check, item, place = "") {
+  const quote = (s3) => `'${s3}'`;
+  return check === "at" ? `at(${quote(item)}, ${quote(place)})` : `${check}(pov, ${quote(item)})`;
+}
+
+// src/frontend/build/contents.tsx
+function ContentsSection(props) {
+  const app = useApp();
+  const rows = authoredContents(props.world, props.id, props.collection);
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-contents": props.id,
+    children: /* @__PURE__ */ u3(Section, {
+      title: props.collection === "places" ? "Things here" : "Contents",
+      children: [
+        rows.length === 0 ? /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: props.collection === "places" ? "Nothing lies here loose." : "Nothing is in it."
+        }, undefined, false, undefined, this) : null,
+        rows.map((row) => /* @__PURE__ */ u3(ItemRow, {
+          title: row.name,
+          badge: row.hidden ? /* @__PURE__ */ u3(Badge, {
+            tone: "gm",
+            children: "Hidden until searched"
+          }, undefined, false, undefined, this) : undefined,
+          openLabel: `Open ${row.name}`,
+          onOpen: () => go(app, { view: "item", worldId: props.world.id, collection: "entities", id: row.id })
+        }, row.id, false, undefined, this))
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function RevealItem(props) {
+  if (typeof props.value.kind !== "string" || !isItemKind(props.kinds, props.value.kind))
+    return null;
+  if (props.value.visibility === "discoverable") {
+    return /* @__PURE__ */ u3(Banner, {
+      tone: "info",
+      icon: "search",
+      children: "Hidden until the player character searches where it lies, or opens what holds it."
+    }, undefined, false, undefined, this);
+  }
+  const made = revealScaffold(props.value);
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-reveal": "",
+    children: /* @__PURE__ */ u3(FormGroup, {
+      title: "Reveal this item",
+      children: [
+        /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: "Keeps it hidden until the player character searches where it lies, or opens what holds it, with Search."
+        }, undefined, false, undefined, this),
+        "problem" in made ? /* @__PURE__ */ u3("span", {
+          class: "lre-small",
+          children: made.problem
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "search",
+          disabled: "problem" in made,
+          onClick: () => ("entity" in made) ? props.onChange(made.entity) : undefined,
+          children: "Hide until searched"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+var CHECKS = [
+  { value: "carries", label: "Has it with them" },
+  { value: "has_item", label: "Has one like it" },
+  { value: "at", label: "It lies at" }
+];
+function ItemObjectivePicker(props) {
+  const app = useApp();
+  const packKinds = useSelect(app.drafts, (d3) => d3?.packKinds);
+  const kinds = b2(() => ({ ...packKinds, ...props.world.kinds }), [packKinds, props.world.kinds]);
+  const [check, setCheck] = d2("carries");
+  const [item, setItem] = d2("");
+  const [place, setPlace] = d2("");
+  const items = b2(() => Object.values(props.world.entities).filter((e3) => isItemKind(kinds, e3.kind)).map((e3) => ({ value: e3.id, label: e3.name, ...e3.visibility === "discoverable" ? { sublabel: "hidden until searched" } : {} })).sort((a3, b3) => a3.label.localeCompare(b3.label)), [props.world.entities, kinds]);
+  const places2 = b2(() => Object.values(props.world.places).map((p3) => ({ value: p3.id, label: p3.name })).sort((a3, b3) => a3.label.localeCompare(b3.label)), [props.world.places]);
+  const ready = item !== "" && (check !== "at" || place !== "");
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-item-objective": "",
+    children: /* @__PURE__ */ u3(FormGroup, {
+      title: "Add an item check",
+      children: [
+        /* @__PURE__ */ u3(Seg, {
+          label: "Check",
+          value: check,
+          options: CHECKS,
+          onChange: setCheck
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(RefPicker, {
+          label: "Item",
+          value: item,
+          options: items,
+          placeholder: "Pick a thing",
+          onChange: setItem
+        }, undefined, false, undefined, this),
+        check === "at" ? /* @__PURE__ */ u3(RefPicker, {
+          label: "Place",
+          value: place,
+          options: places2,
+          placeholder: "Pick a place",
+          onChange: setPlace
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "plus",
+          disabled: !ready,
+          onClick: () => props.onAdd(itemObjective(check, item, place)),
+          children: "Add objective"
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this)
@@ -16302,6 +16504,340 @@ function MindsEditor() {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/build/book-lore.tsx
+function useBooks() {
+  const app = useApp();
+  const [books, setBooks] = d2(null);
+  A(() => {
+    app.request({ type: "lre.lore", op: "books" }).then((body) => setBooks(body?.books ?? []));
+  }, []);
+  return books;
+}
+function LoreBooksSection() {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d3) => d3);
+  const send = b2(() => draftSend(app), [app]);
+  const [busy, run] = useBusy();
+  const books = useBooks();
+  const [choice, setChoice] = d2("");
+  const pickId = P2();
+  if (!draft)
+    return null;
+  const listed = loreBooksOf(draft.doc);
+  const save = (next) => run(async () => {
+    await send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "meta", value: { loreBooks: next } });
+    setChoice("");
+  });
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-lore-books": true,
+    children: /* @__PURE__ */ u3(Section, {
+      title: "Lore books",
+      aside: listed.length > 0 ? /* @__PURE__ */ u3(Badge, {
+        children: listed.length
+      }, undefined, false, undefined, this) : undefined,
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: "The helpers and minds read these World Info books as lore, live, beside the books attached to a chat and your global books. A character's or persona's book is read only when it is listed here. Commit, then Upgrade a chat, to use a change in it."
+          }, undefined, false, undefined, this),
+          listed.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
+            label: "Lore books",
+            children: listed.map((id) => {
+              const name = books?.find((b3) => b3.id === id)?.name;
+              const missing = books !== null && name === undefined;
+              return /* @__PURE__ */ u3(ActionRow, {
+                title: name ?? id,
+                subtitle: missing ? "This book no longer exists, so nothing reads it: remove it." : undefined,
+                value: missing ? /* @__PURE__ */ u3(Badge, {
+                  tone: "neg",
+                  children: "Missing"
+                }, undefined, false, undefined, this) : undefined,
+                actions: /* @__PURE__ */ u3(IconButton, {
+                  icon: "close",
+                  label: `Remove ${name ?? id}`,
+                  disabled: busy,
+                  onClick: () => save(listed.filter((b3) => b3 !== id))
+                }, undefined, false, undefined, this)
+              }, id, false, undefined, this);
+            })
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(draft.lint, "loreBooks")
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-add",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                for: pickId,
+                children: "Add a book"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("select", {
+                id: pickId,
+                class: "lre-input",
+                value: choice,
+                onChange: (event) => setChoice(event.currentTarget.value),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: books === null ? "Loading books…" : "Choose a book"
+                  }, undefined, false, undefined, this),
+                  (books ?? []).filter((b3) => !listed.includes(b3.id)).map((b3) => /* @__PURE__ */ u3("option", {
+                    value: b3.id,
+                    children: b3.name
+                  }, b3.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-pins-actions",
+                children: /* @__PURE__ */ u3(Button, {
+                  variant: "primary",
+                  icon: "plus",
+                  disabled: choice === "" || busy,
+                  onClick: () => save([...listed, choice]),
+                  children: "Add"
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function EntryFields(props) {
+  const [fields, setFields] = d2(props.entry.lore ?? {});
+  const gateId = P2();
+  const visibilityId = P2();
+  const audienceLabel = P2();
+  A(() => setFields(props.entry.lore ?? {}), [props.entry.id, JSON.stringify(props.entry.lore ?? {})]);
+  const secret = loreIsSecret(fields);
+  const audience = fields.audience ?? [];
+  const prose = audience.filter((p3) => PROSE_STEPS.includes(p3));
+  const set = (patch) => setFields({ ...fields, ...patch });
+  const toggle = (purpose) => set({ audience: audience.includes(purpose) ? audience.filter((p3) => p3 !== purpose) : LORE_AUDIENCE.filter((p3) => p3 === purpose || audience.includes(p3)) });
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-form-lore-fields",
+    "data-lre-book-entry": props.entry.id,
+    children: [
+      /* @__PURE__ */ u3(CheckField, {
+        label: "Make this entry secret",
+        help: "It is stored switched off: it reaches no prompt and no helper until its gate holds.",
+        checked: secret,
+        onChange: (on) => set({ secret: on })
+      }, undefined, false, undefined, this),
+      secret ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                class: "label",
+                for: gateId,
+                children: "Gate"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("input", {
+                id: gateId,
+                class: "lre-input",
+                value: fields.gate ?? "",
+                placeholder: "stage.keeper == 'revealed'",
+                onInput: (event) => set({ gate: event.currentTarget.value })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-field-help",
+                children: "When it may be read: a formula on the world's state"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            role: "group",
+            "aria-labelledby": audienceLabel,
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "label",
+                id: audienceLabel,
+                children: "Helpers that may read it before the gate holds"
+              }, undefined, false, undefined, this),
+              LORE_AUDIENCE.map((purpose) => /* @__PURE__ */ u3(CheckField, {
+                label: STEP_LABEL[purpose],
+                help: PROSE_STEPS.includes(purpose) ? "Writes for the player: never reads a secret" : undefined,
+                checked: audience.includes(purpose),
+                onChange: () => toggle(purpose)
+              }, purpose, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this),
+          prose.length > 0 ? /* @__PURE__ */ u3(Banner, {
+            tone: "warn",
+            children: [
+              prose.map((p3) => STEP_LABEL[p3]).join(", "),
+              " write what the narrator or the player sees, so they never read this secret before its gate holds."
+            ]
+          }, undefined, true, undefined, this) : null,
+          /* @__PURE__ */ u3(TagListInput, {
+            label: "Holders",
+            noun: "character id",
+            value: fields.holders ?? [],
+            suggestions: [],
+            onChange: (next) => set({ holders: next }),
+            children: /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: "Characters whose own secret it is: their minds read it"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("label", {
+            class: "label",
+            for: visibilityId,
+            children: "Who may read it"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            id: visibilityId,
+            class: "lre-input",
+            value: fields.visibility ?? "public",
+            onChange: (event) => set({ visibility: event.currentTarget.value === "known_by" ? "known_by" : "public" }),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "public",
+                children: "Anyone"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("option", {
+                value: "known_by",
+                children: "Known by: once your character knows everyone and everywhere it links"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(TagListInput, {
+        label: "Links",
+        noun: "id",
+        value: fields.links ?? [],
+        suggestions: [],
+        onChange: (next) => set({ links: next }),
+        children: /* @__PURE__ */ u3("span", {
+          class: "lre-field-help",
+          children: "The people and places it is about"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TagListInput, {
+        label: "Aliases",
+        noun: "alias",
+        value: fields.aliases ?? [],
+        suggestions: [],
+        onChange: (next) => set({ aliases: next }),
+        children: /* @__PURE__ */ u3("span", {
+          class: "lre-field-help",
+          children: "Other names it goes by"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-pins-actions",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: props.busy,
+            onClick: () => props.onSave(fields),
+            children: "Save to the book"
+          }, undefined, false, undefined, this),
+          props.entry.lore ? /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: props.busy,
+            onClick: () => props.onSave(null),
+            children: "Take the fields off"
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BookEntriesSection() {
+  const app = useApp();
+  const books = useBooks();
+  const [busy, run] = useBusy();
+  const [book, setBook] = d2("");
+  const [entries, setEntries] = d2(null);
+  const [open, setOpen] = d2(null);
+  const bookId = P2();
+  A(() => {
+    setEntries(null);
+    setOpen(null);
+    if (book === "")
+      return;
+    app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
+  }, [book]);
+  const save = (entryId, fields) => run(async () => {
+    const body = await app.request({ type: "lre.lore", op: "fields", bookId: book, entryId, fields });
+    if (body?.entries)
+      setEntries(body.entries);
+  });
+  const shown = entries?.find((e3) => e3.id === open) ?? null;
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-book-entries": true,
+    children: /* @__PURE__ */ u3(Section, {
+      title: "World Info entries",
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: "An entry of a book the chat reads is lore as it is. Give it the fields a world entry has, or make it secret: it stays switched off, out of every prompt and helper, until its gate holds."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("label", {
+            for: bookId,
+            children: "Book"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            id: bookId,
+            class: "lre-input",
+            value: book,
+            onChange: (event) => setBook(event.currentTarget.value),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "",
+                children: books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"
+              }, undefined, false, undefined, this),
+              (books ?? []).map((b3) => /* @__PURE__ */ u3("option", {
+                value: b3.id,
+                children: b3.attached ? `${b3.name} (in this chat)` : b3.name
+              }, b3.id, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this),
+          entries && entries.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
+            label: "Entries",
+            children: entries.map((e3) => /* @__PURE__ */ u3(ActionRow, {
+              title: e3.title,
+              value: e3.lore && loreIsSecret(e3.lore) ? /* @__PURE__ */ u3(Badge, {
+                tone: "gm",
+                children: "Secret"
+              }, undefined, false, undefined, this) : e3.lore ? /* @__PURE__ */ u3(Badge, {
+                children: "Lore fields"
+              }, undefined, false, undefined, this) : e3.disabled ? /* @__PURE__ */ u3(Badge, {
+                children: "Off in its book"
+              }, undefined, false, undefined, this) : undefined,
+              actions: /* @__PURE__ */ u3(IconButton, {
+                icon: open === e3.id ? "close" : "edit",
+                label: open === e3.id ? `Close ${e3.title}` : `Edit ${e3.title}'s lore fields`,
+                onClick: () => setOpen(open === e3.id ? null : e3.id)
+              }, undefined, false, undefined, this)
+            }, e3.id, false, undefined, this))
+          }, undefined, false, undefined, this) : null,
+          shown ? /* @__PURE__ */ u3(EntryFields, {
+            entry: shown,
+            busy,
+            onSave: (fields) => save(shown.id, fields)
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
 // src/frontend/build/lore-editor.tsx
 var specs = (keys) => COLLECTION_SPECS.lore.filter((s3) => keys.includes(s3.key));
 var TEXT = specs(["title", "content"]);
@@ -16384,7 +16920,7 @@ function LoreList(props) {
             /* @__PURE__ */ u3(ListRow, {
               icon: "book",
               title: "Index a World Info book",
-              subtitle: "Lore entries, aliases, topics and lookup terms from one of your books",
+              subtitle: "Optional: copy a book into the world's own lore, with aliases, topics and lookup terms, for a world you export",
               chevron: true,
               onClick: () => go(app, { view: "job", worldId: draft.worldId, kind: "index_book" })
             }, undefined, false, undefined, this),
@@ -16398,6 +16934,8 @@ function LoreList(props) {
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(LoreBooksSection, {}, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(BookEntriesSection, {}, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-build-search",
         children: [
@@ -23099,6 +23637,16 @@ function SchemaEditor(props) {
         ctx: { doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields },
         onChange: setValue
       }, undefined, false, undefined, this),
+      props.collection === "entities" ? /* @__PURE__ */ u3(RevealItem, {
+        kinds: formDoc.kinds,
+        value,
+        onChange: setValue
+      }, undefined, false, undefined, this) : null,
+      !isNew && (props.collection === "entities" || props.collection === "places") ? /* @__PURE__ */ u3(ContentsSection, {
+        world: props.world,
+        collection: props.collection,
+        id
+      }, undefined, false, undefined, this) : null,
       props.collection === "places" ? app.catalog.placeFields.map((def) => {
         const fields = isRecord(value.fields) ? value.fields : {};
         return /* @__PURE__ */ u3("div", {
@@ -28322,6 +28870,7 @@ function ActionList(props) {
   const [selected, setSelected] = d2(null);
   const [amount, setAmount] = d2("");
   const [count, setCount] = d2(null);
+  const [people, setPeople] = d2([]);
   const [busy, run] = useBusy();
   const currency = props.view.currency ?? DEFAULT_CURRENCY;
   const amountCents = parseMoneyInput(amount, currency);
@@ -28336,15 +28885,17 @@ function ActionList(props) {
     const same = selected?.entry.action === entry.action;
     const picks = same ? selected.picks.slice(0, depth) : [];
     const again = same && samePick(selected.picks[depth], option);
-    if (!same)
+    if (!same) {
       setCount(null);
+      setPeople([]);
+    }
     setSelected(again ? depth === 0 ? null : { entry, picks } : { entry, picks: [...picks, option] });
   };
   const go2 = () => {
     if (!selected || pending || !amountOk || !countOk)
       return;
     run(async () => {
-      const result = await app.request(paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined));
+      const result = await app.request(paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people));
       if (result)
         props.onSent();
     });
@@ -28387,7 +28938,30 @@ function ActionList(props) {
                 step: chosen.next,
                 chosen: selected.picks[depth + 1],
                 onPick: (option) => pick(entry, depth + 1, option)
-              }, `${depth}:${JSON.stringify(chosen.params)}`, false, undefined, this) : null) : null
+              }, `${depth}:${JSON.stringify(chosen.params)}`, false, undefined, this) : null) : null,
+              selected?.entry.action === entry.action && entry.people ? /* @__PURE__ */ u3("div", {
+                class: "lre-chat-next",
+                "data-lre-palette-people": entry.people.param,
+                children: [
+                  /* @__PURE__ */ u3("div", {
+                    class: "lre-chat-next-head",
+                    children: [
+                      /* @__PURE__ */ u3(Icon, {
+                        name: "users",
+                        size: 16
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ u3("span", {
+                        children: entry.people.label
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  entry.people.options.map((person) => /* @__PURE__ */ u3(HostSwitch, {
+                    label: person.name,
+                    checked: people.includes(person.id),
+                    onChange: (on) => setPeople(on ? [...people, person.id] : people.filter((id) => id !== person.id))
+                  }, person.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this) : null
             ]
           }, entry.action, true, undefined, this))
         ]
@@ -45879,6 +46453,8 @@ function cellMeaning(legend, ch) {
     return { kind: "unknown" };
   if (typeof cell.terrain === "string")
     return cell.terrain === VOID_TERRAIN && cell.blocked === true ? { kind: "nothing" } : { kind: "terrain", terrain: cell.terrain, blocked: cell.blocked === true };
+  if (cell.door === true && typeof cell.place === "string")
+    return { kind: "roomDoor", place: cell.place };
   if (typeof cell.place === "string" && cell.item === undefined)
     return { kind: "place", place: cell.place };
   if (typeof cell.zone === "string")
@@ -46042,7 +46618,7 @@ function layoutFacts(model) {
         m2 = cellMeaning(model.legend, ch);
         meaning.set(ch, m2);
       }
-      if (m2.kind === "place")
+      if (m2.kind === "place" || m2.kind === "roomDoor")
         areas.set(m2.place, [...areas.get(m2.place) ?? [], y3 * model.width + x2]);
     });
   });
@@ -46053,8 +46629,10 @@ function meaningFill(m2, palette) {
     case "nothing":
       return null;
     case "wall":
+      return terrainFill("wall", palette);
     case "door":
-      return terrainFill(m2.kind, palette);
+    case "roomDoor":
+      return terrainFill("door", palette);
     case "terrain":
       return terrainFill(m2.terrain, palette);
     default:
@@ -46315,6 +46893,7 @@ var MEANINGS = [
   { value: "wall", label: "Wall" },
   { value: "floor", label: "Floor" },
   { value: "door", label: "Door" },
+  { value: "roomDoor", label: "Room door" },
   { value: "terrain", label: "Terrain" },
   { value: "place", label: "Room" },
   { value: "zone", label: "Zone" },
@@ -46328,6 +46907,8 @@ function meaningText(m2, placeName, entityName) {
       return "Floor";
     case "door":
       return "Door";
+    case "roomDoor":
+      return `Door of ${placeName(m2.place)}`;
     case "nothing":
       return "Nothing";
     case "terrain":
@@ -46348,6 +46929,8 @@ function legendValue(kind, form) {
     case "floor":
     case "door":
       return kind;
+    case "roomDoor":
+      return { door: true, place: form.place };
     case "terrain":
       return form.blocked ? { terrain: form.terrain, blocked: true } : { terrain: form.terrain };
     case "place":
@@ -46772,7 +47355,7 @@ function MapEditor(props) {
     const roomAt = (cell) => {
       const ch = [...model2.layout[cell.y] ?? ""][cell.x] ?? " ";
       const meaning = facts2.meaning.get(ch);
-      return meaning?.kind === "place" ? meaning.place : null;
+      return meaning?.kind === "place" || meaning?.kind === "roomDoor" ? meaning.place : null;
     };
     if (gridTool === "paint") {
       return {
@@ -47767,16 +48350,16 @@ function LegendSheet(props) {
   const [form, setForm] = d2({
     terrain: current2?.kind === "terrain" ? current2.terrain : "grass",
     blocked: current2?.kind === "terrain" ? current2.blocked : false,
-    place: current2?.kind === "place" ? current2.place : props.mapPlaces[0]?.value ?? "",
+    place: current2?.kind === "place" || current2?.kind === "roomDoor" ? current2.place : props.mapPlaces[0]?.value ?? "",
     zone: current2?.kind === "zone" ? current2.zone : "",
     item: current2?.kind === "item" ? current2.item : "",
     itemPlace: current2?.kind === "item" ? current2.place ?? "" : ""
   });
-  const [chText, setChText] = d2(props.ch ?? freeChar(model.legend, model.layout, kind === "place" ? form.place : kind === "zone" ? form.zone : kind === "item" ? form.item : form.terrain) ?? "");
+  const [chText, setChText] = d2(props.ch ?? freeChar(model.legend, model.layout, kind === "place" || kind === "roomDoor" ? form.place : kind === "zone" ? form.zone : kind === "item" ? form.item : form.terrain) ?? "");
   const cells = props.ch !== null ? props.facts?.counts.get(props.ch) ?? 0 : 0;
   const chars = [...chText];
   const chProblem = chars.length !== 1 ? "One character." : chText !== props.ch && hasOwn(model.legend, chText) ? "The legend has this character already." : null;
-  const ready = kind === "terrain" ? form.terrain.trim() !== "" : kind === "place" ? form.place !== "" : kind === "zone" ? ID_PATTERN.test(form.zone) : kind === "item" ? form.item !== "" : true;
+  const ready = kind === "terrain" ? form.terrain.trim() !== "" : kind === "place" || kind === "roomDoor" ? form.place !== "" : kind === "zone" ? ID_PATTERN.test(form.zone) : kind === "item" ? form.item !== "" : true;
   const things = Object.values(props.world.entities).map((e3) => ({ value: e3.id, label: e3.name, sublabel: e3.kind }));
   const commit = () => {
     if (!ready || chProblem)
@@ -47826,6 +48409,12 @@ function LegendSheet(props) {
       }, undefined, true, undefined, this) : null,
       kind === "place" ? /* @__PURE__ */ u3(RefPicker, {
         label: "The room of",
+        value: form.place,
+        options: props.mapPlaces,
+        onChange: (place) => update({ place })
+      }, undefined, false, undefined, this) : null,
+      kind === "roomDoor" ? /* @__PURE__ */ u3(RefPicker, {
+        label: "A door of",
         value: form.place,
         options: props.mapPlaces,
         onChange: (place) => update({ place })
@@ -48501,6 +49090,10 @@ function StageSheet(props) {
         value: stage,
         ctx: { doc: props.world, lint: props.lint, path, identifiers: props.identifiers, functions: props.functions },
         onChange: (next) => set(next)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ItemObjectivePicker, {
+        world: props.world,
+        onAdd: (objective) => set({ ...stage, objectives: [...stage.objectives ?? [], objective] })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(FormGroup, {
         title: "Next stages",

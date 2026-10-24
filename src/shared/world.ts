@@ -344,7 +344,17 @@ export interface GridDef {
  * terrain, blocked or not; part of one of the map's places (its area); part of a zone; or a thing
  * the world already has, lying on the floor there (in `place`'s area, else the area around it).
  */
-export type MapCellDef = "wall" | "floor" | "door" | { terrain: string; blocked?: boolean } | { place: PlaceId } | { zone: string } | { item: EntityId; place?: PlaceId };
+export type MapCellDef = "wall" | "floor" | "door" | { terrain: string; blocked?: boolean } | { place: PlaceId } | { zone: string } | { item: EntityId; place?: PlaceId } | MapRoomDoorDef;
+
+/**
+ * A door on a room's edge (`lre-map-v1`): a door, walked through as any door is, that is also part
+ * of `place`'s area, so whoever stands in it is in that room. A room door that touches another
+ * room's area joins the two (§4.1).
+ */
+export interface MapRoomDoorDef {
+  door: true;
+  place: PlaceId;
+}
 
 /** A place a map draws inside its scope; the map creates it. */
 export interface MapPlaceDef {

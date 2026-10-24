@@ -26,6 +26,8 @@ import { selectorMatches } from "./selector";
 import type { WorldState } from "./state";
 import { Working } from "./working";
 import { canSeeEntity, canSeePlace } from "./visibility";
+import { acts } from "./life";
+import { together } from "./presence";
 import { labelOf, optionalService, own } from "./pack-kit";
 import type { InferredResult } from "./inferred";
 
@@ -118,16 +120,13 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
       params[name] = id;
       continue;
     }
-    // A list of refs (Go's `with`): each one an entity of the param's kind and selector, kept as
-    // their ids joined by commas, the one scalar form an effect's argument can carry.
+    // A list of refs (Go's `with`): the ones who may come along (`companionCandidates`: in the actor's
+    // scene, seen by it, acting), kept as their ids joined by commas, the one scalar form an effect's
+    // argument can carry. Anyone else simply doesn't come, and isn't named in a refusal, since the
+    // actor may not know of them.
     if (def.type === "list" && def.ref) {
-      const ids = (Array.isArray(raw) ? raw : String(raw).split(",")).map((x) => String(x).trim()).filter((x) => x !== "");
-      for (const id of ids) {
-        const target = own(state.entities, id);
-        if (!target) return { code: "bad_param", reason: `no entity ${labelOf({ world, state }, id)}` };
-        if (!kindIs(reg, world, target.kind, def.ref)) return { code: "bad_param", reason: `${target.name} is not ${/^[aeiou]/i.test(def.ref) ? "an" : "a"} ${(reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase()}` };
-        if (def.of && !selectorMatches(reg, world, state, def.of, id)) return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
-      }
+      const may = new Set(companionCandidates(reg, world, state, action, name, actor));
+      const ids = (Array.isArray(raw) ? raw : String(raw).split(",")).map((x) => String(x).trim()).filter((x) => may.has(x));
       if (ids.length > 0) params[name] = [...new Set(ids)].join(",");
       continue;
     }
@@ -369,6 +368,24 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
     out.push(id);
   }
   return out;
+}
+
+/**
+ * Who may come along on a list-of-refs param (Go's `with`): people of its kind in the actor's scene
+ * (`together`, so a room's people and its building's alike) whom it can see and who act, in id
+ * order. The palette's With picker and interpret's catalog offer the same people.
+ */
+export function companionCandidates(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, param: string, actor: EntityId = world.pov): EntityId[] {
+  const def = own(action.params, param);
+  if (!def || def.type !== "list" || def.ref === undefined) return [];
+  const ref = def.ref;
+  const here = placeOfEntity(state, actor);
+  return Object.keys(state.entities)
+    .sort()
+    .filter((id) => {
+      const e = own(state.entities, id);
+      return !!e && id !== actor && kindIs(reg, world, e.kind, ref) && (!def.of || selectorMatches(reg, world, state, def.of, id)) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)) && canSeeEntity(reg, world, state, actor, id);
+    });
 }
 
 /** The places the actor may see besides its own, nearest first (joined to here by a route, or here's parent or a child), then by name. */

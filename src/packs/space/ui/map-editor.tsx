@@ -155,6 +155,7 @@ export type CellMeaning =
   | { kind: "nothing" }
   | { kind: "terrain"; terrain: string; blocked: boolean }
   | { kind: "place"; place: string }
+  | { kind: "roomDoor"; place: string }
   | { kind: "zone"; zone: string }
   | { kind: "item"; item: string; place: string | null }
   | { kind: "unknown" };
@@ -165,6 +166,7 @@ export function cellMeaning(legend: Readonly<Record<string, unknown>>, ch: strin
   if (cell === "wall" || cell === "floor" || cell === "door") return { kind: cell };
   if (!isRecord(cell)) return { kind: "unknown" };
   if (typeof cell.terrain === "string") return cell.terrain === VOID_TERRAIN && cell.blocked === true ? { kind: "nothing" } : { kind: "terrain", terrain: cell.terrain, blocked: cell.blocked === true };
+  if (cell.door === true && typeof cell.place === "string") return { kind: "roomDoor", place: cell.place };
   if (typeof cell.place === "string" && cell.item === undefined) return { kind: "place", place: cell.place };
   if (typeof cell.zone === "string") return { kind: "zone", zone: cell.zone };
   if (typeof cell.item === "string") return { kind: "item", item: cell.item, place: typeof cell.place === "string" ? cell.place : null };
@@ -367,7 +369,8 @@ function layoutFacts(model: MapModel): LayoutFacts {
         m = cellMeaning(model.legend, ch);
         meaning.set(ch, m);
       }
-      if (m.kind === "place") areas.set(m.place, [...(areas.get(m.place) ?? []), y * model.width + x]);
+      // A door on a room's edge is part of the room's area, as the engine compiles it.
+      if (m.kind === "place" || m.kind === "roomDoor") areas.set(m.place, [...(areas.get(m.place) ?? []), y * model.width + x]);
     });
   });
   return { meaning, areas, counts };
@@ -379,8 +382,10 @@ function meaningFill(m: CellMeaning, palette: CanvasPalette): Paint | null {
     case "nothing":
       return null;
     case "wall":
+      return terrainFill("wall", palette);
     case "door":
-      return terrainFill(m.kind, palette);
+    case "roomDoor":
+      return terrainFill("door", palette);
     case "terrain":
       return terrainFill(m.terrain, palette);
     default:
@@ -664,6 +669,7 @@ const MEANINGS = [
   { value: "wall", label: "Wall" },
   { value: "floor", label: "Floor" },
   { value: "door", label: "Door" },
+  { value: "roomDoor", label: "Room door" },
   { value: "terrain", label: "Terrain" },
   { value: "place", label: "Room" },
   { value: "zone", label: "Zone" },
@@ -680,6 +686,8 @@ function meaningText(m: CellMeaning, placeName: (id: string) => string, entityNa
       return "Floor";
     case "door":
       return "Door";
+    case "roomDoor":
+      return `Door of ${placeName(m.place)}`;
     case "nothing":
       return "Nothing";
     case "terrain":
@@ -702,6 +710,8 @@ function legendValue(kind: MeaningKind, form: { terrain: string; blocked: boolea
     case "floor":
     case "door":
       return kind;
+    case "roomDoor":
+      return { door: true, place: form.place };
     case "terrain":
       return form.blocked ? { terrain: form.terrain, blocked: true } : { terrain: form.terrain };
     case "place":
@@ -1008,7 +1018,7 @@ export function MapEditor(props: EditorProps) {
     const roomAt = (cell: Cell): string | null => {
       const ch = [...(model.layout[cell.y] ?? "")][cell.x] ?? " ";
       const meaning = facts.meaning.get(ch);
-      return meaning?.kind === "place" ? meaning.place : null;
+      return meaning?.kind === "place" || meaning?.kind === "roomDoor" ? meaning.place : null;
     };
     if (gridTool === "paint") {
       return {
@@ -1649,16 +1659,16 @@ function LegendSheet(props: { ch: string | null; model: MapModel; facts: LayoutF
   const [form, setForm] = useState({
     terrain: current?.kind === "terrain" ? current.terrain : "grass",
     blocked: current?.kind === "terrain" ? current.blocked : false,
-    place: current?.kind === "place" ? current.place : (props.mapPlaces[0]?.value ?? ""),
+    place: current?.kind === "place" || current?.kind === "roomDoor" ? current.place : (props.mapPlaces[0]?.value ?? ""),
     zone: current?.kind === "zone" ? current.zone : "",
     item: current?.kind === "item" ? current.item : "",
     itemPlace: current?.kind === "item" ? (current.place ?? "") : "",
   });
-  const [chText, setChText] = useState(props.ch ?? freeChar(model.legend, model.layout, kind === "place" ? form.place : kind === "zone" ? form.zone : kind === "item" ? form.item : form.terrain) ?? "");
+  const [chText, setChText] = useState(props.ch ?? freeChar(model.legend, model.layout, kind === "place" || kind === "roomDoor" ? form.place : kind === "zone" ? form.zone : kind === "item" ? form.item : form.terrain) ?? "");
   const cells = props.ch !== null ? (props.facts?.counts.get(props.ch) ?? 0) : 0;
   const chars = [...chText];
   const chProblem = chars.length !== 1 ? "One character." : chText !== props.ch && hasOwn(model.legend, chText) ? "The legend has this character already." : null;
-  const ready = kind === "terrain" ? form.terrain.trim() !== "" : kind === "place" ? form.place !== "" : kind === "zone" ? ID_PATTERN.test(form.zone) : kind === "item" ? form.item !== "" : true;
+  const ready = kind === "terrain" ? form.terrain.trim() !== "" : kind === "place" || kind === "roomDoor" ? form.place !== "" : kind === "zone" ? ID_PATTERN.test(form.zone) : kind === "item" ? form.item !== "" : true;
   const things: RefOption[] = Object.values(props.world.entities).map((e) => ({ value: e.id, label: e.name, sublabel: e.kind }));
   const commit = () => {
     if (!ready || chProblem) return;
@@ -1684,6 +1694,7 @@ function LegendSheet(props: { ch: string | null; model: MapModel; facts: LayoutF
         </>
       ) : null}
       {kind === "place" ? <RefPicker label="The room of" value={form.place} options={props.mapPlaces} onChange={(place) => update({ place })} /> : null}
+      {kind === "roomDoor" ? <RefPicker label="A door of" value={form.place} options={props.mapPlaces} onChange={(place) => update({ place })} /> : null}
       {kind === "zone" ? (
         <Field label="Zone id" help="Rules can fire when someone steps into it." error={form.zone && !ID_PATTERN.test(form.zone) ? "Letters, digits, _ and -, starting with a letter or digit." : null}>
           <input class="lre-input" value={form.zone} onInput={(event) => update({ zone: event.currentTarget.value.trim() })} />
