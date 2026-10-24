@@ -1063,7 +1063,7 @@ function poolNote(def: FieldDef, defs: Readonly<Record<string, FieldDef>>): stri
  * formula read-only with what it reads; the rest by type, money in the world's currency, durations
  * as spans, references and table rows by name, the packs' lists of objects as typed lists.
  */
-function DefInput(props: { name: string; def: FieldDef; defs: Readonly<Record<string, FieldDef>>; value: JsonValue | undefined; ctx: FormCtx; path: string; onChange(value: JsonValue | undefined): void }) {
+export function DefInput(props: { name: string; def: FieldDef; defs: Readonly<Record<string, FieldDef>>; value: JsonValue | undefined; ctx: FormCtx; path: string; onChange(value: JsonValue | undefined): void }) {
   const { def, ctx, name } = props;
   const label = def.label ?? humanize(name);
   const issues = lintAt(ctx.lint, props.path);
