@@ -18,6 +18,8 @@ import { HOST_LIMITS, hostBound } from "../shared/timeouts";
 import { validMarkerBody } from "../engine/events";
 import type { ChainMessage, FoldSnapshot, SnapshotStore } from "../engine/ledger/chain";
 import { emptyJournal, LedgerCore, type LedgerEnv } from "../engine/ledger/journal";
+import type { WorldState } from "../engine/state";
+import type { WorldDoc } from "../shared/world";
 import type { LedgerFold } from "../engine/ledger/fold";
 import { activeText, contentId } from "../engine/ledger/path";
 import { giveWay } from "./give-way";
@@ -1301,6 +1303,22 @@ export class LedgerService {
   /** The current core of a chat, for reads (state push, tests). */
   async core(chatId: ChatId, userId: UserId): Promise<LedgerCore | null> {
     return (await this.slot(chatId, userId))?.core ?? null;
+  }
+
+  /**
+   * The chat's state as the narrator sees it now (`renderState`), for the World Info interceptor
+   * (DESIGN §6.1). Between the guard letting a generation take the prepared turn and that turn's
+   * `adopt`, the journal holds no planned turn, so the prepared one is folded in: the prompt being
+   * assembled is that generation's, and a secret its own events reveal reaches it. Null for a chat
+   * that isn't open as a world chat.
+   */
+  async narratorState(chatId: ChatId, userId: UserId): Promise<{ state: WorldState; world: WorldDoc } | null> {
+    const core = await this.core(chatId, userId);
+    if (!core) return null;
+    const observed = toChain(await this.host.chats.messages(chatId, userId));
+    const prepared = this.gates.get(chatId)?.prepared;
+    const adopted = Object.values(core.journal.pending).some((p) => p.planned);
+    return prepared?.turn && prepared.generationId !== null && !adopted ? core.renderPlanned(observed, prepared.turn) : core.renderState(observed);
   }
 
   /** Drops a chat's cached slot, guard state and copy of its messages (after attaching a world, or detaching one); a turn it prepared gives its entries back. */

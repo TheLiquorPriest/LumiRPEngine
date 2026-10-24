@@ -14,8 +14,10 @@ import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
 import { bookTextHash } from "../../src/shared/lore";
+import { blankWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
+import { startState } from "../packs/support";
 import { Rig } from "../support/rig";
 
 const SECRET = "The ferryman scuttled the old boat for the insurance money";
@@ -214,5 +216,115 @@ describe("minds in a time skip", () => {
     const minds = rig.host.quietCalls.slice(before).filter((c) => (c.messages[0]?.content ?? "").includes(MIND));
     expect(minds.length).toBeGreaterThan(0);
     expect(minds.some((c) => JSON.stringify(c.messages).includes("BEAT-MARK"))).toBe(true);
+  });
+});
+
+describe("World Info secrecy wherever the entry is read", () => {
+  const carrying = (rig: Rig, text: string): string[] => rig.host.quietCalls.filter((c) => JSON.stringify(c.messages).includes(text)).map((c) => (c.messages[0]?.content ?? "").slice(0, 40));
+  /** A user book holding one entry (on, constant), attached to `chatId`. */
+  async function oneEntry(rig: Rig, chatId: string, over: Partial<HostBookEntryInput>): Promise<{ bookId: string; entryId: string }> {
+    const bookId = await rig.host.books.create("Harbor notes", "", rig.host.userId);
+    const entryId = await rig.host.books.createEntry(bookId, entry("The wreck", `${SECRET}.`, { keys: ["zzqq"], constant: false, ...over }), rig.host.userId);
+    const meta = await rig.host.chats.chatMetadata(chatId, rig.host.userId);
+    await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...(Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : []), bookId] }, rig.host.userId);
+    return { bookId, entryId };
+  }
+
+  test("a secret, gate-shut World Info entry pinned to the starting place reaches no call and no trace", async () => {
+    const rig = new Rig();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { enabled: false } } }));
+    const bookId = await rig.host.books.create("Harbor notes", "", rig.host.userId);
+    const entryId = await rig.host.books.createEntry(bookId, entry("The wreck", `${SECRET}.`, { keys: ["zzqq"], constant: false }), rig.host.userId);
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId, fields: { secret: true, gate: "false" } }));
+    const worldId = await rig.newWorld("Harbor");
+    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc;
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: {}, places: { [draft.start.place]: [{ book: bookId, entry: entryId }] }, steps: {} } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.host.quietReply = quiet;
+    await rig.turn(chatId, "I look out at the water and wait.", "Gulls call.");
+    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
+    expect(carrying(rig, SECRET)).toEqual([]);
+    const traced = (rig.rt.inspectorRecords(chatId) ?? []).flatMap((r) => r.lore ?? []).flatMap((t) => t.entries.map((e) => e.title));
+    expect(traced).not.toContain("The wreck");
+  });
+
+  test("a public world entry over a book entry made secret in Build reads as secret: not in the Place section, nor any call", async () => {
+    const { rig, chatId } = await bookChat([], true);
+    const { bookId, entryId } = await oneEntry(rig, chatId, {});
+    const worldId = (await rig.rt.runOf(chatId, rig.host.userId))?.worldId ?? "";
+    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc;
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "wall", value: { id: "wall", title: "The harbor wall", content: `${SECRET}.`, keys: [], links: [draft.start.place], source: { kind: "book", bookId, entryId, hash: bookTextHash(`${SECRET}.`) } } }));
+    const committed = rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    rig.body(await rig.send({ type: "lre.world", op: "upgrade", chatId, to: committed.revision }));
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId, fields: { secret: true, gate: "false" } }));
+    rig.host.quietCalls.length = 0;
+    await rig.turn(chatId, "I look at the harbor wall.", "Gulls call.");
+    expect(rig.host.section(DEFAULT_SECTIONS.place?.label ?? "Place")).not.toContain(SECRET);
+    expect(carrying(rig, SECRET)).toEqual([]);
+  });
+
+  test("a book entry secret on both sides opens only once both gates hold, its own and the world entry's", async () => {
+    const registry = createRegistry(ALL_PACKS);
+    const world = blankWorld("w_both", "Both");
+    world.lore.wreck = { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: [], links: [], secret: true, gate: "false", source: { kind: "book", bookId: "b", entryId: "e", hash: bookTextHash(`${SECRET}.`) } };
+    const verdict = await worldInfoVerdict(
+      { registry, playsWorld: () => true, head: async () => ({ world, state: startState(world, registry) }), carried: () => new Set(), log: () => undefined },
+      { chatId: "c", userId: "u", chatMetadata: {}, entries: [{ id: "e", bookId: "b", disabled: true, extensions: { [LEDGER_NAMESPACE]: { lore: { secret: true, gate: "true" } } } }] },
+    );
+    expect(verdict).toEqual({ disabled: ["e"], enabled: [] });
+  });
+
+  test("the outline gate's chip shows no World Info secret an outline beat repeats", async () => {
+    const OUTLINE = "You outline a roleplay narrator's next reply";
+    const rig = new Rig({ shipped: true });
+    rig.host.quietReply = () => "{}";
+    for (const patch of [{ modelUse: { preset: "full" } }, { gates: { outline: true } }, { minds: { enabled: false } }]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const { bookId, entryId } = await oneEntry(rig, chatId, {});
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId, fields: { secret: true, gate: "false" } }));
+    rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").startsWith(OUTLINE) ? JSON.stringify({ beats: [`${SECRET}.`, "Danny glances at the clock."] }) : "{}");
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 10 } }, source: "palette", now: true }));
+    await rig.host.start(chatId, { type: "normal" });
+    const gate = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "outline_gate");
+    expect(gate?.detail ?? "").toContain("Danny glances at the clock");
+    expect(JSON.stringify(gate)).not.toContain(SECRET);
+  });
+
+  test("a secret whose gate this turn's Go opens is in that turn's own prompt", async () => {
+    const rig = new Rig({ shipped: true });
+    rig.host.quietReply = () => "{}";
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { enabled: false } } }));
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    await oneEntry(rig, chatId, { disabled: true, constant: true, keys: [], extensions: { [LEDGER_NAMESPACE]: { lore: { secret: true, gate: "self.place == 'alder_market'" } } } });
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "go", params: { to: "alder_market" }, source: "palette", now: true }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    expect(inPrompt(rig, SECRET)).toBe(true);
+    await rig.host.finish(g, "You walk to the market.");
+  });
+
+  test("a Re-read reads World Info as it is now, not as an earlier Re-read of the same reply did", async () => {
+    const { rig, chatId, ids } = await bookChat([entry("The ferry", "FERRY-OLD: the ferry runs twice a day.")]);
+    await rig.turn(chatId, "I walk to the ferry.", "The ferry horn sounds.");
+    const reply = rig.host.chat(chatId).messages.at(-1);
+    if (!reply) throw new Error("no reply");
+    const reread = async (text: string): Promise<string> => {
+      rig.host.editMessage(chatId, reply.id, text);
+      await rig.host.settle();
+      rig.host.quietCalls.length = 0;
+      rig.body(await rig.send({ type: "lre.chip", chatId, chip: `reread:${reply.id}:${reply.swipeId}`, choice: "reread" }));
+      return JSON.stringify(rig.host.quietCalls.map((c) => c.messages));
+    };
+    expect(await reread("The ferry horn sounds twice by the ferry.")).toContain("FERRY-OLD");
+    await rig.host.books.fill(ids[0] ?? "", "FERRY-NEW: the ferry stopped running.", rig.host.userId);
+    const second = await reread("The ferry horn sounds three times by the ferry.");
+    expect(second).toContain("FERRY-NEW");
+    expect(second).not.toContain("FERRY-OLD");
   });
 });

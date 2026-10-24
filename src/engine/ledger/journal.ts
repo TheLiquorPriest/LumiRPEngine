@@ -849,17 +849,24 @@ export class LedgerCore {
    */
   renderState(observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc } | null {
     const planned = Object.values(this.journal.pending).filter((p) => p.planned).at(-1);
-    if (planned) {
-      const index = planned.messageId ? observed.findIndex((m) => m.id === planned.messageId) : observed.length;
-      const at = index < 0 ? observed.length : index;
-      return this.prefixState(this.fold(observed.slice(0, at)), this.chain(observed.slice(at, at + 1))[0], { markersApplied: planned.markersApplied, events: planned.events, pre: planned.events.length, path: this.commitPath(planned), undone: [] }, planned.startMarkers);
-    }
+    if (planned) return this.renderPlanned(observed, planned);
     const out = this.fold(observed);
     const world = this.env.worlds(out.state.revision);
     if (!world) return null;
     const state = structuredClone(out.state);
     if (!this.journal.started) for (const body of this.env.startMarkers()) applyMarker(state, body, this.env);
     return { state, world };
+  }
+
+  /**
+   * The state the narrator sees while `planned` is in flight: its fold prefix plus its planned events.
+   * `renderState` reads the journal's; a turn the engine run took out (`take`) and a generation has
+   * yet to adopt is read through this too, so its own prompt sees it (DESIGN §6.1). Pure.
+   */
+  renderPlanned(observed: readonly ChainMessage[], planned: PendingTurn): { state: WorldState; world: WorldDoc } | null {
+    const index = planned.messageId ? observed.findIndex((m) => m.id === planned.messageId) : observed.length;
+    const at = index < 0 ? observed.length : index;
+    return this.prefixState(this.fold(observed.slice(0, at)), this.chain(observed.slice(at, at + 1))[0], { markersApplied: planned.markersApplied, events: planned.events, pre: planned.events.length, path: this.commitPath(planned), undone: [] }, planned.startMarkers);
   }
 
   /**

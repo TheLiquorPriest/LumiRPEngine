@@ -12,17 +12,7 @@ import type { LoreBookEntryView, LoreBookView, LorePinView, LorePinsView } from 
 import type { LorePin, WorldDoc } from "../shared/world";
 import { worldPinText, type PinRef, type PinnedText } from "../engine/lore-pins";
 import type { HostBookEntry, HostPort } from "./host";
-
-/** The words a book entry with no comment is titled by. */
-const TITLE_WORDS = 8;
-
-/** A book entry's title: its comment, else its text's first words. */
-export function bookEntryTitle(e: Pick<HostBookEntry, "comment" | "content">): string {
-  const comment = e.comment.replace(/\s+/g, " ").trim();
-  if (comment !== "") return comment;
-  const words = e.content.replace(/\s+/g, " ").trim().split(" ").filter((w) => w !== "");
-  return words.length === 0 ? "Untitled entry" : words.length > TITLE_WORDS ? `${words.slice(0, TITLE_WORDS).join(" ")}…` : words.join(" ");
-}
+import { bookEntryTitle, bookLoreEntry } from "./book-lore";
 
 /** An entry the engine wrote (`engineWroteEntry`: its own books' sections, the Minds section among them, which holds other minds): never read through a pin, whatever names it. */
 function engineWrote(e: HostBookEntry): boolean {
@@ -69,9 +59,15 @@ async function bookReads(host: Pick<HostPort, "books" | "log">, pins: readonly L
   return out;
 }
 
-/** A book entry as pinned text, under the key a pin of that one entry has, so a call reads it once however it is pinned; it keeps the part its pin keeps. */
+/**
+ * A book entry as pinned text, under the key a pin of that one entry has, so a call reads it once
+ * however it is pinned; it keeps the part its pin keeps. One with LRE's fields is lore as a world
+ * entry is (`entry`), so its secrecy, audience, holders and Known by links hold for every reader of
+ * the pin, the traces included.
+ */
 function bookText(e: HostBookEntry, ref: PinRef): PinnedText {
-  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on: ref.on, title: bookEntryTitle(e), content: e.content, entry: null, keep: ref.pin.keep ?? "start" };
+  const entry = bookLoreFieldsOf(e.extensions) !== null ? bookLoreEntry(e) : null;
+  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on: ref.on, title: bookEntryTitle(e), content: e.content, entry, keep: ref.pin.keep ?? "start" };
 }
 
 /**
@@ -135,7 +131,7 @@ export async function pinViews(host: Pick<HostPort, "books" | "log">, world: Wor
     }
     const e = read.entries.get(key) ?? null;
     const source = names.get(pin.book) ?? "A World Info book";
-    return e ? { key, pin, title: bookEntryTitle(e), source, status: e.disabled ? "off" : "ok", secret: false } : { key, pin, title: "A book entry", source, status: "missing", secret: false };
+    return e ? { key, pin, title: bookEntryTitle(e), source, status: e.disabled ? "off" : "ok", secret: loreIsSecret(bookLoreFieldsOf(e.extensions) ?? {}) } : { key, pin, title: "A book entry", source, status: "missing", secret: false };
   };
   const part = (record: Readonly<Record<string, readonly LorePin[] | undefined>>): Record<string, LorePinView[]> => Object.fromEntries(Object.entries(record).map(([id, list]) => [id, (list ?? []).map(view)]));
   return { characters: part(pins.characters), places: part(pins.places), steps: part(pins.steps) };

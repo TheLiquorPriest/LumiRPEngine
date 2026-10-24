@@ -62,13 +62,14 @@ async function verdict(gate: WorldInfoGate, input: WorldInfoInput): Promise<Worl
     if (source.kind === "book" && loreIsSecret(entry)) indexed.set(`${source.bookId}/${source.entryId}`, typeof entry.gate === "string" ? entry.gate : undefined);
   }
   const open = loreGateReader(gate.registry, head.world, head.state);
+  const holds = (key: string, gateText: string | undefined): boolean => open({ id: key, title: "", content: "", keys: [], links: [], secret: true, ...(gateText !== undefined ? { gate: gateText } : {}) });
   const enabled: string[] = [];
   for (const e of rest) {
     const key = keyOf(e);
     if (!own.has(e.id) && !indexed.has(key)) continue;
-    const gateText = own.has(e.id) ? own.get(e.id) : indexed.get(key);
-    const probe: LoreEntryDef = { id: key, title: "", content: "", keys: [], links: [], secret: true, ...(gateText !== undefined ? { gate: gateText } : {}) };
-    if (!open(probe)) disabled.push(e.id);
+    // Secret on either side is secret: it opens only once every secret side's gate holds (DESIGN §4.2).
+    const gates = [...(own.has(e.id) ? [own.get(e.id)] : []), ...(indexed.has(key) ? [indexed.get(key)] : [])];
+    if (!gates.every((g) => holds(key, g))) disabled.push(e.id);
     else if (e.disabled) enabled.push(e.id);
   }
   return { disabled, enabled };

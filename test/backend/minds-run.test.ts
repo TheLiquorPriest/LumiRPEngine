@@ -11,6 +11,7 @@ import { toChain } from "../../src/backend/ledger-io";
 import type { JsonObject } from "../../src/shared/json";
 import type { MindsRunView } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
+import { bookTextHash } from "../../src/shared/lore";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { readCharacter } from "../../src/packs/minds/core/state";
@@ -229,6 +230,25 @@ describe("lore pins", () => {
     expect(memories.map((c) => MEMORY.exec(c.messages[0]?.content ?? "")?.[1]).sort()).toEqual(["Danny Okafor", "Priya Nair"]);
     for (const c of memories) expect(c.messages[1]?.content).toContain("## Pinned lore\n- What to remember: MEMORY-PIN: remember who owes whom.");
     for (const c of rig.host.quietCalls.filter((c) => !MEMORY.test(c.messages[0]?.content ?? ""))) expect(JSON.stringify(c.messages)).not.toContain("MEMORY-PIN");
+  });
+
+  test("a memory doesn't read a pinned world entry whose World Info entry was made secret since it was indexed", async () => {
+    const SECRET = "WALL-SECRET: the harbor wall hides the smugglers' tunnel.";
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig, { text: "TURN-MARK" });
+    const user = rig.host.userId;
+    const bookId = await rig.host.books.create("Harbor notes", "", user);
+    const entryId = await rig.host.books.createEntry(bookId, { comment: "The harbor wall", content: SECRET, keys: [], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} }, user);
+    const chatId = await alderChat(rig, async (worldId) => {
+      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "wall", value: { id: "wall", title: "The harbor wall", content: SECRET, keys: [], links: [], source: { kind: "book", bookId, entryId, hash: bookTextHash(SECRET) } } }));
+      rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: {}, places: {}, steps: { memory: [{ lore: "wall" }] } } }));
+    });
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId, fields: { secret: true, gate: "false" } }));
+    await rig.turn(chatId, "I walk to the window and wait.", "The kettle clicks off.");
+    const MEMORY = /You keep the memory of (.+?) in the roleplay world/;
+    const memories = rig.host.quietCalls.filter((c) => MEMORY.test(c.messages[0]?.content ?? ""));
+    expect(memories.length).toBeGreaterThan(0);
+    for (const c of memories) expect(JSON.stringify(c.messages)).not.toContain("WALL-SECRET");
   });
 
   test("a pin to an entry the world doesn't have is linted where it is", () => {
