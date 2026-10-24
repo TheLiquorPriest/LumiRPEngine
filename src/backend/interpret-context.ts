@@ -14,11 +14,10 @@ import type { ActionDef, ParamDef, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, formatStamp, placeOffset, weekdayName } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { povLife } from "../engine/life";
-import { together } from "../engine/presence";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
-import { paramCandidates, placeCandidates } from "../engine/resolve";
+import { companionCandidates, paramCandidates, placeCandidates } from "../engine/resolve";
 import { evalExpr, isGone, kindIs, placeOfEntity, scopeEnv, truthy } from "../engine/scope";
 import { lastSighting } from "../engine/seen";
 import type { WorldState } from "../engine/state";
@@ -111,12 +110,7 @@ function paramWords(ctx: ReadContext, action: ActionDef, name: string, def: Para
   // A list of refs (Go's `with`) takes ids of the scene's people the input brings along: "with Danny"
   // names one, "we" all of them; nobody when the player goes alone, as when no one is here.
   if (def.type === "list" && def.ref !== undefined) {
-    const here = placeOfEntity(state, world.pov);
-    const ref = def.ref;
-    const ids = Object.keys(state.entities).sort().filter((id) => {
-      const e = own(state.entities, id);
-      return !!e && id !== world.pov && kindIs(reg, world, e.kind, ref) && !isGone(state, id) && mayKnow(id) && together(world, here, placeOfEntity(state, id));
-    });
+    const ids = companionCandidates(reg, world, state, action, name).filter(mayKnow);
     if (ids.length === 0) return `${head} (no one here${label})`;
     for (const id of ids) named.add(id);
     return `${head} (${kindWords(reg, world, def)} here, a list of ids: ${ids.join(" | ")}; "we" is all of them${label})`;

@@ -61,6 +61,8 @@ describe("map editor: painting a grid map", () => {
     expect(cellMeaning(legend, "v")).toEqual({ kind: "nothing" });
     expect(cellMeaning(legend, "z")).toEqual({ kind: "zone", zone: "cellar" });
     expect(cellMeaning({ l: { item: "lamp" } }, "l")).toEqual({ kind: "item", item: "lamp", place: null });
+    // A door on a room's edge is a door of that room, never the room's plain floor.
+    expect(cellMeaning({ d: { door: true, place: "parlour" } }, "d")).toEqual({ kind: "roomDoor", place: "parlour" });
     expect(cellMeaning({}, "q")).toEqual({ kind: "unknown" });
   });
 

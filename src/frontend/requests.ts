@@ -68,10 +68,13 @@ export function convertRequest(line: KeepLine, chatId: ChatId): Req<"lre.keep"> 
 }
 
 /** A chain of palette picks (an option, then its second-step choices); params merge in order, then a free amount (cents) and the entry's required number. */
-export function paletteRequest(entry: PaletteEntry, picks: readonly PaletteOption[], chatId: ChatId, amountCents?: number, count?: number): Req<"lre.action"> {
+export function paletteRequest(entry: PaletteEntry, picks: readonly PaletteOption[], chatId: ChatId, amountCents?: number, count?: number, people: readonly EntityId[] = []): Req<"lre.action"> {
   const params: JsonObject = Object.assign({}, ...picks.map((pick) => pick.params));
   if (entry.amount && amountCents !== undefined) params[entry.amount.param] = Math.round(amountCents);
   if (entry.number && count !== undefined) params[entry.number.param] = count;
+  // Only the people the picker offered come along: a tick left from another place never does.
+  const along = entry.people ? people.filter((id) => entry.people?.options.some((o) => o.id === id)) : [];
+  if (entry.people && along.length > 0) params[entry.people.param] = along;
   return { type: "lre.action", chatId, action: entry.action, params, source: "palette" };
 }
 

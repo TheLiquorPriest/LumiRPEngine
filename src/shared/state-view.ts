@@ -238,6 +238,11 @@ export interface PaletteEntry {
   amount?: { param: string; min: number; max: number | null };
   /** A required number (Lend's days), pre-filled with `default` and merged into params under `param`; options are judged with the default. */
   number?: { param: string; label: string; min: number; max: number | null; default: number };
+  /**
+   * Who comes along (Go's `With`): the people in the scene the POV can see, any of whom the player
+   * may tick; their ids are merged into params under `param` as a list. Absent with no one here.
+   */
+  people?: { param: string; label: string; options: { id: EntityId; name: string }[] };
 }
 
 /**

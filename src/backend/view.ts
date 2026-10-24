@@ -29,7 +29,7 @@ import { readPass } from "../engine/read-pass";
 import { claimsOf, presetOf } from "../engine/realism";
 import { inferredOf, worldSkills } from "../engine/inferred";
 import { levelFloors, type Registry } from "../engine/registry-impl";
-import { actionOdds, paramCandidates } from "../engine/resolve";
+import { actionOdds, companionCandidates, paramCandidates } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import { povLife } from "../engine/life";
 import type { WorldState } from "../engine/state";
@@ -267,6 +267,9 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
       options.push(pick(params, target ? nameOf(target) : action.label));
     }
     if (options.length === 0) continue;
+    // Who comes along (Go's With): the scene's people the POV can see, ticked in the sheet.
+    const peopleParam = Object.entries(action.params).find(([, p]) => p.type === "list" && p.ref !== undefined)?.[0];
+    const company = peopleParam ? companionCandidates(registry, world, state, action, peopleParam).map((id) => ({ id, name: nameOf(id) })) : [];
     // Offers carry their price; a free amount would double it.
     entries.push({
       action: action.id,
@@ -275,6 +278,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
       options,
       ...(amountParam && offers.length === 0 ? { amount: { param: amountParam, min: 0, max: null } } : {}),
       ...(numberParam ? { number: { param: numberParam, label: paramLabel(action, numberParam, world, registry), min: 1, max: null, default: 1 } } : {}),
+      ...(peopleParam && company.length > 0 ? { people: { param: peopleParam, label: paramLabel(action, peopleParam, world, registry), options: company } } : {}),
     });
   }
   entries.push(...combatEntries(ctx));
