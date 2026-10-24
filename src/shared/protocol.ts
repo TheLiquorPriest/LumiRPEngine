@@ -12,12 +12,12 @@ import type { InferredChecks, SheetSkill } from "./inferred";
 import type { LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
-import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
+import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, StepPurpose, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -155,6 +155,8 @@ export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: En
  *    this chat (DESIGN §8): how they follow it, one block of it, one of their schedules (`RoutineEditOp`).
  *  - `effect` runs a pack effect registered for GM edits (`EffectDef.gm`) with literal arguments:
  *    what no entity field holds, such as an asset's price.
+ *  - `feed` sets a section's settings in this chat over the world's (DESIGN §6.11), whole; `to: null`
+ *    returns it to the world's.
  */
 export type EditOp =
   | { op: "set"; entity: EntityId; field: FieldId; value: JsonValue }
@@ -174,7 +176,8 @@ export type EditOp =
   | { op: "restore"; entity: EntityId }
   | MindEditOp
   | RoutineEditOp
-  | { op: "effect"; effect: string; args: JsonObject };
+  | { op: "effect"; effect: string; args: JsonObject }
+  | { op: "feed"; section: SlotId; to: SectionFeed | null };
 
 /** A GM edit on the head (DESIGN §7): the operations in order, all or none, as one `post` entry of kind `fix`; locked fields are writable. */
 export interface EditRequest extends Request<"lre.edit"> {

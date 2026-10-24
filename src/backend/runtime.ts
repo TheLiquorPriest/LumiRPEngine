@@ -53,6 +53,7 @@ import { secretLoreNames } from "../engine/lore";
 import { pinsFor, type PinnedText } from "../engine/lore-pins";
 import { namesHidden, povMayKnow } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
+import { feedOf, linesOf, MARKED_FACTS_RULE, markedText, renderersOf } from "../engine/feed";
 import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { resolveUsualMoves, usualRoutineForExtract } from "../packs/castlife/core/usual";
@@ -1032,15 +1033,17 @@ export class Runtime implements TurnHooks {
   /**
    * The sections the narrator will have this turn, by label, as the outline step is told them
    * (DESIGN §9.5): the Outcome, the Scene and the Outline itself, a timelapse's Montage when it has
-   * lines, Minds when someone's mind has one, and any other when its renderers have one. The budget
+   * lines, Minds when someone's mind has one, and any other when its renderers have one; never one
+   * the chat's feed switches off (§6.11). The budget
    * may still leave one out: the Outline is checked again when it is written (`withoutMissing`).
    */
   private narratorSections(world: WorldDoc, state: WorldState, plan: EngineTurnPlan | undefined): string[] {
     return readPass(() => {
       const ctx = this.registry.context(world, state);
-      const has = (slot: string): boolean =>
-        this.registry.renderers.some((r) => {
-          if (r.slot !== slot || r.hint) return false;
+      // A section's player lines decide it, as the Outline names only what the player's view holds.
+      const has = (section: SectionTemplate): boolean =>
+        renderersOf(this.registry.renderers, section, feedOf(section, state)).some((r) => {
+          if (r.hint) return false;
           try {
             return r.render(ctx).length > 0;
           } catch {
@@ -1049,7 +1052,8 @@ export class Runtime implements TurnHooks {
         });
       const montage = plan ? planLines(plan, world, this.registry).montage.length > 0 : false;
       return sectionsOf(world)
-        .filter((s) => (s.id === "outcome" || s.id === "scene" || s.id === "outline" ? true : s.id === MINDS_SLOT ? mindLines(ctx).length > 0 : (s.id === "montage" && montage) || has(s.id)))
+        .filter((s) => feedOf(s, state).enabled !== false)
+        .filter((s) => (s.id === "outcome" || s.id === "scene" || s.id === "outline" ? true : s.id === MINDS_SLOT ? mindLines(ctx).length > 0 : (s.id === "montage" && montage) || has(s)))
         .map((s) => s.label);
     });
   }
@@ -2169,8 +2173,11 @@ export class Runtime implements TurnHooks {
     const uncounted: string[] = [];
     // What goes into the book, in rank order: each entry and its text.
     const fills: { id: string; content: string }[] = [];
-    // Sections with hint lines (Stance's cues, §6.6), which ride once every section has its place.
-    const hinted: { fill: { content: string }; label: string; template: string; lines: string[]; hints: string[]; cost: number }[] = [];
+    // Sections with lines that ride once every section has its place: hints (Stance's cues, §6.6) and
+    // facts beyond the POV's that a scope adds (§6.11), neither counted in what the player sees.
+    const hinted: { fill: { id: string; content: string } | null; entryId: string; label: string; template: string; lines: string[]; marked: { text: string; source?: { bookId: string; entryId: string } }[]; hints: string[]; cost: number; maxTokens: number | undefined }[] = [];
+    // The World Info entries the delivered lines carry (§6.11): that entry can stay out of the prompt.
+    const sources: { bookId: string; entryId: string }[] = [];
     // The entry a section fills: the preset places the section itself when an enabled block holds
     // `{{outlet::lre_<slot>}}` (DESIGN §6.8), so its outlet twin is filled; else its own entry.
     const entryOf = (section: SectionTemplate): string | null => {
@@ -2194,15 +2201,36 @@ export class Runtime implements TurnHooks {
       // The sections filled so far, in rank order: the Outline points only at those (DESIGN §9.5).
       const filled = new Set<string>();
       for (const section of sectionsOf(world)) {
+        // The world's settings for the section, the GM's in this chat over them (§6.11).
+        const feed = feedOf(section, state);
+        if (feed.enabled === false) continue;
         const entryId = entryOf(section);
         if (!entryId) continue;
         const minds = section.id === MINDS_SLOT;
+        const scope = feed.scope ?? "player";
         const lines: string[] = minds ? mindsFit.map((l) => l.line) : [];
+        const lineSources: ({ bookId: string; entryId: string } | undefined)[] = lines.map(() => undefined);
         const hints: string[] = [];
-        for (const r of this.registry.renderers) {
-          if (r.slot !== section.id || minds) continue;
+        const marked: { text: string; source?: { bookId: string; entryId: string } }[] = [];
+        for (const r of renderersOf(this.registry.renderers, section, feed)) {
+          if (minds) continue;
           try {
-            (r.hint ? hints : lines).push(...r.render(ctx));
+            if (r.hint) {
+              hints.push(...r.render(ctx));
+              continue;
+            }
+            for (const l of linesOf(r, ctx, scope)) {
+              if (l.known === "pov") {
+                lines.push(l.text);
+                lineSources.push(l.source);
+                continue;
+              }
+              // A fact beyond the POV's only in the scope that asks for it, marked for the narrator. Only
+              // the GM scope's skip the leak screen, and only here: no player surface reads this copy.
+              if (scope === "player" || (l.known === "gm" && scope !== "gm")) continue;
+              if (scope !== "gm" && findLeaks(l.text, secrets).length > 0) continue;
+              marked.push({ text: markedText(l), ...(l.source ? { source: l.source } : {}) });
+            }
           } catch (error) {
             this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
           }
@@ -2214,13 +2242,26 @@ export class Runtime implements TurnHooks {
           lines.push(minutes > 0 ? `This turn took ${spanText(minutes)}.` : "No time passes this turn.");
         }
         // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.
-        if (section.id === "outcome") lines.unshift(...planned.outcome);
+        if (section.id === "outcome") {
+          lines.unshift(...planned.outcome);
+          lineSources.unshift(...planned.outcome.map(() => undefined));
+        }
         if (section.id === "montage") lines.push(...planned.montage);
-        const safe = minds ? lines : lines.filter((l) => findLeaks(l, secrets).length === 0);
+        while (lineSources.length < lines.length) lineSources.push(undefined);
+        const screened = lines.map((text, i) => ({ text, source: lineSources[i] })).filter((l) => minds || findLeaks(l.text, secrets).length === 0);
+        // The section's own caps (§6.11): its first lines, then cut from the end to its tokens.
+        const capped = feed.maxLines !== undefined ? screened.slice(0, feed.maxLines) : [...screened];
+        const markedRoom = feed.maxLines !== undefined ? Math.max(0, feed.maxLines - capped.length) : marked.length;
+        if (feed.maxTokens !== undefined) while (capped.length > 0 && sectionCost(renderSection(section.label, section.template, capped.map((l) => l.text))) > feed.maxTokens) capped.pop();
+        const safe = capped.map((l) => l.text);
+        const facts = marked.slice(0, markedRoom);
+        const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
         if (safe.length === 0) {
           // A Minds section whose best line alone is over its budget is left out whole.
           if (minds && allMinds.length > 0) record.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
-          // Hints alone never make a section: its being there would tell of them.
+          // Hints alone never make a section: its being there would tell of them. Marked facts may,
+          // in what the budget leaves, with no trace the player sees.
+          if (facts.length > 0) hinted.push({ fill: null, entryId, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens });
           continue;
         }
         const content = renderSection(section.label, section.template, safe);
@@ -2229,36 +2270,64 @@ export class Runtime implements TurnHooks {
         if (counted === undefined) uncounted.push(content);
         const cost = counted ?? sectionTokens(content);
         const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
+        const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - capped.length);
         // Whether it reached the prompt is known once the reply's World Info activates (`onActivated`).
-        record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(minds && mindsFit.length < allMinds.length ? { cut: allMinds.length - mindsFit.length } : {}), delivery: "unchecked" });
+        record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(cut > 0 ? { cut } : {}), delivery: "unchecked" });
         if (clipped) continue;
         if (!minds) budget -= cost;
         const fill = { id: entryId, content };
         fills.push(fill);
         filled.add(section.id);
         (record.entries ??= {})[section.id] = entryId;
-        const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
-        if (safeHints.length > 0) hinted.push({ fill, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
+        sources.push(...capped.flatMap((l) => (l.source ? [l.source] : [])));
+        if (safeHints.length > 0 || facts.length > 0) hinted.push({ fill, entryId, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens });
       }
     });
-    // The preset's narrator rules, for world chats only: at its `{{outlet::lre_narrator}}`, else
-    // before the character. They are the preset's own text, apart from the section budget.
-    const rules = preset.guidance.narrator;
-    const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
-    if (rules && rulesAt) fills.push({ id: rulesAt, content: `[Narrator rules]\n${rules}` });
     record.budget.used = settings.modelUse.tokens.sections - budget;
-    // Hints follow what the POV doesn't know (a hidden flag, a lore gate), so they ride last, in what
-    // the budget has left, and the inspector counts none of them: no clip, size or total the player
-    // sees moves when an off-screen secret changes (§6.2).
+    // Hints follow what the POV doesn't know (a hidden flag, a lore gate), and marked facts go beyond
+    // it, so both ride last, in what the budget has left, and the inspector counts none of them: no
+    // clip, size or total the player sees moves when an off-screen secret changes (§6.2, §6.11).
+    // Marked facts go first, one at a time while they fit; hints still all or none.
+    let markedSent = false;
     for (const h of hinted) {
-      const content = renderSection(h.label, h.template, [...h.lines, ...h.hints]);
-      const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content));
-      if (counted === undefined) uncounted.push(content);
-      const extra = Math.max(0, (counted ?? sectionTokens(content)) - h.cost);
-      if (extra > budget) continue;
-      budget -= extra;
-      h.fill.content = content;
+      const fits = (extra: number, total: number): boolean => extra <= budget && (h.maxTokens === undefined || total <= h.maxTokens);
+      const costOf = (body: string[]): number => {
+        const content = renderSection(h.label, h.template, body);
+        const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content));
+        if (counted === undefined) uncounted.push(content);
+        return counted ?? sectionTokens(content);
+      };
+      const body = [...h.lines];
+      let cost = h.cost;
+      const carried: { bookId: string; entryId: string }[] = [];
+      for (const m of h.marked) {
+        const next = costOf([...body, m.text]);
+        if (!fits(next - cost, next)) break;
+        budget -= next - cost;
+        cost = next;
+        body.push(m.text);
+        if (m.source) carried.push(m.source);
+        markedSent = true;
+      }
+      if (h.hints.length > 0) {
+        const next = costOf([...body, ...h.hints]);
+        if (fits(Math.max(0, next - cost), next)) {
+          budget -= Math.max(0, next - cost);
+          body.push(...h.hints);
+        }
+      }
+      if (body.length === h.lines.length) continue;
+      const content = renderSection(h.label, h.template, body);
+      if (h.fill) h.fill.content = content;
+      else fills.push({ id: h.entryId, content });
+      sources.push(...carried);
     }
+    // The narrator rules, for world chats only: at the preset's `{{outlet::lre_narrator}}`, else
+    // before the character, apart from the section budget. The preset's own text, led by the
+    // engine's rule for marked facts when the turn carries any (§6.11).
+    const rules = [markedSent ? MARKED_FACTS_RULE : null, preset.guidance.narrator ?? null].filter((r): r is string => r !== null && r !== "");
+    const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
+    if (rules.length > 0 && rulesAt) fills.push({ id: rulesAt, content: `[Narrator rules]\n${rules.join("\n")}` });
     this.countLater(input.userId, uncounted);
     record.forced = fills.map((f) => f.id);
     await this.inspector.add(input.chatId, input.userId, record);
@@ -2267,7 +2336,7 @@ export class Runtime implements TurnHooks {
     const sent = new Set(record.sections.filter((s) => !s.clipped).map((s) => s.slot));
     this.diag.sections({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, `${pending?.kind ?? "continue"} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent.has(s.id) })), started);
     // Nothing goes into the book yet: the guard of the generation that takes the turn writes it (`fill`).
-    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}` };
+    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}`, sources };
   }
 
   /**

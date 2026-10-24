@@ -15,7 +15,7 @@ import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
 import type { WorldCurrency, WorldDoc } from "../shared/world";
 import type { DataTable } from "../shared/tables";
 import { compileMaps } from "../shared/maps";
-import { DEFAULT_CURRENCY, ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
+import { DEFAULT_CURRENCY, ENGINE_VERSION, readSectionFeed, SECTION_FEED_KEYS, WORLD_FORMAT } from "../shared/world";
 import { applyEvent, validateEvent } from "./events";
 import type { Registry } from "./registry-impl";
 import { worldSkills } from "./inferred";
@@ -30,6 +30,7 @@ import { authorLines, playerLines } from "./player-events";
 import { typedIntent } from "./typed-intent";
 import { migrateMoney } from "./money-migrate";
 import { MINDS_SLOT } from "../shared/minds";
+import { sourceOf } from "./feed";
 
 // ---------------------------------------------------------------- documents
 
@@ -262,10 +263,18 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   for (const [id, s] of Object.entries(world.sections)) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0) err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
   }
-  // A section only the engine's renderers or the turn itself fill: one neither feeds is skipped
-  // every turn, without a word (DESIGN §6).
+  // A section only the engine's renderers (its own slot's, or its `include`'s) or the turn itself
+  // fill: one neither feeds is skipped every turn, without a word (DESIGN §6, §6.11).
+  const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
   for (const [id, s] of Object.entries(world.sections)) {
-    if (!hasOwn(TURN_FED_SECTIONS, id) && !registry.renderers.some((r) => r.slot === id)) warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}", so it never goes in`);
+    const feed = readSectionFeed(Object.fromEntries(SECTION_FEED_KEYS.flatMap((k) => (s[k] !== undefined ? [[k, s[k]]] : []))));
+    if (!feed) {
+      err(`sections.${id}`, "section_feed", `"${s.label}": enabled is on or off, maxTokens and maxLines are whole numbers from 1, include is a list of sources, scope is player, scene or gm`);
+      continue;
+    }
+    for (const source of feed.include ?? []) if (!sources.has(source)) warn(`sections.${id}.include`, "section_source", `"${s.label}" includes "${source}", which no pack renders`);
+    const fed = feed.include ? feed.include.some((source) => sources.has(source)) : registry.renderers.some((r) => r.slot === id);
+    if (!hasOwn(TURN_FED_SECTIONS, id) && !fed) warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}"${feed.include ? " or one it includes" : ""}, so it never goes in`);
   }
   // World step templates (DESIGN §5.2): an output their purpose uses, known signals, engine placeholders
   // (with those only some steps are given), and some text. A blank minds template is the minds lint's.

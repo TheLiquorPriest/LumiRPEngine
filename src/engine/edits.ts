@@ -18,7 +18,8 @@ import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
 import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../shared/routines";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, FieldType, WorldDoc } from "../shared/world";
-import { BUILTIN_RELATIONS, formatMoney } from "../shared/world";
+import { BUILTIN_RELATIONS, formatMoney, readSectionFeed } from "../shared/world";
+import { FEED_EVENT } from "./feed";
 import { calendarOf, slotIndexAt } from "./calendar";
 import { parseDice } from "./dice";
 import { applyEffects, fieldBounds } from "./effects";
@@ -412,6 +413,9 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
     }
     case "effect":
       return effectOp(reg, w, op, opts, rng);
+    case "feed":
+      // A section's settings in this chat (DESIGN §6.11): one event, so its Undo is the fix's.
+      return w.apply({ type: FEED_EVENT, data: { section: op.section, to: op.to as JsonObject | null } });
   }
 }
 
@@ -514,6 +518,12 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
           return { op: "schedule_override", entity: o.entity, schedule: o.schedule, value: o.value as ChatScheduleChange | null };
         case "effect":
           return str(o.effect) && isRecord(o.args) ? { op: "effect", effect: o.effect, args: o.args as JsonObject } : null;
+        case "feed": {
+          if (!str(o.section) || o.section.trim() === "") return null;
+          if (o.to === null) return { op: "feed", section: o.section, to: null };
+          const to = readSectionFeed(o.to);
+          return to ? { op: "feed", section: o.section, to } : null;
+        }
         default:
           return null;
       }
