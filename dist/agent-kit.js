@@ -25026,18 +25026,50 @@ function farRoute(route) {
   return walk2 === undefined || walk2.minutes > INTERIOR_WALK_MINUTES;
 }
 var spreadOf = new WeakMap;
+function joined(parts, part) {
+  let rep = part;
+  for (let next = parts.get(rep);next !== undefined && next !== rep; next = parts.get(rep))
+    rep = next;
+  parts.set(part, rep);
+  return rep;
+}
 function spreadPlaces(world) {
   const hit = spreadOf.get(world);
   if (hit)
     return hit;
   const out = new Set;
+  const joins = new Map;
   for (const r of Object.values(world.routes)) {
-    if (!farRoute(r))
+    const from = placeChain(world, r.from);
+    const to = placeChain(world, r.to);
+    for (let i = 1;i < from.length; i++) {
+      const place = from[i];
+      const fromPart = from[i - 1];
+      const j = place === undefined ? -1 : to.indexOf(place);
+      const toPart = to[j - 1];
+      if (place === undefined || fromPart === undefined || j < 1 || toPart === undefined)
+        continue;
+      const parts = joins.get(place) ?? new Map;
+      joins.set(place, parts);
+      if (farRoute(r))
+        out.add(place);
+      else
+        parts.set(joined(parts, fromPart), joined(parts, toPart));
+    }
+  }
+  const partsOf = new Map;
+  for (const p of Object.values(world.places)) {
+    if (!p.parent)
       continue;
-    const from = new Set(placeChain(world, r.from).slice(1));
-    for (const p of placeChain(world, r.to).slice(1))
-      if (from.has(p))
-        out.add(p);
+    const parts = partsOf.get(p.parent);
+    if (parts)
+      parts.push(p.id);
+    else
+      partsOf.set(p.parent, [p.id]);
+  }
+  for (const [place, parts] of joins) {
+    if (new Set((partsOf.get(place) ?? []).map((part) => joined(parts, part))).size > 1)
+      out.add(place);
   }
   spreadOf.set(world, out);
   return out;
@@ -26274,7 +26306,7 @@ function storyEvents(args, ctx) {
 }
 
 // src/packs/castlife/core/usual.ts
-function joined(words2) {
+function joined2(words2) {
   return words2.length <= 1 ? words2[0] ?? "" : `${words2.slice(0, -1).join(", ")} and ${words2[words2.length - 1] ?? ""}`;
 }
 function weekdaysPhrase(cal, days) {
@@ -26285,7 +26317,7 @@ function weekdaysPhrase(cal, days) {
     return "weekdays";
   if (set.join() === "0,6")
     return "weekends";
-  return `on ${joined(set.map((d) => weekdayName(cal, d)))}`;
+  return `on ${joined2(set.map((d) => weekdayName(cal, d)))}`;
 }
 function blockDays(cal, d) {
   if (!d)
@@ -26304,7 +26336,7 @@ function blockDays(cal, d) {
   if (d.birthday === "friend")
     parts.push("on a friend's birthday");
   if (d.seasons)
-    parts.push(`in ${joined(d.seasons)}`);
+    parts.push(`in ${joined2(d.seasons)}`);
   if (d.weather)
     parts.push(`in ${d.weather} weather`);
   return parts.filter((p) => p !== "").join(", ");
@@ -31071,8 +31103,8 @@ function namedIn(name, said3) {
   if (own2.length === 0 || said3.length === 0)
     return false;
   const whole4 = own2.join(" ");
-  const joined2 = ` ${said3.join(" ")} `;
-  if (joined2.includes(` ${whole4} `))
+  const joined3 = ` ${said3.join(" ")} `;
+  if (joined3.includes(` ${whole4} `))
     return true;
   const present2 = new Set(said3);
   return own2.some((w) => w.length >= 3 && !NAME_FILLER[w] && present2.has(w));
@@ -60409,7 +60441,7 @@ Simulated perspectives drive the characters, and the mechanics ground them. Each
   - **Pending interactions with the POV:** an invitation, an appointment together, an open plan in force (§24.8) or commitment with the POV, up to three.
   - **Tier and recency:** the detail band of their tier, and being seen with the POV lately (all of it right after, nothing a day later).
 - **Who decides:** the GM's pin in the chat decides first. Then the author's \`never\` selector (always Background), which wins over \`always\` (always Live). Then the score against the world's thresholds, each read as at least the next one down. Live is only for people at hand: someone neither in the POV's scene nor named this turn is Near at most, however high their score, so a Live slot never goes to someone across town while a person in the room has none. "Close by" scores but doesn't count as at hand: it means under the same parent place, which in a town is the whole town. The GM view shows each input's points, any pin and that cap.
-- **The POV's scene** (\`together\`, \`engine/presence.ts\`): two places are together when they are the same place, or one lies at most two levels inside the other (\`LEVELS_APART\`: a floor, a suite on it, a room of the suite) with no spread-out place on the way up, so someone the story placed on "the fourth floor" is with the POV in the bath of a suite on it. A place is spread out by travel distance: some route between two places inside it, both its ends within it, takes something other than walking, or a walk of more than ten minutes (\`INTERIOR_WALK_MINUTES\`). That is a town or a region, and being somewhere in it isn't being with whoever is in one of its buildings. Short walks between rooms never spread a place, so a building authored as rooms joined by one-minute routes, or a floor plan's doors, stays one building. Three levels or more apart isn't together, so everyone a routine puts somewhere in a big building doesn't fill People and Minds while the POV is in one of its rooms. Rooms side by side are never together. The Minds section (§24.3), People and Stance (§6.6), minds' presence (who heard a turn, §24.4, and whether a mind is with the POV, §24.5) and who thinks all read the scene this way, on the state the sections render from.
+- **The POV's scene** (\`together\`, \`engine/presence.ts\`): two places are together when they are the same place, or one lies at most two levels inside the other (\`LEVELS_APART\`: a floor, a suite on it, a room of the suite) with no spread-out place on the way up, so someone the story placed on "the fourth floor" is with the POV in the bath of a suite on it. A place is spread out by travel distance: some route between two places inside it, both its ends within it, takes something other than walking, or a walk of more than ten minutes (\`INTERIOR_WALK_MINUTES\`). It is spread out too when routes run inside it but short walks don't join all of its parts to one another: travel then joins its parts only by those routes, so a town whose homes and sites are each their own island is spread out though no long route runs inside it. That is a town or a region, and being somewhere in it isn't being with whoever is in one of its buildings. Short walks that join all of a building's rooms never spread it, so a building authored as rooms joined by one-minute routes, or a floor plan's doors, stays one building, and a place with no routes inside, whose parts travel joins on foot, is never spread out. Three levels or more apart isn't together, so everyone a routine puts somewhere in a big building doesn't fill People and Minds while the POV is in one of its rooms. Rooms side by side are never together. The Minds section (§24.3), People and Stance (§6.6), minds' presence (who heard a turn, §24.4, and whether a mind is with the POV, §24.5) and who thinks all read the scene this way, on the state the sections render from.
 - **Who thinks this turn** (the user's cadence, §24.6): minds follow the scene and what's in motion.
   - Everyone in the POV's scene thinks every turn, best on the ladder first, up to the Live limit ("none" for no limit); so does a Live character elsewhere while they're involved (below).
   - Someone elsewhere thinks only while they're in something that could surface soon (\`involved\`): a plan or appointment with the POV within the coming day, an invitation to the POV still open, an agenda of their own under way, the GM's intent for them (§24.9), a place or activity the story holds them to, or a mind of theirs that interrupted the skip the clock stopped on. Idling, living their routine or being named calls no mind.
@@ -61972,7 +62004,7 @@ Every turn, and at each beat of a time skip, each character gets a focus score a
 
 Who thinks follows your scene and what's in motion:
 
-- **Everyone in your scene** thinks every turn, best on the ladder first, up to your Live limit. Your scene is where you are, or a place up to two levels inside or around it, as long as nothing between is spread out (a town or a region: places a drive, a boat or a walk of more than ten minutes joins). Someone the story put on the fourth floor is with you in the bath of a suite on it, even in a building drawn room by room with short walks between; someone in the room next door, somewhere else in a big building, or somewhere in town, isn't.
+- **Everyone in your scene** thinks every turn, best on the ladder first, up to your Live limit. Your scene is where you are, or a place up to two levels inside or around it, as long as nothing between is spread out (a town or a region: a place whose parts a drive, a boat or a walk of more than ten minutes joins, or whose parts short walks don't all join, such as a town whose homes and sites have no routes between them). Someone the story put on the fourth floor is with you in the bath of a suite on it, even in a building drawn room by room with short walks between; someone in the room next door, somewhere else in a big building, or somewhere in town, isn't.
 - **Someone elsewhere** thinks only while they're caught up in something that could come up soon: a plan or appointment with you within the next day, an invitation to you, an agenda of their own under way, your intent for them in GM mode, a place or activity the story holds them to, or their interrupting a time skip. They think on their level's refresh, or every turn when they're Live, and what they thought is on record, though it never shows in the Minds section. Being named, idling or going about their routine makes no one think.
 - A mind that falls due while nothing calls it still keeps the level it fell due at, so a character's routine role never changes with who thinks.
 
@@ -63616,7 +63648,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "6f741a60";
+var BUILD = "d9e948e9";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
