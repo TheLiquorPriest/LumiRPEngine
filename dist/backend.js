@@ -2419,6 +2419,14 @@ var lre_map_v1_schema_default = {
           properties: { place: { $ref: "#/$defs/id" } }
         },
         {
+          title: '{"door": true, "place": \u2026}',
+          description: "A door on a room's edge: walked through as a door, and part of `place`'s area, so whoever stands in it is in that room. One that touches another room's area joins the two.",
+          type: "object",
+          required: ["door", "place"],
+          additionalProperties: false,
+          properties: { door: { enum: [true] }, place: { $ref: "#/$defs/id" } }
+        },
+        {
           title: '{"zone": \u2026}',
           type: "object",
           required: ["zone"],
@@ -2657,6 +2665,7 @@ function compileGrid(key, map, mine, places, grids) {
   const zones = new Map;
   const rooms = new Map;
   const things = [];
+  const doors = new Set;
   for (let y = 0;y < height; y += 1) {
     for (let x = 0;x < width; x += 1) {
       const index = y * width + x;
@@ -2666,7 +2675,14 @@ function compileGrid(key, map, mine, places, grids) {
         blocked.push(index);
       } else if (cell === "floor" || cell === "door")
         terrain.push(cell);
-      else if ("terrain" in cell) {
+      else if ("door" in cell) {
+        terrain.push("door");
+        if (ids.has(cell.place)) {
+          zones.set(cell.place, [...zones.get(cell.place) ?? [], index]);
+          rooms.set(index, cell.place);
+          doors.add(index);
+        }
+      } else if ("terrain" in cell) {
         terrain.push(cell.terrain);
         if (cell.blocked === true)
           blocked.push(index);
@@ -2705,7 +2721,9 @@ function compileGrid(key, map, mine, places, grids) {
     const def = places[p.id];
     if (!def)
       continue;
-    const cell = p.at ? p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null : nearestMiddle(zones.get(p.id) ?? [], width);
+    const area = zones.get(p.id) ?? [];
+    const floor = area.filter((i) => !doors.has(i));
+    const cell = p.at ? p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null : nearestMiddle(floor.length > 0 ? floor : area, width);
     if (cell)
       places[p.id] = { ...def, cell };
   }
@@ -2921,6 +2939,18 @@ function mapProblems(world) {
         else if (drawn > 0 && other)
           problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} already lies on the map "${other.map ?? other.id}"` });
       }
+      const roomOf = (x, y) => {
+        const cell = cellOf(map, rows[y]?.[x] ?? " ");
+        return typeof cell === "object" && "place" in cell && !("item" in cell) && cell.place !== undefined ? cell.place : null;
+      };
+      rows.forEach((row, y) => row.forEach((ch, x) => {
+        const cell = cellOf(map, ch);
+        if (typeof cell !== "object" || !("door" in cell) || !ids.includes(cell.place))
+          return;
+        const beside = [roomOf(x - 1, y), roomOf(x + 1, y), roomOf(x, y - 1), roomOf(x, y + 1)];
+        if (!beside.includes(cell.place))
+          problems.push({ severity: "warning", path: ["layout", y], code: "map_door", message: `The door of ${placeName(cell.place)} at [${x}, ${y}] touches none of its room: put it on the room's edge` });
+      }));
       (map.places ?? []).forEach((p, i) => {
         if (p.at && (p.at[0] >= width || p.at[1] >= height))
           err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${width} \xD7 ${height} layout`);
@@ -28633,16 +28663,8 @@ function prepare(reg, world, state2, req) {
       continue;
     }
     if (def.type === "list" && def.ref) {
-      const ids = (Array.isArray(raw) ? raw : String(raw).split(",")).map((x) => String(x).trim()).filter((x) => x !== "");
-      for (const id of ids) {
-        const target = own(state2.entities, id);
-        if (!target)
-          return { code: "bad_param", reason: `no entity ${labelOf({ world, state: state2 }, id)}` };
-        if (!kindIs(reg, world, target.kind, def.ref))
-          return { code: "bad_param", reason: `${target.name} is not ${/^[aeiou]/i.test(def.ref) ? "an" : "a"} ${(reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase()}` };
-        if (def.of && !selectorMatches(reg, world, state2, def.of, id))
-          return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
-      }
+      const may = new Set(companionCandidates(reg, world, state2, action, name, actor2));
+      const ids = (Array.isArray(raw) ? raw : String(raw).split(",")).map((x) => String(x).trim()).filter((x) => may.has(x));
       if (ids.length > 0)
         params[name] = [...new Set(ids)].join(",");
       continue;
@@ -28843,6 +28865,17 @@ function paramCandidates(reg, world, state2, action, param, actor2 = world.pov) 
     out.push(id);
   }
   return out;
+}
+function companionCandidates(reg, world, state2, action, param, actor2 = world.pov) {
+  const def = own(action.params, param);
+  if (!def || def.type !== "list" || def.ref === undefined)
+    return [];
+  const ref = def.ref;
+  const here = placeOfEntity(state2, actor2);
+  return Object.keys(state2.entities).sort().filter((id) => {
+    const e = own(state2.entities, id);
+    return !!e && id !== actor2 && kindIs(reg, world, e.kind, ref) && (!def.of || selectorMatches(reg, world, state2, def.of, id)) && !isGone(state2, id) && acts(world, state2, id) && together(world, here, placeOfEntity(state2, id)) && canSeeEntity(reg, world, state2, actor2, id);
+  });
 }
 function placeCandidates(reg, world, state2, actor2 = world.pov) {
   const here = placeOfEntity(state2, actor2);
@@ -63235,7 +63268,7 @@ function mapSystem() {
   return [
     "You draw maps for a roleplay world engine. From the author's description of one place, answer with one map of that place's inside, as JSON in the lre-map-v1 format the JSON Schema below defines. Output the map object only: no prose, no code fence.",
     "Rules:",
-    `- A building, a floor or a set of rooms is a grid map: "layout" is the floor plan, one string per row, every row the same length, one character per cell, and "legend" says what each character is. Unless the legend says otherwise # is a wall, . is floor, + is a door and a space is nothing. Give each room its own letter and map that letter to {"place": "<the room's id>"}.`,
+    `- A building, a floor or a set of rooms is a grid map: "layout" is the floor plan, one string per row, every row the same length, one character per cell, and "legend" says what each character is. Unless the legend says otherwise # is a wall, . is floor, + is a door and a space is nothing. Give each room its own letter and map that letter to {"place": "<the room's id>"}. A door that belongs to a room (its front door, a doorway between two rooms that opens into it) can get its own character mapped to {"door": true, "place": "<the room's id>"}: it is a door on the room's edge, and it joins the room to the one on its other side.`,
     '- A town, a district or a region is a node map: "places" and "links", no layout. "at" is optional, [x, y] within "size" [width, height].',
     '- "places" lists the places inside it, each with a new lowercase snake_case id and a "name". Never reuse an id the world already has.',
     '- "links" are ways between places with their minutes on foot (or a "mode"). Link every place inside it or none; with no links, people walk freely between them.',
@@ -67268,13 +67301,16 @@ function palette(world, state2, registry) {
     }
     if (options.length === 0)
       continue;
+    const peopleParam = Object.entries(action.params).find(([, p]) => p.type === "list" && p.ref !== undefined)?.[0];
+    const company2 = peopleParam ? companionCandidates(registry, world, state2, action, peopleParam).map((id) => ({ id, name: nameOf7(id) })) : [];
     entries2.push({
       action: action.id,
       label: action.label,
       group: groupOf(action),
       options,
       ...amountParam && offers.length === 0 ? { amount: { param: amountParam, min: 0, max: null } } : {},
-      ...numberParam ? { number: { param: numberParam, label: paramLabel(action, numberParam, world, registry), min: 1, max: null, default: 1 } } : {}
+      ...numberParam ? { number: { param: numberParam, label: paramLabel(action, numberParam, world, registry), min: 1, max: null, default: 1 } } : {},
+      ...peopleParam && company2.length > 0 ? { people: { param: peopleParam, label: paramLabel(action, peopleParam, world, registry), options: company2 } } : {}
     });
   }
   entries2.push(...combatEntries(ctx));
@@ -67792,12 +67828,7 @@ function paramWords(ctx, action, name, def, mayKnow, places2, named) {
     return `${head} (${kindWords(reg, world, def)}: ${ids2.join(" | ")}${claimed ? `, or ${claimed}` : ""})`;
   }
   if (def.type === "list" && def.ref !== undefined) {
-    const here = placeOfEntity(state2, world.pov);
-    const ref = def.ref;
-    const ids2 = Object.keys(state2.entities).sort().filter((id) => {
-      const e = own(state2.entities, id);
-      return !!e && id !== world.pov && kindIs(reg, world, e.kind, ref) && !isGone(state2, id) && mayKnow(id) && together(world, here, placeOfEntity(state2, id));
-    });
+    const ids2 = companionCandidates(reg, world, state2, action, name).filter(mayKnow);
     if (ids2.length === 0)
       return `${head} (no one here${label})`;
     for (const id of ids2)
@@ -71030,9 +71061,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "a45c8e9148c05cb759a98d6761af830b9e708da10e4f48b7c42a0df5b2a2cd31";
+  const sha256 = "44f2d63956a80b483841823d573c83a5f8ef4a49b295f9117b2391e649fcba91";
   const tools = ["0a9baadf30fa77cf7cb49d886cca019e", "be126719e8971c9663eddb1d75fbe1b9"].filter((f) => f !== undefined);
-  return { id: "10314a7d", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "30df42cf", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -74067,7 +74098,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "10314a7d" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "30df42cf" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);

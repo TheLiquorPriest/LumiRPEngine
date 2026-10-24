@@ -5353,12 +5353,15 @@ function convertRequest(line, chatId) {
     return null;
   return { type: "lre.keep", chatId, choice: "convert", messageId: line.messageId, parentPath: line.parentPath, refs: [line.ref] };
 }
-function paletteRequest(entry, picks, chatId, amountCents, count) {
+function paletteRequest(entry, picks, chatId, amountCents, count, people = []) {
   const params = Object.assign({}, ...picks.map((pick) => pick.params));
   if (entry.amount && amountCents !== undefined)
     params[entry.amount.param] = Math.round(amountCents);
   if (entry.number && count !== undefined)
     params[entry.number.param] = count;
+  const along = entry.people ? people.filter((id) => entry.people?.options.some((o4) => o4.id === id)) : [];
+  if (entry.people && along.length > 0)
+    params[entry.people.param] = along;
   return { type: "lre.action", chatId, action: entry.action, params, source: "palette" };
 }
 function timelapseRequest(view, target, overrides, chatId, followRoutine, source = "palette") {
@@ -13609,6 +13612,14 @@ var lre_map_v1_schema_default = {
           properties: { place: { $ref: "#/$defs/id" } }
         },
         {
+          title: '{"door": true, "place": …}',
+          description: "A door on a room's edge: walked through as a door, and part of `place`'s area, so whoever stands in it is in that room. One that touches another room's area joins the two.",
+          type: "object",
+          required: ["door", "place"],
+          additionalProperties: false,
+          properties: { door: { enum: [true] }, place: { $ref: "#/$defs/id" } }
+        },
+        {
           title: '{"zone": …}',
           type: "object",
           required: ["zone"],
@@ -13953,6 +13964,7 @@ function compileGrid(key, map, mine, places2, grids) {
   const zones = new Map;
   const rooms = new Map;
   const things = [];
+  const doors = new Set;
   for (let y3 = 0;y3 < height; y3 += 1) {
     for (let x2 = 0;x2 < width; x2 += 1) {
       const index = y3 * width + x2;
@@ -13962,7 +13974,14 @@ function compileGrid(key, map, mine, places2, grids) {
         blocked.push(index);
       } else if (cell === "floor" || cell === "door")
         terrain.push(cell);
-      else if ("terrain" in cell) {
+      else if ("door" in cell) {
+        terrain.push("door");
+        if (ids.has(cell.place)) {
+          zones.set(cell.place, [...zones.get(cell.place) ?? [], index]);
+          rooms.set(index, cell.place);
+          doors.add(index);
+        }
+      } else if ("terrain" in cell) {
         terrain.push(cell.terrain);
         if (cell.blocked === true)
           blocked.push(index);
@@ -14001,7 +14020,9 @@ function compileGrid(key, map, mine, places2, grids) {
     const def = places2[p3.id];
     if (!def)
       continue;
-    const cell = p3.at ? p3.at[0] < width && p3.at[1] < height ? { x: p3.at[0], y: p3.at[1] } : null : nearestMiddle(zones.get(p3.id) ?? [], width);
+    const area = zones.get(p3.id) ?? [];
+    const floor = area.filter((i3) => !doors.has(i3));
+    const cell = p3.at ? p3.at[0] < width && p3.at[1] < height ? { x: p3.at[0], y: p3.at[1] } : null : nearestMiddle(floor.length > 0 ? floor : area, width);
     if (cell)
       places2[p3.id] = { ...def, cell };
   }
@@ -14217,6 +14238,18 @@ function mapProblems(world) {
         else if (drawn > 0 && other)
           problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} already lies on the map "${other.map ?? other.id}"` });
       }
+      const roomOf = (x2, y3) => {
+        const cell = cellOf(map, rows[y3]?.[x2] ?? " ");
+        return typeof cell === "object" && "place" in cell && !("item" in cell) && cell.place !== undefined ? cell.place : null;
+      };
+      rows.forEach((row, y3) => row.forEach((ch, x2) => {
+        const cell = cellOf(map, ch);
+        if (typeof cell !== "object" || !("door" in cell) || !ids.includes(cell.place))
+          return;
+        const beside = [roomOf(x2 - 1, y3), roomOf(x2 + 1, y3), roomOf(x2, y3 - 1), roomOf(x2, y3 + 1)];
+        if (!beside.includes(cell.place))
+          problems.push({ severity: "warning", path: ["layout", y3], code: "map_door", message: `The door of ${placeName(cell.place)} at [${x2}, ${y3}] touches none of its room: put it on the room's edge` });
+      }));
       (map.places ?? []).forEach((p3, i3) => {
         if (p3.at && (p3.at[0] >= width || p3.at[1] >= height))
           err(["places", i3, "at"], "map_place", `[${p3.at[0]}, ${p3.at[1]}] is outside the ${width} × ${height} layout`);
@@ -28471,6 +28504,7 @@ function ActionList(props) {
   const [selected, setSelected] = d2(null);
   const [amount, setAmount] = d2("");
   const [count, setCount] = d2(null);
+  const [people, setPeople] = d2([]);
   const [busy, run] = useBusy();
   const currency = props.view.currency ?? DEFAULT_CURRENCY;
   const amountCents = parseMoneyInput(amount, currency);
@@ -28485,15 +28519,17 @@ function ActionList(props) {
     const same = selected?.entry.action === entry.action;
     const picks = same ? selected.picks.slice(0, depth) : [];
     const again = same && samePick(selected.picks[depth], option);
-    if (!same)
+    if (!same) {
       setCount(null);
+      setPeople([]);
+    }
     setSelected(again ? depth === 0 ? null : { entry, picks } : { entry, picks: [...picks, option] });
   };
   const go2 = () => {
     if (!selected || pending || !amountOk || !countOk)
       return;
     run(async () => {
-      const result = await app.request(paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined));
+      const result = await app.request(paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people));
       if (result)
         props.onSent();
     });
@@ -28536,7 +28572,30 @@ function ActionList(props) {
                 step: chosen.next,
                 chosen: selected.picks[depth + 1],
                 onPick: (option) => pick(entry, depth + 1, option)
-              }, `${depth}:${JSON.stringify(chosen.params)}`, false, undefined, this) : null) : null
+              }, `${depth}:${JSON.stringify(chosen.params)}`, false, undefined, this) : null) : null,
+              selected?.entry.action === entry.action && entry.people ? /* @__PURE__ */ u3("div", {
+                class: "lre-chat-next",
+                "data-lre-palette-people": entry.people.param,
+                children: [
+                  /* @__PURE__ */ u3("div", {
+                    class: "lre-chat-next-head",
+                    children: [
+                      /* @__PURE__ */ u3(Icon, {
+                        name: "users",
+                        size: 16
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ u3("span", {
+                        children: entry.people.label
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  entry.people.options.map((person) => /* @__PURE__ */ u3(HostSwitch, {
+                    label: person.name,
+                    checked: people.includes(person.id),
+                    onChange: (on) => setPeople(on ? [...people, person.id] : people.filter((id) => id !== person.id))
+                  }, person.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this) : null
             ]
           }, entry.action, true, undefined, this))
         ]
@@ -46028,6 +46087,8 @@ function cellMeaning(legend, ch) {
     return { kind: "unknown" };
   if (typeof cell.terrain === "string")
     return cell.terrain === VOID_TERRAIN && cell.blocked === true ? { kind: "nothing" } : { kind: "terrain", terrain: cell.terrain, blocked: cell.blocked === true };
+  if (cell.door === true && typeof cell.place === "string")
+    return { kind: "roomDoor", place: cell.place };
   if (typeof cell.place === "string" && cell.item === undefined)
     return { kind: "place", place: cell.place };
   if (typeof cell.zone === "string")
@@ -46191,7 +46252,7 @@ function layoutFacts(model) {
         m2 = cellMeaning(model.legend, ch);
         meaning.set(ch, m2);
       }
-      if (m2.kind === "place")
+      if (m2.kind === "place" || m2.kind === "roomDoor")
         areas.set(m2.place, [...areas.get(m2.place) ?? [], y3 * model.width + x2]);
     });
   });
@@ -46202,8 +46263,10 @@ function meaningFill(m2, palette) {
     case "nothing":
       return null;
     case "wall":
+      return terrainFill("wall", palette);
     case "door":
-      return terrainFill(m2.kind, palette);
+    case "roomDoor":
+      return terrainFill("door", palette);
     case "terrain":
       return terrainFill(m2.terrain, palette);
     default:
@@ -46464,6 +46527,7 @@ var MEANINGS = [
   { value: "wall", label: "Wall" },
   { value: "floor", label: "Floor" },
   { value: "door", label: "Door" },
+  { value: "roomDoor", label: "Room door" },
   { value: "terrain", label: "Terrain" },
   { value: "place", label: "Room" },
   { value: "zone", label: "Zone" },
@@ -46477,6 +46541,8 @@ function meaningText(m2, placeName, entityName) {
       return "Floor";
     case "door":
       return "Door";
+    case "roomDoor":
+      return `Door of ${placeName(m2.place)}`;
     case "nothing":
       return "Nothing";
     case "terrain":
@@ -46497,6 +46563,8 @@ function legendValue(kind, form) {
     case "floor":
     case "door":
       return kind;
+    case "roomDoor":
+      return { door: true, place: form.place };
     case "terrain":
       return form.blocked ? { terrain: form.terrain, blocked: true } : { terrain: form.terrain };
     case "place":
@@ -46921,7 +46989,7 @@ function MapEditor(props) {
     const roomAt = (cell) => {
       const ch = [...model2.layout[cell.y] ?? ""][cell.x] ?? " ";
       const meaning = facts2.meaning.get(ch);
-      return meaning?.kind === "place" ? meaning.place : null;
+      return meaning?.kind === "place" || meaning?.kind === "roomDoor" ? meaning.place : null;
     };
     if (gridTool === "paint") {
       return {
@@ -47916,16 +47984,16 @@ function LegendSheet(props) {
   const [form, setForm] = d2({
     terrain: current2?.kind === "terrain" ? current2.terrain : "grass",
     blocked: current2?.kind === "terrain" ? current2.blocked : false,
-    place: current2?.kind === "place" ? current2.place : props.mapPlaces[0]?.value ?? "",
+    place: current2?.kind === "place" || current2?.kind === "roomDoor" ? current2.place : props.mapPlaces[0]?.value ?? "",
     zone: current2?.kind === "zone" ? current2.zone : "",
     item: current2?.kind === "item" ? current2.item : "",
     itemPlace: current2?.kind === "item" ? current2.place ?? "" : ""
   });
-  const [chText, setChText] = d2(props.ch ?? freeChar(model.legend, model.layout, kind === "place" ? form.place : kind === "zone" ? form.zone : kind === "item" ? form.item : form.terrain) ?? "");
+  const [chText, setChText] = d2(props.ch ?? freeChar(model.legend, model.layout, kind === "place" || kind === "roomDoor" ? form.place : kind === "zone" ? form.zone : kind === "item" ? form.item : form.terrain) ?? "");
   const cells = props.ch !== null ? props.facts?.counts.get(props.ch) ?? 0 : 0;
   const chars = [...chText];
   const chProblem = chars.length !== 1 ? "One character." : chText !== props.ch && hasOwn(model.legend, chText) ? "The legend has this character already." : null;
-  const ready = kind === "terrain" ? form.terrain.trim() !== "" : kind === "place" ? form.place !== "" : kind === "zone" ? ID_PATTERN.test(form.zone) : kind === "item" ? form.item !== "" : true;
+  const ready = kind === "terrain" ? form.terrain.trim() !== "" : kind === "place" || kind === "roomDoor" ? form.place !== "" : kind === "zone" ? ID_PATTERN.test(form.zone) : kind === "item" ? form.item !== "" : true;
   const things = Object.values(props.world.entities).map((e3) => ({ value: e3.id, label: e3.name, sublabel: e3.kind }));
   const commit = () => {
     if (!ready || chProblem)
@@ -47975,6 +48043,12 @@ function LegendSheet(props) {
       }, undefined, true, undefined, this) : null,
       kind === "place" ? /* @__PURE__ */ u3(RefPicker, {
         label: "The room of",
+        value: form.place,
+        options: props.mapPlaces,
+        onChange: (place) => update({ place })
+      }, undefined, false, undefined, this) : null,
+      kind === "roomDoor" ? /* @__PURE__ */ u3(RefPicker, {
+        label: "A door of",
         value: form.place,
         options: props.mapPlaces,
         onChange: (place) => update({ place })
