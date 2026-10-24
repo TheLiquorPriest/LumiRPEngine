@@ -94,7 +94,7 @@ export function TimePage(props: DefaultsProps) {
           A length of time you type ("for the next three hours") or a jump a reply tells ("three hours later") runs in the turn up to this long; a longer one is offered as a Timelapse chip instead. A skip until something ("until dinner", "until my shift") always runs. Every chat follows it from its next turn, up to {formatMinutes(TIMELAPSE_REACH_MINUTES)}.
         </p>
         <NumberStepper
-          label={`Run skips up to (min): ${time.askBeyondMinutes > 0 ? formatMinutes(time.askBeyondMinutes) : "every skip asks"}`}
+          label="Run skips up to (minutes)"
           value={time.askBeyondMinutes}
           min={0}
           max={TIMELAPSE_REACH_MINUTES}
@@ -103,6 +103,10 @@ export function TimePage(props: DefaultsProps) {
           disabled={props.busy}
           onChange={(askBeyondMinutes) => props.patch({ time: { askBeyondMinutes } })}
         />
+        {/* The minutes read back as a span, so 1440 is plainly a day; 0 is its own rule. */}
+        <p class="lre-small lre-muted" style={{ margin: 0 }} data-lre-skip-limit>
+          {time.askBeyondMinutes > 0 ? `That's ${formatMinutes(time.askBeyondMinutes)}: a longer skip is offered as a Timelapse chip.` : "0: every skip with a length is offered as a Timelapse chip."}
+        </p>
       </Section>
     </div>
   );

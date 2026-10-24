@@ -699,7 +699,7 @@ function valueWords(field: FieldSpec, value: JsonValue | undefined, ctx: FormCtx
     case "list":
       return Array.isArray(value) ? `${value.length} ${field.label.toLowerCase()}` : "";
     case "enum":
-      return typeof value === "string" ? words(value) : "";
+      return typeof value === "string" ? (field.labels?.[value] ?? words(value)) : "";
     case "text":
     case "expr":
     case "dice":
@@ -1378,7 +1378,7 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
     case "bool":
       return <CheckField label={spec.label} help={spec.hint} checked={boolChecked(spec, props.value)} issues={issues} onChange={(checked) => props.onChange(checked)} />;
     case "enum":
-      return <ChoiceInput label={spec.label} value={props.value} options={spec.values.map((v) => ({ value: v, label: words(v) }))} optional={spec.optional} hint={spec.hint} issues={issues} onChange={props.onChange} />;
+      return <ChoiceInput label={spec.label} value={props.value} options={spec.values.map((v) => ({ value: v, label: spec.labels?.[v] ?? words(v) }))} optional={spec.optional} hint={spec.hint} issues={issues} onChange={props.onChange} />;
     case "ref": {
       if (spec.inline && isRecord(props.value)) return <JsonInput label={`${spec.label} (defined here)`} value={props.value} optional={spec.optional} hint="Written out in place rather than named; edit it as JSON, or clear it to pick one by name." issues={issues} onChange={props.onChange} />;
       const options = refOptions(ctx.doc, spec.collection);

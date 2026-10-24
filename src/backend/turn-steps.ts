@@ -19,7 +19,7 @@ import type { ChainMessage } from "../engine/ledger/chain";
 import { recentMessages } from "./interpret-context";
 import type { StepSignal } from "../shared/steps";
 import { limitOf, MINDS_SLOT } from "../shared/minds";
-import { PROSE_PROMPTS } from "../shared/steps";
+import { DECISION_PROMPTS, PROSE_PROMPTS } from "../shared/steps";
 import type { Timeout } from "../shared/timeouts";
 import { within } from "../shared/timeouts";
 import type { ActionDef, ParamDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
@@ -482,7 +482,7 @@ export async function npcChoose(steps: Steps, run: StepRun, ties: readonly Tie[]
   asked.forEach((t, i) => {
     const criteria: Record<string, string> = {};
     for (const o of t.options) criteria[o] = t.labels?.[o] ?? humanize(o);
-    questions[`t${i}`] = { type: "choice", instructions: run.template?.template ?? "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.", criteria };
+    questions[`t${i}`] = { type: "choice", instructions: run.template?.template ?? DECISION_PROMPTS["npc.choose"], criteria };
     state[`t${i}`] = describe(t);
   });
   const answer = await steps.decide("npc.choose", state, questions, run.config, userId, signal, lore, run.guidance, run.recent);
@@ -515,7 +515,7 @@ export async function contradiction(steps: Steps, run: StepRun, facts: readonly 
   asked.forEach((f, i) => {
     criteria[`f${i}`] = f;
   });
-  const questions: Questions = { contradicts: { type: "choice", instructions: run.template?.template ?? "Does the narrator's reply contradict one of these engine facts? Pick the fact it contradicts, or none.", criteria } };
+  const questions: Questions = { contradicts: { type: "choice", instructions: run.template?.template ?? DECISION_PROMPTS.contradiction, criteria } };
   const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run.config, userId, signal, lore, run.guidance, run.recent);
   const a = answer?.answers.contradicts;
   if (!a || a.type !== "choice" || a.choice === "none" || a.confidence < 0.5) return null;
@@ -528,7 +528,7 @@ export async function contradiction(steps: Steps, run: StepRun, facts: readonly 
  * correct. The question carries the accepted answers (a secret), so it is its own decision call.
  */
 export async function puzzleAnswer(steps: Steps, run: StepRun, question: string, accepted: readonly string[], answer: string, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<number | null> {
-  const questions: Questions = { correct: { type: "noul", instructions: run.template?.template ?? "Is the player's answer correct: the same as one of the accepted answers, allowing for wording and spelling?" } };
+  const questions: Questions = { correct: { type: "noul", instructions: run.template?.template ?? DECISION_PROMPTS["puzzle.answer"] } };
   const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run.config, userId, signal, lore, run.guidance, run.recent);
   const a = result?.answers.correct;
   return a && a.type === "noul" ? a.noul : null;
@@ -555,7 +555,7 @@ export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: U
   const scale = `0 (no particular approach, or one that works against them) to ${ask.max} (a clever, prepared approach that fits the situation)`;
   const choices = ask.odds ? Object.keys(ask.odds) : [];
   const guidance = ask.odds ? Object.fromEntries(Object.entries(ask.odds).map(([o, p]) => [o, `${Math.round(p * 100)}%`])) : null;
-  const lead = run.template?.template ?? "Judge how well the player's described approach suits what their character attempts.";
+  const lead = run.template?.template ?? DECISION_PROMPTS.judge;
   const outcomesOf = (raw: unknown): Record<string, number> | undefined => {
     if (!isRecord(raw)) return undefined;
     const out: Record<string, number> = {};
