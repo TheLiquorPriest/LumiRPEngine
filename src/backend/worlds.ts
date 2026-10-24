@@ -22,7 +22,7 @@ import type { EditorRequest, JsonPatchOp, LintIssue, ResultBodies, WorldCollecti
 import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
-import { lorePinsOf } from "../shared/lore";
+import { loreBooksOf, lorePinsOf } from "../shared/lore";
 import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, routineShapeProblems } from "../shared/routines";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
@@ -719,6 +719,12 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
       const settings = mapSettingsOf({ mapSettings: value.mapSettings });
       if (JSON.stringify(settings) === JSON.stringify(mapSettingsOf({}))) delete doc.mapSettings;
       else doc.mapSettings = settings;
+    }
+    // The World Info books the world reads lore from live (DESIGN §4.2), each once; none listed is no list.
+    if (value.loreBooks !== undefined) {
+      const books = loreBooksOf({ loreBooks: value.loreBooks });
+      if (books.length === 0) delete doc.loreBooks;
+      else doc.loreBooks = books;
     }
     return;
   }

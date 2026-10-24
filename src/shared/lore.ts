@@ -7,6 +7,7 @@ import { hashParts } from "./hash";
 import type { TopicId } from "./ids";
 import type { JsonObject } from "./json";
 import { hasOwn, isRecord, safeKey } from "./json";
+import { LEDGER_NAMESPACE } from "./ledger";
 import { STEP_OUTPUTS } from "./steps";
 import type { LoreIndex, LorePin, LorePins, LoreSource, StepPurpose, WorldDoc } from "./world";
 
@@ -52,6 +53,79 @@ export function loreSourceOf(raw: unknown): LoreSource {
   if (raw.kind === "chat" && typeof raw.chatId === "string" && typeof raw.messageId === "string") return { kind: "chat", chatId: raw.chatId, messageId: raw.messageId };
   if (raw.kind === "ai" && (raw.status === "pending" || raw.status === "accepted")) return { kind: "ai", status: raw.status };
   return { kind: "authored" };
+}
+
+/**
+ * LRE's own fields on a World Info entry (DESIGN §4.2), in its extension data under
+ * `lumi_rp_engine.lore`: what a world lore entry says beside its text, for an entry read live from a
+ * book. With `secret` the entry is stored switched off, and the interceptor turns it on for a prompt
+ * only once its gate holds (§6.1).
+ */
+export interface BookLoreFields {
+  secret?: boolean;
+  gate?: string;
+  audience?: StepPurpose[];
+  visibility?: "public" | "known_by";
+  links?: string[];
+  aliases?: string[];
+  holders?: string[];
+}
+
+/**
+ * An entry's LRE fields as stored, each kept only when well formed; null when it has none. A
+ * `secret` that isn't `false` reads as secret, and a visibility this reader doesn't know as Known by
+ * with nothing linked, which no one reads: both keep a malformed entry hidden, as a world entry's do.
+ */
+export function bookLoreFieldsOf(extensions: unknown): BookLoreFields | null {
+  const ns = isRecord(extensions) ? extensions[LEDGER_NAMESPACE] : undefined;
+  const raw = isRecord(ns) ? ns.lore : undefined;
+  if (!isRecord(raw)) return null;
+  const ids = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x !== "") : undefined);
+  const out: BookLoreFields = {};
+  if (raw.secret !== undefined) out.secret = raw.secret !== false;
+  if (typeof raw.gate === "string") out.gate = raw.gate;
+  const audience = ids(raw.audience)?.filter((p): p is StepPurpose => (LORE_AUDIENCE as readonly string[]).includes(p));
+  if (audience) out.audience = audience;
+  const links = ids(raw.links);
+  if (links) out.links = links;
+  const aliases = ids(raw.aliases);
+  if (aliases) out.aliases = aliases;
+  const holders = ids(raw.holders);
+  if (holders) out.holders = holders;
+  if (raw.visibility === "public" || raw.visibility === "known_by") out.visibility = raw.visibility;
+  else if (raw.visibility !== undefined) {
+    out.visibility = "known_by";
+    out.links = [];
+  }
+  return out;
+}
+
+/** Extension data with `fields` as the entry's LRE fields (null takes them off), everything else in it kept. */
+export function withBookLoreFields(extensions: JsonObject, fields: BookLoreFields | null): JsonObject {
+  const held = extensions[LEDGER_NAMESPACE];
+  const ns: JsonObject = isRecord(held) ? { ...held } : {};
+  if (fields === null) delete ns.lore;
+  else ns.lore = JSON.parse(JSON.stringify(fields)) as JsonObject;
+  const out: JsonObject = { ...extensions };
+  if (Object.keys(ns).length === 0) delete out[LEDGER_NAMESPACE];
+  else out[LEDGER_NAMESPACE] = ns;
+  return out;
+}
+
+/**
+ * Whether the engine wrote a World Info entry: its books' sections and their outlet twins, its
+ * narrator rules, or a copy an earlier build made of world lore. Such an entry is never lore, and
+ * never read through a pin, whatever names it (the Minds section holds other minds).
+ */
+export function engineWroteEntry(extensions: unknown): boolean {
+  const ns = isRecord(extensions) ? extensions[LEDGER_NAMESPACE] : undefined;
+  return isRecord(ns) && (typeof ns.slot === "string" || typeof ns.twin === "string" || typeof ns.narrator === "string" || typeof ns.lore === "string");
+}
+
+/** The World Info books a world lists to read lore from (DESIGN §4.2): its well-formed ids, each once, in order. */
+export function loreBooksOf(world: { readonly loreBooks?: unknown }): string[] {
+  const raw = world.loreBooks;
+  return Array.isArray(raw) ? [...new Set(raw.filter((id): id is string => typeof id === "string" && id.trim() !== ""))] : [];
 }
 
 /** Whether a value is a lore pin: `{lore}` naming one of the world's entries, `{book, entry}` naming a World Info book's, or `{book}` naming a whole book (DESIGN §24.5). */
@@ -119,7 +193,7 @@ export function lorePinsJson(pins: LorePins): JsonObject {
 
 /** The lint codes lore pins raise (DESIGN §24.5), with what each means; the reference lists them. */
 export const LORE_PIN_LINTS: Readonly<Record<string, string>> = {
-  pin_shape: 'a pin that is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}, each with an optional "keep" of "start" or "end": it is ignored',
+  pin_shape: 'a pin that is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}: it is ignored',
   pin_missing: "a pin naming a lore entry the world doesn't have",
   pin_target: "pins under a character, place or step the world doesn't have: no call reads them",
   pin_duplicate: "the same entry or book pinned twice to one character, place or step",

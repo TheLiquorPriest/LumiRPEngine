@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "./json";
 import type { AgentsView, HelloClient, KitReport } from "./agents";
 import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
-import type { LoreIndexAddition } from "./lore";
+import type { BookLoreFields, LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TierId, TrackId, WorldId } from "./ids";
@@ -527,10 +527,19 @@ export interface WorldChatInfo {
  * entry in the draft of the chat's world, its source the message it came from. `books`: the user's
  * World Info books a pin may name an entry of, those attached to `chatId` first (the engine's own
  * books left out). `entries`: one book's entries. `pins`: every pin of the world's draft (with
- * `worldId`) or of the revision the chat plays (with `chatId`), each read now.
+ * `worldId`) or of the revision the chat plays (with `chatId`), each read now. `fields`: LRE's own
+ * fields on one of a book's entries (null takes them off); a secret entry is stored switched off,
+ * a secret one made public switched back on; answers the book's entries.
  */
 export type LoreRequest = Request<"lre.lore"> &
-  ({ op: "drift"; worldId: WorldId; id?: string } | { op: "save"; chatId: ChatId; text?: string } | { op: "books"; chatId?: ChatId } | { op: "entries"; bookId: string } | { op: "pins"; worldId?: WorldId; chatId?: ChatId });
+  (
+    | { op: "drift"; worldId: WorldId; id?: string }
+    | { op: "save"; chatId: ChatId; text?: string }
+    | { op: "books"; chatId?: ChatId }
+    | { op: "entries"; bookId: string }
+    | { op: "pins"; worldId?: WorldId; chatId?: ChatId }
+    | { op: "fields"; bookId: string; entryId: string; fields: BookLoreFields | null }
+  );
 
 /** A book-sourced lore entry whose World Info entry changed since it was indexed (with its text now), or is gone. */
 export type LoreDrift = { status: "changed"; content: string; hash: string } | { status: "missing" };
@@ -542,13 +551,14 @@ export interface LoreBookView {
   attached: boolean;
 }
 
-/** One entry of a World Info book, for a pin picker (`lre.lore entries`); `disabled`: switched off in its book, which a pin still reads. */
+/** One entry of a World Info book, for a pin picker and the lore editor (`lre.lore entries`); `disabled`: switched off in its book, which a pin still reads; `lore`: its LRE fields, when it has any. */
 export interface LoreBookEntryView {
   id: string;
   title: string;
   disabled: boolean;
   /** Its text's length, in characters. */
   chars: number;
+  lore?: BookLoreFields;
 }
 
 /**

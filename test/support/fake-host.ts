@@ -31,6 +31,8 @@ import type {
   ProcessEvent,
   QuietRequest,
   QuietToolCall,
+  WorldInfoInput,
+  WorldInfoVerdict,
 } from "../../src/backend/host";
 import { ENGINE_EXTENSION, STUDIO_EXTENSION } from "../../src/shared/studio-bridge";
 import { decodeEvent } from "../../src/backend/spindle-host";
@@ -348,6 +350,16 @@ export class FakeHost implements HostPort {
     this.contextTimeoutMs = options.timeoutMs;
     this.contextRequired = options.required && this.capabilities.required;
   }
+
+  /** The World Info interceptor, asked before activation in every assembly as Lumiverse asks it. */
+  worldInfoInterceptor: ((input: WorldInfoInput) => Promise<WorldInfoVerdict>) | null = null;
+
+  registerWorldInfoInterceptor(handler: (input: WorldInfoInput) => Promise<WorldInfoVerdict>): void {
+    this.worldInfoInterceptor = handler;
+  }
+
+  /** The user's global books, which every chat's prompt scans beside the chat's own. */
+  globalBooks: string[] = [];
 
   /**
    * Scripted model replies for tests (a quiet call's text, or its text and tool calls); throwing
@@ -690,7 +702,7 @@ export class FakeHost implements HostPort {
     // The host names the page the generation runs for; with one page open, it is that page.
     const verdict = await this.runContext({ chatId, userId: this.userId, generationType: type, dryRun: false, connectionId: this.contextConnectionId, personaId: null, frontendSessionId: opts.session ?? FakeHost.PAGE }, opts.abandonContext === true);
     if (verdict !== "go") return this.halt(g, verdict);
-    const prompt = this.worldInfo(chatId);
+    const prompt = await this.worldInfo(chatId);
     this.assembled = prompt.placed;
     if (this.options.wiBook) this.emit("WORLD_INFO_ACTIVATED", { chatId, entries: prompt.activated.map((e) => ({ id: e.id, comment: e.comment, source: "constant", bookId: e.bookId })), stats: {} });
     this.emit("GENERATION_IN_PROGRESS", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator" });
@@ -749,7 +761,7 @@ export class FakeHost implements HostPort {
       const verdict = await this.contextHandler({ chatId, userId: this.userId, generationType: "normal", dryRun: true, connectionId: null, personaId: null }, new AbortController().signal);
       if (verdict === "cancel" && this.capabilities.cancel) throw new Error("Generation cancelled by an extension");
     }
-    const lore = this.worldInfo(chatId).placed.map((e) => e.content);
+    const lore = (await this.worldInfo(chatId)).placed.map((e) => e.content);
     const chat = this.chat(chatId).messages.filter((m) => m.isUser || (m.swipes[m.swipeId] ?? "") !== "").map((m) => ({ role: m.isUser ? "user" : "assistant", content: m.swipes[m.swipeId] ?? "" }));
     return { messages: [...lore.map((content) => ({ role: "system", content })), ...chat], blocks: structuredClone(this.preset.blocks), maxTokens: this.preset.maxTokens, model: this.preset.model };
   }
@@ -758,17 +770,27 @@ export class FakeHost implements HostPort {
   assembledOutlets: Set<string> | null = null;
 
   /**
-   * The World Info a prompt gets, read from the chat's books as they are now: every enabled constant
-   * entry with text activates; an outlet-only one (position 8) reaches the prompt only where an
-   * assembled block holds its outlet.
+   * The World Info a prompt gets, read from the chat's books and the global ones as they are now. The
+   * interceptor runs first, as Lumiverse's does: an off vote wins, `enabled` switches on an entry
+   * stored switched off, and a throw leaves the entries as stored. Then every enabled constant entry
+   * with text activates; an outlet-only one (position 8) reaches the prompt only where an assembled
+   * block holds its outlet.
    */
-  private worldInfo(chatId: ChatId): { activated: (HostBookEntry & { outlet: string | null })[]; placed: AssembledEntry[] } {
+  private async worldInfo(chatId: ChatId): Promise<{ activated: (HostBookEntry & { outlet: string | null })[]; placed: AssembledEntry[] }> {
     const ids = this.chat(chatId).metadata.chat_world_book_ids;
-    const activated: (HostBookEntry & { outlet: string | null })[] = [];
-    for (const bookId of Array.isArray(ids) ? ids : []) {
-      if (typeof bookId !== "string") continue;
-      for (const e of this.bookStore.get(bookId)?.entries.values() ?? []) if (!e.disabled && e.constant && e.content !== "") activated.push(structuredClone(e));
+    const scanned = [...new Set([...(Array.isArray(ids) ? ids : []), ...this.globalBooks])].filter((id): id is string => typeof id === "string");
+    const candidates = scanned.flatMap((bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map((e) => structuredClone(e)));
+    if (this.worldInfoInterceptor) {
+      try {
+        const verdict = await this.worldInfoInterceptor({ chatId, userId: this.userId, entries: candidates.map((e) => ({ id: e.id, bookId: e.bookId, disabled: e.disabled, extensions: structuredClone(e.extensions) })), chatMetadata: structuredClone(this.chat(chatId).metadata) });
+        const off = new Set(verdict.disabled);
+        const on = new Set(verdict.enabled);
+        for (const e of candidates) e.disabled = off.has(e.id) || (e.disabled && !on.has(e.id));
+      } catch {
+        // Lumiverse logs the failure and activates the entries as stored.
+      }
     }
+    const activated = candidates.filter((e) => !e.disabled && e.constant && e.content !== "");
     // An outlet-only entry reaches the prompt where an enabled block of the preset the host assembles with (its block states applied) holds its outlet.
     const blocks = this.activePreset === null ? [] : this.activePreset === "preset-1" ? this.presetBlocks : (this.otherPresets.get(this.activePreset)?.blocks ?? []);
     const held = new Set(blocks.filter((b) => this.blockStates[b.id] ?? b.enabled).flatMap((b) => [...b.content.matchAll(/\{\{outlet::([^}]*)\}\}/gi)].map((m) => (m[1] ?? "").trim().toLowerCase())));
@@ -823,6 +845,7 @@ export class FakeHost implements HostPort {
     },
     exists: async (bookId) => this.bookStore.has(bookId),
     list: async () => [...this.bookStore.entries()].map(([id, book]) => ({ id, name: book.name, engine: book.name.startsWith("LumiRPEngine · ") })),
+    global: async () => [...this.globalBooks],
     entries: async (bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map(({ outlet: _outlet, ...e }) => structuredClone(e)),
     entry: async (entryId) => {
       const stored = this.storedEntry(entryId);
@@ -849,6 +872,12 @@ export class FakeHost implements HostPort {
       for (const book of this.bookStore.values()) {
         const e = book.entries.get(entryId);
         if (e) book.entries.set(entryId, { ...e, content: content ?? "", disabled: content === null, constant: content !== null });
+      }
+    },
+    setExtensions: async (entryId, extensions, disabled) => {
+      for (const book of this.bookStore.values()) {
+        const e = book.entries.get(entryId);
+        if (e) book.entries.set(entryId, { ...e, extensions: structuredClone(extensions), disabled: disabled ?? e.disabled });
       }
     },
     deleteEntry: async (entryId) => {

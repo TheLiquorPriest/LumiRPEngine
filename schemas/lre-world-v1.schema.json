@@ -72,6 +72,7 @@
     "lore": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/loreEntry" } },
     "loreIndex": { "$ref": "#/$defs/loreIndex" },
     "lorePins": { "$ref": "#/$defs/lorePins" },
+    "loreBooks": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "description": "World Info book ids the world reads lore from live, beside a chat's own books and the user's global ones; a character's or persona's book is read only when listed here. Each entry is lore, with LumiRPEngine's fields from its extension data (extensions.lumi_rp_engine.lore). Absent: none listed." },
     "mapSettings": {
       "type": "object",
       "description": "How the map shows the world, the optional grid system, and the optional travel simulation. Absent: knowledge display, movement off, sight 3, no travel simulation.",

@@ -27,6 +27,7 @@ import { useHeld } from "./held";
 import { COLLECTION_SPECS, newItem } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { TagListInput } from "./selector-editor";
+import { BookEntriesSection, LoreBooksSection } from "./book-lore";
 
 const specs = (keys: readonly string[]) => COLLECTION_SPECS.lore.filter((s) => keys.includes(s.key));
 const TEXT = specs(["title", "content"]);
@@ -93,10 +94,12 @@ export function LoreList(props: { worldId: string }) {
             chevron
             onClick={() => go(app, { view: "part", worldId: draft.worldId, part: "loreIndex" })}
           />
-          <ListRow icon="book" title="Index a World Info book" subtitle="Lore entries, aliases, topics and lookup terms from one of your books" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_book" })} />
+          <ListRow icon="book" title="Index a World Info book" subtitle="Optional: copy a book into the world's own lore, with aliases, topics and lookup terms, for a world you export" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_book" })} />
           <ListRow icon="scroll" title="Index this text" subtitle="The same, from text you paste" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })} />
         </List>
       </Section>
+      <LoreBooksSection />
+      <BookEntriesSection />
       <div class="lre-build-search">
         <Icon name="search" size={16} />
         <input class="lre-input" type="search" placeholder="Search titles, aliases, topics and text" aria-label="Search lore" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />

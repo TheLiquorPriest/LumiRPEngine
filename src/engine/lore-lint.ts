@@ -71,6 +71,26 @@ export function lintLore(world: WorldDoc): LintIssue[] {
     for (const entry of ids(topic.entries)) if (!hasOwn(world.lore, entry)) push("warning", path, "missing_ref", `"${entry}" is not a lore entry`);
   }
   issues.push(...lintLorePins(world));
+  issues.push(...lintLoreBooks(world));
+  return issues;
+}
+
+/**
+ * The World Info books the world reads lore from live (DESIGN §4.2): a list of book ids, each once.
+ * Whether a book still exists is the host's to say: a chat's turn logs a listed book that is gone,
+ * and Build marks it.
+ */
+function lintLoreBooks(world: WorldDoc): LintIssue[] {
+  const raw: unknown = world.loreBooks;
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) return [{ severity: "error", path: "loreBooks", code: "lore_books_shape", message: "Lore books are a list of World Info book ids; none are read." }];
+  const issues: LintIssue[] = [];
+  const seen = new Set<string>();
+  raw.forEach((id: unknown, i) => {
+    if (typeof id !== "string" || id.trim() === "") issues.push({ severity: "warning", path: `loreBooks.${i}`, code: "lore_books_shape", message: "Not a World Info book id: it is ignored." });
+    else if (seen.has(id)) issues.push({ severity: "warning", path: `loreBooks.${i}`, code: "lore_books_duplicate", message: "This book is listed twice: it is read once." });
+    else seen.add(id);
+  });
   return issues;
 }
 

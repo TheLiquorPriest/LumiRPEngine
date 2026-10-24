@@ -43,6 +43,8 @@ import { toChain } from "./ledger-io";
 import { JobError, type JobRunner } from "./jobs";
 import { bookDrift, saveFromChat } from "./lore";
 import { pinBooks, pinEntries, pinViews } from "./lore-pins";
+import { bookLoreProblem, writeBookLore } from "./book-lore";
+import { bookLoreFieldsOf, engineWroteEntry } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, declineNote, playerReason, readRun, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
@@ -508,6 +510,19 @@ export class Dispatcher {
         }
         if (r.op === "entries") {
           if (typeof r.bookId !== "string" || r.bookId === "") throw new RequestError("bad_request", "name the book");
+          reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
+          return;
+        }
+        if (r.op === "fields") {
+          if (typeof r.bookId !== "string" || r.bookId === "" || typeof r.entryId !== "string" || r.entryId === "") throw new RequestError("bad_request", "name the book and its entry");
+          const entry = await this.rt.host.books.entry(r.entryId, userId);
+          if (!entry || entry.bookId !== r.bookId) throw new RequestError("not_found", "that book has no such entry");
+          if (engineWroteEntry(entry.extensions)) throw new RequestError("bad_request", "the engine wrote that entry; a world's own lore is its document's");
+          const fields = r.fields === null ? null : bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: r.fields } });
+          if (r.fields !== null && fields === null) throw new RequestError("bad_request", "give the fields as an object, or null to take them off");
+          const problem = fields ? bookLoreProblem(fields) : null;
+          if (problem) throw new RequestError("bad_request", problem);
+          await writeBookLore(this.rt.host, entry, fields, userId);
           reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
           return;
         }

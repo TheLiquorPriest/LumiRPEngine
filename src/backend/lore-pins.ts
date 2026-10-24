@@ -6,9 +6,8 @@
 // from and whether it reads), and the books and entries a pin may name.
 
 import type { ChatId, UserId } from "../shared/ids";
-import { hasOwn, isRecord } from "../shared/json";
-import { LEDGER_NAMESPACE } from "../shared/ledger";
-import { loreIsSecret, lorePinKey, lorePinsOf, loreSourceOf } from "../shared/lore";
+import { hasOwn } from "../shared/json";
+import { bookLoreFieldsOf, engineWroteEntry, loreIsSecret, lorePinKey, lorePinsOf, loreSourceOf } from "../shared/lore";
 import type { LoreBookEntryView, LoreBookView, LorePinView, LorePinsView } from "../shared/protocol";
 import type { LorePin, WorldDoc } from "../shared/world";
 import { worldPinText, type PinRef, type PinnedText } from "../engine/lore-pins";
@@ -25,12 +24,9 @@ export function bookEntryTitle(e: Pick<HostBookEntry, "comment" | "content">): s
   return words.length === 0 ? "Untitled entry" : words.length > TITLE_WORDS ? `${words.slice(0, TITLE_WORDS).join(" ")}…` : words.join(" ");
 }
 
-/**
- * An entry the engine wrote (its own books' sections, the Minds section among them, which holds
- * other minds): never read through a pin, whatever names it.
- */
+/** An entry the engine wrote (`engineWroteEntry`: its own books' sections, the Minds section among them, which holds other minds): never read through a pin, whatever names it. */
 function engineWrote(e: HostBookEntry): boolean {
-  return isRecord(e.extensions[LEDGER_NAMESPACE]);
+  return engineWroteEntry(e.extensions);
 }
 
 /**
@@ -155,7 +151,10 @@ export async function pinBooks(host: Pick<HostPort, "books" | "chats">, chatId: 
     .sort((a, b) => Number(b.attached) - Number(a.attached) || a.name.localeCompare(b.name));
 }
 
-/** One book's entries, for a pin picker (`lre.lore entries`), in the book's order. */
+/** One book's entries, for a pin picker and the lore editor (`lre.lore entries`), in the book's order, each with its LRE fields when it has any. */
 export async function pinEntries(host: Pick<HostPort, "books">, bookId: string, userId: UserId): Promise<LoreBookEntryView[]> {
-  return (await host.books.entries(bookId, userId)).map((e) => ({ id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length }));
+  return (await host.books.entries(bookId, userId)).map((e) => {
+    const lore = bookLoreFieldsOf(e.extensions);
+    return { id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length, ...(lore ? { lore } : {}) };
+  });
 }

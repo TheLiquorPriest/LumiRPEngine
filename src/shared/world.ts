@@ -1145,6 +1145,12 @@ export interface WorldDoc {
   loreIndex: LoreIndex;
   /** Lore pinned to characters and places (DESIGN §24.5, §5.4); absent, none. */
   lorePins?: LorePins;
+  /**
+   * World Info books the world reads lore from live (DESIGN §4.2), beside a chat's own books and the
+   * user's global ones: a character's or persona's book is read only when it is listed here. Each
+   * entry is lore with LRE's fields from its extension data (`BookLoreFields`); absent, none listed.
+   */
+  loreBooks?: string[];
   /** How the map shows the world, and the optional grid system (DESIGN §12); absent, the defaults. */
   mapSettings?: MapSettings;
   /** Classification facets by id (DESIGN §4.1); entities hold values in `class`. */

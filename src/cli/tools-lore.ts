@@ -4,6 +4,7 @@
 // (`/lore`, `/lorePins`), written with lre_edit like the rest of it.
 
 import type { JsonObject } from "../shared/json";
+import type { BookLoreFields } from "../shared/lore";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, ToolError } from "./args";
 import { readAt } from "./read";
@@ -93,5 +94,21 @@ export const LORE_TOOLS: readonly ToolModule[] = [
     write: { destructive: false, idempotent: false },
     run: saveTool,
     cli: { command: "lore-save", section: "Lore", usage: "lore-save <chatId> [--text <excerpt>]", summary: "The latest reply (or an excerpt) becomes lore", positionals: ["chatId"], needs: 1, options: { "--text": { arg: "text", as: "text" } } },
+  },
+  {
+    name: "lre_lore_fields",
+    description:
+      'Set LumiRPEngine\'s fields on one of your World Info entries, as Build → Lore → World Info does (DESIGN §4.2): {"secret": true, "gate": "<formula>"} keeps the entry secret (stored switched off; the engine switches it on for a prompt, and its helpers read it, only once the gate holds), "audience" names the helpers that may read it before then, "visibility": "known_by" with "links" shows it once the player knows them, and "aliases" and "holders" are as on a world entry. fields: null takes them off; a secret made public is switched back on. The entry\'s book is read as lore when it is attached to the chat, global, or in the world\'s /loreBooks. Answers the book\'s entries with their fields.',
+    inputSchema: object({ bookId: { type: "string", description: "The entry's book (lre_lore_books lists them)." }, entryId: { type: "string", description: "The entry (lre_lore_entries lists them)." }, fields: { type: ["object", "null"], description: "The fields, or null to take them off." } }, ["bookId", "entryId", "fields"]),
+    write: { destructive: false, idempotent: true },
+    run: async (args, ctx) => {
+      const bookId = neededText(args, "bookId", "the book's id (lre_lore_books lists them)");
+      const entryId = neededText(args, "entryId", "the entry's id (lre_lore_entries lists them)");
+      const fields = args.fields;
+      if (fields !== null && (typeof fields !== "object" || Array.isArray(fields))) throw new ToolError("Give fields as an object, or null to take them off.");
+      const body = await ctx.live().conn.request("lre.lore", { op: "fields", bookId, entryId, fields: fields as BookLoreFields | null });
+      return { text: json({ bookId, entries: body.entries ?? [] }) };
+    },
+    cli: { command: "lore-fields", section: "Lore", usage: "lore-fields <bookId> <entryId> --fields <json|null>", summary: "Set LumiRPEngine's fields on a World Info entry", positionals: ["bookId", "entryId"], needs: 2, options: { "--fields": { arg: "fields", as: "json" } } },
   },
 ];
