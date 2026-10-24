@@ -10,6 +10,7 @@ import type { JsonObject } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { ROUTINE_EVENTS, routineSettingsOf, type SkipPlan } from "../shared/routines";
 import type { Limit, MindsReads } from "../shared/minds";
+import type { StepConfig } from "../shared/settings";
 import { firedTimeout, within } from "../shared/timeouts";
 import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
@@ -58,6 +59,9 @@ export interface SkipPlanInput {
   /** The engine run's clock, and the call's own limit (`skipPlanMs`). */
   signal: AbortSignal;
   limit: Limit;
+  /** The time-skip step's own settings (connection, model, max tokens, sampling) and the preset's guidance for it: the plan is part of that step. */
+  config: StepConfig | null;
+  guidance: string;
 }
 
 export interface SkipPlanDeps {
@@ -106,7 +110,7 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
       const brief = skipPlanBrief(ctx, group, from, to);
       const failure = { reason: "" };
       // Spared: a failed plan leaves its people to their basic needs, and the skip runs without it.
-      const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, [skipPlanText(ctx, brief, told, journal), ...extra].join("\n\n"), null, input.userId, signal, { failure, spared: true });
+      const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, [skipPlanText(ctx, brief, told, journal), ...extra].join("\n\n"), input.config, input.userId, signal, { failure, spared: true, guidance: input.guidance });
       if (raw !== null) return { people: group.length, checked: checkSkipPlan(ctx, brief, raw), why: null };
       const fired = firedTimeout(signal);
       return { people: group.length, checked: null, why: fired ? fired.message : failure.reason || "the call didn't answer" };

@@ -9,7 +9,8 @@ import { macroHazards } from "../shared/macros";
 import type { LintIssue } from "../shared/protocol";
 import type { SheetSectionView } from "../shared/state-view";
 import type { SheetSkill } from "../shared/inferred";
-import { currentSignals, hasRetiredSignal, knownSignal, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
+import { currentSignals, hasRetiredSignal, knownSignal, PURPOSE_PLACEHOLDERS, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
+import { MIND_PURPOSES } from "../shared/minds";
 import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
 import type { WorldCurrency, WorldDoc } from "../shared/world";
 import type { DataTable } from "../shared/tables";
@@ -257,12 +258,17 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   for (const [id, s] of Object.entries(world.sections)) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0) err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
   }
-  // World step templates (DESIGN §5.2): an output their purpose uses, known signals, engine placeholders.
+  // World step templates (DESIGN §5.2): an output their purpose uses, known signals, engine placeholders
+  // (with those only some steps are given), and some text. A blank minds template is the minds lint's.
   for (const [id, t] of Object.entries(world.steps)) {
     if (t.id !== id) err(`steps.${id}.id`, "id_mismatch", "the id must match its key");
     if (!(STEP_OUTPUTS[t.purpose] ?? []).includes(t.output)) warn(`steps.${id}.output`, "step_output", `a ${t.purpose} template can't produce ${t.output}; it would never run`);
+    // Any contradiction template takes the built-in check's place, and only a decision one is a check.
+    else if (t.purpose === "contradiction" && t.output !== "decision") warn(`steps.${id}.output`, "step_contradiction_output", `a contradiction template with output ${t.output} takes the place of the built-in contradiction check, so no reply is checked against the facts; make it a decision to keep the check`);
     for (const s of t.signals) if (!knownSignal(s)) warn(`steps.${id}.signals`, "unknown_signal", `unknown signal "${s}"`);
-    for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g)) if (!(STEP_PLACEHOLDERS as readonly string[]).includes((m[1] ?? "").toLowerCase())) warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder; it renders empty`);
+    if (t.template.trim() === "" && !(MIND_PURPOSES as readonly string[]).includes(t.purpose)) warn(`steps.${id}.template`, "step_blank", `this ${t.purpose} template is blank: it takes the place of the built-in instructions with none`);
+    const known: readonly string[] = [...STEP_PLACEHOLDERS, ...(PURPOSE_PLACEHOLDERS[t.purpose] ?? [])];
+    for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g)) if (!known.includes((m[1] ?? "").toLowerCase())) warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder for a ${t.purpose} step; it renders empty`);
   }
   issues.push(...lintStructure(world, registry));
   for (const rule of registry.lints) issues.push(...rule.check(world, registry));
