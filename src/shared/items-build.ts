@@ -54,12 +54,29 @@ export function revealScaffold(entity: JsonObject): { entity: JsonObject } | { p
 /** The item checks an objective can make: the player character has it with them, has one like it, or it lies at a place. */
 export type ItemCheck = "carries" | "has_item" | "at";
 
+/** A thing or place an item check names: its id for the condition, its name for the label. */
+export interface Named {
+  id: string;
+  name: string;
+}
+
 /**
- * An objective testing a thing (DESIGN §10): `carries(pov, 'id')`, `has_item(pov, 'id')` or
- * `at('id', 'place')`. Ids go in as quoted literals, which the quest-id lint checks.
+ * An objective testing a thing (DESIGN §10): a label the player reads in their quests, `label` or a
+ * plain one from the check ("Have the spare relay with you"), and its condition, `carries(pov, 'id')`,
+ * `has_item(pov, 'id')` or `at('id', 'place')`. Ids go in as quoted literals, which the quest-id lint checks.
  */
-export function itemObjective(check: ItemCheck, item: string, place = ""): string {
+export function itemObjective(check: ItemCheck, item: Named, place: Named | null = null, label = ""): { label: string; when: string } {
   // World ids are plain keys (no quotes or backslashes), so a literal holds them as they are.
   const quote = (s: string): string => `'${s}'`;
-  return check === "at" ? `at(${quote(item)}, ${quote(place)})` : `${check}(pov, ${quote(item)})`;
+  const when = check === "at" ? `at(${quote(item.id)}, ${quote(place?.id ?? "")})` : `${check}(pov, ${quote(item.id)})`;
+  return { label: label.trim() !== "" ? label.trim() : itemObjectiveLabel(check, item, place), when };
+}
+
+/** The plain label an item check reads as when the author gives none. */
+export function itemObjectiveLabel(check: ItemCheck, item: Named, place: Named | null = null): string {
+  // "Spare relay" reads as "the spare relay"; a name that starts with a proper noun ("Rosie's keys") keeps its capital.
+  const thing = /^[A-Z][a-z]/.test(item.name) && !/^[A-Z][a-z]*'/.test(item.name) ? item.name.charAt(0).toLowerCase() + item.name.slice(1) : item.name;
+  if (check === "carries") return `Have the ${thing} with you`;
+  if (check === "has_item") return `Have a ${thing}`;
+  return `Get the ${thing} to ${place?.name ?? "the place"}`;
 }

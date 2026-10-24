@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import { nameOfId } from "../../../shared/maps";
 import type { LintIssue } from "../../../shared/protocol";
-import type { StageDef, TrackDef, TrackKind, WorldDoc } from "../../../shared/world";
+import type { Objective, StageDef, TrackDef, TrackKind, WorldDoc } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { deleteItem, go, ItemHeader, newItemName } from "../../../frontend/build/chrome";
 import { ExprEditor } from "../../../frontend/build/expr-editor";
@@ -23,6 +23,7 @@ import { Badge, Banner, Button, Disclosure, Field, IconButton, IdText, SaveBar, 
 import { isMobile } from "../../../frontend/layout";
 import type { EditorProps } from "../../../frontend/registry";
 import { useSelect } from "../../../frontend/store";
+import { objectiveFrom, objectiveParts, type ObjectiveParts } from "./objectives";
 
 export interface TrackNode {
   id: string;
@@ -175,12 +176,13 @@ function TrackGraph(props: { track: TrackDef; current: string | null; onOpen(id:
   );
 }
 
-/** A stage's fields the schema form lays out; its next stages and how it fails have their own pickers. */
-const STAGE_SPECS: FieldSpec[] = [
+/** A stage's fields the schema form lays out, around its objectives (their own editor); its next stages and how it fails have their own pickers. */
+const STAGE_HEAD: FieldSpec[] = [
   { kind: "text", key: "label", label: "Label" },
   { kind: "text", key: "cue", label: "Cue (the player sees it)", multiline: true, optional: true },
   { kind: "text", key: "truth", label: "Secret truth (GM only until it's revealed)", multiline: true, optional: true },
-  { kind: "list", key: "objectives", label: "Objectives", item: { kind: "expr", key: "", label: "Objective" } },
+];
+const STAGE_TAIL: FieldSpec[] = [
   { kind: "expr", key: "gate", label: "Gate (it can't be entered until this holds)", optional: true },
   { kind: "list", key: "hints", label: "Hints", item: { kind: "text", key: "", label: "Hint" } },
   { kind: "number", key: "priority", label: "Planner priority (agendas)", optional: true },
@@ -189,7 +191,52 @@ const STAGE_SPECS: FieldSpec[] = [
   { kind: "json", key: "answer", label: "Puzzle answer", optional: true, hint: '{"expect": ["…"], "normalize": true, "decision": {"threshold": 0.8}}' },
 ];
 
-function StageSheet(props: { track: TrackDef; id: string; world: WorldDoc; identifiers: readonly string[]; functions: readonly string[]; lint: readonly LintIssue[]; path: string; onChange(track: TrackDef): void; onOpen(id: string): void; onClose(): void }) {
+/** Saving from a stage: the track's own Save to draft and Revert, which the stage page carries so its edits never look unsaved-able. */
+interface StageSave {
+  changed: boolean;
+  busy: boolean;
+  onSave(): void;
+  onRevert(): void;
+}
+
+/**
+ * The stage's objectives: each what the player reads in their quests and the condition that meets
+ * it. A plain-formula objective shows its condition with no label (the player reads the formula, so
+ * the hint asks for one); an item check is added beside them.
+ */
+function ObjectivesEditor(props: { stage: StageDef; world: WorldDoc; identifiers: readonly string[]; functions: readonly string[]; lint: readonly LintIssue[]; path: string; onChange(objectives: Objective[]): void }) {
+  const list = props.stage.objectives ?? [];
+  const put = (i: number, parts: ObjectiveParts): void => props.onChange(list.map((o, j) => (j === i ? objectiveFrom(parts) : o)));
+  return (
+    <FormGroup title="Objectives" aside={<span class="lre-small lre-muted">The player sees each label in their quests</span>}>
+      {list.length === 0 ? <span class="lre-small lre-muted">None yet.</span> : null}
+      {list.map((o, i) => {
+        const parts = objectiveParts(o);
+        return (
+          <div key={i} class="lre-ve-transition" data-lre-objective={i}>
+            <div class="lre-ve-transition-head">
+              <span class="grow">Objective {i + 1}</span>
+              <IconButton icon="trash" label={`Remove objective ${i + 1}`} onClick={() => props.onChange(list.filter((_, j) => j !== i))} />
+            </div>
+            <Field label="What the player reads" help={parts.label === "" ? "With none, the player reads the condition itself: give it words." : undefined}>
+              <input class="lre-input" value={parts.label} placeholder="Find the spare relay" onChange={(event) => put(i, { ...parts, label: event.currentTarget.value })} />
+            </Field>
+            <ExprEditor label="Met when" value={parts.when} identifiers={props.identifiers} functions={props.functions} doc={props.world} lint={lintAt(props.lint, `${props.path}.objectives.${i}`)} onChange={(when) => put(i, { ...parts, when })} />
+          </div>
+        );
+      })}
+      <div class="lre-inline">
+        <Button size="sm" icon="plus" onClick={() => props.onChange([...list, objectiveFrom({ label: "", when: "" })])}>
+          Add objective
+        </Button>
+      </div>
+      {/* An objective about a thing, picked rather than typed, so its ids are the world's (the quest-id lint checks them). */}
+      <ItemObjectivePicker world={props.world} onAdd={(objective) => props.onChange([...list, objective])} />
+    </FormGroup>
+  );
+}
+
+function StageSheet(props: { track: TrackDef; id: string; world: WorldDoc; identifiers: readonly string[]; functions: readonly string[]; lint: readonly LintIssue[]; path: string; save: StageSave; onChange(track: TrackDef): void; onOpen(id: string): void; onClose(): void }) {
   const { track, id } = props;
   const stage = track.stages[id];
   if (!stage) {
@@ -224,9 +271,9 @@ function StageSheet(props: { track: TrackDef; id: string; world: WorldDoc; ident
           </Button>
         </div>
       )}
-      <SchemaFields specs={STAGE_SPECS} value={stage as unknown as JsonObject} ctx={{ doc: props.world, lint: props.lint, path, identifiers: props.identifiers, functions: props.functions }} onChange={(next) => set(next as unknown as StageDef)} />
-      {/* An objective about a thing, picked rather than typed, so its ids are the world's (the quest-id lint checks them). */}
-      <ItemObjectivePicker world={props.world} onAdd={(objective) => set({ ...stage, objectives: [...(stage.objectives ?? []), objective] })} />
+      <SchemaFields specs={STAGE_HEAD} value={stage as unknown as JsonObject} ctx={{ doc: props.world, lint: props.lint, path, identifiers: props.identifiers, functions: props.functions }} onChange={(next) => set(next as unknown as StageDef)} />
+      <ObjectivesEditor stage={stage} world={props.world} identifiers={props.identifiers} functions={props.functions} lint={props.lint} path={path} onChange={(objectives) => set({ ...stage, objectives })} />
+      <SchemaFields specs={STAGE_TAIL} value={stage as unknown as JsonObject} ctx={{ doc: props.world, lint: props.lint, path, identifiers: props.identifiers, functions: props.functions }} onChange={(next) => set(next as unknown as StageDef)} />
       <FormGroup title="Next stages" aside={<span class="lre-small lre-muted">The first that holds wins</span>}>
         {stage.next.length === 0 ? <span class="lre-small lre-muted">None: the track ends here.</span> : null}
         {stage.next.map((n, i) => (
@@ -273,6 +320,15 @@ function StageSheet(props: { track: TrackDef; id: string; world: WorldDoc; ident
           Delete stage
         </Button>
       </div>
+      {/* The stage is part of the track: its Save keeps every stage at once, and Revert goes back to the track as saved. */}
+      <SaveBar>
+        <Button variant="primary" disabled={!props.save.changed || props.save.busy} busy={props.save.busy} onClick={props.save.onSave}>
+          Save track to draft
+        </Button>
+        <Button variant="ghost" disabled={!props.save.changed || props.save.busy} onClick={props.save.onRevert}>
+          Revert track
+        </Button>
+      </SaveBar>
     </FormSheet>
   );
 }
@@ -445,7 +501,7 @@ export function TrackEditor(props: EditorProps) {
         />
         {jsonProblem ? <Issues issues={[{ severity: "error", path: `tracks.${id}`, code: "json", message: jsonProblem }]} /> : null}
       </Disclosure>
-      {open !== null ? <StageSheet key={open} track={track} id={open} world={props.world} identifiers={identifiers} functions={functions} lint={lint} path={`tracks.${id}`} onChange={setTrack} onOpen={openStage} onClose={() => setOpen(null)} /> : null}
+      {open !== null ? <StageSheet key={open} track={track} id={open} world={props.world} identifiers={identifiers} functions={functions} lint={lint} path={`tracks.${id}`} save={{ changed, busy, onSave: save, onRevert: () => setTrack(stored ? structuredClone(stored) : blank) }} onChange={setTrack} onOpen={openStage} onClose={() => setOpen(null)} /> : null}
       {adding ? (
         <NewStageSheet
           track={track}

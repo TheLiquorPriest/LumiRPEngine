@@ -34,7 +34,8 @@ export type FieldSpec =
   | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number; optional?: boolean; hint?: string; when?: When }
   /** `reads`: how the engine reads a value that may not be a boolean (by default only `true` is on). */
   | { kind: "bool"; key: string; label: string; hint?: string; reads?: (value: JsonValue | undefined) => boolean }
-  | { kind: "enum"; key: string; label: string; values: readonly string[]; optional?: boolean; hint?: string; when?: When }
+  /** `labels`: how a value reads in the choice, where its id isn't plain words. */
+  | { kind: "enum"; key: string; label: string; values: readonly string[]; labels?: Readonly<Record<string, string>>; optional?: boolean; hint?: string; when?: When }
   /** `inline`: the value may also be an inline definition, which is then edited as JSON. */
   | { kind: "ref"; key: string; label: string; collection: RefCollection; optional?: boolean; any?: boolean; inline?: boolean; hint?: string; when?: When }
   | { kind: "refs"; key: string; label: string; collections: readonly RefCollection[] }
@@ -90,6 +91,9 @@ const BOUND_MODES = ["auto", "confirm", "never"] as const;
 const VISIBILITY = ["public", "known_by", "secret"] as const;
 /** Places may also be hidden until the POV has been there or hears of them. */
 const PLACE_VISIBILITY = ["public", "known_by", "discoverable", "secret"] as const;
+/** Visibility as an author reads it: what each value means for a thing or a person, and for a place. */
+const ENTITY_VISIBILITY_LABEL: Readonly<Record<string, string>> = { public: "Anyone who can see it", known_by: "Whoever knows of it", discoverable: "Hidden until searched", secret: "Secret (GM only)" };
+const PLACE_VISIBILITY_LABEL: Readonly<Record<string, string>> = { public: "Anyone", known_by: "Whoever knows of it", discoverable: "Hidden until visited or heard of", secret: "Secret (GM only)" };
 const TRAVEL_MODES = ["walk", "road", "offroad", "water"] as const;
 
 const BAND: FieldSpec = {
@@ -286,7 +290,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "refs", key: "lifeKnownBy", label: "Who knows how it starts (none: everyone)", collections: ["entities"] },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
     // `discoverable`: hidden until the player character searches where it is, or opens what holds it.
-    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, optional: true },
+    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, labels: ENTITY_VISIBILITY_LABEL, optional: true },
     { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by", "discoverable"] } },
     {
       kind: "list",
@@ -334,7 +338,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
       ],
     },
     { kind: "json", key: "fields", label: "Fields" },
-    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, optional: true },
+    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, labels: PLACE_VISIBILITY_LABEL, optional: true },
     { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by", "discoverable"] } },
   ],
   routes: [

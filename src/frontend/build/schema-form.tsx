@@ -640,11 +640,11 @@ export function ChoiceInput(props: { label: string; value: JsonValue | undefined
   );
 }
 
-/** A reference by name (`RefPicker`), with the field's help and lint under it. */
-export function RefInput(props: { label: string; value: JsonValue | undefined; options: readonly RefOption[]; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
+/** A reference by name (`RefPicker`), with the field's help and lint under it. `unmarked`: an optional one without the "optional" mark, on a page that drops it. */
+export function RefInput(props: { label: string; value: JsonValue | undefined; options: readonly RefOption[]; optional?: boolean; unmarked?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   return (
     <div class="lre-field">
-      <RefPicker label={props.optional ? `${props.label} · optional` : props.label} value={typeof props.value === "string" ? props.value : ""} options={props.options} none={props.optional ? "None" : undefined} onChange={(next) => props.onChange(next === "" ? (props.optional ? undefined : "") : next)} />
+      <RefPicker label={props.optional && props.unmarked !== true ? `${props.label} · optional` : props.label} value={typeof props.value === "string" ? props.value : ""} options={props.options} none={props.optional ? "None" : undefined} onChange={(next) => props.onChange(next === "" ? (props.optional ? undefined : "") : next)} />
       {props.hint ? <span class="lre-field-help">{props.hint}</span> : null}
       <Issues issues={props.issues} />
     </div>
@@ -1062,12 +1062,15 @@ function poolNote(def: FieldDef, defs: Readonly<Record<string, FieldDef>>): stri
  * One field typed by its definition (a kind's or a relation type's): a derived field shows its
  * formula read-only with what it reads; the rest by type, money in the world's currency, durations
  * as spans, references and table rows by name, the packs' lists of objects as typed lists.
+ * `words`: the page's own lines about the field (the Character page's), shown in place of the
+ * builder's notes (the level a field comes from, a pool's max) on a page that reads like a form a
+ * person fills in; a number still shows its range, and that page hides the "optional" mark itself.
  */
-export function DefInput(props: { name: string; def: FieldDef; defs: Readonly<Record<string, FieldDef>>; value: JsonValue | undefined; ctx: FormCtx; path: string; onChange(value: JsonValue | undefined): void }) {
+export function DefInput(props: { name: string; def: FieldDef; defs: Readonly<Record<string, FieldDef>>; value: JsonValue | undefined; ctx: FormCtx; path: string; words?: readonly string[]; onChange(value: JsonValue | undefined): void }) {
   const { def, ctx, name } = props;
   const label = def.label ?? humanize(name);
   const issues = lintAt(ctx.lint, props.path);
-  const notes = [def.level ? `From level ${def.level} (${LEVEL_LABEL[def.level]})` : null, def.locked ? "Never offered to a model" : null, def.visibility === "secret" ? "Secret" : def.visibility === "known_by" ? "Known only to some" : null].filter((n): n is string => n !== null);
+  const notes = props.words ?? [def.level ? `From level ${def.level} (${LEVEL_LABEL[def.level]})` : null, def.locked ? "Never offered to a model" : null, def.visibility === "secret" ? "Secret" : def.visibility === "known_by" ? "Known only to some" : null].filter((n): n is string => n !== null);
   const help = notes.join(" · ") || undefined;
   const placeholder = def.default === undefined || def.default === null ? undefined : `Default: ${typeof def.default === "string" ? def.default : JSON.stringify(def.default)}`;
   if (def.derived) {
@@ -1086,7 +1089,7 @@ export function DefInput(props: { name: string; def: FieldDef; defs: Readonly<Re
   }
   switch (def.type) {
     case "number":
-      return <NumberInput label={label} value={props.value} min={def.min} max={def.max} optional hint={[poolNote(def, props.defs), def.bands?.length ? `Shown as ${def.bands.map((b) => b.label).join(", ")}` : null, help].filter((h) => h).join(" · ") || undefined} placeholder={placeholder} issues={issues} onChange={props.onChange} />;
+      return <NumberInput label={label} value={props.value} min={def.min} max={def.max} optional hint={(props.words ? [help] : [poolNote(def, props.defs), def.bands?.length ? `Shown as ${def.bands.map((b) => b.label).join(", ")}` : null, help]).filter((h) => h).join(" · ") || undefined} placeholder={placeholder} issues={issues} onChange={props.onChange} />;
     case "duration":
       return <DurationInput label={label} value={props.value} optional hint={help} issues={issues} onChange={props.onChange} />;
     case "date":
@@ -1102,7 +1105,7 @@ export function DefInput(props: { name: string; def: FieldDef; defs: Readonly<Re
       const options = def.ref
         ? refOptions(ctx.doc, "entities").filter((o) => kindIs(ctx.doc, ctx.doc.entities[o.value]?.kind ?? "", def.ref ?? ""))
         : [...refOptions(ctx.doc, "places").map((o) => ({ ...o, sublabel: o.sublabel ? `Place · ${o.sublabel}` : "Place" })), ...refOptions(ctx.doc, "entities")];
-      return <RefInput label={label} value={props.value} options={options} optional hint={help} issues={issues} onChange={props.onChange} />;
+      return <RefInput label={label} value={props.value} options={options} optional unmarked={props.words !== undefined} hint={help} issues={issues} onChange={props.onChange} />;
     }
     case "list": {
       const shape = hasOwn(LIST_ITEMS, name) ? LIST_ITEMS[name] : undefined;
@@ -1116,7 +1119,7 @@ export function DefInput(props: { name: string; def: FieldDef; defs: Readonly<Re
     default: {
       // A text field naming a row of a data table picks the row by its name, while the world has the table.
       const table = def.table && hasOwn(ctx.doc.tables, def.table) ? ctx.doc.tables[def.table] : undefined;
-      if (table) return <RefInput label={label} value={props.value} options={tableChoices(table).map((c) => ({ value: c.key, label: c.label }))} optional hint={[`A row of ${table.label}`, help].filter((h) => h).join(" · ")} issues={issues} onChange={props.onChange} />;
+      if (table) return <RefInput label={label} value={props.value} options={tableChoices(table).map((c) => ({ value: c.key, label: c.label }))} optional unmarked={props.words !== undefined} hint={[`A row of ${table.label}`, help].filter((h) => h).join(" · ")} issues={issues} onChange={props.onChange} />;
       return <TextInput label={label} value={props.value} optional placeholder={placeholder} hint={help} issues={issues} onChange={props.onChange} />;
     }
   }
@@ -1378,7 +1381,7 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
     case "bool":
       return <CheckField label={spec.label} help={spec.hint} checked={boolChecked(spec, props.value)} issues={issues} onChange={(checked) => props.onChange(checked)} />;
     case "enum":
-      return <ChoiceInput label={spec.label} value={props.value} options={spec.values.map((v) => ({ value: v, label: words(v) }))} optional={spec.optional} hint={spec.hint} issues={issues} onChange={props.onChange} />;
+      return <ChoiceInput label={spec.label} value={props.value} options={spec.values.map((v) => ({ value: v, label: spec.labels?.[v] ?? words(v) }))} optional={spec.optional} hint={spec.hint} issues={issues} onChange={props.onChange} />;
     case "ref": {
       if (spec.inline && isRecord(props.value)) return <JsonInput label={`${spec.label} (defined here)`} value={props.value} optional={spec.optional} hint="Written out in place rather than named; edit it as JSON, or clear it to pick one by name." issues={issues} onChange={props.onChange} />;
       const options = refOptions(ctx.doc, spec.collection);

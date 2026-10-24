@@ -13,7 +13,7 @@ import { useApp } from "../app";
 import { BedPicker, bedValue } from "../character/bed-picker";
 import { PlacePicker } from "../character/place-picker";
 import { TextListEditor } from "../character/text-list";
-import { Badge, Banner, Button, Disclosure, IconButton, SaveBar, Section, useBusy } from "../components";
+import { Badge, Banner, Button, Disclosure, IconButton, SaveBar, Section, Seg, useBusy } from "../components";
 import { humanize } from "../format";
 import type { EditorProps } from "../registry";
 import { characterRequest } from "../requests";
@@ -106,7 +106,7 @@ export function CharacterPage(props: EditorProps) {
       {model ? <WhereTheyLive model={model} value={value} world={formDoc} onField={setField} onChange={setValue} /> : null}
       <TheirDay world={props.world} id={id} value={value} model={character} ctx={ctx} onChange={setValue} onField={setField} />
       <Section title="Work and money">
-        <RefPicker label="Works for" value={typeof fields.employer === "string" ? fields.employer : ""} options={entitiesOfKind(formDoc, "business")} none="No employer" placeholder="Pick a business" onChange={(v) => setField("employer", v === "" ? undefined : v)} />
+        <WorksFor model={model} world={formDoc} value={typeof fields.employer === "string" ? fields.employer : ""} onPick={(v) => setField("employer", v)} />
         <SectionFields section="work" model={character} value={value} ctx={ctx} onField={setField} skip={["employer"]} />
       </Section>
       <People world={formDoc} id={id} value={value} onChange={setValue} />
@@ -151,7 +151,8 @@ function SectionFields(props: { section: CharacterSection["id"]; model: Characte
           if (def.type === "list" && (def.of === undefined || def.of === "text") && (v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string")))) {
             return <TextListEditor key={f.id} label={f.label} value={Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []} onChange={(next) => props.onField(f.id, next.length > 0 ? next : undefined)} />;
           }
-          return <DefInput key={f.id} name={f.id} def={{ ...def, label: f.label, ...(f.help ? { hint: f.help } : {}) }} defs={defs} value={v} ctx={props.ctx} path={`${props.ctx.path}.fields.${f.id}`} onChange={(next) => props.onField(f.id, next)} />;
+          // The model's help in place of the builder's notes; a number's range the number input shows itself, so its `hint` would say it twice.
+          return <DefInput key={f.id} name={f.id} def={{ ...def, label: f.label }} defs={defs} value={v} ctx={props.ctx} path={`${props.ctx.path}.fields.${f.id}`} words={f.help ? [f.help] : []} onChange={(next) => props.onField(f.id, next)} />;
         })}
     </>
   );
@@ -193,11 +194,33 @@ function WhereTheyLive(props: { model: CharacterResult; value: JsonObject; world
   );
 }
 
+type EmployerKind = "place" | "business";
+const EMPLOYER_KINDS: { value: EmployerKind; label: string }[] = [
+  { value: "place", label: "A place" },
+  { value: "business", label: "A business" },
+];
+
+/** Who they work for: a place in the world, picked by its path, or a business; either way its id goes in `employer`. */
+function WorksFor(props: { model: CharacterResult | null; world: WorldDoc; value: string; onPick(id: string | undefined): void }) {
+  const places = props.model?.places ?? [];
+  // Which picker shows first follows what they work for now; with no employer yet, a place (the usual: a shop in the world).
+  const [kind, setKind] = useState<EmployerKind>(props.value !== "" && !places.some((p) => p.id === props.value) && props.model?.character.employer?.kind !== "place" ? "business" : "place");
+  return (
+    <div class="lre-stack" data-lre-works-for="">
+      <Seg<EmployerKind> label="Works for" value={kind} options={EMPLOYER_KINDS} onChange={setKind} />
+      {kind === "place" ? (
+        <PlacePicker title="Where they work" label="Works at" places={places} value={places.some((p) => p.id === props.value) ? props.value : null} clearLabel="No employer" onPick={(p) => props.onPick(p?.id)} />
+      ) : (
+        <RefPicker label="Works for" value={places.some((p) => p.id === props.value) ? "" : props.value} options={entitiesOfKind(props.world, "business")} none="No employer" placeholder="Pick a business" onChange={(v) => props.onPick(v === "" ? undefined : v)} />
+      )}
+    </div>
+  );
+}
+
 /** Whether they live their own day, the routines and schedules that are theirs, and the day's fields. */
 function TheirDay(props: { world: WorldDoc; id: string; value: JsonObject; model: CharacterDTO | null; ctx: FormCtx; onChange(next: JsonObject): void; onField(field: string, next: JsonValue | undefined): void }) {
   const app = useApp();
   const routines = Object.values(props.world.routines ?? {}).filter((r) => r.owner === props.id);
-  const schedules = Object.values(props.world.schedules).filter((s) => s.owner === props.id);
   return (
     <Section title="Their day">
       <CheckField label="Lives their own day (agendas and plans)" checked={props.value.agent === true} onChange={(on) => props.onChange({ ...props.value, agent: on })} />
@@ -207,10 +230,10 @@ function TheirDay(props: { world: WorldDoc; id: string; value: JsonObject; model
           <ItemRow key={r.id} title={r.label ?? humanize(r.id)} subtitle={`${r.blocks.length} ${r.blocks.length === 1 ? "block" : "blocks"}`} openLabel="Edit their routine" onOpen={() => go(app, { view: "item", worldId: props.world.id, collection: "routines", id: r.id })} />
         ))}
       </FormGroup>
-      {schedules.length > 0 ? (
+      {(props.model?.schedules.length ?? 0) > 0 ? (
         <FormGroup title="Schedules">
-          {schedules.map((s) => (
-            <ItemRow key={s.id} title={humanize(s.id)} subtitle={`Sets ${humanize(s.target)}`} openLabel="Edit the schedule" onOpen={() => go(app, { view: "item", worldId: props.world.id, collection: "schedules", id: s.id })} />
+          {props.model?.schedules.map((s) => (
+            <ItemRow key={s.id} title={s.label} subtitle={s.summary !== s.label ? s.summary : undefined} openLabel="Edit the schedule" onOpen={() => go(app, { view: "item", worldId: props.world.id, collection: "schedules", id: s.id })} />
           ))}
         </FormGroup>
       ) : null}

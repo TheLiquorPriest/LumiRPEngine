@@ -1174,7 +1174,7 @@ export function worldFixture(): WorldDoc {
         visibility: "public",
         stages: {
           start: { label: "Thinking about it", next: [{ to: "case", when: "regard(npc_rosie, pov) >= 1" }] },
-          case: { label: "Build the case", cue: "Rosie respects people who show up early.", objectives: ["shifts_covered >= 2"], next: [{ to: "ask", when: "vouched" }], fail: { when: "fired", to: "lost" }, hints: ["Mr. Okafor talks to Rosie every morning."] },
+          case: { label: "Build the case", cue: "Rosie respects people who show up early.", objectives: [{ label: "Cover two extra shifts", when: "shifts_covered >= 2" }, "vouched"], next: [{ to: "ask", when: "vouched" }], fail: { when: "fired", to: "lost" }, hints: ["Mr. Okafor talks to Rosie every morning."] },
           ask: { label: "Ask Rosie", next: [{ to: "done", when: "outcome == 'yes'" }, { to: "case", when: "outcome == 'later'" }] },
           done: { label: "Raise granted", next: [], rewards: [{ type: "set", args: { entity: "pov", field: "wage", value: "wage + 150" } }] },
           lost: { label: "Lost the job", next: [] },

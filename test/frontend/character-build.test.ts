@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { bedValue } from "../../src/frontend/character/bed-picker";
-import { entityPatch, opensCharacterPage, relationGroups } from "../../src/frontend/build/character-model";
+import { entityFormSpecs, entityPatch, opensCharacterPage, relationGroups } from "../../src/frontend/build/character-model";
 import type { JsonObject } from "../../src/shared/json";
 import { applyPatch } from "../../src/shared/json-patch";
 import type { WorldDoc } from "../../src/shared/world";
@@ -55,5 +55,15 @@ describe("Build's Character page", () => {
       { type: "in", to: "car" },
     ]);
     expect(Object.fromEntries(Object.entries(groups).map(([g, rows]) => [g, rows.map((r) => `${r.index}:${r.to}`)]))).toEqual({ family: ["0:maya"], feelings: ["1:jordan"], groups: ["2:union"], other: ["3:rosa"] });
+  });
+
+  test("a thing's page leaves out what only a person has; a person's keeps it", () => {
+    const doc = draft();
+    const keys = (id: string): string[] => entityFormSpecs(doc, doc.entities[id] as unknown as JsonObject).map((s) => s.key);
+    for (const key of ["life", "characterId", "cues", "agent"]) {
+      expect(keys("phone")).not.toContain(key);
+      expect(keys("maya")).toContain(key);
+    }
+    expect(keys("phone")).toContain("visibility");
   });
 });
