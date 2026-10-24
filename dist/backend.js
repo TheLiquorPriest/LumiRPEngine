@@ -5597,6 +5597,8 @@ function recentOf(purpose, config) {
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
+var TIMELAPSE_REACH_MINUTES = 366 * 1440;
+var ASK_BEYOND_DEFAULT = 1440;
 var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
@@ -5628,7 +5630,7 @@ function jobSettingsOf(raw, base = JOB_SETTINGS_DEFAULTS) {
 var TIME_LIMITS = Object.freeze({
   tickMinutes: MINUTES_PER_DAY,
   scale: [0.25, 10],
-  timelapseMinutes: 366 * MINUTES_PER_DAY,
+  timelapseMinutes: TIMELAPSE_REACH_MINUTES,
   unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
   thresholdMinutes: SPEED_THRESHOLD_MINUTES
 });
@@ -70142,9 +70144,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "2b5a2359eb6b0fed7ad5589f525dddb2c9b02e49e4bee2f2382e52ff46c0958d";
-  const tools = ["900afa8b920c04258682d2153c987c9e", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
-  return { id: "3c0d32e8", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  const sha256 = "7f6696e0a7dceb3a9bc8eed3a8936269a75b881f371f8424449e534f75c26026";
+  const tools = ["13e905eca8066aa2f4b354dc04dbcc38", "be126719e8971c9663eddb1d75fbe1b9"].filter((f) => f !== undefined);
+  return { id: "e6150c88", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -71106,7 +71108,8 @@ function defaultSettings() {
       interrupts: { invitation: "stop", bill: "note", decline: "stop", incident: "stop", quest: "stop", rule: "note", arrival: "stop", overdue: "note", needs: "ignore", weather: "ignore" },
       speedThrough: Object.fromEntries(SPEED_ACTIVITIES.map((activity) => [activity, { ...SPEED_DEFAULT }])),
       montage: "key",
-      unitCap: { agentDays: 600, events: 5000 }
+      unitCap: { agentDays: 600, events: 5000 },
+      askBeyondMinutes: ASK_BEYOND_DEFAULT
     },
     overrideWorldDefaults: false,
     adjudication: defaultAdjudication(),
@@ -71153,6 +71156,10 @@ var STEP_PURPOSES = ["interpret", "npc.choose", "contradiction", "puzzle.answer"
 var int = (v, lo, hi) => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined;
 var atLeast = (v, lo) => int(v, lo, Number.MAX_SAFE_INTEGER);
 var real = (v, lo, hi) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : undefined;
+function askBeyondOf(v) {
+  const minutes2 = real(v, 0, Number.POSITIVE_INFINITY);
+  return minutes2 === undefined ? undefined : Math.min(TIMELAPSE_REACH_MINUTES, Math.round(minutes2));
+}
 var oneOf3 = (v, values) => values.find((x) => x === v);
 var LEVELS2 = [0, 1, 2, 3, 4];
 var level = (v) => LEVELS2.find((l) => l === v);
@@ -71298,7 +71305,8 @@ function conform(v, d) {
     interrupts,
     speedThrough: isRecord(t.speedThrough) ? entries2(t.speedThrough, 64, speedOf) : d.time.speedThrough,
     montage: oneOf3(t.montage, ["key", "day", "week"]) ?? d.time.montage,
-    unitCap: { agentDays: int(unitCap.agentDays, 1, 1e6) ?? d.time.unitCap.agentDays, events: int(unitCap.events, 1, 1e7) ?? d.time.unitCap.events }
+    unitCap: { agentDays: int(unitCap.agentDays, 1, 1e6) ?? d.time.unitCap.agentDays, events: int(unitCap.events, 1, 1e7) ?? d.time.unitCap.events },
+    askBeyondMinutes: askBeyondOf(t.askBeyondMinutes) ?? d.time.askBeyondMinutes
   };
   const rawBounds = isRecord(v.extraction) ? v.extraction : {};
   const extraction = {};
@@ -72266,7 +72274,6 @@ function clockMinutes2(events3) {
       minutes2 += e.minutes;
   return minutes2;
 }
-var TIME_ADVANCE_CAP = 240;
 
 class TurnBridge {
   registry;
@@ -72498,16 +72505,17 @@ class TurnBridge {
     w.applyAll(prepared?.events ?? []);
     const chips = [];
     const proposals = [];
-    for (const p of prepared?.auto ?? []) {
-      if (p.type !== "time_advance") {
-        proposals.push(p);
-        continue;
+    if (prepared)
+      for (const p of prepared.auto) {
+        if (p.type !== "time_advance") {
+          proposals.push(p);
+          continue;
+        }
+        const minutes2 = typeof p.minutes === "number" ? Math.round(p.minutes) : 0;
+        const outcome = applyTimeAdvance(this.registry, w, minutes2, { runSeed: this.runSeed, capMinutes: prepared.askBeyond, unitCap: w.state.time.unitCap });
+        if (outcome.chip)
+          chips.push({ target: outcome.chip.target, reason: outcome.reason === "unit_cap" ? "unit_cap" : "over_cap" });
       }
-      const minutes2 = typeof p.minutes === "number" ? Math.round(p.minutes) : 0;
-      const outcome = applyTimeAdvance(this.registry, w, minutes2, { runSeed: this.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
-      if (outcome.chip)
-        chips.push({ target: outcome.chip.target, reason: outcome.reason === "unit_cap" ? "unit_cap" : "over_cap" });
-    }
     applyProposals(this.registry, w, proposals, input.seed, this.runSeed);
     if (prepared?.post !== false) {
       const base = input.seed.split(":")[0] ?? input.seed;
@@ -73135,7 +73143,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "3c0d32e8" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "e6150c88" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -73560,7 +73568,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       const target = (result.action === TIMELAPSE_ACTION2 ? interpretedTarget(result.params, render.world, render.state, text6, this.registry) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text6, this.registry) : null) ?? interpretedTarget({ span: text6 }, render.world, render.state, text6, this.registry);
       if (!target)
         this.host.log("info", `[LumiRPEngine] interpret: lets time pass but states no span it can read; the turn plays as roleplay`, userId);
-      const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
+      const over = target?.type === "duration" && target.minutes > settings.time.askBeyondMinutes;
       bridge.setOffer(text6, over ? target : null);
       bridge.setIntent(text6, target && !over ? timelapseIntent(target, undefined, 1, target.type !== "duration") : null, target !== null && !over);
       return;
@@ -73944,7 +73952,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       else
         confirm.push(fitted2);
     }
-    bridge.prepareRead(input.content, { auto, post, events: decisions2, minds: minded2.events });
+    bridge.prepareRead(input.content, { auto, post, events: decisions2, minds: minded2.events, askBeyond: settings.time.askBeyondMinutes });
     const w = new Working(this.registry, context.world, context.state);
     const outcomes = applyProposals(this.registry, w, auto.filter((p) => p.type !== "time_advance"), `${context.seed}:preview`, bridge.runSeed);
     const stored = [];
@@ -73977,7 +73985,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     });
     confirm.forEach((proposal, i) => {
       if (proposal.type === "time_advance") {
-        const advance3 = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+        const advance3 = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: settings.time.askBeyondMinutes, unitCap: w.state.time.unitCap });
         if (advance3.chip)
           stored.push(skipAheadChip(`adv:${messageId}:${swipeId}:c${i}`, { messageId, swipeId }, advance3.chip.target, advance3.reason === "unit_cap" ? "unit_cap" : "over_cap"));
         else if (advance3.applied) {
@@ -74157,7 +74165,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     if (offer) {
       const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
       const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(chipWorld, headState, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
-      const detail = offer.type === "duration" && offer.minutes > INTERPRETED_TIMELAPSE_CAP ? "That's longer than one turn runs on its own. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
+      const detail = offer.type === "duration" && offer.minutes > (await this.settings.get(input.userId)).time.askBeyondMinutes ? "That's longer than a skip runs without asking. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at2}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) } });
     }
     const left = plan2?.stopped ? (bridge.intentOf(userText)?.queue ?? []).slice(-plan2.stopped.left).map((q) => q.text) : [];
@@ -74653,7 +74661,6 @@ var TYPE_LABELS = {
   life: "Life and death",
   routine: "Routine changes"
 };
-var INTERPRETED_TIMELAPSE_CAP = 1440;
 function interpretedTarget(params, world, state2, text6, reg) {
   const cal = calendarOf(world);
   const now = state2.clock;
@@ -75988,7 +75995,7 @@ class Dispatcher {
         const w = new Working(this.rt.registry, world, state2);
         let events3;
         if (proposal.type === "time_advance") {
-          const advance3 = applyTimeAdvance(this.rt.registry, w, typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: this.runSeedOf(chatId), capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+          const advance3 = applyTimeAdvance(this.rt.registry, w, typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: this.runSeedOf(chatId), capMinutes: (await this.rt.settings.get(userId)).time.askBeyondMinutes, unitCap: w.state.time.unitCap });
           if (!advance3.applied)
             throw new RequestError("validation", advance3.reason === "unit_cap" ? "too much happens in between to run it inside the turn" : advance3.reason === "in_fight" ? `${IN_FIGHT}, and its rounds take no clock time` : "the time skip no longer applies");
           events3 = [...w.events];

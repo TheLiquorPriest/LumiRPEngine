@@ -1544,6 +1544,7 @@ var DEFAULT_RECENT = Object.freeze({ on: true, messages: 8, tokens: 3000 });
 var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
+var TIMELAPSE_REACH_MINUTES = 366 * 1440;
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -5511,7 +5512,7 @@ function relationIssues(reg, world) {
 var TIME_LIMITS = Object.freeze({
   tickMinutes: MINUTES_PER_DAY,
   scale: [0.25, 10],
-  timelapseMinutes: 366 * MINUTES_PER_DAY,
+  timelapseMinutes: TIMELAPSE_REACH_MINUTES,
   unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
   thresholdMinutes: SPEED_THRESHOLD_MINUTES
 });

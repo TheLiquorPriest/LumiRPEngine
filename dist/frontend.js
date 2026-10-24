@@ -14406,6 +14406,7 @@ function recentOf(purpose, config) {
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
+var TIMELAPSE_REACH_MINUTES = 366 * 1440;
 var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
@@ -25963,7 +25964,7 @@ function TimePage(props) {
     children: [
       /* @__PURE__ */ u3("p", {
         class: "lre-set-lead",
-        children: "How fast time passes in a scene, what stops a timelapse, and how much a long one may cover, for chats you start from now on."
+        children: "How fast time passes in a scene, what stops a timelapse, and how much a long one may cover, for chats you start from now on; and, for every chat, how long a skip runs without asking."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(ThisChatPointer, {}, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
@@ -25991,7 +25992,31 @@ function TimePage(props) {
           if (Object.keys(body).length > 0)
             props.patch(body);
         }
-      }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Skips without asking",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-small lre-muted",
+            style: { margin: 0 },
+            children: [
+              'A length of time you type ("for the next three hours") or a jump a reply tells ("three hours later") runs in the turn up to this long; a longer one is offered as a Timelapse chip instead. A skip until something ("until dinner", "until my shift") always runs. Every chat follows it from its next turn, up to ',
+              formatMinutes(TIMELAPSE_REACH_MINUTES),
+              "."
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(NumberStepper, {
+            label: `Run skips up to (min): ${time.askBeyondMinutes > 0 ? formatMinutes(time.askBeyondMinutes) : "every skip asks"}`,
+            value: time.askBeyondMinutes,
+            min: 0,
+            max: TIMELAPSE_REACH_MINUTES,
+            step: 60,
+            integer: true,
+            disabled: props.busy,
+            onChange: (askBeyondMinutes) => props.patch({ time: { askBeyondMinutes } })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -31541,7 +31566,7 @@ var POV_ONLY = new Set(["castlife.need", "economy.anchor"]);
 var TIME_LIMITS = Object.freeze({
   tickMinutes: MINUTES_PER_DAY,
   scale: [0.25, 10],
-  timelapseMinutes: 366 * MINUTES_PER_DAY,
+  timelapseMinutes: TIMELAPSE_REACH_MINUTES,
   unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
   thresholdMinutes: SPEED_THRESHOLD_MINUTES
 });
