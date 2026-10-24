@@ -1,12 +1,15 @@
 // GM mode's own building blocks on the shared atoms: a page opened over a section's list (as Play
 // opens sheets), rows that carry their own actions (✎, remove, add or take), titled cards for
-// tracks and people's money, and the way to Build for what belongs to the world.
+// tracks and people's money, the notice an edit leaves with its Undo, and the way to Build for what
+// belongs to the world.
 
 import type { ComponentChildren, RefObject } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useApp, useUi } from "../app";
 import { focusTaken, gmOpen } from "./gate";
-import { Button, IdText, PageHeader } from "../components";
+import type { EditNotice } from "./editor";
+import { Button, IconButton, IdText, PageHeader } from "../components";
+import { Icon } from "../icons";
 
 export interface Pages<T> {
   /** The page over the list, or null for the list itself. */
@@ -132,6 +135,40 @@ export function GmCard(props: { name?: string; title: ComponentChildren; subtitl
       </div>
       {props.children}
     </section>
+  );
+}
+
+/**
+ * What the latest GM edit did, with its Undo, pinned over GM mode's tab bar until it is dismissed,
+ * replaced or no longer undoable. Its height is published on GM mode (`--lre-gm-notice-h`) so a
+ * list's selection bar pinned there sits above it.
+ */
+export function EditNoticeBar(props: { notice: EditNotice; busy: boolean; onUndo(): void; onDismiss(): void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const mode = el?.closest<HTMLElement>(".lre-gm");
+    if (!el || !mode) return;
+    const publish = () => mode.style.setProperty("--lre-gm-notice-h", `${el.offsetHeight}px`);
+    publish();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    observer?.observe(el);
+    return () => {
+      observer?.disconnect();
+      mode.style.removeProperty("--lre-gm-notice-h");
+    };
+  }, []);
+  return (
+    <div ref={ref} class="lre-gm-notice" role="status" data-lre-gm-notice="">
+      <Icon name="check" size={16} />
+      <span class="lre-gm-notice-text">{props.notice.text}</span>
+      {props.notice.undo.length > 0 ? (
+        <Button size="sm" icon="undo" disabled={props.busy} onClick={props.onUndo}>
+          Undo
+        </Button>
+      ) : null}
+      <IconButton icon="close" label="Dismiss" onClick={props.onDismiss} />
+    </div>
   );
 }
 

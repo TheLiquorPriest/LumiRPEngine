@@ -13,7 +13,7 @@ import { Icon } from "../icons";
 import { PickBox, SelectBar, useSelection } from "../multi-select";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 import { BatchPage } from "./batch";
-import type { Editor } from "./editor";
+import type { BulkEditor, Editor } from "./editor";
 import { claimedThings, findEntities } from "./editor";
 import { EntityBadges, EntityPage } from "./entity";
 import { BuildLink, GmPage, useGmFocus, usePages } from "./ui";
@@ -96,7 +96,7 @@ function SpawnPage(props: { editor: Editor; onBack(): void }) {
   );
 }
 
-export function WorldSection(props: { editor: Editor; chatId: string }) {
+export function WorldSection(props: { editor: BulkEditor; chatId: string }) {
   const { editor } = props;
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("");
@@ -120,6 +120,8 @@ export function WorldSection(props: { editor: Editor; chatId: string }) {
   const list = findEntities(editor.gm.entities, query, kind);
   const kinds = editor.gm.kinds.filter((k) => editor.gm.entities.some((e) => e.kind === k.id));
   const claimed = claimedThings(editor.gm);
+  // A character's fidelity level, on its row: what Select a level picks them by.
+  const levels = new Map(editor.gm.minds.characters.map((c) => [c.entity, FIDELITY_LABEL[c.fidelity.level]]));
   return (
     <div ref={pages.host.ref} class="lre-gm-pages" onKeyDown={pages.host.onKeyDown}>
       <div class="lre-stack lre-gm-list" hidden={open}>
@@ -167,7 +169,7 @@ export function WorldSection(props: { editor: Editor; chatId: string }) {
                     id={e.id}
                     title={e.name}
                     leading={selection.on ? <PickBox label={`Select ${e.name}`} checked={selection.ids.includes(e.id)} /> : undefined}
-                    subtitle={[editor.gm.kinds.find((k) => k.id === e.kind)?.label ?? e.kind, e.agent ? "lives their own day" : null, e.spawned ? "spawned here" : null].filter((part) => part !== null).join(" · ")}
+                    subtitle={[editor.gm.kinds.find((k) => k.id === e.kind)?.label ?? e.kind, levels.get(e.id) ?? null, e.agent ? "lives their own day" : null, e.spawned ? "spawned here" : null].filter((part) => part !== null).join(" · ")}
                     badge={<EntityBadges entity={e} />}
                     chevron={!selection.on}
                     onClick={() => (selection.on ? selection.toggle(e.id) : pages.open({ entity: e.id }))}
