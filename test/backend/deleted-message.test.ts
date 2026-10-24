@@ -108,4 +108,30 @@ describe("a turn the engine finished", () => {
     await rig.host.finish(reply, "Someone waves back.");
     expect(await flagOf(rig, chatId)).toBeUndefined();
   });
+
+  test("saving a setting the turn doesn't read keeps the reply it prepared, while a step's model drops it", async () => {
+    const rig = new Rig();
+    const chatId = await playedChat(rig);
+    // The swipe default and a new chat's check rules: neither is read by a turn already prepared.
+    let saved = false;
+    rig.host.quietReply = () => {
+      if (!saved) void rig.send({ type: "lre.settings.set", patch: { swipeDefault: "renarrate", overrideWorldAdjudication: true } });
+      saved = true;
+      return "{}";
+    };
+    const kept = await send(rig, chatId, "I wave.");
+    expect(kept.halted).toBeUndefined();
+    await rig.host.finish(kept, "Someone waves back.");
+    expect(await flagOf(rig, chatId)).toBeUndefined();
+    // A step's model is: the turn made on the old one goes.
+    let changed = false;
+    rig.host.quietReply = () => {
+      if (!changed) void rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { interpret: { route: { connectionId: "other", model: "other-model" } } } } } });
+      changed = true;
+      return "{}";
+    };
+    rig.host.sendUser(chatId, "I nod.");
+    await rig.host.settle();
+    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
+  });
 });

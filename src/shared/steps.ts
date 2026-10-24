@@ -59,6 +59,13 @@ export function hasRetiredSignal(signals: readonly string[]): boolean {
 export const STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "character"] as const;
 
 /**
+ * Placeholders only the steps that are given them may use: `usual`, the usual routines of the people
+ * with the player character, in the steps that read the reply (`extract`, and the `effects` and
+ * `choices` templates); `sections`, the sections the narrator has this turn, in the outline.
+ */
+export const PURPOSE_PLACEHOLDERS: Partial<Record<StepPurpose, readonly string[]>> = { extract: ["usual"], contradiction: ["usual"], choices: ["usual"], outline: ["sections"] };
+
+/**
  * The outputs a world template may declare per purpose. `text` on a decision purpose is its
  * question's instructions; `effects` runs in the post phase only, so only post purposes take it.
  */

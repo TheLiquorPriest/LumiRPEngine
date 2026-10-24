@@ -183,7 +183,9 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
   const reads = input.settings.minds.reads;
   const chat = reads.history.on ? recentChat({ reads, hideJson: input.settings.hideJsonBlocks, history: chatBefore(await deps.host.chats.messages(input.chatId, input.userId).catch(() => []), true) }) : [];
   const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : "", pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : "", chat.length > 0 ? `Recent chat (as the player sees it):\n${chat.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
-  const prompt = mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name });
+  // The placeholders the minds steps' docs promise; the step thinks for no one, so `character` is empty.
+  const here = placeOfEntity(state, input.world.pov);
+  const prompt = mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name, character: "", clock: formatClock(cal, scanned.from), place: here ? (own(input.world.places, here)?.name ?? here) : "", pov: own(state.entities, input.world.pov)?.name ?? input.world.pov });
   const usage = { tokens: 0 };
   const t0 = performance.now();
   const raw = await deps.steps.helperJson("skip", prompt.text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "", usage });

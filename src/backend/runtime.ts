@@ -11,7 +11,7 @@ import type { ChatRun, EventRef, GenerationKind, LedgerEvent, PostEvent, Timelap
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, StepConfig, UserSettings } from "../shared/settings";
-import { EXTRACTION_TYPES, helperCallOf, recentOf, stepLoreOf } from "../shared/settings";
+import { EXTRACTION_TYPES, helperCallOf, recentOf, stepConfigOf, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
@@ -599,6 +599,8 @@ export class Runtime implements TurnHooks {
   private readonly runs = new Map<string, ChatRun | null>();
   private readonly bridges = new Map<ChatId, TurnBridge>();
   private readonly settingsCache = new Map<UserId, UserSettings>();
+  /** Each user's `turnSettingsKey`, kept against the settings revision it was made from. */
+  private readonly turnSettings = new Map<UserId, { revision: number; key: string }>();
   /**
    * Host tokenizer counts of rendered section texts, by user and text hash: the host counts with each
    * user's own main model, so one user's count never prices another's section. A section costs its
@@ -929,7 +931,7 @@ export class Runtime implements TurnHooks {
         start.applyAll(bridge.prePlan(text));
         const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
         const log = (message: string): void => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
-        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: from.world, state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs }));
+        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: from.world, state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: stepConfigOf(settings.modelUse.steps, "skip"), guidance: preset.guidance.skip ?? "" }));
       }
     }
     // A timelapse with minds on is a time skip (DESIGN §24.7): its beats and the minds at them are
@@ -2081,16 +2083,36 @@ export class Runtime implements TurnHooks {
 
   /**
    * What a chat's sections are made from besides its messages and journal, read from memory for the
-   * guard (DESIGN §5.1): the chat's world revision, the user's settings revision (section budgets,
-   * secrecy, minds) and the chat's Outcome notes (a decline reworded or dismissed on its chip). The
-   * preset isn't one: the reply's guard checks the one that reply is assembled with (`fill`).
+   * guard (DESIGN §5.1): the chat's world revision, the settings the turn reads (`turnSettingsKey`)
+   * and the chat's Outcome notes (a decline reworded or dismissed on its chip). The preset isn't one:
+   * the reply's guard checks the one that reply is assembled with (`fill`).
    */
   inputs(chatId: ChatId, userId: UserId): TurnInputs {
     return {
       revision: this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "",
-      settings: String(this.settings.revision(userId)),
+      settings: this.turnSettingsKey(userId),
       notes: String(this.outcomeNotes.revision(chatId, userId)),
     };
+  }
+
+  /**
+   * The user's settings a prepared turn reads (DESIGN §5.1), as one value, so saving any other (a new
+   * chat's realism or time, the check rules, the swipe default, Build's jobs, a reply-read setting)
+   * keeps the turn: the helper model, which every step without a connection of its own runs on; Model
+   * use (each step, the phase budgets, the section budget); the minds; whether JSON blocks are hidden
+   * from what the steps read of the chat; and the run's own clocks (the engine run, its lore window,
+   * the skip plan). They are known by the time a turn starts, since its core was read with them.
+   */
+  private turnSettingsKey(userId: UserId): string {
+    const settings = this.settings.known(userId);
+    if (!settings) return "";
+    const revision = this.settings.revision(userId);
+    const kept = this.turnSettings.get(userId);
+    if (kept?.revision === revision) return kept.key;
+    const { helper, modelUse, minds, hideJsonBlocks, timeouts } = settings;
+    const key = hashParts("lre.turn-settings", JSON.stringify({ helper, modelUse, minds, hideJsonBlocks, timeouts: { engineRunMs: timeouts.engineRunMs, preLookupMs: timeouts.preLookupMs, skipPlanMs: timeouts.skipPlanMs } }));
+    lruSet(this.turnSettings, userId, { revision, key }, 256);
+    return key;
   }
 
   /**

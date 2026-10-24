@@ -18,6 +18,8 @@ import type { Chip } from "../shared/state-view";
 import { chipRegenerates } from "../shared/state-view";
 import type { AdjudicationDef } from "../shared/world";
 import { TIME_CONTROLS } from "../engine/events";
+// The one limit on a GM edit's operations: the schemas take no more than the engine accepts.
+import { EDIT_OPS_MAX } from "../engine/edits";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
 import type { RequestFields, RequestType } from "./connection";
@@ -425,7 +427,7 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
     name: "lre_gm_edit",
     description:
       'GM edits on the chat\'s latest message (GM view → Edit): the operations in order, all or none, as one edit with an Undo chip; locked fields are writable. Each names its op: set {entity, field, value}; add {entity, field, delta}; link {rel, from, to, fields?, until?}; unlink {rel, from, to}; move {entity, to: place}; put {entity, into: entity or null}; adjust {account, cents} (money in or out against a correction); stage {track, to}; entity {entity, tier?, agent?, levels?}; classify {entity, class, tags}; life {entity, to?, tell?}; spawn {kind, name, id?, tier?, place?, agent?}; despawn {entity}; restore {entity}; mind_pin, mind_refresh, mind_memory, mind_intent (as lre_mind_edit); effect {effect, args}. Ids come from lre_gm. Needs spoilers: true.',
-    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: 200, items: OPS_ITEM, description: 'The operations, applied in order: [{"op": "set", "entity": "pov", "field": "mood", "value": "calm"}].' } }, ["chatId", "spoilers", "ops"]),
+    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: EDIT_OPS_MAX, items: OPS_ITEM, description: 'The operations, applied in order: [{"op": "set", "entity": "pov", "field": "mood", "value": "calm"}].' } }, ["chatId", "spoilers", "ops"]),
     write: { destructive: true, idempotent: false },
     run: (args, ctx) => gmEdit(args, ctx, "lre_gm_edit"),
     cli: { command: "gm-edit", section: SECTION, usage: "gm-edit <chatId> --ops <file|json> --spoilers", summary: "GM edits, all or none", positionals: ["chatId"], needs: 1, options: { "--ops": { arg: "ops", as: "json" }, "--spoilers": { arg: "spoilers", as: "flag" } } },
@@ -434,7 +436,7 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
     name: "lre_mind_edit",
     description:
       'Change characters\' minds (GM → Minds), as one GM edit with an Undo chip: mind_pin {entity, level: "live", "near", "far", "background", or null to unpin} pins a character\'s fidelity; mind_refresh {entity} asks for a fresh mind next turn; mind_memory {entity, part: "note", "commitment" or "plan", id, value} edits one (value: the fields to change), adds one (id null; value needs its text, and a plan its what and when) or deletes one (value null); mind_intent {entity, text?, approach?} sets what they mean to do now, in your words (at most 600 characters), which only their own mind reads, first, and works from, and how they go about it ("reactive": answer the scene; "proactive": pursue their own aims; null: their mind decides); give either or both, "" and null empty them, and with both empty the intent is cleared. lre_minds shows the ids and each intent. Needs spoilers: true.',
-    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: 200, items: { type: "object", properties: { op: { type: "string", enum: MIND_OPS } }, required: ["op", "entity"] }, description: 'The operations, in order: [{"op": "mind_pin", "entity": "danny_okafor", "level": "live"}].' } }, ["chatId", "spoilers", "ops"]),
+    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: EDIT_OPS_MAX, items: { type: "object", properties: { op: { type: "string", enum: MIND_OPS } }, required: ["op", "entity"] }, description: 'The operations, in order: [{"op": "mind_pin", "entity": "danny_okafor", "level": "live"}].' } }, ["chatId", "spoilers", "ops"]),
     write: { destructive: true, idempotent: false },
     run: (args, ctx) => gmEdit(args, ctx, "lre_mind_edit", MIND_OPS),
     cli: { command: "mind-edit", section: SECTION, usage: "mind-edit <chatId> --ops <file|json> --spoilers", summary: "Pin, refresh, edit or steer characters' minds", positionals: ["chatId"], needs: 1, options: { "--ops": { arg: "ops", as: "json" }, "--spoilers": { arg: "spoilers", as: "flag" } } },
@@ -549,7 +551,7 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
     name: "lre_routine_edit",
     description:
       'Change characters\' routines and schedules in a chat (GM → Routine), as one GM edit with an Undo chip: routine_follow {entity, mode?: "follows", "no_invitations" or "off" (no routine: the story, the GM, commitments and basic needs only), awareness?: "story_first", "balanced" or "routine_first", role?: "informative" (context only: the engine never moves them by their routine or schedules), "enforced" (lived, the story first) or "off" (not even context)} (null returns a part to the world\'s, the role to their level\'s); routine_block {entity, block, value: a block, {"id", "off": true}, or null to drop the chat\'s change}; schedule_override {entity, schedule, value: {"off": true, "until": minutes or null}, {"slots": [...], "recurrence"?}, or null}. lre_day shows the blocks and schedules. Needs spoilers: true.',
-    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: 200, items: { type: "object", properties: { op: { type: "string", enum: ROUTINE_OPS } }, required: ["op", "entity"] }, description: 'The operations, in order: [{"op": "routine_follow", "entity": "danny_okafor", "mode": "no_invitations"}].' } }, ["chatId", "spoilers", "ops"]),
+    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: EDIT_OPS_MAX, items: { type: "object", properties: { op: { type: "string", enum: ROUTINE_OPS } }, required: ["op", "entity"] }, description: 'The operations, in order: [{"op": "routine_follow", "entity": "danny_okafor", "mode": "no_invitations"}].' } }, ["chatId", "spoilers", "ops"]),
     write: { destructive: true, idempotent: false },
     run: (args, ctx) => gmEdit(args, ctx, "lre_routine_edit", ROUTINE_OPS),
     cli: { command: "routine-edit", section: SECTION, usage: "routine-edit <chatId> --ops <file|json> --spoilers", summary: "Change characters' routines and schedules in a chat", positionals: ["chatId"], needs: 1, options: { "--ops": { arg: "ops", as: "json" }, "--spoilers": { arg: "spoilers", as: "flag" } } },

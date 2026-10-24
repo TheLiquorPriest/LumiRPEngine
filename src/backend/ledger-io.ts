@@ -367,8 +367,9 @@ export interface TurnHooks {
   worldOf(chatId: ChatId, userId: UserId): Promise<WorldId | null>;
   /**
    * What else the chat's sections are made from, each read from memory (DESIGN §5.1): the chat's
-   * world revision, the user's settings revision, the active preset and the presets written, and the
-   * chat's Outcome notes. Each is named, so a turn dropped for it says which changed.
+   * world revision, the settings the turn reads (not every setting: one it doesn't read keeps it),
+   * the active preset and the presets written, and the chat's Outcome notes. Each is named, so a turn
+   * dropped for it says which changed.
    */
   inputs(chatId: ChatId, userId: UserId): TurnInputs;
   beforeCommit(input: TurnContext): Promise<void>;

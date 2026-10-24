@@ -93,6 +93,17 @@ describe("a timelapse with someone the model plans", () => {
     expect(events[at]).toMatchObject({ data: { from: span.from, to: span.to, plans: [{ entity: "danny_okafor", blocks: [{ start: span.from + 15, end: span.from + 75, place: "alder_harbor_marina", activity: "work" }] }] } });
   });
 
+  test("its call runs on the time-skip step's own connection, model and max tokens", async () => {
+    let asked: QuietRequest | null = null;
+    const { rig, chatId } = await alder((req) => {
+      asked = req;
+      return JSON.stringify({ plans: [] });
+    });
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { route: { connectionId: "skip-connection", model: "skip-model" }, maxTokens: 20_000 } } } } }));
+    await lapse(rig, chatId);
+    expect(asked).toMatchObject({ connectionId: "skip-connection", model: "skip-model", maxTokens: 20_000 });
+  });
+
   test("a call that fails plans no one and leaves a note, and the skip still runs", async () => {
     const { rig, chatId, calls } = await alder(() => {
       throw new Error("the provider refused");
@@ -171,7 +182,7 @@ async function plan(world: WorldDoc, state: WorldState, answer: JsonObject): Pro
     return JSON.stringify(answer);
   };
   const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 120 } }, probabilities: { timelapse: 1 } };
-  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000 });
+  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000, config: null, guidance: "" });
   return { event, calls };
 }
 
@@ -231,7 +242,7 @@ describe("the skip plan's checks", () => {
       throw new Error("the provider refused");
     };
     const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 7 * 60 } }, probabilities: { timelapse: 1 } };
-    const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state: w.state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000 });
+    const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state: w.state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000, config: null, guidance: "" });
     if (!event) throw new Error("no plan recorded");
     expect(plannedOf(event)).toEqual([]);
     w.applyAll([event]);
@@ -267,7 +278,7 @@ async function planEach(world: WorldDoc, state: WorldState, stamp: (minutes: num
     return JSON.stringify({ plans: named.map((id) => ({ entity: id, blocks: [block(stamp(10), stamp(40), places[id] ?? "")] })) });
   };
   const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 120 } }, probabilities: { timelapse: 1 } };
-  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000 });
+  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000, config: null, guidance: "" });
   return { event, calls };
 }
 
