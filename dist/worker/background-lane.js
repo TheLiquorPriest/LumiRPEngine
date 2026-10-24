@@ -4316,7 +4316,9 @@ function loreSourceOf(raw) {
 function isLorePin(v) {
   if (!isRecord(v))
     return false;
-  const keys = Object.keys(v).length;
+  if (v.keep !== undefined && v.keep !== "start" && v.keep !== "end")
+    return false;
+  const keys = Object.keys(v).length - (v.keep === undefined ? 0 : 1);
   if (v.lore !== undefined)
     return typeof v.lore === "string" && v.lore !== "" && keys === 1;
   if (typeof v.book !== "string" || v.book === "")
@@ -8576,6 +8578,25 @@ function lintLore(world) {
         push("warning", path, "missing_ref", `"${entry}" is not a lore entry`);
   }
   issues.push(...lintLorePins(world));
+  issues.push(...lintLoreBooks(world));
+  return issues;
+}
+function lintLoreBooks(world) {
+  const raw = world.loreBooks;
+  if (raw === undefined)
+    return [];
+  if (!Array.isArray(raw))
+    return [{ severity: "error", path: "loreBooks", code: "lore_books_shape", message: "Lore books are a list of World Info book ids; none are read." }];
+  const issues = [];
+  const seen = new Set;
+  raw.forEach((id, i) => {
+    if (typeof id !== "string" || id.trim() === "")
+      issues.push({ severity: "warning", path: `loreBooks.${i}`, code: "lore_books_shape", message: "Not a World Info book id: it is ignored." });
+    else if (seen.has(id))
+      issues.push({ severity: "warning", path: `loreBooks.${i}`, code: "lore_books_duplicate", message: "This book is listed twice: it is read once." });
+    else
+      seen.add(id);
+  });
   return issues;
 }
 function lintLorePins(world) {

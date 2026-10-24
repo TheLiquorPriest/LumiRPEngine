@@ -3780,6 +3780,11 @@ function hashJson(value) {
   return hashParts("json", canonicalJson(value, 0));
 }
 
+// src/shared/ledger.ts
+var LEDGER_NAMESPACE = "lumi_rp_engine";
+var ROOT_PATH = "00000000000000000000000000000000";
+var UPGRADE_ASPECTS = ["kind", "name", "tier", "agent", "levels", "class", "life"];
+
 // src/shared/steps.ts
 var STEP_SIGNALS = [
   "typed_input",
@@ -3896,10 +3901,65 @@ function loreSourceOf(raw) {
     return { kind: "ai", status: raw.status };
   return { kind: "authored" };
 }
+function bookLoreFieldsOf(extensions) {
+  const ns = isRecord(extensions) ? extensions[LEDGER_NAMESPACE] : undefined;
+  const raw = isRecord(ns) ? ns.lore : undefined;
+  if (!isRecord(raw))
+    return null;
+  const ids = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : undefined;
+  const out = {};
+  if (raw.secret !== undefined)
+    out.secret = raw.secret !== false;
+  if (typeof raw.gate === "string")
+    out.gate = raw.gate;
+  const audience = ids(raw.audience)?.filter((p) => LORE_AUDIENCE.includes(p));
+  if (audience)
+    out.audience = audience;
+  const links = ids(raw.links);
+  if (links)
+    out.links = links;
+  const aliases = ids(raw.aliases);
+  if (aliases)
+    out.aliases = aliases;
+  const holders = ids(raw.holders);
+  if (holders)
+    out.holders = holders;
+  if (raw.visibility === "public" || raw.visibility === "known_by")
+    out.visibility = raw.visibility;
+  else if (raw.visibility !== undefined) {
+    out.visibility = "known_by";
+    out.links = [];
+  }
+  return out;
+}
+function withBookLoreFields(extensions, fields) {
+  const held = extensions[LEDGER_NAMESPACE];
+  const ns = isRecord(held) ? { ...held } : {};
+  if (fields === null)
+    delete ns.lore;
+  else
+    ns.lore = JSON.parse(JSON.stringify(fields));
+  const out = { ...extensions };
+  if (Object.keys(ns).length === 0)
+    delete out[LEDGER_NAMESPACE];
+  else
+    out[LEDGER_NAMESPACE] = ns;
+  return out;
+}
+function engineWroteEntry(extensions) {
+  const ns = isRecord(extensions) ? extensions[LEDGER_NAMESPACE] : undefined;
+  return isRecord(ns) && (typeof ns.slot === "string" || typeof ns.twin === "string" || typeof ns.narrator === "string" || typeof ns.lore === "string");
+}
+function loreBooksOf(world) {
+  const raw = world.loreBooks;
+  return Array.isArray(raw) ? [...new Set(raw.filter((id) => typeof id === "string" && id.trim() !== ""))] : [];
+}
 function isLorePin(v) {
   if (!isRecord(v))
     return false;
-  const keys = Object.keys(v).length;
+  if (v.keep !== undefined && v.keep !== "start" && v.keep !== "end")
+    return false;
+  const keys = Object.keys(v).length - (v.keep === undefined ? 0 : 1);
   if (v.lore !== undefined)
     return typeof v.lore === "string" && v.lore !== "" && keys === 1;
   if (typeof v.book !== "string" || v.book === "")
@@ -3910,7 +3970,10 @@ function lorePinKey(pin) {
   return "lore" in pin ? `lore:${pin.lore}` : ("entry" in pin) ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
 function pinJson(pin) {
-  return "lore" in pin ? { lore: pin.lore } : ("entry" in pin) ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+  const base = "lore" in pin ? { lore: pin.lore } : ("entry" in pin) ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+  if (pin.keep === "end")
+    base.keep = "end";
+  return base;
 }
 var pinsRead = new WeakMap;
 function lorePinsOf(world) {
@@ -6565,13 +6628,31 @@ function secretLoreNames(reg, world, state) {
   }
   return [...names];
 }
-function loreSnippet(tokens, entry, budget) {
+function loreSnippet(tokens, entry, budget, keep = "start") {
   const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
   const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
   const whole2 = title === "" ? body : `${title}: ${body}`;
   const cost = tokens(whole2);
   if (cost <= budget)
     return { text: whole2, tokens: cost, cut: false };
+  if (keep === "end") {
+    const words2 = body === "" ? [] : body.split(" ");
+    const lead = title === "" ? "\u2026" : `${title}: \u2026`;
+    const kept2 = (n) => `${lead}${words2.slice(words2.length - n).join(" ")}`;
+    let lo2 = MIN_WORDS;
+    if (lo2 >= words2.length || tokens(kept2(lo2)) > budget)
+      return null;
+    let hi2 = words2.length - 1;
+    while (lo2 < hi2) {
+      const mid = Math.ceil((lo2 + hi2) / 2);
+      if (tokens(kept2(mid)) <= budget)
+        lo2 = mid;
+      else
+        hi2 = mid - 1;
+    }
+    const text3 = kept2(lo2);
+    return { text: text3, tokens: tokens(text3), cut: true };
+  }
   const head = title === "" ? 0 : title.split(" ").length;
   const words = whole2.split(" ");
   const fits = (n) => tokens(`${words.slice(0, n).join(" ")}\u2026`) <= budget;
@@ -6738,7 +6819,7 @@ function worldPinText(world, ref) {
   if (!("lore" in ref.pin))
     return null;
   const entry = own(world.lore, ref.pin.lore);
-  return entry ? { key: ref.key, on: ref.on, title: typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : ref.pin.lore, content: typeof entry.content === "string" ? entry.content : "", entry } : null;
+  return entry ? { key: ref.key, on: ref.on, title: typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : ref.pin.lore, content: typeof entry.content === "string" ? entry.content : "", entry, keep: ref.pin.keep ?? "start" } : null;
 }
 function fitPins(r, texts, budget, readable) {
   const open = loreGateReader(r.reg, r.world, r.state);
@@ -6748,7 +6829,7 @@ function fitPins(r, texts, budget, readable) {
     if (t.entry !== null && !readable(t.entry))
       continue;
     const secret = t.entry !== null && loreIsSecret(t.entry) && !open(t.entry);
-    const snippet = loreSnippet((text2) => r.tokens(text2), { title: t.title, content: t.content }, left);
+    const snippet = loreSnippet((text2) => r.tokens(text2), { title: t.title, content: t.content }, left, t.keep);
     if (!snippet) {
       out.push({ key: t.key, title: t.title, entry: t.entry, snippet: null, tokens: 0, cut: false, secret });
       continue;
@@ -7445,11 +7526,6 @@ function clampBand(policy, said) {
   const index = Math.min(bandAt(policy.difficulty.highest), Math.max(bandAt(policy.difficulty.lowest), n !== null ? Math.max(0, named) : named < 0 ? bandAt("moderate") : named));
   return DIFFICULTY_BANDS[index] ?? { id: "moderate", label: "Moderate", dc: 10 };
 }
-
-// src/shared/ledger.ts
-var LEDGER_NAMESPACE = "lumi_rp_engine";
-var ROOT_PATH = "00000000000000000000000000000000";
-var UPGRADE_ASPECTS = ["kind", "name", "tier", "agent", "levels", "class", "life"];
 
 // src/engine/touched.ts
 var PACK3 = "engine";
@@ -58185,6 +58261,25 @@ function lintLore(world) {
         push("warning", path, "missing_ref", `"${entry}" is not a lore entry`);
   }
   issues.push(...lintLorePins(world));
+  issues.push(...lintLoreBooks(world));
+  return issues;
+}
+function lintLoreBooks(world) {
+  const raw = world.loreBooks;
+  if (raw === undefined)
+    return [];
+  if (!Array.isArray(raw))
+    return [{ severity: "error", path: "loreBooks", code: "lore_books_shape", message: "Lore books are a list of World Info book ids; none are read." }];
+  const issues = [];
+  const seen = new Set;
+  raw.forEach((id, i) => {
+    if (typeof id !== "string" || id.trim() === "")
+      issues.push({ severity: "warning", path: `loreBooks.${i}`, code: "lore_books_shape", message: "Not a World Info book id: it is ignored." });
+    else if (seen.has(id))
+      issues.push({ severity: "warning", path: `loreBooks.${i}`, code: "lore_books_duplicate", message: "This book is listed twice: it is read once." });
+    else
+      seen.add(id);
+  });
   return issues;
 }
 function lintLorePins(world) {
@@ -65997,6 +66092,13 @@ function setPart(doc, part, value) {
       else
         doc.mapSettings = settings;
     }
+    if (value.loreBooks !== undefined) {
+      const books = loreBooksOf({ loreBooks: value.loreBooks });
+      if (books.length === 0)
+        delete doc.loreBooks;
+      else
+        doc.loreBooks = books;
+    }
     return;
   }
   if (part === "tiers") {
@@ -66858,7 +66960,7 @@ function bookEntryTitle(e) {
   return words5.length === 0 ? "Untitled entry" : words5.length > TITLE_WORDS ? `${words5.slice(0, TITLE_WORDS).join(" ")}\u2026` : words5.join(" ");
 }
 function engineWrote(e) {
-  return isRecord(e.extensions[LEDGER_NAMESPACE]);
+  return engineWroteEntry(e.extensions);
 }
 async function bookReads(host, pins, userId) {
   const out = { entries: new Map, books: new Map };
@@ -66890,8 +66992,8 @@ async function bookReads(host, pins, userId) {
   }));
   return out;
 }
-function bookText(e, on) {
-  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on, title: bookEntryTitle(e), content: e.content, entry: null };
+function bookText(e, ref) {
+  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on: ref.on, title: bookEntryTitle(e), content: e.content, entry: null, keep: ref.pin.keep ?? "start" };
 }
 async function pinReader(host, world, refs, userId) {
   const read = await bookReads(host, refs.map((r) => r.pin), userId);
@@ -66909,11 +67011,11 @@ async function pinReader(host, world, refs, userId) {
         give2(worldPinText(world, ref));
       else if ("entry" in ref.pin) {
         const e = read.entries.get(ref.key);
-        give2(e ? bookText(e, ref.on) : null);
+        give2(e ? bookText(e, ref) : null);
       } else
         for (const e of read.books.get(ref.pin.book) ?? [])
           if (!e.disabled)
-            give2(bookText(e, ref.on));
+            give2(bookText(e, ref));
     }
     return out;
   };
@@ -66957,7 +67059,93 @@ async function pinBooks(host, chatId, userId) {
   return (await host.books.list(userId)).filter((b) => !b.engine).map((b) => ({ id: b.id, name: b.name, attached: attached.has(b.id) })).sort((a, b) => Number(b.attached) - Number(a.attached) || a.name.localeCompare(b.name));
 }
 async function pinEntries(host, bookId, userId) {
-  return (await host.books.entries(bookId, userId)).map((e) => ({ id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length }));
+  return (await host.books.entries(bookId, userId)).map((e) => {
+    const lore = bookLoreFieldsOf(e.extensions);
+    return { id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length, ...lore ? { lore } : {} };
+  });
+}
+
+// src/backend/book-lore.ts
+function bookLoreId(bookId, entryId) {
+  return `book:${bookId}/${entryId}`;
+}
+function bookLoreProblem(fields) {
+  if (!loreIsSecret(fields))
+    return null;
+  if (fields.gate === undefined || fields.gate.trim() === "")
+    return "a secret entry needs a gate: the condition under which it may be read";
+  try {
+    compile(fields.gate);
+  } catch (error) {
+    return `its gate doesn't read: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  return null;
+}
+async function writeBookLore(host, e, fields, userId) {
+  const was = bookLoreFieldsOf(e.extensions);
+  const secret = fields !== null && loreIsSecret(fields);
+  const disabled = secret ? true : was !== null && loreIsSecret(was) ? false : null;
+  await host.books.setExtensions(e.id, withBookLoreFields(e.extensions, fields), disabled, userId);
+}
+function bookLoreEntry(e) {
+  if (engineWroteEntry(e.extensions) || e.content.trim() === "")
+    return null;
+  const fields = bookLoreFieldsOf(e.extensions);
+  if (e.disabled && fields === null)
+    return null;
+  return {
+    id: bookLoreId(e.bookId, e.id),
+    title: bookEntryTitle(e),
+    content: e.content,
+    keys: e.keys.filter((k) => k.trim() !== ""),
+    links: fields?.links ?? [],
+    ...fields?.aliases ? { aliases: fields.aliases } : {},
+    ...fields?.secret !== undefined ? { secret: fields.secret } : {},
+    ...fields?.gate !== undefined ? { gate: fields.gate } : {},
+    ...fields?.audience ? { audience: fields.audience } : {},
+    ...fields?.visibility ? { visibility: fields.visibility } : {},
+    ...fields?.holders ? { holders: fields.holders } : {},
+    source: { kind: "book", bookId: e.bookId, entryId: e.id, hash: bookTextHash(e.content) }
+  };
+}
+async function loreBookIds(host, world, chatId, userId) {
+  const listed2 = loreBooksOf(world);
+  const meta = chatId ? await host.chats.chatMetadata(chatId, userId) : {};
+  const chat = isRecord(meta) && Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids.filter((id) => typeof id === "string") : [];
+  const [books, global] = await Promise.all([host.books.list(userId), host.books.global(userId)]);
+  const known = new Map(books.map((b) => [b.id, b.engine]));
+  const ids2 = [...new Set([...listed2, ...chat, ...global])];
+  return { read: ids2.filter((id) => known.get(id) === false), gone: listed2.filter((id) => !known.has(id)) };
+}
+async function liveLore(host, world, chatId, userId) {
+  const books = await loreBookIds(host, world, chatId, userId);
+  for (const id of books.gone)
+    host.log("warn", `[LumiRPEngine] lore book ${id} the world lists is gone: no call reads it (Build \u2192 Lore \u2192 Lore books)`, userId);
+  if (books.read.length === 0)
+    return world;
+  const read = await Promise.all(books.read.map((id) => host.books.entries(id, userId).catch((error) => {
+    host.log("warn", `[LumiRPEngine] lore book ${id} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
+    return [];
+  })));
+  const live = new Map(read.flat().map((e) => [bookLoreId(e.bookId, e.id), e]));
+  const lore = {};
+  const indexed = new Set;
+  for (const [id, entry] of Object.entries(world.lore)) {
+    const source = loreSourceOf(entry.source);
+    const key = source.kind === "book" ? bookLoreId(source.bookId, source.entryId) : null;
+    const now = key ? live.get(key) : undefined;
+    if (key && now)
+      indexed.add(key);
+    lore[id] = now && now.content.trim() !== "" ? { ...entry, content: now.content } : entry;
+  }
+  for (const [key, e] of live) {
+    if (indexed.has(key) || hasOwn(lore, key))
+      continue;
+    const entry = bookLoreEntry(e);
+    if (entry)
+      lore[key] = entry;
+  }
+  return { ...world, lore };
 }
 
 // src/engine/gm-view.ts
@@ -71061,9 +71249,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "44f2d63956a80b483841823d573c83a5f8ef4a49b295f9117b2391e649fcba91";
-  const tools = ["0a9baadf30fa77cf7cb49d886cca019e", "be126719e8971c9663eddb1d75fbe1b9"].filter((f) => f !== undefined);
-  return { id: "30df42cf", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  const sha256 = "d2786f027c9bb62081887f6503f83dcacf56f42bb997820dad8e771ebe38400e";
+  const tools = ["55f75986009e810bfc74e28eeabf61fb", "be126719e8971c9663eddb1d75fbe1b9"].filter((f) => f !== undefined);
+  return { id: "0e888194", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72623,6 +72811,57 @@ function outOfHand(action, params, world, state2) {
   return null;
 }
 
+// src/backend/wi-interceptor.ts
+var keyOf2 = (e) => `${e.bookId}/${e.id}`;
+function ownSecrets(entries3) {
+  const out = new Map;
+  for (const e of entries3) {
+    const fields = bookLoreFieldsOf(e.extensions);
+    if (fields !== null && loreIsSecret(fields))
+      out.set(e.id, fields.gate);
+  }
+  return out;
+}
+async function worldInfoVerdict(gate, input) {
+  try {
+    return await verdict(gate, input);
+  } catch (error) {
+    gate.log(`World Info: its secret entries stay off for this prompt (${error instanceof Error ? error.message : String(error)})`, input.userId);
+    return { disabled: [...ownSecrets(input.entries).keys()], enabled: [] };
+  }
+}
+async function verdict(gate, input) {
+  if (!gate.playsWorld(input.chatMetadata))
+    return { disabled: [], enabled: [] };
+  const carried = gate.carried(input.chatId);
+  const disabled = input.entries.filter((e) => carried.has(keyOf2(e))).map((e) => e.id);
+  const rest = input.entries.filter((e) => !carried.has(keyOf2(e)));
+  const own2 = ownSecrets(rest);
+  const head = await gate.head(input.chatId, input.userId);
+  if (!head)
+    return { disabled: [...disabled, ...own2.keys()], enabled: [] };
+  const indexed = new Map;
+  for (const entry of Object.values(head.world.lore)) {
+    const source = loreSourceOf(entry.source);
+    if (source.kind === "book" && loreIsSecret(entry))
+      indexed.set(`${source.bookId}/${source.entryId}`, typeof entry.gate === "string" ? entry.gate : undefined);
+  }
+  const open = loreGateReader(gate.registry, head.world, head.state);
+  const enabled = [];
+  for (const e of rest) {
+    const key = keyOf2(e);
+    if (!own2.has(e.id) && !indexed.has(key))
+      continue;
+    const gateText = own2.has(e.id) ? own2.get(e.id) : indexed.get(key);
+    const probe = { id: key, title: "", content: "", keys: [], links: [], secret: true, ...gateText !== undefined ? { gate: gateText } : {} };
+    if (!open(probe))
+      disabled.push(e.id);
+    else if (e.disabled)
+      enabled.push(e.id);
+  }
+  return { disabled, enabled };
+}
+
 // src/backend/inferred-words.ts
 function listed2(names2) {
   return names2.length <= 1 ? names2[0] ?? "" : `${names2.slice(0, -1).join(", ")} and ${names2.at(-1) ?? ""}`;
@@ -72733,8 +72972,8 @@ function inferredChip(res, info) {
   const opponents = info.others === "shown" ? info.against.map((x) => ` ${x.name} ${x.rolled ? `rolled ${x.score}` : `set it at ${x.score} without a roll`}.`).join("") : "";
   return { label: `${info.label}: ${res.outcome ?? ""}`, detail: `${own2}${companions2}${opponents}` };
 }
-function checkQuestion(verdict, nameOf8) {
-  const { skill, band, read } = verdict;
+function checkQuestion(verdict2, nameOf8) {
+  const { skill, band, read } = verdict2;
   const against = read.against.length > 0 ? ` against ${listed2(read.against.map((a) => nameOf8(a.who)))}` : "";
   const joined3 = read.with.length > 0 ? ` with ${listed2(read.with.map(nameOf8))}` : "";
   const what = read.attempt !== "" ? `, to "${read.attempt}"` : "";
@@ -73880,7 +74119,7 @@ function boughtAlong(p, pre, ctx, typed = [], narration = "", items = []) {
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
   const row = rowAt(ctx, p.item, typeof p.category === "string" ? p.category : "");
   const rowDef = row === null ? undefined : own(rows, row);
-  let verdict = null;
+  let verdict2 = null;
   let sameNoun = false;
   for (const buy of buys) {
     const bought = itemName(buy.name);
@@ -73904,10 +74143,10 @@ function boughtAlong(p, pre, ctx, typed = [], narration = "", items = []) {
     const priced = near(buy.cents) || typed.some(near) || inBand();
     if (holds && priced && !toldAsAnother(narration, said2.head, ctx))
       return "retold";
-    verdict = "unsure";
+    verdict2 = "unsure";
   }
   if (sameNoun || another || toldAsAnother(narration, said2.head, ctx))
-    return verdict;
+    return verdict2;
   const group = rowDef?.category;
   if (typeof group !== "string" || group === "")
     return null;
@@ -74064,6 +74303,8 @@ class Runtime {
   lastPlace = new Map;
   prePhase = new Map;
   loreTraces = new Map;
+  liveWorlds = new Map;
+  carriedEntries = new Map;
   mindTraces = new Map;
   answeredMinds = new Map;
   keptMinds = new Map;
@@ -74098,7 +74339,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "30df42cf" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "0e888194" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -74124,6 +74365,8 @@ class Runtime {
         this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
     });
     this.host.on("WORLD_INFO_ACTIVATED", (e) => this.onActivated(e.chatId, e.entries.map((x) => x.id)));
+    const gate = this.worldInfoGate();
+    this.host.registerWorldInfoInterceptor((input) => worldInfoVerdict(gate, input));
     this.host.on("CHAT_DELETED", (e, userId) => {
       if (userId)
         this.jsonHiding.removeChat(e.chatId, userId).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: its JSON regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
@@ -74219,9 +74462,10 @@ class Runtime {
     const before = input.observed.slice(0, target < 0 ? input.observed.length : target);
     const lastUser = before.findLast((m) => m.isUser);
     const text6 = lastUser ? lastUser.swipes[lastUser.swipeId] ?? "" : "";
-    const render = input.core.renderState(input.observed);
-    if (!render)
+    const folded = input.core.renderState(input.observed);
+    if (!folded)
       return;
+    const render = { ...folded, world: await this.liveWorld(p.generationId, input.chatId, input.userId, folded.world) };
     bridge.begin(text6, input.core.planState(p.generationId, input.observed)?.parentPath ?? "");
     const budget = phaseBudget(settings, "pre", input.signal);
     this.preBudgets.set(p.generationId, budget);
@@ -74247,7 +74491,7 @@ class Runtime {
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION2,
       earlier: { messages: earlier, hideJson: settings.hideJsonBlocks }
     };
-    const at2 = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text6, preset.guidance);
+    const at2 = await this.lorePhase("pre", p.generationId, input.chatId, input.userId, render.world, render.state, budget, text6, preset.guidance);
     const left = text6.trim() === "" ? "" : await this.leftUnplayed(input.chatId, input.userId, earlier, text6);
     const intentTask = text6.trim() === "" || bridge.hasIntent(text6) || bridge.isHeld(text6) ? Promise.resolve() : this.readIntent(bridge, text6, recorded, render, all2, earlier, settings, facts, budget, at2, left);
     const policy = policyOf(render.world, render.state);
@@ -74365,7 +74609,7 @@ class Runtime {
     const vars = safeVars(this.stepVars(render.world, render.state, plan2, pre.text, "", "", recent), secrets);
     const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join(`
 `), links: this.sceneLinks(render.world, render.state) };
-    const at2 = await this.lorePhase("pre", input.generationId, input.userId, render.world, render.state, budget, pre.text, pre.preset.guidance);
+    const at2 = await this.lorePhase("pre", input.generationId, input.chatId, input.userId, render.world, render.state, budget, pre.text, pre.preset.guidance);
     const run2 = (r, kind, stepVars = vars) => budget.take() ? promptedText(this.steps, r, kind, stepVars, secrets, input.userId, budget.signal, this.stepLore(r, at2, inputs)).then((lines2) => lines2 ?? []) : Promise.resolve([]);
     const briefTask = Promise.all(briefRuns.map((r) => run2(r, "brief")));
     const outlineVars = outlineRuns.length > 0 ? { ...vars, sections: this.narratorSections(render.world, render.state, plan2).join(", ") } : vars;
@@ -74542,28 +74786,28 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
         rolls ||= checkOf(render.world, def.check) !== null;
         return;
       }
-      const verdict = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: given, unfit: ref, said: said2, thing, policy, mayKnow });
-      if (verdict?.kind === "known")
-        return take(def, verdict.params, words5, undefined, said2);
-      if (verdict?.kind === "real")
-        steps.push({ action: def.id, params: given, text: words5, claim: verdict.claim });
-      else if (verdict?.kind === "ask")
-        steps.push({ action: def.id, params: given, text: words5, claim: verdict.claim, ask: { kind: "claim", question: verdict.question, detail: verdict.detail } });
+      const verdict2 = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: given, unfit: ref, said: said2, thing, policy, mayKnow });
+      if (verdict2?.kind === "known")
+        return take(def, verdict2.params, words5, undefined, said2);
+      if (verdict2?.kind === "real")
+        steps.push({ action: def.id, params: given, text: words5, claim: verdict2.claim });
+      else if (verdict2?.kind === "ask")
+        steps.push({ action: def.id, params: given, text: words5, claim: verdict2.claim, ask: { kind: "claim", question: verdict2.question, detail: verdict2.detail } });
       else {
         this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
-        dropped.push({ label: def.label, reason: verdict?.kind === "hold" && verdict.reason ? verdict.reason : unfitReason(this.registry, render.world, render.state, ref, text6, secrets, mayKnow) });
+        dropped.push({ label: def.label, reason: verdict2?.kind === "hold" && verdict2.reason ? verdict2.reason : unfitReason(this.registry, render.world, render.state, ref, text6, secrets, mayKnow) });
         return;
       }
       rolls ||= checkOf(render.world, def.check) !== null;
     };
     const takeTry = (given, words5) => {
-      const verdict = rolls ? { ok: false, why: "an action before it rolls its own check" } : inferredRead(this.registry, render.world, render.state, given);
-      if (!verdict.ok) {
-        this.host.log("info", `[LumiRPEngine] interpret: Try something isn't a check here (${verdict.why}); the message plays without it`, userId);
+      const verdict2 = rolls ? { ok: false, why: "an action before it rolls its own check" } : inferredRead(this.registry, render.world, render.state, given);
+      if (!verdict2.ok) {
+        this.host.log("info", `[LumiRPEngine] interpret: Try something isn't a check here (${verdict2.why}); the message plays without it`, userId);
         return;
       }
-      const asked = verdict.policy.mode === "suggest" ? checkQuestion(verdict, (id) => render.state.entities[id]?.name ?? id) : null;
-      steps.push({ action: TRY_ACTION, params: verdict.params, text: words5, ...asked ? { ask: { kind: "check", ...asked } } : {} });
+      const asked = verdict2.policy.mode === "suggest" ? checkQuestion(verdict2, (id) => render.state.entities[id]?.name ?? id) : null;
+      steps.push({ action: TRY_ACTION, params: verdict2.params, text: words5, ...asked ? { ask: { kind: "check", ...asked } } : {} });
     };
     if (chosen)
       take(chosen, params, "", result.thing, [text6]);
@@ -74634,11 +74878,11 @@ ${answer}`, links: owner ? [owner] : [] }));
     const target = this.judgeTarget(bridge.intentOf(text6), render);
     if (!target)
       return;
-    const { intent: intent2, index, action, params, verdict, odds, policy } = target;
+    const { intent: intent2, index, action, params, verdict: verdict2, odds, policy } = target;
     const run2 = runsOf(settings.modelUse, render.world, "judge", facts, { guidance: at2.guidance })[0];
     if (!run2 || !budget.take())
       return;
-    const story = verdict.why === "story" ? Object.fromEntries(outcomeChoices(action, Object.keys(odds)).map((o) => [o, odds[o] ?? 0])) : null;
+    const story = verdict2.why === "story" ? Object.fromEntries(outcomeChoices(action, Object.keys(odds)).map((o) => [o, odds[o] ?? 0])) : null;
     const placeName2 = povPlace(this.registry, render.world, render.state)?.name ?? null;
     const scene2 = { you: render.state.entities[render.world.pov]?.name ?? render.world.pov, place: placeName2, present: presentNames(this.registry, render.world, render.state) };
     const targets = Object.values(params).filter((v) => typeof v === "string" && (hasOwn(render.state.entities, v) || hasOwn(render.world.places, v)));
@@ -74663,7 +74907,8 @@ ${answer}`, links: owner ? [owner] : [] }));
     const place = placeOfEntity(state2, t.agent);
     return { agent: e?.name ?? t.agent, at: place ? world.places[place]?.name ?? place : null, time: formatClock(calendarOf(world), state2.clock), options: t.options };
   }
-  async lorePhase(phase, key, userId, world, state2, budget, said2, guidance) {
+  async lorePhase(phase, key, chatId, userId, folded, state2, budget, said2, guidance) {
+    const world = await this.liveWorld(key, chatId, userId, folded);
     const here = pinsFor(world, placeOfEntity(state2, world.pov));
     const own2 = LORE_AUDIENCE.filter((step2) => !isMindPurpose(step2)).map((step2) => [step2, pinsFor(world, null, undefined, [step2])]);
     const textsOf = await pinReader(this.host, world, [...here, ...own2.flatMap(([, refs]) => refs)], userId);
@@ -74804,14 +75049,14 @@ ${answer}`, links: owner ? [owner] : [] }));
     const ties = tiesOf2(ctx, context.world, context.state);
     const facts = { ...pre?.facts ?? noFacts(), ...pre ? planFacts(context.world, pre.start, context.state, plan2) : {}, reply: text6.trim() !== "", present: false, offscreen: ties.offscreen.length > 0, tieZone: ties.offscreen.length > 0 };
     const budget = phaseBudget(settings, "post");
-    const secrets = unrevealedSecrets(this.registry, context.world, context.state);
+    const secrets = unrevealedSecrets(this.registry, await this.liveWorld(key, chatId, userId, context.world), context.state);
     const usual = usualRoutineForExtract(ctx);
     const vars = safeVars({ ...this.stepVars(context.world, context.state, plan2, pre?.text ?? "", text6, (plan2 && bridge.proseFor(context.seed)?.brief) ?? "", context.recent), usual: usual.join(`
 `) }, secrets);
     const modelUse = settings.modelUse;
     const read = { text: `${text6}
 ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
-    const at2 = await this.lorePhase("post", key, userId, context.world, context.state, budget, read.text, guidance);
+    const at2 = await this.lorePhase("post", key, chatId, userId, context.world, context.state, budget, read.text, guidance);
     const lore2 = (r, effects2 = false) => this.stepLore(r, at2, read, effects2);
     const extractRun = runsOf(modelUse, context.world, "extract", facts, { guidance }).find((r) => r.template === null || r.template.output !== "effects");
     const skipped = facts.timelapse || !!plan2?.timelapse;
@@ -75454,21 +75699,45 @@ ${rules.join(`
     if (`${now}\x00${this.book.placedAs(delivered.bookId)}` !== delivered.placed)
       return "moved";
     await this.book.write(delivered.bookId, delivered.fills, userId);
+    this.carriedEntries.set(chatId, new Set(delivered.sources.map((s) => `${s.bookId}/${s.entryId}`)));
     return "filled";
   }
-  async clear(_chatId, userId, delivered) {
+  async clear(chatId, userId, delivered) {
+    this.carriedEntries.delete(chatId);
     await this.book.clear(delivered.bookId, [...delivered.fills.keys()], userId);
   }
   async vacate(chatId, userId) {
     const run2 = await this.runOf(chatId, userId);
     const bookId = run2 ? (await this.worlds.index(run2.worldId, userId))?.loreBookId : null;
+    this.carriedEntries.delete(chatId);
     if (bookId)
       await this.book.vacate(bookId, userId);
+  }
+  async liveWorld(key, chatId, userId, world) {
+    const kept2 = this.liveWorlds.get(key);
+    if (kept2)
+      return kept2;
+    const live = await liveLore(this.host, world, chatId, userId);
+    lruSet(this.liveWorlds, key, live, 64);
+    return live;
+  }
+  worldInfoGate() {
+    return {
+      registry: this.registry,
+      playsWorld: (meta) => readRun(meta) !== null,
+      head: async (chatId, userId) => {
+        const core = await this.ledger.core(chatId, userId);
+        return core ? core.renderState(toChain(await this.host.chats.messages(chatId, userId))) : null;
+      },
+      carried: (chatId) => this.carriedEntries.get(chatId) ?? new Set,
+      log: (message, userId) => this.host.log("warn", `[LumiRPEngine] ${message}`, userId)
+    };
   }
   async adopted(chatId, userId, from, to) {
     rekey(this.preBudgets, from, to);
     rekey(this.prePhase, from, to);
     rekey(this.loreTraces, from, to);
+    rekey(this.liveWorlds, from, to);
     rekey(this.mindTraces, from, to);
     const own2 = this.runLines.get(from);
     this.runLines.delete(from);
@@ -76650,6 +76919,24 @@ class Dispatcher {
           reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
           return;
         }
+        if (r.op === "fields") {
+          if (typeof r.bookId !== "string" || r.bookId === "" || typeof r.entryId !== "string" || r.entryId === "")
+            throw new RequestError("bad_request", "name the book and its entry");
+          const entry = await this.rt.host.books.entry(r.entryId, userId);
+          if (!entry || entry.bookId !== r.bookId)
+            throw new RequestError("not_found", "that book has no such entry");
+          if (engineWroteEntry(entry.extensions))
+            throw new RequestError("bad_request", "the engine wrote that entry; a world's own lore is its document's");
+          const fields = r.fields === null ? null : bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: r.fields } });
+          if (r.fields !== null && fields === null)
+            throw new RequestError("bad_request", "give the fields as an object, or null to take them off");
+          const problem = fields ? bookLoreProblem(fields) : null;
+          if (problem)
+            throw new RequestError("bad_request", problem);
+          await writeBookLore(this.rt.host, entry, fields, userId);
+          reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
+          return;
+        }
         if (r.op === "pins") {
           if (typeof r.worldId === "string") {
             reply("lre.lore", { pins: await pinViews(this.rt.host, await this.rt.worlds.working(r.worldId, userId), userId) });
@@ -77712,9 +77999,17 @@ function createSpindleHost() {
         const session = str18(context, "frontendSessionId");
         if (session)
           input.frontendSessionId = session;
-        const verdict = await handler(input, signal2 ?? new AbortController().signal);
-        return verdict === "cancel" && isRecord(context) ? { ...context, cancelGeneration: true } : context;
+        const verdict2 = await handler(input, signal2 ?? new AbortController().signal);
+        return verdict2 === "cancel" && isRecord(context) ? { ...context, cancelGeneration: true } : context;
       }, 100, { timeoutMs: options.timeoutMs, required: options.required });
+    },
+    registerWorldInfoInterceptor(handler) {
+      spindle.registerWorldInfoInterceptor(async (ctx) => {
+        if (!ctx.userId)
+          return {};
+        const entries3 = ctx.entries.map((e) => ({ id: e.id, bookId: e.world_book_id, disabled: e.disabled, extensions: isRecord(e.extensions) ? e.extensions : {} }));
+        return await handler({ chatId: ctx.chatId, userId: ctx.userId, entries: entries3, chatMetadata: ctx.chatMetadata });
+      }, 100);
     },
     models: {
       async quiet(request, userId, signal2) {
@@ -77822,6 +78117,9 @@ function createSpindleHost() {
         const e = await spindle.world_books.entries.get(entryId, userId);
         return e ? bookEntryOf(e) : null;
       },
+      async global(userId) {
+        return await spindle.world_books.getGlobal(userId);
+      },
       async createEntry(bookId, entry, userId) {
         const created = await spindle.world_books.entries.create(bookId, entryInput(entry), userId);
         return created.id;
@@ -77831,6 +78129,9 @@ function createSpindleHost() {
       },
       async fill(entryId, content, userId) {
         await spindle.world_books.entries.update(entryId, content === null ? { content: "", disabled: true, constant: false } : { content, disabled: false, constant: true }, userId);
+      },
+      async setExtensions(entryId, extensions, disabled, userId) {
+        await spindle.world_books.entries.update(entryId, disabled === null ? { extensions } : { extensions, disabled }, userId);
       },
       async deleteEntry(entryId, userId) {
         await spindle.world_books.entries.delete(entryId, userId);
