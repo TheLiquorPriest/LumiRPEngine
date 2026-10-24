@@ -29,6 +29,14 @@ export function opensCharacterPage(doc: WorldDoc, collection: string, id: string
   return e !== undefined && kindIs(doc, e.kind, "person");
 }
 
+/** Which Works for picker shows an employer: one of the world's places, or a business. */
+export type EmployerKind = "place" | "business";
+
+/** The picker for an employer: a place for one of the world's places, a business for anything else, and a place while there's none (the usual: a shop in the world). Read from the world, not the page's model, so it holds before the model arrives. */
+export function employerPicker(doc: WorldDoc, employer: string): EmployerKind {
+  return employer === "" || hasOwn(doc.places, employer) ? "place" : "business";
+}
+
 /**
  * A draft patch (RFC 6902) of only what an edit changed on entity `id`: its top-level keys, and its
  * fields one by one, so a change made elsewhere to anything else stands. Nothing changed, none.

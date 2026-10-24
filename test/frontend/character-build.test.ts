@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { bedValue } from "../../src/frontend/character/bed-picker";
-import { entityFormSpecs, entityPatch, opensCharacterPage, relationGroups } from "../../src/frontend/build/character-model";
+import { employerPicker, entityFormSpecs, entityPatch, opensCharacterPage, relationGroups } from "../../src/frontend/build/character-model";
 import type { JsonObject } from "../../src/shared/json";
 import { applyPatch } from "../../src/shared/json-patch";
 import type { WorldDoc } from "../../src/shared/world";
@@ -65,5 +65,14 @@ describe("Build's Character page", () => {
       expect(keys("maya")).toContain(key);
     }
     expect(keys("phone")).toContain("visibility");
+  });
+
+  test("Works for shows a workplace under A place and a business under A business, from the world alone", () => {
+    const doc = draft();
+    // The office is a place, Brightline a business; a page opening before its model arrives shows each where it is.
+    expect(employerPicker(doc, "office")).toBe("place");
+    expect(employerPicker(doc, "brightline")).toBe("business");
+    expect(employerPicker(doc, "")).toBe("place");
+    expect(employerPicker(doc, "gone_shop")).toBe("business");
   });
 });

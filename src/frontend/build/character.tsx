@@ -18,7 +18,7 @@ import { humanize } from "../format";
 import type { EditorProps } from "../registry";
 import { characterRequest } from "../requests";
 import { useSelect } from "../store";
-import { entityPatch, GROUP_LABEL, relationGroups, type RelationGroup } from "./character-model";
+import { employerPicker, entityPatch, GROUP_LABEL, relationGroups, type EmployerKind, type RelationGroup } from "./character-model";
 import { deleteItem, go, ItemHeader } from "./chrome";
 import { authoredContents } from "../../shared/items-build";
 import { CheckField, FormGroup, ItemRow, RefPicker, type RefOption } from "./form-kit";
@@ -106,7 +106,7 @@ export function CharacterPage(props: EditorProps) {
       {model ? <WhereTheyLive model={model} value={value} world={formDoc} onField={setField} onChange={setValue} /> : null}
       <TheirDay world={props.world} id={id} value={value} model={character} ctx={ctx} onChange={setValue} onField={setField} />
       <Section title="Work and money">
-        <WorksFor model={model} world={formDoc} value={typeof fields.employer === "string" ? fields.employer : ""} onPick={(v) => setField("employer", v)} />
+        {model ? <WorksFor model={model} world={formDoc} value={typeof fields.employer === "string" ? fields.employer : ""} onPick={(v) => setField("employer", v)} /> : null}
         <SectionFields section="work" model={character} value={value} ctx={ctx} onField={setField} skip={["employer"]} />
       </Section>
       <People world={formDoc} id={id} value={value} onChange={setValue} />
@@ -194,24 +194,24 @@ function WhereTheyLive(props: { model: CharacterResult; value: JsonObject; world
   );
 }
 
-type EmployerKind = "place" | "business";
 const EMPLOYER_KINDS: { value: EmployerKind; label: string }[] = [
   { value: "place", label: "A place" },
   { value: "business", label: "A business" },
 ];
 
 /** Who they work for: a place in the world, picked by its path, or a business; either way its id goes in `employer`. */
-function WorksFor(props: { model: CharacterResult | null; world: WorldDoc; value: string; onPick(id: string | undefined): void }) {
-  const places = props.model?.places ?? [];
-  // Which picker shows first follows what they work for now; with no employer yet, a place (the usual: a shop in the world).
-  const [kind, setKind] = useState<EmployerKind>(props.value !== "" && !places.some((p) => p.id === props.value) && props.model?.character.employer?.kind !== "place" ? "business" : "place");
+function WorksFor(props: { model: CharacterResult; world: WorldDoc; value: string; onPick(id: string | undefined): void }) {
+  // The picker follows what they work for until the author picks the other one.
+  const [chosen, setChosen] = useState<EmployerKind | null>(null);
+  const kind = chosen ?? employerPicker(props.world, props.value);
+  const isPlace = props.value !== "" && employerPicker(props.world, props.value) === "place";
   return (
     <div class="lre-stack" data-lre-works-for="">
-      <Seg<EmployerKind> label="Works for" value={kind} options={EMPLOYER_KINDS} onChange={setKind} />
+      <Seg<EmployerKind> label="Works for" value={kind} options={EMPLOYER_KINDS} onChange={setChosen} />
       {kind === "place" ? (
-        <PlacePicker title="Where they work" label="Works at" places={places} value={places.some((p) => p.id === props.value) ? props.value : null} clearLabel="No employer" onPick={(p) => props.onPick(p?.id)} />
+        <PlacePicker title="Where they work" label="Works at" places={props.model.places} value={isPlace ? props.value : null} clearLabel="No employer" onPick={(p) => props.onPick(p?.id)} />
       ) : (
-        <RefPicker label="Works for" value={places.some((p) => p.id === props.value) ? "" : props.value} options={entitiesOfKind(props.world, "business")} none="No employer" placeholder="Pick a business" onChange={(v) => props.onPick(v === "" ? undefined : v)} />
+        <RefPicker label="Works for" value={isPlace ? "" : props.value} options={entitiesOfKind(props.world, "business")} none="No employer" placeholder="Pick a business" onChange={(v) => props.onPick(v === "" ? undefined : v)} />
       )}
     </div>
   );
