@@ -18,3 +18,15 @@ export function hideTruth(ui: UiState): UiState {
 export function gmAt(ui: UiState, section: GmSection): UiState {
   return ui.gm.section === section ? ui : { ...ui, gm: { ...ui.gm, section } };
 }
+
+/** Another GM section with one character's page open in it (a link between a character's GM pages), the gate left as it is. */
+export function gmOpen(ui: UiState, section: GmSection, entity: string): UiState {
+  return { ...ui, gm: { ...ui.gm, section, focus: entity } };
+}
+
+/** The focus taken: the section opened its page. */
+export function focusTaken(ui: UiState): UiState {
+  if (ui.gm.focus === undefined) return ui;
+  const { focus: _taken, ...gm } = ui.gm;
+  return { ...ui, gm };
+}

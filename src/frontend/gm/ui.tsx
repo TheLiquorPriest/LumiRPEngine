@@ -4,7 +4,8 @@
 
 import type { ComponentChildren, RefObject } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { useApp } from "../app";
+import { useApp, useUi } from "../app";
+import { focusTaken, gmOpen } from "./gate";
 import { Button, IdText, PageHeader } from "../components";
 
 export interface Pages<T> {
@@ -54,6 +55,30 @@ export function usePages<T>(): Pages<T> {
       },
     },
   };
+}
+
+/**
+ * Opens the character page a link from another GM page asked for (`gmOpen`) once the section
+ * shows, then takes the ask, so going back and forth doesn't open it again.
+ */
+export function useGmFocus(open: (entity: string) => void): void {
+  const app = useApp();
+  const focus = useUi((ui) => ui.gm.focus);
+  useEffect(() => {
+    if (focus === undefined) return;
+    open(focus);
+    app.ui.update(focusTaken);
+  }, [focus]);
+}
+
+/** A link from one of a character's GM pages (their mind, their routine) to their character sheet in World. */
+export function SheetLink(props: { entity: string }) {
+  const app = useApp();
+  return (
+    <Button size="sm" variant="secondary" icon="user" onClick={() => app.ui.update((ui) => gmOpen(ui, "world", props.entity))}>
+      Character sheet
+    </Button>
+  );
 }
 
 /** A page over a section's list: a header with Back, then its content. */

@@ -49,6 +49,8 @@ export interface GmState {
   /** The truth shows only once the gate is opened; leaving GM mode closes it again. */
   revealed: boolean;
   section: GmSection;
+  /** A character to open in `section` once it shows (a link from another GM page); it is taken when the page opens. */
+  focus?: string;
 }
 
 export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "timeouts" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats" | "diagnostics" | "mcp";

@@ -17,7 +17,7 @@ import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Chip } from "../../../frontend/build/form-kit";
 import { Badge, Banner, Button, Empty, Field, IdText, List, ListRow, Section, Seg, Stat } from "../../../frontend/components";
 import { formatMinutes } from "../../../frontend/format";
-import { GmPage, usePages } from "../../../frontend/gm/ui";
+import { GmPage, SheetLink, useGmFocus, usePages } from "../../../frontend/gm/ui";
 import { Icon } from "../../../frontend/icons";
 import { fidelityGroups } from "../../../frontend/batch";
 import { PickBox, SelectBar, useSelection } from "../../../frontend/multi-select";
@@ -117,6 +117,8 @@ function send(ctx: Ctx, op: EditOp, onDone: () => void): void {
 export function GmMindsSection(props: GmSectionProps) {
   const view = props.gm.minds;
   const pages = usePages<EntityId>();
+  // A link from a character's sheet opens their mind here.
+  useGmFocus((id) => pages.open(id));
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<Fidelity | "">("");
   // Choosing who to run: tapping a row picks them instead of opening their page.
@@ -277,6 +279,7 @@ function CharacterPages(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }
             </>
           }
           backLabel="Minds"
+          actions={<SheetLink entity={c.entity} />}
           onBack={props.onBack}
         >
           <div class="lre-gm-minds" data-lre-gm-minds={c.entity}>
