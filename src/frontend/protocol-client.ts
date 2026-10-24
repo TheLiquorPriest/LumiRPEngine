@@ -92,6 +92,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.minds": true,
   "lre.routine": true,
   "lre.agents": true,
+  "lre.cancel": true,
 };
 
 function isRequestType(value: unknown): value is keyof ResultBodies {

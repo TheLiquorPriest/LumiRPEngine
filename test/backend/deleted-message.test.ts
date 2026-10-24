@@ -135,3 +135,34 @@ describe("a turn the engine finished", () => {
     expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
   });
 });
+
+describe("cancelling a turn in flight", () => {
+  test("Cancel stops the engine run with no failure flag, and sending again plays the turn", async () => {
+    const rig = new Rig();
+    const chatId = await playedChat(rig);
+    // The player presses Cancel while the engine reads the action.
+    let pressed = false;
+    rig.host.quietReply = () => {
+      if (!pressed) void rig.send({ type: "lre.cancel", chatId });
+      pressed = true;
+      return "{}";
+    };
+    rig.host.sendUser(chatId, "I wave.");
+    await rig.host.settle();
+    const stopped = await rig.host.start(chatId, { type: "normal" });
+    expect(pressed).toBe(true);
+    expect(stopped.halted).toBe("cancelled");
+    expect(await flagOf(rig, chatId)).toBeUndefined();
+    const records = await rig.rt.diag.records(chatId, rig.host.userId);
+    expect(records.some((r) => r.kind === "turn" && r.status === "failed")).toBe(false);
+    // Nothing runs now, so a second Cancel stops nothing.
+    expect(rig.body(await rig.send({ type: "lre.cancel", chatId })).cancelled).toBe(false);
+    // Sent again (the frontend's Regenerate after the player's message), the turn plays with its reply.
+    const again = await rig.host.start(chatId, { type: "regenerate" });
+    expect(again.halted).toBeUndefined();
+    await rig.host.finish(again, "Someone waves back.");
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    expect(core?.journal.messages[again.messageId ?? ""]?.ledger.swipes["0"]?.status).toBe("ok");
+    expect(await flagOf(rig, chatId)).toBeUndefined();
+  });
+});

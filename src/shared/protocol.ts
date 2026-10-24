@@ -592,6 +592,11 @@ export interface LorePinsView {
  */
 export type MindsRequest = Request<"lre.minds"> & { chatId: ChatId } & ({ op: "run"; who?: EntityId[] } | { op: "cancel"; runId: string } | { op: "status" });
 
+/** Cancel on the activity line (DESIGN §5.1): stop the chat's engine run or reply read under way. A cancelled turn ends with no failure, and can be sent again. */
+export interface CancelTurnRequest extends Request<"lre.cancel"> {
+  chatId: ChatId;
+}
+
 /**
  * LumiRPEngine Studio's offer (DESIGN §15). `offer` reads the world the Studio offers and reviews
  * it, installing nothing; `install` installs the offer reviewed as `offerId`: a new world, or the
@@ -692,7 +697,8 @@ export type FrontendToBackend =
   | DiagRequest
   | MindsRequest
   | RoutineRequest
-  | AgentsRequest;
+  | AgentsRequest
+  | CancelTurnRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -780,6 +786,8 @@ export interface ResultBodies {
   "lre.diag": { records: DiagRecord[]; activity: Activity | null };
   /** The run started, cancelled or asked about; null when the chat has had none since the extension started. */
   "lre.minds": { run: MindsRunView | null };
+  /** Whether a run or read was under way to stop. */
+  "lre.cancel": { cancelled: boolean };
   "lre.routine": RoutineReadResult;
   /** `kit`: this build, where its kit is, and whether the asking session checked in since the extension started; every other op answers the `view`. */
   "lre.agents": { view?: AgentsView; build?: string; kit?: KitReport | null; known?: boolean };

@@ -152,14 +152,18 @@ export type ChipKind =
   /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
   | "fix"
   /** A write held during a reply that no longer applied when the reply finished (P2), with Dismiss. */
-  | "refused";
+  | "refused"
+  /** The intent gate (DESIGN §5.1 preview gates): a typed message's read action waits, nothing generated, on Play, Edit (its params) or Cancel; Play and Edit resume the turn. */
+  | "intent_gate"
+  /** The outline gate (DESIGN §5.1 preview gates): the turn's outline waits, no reply written, on Play, Edit (its lines) or Cancel; Play and Edit resume the turn with that outline. */
+  | "outline_gate";
 
 /**
  * A value a chip action asks for before it's sent, in its `lre.chip` payload: an amount in the
- * world's currency (`{cents}`, minor units; `value` is the amount it starts at), or one of
- * `options` (`{value}`).
+ * world's currency (`{cents}`, minor units; `value` is the amount it starts at), one of `options`
+ * (`{value}`), or text the player edits (`{text}`; `value` is the text it starts with).
  */
-export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] };
+export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string };
 
 export interface ChipAction {
   id: string;
@@ -187,7 +191,7 @@ export interface Chip {
  * does. The frontend regenerates after them; an outside client tells the user to.
  */
 export function chipRegenerates(kind: ChipKind, choice: string): boolean {
-  return choice === "regenerate" || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop"));
+  return choice === "regenerate" || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit"));
 }
 
 /** Detail opened during an in-flight window shows "pending" until it closes (DESIGN §9.2). */

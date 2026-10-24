@@ -252,7 +252,7 @@ export function Settings() {
     ) : page === "model" ? (
       <ModelUseSection modelUse={settings.modelUse} meter={view?.meter ?? null} patch={patch} openTimeouts={() => go("timeouts")} busy={busy} />
     ) : page === "steps" ? (
-      <StepsSection modelUse={settings.modelUse} helper={settings.helper} jobs={settings.jobs} prompts={settings.minds.prompts} patch={patch} openHelper={() => go("helper")} busy={busy} />
+      <StepsSection modelUse={settings.modelUse} helper={settings.helper} jobs={settings.jobs} gates={settings.gates} prompts={settings.minds.prompts} patch={patch} openHelper={() => go("helper")} busy={busy} />
     ) : page === "minds" ? (
       <MindsSection minds={settings.minds} patch={patch} busy={busy} />
     ) : page === "timeouts" ? (

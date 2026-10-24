@@ -232,6 +232,10 @@ export class Dispatcher {
         if (r.chatId && r.viewing) this.rt.ledger.askAgain(r.chatId, userId, session);
         return;
       }
+      case "lre.cancel":
+        // Cancel on the activity line (DESIGN §5.1): only the user whose chat it is can stop its turn.
+        reply("lre.cancel", { cancelled: this.rt.ledger.cancel(r.chatId, userId) });
+        return;
       case "lre.restart":
         reply("lre.restart", { start: this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn) });
         return;
@@ -1063,6 +1067,22 @@ export class Dispatcher {
         const index = typeof chip.payload.index === "number" ? chip.payload.index : -1;
         return { applied: this.rt.answerAsk(chatId, text, index, choice === keep), pending: false };
       }
+      case "intent_gate":
+      case "outline_gate": {
+        // A preview gate (DESIGN §5.1): Play and Edit keep the answer with the turn, and the frontend's
+        // Regenerate resumes it; Cancel only takes the chip, so nothing is generated.
+        if (choice === "cancel") return { applied: true, pending: false };
+        if (choice !== "play" && choice !== "edit") throw new RequestError("bad_request", `unknown choice ${choice}`);
+        const text = typeof chip.payload.text === "string" ? chip.payload.text : "";
+        const edited = choice === "edit" ? (typeof payload?.text === "string" ? payload.text : null) : undefined;
+        if (edited === null) throw new RequestError("bad_request", "Edit needs the edited text");
+        if (chip.kind === "intent_gate") return { applied: this.rt.passIntent(chatId, text, edited === undefined ? undefined : paramsOf(edited)), pending: false };
+        const shown = Array.isArray(chip.payload.lines) ? chip.payload.lines.filter((l): l is string => typeof l === "string") : [];
+        const held = Array.isArray(chip.payload.held) ? chip.payload.held.filter((l): l is string => typeof l === "string") : [];
+        // Lines the player wrote are words for the narrator, never macros the prompt would run.
+        const lines = edited === undefined ? shown : edited.split("\n").map((l) => neutralizeMacros(l).trim()).filter((l) => l !== "");
+        return { applied: this.rt.passOutline(chatId, text, [...lines, ...held]), pending: false };
+      }
       case "claimed": {
         // Undo of a thing the player said they had: it goes, with what its action did (DESIGN §9.4).
         const core = await this.rt.ledger.core(chatId, userId);
@@ -1205,7 +1225,20 @@ function chipValue(chip: StoredChip, choice: string, payload: JsonObject | undef
   const input = chip.actions.find((a) => a.id === choice)?.input;
   if (!input || !payload) return null;
   if (input.type === "money") return typeof payload.cents === "number" && Number.isSafeInteger(payload.cents) && payload.cents > 0 ? payload.cents : null;
+  if (input.type === "text") return null;
   return typeof payload.value === "string" && input.options.some((o) => o.value === payload.value) ? payload.value : null;
+}
+
+/** An action's details as the intent gate's Edit sends them: a JSON object, or the request is refused. */
+function paramsOf(text: string): JsonObject {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new RequestError("bad_request", "the details aren't JSON");
+  }
+  if (!isRecord(parsed)) throw new RequestError("bad_request", "the details must be a JSON object");
+  return parsed as JsonObject;
 }
 
 function targetLabel(t: TimelapseTarget): string {

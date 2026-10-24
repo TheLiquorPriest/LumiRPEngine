@@ -9,7 +9,7 @@ import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
-import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
+import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, GateSettings, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
 import { ASK_BEYOND_DEFAULT, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
@@ -210,6 +210,8 @@ export function defaultSettings(): UserSettings {
     minds: defaultMindsSettings(),
     timeouts: defaultTimeouts(),
     jobs: { ...JOB_SETTINGS_DEFAULTS },
+    // A turn plays as soon as it is read until the player asks to see it first.
+    gates: { intent: false, outline: false },
   };
 }
 
@@ -460,7 +462,14 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     minds: mindsSettingsOf(v.minds, d.minds),
     timeouts: timeoutsOf(v.timeouts, d.timeouts),
     jobs: jobSettingsOf(v.jobs, d.jobs),
+    gates: gatesOf(v.gates, d.gates),
   };
+}
+
+/** The preview gates as stored: a switch that isn't a boolean keeps its default (off). */
+function gatesOf(value: unknown, d: GateSettings): GateSettings {
+  const v = isRecord(value) ? value : {};
+  return { intent: typeof v.intent === "boolean" ? v.intent : d.intent, outline: typeof v.outline === "boolean" ? v.outline : d.outline };
 }
 
 /** Expands a named preset into its values (the UI sends `custom` with any manual change). */

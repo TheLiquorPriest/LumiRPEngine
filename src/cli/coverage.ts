@@ -105,4 +105,5 @@ export const COVERAGE: Coverage = {
     dismiss: { excluded: "Dismissing the update notice in the drawer is the user's acknowledgement of it, so no agent tool does it for them." },
     forget: { excluded: "Settings → MCP server's Forget, which drops a server the user no longer runs from the list; the user's call, on the page." },
   },
+  "lre.cancel": { excluded: "Cancel on the activity line, the player's own stop for a turn in flight in the chat they watch; a tool's turn is the player's chat too, so the page that shows it stops it." },
 };
