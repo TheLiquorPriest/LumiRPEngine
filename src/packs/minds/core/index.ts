@@ -16,7 +16,7 @@ import { mindEdit } from "./edit";
 import { fidelityOf } from "./fidelity";
 import { MINDS_LINTS } from "./lint";
 import { mindLines, minded } from "./section";
-import { keptPlans, PACK, readCharacter } from "./state";
+import { keptPlans, lastDue, PACK, readCharacter } from "./state";
 
 export const mindsPack: PackDef = {
   id: PACK,
@@ -30,7 +30,7 @@ export const mindsPack: PackDef = {
     r.query("minds.plans", (ctx, who) => keptPlans(readCharacter(ctx.state, who)));
     r.query("minds.tier", (ctx, who) => {
       const c = readCharacter(ctx.state, who);
-      return c.pin ?? c.mind?.level ?? "background";
+      return c.pin ?? lastDue(c)?.level ?? "background";
     });
     r.query("minds.minded", minded);
     r.query("minds.on", mindsOn);

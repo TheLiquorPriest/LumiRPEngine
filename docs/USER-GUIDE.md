@@ -747,10 +747,16 @@ Each mind is recorded on the turn, so swipes and branches keep it: **Re-narrate*
 
 Every turn, and at each beat of a time skip, each character gets a focus score and a level from it:
 
-- **Live**: they think every turn, best score first, up to your Live limit. Only people at hand are Live: in your scene, or named this turn. Anyone else is Near at most, however much of the story they carry.
+- **Live**: the closest to the story. Only people at hand are Live: in your scene, or named this turn. Anyone else is Near at most, however much of the story they carry.
 - **Near**: they think again when something calls for it: they come into the scene, they are named, or their mind is old enough (the Near refresh).
 - **Far**: they think now and then, on the Far refresh period, and their plans shape their day if they live their own day.
 - **Background**: no mind; they follow their routine.
+
+Who thinks follows your scene and what's in motion:
+
+- **Everyone in your scene** thinks every turn, best on the ladder first, up to your Live limit. Your scene is where you are, a room inside it, or the place holding it within the same building or site: someone the story put on the fourth floor is with you in its bathroom, while someone in the room next door, or somewhere in town, isn't.
+- **Someone elsewhere** thinks only while they're caught up in something that could come up soon: a plan or appointment with you within the next day, an invitation to you, an agenda of their own under way, your intent for them in GM mode, a place or activity the story holds them to, or their interrupting a time skip. They think on their level's refresh, or every turn when they're Live, and what they thought is on record, though it never shows in the Minds section. Being named, idling or going about their routine makes no one think.
+- A mind that falls due while nothing calls it still keeps the level it fell due at, so a character's routine role never changes with who thinks.
 
 The score adds up proximity, being named, their feelings toward you, how they figure in the story (quests, secrets, agendas, story roles, rules that name them), what is pending between you (invitations, appointments, plans, commitments), their tier and how recently you saw them. The world sets the weights and thresholds, and who is always Live or never gets a mind ([Character minds in a world](#character-minds-in-a-world)); **GM → Minds** can pin anyone at a level.
 
@@ -863,9 +869,13 @@ You can pin any type to **Auto**, **Confirm** or **Never** in **Settings → Cha
 
 With **Time-skip beats** turned on, its call before a time skip is listed there too, as the step alone: it thinks as no one, so it shows no one's name and no level.
 
+### The People section
+
+**People** tells the narrator who is in your scene ([The fidelity ladder](#the-fidelity-ladder) says what your scene takes in): your character first, by name, with any needs pressing on them from Cast life 4 ("Tommy Kyser (you): hungry, tired, lonely"), then each person there you can see, what they're doing when you may see it, and how they regard you. The Minds and Stance sections read your scene the same way.
+
 ### The Stance section
 
-**Stance** tells the narrator how the people with you stand toward you and what they are about, in a line or two each. It lists only the people you can see where you are: someone hidden from you gets no line, and no line names them.
+**Stance** tells the narrator how the people with you stand toward you and what they are about, in a line or two each. It lists only the people you can see in your scene: someone hidden from you gets no line, and no line names them.
 
 - **What they know of you:** whether they know you (a **Knows** relation to you, or regard for you) and how they regard you, in your world's words for regard ("warm", "cold"), never numbers. From Relationships 3 it also names any side of their regard that differs from the whole: "regard: warm (trust: cold)".
 - **What they are about:** what they are doing, as the People section says it; for each public agenda they have, its cue, or its current step as **Play → People** shows it; and, for someone who lives their own day, the part of today they chose themselves (an NPC choice), the one under way or the next: "Decided: See friends at 18:00".

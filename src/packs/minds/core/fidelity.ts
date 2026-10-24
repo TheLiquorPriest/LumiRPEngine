@@ -2,8 +2,10 @@
 // function of the state and this turn's texts, with the world's weights and thresholds. The GM's pin
 // decides first, then the author's `never`, then `always`, then the score.
 //
-// Which minds run (`pickMinds`) follows from the ladder and the user's cadence: Live every turn up to
-// the Live limit, best score first; Near and Far on their refresh triggers.
+// Which minds run (`pickMinds`) follows from the scene, the ladder and the user's cadence: everyone in
+// the POV's scene every turn up to the Live limit, best score first; the others on their level's
+// refresh triggers (a Live one every turn), called only while they're in something that could
+// surface soon (`involved`).
 
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
@@ -16,13 +18,14 @@ import { identifiers } from "../../../engine/expr";
 import { acts } from "../../../engine/life";
 import { objOf, optionalQuery, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
+import { inPovScene } from "../../../engine/presence";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { selectorMatches, classValues, valueWithin } from "../../../engine/selector";
 import { lastSighting } from "../../../engine/seen";
 import type { WorldState } from "../../../engine/state";
 import { currentStage, isTerminal } from "../../../engine/tracks";
 import { knows } from "../../../engine/visibility";
-import { openCommitments, openPlans, readCharacter, readSlice } from "./state";
+import { lastDue, openCommitments, openPlans, readCharacter, readSlice } from "./state";
 
 /** Who can have a mind: every person still in the world and acting, but the POV. */
 export function mindCandidates(ctx: Pick<ReadContext, "registry" | "world" | "state">): EntityId[] {
@@ -122,6 +125,16 @@ function reason(out: { label: string; points: number }[], label: string, points:
   return points;
 }
 
+/** The appointments `who` has with `other` from now until `until` (an entity's dated `appointments`, each with whom). */
+function appointmentsWith(state: Readonly<WorldState>, who: EntityId, other: EntityId, until: number): number {
+  const list = own(state.entities, who)?.fields.appointments;
+  return (Array.isArray(list) ? list : []).filter((raw) => {
+    const a = objOf(raw);
+    const withList = Array.isArray(a.with) ? a.with : [];
+    return typeof a.at === "number" && a.at >= state.clock && a.at <= until && withList.includes(other);
+  }).length;
+}
+
 /** The pending interactions between a character and the POV: an invitation, an appointment together, an open plan or commitment with them. */
 function pendingWith(ctx: ReadContext, id: EntityId): number {
   const { world, state } = ctx;
@@ -130,19 +143,36 @@ function pendingWith(ctx: ReadContext, id: EntityId): number {
   const invited = ctx.registry.formulas.get("invited");
   if (invited && invited(ctx, id) === true) n++;
   const now = state.clock;
-  const appointments = (who: EntityId, other: EntityId): number => {
-    const list = own(state.entities, who)?.fields.appointments;
-    return (Array.isArray(list) ? list : []).filter((raw) => {
-      const a = objOf(raw);
-      const withList = Array.isArray(a.with) ? a.with : [];
-      return typeof a.at === "number" && a.at >= now && withList.includes(other);
-    }).length;
-  };
-  n += appointments(id, pov) + appointments(pov, id);
+  n += appointmentsWith(state, id, pov, Number.POSITIVE_INFINITY) + appointmentsWith(state, pov, id, Number.POSITIVE_INFINITY);
   const c = readCharacter(state, id);
   n += openPlans(c).filter((p) => p.with.includes(pov) && p.when.to >= now).length;
   n += openCommitments(c).filter((x) => x.with.includes(pov)).length;
   return n;
+}
+
+/** How far ahead a plan or appointment with the POV could surface soon: the coming day of world time. */
+const SOON_MINUTES = 1440;
+
+/**
+ * Whether someone off the POV's scene is in something that could surface soon (DESIGN §24.1): a plan
+ * or appointment with the POV within the coming day, an invitation to it still open, an agenda of
+ * their own under way, the GM's intent for them, a place or activity the story holds them to, or a
+ * mind that interrupted the skip the clock stopped on. Idling, living their routine or being named
+ * is none of these.
+ */
+export function involved(ctx: ReadContext, id: EntityId): boolean {
+  const { world, state } = ctx;
+  const pov = world.pov;
+  const now = state.clock;
+  const soon = now + SOON_MINUTES;
+  const c = readCharacter(state, id);
+  if (openPlans(c).some((p) => p.with.includes(pov) && p.when.to >= now && p.when.from <= soon)) return true;
+  if (appointmentsWith(state, id, pov, soon) + appointmentsWith(state, pov, id, soon) > 0) return true;
+  if (ctx.registry.formulas.get("invited")?.(ctx, id) === true) return true;
+  if (liveTracks(world, state).some((t) => own(world.tracks, t)?.kind === "agenda" && own(world.tracks, t)?.owner === id)) return true;
+  if (c.intent !== undefined) return true;
+  if (Object.values(objOf(own(state.entities, id)?.fields.holds)).some((until) => typeof until === "number" && until > now)) return true;
+  return c.mind !== null && c.mind.interrupt !== null && c.mind.at === now;
 }
 
 /**
@@ -212,20 +242,29 @@ export function fidelityOf(ctx: ReadContext, texts: FidelityTexts, config: World
   return out.sort((a, b) => rank[a.level] - rank[b.level] || b.score - a.score || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0));
 }
 
-/** A mind to run this turn: who, at what level, and why now. */
+/**
+ * A mind due this turn: who, at what level, why now, and whether it is called. One not called (off
+ * the POV's scene and not `involved`) makes no model call; only its level is recorded, on the round.
+ */
 export interface MindPick {
   entity: EntityId;
   level: Fidelity;
   reason: RefreshReason;
+  call: boolean;
 }
 
 const LEVEL_RANK: Record<Fidelity, number> = { live: 0, near: 1, far: 2, background: 3 };
 
 /**
- * Which minds run this turn (DESIGN §24.1): Live characters best score first up to the Live limit
- * (a GM's refresh request runs whatever the level); those past the limit, and Near characters, on
- * Near's triggers; Far characters on their first mind, a rise on the ladder or their period. At most
- * `refreshLimit` refreshes besides the Live ones, the most pressing first.
+ * Which minds are due this turn, and which of them are called (DESIGN §24.1). Minds follow the scene
+ * and what's in motion: everyone in the POV's scene (`inPovScene`), and a Live character elsewhere
+ * while `involved`, thinks every turn, best on the ladder first, up to the Live limit (a GM's
+ * refresh request runs whatever the level or the place). Everyone else comes due on their level's
+ * cadence: Near characters, and those past the limit, on Near's triggers; Far characters on their
+ * first mind, a rise on the ladder or their period. A due mind is called only in the scene or while
+ * `involved`, at most `refreshLimit` of them besides the Live ones, the most pressing first. Any
+ * other still comes due, uncalled, so the level it was due at is recorded and the tier routine roles
+ * read (`minds.tier`) moves as it always did.
  */
 export function pickMinds(ctx: ReadContext, scores: readonly FidelityScore[], texts: FidelityTexts, settings: Pick<MindsSettings, "liveLimit" | "nearRefresh" | "farRefreshMinutes" | "refreshLimit">): MindPick[] {
   const { world, state } = ctx;
@@ -238,15 +277,16 @@ export function pickMinds(ctx: ReadContext, scores: readonly FidelityScore[], te
   const ORDER: Record<RefreshReason, number> = { gm: 0, live: 1, promoted: 2, scene: 3, mention: 4, first: 5, turns: 6, minutes: 7, period: 8 };
   for (const s of scores) {
     const c = readCharacter(state, s.entity);
-    const mind = c.mind;
+    const mind = lastDue(c);
     if (c.refresh) {
-      refreshes.push({ entity: s.entity, level: s.level, reason: "gm", order: ORDER.gm, score: s.score });
+      refreshes.push({ entity: s.entity, level: s.level, reason: "gm", call: true, order: ORDER.gm, score: s.score });
       continue;
     }
     if (s.level === "background") continue;
-    if (s.level === "live" && liveLeft > 0) {
+    const scene = inPovScene(world, state, s.entity);
+    if ((scene || (s.level === "live" && involved(ctx, s.entity))) && liveLeft > 0) {
       liveLeft--;
-      live.push({ entity: s.entity, level: "live", reason: "live" });
+      live.push({ entity: s.entity, level: s.level, reason: "live", call: true });
       continue;
     }
     const why = ((): RefreshReason | null => {
@@ -261,10 +301,12 @@ export function pickMinds(ctx: ReadContext, scores: readonly FidelityScore[], te
       if (state.clock - mind.at >= limitOf(near.minutes)) return "minutes";
       return null;
     })();
-    if (why) refreshes.push({ entity: s.entity, level: s.level, reason: why, order: ORDER[why], score: s.score });
+    if (why) refreshes.push({ entity: s.entity, level: s.level, reason: why, call: scene || involved(ctx, s.entity), order: ORDER[why], score: s.score });
   }
-  // A GM's request always runs; the other refreshes share the limit, the most pressing first.
+  // A GM's request always runs; the other calls share the limit, the most pressing first. A mind
+  // that isn't called costs nothing, so every one of those is due.
   const sorted = refreshes.sort((a, b) => a.order - b.order || b.score - a.score || (a.entity < b.entity ? -1 : 1));
-  const chosen = [...sorted.filter((r) => r.reason === "gm"), ...sorted.filter((r) => r.reason !== "gm").slice(0, limitOf(settings.refreshLimit))];
-  return [...live, ...chosen.map(({ entity, level, reason: r }) => ({ entity, level, reason: r }))];
+  const called = sorted.filter((r) => r.call);
+  const chosen = [...called.filter((r) => r.reason === "gm"), ...called.filter((r) => r.reason !== "gm").slice(0, limitOf(settings.refreshLimit)), ...sorted.filter((r) => !r.call)];
+  return [...live, ...chosen.map(({ entity, level, reason: r, call }) => ({ entity, level, reason: r, call }))];
 }

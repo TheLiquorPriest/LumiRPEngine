@@ -226,7 +226,9 @@ describe("which minds run", () => {
     // A mind thought at the cafe this round: nothing new until a trigger fires.
     const thought = fold(reg, w, base, [round(base), mind(base, "maya", { level: "near", place: "cafe" })]);
     expect(pick(thought)).toBe(null);
-    expect(pick(at(w, thought, "maya", "apartment"))).toBe("scene");
+    // In the POV's scene she thinks every turn, as Live does; past the Live limit, coming in is a trigger.
+    expect(pick(at(w, thought, "maya", "apartment"))).toBe("live");
+    expect(pick(at(w, thought, "maya", "apartment"), NO_TEXT, { liveLimit: 0 })).toBe("scene");
     expect(pick(thought, { user: "Where's Maya today?", reply: "" })).toBe("mention");
     const later = fold(reg, w, thought, Array.from({ length: 6 }, () => round(thought)));
     expect(pick(later)).toBe("turns");

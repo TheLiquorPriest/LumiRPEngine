@@ -98,14 +98,26 @@ function nameOf(ctx: ReadContext, id: EntityId): string {
 
 const PLAN_STATUSES: readonly PlanStatus[] = ["open", "done", "dropped"];
 
-/** `minds.round`: a turn's minds round opens, and whether minds are on. */
+/**
+ * `minds.round`: a turn's minds round opens, and whether minds are on. Its `levels`, when there are
+ * any, are the minds due this round that weren't called (DESIGN §24.1), each with the level it was
+ * due at and where they were: kept as `passed`, so their cadence counts from now and their tier
+ * reads that level, as a mind recorded then would. A round recorded without it folds as it did.
+ */
 const round: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.round,
-  validate: (e) => (finite(e.data.at) && typeof e.data.on === "boolean" ? null : bad("a minds round needs its clock and whether minds are on")),
+  validate: (e, ctx) => {
+    const levels = e.data.levels;
+    const passedOk = levels === undefined || (isRecord(levels) && Object.entries(levels).every(([id, v]) => own(ctx.state.entities, id) !== undefined && isRecord(v) && isFidelity(v.level) && (v.place === null || str(v.place))));
+    return finite(e.data.at) && typeof e.data.on === "boolean" && passedOk ? null : bad("a minds round needs its clock, whether minds are on, and each passed mind's level and place");
+  },
   apply: (e, state) => {
     const s = writeSlice(state);
     s.round += 1;
     s.on = e.data.on === true;
+    const at = finite(e.data.at) ? e.data.at : state.clock;
+    const levels = isRecord(e.data.levels) ? e.data.levels : {};
+    for (const [id, v] of Object.entries(levels)) if (isRecord(v) && isFidelity(v.level)) writeCharacter(state, id).passed = { at, round: s.round, level: v.level, place: str(v.place) ? v.place : null };
   },
   describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : e.data.on === true ? "Minds round" : "Minds switched off"),
 };

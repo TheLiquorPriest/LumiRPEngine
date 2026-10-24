@@ -23,13 +23,11 @@ import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import type { BandDef, KindDef, RelationTypeDef } from "../../../shared/world";
-import { povLife } from "../../../engine/life";
 import { numOf, objOf, strOf, own } from "../../../engine/pack-kit";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "../../../engine/registry";
-import { bandOf, kindIs, placeOfEntity } from "../../../engine/scope";
+import { bandOf } from "../../../engine/scope";
 import { GROUP_KIND, MEMBER_OF, membersOf } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
-import { canSeeEntity } from "../../../engine/visibility";
 
 export interface Axis {
   id: string;
@@ -91,6 +89,8 @@ declare module "../../../engine/registry" {
     "relationships.view": (ctx: ReadContext, from: EntityId, to: EntityId) => { axis: string; band: string; value?: number }[];
     /** Regard in the world's band words alone, for the narrator's Stance (`regardWords`); null without regard. */
     "relationships.words": (ctx: ReadContext, from: EntityId, to: EntityId) => string | null;
+    /** The voice line for someone in the POV's scene, as the narrator's People section tells it (`voiceLine`); null without regard. */
+    "relationships.voice": (ctx: ReadContext, who: EntityId) => string | null;
   }
 }
 
@@ -334,6 +334,8 @@ export const relationshipsPack: PackDef = {
     r.query("relationships.faction_regard", groupRegard);
     r.query("relationships.view", regardView);
     r.query("relationships.words", regardWords);
+    // People tells each person's regard after their own line, once it has named the POV first: Cast life reads it there.
+    r.query("relationships.voice", voiceLine);
     r.formula("regard", (ctx, from, to, axis) => regardValue(ctx, String(from ?? ""), String(to ?? ""), typeof axis === "string" && axis !== "" ? axis : undefined));
     r.formula("regard_band", (ctx, from, to) => regardBand(ctx, String(from ?? ""), String(to ?? "")));
     // Group regard, under the name worlds already use.
@@ -355,25 +357,6 @@ export const relationshipsPack: PackDef = {
 
     r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }] }, duration: "15", lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
     r.action({ id: "give_gift", label: "Give a gift", description: "Give someone here a present.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
-
-    r.renderer({
-      slot: "people",
-      render(ctx) {
-        const here = placeOfEntity(ctx.state, ctx.world.pov);
-        if (!here) return [];
-        const lines: string[] = [];
-        for (const id of Object.keys(ctx.state.entities).sort()) {
-          if (id === ctx.world.pov || placeOfEntity(ctx.state, id) !== here) continue;
-          if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id)) continue;
-          // A body the POV knows of holds no regard to voice: Cast life's line says how it lies.
-          const life = povLife(ctx.world, ctx.state, id);
-          if (life && !life.acts) continue;
-          const line = voiceLine(ctx, id);
-          if (line) lines.push(line);
-        }
-        return lines;
-      },
-    });
 
     r.proposal({
       type: "regard",

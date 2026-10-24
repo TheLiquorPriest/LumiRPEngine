@@ -41,6 +41,7 @@ import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
+import { povLead, together } from "../../../engine/presence";
 import { acts as lifeActs, povLife } from "../../../engine/life";
 import { classValues, isGroup, isMemberOf, MEMBER_OF, selectEntities } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
@@ -1261,9 +1262,10 @@ function decidedBlock(ctx: ReadContext, who: EntityId): string | null {
 }
 
 /**
- * Who the Stance section tells of (DESIGN §6.6): everyone at the POV's place it can see who acts, in
- * id order, and the test each piece about them passes: no unrevealed secret, nothing hidden named.
- * The test is built on its first use, so a renderer with nothing to check never pays for it.
+ * Who the Stance section tells of (DESIGN §6.6): everyone in the POV's scene (`together`) it can
+ * see who acts, in id order, and the test each piece about them passes: no unrevealed secret,
+ * nothing hidden named. The test is built on its first use, so a renderer with nothing to check
+ * never pays for it.
  */
 function stanceCast(ctx: ReadContext): { people: EntityId[]; safe: (text: string) => boolean } {
   const { registry: reg, world, state } = ctx;
@@ -1272,7 +1274,7 @@ function stanceCast(ctx: ReadContext): { people: EntityId[]; safe: (text: string
   // Who acts as far as the POV knows, as People and Cast read it: a body it hasn't found reads as them.
   // A character the Minds section tells of this turn has no Stance line (DESIGN §24.3): their mind says it.
   const minded = new Set(optionalQuery(ctx, "minds.minded")?.(ctx) ?? []);
-  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false && !minded.has(id));
+  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && together(world, here, placeOfEntity(state, id)) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false && !minded.has(id));
   let check: ((text: string) => boolean) | null = null;
   const safe = (text: string): boolean => {
     if (!check) {
@@ -1441,11 +1443,15 @@ export const castlifePack: PackDef = {
       slot: "people",
       render(ctx) {
         const pov = ctx.world.pov;
-        const lines: string[] = [];
+        // The POV leads, by name, so the narrator knows who "you" is, with the needs pressing on it.
+        const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
+        const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
+        const lines: string[] = [urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`];
         const here = placeOfEntity(ctx.state, pov);
+        const voice = optionalQuery(ctx, "relationships.voice");
         for (const id of Object.keys(ctx.state.entities).sort()) {
           const e = own(ctx.state.entities, id);
-          if (!e || id === pov || !here || placeOfEntity(ctx.state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id)) continue;
+          if (!e || id === pov || !together(ctx.world, here, placeOfEntity(ctx.state, id)) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id)) continue;
           // The narrator is told only who the POV can see: a secret or unknown person stays out of the prose.
           if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) continue;
           // What they are doing is a field: told only when the POV may see it. A life state the POV
@@ -1453,10 +1459,9 @@ export const castlifePack: PackDef = {
           const life = povLife(ctx.world, ctx.state, id);
           const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
           lines.push(life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
-        }
-        if (ctx.levelOf(pov, "castlife") >= 4) {
-          const urgent = Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label);
-          if (urgent.length > 0) lines.push(`You feel ${urgent.join(" and ")}.`);
+          // How they regard the POV follows them; a body the POV knows of holds no regard to voice.
+          const regard = life && !life.acts ? null : (voice?.(ctx, id) ?? null);
+          if (regard) lines.push(regard);
         }
         return lines;
       },

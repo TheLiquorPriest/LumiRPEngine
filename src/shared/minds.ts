@@ -626,6 +626,9 @@ export type MindRecord = {
   withheld: boolean;
 };
 
+/** When a mind was last due and at what level, as its cadence and a character's tier read it. */
+export type MindDue = Pick<MindRecord, "at" | "round" | "level" | "place">;
+
 /**
  * How a character goes about things, as the GM sets it (DESIGN §24.9): `reactive` answers the scene
  * and starts nothing of their own; `proactive` pursues their own aims unprompted.
@@ -661,6 +664,11 @@ export type MindsCharacter = {
   consolidated: number | null;
   /** The GM's intent for them in this chat (`minds.intent`); absent until one is set, and gone once cleared. */
   intent?: MindIntent;
+  /**
+   * Their mind was last due but not called (`minds.round` `levels`: off the POV's scene and in nothing
+   * that could surface soon, DESIGN §24.1). The later of it and `mind` is when it was last due (`lastDue`).
+   */
+  passed?: MindDue;
 };
 
 /** The minds pack's state slice (`state.packs.minds`). */
@@ -749,7 +757,7 @@ export interface SkipOutput {
 
 /** The minds pack's events. Every model answer is one, so a fold never calls a model. */
 export const MINDS_EVENTS = {
-  /** A turn's minds round: every turn with minds on (`on` true), and once with `on` false on the first turn after they're switched off. */
+  /** A turn's minds round: every turn with minds on (`on` true), and once with `on` false on the first turn after they're switched off; `levels`, the minds due that weren't called. */
   round: "minds.round",
   mind: "minds.mind",
   memory: "minds.memory",
