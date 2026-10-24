@@ -9,7 +9,7 @@
 //   recover {entity, field, amount?, full?}  a pool rises by `amount`, else its own `recover`, else to its max
 //   award   {entity, progression, amount}    adds to a progression's XP field (the level-up follows)
 //   check   {check, actor, target?, outcomes} anyone rolls a check; its outcome's effects see `roll.*`
-//   move    {entity, to, activity?, route?}      the one move path (`relocate`): leaves any container (`in`), `place` := to, where it then stands is the space pack's (`space.arrival`); `activity` is a narrated move's (its old one stays behind), `route` checks routes under the travel simulation; the player character's party follows it
+//   move    {entity, to, activity?, told?, with?}  the one move path (`relocate`): leaves any container (`in`), `place` := to, where it then stands is the space pack's (`space.arrival`); `told` is a narrated move's (routes checked under the travel simulation; its activity `activity`, else idle, and a stated one even where they already are); `with` the people who come along; the player character's party follows it, but not someone the same read or edit already put elsewhere
 //   link    {rel, from, to, until?, fields?} unlink {rel, from, to}: the other side of a symmetric
 //                                            or inverse type with it; kinds and cardinality checked
 //   spawn   {id?, kind, name, tier?, fields?, relations?, agent?, place?, class?, tags?}
@@ -50,7 +50,7 @@ import { together } from "./presence";
 import { classOf, classProblems } from "./selector";
 import type { Working } from "./working";
 import { labelOf, optionalService, own } from "./pack-kit";
-import { relocate } from "./relocate";
+import { movedElsewhere, relocate } from "./relocate";
 
 export interface EffectScope {
   /** Name → entity id (`self`, `actor`, `target`, ref params). */
@@ -86,7 +86,7 @@ export const CORE_EFFECTS: Readonly<Record<string, readonly string[]>> = {
   recover: ["entity", "field", "amount?", "full?"],
   award: ["entity", "progression", "amount"],
   check: ["check", "actor?", "target?", "outcomes"],
-  move: ["entity", "to", "activity?", "route?", "with?"],
+  move: ["entity", "to", "activity?", "told?", "with?"],
   link: ["rel", "from", "to", "until?", "fields?"],
   unlink: ["rel", "from", "to"],
   spawn: ["kind", "name", "id?", "tier?", "fields?", "relations?", "agent?", "place?", "class?", "tags?"],
@@ -201,16 +201,19 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       const e = own(state.entities, entity);
       if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
       if (!own(world.places, to)) return reject("missing_place", `no place ${labelOf(w, to)}`);
-      const moved = relocate(w.ctx, entity, to, { party: true, ...(typeof args.activity === "string" ? { activity: args.activity } : {}), ...(args.route === true ? { route: true } : {}) });
+      const here = placeOfEntity(state, entity);
+      // The party follows the player character, except anyone this read or edit already sent
+      // somewhere else, even somewhere still `together` with it (its flat inside the building).
+      const stayed = entity === world.pov ? movedElsewhere(w.events, here) : undefined;
+      const moved = relocate(w.ctx, entity, to, { party: true, ...(stayed ? { stayed } : {}), ...(typeof args.activity === "string" ? { activity: args.activity } : {}), ...(args.told === true ? { told: true } : {}) });
       if (!Array.isArray(moved)) return moved;
       // Who comes along (Go's `with`): people in the mover's scene who act; anyone else stays, and
-      // someone the party already brought isn't moved twice.
-      const here = placeOfEntity(state, entity);
+      // someone the party already brought isn't moved twice. What they were doing stays behind.
       const along = text(args.with).split(",").map((s) => s.trim()).filter((id) => id !== "" && id !== entity && own(state.entities, id) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)));
       const out = [...moved];
       for (const id of along) {
         if (out.some((ev) => ev.type === "set" && ev.entity === id && ev.field === "place")) continue;
-        const theirs = relocate(w.ctx, id, to);
+        const theirs = relocate(w.ctx, id, to, { along: true });
         if (Array.isArray(theirs)) out.push(...theirs);
       }
       return out;

@@ -76,7 +76,7 @@ describe("space: routes", () => {
     const ch = reg.proposals.get("location");
     expect(ch?.validate({ entity: "you", place: "atlantis" }, ctx)?.code).toBe("missing_place");
     expect(ch?.validate({ entity: "you", place: "cafe" }, ctx)).toBeNull();
-    expect(ch?.toEffects({ entity: "you", place: "cafe" }, ctx)).toEqual([{ type: "move", args: { entity: "you", to: "cafe", activity: "idle", route: true } }]);
+    expect(ch?.toEffects({ entity: "you", place: "cafe" }, ctx)).toEqual([{ type: "move", args: { entity: "you", to: "cafe", told: true } }]);
     world.places.islet = { id: "islet", name: "The islet", fields: {} };
     s.entities.you!.fields.place = "islet";
     expect(ch?.validate({ entity: "you", place: "cafe" }, reg.context(world, s))).toBeNull();

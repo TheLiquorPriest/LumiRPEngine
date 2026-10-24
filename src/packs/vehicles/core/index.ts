@@ -403,7 +403,8 @@ export const vehiclesPack: PackDef = {
           const pe = own(ctx.state.entities, p);
           if (!pe || moved.has(p) || pe.relations.some((x) => x.type === "in" && x.to === v)) continue;
           moved.add(p);
-          const events = relocate(ctx, p, to);
+          // A rider comes along: what they were doing stays behind, as for a Go companion.
+          const events = relocate(ctx, p, to, p === driver ? {} : { along: true });
           if ("code" in events) return events;
           out.push(...events);
         }
