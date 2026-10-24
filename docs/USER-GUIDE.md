@@ -298,7 +298,7 @@ A person in **World** opens their **character sheet**, a page made for running t
 - **Now**: where they are, as the whole path ("Port Alder › Harbor Street › 114 Harbor Street"); what they're doing and until when; what holds them (a car, say), with **Take out**; and what the story holds them to, with until when. **Move them…** opens the place picker (see [Picking a place, a bed or a list of words](#picking-a-place-a-bed-or-a-list-of-words)), with **Their home** and **Where** *your character* **is** offered first. **Bring to** *your character*'s **place** does it in one tap. **Travels with** *your character* is a switch: on, they go wherever your character goes (Go to, driving, a move the reply tells, your character's own routine in a skip).
 - **Where they live**: **Home**, through the place picker, and **Sleeps**, through the bed picker; each shows as its path.
 - **Mind**: their level and what the GM means them to do, with **Open their mind**, their page in **Minds**.
-- **Routine**: what they're doing now and next in today's laid day, with **Open their routine**, their page in **Routines**.
+- **Routine**: what their routine has them doing now and next in today's laid day, with **Open their routine**, their page in **Routines**. When that isn't what they're doing, a line under it says why: their routine is context only (informative) or switched off, so it never moves them; the story holds them (named); or they simply aren't where it has them yet.
 - **Carrying**: what they wear, have equipped and carry, each with **Open**.
 - **Money**: their cash or wealth and how many accounts they hold, with **Open their money**, their hub in **Money**.
 - **Relations**, **Simulation**, **Life**, **Classes and tags** and **Remove from the world**, as on an entity's page.
@@ -337,16 +337,16 @@ A classification or tag you set here holds in this chat only, over what the worl
 
 ### What the narrator is fed
 
-Each section the narrator reads (Outcome, Scene, People and the rest) has settings. The world sets them in **Build → Sections**, and **GM → This chat → Sections** sets them for the chat you have open: tap a section, change what you like and tap **Save for this chat**, or **Use the world's** to go back to the world's. The chat's settings stand in place of the world's for that section, whole: the form opens on the settings in force, and what you save is all of them, so you can lift a cap or a list of sources the world set. Each save is a GM edit with its own **Undo**.
+Each section the narrator reads (Outcome, Scene, People and the rest) has settings. The world sets them in **Build → Sections**, and **GM → This chat → Sections** sets them for the chat you have open. Each section's row says, in the form's own words, whether it's in the prompt, whose knowledge it tells, its caps and whether it takes sources it picked, and whether those settings are this chat's or the world's. Tap a section and its settings open as a page of their own: change what you like and tap **Save for this chat**, or **Use the world's** to go back to the world's. The chat's settings stand in place of the world's for that section, whole: the form opens on the settings in force, and what you save is all of them, so you can lift a cap or a list of sources the world set. Each save is a GM edit with its own **Undo**.
 
 - **In the prompt**: off leaves the section out.
-- **At most lines** (**Cap its lines** in the GM page; off is no cap): only its first lines go in, the background hints included.
-- **At most tokens** (**Cap its tokens**; off is no cap): lines past it are cut from the end.
-- **Sources**: the renderers that fill the section, by name; none means its own. `location`, `calendar` and `weather` fill Scene, `people`, `routines` and `present_gear` People, `stance` and `cues` Stance, `conditions` Outcome, and `money`, `gear`, `vehicles`, `quest`, `place`, `property` and `minds` their own sections. A custom section with sources, say a **Weather** section with `weather`, gets those lines too.
+- **Cap its lines**, then **At most lines** (off is no cap): only its first lines go in, the background hints included.
+- **Cap its tokens**, then **At most tokens** (off is no cap): lines past it are cut from the end.
+- **What it tells** (**Sources** in **Build → Sections**, by name): a box for each kind of fact the packs tell, in plain words ("What the people here wear and carry"), its own marked **Its own** and ticked unless the section picked others. Ticking exactly its own is the plain setting, so it also takes what a pack adds to it later; tick others, or untick some, and it takes just those. Tick at least one, or switch the section out of the prompt. By name, `location`, `calendar` and `weather` fill Scene, `people`, `routines` and `present_gear` People, `stance` and `cues` Stance, `conditions` Outcome, and `money`, `gear`, `vehicles`, `quest`, `place`, `place_lore`, `property` and `minds` their own sections. A custom section with sources, say a **Weather** section with `weather`, gets those lines too.
 - **Whose knowledge**:
-  - **What the player character knows** (the default): what every section has always told.
-  - **Also what the people with him know**: facts he doesn't know but someone with him does, such as a person in the room only Maya knows is there. Never a secret (something only the GM knows), nor a quest's hidden truth: only **Everything** tells those.
-  - **Everything**: every fact, secrets included.
+  - **What your character knows** (the default): what every section has always told.
+  - **Also what the people with your character know**: facts your character doesn't know but someone with them does, such as a person in the room only Maya knows is there. Never a secret (something only the GM knows), nor a quest's hidden truth: only **Everything** tells those.
+  - **Everything, with what your character doesn't know marked**: every fact, secrets included.
 
   A fact your character doesn't know is marked for the narrator ("[unknown to you; known to Maya]", "[unknown to you; GM only]"), and the narrator is told that marked facts are only for steering the story: never to reveal, narrate as known or let your character act on. The engine's own screens never show them: Play, chips, the Journal and the Context panel's sizes show only what your character knows. But marked facts are in the prompt, so anything in Lumiverse that shows the prompt or the engine's book shows them too; choosing a wider scope is choosing to put them there.
 

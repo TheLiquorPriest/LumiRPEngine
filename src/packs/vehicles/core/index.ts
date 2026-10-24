@@ -530,7 +530,7 @@ export const vehiclesPack: PackDef = {
       },
     });
 
-    r.renderer({ slot: "vehicles", render: (ctx) => vehicleLines(ctx, "player").map((l) => l.text), feed: vehicleLines });
+    r.renderer({ slot: "vehicles", label: "Vehicles your character can use, and others nearby", render: (ctx) => vehicleLines(ctx, "player").map((l) => l.text), feed: vehicleLines });
     r.view({ panel: "vehicles.garage", build: (ctx) => buildGarageView(ctx) as unknown as JsonValue });
 
     r.lint({

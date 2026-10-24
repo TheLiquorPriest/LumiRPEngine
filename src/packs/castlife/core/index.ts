@@ -1773,14 +1773,14 @@ export const castlifePack: PackDef = {
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun", minutes: `=${REST_FOR}`, activity: "waiting", after: `=${REST_TURN}` } }] }, duration: REST_TURN, activity: { type: "waiting", until: `clock + (${REST_FOR})` }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }, { type: "castlife.book_invitation", args: { host: "host" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
 
-    r.renderer({ slot: "people", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
+    r.renderer({ slot: "people", label: "Who is here and how they feel about your character", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
     // Their usual routine as background the narrator may use or ignore (DESIGN §6.6): a hint, so it
     // rides last on the budget and stays out of the helpers' facts.
-    r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });
+    r.renderer({ slot: "people", source: "routines", label: "People's usual routines, as background", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) as unknown as JsonValue });
     r.view({ panel: "castlife.needs", build: (ctx) => buildNeedsView(ctx) as unknown as JsonValue });
-    r.renderer({ slot: "stance", render: stanceLines, feed: stanceFeed });
-    r.renderer({ slot: "stance", source: "cues", hint: true, render: stanceCues });
+    r.renderer({ slot: "stance", label: "How the people here stand and what they're about", render: stanceLines, feed: stanceFeed });
+    r.renderer({ slot: "stance", source: "cues", label: "Hints of what people keep to themselves", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
     r.lint({ code: "castlife.needs", check: needsIssues });
     // A birthday the planner can't read is no occasion: say so where it is written.

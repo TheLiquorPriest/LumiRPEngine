@@ -289,6 +289,7 @@ export const sheetsPack: PackDef = {
       slot: "outcome",
       // A section's `include` picks it by this name (DESIGN §6.11).
       source: "conditions",
+      label: "Conditions your character is under",
       render(ctx) {
         const conditions = activeConditions(ctx, ctx.world.pov);
         return conditions.length > 0 ? [`You are ${conditions.map((c) => c.label.toLowerCase()).join(", ")}.`] : [];
