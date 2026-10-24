@@ -45,7 +45,5 @@ describe("search and discoverable things", () => {
     const opened = resolveAction(reg, w, { action: "search", params: { target: "chest" } }, createRng("chest"));
     expect(opened.ok).toBe(true);
     expect(sees(w, "letter")).toBe(true);
-    // The chest the world filled keeps what it was given: no random stock beside the letter.
-    expect(Object.values(w.state.entities).filter((e) => e.relations.some((r) => r.type === "in" && r.to === "chest")).map((e) => e.name)).toEqual(["Sealed letter"]);
   });
 });

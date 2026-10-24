@@ -66,6 +66,40 @@ export function putPlan(c: MindsCharacter, plan: MindPlan): void {
   boundPlans(c);
 }
 
+/**
+ * Puts a plan for `who` and, while everyone in it shares it (`shared`, DESIGN §24.8), for each other
+ * person in it a copy from their side under the same id (`with`: everyone else in it): one plan, which
+ * each holder settles as they live it, so a copy keeps the status its holder has it at. Anyone who held
+ * it and is no longer in it loses it. Never for the player character, whose plans are the player's
+ * (the plan's invitation asks it along), nor for anyone the world doesn't have. Every list keeps its
+ * bounds (`putPlan`). Reads only the plan, the minds slice and who exists, so a coarsened record folds alike.
+ */
+export function sharePlan(state: WorldState, pov: EntityId, who: EntityId, plan: MindPlan): void {
+  putPlan(writeCharacter(state, who), plan);
+  const people = [who, ...plan.with.filter((id) => id !== who)];
+  const sharing = plan.shared === true ? people.filter((id) => id !== who && id !== pov && own(state.entities, id) !== undefined) : [];
+  const chars = writeSlice(state).chars;
+  for (const id of Object.keys(chars)) {
+    const c = own(chars, id);
+    if (c && id !== who && !sharing.includes(id) && c.plans.some((p) => p.id === plan.id)) c.plans = c.plans.filter((p) => p.id !== plan.id);
+  }
+  for (const id of sharing) {
+    const c = writeCharacter(state, id);
+    const held = c.plans.find((p) => p.id === plan.id) ?? plan;
+    putPlan(c, { ...plan, with: people.filter((x) => x !== id), status: held.status, closed: held.closed, reason: held.reason });
+  }
+}
+
+/** Takes a plan from `who`, and a shared one (`shared`) from everyone who holds it: it is one plan. */
+export function dropPlan(state: WorldState, who: EntityId, id: string): void {
+  const chars = writeSlice(state).chars;
+  const shared = own(chars, who)?.plans.find((p) => p.id === id)?.shared === true;
+  for (const holder of shared ? Object.keys(chars) : [who]) {
+    const c = own(chars, holder);
+    if (c) c.plans = c.plans.filter((p) => p.id !== id);
+  }
+}
+
 /** Open plans past the bound go oldest first; closed ones keep only the latest. */
 export function boundPlans(c: MindsCharacter): void {
   const open = c.plans.filter((p) => p.status === "open");

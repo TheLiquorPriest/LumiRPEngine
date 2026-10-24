@@ -8,7 +8,7 @@ import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { CommitmentKind, CommitmentStatus, MindCommitment, MindEditOp, MindNote, MindPlan, PlanKind, PlanStatus } from "../../../shared/minds";
-import { COMMITMENT_KINDS, COMMITMENT_STATUSES, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
+import { COMMITMENT_KINDS, COMMITMENT_STATUSES, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan } from "../../../shared/minds";
 import { labelOf, own } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
@@ -87,8 +87,10 @@ function planFrom(ctx: ReadContext, who: EntityId, id: string | null, v: JsonObj
   const money = kind === "pay" || kind === "lend";
   const cents = v.cents === undefined ? before?.cents : typeof v.cents === "number" && Number.isInteger(v.cents) && v.cents > 0 ? v.cents : null;
   if (money && (cents === null || cents === undefined || withList.length === 0)) return reject("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
+  // A plan with others in it is theirs too (DESIGN §24.8): one plan, under the id the same people and start give it, whoever records it.
+  const shared = sharesPlan({ kind, with: withList });
   return {
-    id: id ?? `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`,
+    id: id ?? (shared ? sharedPlanId([who, ...withList], when.from) : `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`),
     what,
     kind,
     when: { from: when.from, to: when.to },
@@ -101,6 +103,9 @@ function planFrom(ctx: ReadContext, who: EntityId, id: string | null, v: JsonObj
     closed,
     reason: status === "open" ? null : (before?.reason ?? "GM edit"),
     ...(money && cents ? { cents } : {}),
+    ...(shared ? { shared: true as const } : {}),
+    // A memory's words stay that memory's until the GM rewrites them; the GM's own are everyone's in it.
+    ...(shared && v.what === undefined && before?.by !== undefined ? { by: before.by } : {}),
   };
 }
 

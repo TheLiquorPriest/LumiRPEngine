@@ -3982,10 +3982,13 @@ function canSeeEntity(reg, world, state, pov, id) {
     return true;
   if (!own(state.entities, id) || isGone(state, id))
     return false;
-  const v = entityVisibility(world, state, id);
+  const v = isDiscoverable(world, state, id) ? "known_by" : entityVisibility(world, state, id);
   if (v !== "known_by")
     return v === "public";
   return knows(state, pov, id) || granted(reg, world, state, pov, own(world.entities, id)?.knownBy ?? own(state.entities, id)?.fields.knownBy);
+}
+function isDiscoverable(world, state, id) {
+  return (own(world.entities, id)?.visibility ?? own(state.entities, id)?.fields.visibility) === "discoverable";
 }
 function canSeeField(reg, world, state, pov, id, field) {
   if (!canSeeEntity(reg, world, state, pov, id))
@@ -5427,6 +5430,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   thoughts: { on: false, tokens: "none" },
   recall: { on: false },
   routine: { on: true, tokens: 400 },
+  plans: { on: true, tokens: 400 },
   life: { on: false, tokens: "none" }
 });
 var MINDS_PRESETS = Object.freeze({
@@ -5478,6 +5482,7 @@ function readsOf(raw, base) {
     thoughts: readOf(r.thoughts, base.thoughts),
     recall: { on: typeof recall.on === "boolean" ? recall.on : base.recall.on },
     routine: readOf(r.routine, base.routine),
+    plans: readOf(r.plans, base.plans),
     life: readOf(r.life, base.life)
   };
 }
@@ -5540,6 +5545,15 @@ function effectiveMemory(world, settings) {
 }
 var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
 var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+function planWords(p, who) {
+  return p.by === undefined || p.by === who ? p.what : `a ${p.kind} plan`;
+}
+function sharesPlan(p) {
+  return p.with.length > 0 && p.kind !== "pay" && p.kind !== "lend";
+}
+function sharedPlanId(people, from) {
+  return `p_${hashParts("minds.plan.shared", String(from), ...[...new Set(people)].sort()).slice(0, 10)}`;
+}
 function planInForce(p) {
   return p.source !== "mind";
 }
@@ -5673,7 +5687,7 @@ var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var TIMELAPSE_REACH_MINUTES = 366 * 1440;
 var ASK_BEYOND_DEFAULT = 1440;
-var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine"];
+var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -5685,7 +5699,13 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   life: "confirm",
   knows: "confirm",
   give: "confirm",
-  purchase: "confirm"
+  purchase: "confirm",
+  take: "confirm",
+  drop: "confirm",
+  use_up: "confirm",
+  wear: "confirm",
+  lose: "confirm",
+  item_condition: "confirm"
 });
 var EXTRACTION_LEARNING = Object.freeze({
   promoteAt: 0.9,
@@ -22265,7 +22285,7 @@ function registerEffects(r, hooks) {
       const out = [...paid];
       const spawn = PHYSICAL.has(price.category) && args.keep !== false ? optionalService(ctx, "gear.spawn") : null;
       if (spawn && ctx.levelOf(payer, "gear") >= 1) {
-        const made = spawn(ctx, { name, owner: payer, holder: payer, ...row ? { catalog: row } : {}, category: price.category, qty, salt: `buy:${ctx.rng.seed}` });
+        const made = spawn(ctx, { name, owner: payer, holder: payer, ...row ? { catalog: row } : {}, category: price.category, qty, salt: `buy:${ctx.rng.seed}`, stack: true });
         if (Array.isArray(made))
           out.push(...made);
       }
@@ -23015,7 +23035,23 @@ var give = (ctx, item, from, to) => {
 function spawnId2(ctx, spec) {
   return `item:${hashParts(spec.name, spec.owner ?? "", spec.holder ?? "", spec.catalog ?? "", ctx.state.clock, spec.salt ?? "", Object.keys(ctx.state.entities).length).slice(0, 12)}`;
 }
+function stackFor(ctx, spec) {
+  if (!spec.holder || !own(ctx.state.entities, spec.holder))
+    return null;
+  const name = spec.name.trim().toLowerCase();
+  return carriedBy(ctx.state, spec.holder).find((id) => {
+    const e = own(ctx.state.entities, id);
+    if (!e || e.kind !== "item" || isGone(ctx.state, id) || e.relations.some((r) => r.type === "worn_by" || r.type === "equipped"))
+      return false;
+    if ((e.fields.owner ?? null) !== (spec.owner ?? null))
+      return false;
+    return spec.catalog ? e.fields.catalog === spec.catalog : e.fields.catalog === undefined && e.name.trim().toLowerCase() === name;
+  }) ?? null;
+}
 var spawn = (ctx, spec) => {
+  const stack = spec.stack ? stackFor(ctx, spec) : null;
+  if (stack)
+    return [{ type: "set", entity: stack, field: "qty", value: numOf(own(ctx.state.entities, stack)?.fields.qty, 1) + (spec.qty ?? 1) }];
   const row = spec.catalog ? rowOf(ctx, "gear.items", spec.catalog) ?? rowOf(ctx, "gear.containers", spec.catalog) : undefined;
   const fields = { notable: true };
   if (spec.owner)
@@ -23052,12 +23088,44 @@ function usedUp(ctx, item, done) {
   const e = own(ctx.state.entities, item);
   return done && e?.fields.claimed === true && e.fields.consumable === true && e.fields[GONE_FIELD] !== true ? [{ type: "set", entity: item, field: GONE_FIELD, value: true }] : [];
 }
+function search(ctx, who, target) {
+  if (!own(ctx.state.entities, who))
+    return reject9("missing_entity", `no searcher ${labelOf(ctx, who)}`);
+  const place = placeOfEntity(ctx.state, who);
+  if (target !== null) {
+    if (!own(ctx.state.entities, target))
+      return reject9("missing_entity", `no ${labelOf(ctx, target)} to search`);
+    if (placeOfEntity(ctx.state, target) !== place)
+      return reject9("not_here", `${labelOf(ctx, target)} isn't here`);
+  } else if (!place)
+    return reject9("no_place", `${labelOf(ctx, who)} is nowhere`);
+  const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place).sort();
+  return found.filter((id) => id !== who && !isGone(ctx.state, id) && isDiscoverable(ctx.world, ctx.state, id) && !knows(ctx.state, who, id)).map((id) => ({ type: "link", rel: "knows", from: who, to: id }));
+}
 function heldItem(ctx, item, from) {
   if (own(ctx.state.entities, item) || from === "")
     return item;
   const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
   const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
+}
+var USE_UP_MAX = 10;
+var CONDITION_STEP_MAX = 25;
+function lyingNamed(ctx, item, who) {
+  const place = placeOfEntity(ctx.state, who);
+  const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
+  const fits = Object.keys(ctx.state.entities).filter((id) => !isGone(ctx.state, id) && !heldByPerson(ctx, id) && placeOfEntity(ctx.state, id) === place && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
+  return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
+}
+function heldByPerson(ctx, id) {
+  let cur = holderOf(ctx.state, id);
+  for (let guard = 0;cur && guard < 32; guard++) {
+    const e = own(ctx.state.entities, cur);
+    if (e && kindIs(ctx.registry, ctx.world, e.kind, "person"))
+      return true;
+    cur = holderOf(ctx.state, cur);
+  }
+  return false;
 }
 function claimId(ctx, c) {
   for (let n = 0;; n++) {
@@ -23070,6 +23138,11 @@ var claim = (ctx, c) => {
   if (!own(ctx.state.entities, c.by))
     return reject9("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
   const name = c.name.trim();
+  if (c.existing && own(ctx.state.entities, c.existing)) {
+    const place2 = placeOfEntity(ctx.state, c.by);
+    const moved = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place2 ? drop(ctx, c.existing, place2) : reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    return Array.isArray(moved) ? { entity: c.existing, events: moved } : moved;
+  }
   if (c.at === "held") {
     const held2 = carriedBy(ctx.state, c.by).find((id2) => {
       const e = own(ctx.state.entities, id2);
@@ -23236,7 +23309,8 @@ var gearPack = {
     });
     wrap("gear.drop", ["item", "place?"], (a, ctx) => drop(ctx, strOf(a.item), strOf(a.place) || (placeOfEntity(ctx.state, strOf(a.item)) ?? "")));
     wrap("gear.give", ["item", "from", "to"], (a, ctx) => give(ctx, strOf(a.item), strOf(a.from), strOf(a.to)));
-    wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}` }));
+    wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}`, stack: true }));
+    wrap("gear.search", ["who", "target?"], (a, ctx) => search(ctx, strOf(a.who) || ctx.world.pov, strOf(a.target) || null));
     wrap("gear.take_piece", ["kit", "piece", "to"], (a, ctx) => takePiece(ctx, strOf(a.kit), strOf(a.piece), strOf(a.to)));
     wrap("gear.lend", ["item", "to", "until?", "said?"], (a, ctx) => {
       const said2 = strOf(a.said);
@@ -23312,6 +23386,7 @@ var gearPack = {
     });
     r.action({ id: "lose", label: "Lose something", description: "Something you own or carry is lost or gone, whereabouts unknown.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self or carries(self, item)", "item.lost != true"], outcomes: { default: [{ type: "gear.lose", args: { item: "item" } }] }, duration: "1", lexicon: ["lost my", "lose", "can't find my", "is gone", "is missing"], observable: "searches their pockets" });
     r.action({ id: "drop", label: "Drop", description: "Put down something you carry, here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
+    r.action({ id: "search", label: "Search", description: "Search where you are, or look through a container, for what isn't in plain sight.", pack: "gear", params: { target: { type: "ref", ref: "item", optional: true, label: "What to look through (none: around here)" } }, requires: [], outcomes: { default: [{ type: "gear.search", args: { who: "self", target: "=params.target" } }] }, duration: "5", lexicon: ["search", "look around", "examine", "look through", "look inside", "open", "rummage"], observable: "searches the place" });
     r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
     r.action({ id: "lend", label: "Lend", description: "Lend something of yours to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
@@ -23425,6 +23500,141 @@ var gearPack = {
       toEffects: (p, ctx) => {
         const item = heldItem(ctx, strOf(p.item), strOf(p.from));
         return own(ctx.state.entities, item) ? [{ type: "gear.give", args: { item, from: strOf(p.from), to: strOf(p.to) } }] : [{ type: "gear.receive", args: { name: item, from: strOf(p.from), to: strOf(p.to) } }];
+      }
+    });
+    const itemFor = (p, ctx, who, near) => {
+      if (!own(ctx.state.entities, who))
+        return reject9("missing_entity", `no one ${labelOf(ctx, who)}`);
+      const named = heldItem(ctx, strOf(p.item), who);
+      const id = near && !own(ctx.state.entities, named) ? lyingNamed(ctx, strOf(p.item), who) : named;
+      const e = own(ctx.state.entities, id);
+      if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "item") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id))
+        return reject9("missing_entity", `no item ${labelOf(ctx, strOf(p.item))}`);
+      if (e.kind === "account")
+        return reject9("is_money", "money changes hands as a transfer");
+      return { id, e };
+    };
+    r.proposal({
+      type: "take",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        if ("code" in found)
+          return found;
+        if (isInside(ctx.state, found.id, who))
+          return reject9("already_held", `${labelOf(ctx, who)} already has ${found.e.name}`);
+        if (placeOfEntity(ctx.state, found.id) !== placeOfEntity(ctx.state, who) || heldByPerson(ctx, found.id))
+          return reject9("not_here", `${found.e.name} isn't lying where ${labelOf(ctx, who)} is`);
+        return null;
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        return "code" in found ? [] : [{ type: "gear.transfer", args: { item: found.id, to: who } }];
+      }
+    });
+    r.proposal({
+      type: "drop",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return found;
+        if (!isInside(ctx.state, found.id, who))
+          return reject9("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        return placeOfEntity(ctx.state, who) ? null : reject9("no_place", `${labelOf(ctx, who)} is nowhere`);
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        return "code" in found ? [] : [{ type: "gear.drop", args: { item: found.id, place: placeOfEntity(ctx.state, who) ?? "" } }];
+      }
+    });
+    r.proposal({
+      type: "use_up",
+      boundField: "number",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return found;
+        if (!isInside(ctx.state, found.id, who))
+          return reject9("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        const n = p.qty === undefined ? 1 : p.qty;
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > USE_UP_MAX)
+          return reject9("bound", `using up is a whole number from 1 to ${USE_UP_MAX} at a time`);
+        return null;
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return [];
+        const left = numOf(found.e.fields.qty, 1) - numOf(p.qty, 1);
+        return [left > 0 ? { type: "set", args: { entity: found.id, field: "qty", value: left } } : { type: "set", args: { entity: found.id, field: GONE_FIELD, value: true } }];
+      }
+    });
+    r.proposal({
+      type: "wear",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        if ("code" in found)
+          return found;
+        const worn = found.e.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who);
+        if (p.off === true)
+          return worn ? null : reject9("not_worn", `${labelOf(ctx, who)} isn't wearing ${found.e.name}`);
+        if (worn)
+          return reject9("already_worn", `${labelOf(ctx, who)} already wears ${found.e.name}`);
+        return isInside(ctx.state, found.id, who) || placeOfEntity(ctx.state, found.id) === placeOfEntity(ctx.state, who) ? null : reject9("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        if ("code" in found)
+          return [];
+        return p.off === true ? [{ type: "gear.remove", args: { item: found.id } }] : [{ type: "gear.wear", args: { item: found.id, wearer: who } }];
+      }
+    });
+    r.proposal({
+      type: "lose",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return found;
+        if (!isInside(ctx.state, found.id, who) && found.e.fields.owner !== who)
+          return reject9("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        const by = strOf(p.by);
+        return by === "" || own(ctx.state.entities, by) ? null : reject9("missing_entity", `no thief ${labelOf(ctx, by)}`);
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return [];
+        return strOf(p.by) !== "" ? [{ type: "gear.transfer", args: { item: found.id, to: strOf(p.by) } }] : [{ type: "gear.lose", args: { item: found.id } }];
+      }
+    });
+    r.proposal({
+      type: "item_condition",
+      boundField: "number",
+      validate(p, ctx) {
+        const holder = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, holder, true);
+        if ("code" in found)
+          return found;
+        if (typeof p.delta !== "number" || !Number.isInteger(p.delta) || p.delta === 0 || Math.abs(p.delta) > CONDITION_STEP_MAX)
+          return reject9("bound", `an item's condition moves by a whole number up to ${CONDITION_STEP_MAX} a reply`);
+        return null;
+      },
+      toEffects: (p, ctx) => {
+        const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
+        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: numOf(p.delta, 0) } }];
       }
     });
     r.proposal({
@@ -26657,7 +26867,7 @@ function asksOf(ctx, who, days) {
     for (const p of plans) {
       const first = laid.get(p.id)?.[0];
       if (first)
-        out.push({ key: `${who}:plan:${p.id}`, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null, origin: { type: "plan", plan: p.id } });
+        out.push({ key: p.shared === true ? `plan:${p.id}` : `${who}:plan:${p.id}`, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null, origin: { type: "plan", plan: p.id } });
     }
   }
   if (routineSettingsOf(ctx.world).invitations === "off" || followOf(ctx, who).mode !== "follows" || routineRole(ctx, who) !== "enforced")
@@ -26687,6 +26897,35 @@ function invitation(ctx, who, ask) {
     return [];
   const text4 = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
   return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text: text4, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text: text4, entity: who } }];
+}
+function openInvitations(ctx) {
+  const list = sliceOf(ctx.state, "castlife").invitations;
+  const now = ctx.state.clock;
+  return (Array.isArray(list) ? list : []).map(objOf).filter((inv) => {
+    const at = numOf(inv.at);
+    return povLife(ctx.world, ctx.state, strOf(inv.agent))?.acts !== false && at >= now - 180 && at <= now + MINUTES_PER_DAY;
+  });
+}
+function bookInvitation(ctx, host) {
+  const pov = ctx.world.pov;
+  const inv = openInvitations(ctx).findLast((i) => strOf(i.agent) === host);
+  const e = own(ctx.state.entities, pov);
+  if (!inv || !e)
+    return [];
+  const at = numOf(inv.at);
+  const key = strOf(inv.key) || `${host}:${at}`;
+  const booked = Array.isArray(e.fields.appointments) ? e.fields.appointments : [];
+  if (booked.some((a) => objOf(a).invitation === key))
+    return [];
+  const origin = strOf(inv.origin);
+  const plan2 = origin.startsWith("plan:") ? (optionalQuery(ctx, "minds.plans")?.(ctx, host) ?? []).find((p) => `plan:${p.id}` === origin) : undefined;
+  const cal = calendarOf(ctx.world);
+  const blocks = plan2 ? laidPlans(ctx, host, [plan2]).get(plan2.id) ?? [] : dayPlan(ctx, host, dateAt(cal, at).dayIndex).blocks;
+  const end = blocks.find((b) => b.start === at)?.end;
+  const place = typeof inv.place === "string" && own(ctx.world.places, inv.place) && canSeePlace(ctx.registry, ctx.world, ctx.state, pov, inv.place) ? inv.place : null;
+  const people = [...new Set([host, ...plan2?.with ?? []])].filter((id) => id !== pov);
+  const appointment = { at, minutes: end !== undefined && end > at ? end - at : 60, ...place ? { place } : {}, label: `With ${own(ctx.state.entities, host)?.name ?? host}`, with: people, invitation: key };
+  return [{ type: "set", entity: pov, field: "appointments", value: [...booked, appointment] }];
 }
 function planMoments(ctx, who, slot) {
   const inside = (at) => at > slot.start && at < slot.end;
@@ -27407,14 +27646,7 @@ var castlifePack = {
       }
       return out;
     });
-    const openInvitations = (ctx) => {
-      const list = sliceOf(ctx.state, "castlife").invitations;
-      const now = ctx.state.clock;
-      return (Array.isArray(list) ? list : []).map(objOf).filter((inv) => {
-        const at = numOf(inv.at);
-        return povLife(ctx.world, ctx.state, strOf(inv.agent))?.acts !== false && at >= now - 180 && at <= now + MINUTES_PER_DAY;
-      });
-    };
+    r.effect({ type: "castlife.book_invitation", args: ["host"], resolve: (a, ctx) => bookInvitation(ctx, strOf(a.host)) });
     r.formula("invited", (ctx, host) => openInvitations(ctx).some((inv) => strOf(inv.agent) === String(host ?? "")));
     r.query("castlife.invitations", (ctx, viewer) => openInvitations(ctx).map((inv) => ({ host: strOf(inv.agent), text: invitationText(ctx, strOf(inv.agent), typeof inv.place === "string" ? inv.place : null, numOf(inv.at), viewer) })));
     r.formula("need", (ctx, who, need2) => needValue(ctx, String(who ?? ctx.world.pov), String(need2 ?? "")));
@@ -27456,7 +27688,7 @@ var castlifePack = {
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
-    r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
+    r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }, { type: "castlife.book_invitation", args: { host: "host" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
     r.renderer({ slot: "people", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
     r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
@@ -30544,6 +30776,31 @@ function putPlan(c, plan2) {
     c.plans.push(plan2);
   boundPlans(c);
 }
+function sharePlan(state2, pov, who, plan2) {
+  putPlan(writeCharacter(state2, who), plan2);
+  const people = [who, ...plan2.with.filter((id) => id !== who)];
+  const sharing = plan2.shared === true ? people.filter((id) => id !== who && id !== pov && own(state2.entities, id) !== undefined) : [];
+  const chars = writeSlice(state2).chars;
+  for (const id of Object.keys(chars)) {
+    const c = own(chars, id);
+    if (c && id !== who && !sharing.includes(id) && c.plans.some((p) => p.id === plan2.id))
+      c.plans = c.plans.filter((p) => p.id !== plan2.id);
+  }
+  for (const id of sharing) {
+    const c = writeCharacter(state2, id);
+    const held3 = c.plans.find((p) => p.id === plan2.id) ?? plan2;
+    putPlan(c, { ...plan2, with: people.filter((x) => x !== id), status: held3.status, closed: held3.closed, reason: held3.reason });
+  }
+}
+function dropPlan(state2, who, id) {
+  const chars = writeSlice(state2).chars;
+  const shared = own(chars, who)?.plans.find((p) => p.id === id)?.shared === true;
+  for (const holder of shared ? Object.keys(chars) : [who]) {
+    const c = own(chars, holder);
+    if (c)
+      c.plans = c.plans.filter((p) => p.id !== id);
+  }
+}
 function boundPlans(c) {
   const open = c.plans.filter((p) => p.status === "open");
   const closed = c.plans.filter((p) => p.status !== "open");
@@ -30619,7 +30876,7 @@ function isFidelity(v) {
 function isPlan(v) {
   if (!isRecord(v) || !isRecord(v.when))
     return false;
-  return str13(v.id) && v.id !== "" && str13(v.what) && typeof v.kind === "string" && PLAN_KINDS.includes(v.kind) && finite2(v.when.from) && finite2(v.when.to) && v.when.to >= v.when.from && (v.where === null || str13(v.where)) && ids(v.with) && finite2(v.priority) && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max && (v.status === "open" || v.status === "done" || v.status === "dropped") && finite2(v.made) && (v.source === "mind" || v.source === "memory" || v.source === "gm") && (v.closed === null || finite2(v.closed)) && (v.reason === null || str13(v.reason)) && (v.kind === "pay" || v.kind === "lend" ? finite2(v.cents) && Number.isInteger(v.cents) && v.cents > 0 && v.with.length > 0 : v.cents === undefined);
+  return str13(v.id) && v.id !== "" && str13(v.what) && typeof v.kind === "string" && PLAN_KINDS.includes(v.kind) && finite2(v.when.from) && finite2(v.when.to) && v.when.to >= v.when.from && (v.where === null || str13(v.where)) && ids(v.with) && finite2(v.priority) && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max && (v.status === "open" || v.status === "done" || v.status === "dropped") && finite2(v.made) && (v.source === "mind" || v.source === "memory" || v.source === "gm") && (v.closed === null || finite2(v.closed)) && (v.reason === null || str13(v.reason)) && (v.shared === undefined || v.shared === true && v.with.length > 0 && v.kind !== "pay" && v.kind !== "lend") && (v.by === undefined || str13(v.by) && v.shared === true) && (v.kind === "pay" || v.kind === "lend" ? finite2(v.cents) && Number.isInteger(v.cents) && v.cents > 0 && v.with.length > 0 : v.cents === undefined);
 }
 function isNote(v) {
   return isRecord(v) && str13(v.id) && v.id !== "" && str13(v.text) && finite2(v.salience) && v.salience >= 0 && v.salience <= 5 && finite2(v.at);
@@ -30628,7 +30885,7 @@ function isCommitment(v) {
   return isRecord(v) && str13(v.id) && v.id !== "" && typeof v.kind === "string" && COMMITMENT_KINDS.includes(v.kind) && ids(v.with) && str13(v.text) && (v.due === null || finite2(v.due)) && typeof v.status === "string" && COMMITMENT_STATUSES.includes(v.status) && finite2(v.made) && (v.closed === null || finite2(v.closed));
 }
 function planOf(v) {
-  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason, ...v.cents !== undefined ? { cents: v.cents } : {} };
+  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason, ...v.cents !== undefined ? { cents: v.cents } : {}, ...v.shared === true ? { shared: true } : {}, ...v.by !== undefined ? { by: v.by } : {} };
 }
 function noteOf(v) {
   return { id: v.id, text: v.text, salience: v.salience, at: v.at };
@@ -30718,7 +30975,7 @@ function validMemory(data) {
 var memory = {
   type: MINDS_EVENTS.memory,
   validate: (e, ctx) => person(ctx, e.data) ?? validMemory(e.data),
-  apply: (e, state2) => {
+  apply: (e, state2, ctx) => {
     const d = e.data;
     if (!str13(d.entity))
       return;
@@ -30740,7 +30997,7 @@ var memory = {
     }
     for (const p of Array.isArray(d.plans) ? d.plans : [])
       if (isPlan(p))
-        putPlan(c, planOf(p));
+        sharePlan(state2, ctx.world.pov, who, planOf(p));
     if (str13(d.summary))
       c.summary = d.summary;
     for (const t of Array.isArray(d.told) ? d.told : []) {
@@ -30823,24 +31080,21 @@ function editDef(type, key, valid, list, put, remove) {
         return list(readCharacter(ctx.state, String(d.entity))).some((x) => x.id === id) ? null : { code: `missing_${key}`, reason: `that ${key} isn't theirs any more` };
       return valid(d.value) && isRecord(d.value) && d.value.id === id ? null : bad(`a ${key} edit's value is malformed`);
     },
-    apply: (e, state2) => {
+    apply: (e, state2, ctx) => {
       const d = e.data;
       const who = String(d.entity);
       if (d.value === null)
         remove(state2, who, String(d[key]));
       else if (d.value !== undefined && valid(d.value))
-        put(state2, who, d.value);
+        put(state2, who, d.value, ctx);
     },
     describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s ${key} ${e.data.value === null ? "deleted" : "edited"}`
   };
 }
-var planEdit = editDef(MINDS_EVENTS.planEdit, "plan", isPlan, (c) => c.plans, (state2, who, v) => {
+var planEdit = editDef(MINDS_EVENTS.planEdit, "plan", isPlan, (c) => c.plans, (state2, who, v, ctx) => {
   if (isPlan(v))
-    putPlan(writeCharacter(state2, who), planOf(v));
-}, (state2, who, id) => {
-  const c = writeCharacter(state2, who);
-  c.plans = c.plans.filter((p) => p.id !== id);
-});
+    sharePlan(state2, ctx.world.pov, who, planOf(v));
+}, dropPlan);
 var noteEdit = editDef(MINDS_EVENTS.noteEdit, "note", isNote, (c) => c.notes, (state2, who, v) => {
   if (isNote(v))
     putNote(writeCharacter(state2, who), noteOf(v));
@@ -31024,8 +31278,9 @@ function planFrom(ctx, who, id, v, before) {
   const cents = v.cents === undefined ? before?.cents : typeof v.cents === "number" && Number.isInteger(v.cents) && v.cents > 0 ? v.cents : null;
   if (money4 && (cents === null || cents === undefined || withList.length === 0))
     return reject16("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
+  const shared = sharesPlan({ kind, with: withList });
   return {
-    id: id ?? `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`,
+    id: id ?? (shared ? sharedPlanId([who, ...withList], when2.from) : `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`),
     what,
     kind,
     when: { from: when2.from, to: when2.to },
@@ -31037,7 +31292,9 @@ function planFrom(ctx, who, id, v, before) {
     source: before?.source ?? "gm",
     closed,
     reason: status === "open" ? null : before?.reason ?? "GM edit",
-    ...money4 && cents ? { cents } : {}
+    ...money4 && cents ? { cents } : {},
+    ...shared ? { shared: true } : {},
+    ...shared && v.what === undefined && before?.by !== undefined ? { by: before.by } : {}
   };
 }
 function mindEdit(ctx, op) {
@@ -57903,19 +58160,19 @@ function lintStructure(world, reg) {
     }
   }
   const subjects = [
-    ...Object.entries(world.entities).map(([id, e]) => ({ path: `entities.${id}`, what: e.name, visibility: e.visibility, knownBy: e.knownBy, place: false })),
-    ...Object.entries(world.places).map(([id, p]) => ({ path: `places.${id}`, what: p.name, visibility: p.visibility, knownBy: p.knownBy, place: true })),
-    ...Object.entries(world.tracks).map(([id, t]) => ({ path: `tracks.${id}`, what: t.label, visibility: t.visibility, knownBy: t.knownBy, place: false })),
-    ...Object.entries(world.kinds).flatMap(([kid, k]) => Object.entries(k.fields).map(([fid, f]) => ({ path: `kinds.${kid}.fields.${fid}`, what: `${k.label}'s ${f.label ?? fid}`, visibility: f.visibility, knownBy: f.knownBy, place: false })))
+    ...Object.entries(world.entities).map(([id, e]) => ({ path: `entities.${id}`, what: e.name, visibility: e.visibility, knownBy: e.knownBy, findable: true })),
+    ...Object.entries(world.places).map(([id, p]) => ({ path: `places.${id}`, what: p.name, visibility: p.visibility, knownBy: p.knownBy, findable: true })),
+    ...Object.entries(world.tracks).map(([id, t]) => ({ path: `tracks.${id}`, what: t.label, visibility: t.visibility, knownBy: t.knownBy, findable: false })),
+    ...Object.entries(world.kinds).flatMap(([kid, k]) => Object.entries(k.fields).map(([fid, f]) => ({ path: `kinds.${kid}.fields.${fid}`, what: `${k.label}'s ${f.label ?? fid}`, visibility: f.visibility, knownBy: f.knownBy, findable: false })))
   ];
   for (const s of subjects) {
-    const understood = s.visibility === undefined || s.visibility === "public" || s.visibility === "known_by" || s.visibility === "secret" || s.place && s.visibility === "discoverable";
+    const understood = s.visibility === undefined || s.visibility === "public" || s.visibility === "known_by" || s.visibility === "secret" || s.findable && s.visibility === "discoverable";
     if (!understood)
-      err(`${s.path}.visibility`, "visibility", `${s.what} has visibility "${String(s.visibility)}", which isn't ${s.place ? "public, known_by, discoverable or secret" : "public, known_by or secret (discoverable is for places)"}; it stays hidden from the player.`);
+      err(`${s.path}.visibility`, "visibility", `${s.what} has visibility "${String(s.visibility)}", which isn't ${s.findable ? "public, known_by, discoverable or secret" : "public, known_by or secret (discoverable is for places and things)"}; it stays hidden from the player.`);
     if (s.knownBy === undefined)
       continue;
-    if (s.visibility !== "known_by" && !(s.place && s.visibility === "discoverable"))
-      warn(`${s.path}.knownBy`, "visibility", `${s.what} has a Known by, which only counts with ${s.place ? "known_by or discoverable" : "known_by"} visibility.`);
+    if (s.visibility !== "known_by" && !(s.findable && s.visibility === "discoverable"))
+      warn(`${s.path}.knownBy`, "visibility", `${s.what} has a Known by, which only counts with ${s.findable ? "known_by or discoverable" : "known_by"} visibility.`);
     const selector = knownBySelector(s.knownBy);
     if (!selector) {
       err(`${s.path}.knownBy`, "visibility", `${s.what}'s Known by names no constraint, or one this engine doesn't read, so it grants nobody.`);
@@ -67547,9 +67804,11 @@ function lifeLines(scope, c) {
   } catch {}
   for (const x of openCommitments(c).slice(0, scope.memory.commitments.show))
     out.push(`- Commitment (${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf6(scope, id)).join(", ")}` : ""}): ${x.text}${x.due !== null ? `, due ${formatClock(cal, x.due)}` : ""}`);
-  for (const p of openPlans(c).slice(0, 8))
-    out.push(`- Plan (${p.kind}): ${p.what}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""}, ${formatClock(cal, p.when.from)} to ${formatHHMM(dateAt(cal, p.when.to).minuteOfDay)}${p.where ? ` at ${nameOf6(scope, p.where)}` : ""}${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf6(scope, id)).join(", ")}` : ""}`);
   return out;
+}
+function planLines(scope, c) {
+  const cal = calendarOf(scope.world);
+  return openPlans(c).map((p) => `- Plan (${p.kind}): ${planWords(p, scope.who)}${p.cents !== undefined ? `, ${formatMoney(p.cents, scope.world.currency)}` : ""}, ${formatClock(cal, p.when.from)} to ${formatHHMM(dateAt(cal, p.when.to).minuteOfDay)}${p.where ? ` at ${nameOf6(scope, p.where)}` : ""}${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf6(scope, id)).join(", ")}` : ""}`);
 }
 function routineLines(scope) {
   const { reg, world, state: state2, who } = scope;
@@ -67666,6 +67925,10 @@ ${heardLast ? readableReply(moment.reply, scope.hideJson) : ""}` : place ? nameO
   const routine = linesWithin(usual, reads.routine.tokens);
   if (report && usual.length > 0)
     report.routine = { given: routine.length, left: usual.length - routine.length };
+  const planned = reads.plans.on ? planLines(scope, c) : [];
+  const plans = linesWithin(planned, reads.plans.tokens);
+  if (report && planned.length > 0)
+    report.plans = { given: plans.length, left: planned.length - plans.length };
   const chat = recentChat(ended !== "" && scope.history?.at(-1)?.isUser === false ? { ...scope, history: scope.history.slice(0, -1) } : scope);
   if (report && chat.length > 0)
     report.history = chat.length;
@@ -67676,6 +67939,7 @@ ${heardLast ? readableReply(moment.reply, scope.hideJson) : ""}` : place ? nameO
     block("Where you are", sceneLines(scope, place)),
     reads.summary.on && c.summary !== "" ? block("Your story so far", [clip(c.summary, charsOf(reads.summary.tokens))]) : "",
     block("Your usual routine (habits you may weigh, never orders: what is happening now comes first)", routine),
+    block("Your plans", plans),
     reads.life.on ? block("Your own life", linesWithin(lifeLines(scope, c), reads.life.tokens)) : "",
     reads.memory.on ? block("What you remember, and what you saw", linesWithin(memoryLines(scope, c), reads.memory.tokens)) : "",
     reads.thoughts.on ? thoughtsBlock(scope, c) : "",
@@ -67698,7 +67962,7 @@ function memoryContext(scope, turn) {
   const c = readCharacter(state2, who);
   const cal = calendarOf(world);
   const commitments2 = openCommitments(c).map((x) => `- [${x.id}] ${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf6(scope, id)).join(", ")}` : ""}: ${x.text}`);
-  const plans = openPlans(c).map((p) => `- ${p.what}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""} (${formatClock(cal, p.when.from)})`);
+  const plans = openPlans(c).map((p) => `- ${planWords(p, who)}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""} (${formatClock(cal, p.when.from)})${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf6(scope, id)).join(", ")}` : ""}`);
   const user = turn.user.trim() !== "" ? clip(turn.user, charsOf(scope.reads.message.tokens)) : "";
   const written = [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", user !== "" ? `${povLabel(scope)} (the player character) wrote: ${user}` : "", `Story: ${latestReply(scope, turn.reply)}`];
   return [
@@ -68260,17 +68524,19 @@ var EXTRACT_STRICT_RULES = [
   "One purchase per item: two things bought are two purchases, each with its own item and price; never one item that names both.",
   "life only when the prose states that someone died, is dying, collapsed or came round, or that the player character is told so; never a threat, a fear or a guess.",
   "routine only when the prose states a lasting change to someone's week: a new job or shift, a new habit, one they gave up, or a move to a new home, with the days and times the prose gives; never a one-off, a plan, a wish, someone's thoughts, or a habit only mentioned.",
+  "take, drop, use_up, wear and lose only for a thing the prose says changed hands or state this reply: picked up or found (take), put down (drop), eaten, drunk or used up (use_up), put on or taken off (wear, off: true), lost or stolen (lose, by: the thief); item_condition only when it says a thing was damaged, worn out or mended.",
   "Never duplicate a change. When unsure, leave it out."
 ];
+var EXTRACT_ITEM_TYPES = "take{entity,item} \xB7 drop{entity,item} \xB7 use_up{entity,item,qty?} (qty: how many, 1 when not said) \xB7 wear{entity,item,off?} \xB7 lose{entity,item,by?} (by: who stole it) \xB7 item_condition{entity?,item,delta} (delta -25..25: damage negative, mending positive)";
 var EXTRACT_WHERE = `Beside "proposals", give "where": the id of the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given; null when it doesn't say.`;
 var EXTRACT_USUAL = `Usual routines are given below the state, only to tell where a move the reply describes is going: someone who heads out to their usual spot ("his usual lunch place", "off to her regular bar") moves to that place; give its id from their usual routine, or place "usual" when the reply doesn't say which. A usual routine is never a move by itself: no location for someone the reply doesn't describe leaving or arriving.`;
-async function extract(steps, narration, world, prefix, appliedMinutes, channels, config3, userId, signal2, instructions, lore = null, guidance = "", usual = [], recent = []) {
+async function extract(steps, narration, world, prefix, appliedMinutes, channels, config3, userId, signal2, instructions, lore = null, guidance = "", usual = [], recent = [], said2 = "") {
   const types = `time_advance{minutes} \xB7 location{entity,place} \xB7 purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) \xB7 transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) \xB7 give{item,from,to,amount?} (amount: for cash or money handed over, the amount) \xB7 quantity{entity,item,delta} \xB7 condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) \xB7 regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) \xB7 knows{who,fact} (public facts only) \xB7 spawn{kind,name,place?,role?} \xB7 life{entity,state} (state: ${lifeStatesOf(world).map(([id]) => id).join("|")}) \xB7 routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
   const system = `${instructions ? `${instructions}
 ` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.
 ${worldBrief(world, "")}
-Proposal types: ${types}. ${allowed}
+Proposal types: ${types} \xB7 ${EXTRACT_ITEM_TYPES}. ${allowed}
 Rules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).
 Strict rules:
 - ${EXTRACT_STRICT_RULES.join(`
@@ -68281,11 +68547,14 @@ Output JSON only: {"proposals":[{"type":...}, ...]}.`;
   const asked = `${moves ? `${system}
 ${EXTRACT_WHERE}` : system}${routines ? `
 ${EXTRACT_USUAL}` : ""}`;
+  const message = said2.trim() !== "" ? `The player's message this reply answers (context only; propose only what the narration states happened):
+${said2.trim()}
+` : "";
   const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}
 ${routines ? `Usual routines (where a described move goes; never a move by itself):
 ${usual.join(`
 `)}
-` : ""}Narration:
+` : ""}${message}Narration:
 ${narration}`, config3, userId, signal2, { lore, guidance, recent });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals = [];
@@ -69106,9 +69375,17 @@ function plansFrom(reg, world, state2, who, raw) {
     const cents = !money4 ? 0 : typeof d.amount === "number" && Number.isFinite(d.amount) ? Math.round(d.amount * 10 ** world.currency.decimals) : parseMoneyInput(str16(d.amount), world.currency) ?? 0;
     if (money4 && (cents <= 0 || withIds.length === 0))
       continue;
-    out.push({ id: `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`, what, kind, when: { from, to }, where: placeNamed2(world, str16(d.where)), with: withIds, priority, status: "open", made: now, source: "memory", closed: null, reason: null, ...money4 ? { cents } : {} });
+    const shared = sharesPlan({ kind, with: withIds });
+    const id = shared ? sharedPlanId([who, ...withIds], from) : `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`;
+    if (out.some((p) => p.id === id))
+      continue;
+    out.push({ id, what, kind, when: { from, to }, where: placeNamed2(world, str16(d.where)), with: withIds, priority, status: "open", made: now, source: "memory", closed: null, reason: null, ...money4 ? { cents } : {}, ...shared ? { shared: true, by: who } : {} });
   }
   return out;
+}
+function unheldPlans(state2, who, plans) {
+  const held3 = readCharacter(state2, who).plans;
+  return plans.filter((p) => !held3.some((x) => x.id === p.id));
 }
 function mindData(reg, world, state2, who, raw, moment, level, reason2) {
   if (!isRecord(raw))
@@ -69218,13 +69495,16 @@ async function runMinds(deps, input) {
     const given = shownLore(report.pinned);
     const activated = shownLore(report.activated);
     const routineLeft = report.routine?.left ?? 0;
+    const plansLeft = report.plans?.left ?? 0;
     const notes = [
       ...fitNote("Pinned lore", report.pinned, reads.pinned.tokens),
       ...fitNote("The lore the turn activated", report.activated, reads.activated.tokens),
-      ...routineLeft > 0 ? [`Their usual routine didn't all fit: ${routineLeft} line${routineLeft === 1 ? "" : "s"} left out, over the ${reads.routine.tokens} tokens a mind reads of it; raise that in Settings \u2192 Minds \u2192 What a mind reads.`] : []
+      ...routineLeft > 0 ? [`Their usual routine didn't all fit: ${routineLeft} line${routineLeft === 1 ? "" : "s"} left out, over the ${reads.routine.tokens} tokens a mind reads of it; raise that in Settings \u2192 Minds \u2192 What a mind reads.`] : [],
+      ...plansLeft > 0 ? [`Their plans didn't all fit: ${plansLeft} left out, over the ${reads.plans.tokens} tokens a mind reads of them; raise that in Settings \u2192 Minds \u2192 What a mind reads.`] : []
     ];
     const routine = report.routine?.given ?? 0;
-    const trace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage2.tokens, prompt: prompt.source, ...given.length > 0 ? { pinned: given } : {}, ...activated.length > 0 ? { activated } : {}, ...routine > 0 ? { routine } : {}, ...report.history ? { history: report.history } : {}, ...notes.length > 0 ? { notes } : {} };
+    const plans = report.plans?.given ?? 0;
+    const trace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage2.tokens, prompt: prompt.source, ...given.length > 0 ? { pinned: given } : {}, ...activated.length > 0 ? { activated } : {}, ...routine > 0 ? { routine } : {}, ...plans > 0 ? { plans } : {}, ...report.history ? { history: report.history } : {}, ...notes.length > 0 ? { notes } : {} };
     const why = data !== null ? null : raw !== null ? "the answer said nothing: no thoughts, intent or depiction" : failure.reason !== "" ? failure.reason : "the call failed";
     if (why !== null)
       deps.host.log("warn", `[LumiRPEngine] mind for ${who}: ${why}`, userId);
@@ -69411,7 +69691,7 @@ async function postMinds(deps, input) {
   for (const data of remembered) {
     if (!data)
       continue;
-    const event = { type: MINDS_EVENTS.memory, data };
+    const event = { type: MINDS_EVENTS.memory, data: { ...data, plans: unheldPlans(w.state, data.entity, data.plans) } };
     if (!w.apply(event))
       events3.push(event);
   }
@@ -70443,9 +70723,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "9c29ab3ec3081810403dfce8fe8c84e80818584d02ad7950bdd022710bf67561";
+  const sha256 = "b683e201072c39c5e8af84c672b6f23ae1503b1464fd07d01714eb782e9457ef";
   const tools = ["0a9baadf30fa77cf7cb49d886cca019e", "be126719e8971c9663eddb1d75fbe1b9"].filter((f) => f !== undefined);
-  return { id: "0de576a8", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "98dc8533", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -71911,7 +72191,7 @@ function knownBy(registry, world, state2, name, mayKnow) {
   };
   const here = placeOfEntity(state2, world.pov);
   const rank = (id) => isInside(state2, id, world.pov) ? 0 : placeOfEntity(state2, id) === here ? 1 : 2;
-  const things = Object.keys(state2.entities).filter((id) => id !== world.pov && !isGone(state2, id) && mayKnow(id) && names2(own(state2.entities, id)?.name ?? "")).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const things = Object.keys(state2.entities).filter((id) => id !== world.pov && !isGone(state2, id) && mayKnow(id) && !mineElsewhere(world, state2, id) && names2(own(state2.entities, id)?.name ?? "")).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   if (things[0] !== undefined)
     return things[0];
   const place = Object.values(world.places).some((p) => {
@@ -71943,14 +72223,15 @@ function claimFor(input) {
   const kind = unfit.def.ref ?? "item";
   if (!at2 || typeof unfit.value !== "string" || !kindIs(registry, world, kind, "item"))
     return null;
-  if (own(state2.entities, unfit.value) && mayKnow(unfit.value) || own(world.places, unfit.value))
+  const named = mineElsewhere(world, state2, unfit.value) ? unfit.value : null;
+  if (!named && (own(state2.entities, unfit.value) && mayKnow(unfit.value) || own(world.places, unfit.value)))
     return null;
   if (unfitRef(registry, action, input.params, world, state2, mayKnow, unfit.param))
     return null;
-  const name = typedName(unfit.value, input.said);
+  const name = named ? own(state2.entities, named)?.name ?? null : typedName(unfit.value, input.said);
   if (name === null)
     return null;
-  const known = knownBy(registry, world, state2, name, mayKnow);
+  const known = named ? null : knownBy(registry, world, state2, name, mayKnow);
   if (known === "place")
     return { kind: "hold" };
   if (known !== null)
@@ -71960,6 +72241,14 @@ function claimFor(input) {
   const ctx = registry.context(world, state2);
   if (input.policy.mode === "hold" || !optionalService(ctx, "gear.claim") || ctx.levelOf(world.pov, "gear") === 0)
     return { kind: "hold" };
+  const verb = (action.lexicon?.[0] ?? action.label).toLowerCase();
+  const title = `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+  const existing = named ?? mineByName(registry, world, state2, name, mayKnow);
+  if (existing) {
+    const claim3 = { param: unfit.param, name, at: at2, kind, consumable: false, existing };
+    const detail2 = input.policy.mode === "ask" ? "This chat asks before it changes where your things are." : input.thing !== undefined && hasOwn(RESTRICTED, input.thing) ? "Keys, weapons and documents always ask first." : null;
+    return detail2 === null ? { kind: "real", claim: claim3 } : { kind: "ask", claim: claim3, question: `${title} isn't with you as far as the world knows. Have it with you and ${verb} it?`, detail: detail2 };
+  }
   const here = placeOfEntity(state2, world.pov);
   const row = matchCatalog(ctx, name, here);
   const category = row ? String(ctx.tables.get("economy.catalog")?.rows[row]?.category ?? "") : "";
@@ -71971,8 +72260,29 @@ function claimFor(input) {
   const detail = input.policy.mode === "ask" ? "This chat asks before it adds what you say you have." : input.thing !== undefined && hasOwn(RESTRICTED, input.thing) ? "Keys, weapons and documents always ask first." : input.policy.capped && price !== null && price > cap ? `It costs about ${formatMoney(price, world.currency)}, over this world's ${formatMoney(cap, world.currency)} for what you say you have.` : null;
   if (detail === null)
     return { kind: "real", claim: claim2 };
-  const verb = (action.lexicon?.[0] ?? action.label).toLowerCase();
-  return { kind: "ask", claim: claim2, question: `${name.charAt(0).toUpperCase()}${name.slice(1)} isn't in this world yet. Add it and ${verb} it?`, detail };
+  return { kind: "ask", claim: claim2, question: `${title} isn't in this world yet. Add it and ${verb} it?`, detail };
+}
+function mineElsewhere(world, state2, id) {
+  const e = own(state2.entities, id);
+  return e !== undefined && id !== world.pov && !isGone(state2, id) && e.fields.owner === world.pov && !isInside(state2, id, world.pov) && placeOfEntity(state2, id) !== placeOfEntity(state2, world.pov);
+}
+function mineByName(registry, world, state2, name, mayKnow) {
+  const said2 = itemName(name);
+  if (!said2)
+    return null;
+  const fits2 = Object.keys(state2.entities).filter((id) => mineElsewhere(world, state2, id) && mayKnow(id) && kindIs(registry, world, own(state2.entities, id)?.kind ?? "", "item")).filter((id) => {
+    const n = itemName(own(state2.entities, id)?.name ?? "");
+    return n !== null && n.head === said2.head && [...said2.words].every((w) => n.words.has(w));
+  }).sort();
+  return fits2[0] ?? null;
+}
+function outOfHand(action, params, world, state2) {
+  for (const [param, def] of Object.entries(action.params)) {
+    const value = params[param];
+    if (def.type === "ref" && def.claim && typeof value === "string" && mineElsewhere(world, state2, value))
+      return { param, def, value };
+  }
+  return null;
 }
 
 // src/backend/inferred-words.ts
@@ -72443,8 +72753,9 @@ function mindTracesOf(raw) {
     const notes = strings3(t.notes) ? [...t.notes] : [];
     const count = (v) => typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : 0;
     const routine = count(t.routine);
+    const plans = count(t.plans);
     const history = count(t.history);
-    return [{ purpose, phase, who: t.who, level: level2, outcome, ms: t.ms, tokens: t.tokens, prompt, ...pinned.length > 0 ? { pinned } : {}, ...activated.length > 0 ? { activated } : {}, ...routine > 0 ? { routine } : {}, ...history > 0 ? { history } : {}, ...notes.length > 0 ? { notes } : {} }];
+    return [{ purpose, phase, who: t.who, level: level2, outcome, ms: t.ms, tokens: t.tokens, prompt, ...pinned.length > 0 ? { pinned } : {}, ...activated.length > 0 ? { activated } : {}, ...routine > 0 ? { routine } : {}, ...plans > 0 ? { plans } : {}, ...history > 0 ? { history } : {}, ...notes.length > 0 ? { notes } : {} }];
   });
 }
 
@@ -73449,7 +73760,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "0de576a8" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "98dc8533" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -73739,7 +74050,7 @@ class Runtime {
           return false;
         }
       });
-      const montage = plan2 ? planLines(plan2, world, this.registry).montage.length > 0 : false;
+      const montage = plan2 ? planLines2(plan2, world, this.registry).montage.length > 0 : false;
       return sectionsOf(world).filter((s) => feedOf(s, state2).enabled !== false).filter((s) => s.id === "outcome" || s.id === "scene" || s.id === "outline" ? true : s.id === MINDS_SLOT ? mindLines(ctx).length > 0 : s.id === "montage" && montage || has(s)).map((s) => s.label);
     });
   }
@@ -73758,7 +74069,7 @@ class Runtime {
   keepRunLines(turn, seed, plan2, world, prose) {
     if (!plan2)
       return;
-    lruSet(this.runLines, turn, { seed, prose, lines: { ...planLines(plan2, world, this.registry), outline: planOutline(plan2, prose) } }, 64);
+    lruSet(this.runLines, turn, { seed, prose, lines: { ...planLines2(plan2, world, this.registry), outline: planOutline(plan2, prose) } }, 64);
   }
   stepVars(world, state2, plan2, user, reply, brief, recent) {
     const facts = factLines(this.registry, world, state2, []);
@@ -73772,7 +74083,7 @@ class Runtime {
       facts: facts.join(`
 `),
       present: presentNames(this.registry, world, state2).join(", "),
-      outcome: plan2 ? planLines(plan2, world, this.registry).outcome.join(`
+      outcome: plan2 ? planLines2(plan2, world, this.registry).outcome.join(`
 `) : "",
       beats: (plan2?.outline ?? []).join(`
 `),
@@ -73887,7 +74198,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     const steps = [];
     let rolls = false;
     const take = (def, given, words5, thing, said2) => {
-      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow);
+      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state);
       if (!ref) {
         steps.push({ action: def.id, params: given, text: words5 });
         rolls ||= checkOf(render.world, def.check) !== null;
@@ -74166,12 +74477,12 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const lore2 = (r, effects2 = false) => this.stepLore(r, at2, read, effects2);
     const extractRun = runsOf(modelUse, context.world, "extract", facts, { guidance }).find((r) => r.template === null || r.template.output !== "effects");
     const skipped = facts.timelapse || !!plan2?.timelapse;
-    const extractTask = extractRun && budget.take() ? extract(this.steps, text6, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" ? !skipped : this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore2(extractRun), extractRun.guidance, usual, extractRun.recent) : Promise.resolve({ proposals: [], where: null });
+    const extractTask = extractRun && budget.take() ? extract(this.steps, text6, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" ? !skipped : this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore2(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "") : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = ["extract", "contradiction", "choices"].flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore2(r, true)) : Promise.resolve([]));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
     const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal, this.stepLore(npcRun, at2, this.tieInputs(ties.offscreen, context.world, context.state))) : Promise.resolve([]);
     const contradictionRun = runsOf(modelUse, context.world, "contradiction", facts, { guidance }).find((r) => r.template === null || r.template.output === "decision");
-    const told = [...plan2 ? planLines(plan2, context.world, this.registry).outcome : [], ...factLines(this.registry, context.world, context.state, secrets)];
+    const told = [...plan2 ? planLines2(plan2, context.world, this.registry).outcome : [], ...factLines(this.registry, context.world, context.state, secrets)];
     const contradictionTask = contradictionRun && post && budget.take() ? contradiction(this.steps, contradictionRun, told, text6, userId, budget.signal, lore2(contradictionRun)) : Promise.resolve(null);
     const choiceRuns = runsOf(modelUse, context.world, "choices", facts, { output: "text", guidance });
     const choiceTasks = choiceRuns.map((r) => post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore2(r)).then((lines2) => lines2 ?? []) : Promise.resolve([]));
@@ -74616,7 +74927,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const own2 = plan2 && !renarrated ? this.runLines.get(input.generationId) : undefined;
     const turnPlan = plan2 && !renarrated && !own2 ? this.bridges.get(input.chatId)?.planFor(plan2.seed) : undefined;
     const kept2 = plan2 && renarrated ? await this.planNotes.get(input.chatId, input.userId, plan2.seed) : null;
-    const turnLines2 = own2?.lines ?? (turnPlan ? { ...planLines(turnPlan, world, this.registry), outline: planOutline(turnPlan, undefined) } : kept2);
+    const turnLines2 = own2?.lines ?? (turnPlan ? { ...planLines2(turnPlan, world, this.registry), outline: planOutline(turnPlan, undefined) } : kept2);
     const outline2 = turnLines2?.outline ?? [];
     const planned = { outcome: [...turnLines2?.outcome ?? []], montage: [...turnLines2?.montage ?? []] };
     const preset = this.prePhase.get(input.generationId)?.preset ?? await this.presets.current(input.chatId, input.userId);
@@ -75069,7 +75380,13 @@ var TYPE_LABELS = {
   quantity: "Quantities",
   spawn: "New characters",
   life: "Life and death",
-  routine: "Routine changes"
+  routine: "Routine changes",
+  take: "Things picked up",
+  drop: "Things put down",
+  use_up: "Things used up",
+  wear: "Things put on or off",
+  lose: "Things lost or stolen",
+  item_condition: "Wear and damage"
 };
 function interpretedTarget(params, world, state2, text6, reg) {
   const cal = calendarOf(world);
@@ -75204,7 +75521,7 @@ function shortClock(world, state2, at2) {
 function planOutline(plan2, prose) {
   return [...prose?.brief ? [`Brief: ${prose.brief}`] : [], ...plan2.outline, ...prose?.outline ?? []];
 }
-function planLines(plan2, world, registry) {
+function planLines2(plan2, world, registry) {
   const outcome = [];
   for (const res of plan2.resolutions) {
     const label = res.inferred?.label ?? (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
@@ -75380,6 +75697,18 @@ function describeProposal(p, world, state2) {
       return `${s("from")} \u2192 ${s("to")}: ${s("axis")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "knows":
       return `${s("who")} learns: ${s("fact")}`;
+    case "take":
+      return `${s("entity")} picked up ${s("item")}`;
+    case "drop":
+      return `${s("entity")} put down ${s("item")}`;
+    case "use_up":
+      return `${s("entity")} used up ${s("item")}${typeof p.qty === "number" && p.qty > 1 ? ` \xD7${p.qty}` : ""}`;
+    case "wear":
+      return `${s("entity")} ${p.off === true ? "took off" : "put on"} ${s("item")}`;
+    case "lose":
+      return typeof p.by === "string" && p.by !== "" ? `${s("by")} stole ${s("item")} from ${s("entity")}` : `${s("entity")} lost ${s("item")}`;
+    case "item_condition":
+      return `${s("item")}: condition ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "spawn":
       return `New: ${s("name")}`;
     case "life":
@@ -75652,6 +75981,13 @@ class Dispatcher {
     if (runSeed === undefined)
       throw new RequestError("not_world_chat", "this chat is not attached to a world");
     return runSeed;
+  }
+  consequences(w, events3, seed, rules) {
+    const mark2 = w.events.length;
+    if (rules)
+      runRulesOnEvents(this.rt.registry, w, events3, { seed: `${seed}:rules` });
+    stepTracks(this.rt.registry, w, `${seed}:tracks`);
+    return [...events3, ...w.events.slice(mark2)];
   }
   async route(r, userId, session, reply, noted2) {
     switch (r.type) {
@@ -76414,7 +76750,7 @@ class Dispatcher {
             throw new RequestError("validation", outcome?.rejection?.reason ?? "the change no longer applies");
           events3 = [...outcome.materialized, ...outcome.events];
         }
-        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: events3 } });
+        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, events3, `${id}:confirm`, proposal.type !== "time_advance") } });
         await settle3("accepted");
         return { applied: result.applied, pending: result.pending };
       }
@@ -76585,7 +76921,7 @@ class Dispatcher {
           if (!outcome || outcome.rejection || outcome.events.length === 0)
             throw new RequestError("validation", outcome?.rejection?.reason ?? "the purchase no longer applies");
           await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
+          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${choice}`, true) } });
           return { applied: result.applied, pending: result.pending };
         }
         if (choice !== "other")
@@ -76596,7 +76932,7 @@ class Dispatcher {
           if (!outcome || outcome.rejection || outcome.events.length === 0)
             continue;
           await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
+          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${method}`, true) } });
           return { applied: result.applied, pending: result.pending };
         }
         throw new RequestError("validation", "No other way to pay covers it.");
