@@ -24672,18 +24672,50 @@ function farRoute(route) {
   return walk2 === undefined || walk2.minutes > INTERIOR_WALK_MINUTES;
 }
 var spreadOf = new WeakMap;
+function joined(parts, part) {
+  let rep = part;
+  for (let next = parts.get(rep);next !== undefined && next !== rep; next = parts.get(rep))
+    rep = next;
+  parts.set(part, rep);
+  return rep;
+}
 function spreadPlaces(world) {
   const hit = spreadOf.get(world);
   if (hit)
     return hit;
   const out = new Set;
+  const joins = new Map;
   for (const r of Object.values(world.routes)) {
-    if (!farRoute(r))
+    const from = placeChain(world, r.from);
+    const to = placeChain(world, r.to);
+    for (let i = 1;i < from.length; i++) {
+      const place = from[i];
+      const fromPart = from[i - 1];
+      const j = place === undefined ? -1 : to.indexOf(place);
+      const toPart = to[j - 1];
+      if (place === undefined || fromPart === undefined || j < 1 || toPart === undefined)
+        continue;
+      const parts = joins.get(place) ?? new Map;
+      joins.set(place, parts);
+      if (farRoute(r))
+        out.add(place);
+      else
+        parts.set(joined(parts, fromPart), joined(parts, toPart));
+    }
+  }
+  const partsOf = new Map;
+  for (const p of Object.values(world.places)) {
+    if (!p.parent)
       continue;
-    const from = new Set(placeChain(world, r.from).slice(1));
-    for (const p of placeChain(world, r.to).slice(1))
-      if (from.has(p))
-        out.add(p);
+    const parts = partsOf.get(p.parent);
+    if (parts)
+      parts.push(p.id);
+    else
+      partsOf.set(p.parent, [p.id]);
+  }
+  for (const [place, parts] of joins) {
+    if (new Set((partsOf.get(place) ?? []).map((part) => joined(parts, part))).size > 1)
+      out.add(place);
   }
   spreadOf.set(world, out);
   return out;
@@ -25955,7 +25987,7 @@ function storyEvents(args, ctx) {
 }
 
 // src/packs/castlife/core/usual.ts
-function joined(words2) {
+function joined2(words2) {
   return words2.length <= 1 ? words2[0] ?? "" : `${words2.slice(0, -1).join(", ")} and ${words2[words2.length - 1] ?? ""}`;
 }
 function weekdaysPhrase(cal, days) {
@@ -25966,7 +25998,7 @@ function weekdaysPhrase(cal, days) {
     return "weekdays";
   if (set.join() === "0,6")
     return "weekends";
-  return `on ${joined(set.map((d) => weekdayName(cal, d)))}`;
+  return `on ${joined2(set.map((d) => weekdayName(cal, d)))}`;
 }
 function blockDays(cal, d) {
   if (!d)
@@ -25985,7 +26017,7 @@ function blockDays(cal, d) {
   if (d.birthday === "friend")
     parts.push("on a friend's birthday");
   if (d.seasons)
-    parts.push(`in ${joined(d.seasons)}`);
+    parts.push(`in ${joined2(d.seasons)}`);
   if (d.weather)
     parts.push(`in ${d.weather} weather`);
   return parts.filter((p) => p !== "").join(", ");
@@ -30841,8 +30873,8 @@ function namedIn(name, said2) {
   if (own2.length === 0 || said2.length === 0)
     return false;
   const whole4 = own2.join(" ");
-  const joined2 = ` ${said2.join(" ")} `;
-  if (joined2.includes(` ${whole4} `))
+  const joined3 = ` ${said2.join(" ")} `;
+  if (joined3.includes(` ${whole4} `))
     return true;
   const present2 = new Set(said2);
   return own2.some((w) => w.length >= 3 && !NAME_FILLER[w] && present2.has(w));
@@ -62241,11 +62273,11 @@ function textChunks(text5, size = INDEX_TEXT_CHUNK) {
   for (const paragraph of text5.split(/\n\s*\n/)) {
     let rest = paragraph.trim();
     while (rest !== "") {
-      const joined2 = current2 === "" ? rest : `${current2}
+      const joined3 = current2 === "" ? rest : `${current2}
 
 ${rest}`;
-      if (joined2.length <= size) {
-        current2 = joined2;
+      if (joined3.length <= size) {
+        current2 = joined3;
         rest = "";
       } else if (current2 !== "") {
         out.push(current2);
@@ -70110,9 +70142,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "d7f951323705ea486cbd014519b5df84d2b979d7069f838a6b3e7f1701f2cc58";
+  const sha256 = "3007f18a52e5f42d61d886b7771ca2ce8fbf80ac0bec92b73049db7cc2c20896";
   const tools = ["900afa8b920c04258682d2153c987c9e", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
-  return { id: "6f741a60", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "d9e948e9", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -71742,9 +71774,9 @@ function inferredChip(res, info) {
 function checkQuestion(verdict, nameOf7) {
   const { skill, band, read } = verdict;
   const against = read.against.length > 0 ? ` against ${listed2(read.against.map((a) => nameOf7(a.who)))}` : "";
-  const joined2 = read.with.length > 0 ? ` with ${listed2(read.with.map(nameOf7))}` : "";
+  const joined3 = read.with.length > 0 ? ` with ${listed2(read.with.map(nameOf7))}` : "";
   const what = read.attempt !== "" ? `, to "${read.attempt}"` : "";
-  return { question: `Roll ${skill.label}?`, detail: `${skill.label}${joined2}${against}, looking ${band.label.toLowerCase()}${what}. Roll plays your message with the roll; No roll plays it as written.` };
+  return { question: `Roll ${skill.label}?`, detail: `${skill.label}${joined3}${against}, looking ${band.label.toLowerCase()}${what}. Roll plays your message with the roll; No roll plays it as written.` };
 }
 
 // src/backend/section-refs.ts
@@ -71783,8 +71815,8 @@ function withoutMissing(lines, missing) {
         return [sentence2];
       if (left.length === 0)
         return [];
-      const joined2 = left.join("; ").replace(/[\s,;:]+$/, "");
-      const ended = /[.!?]$/.test(joined2) ? joined2 : `${joined2}.`;
+      const joined3 = left.join("; ").replace(/[\s,;:]+$/, "");
+      const ended = /[.!?]$/.test(joined3) ? joined3 : `${joined3}.`;
       return [ended.charAt(0).toUpperCase() + ended.slice(1)];
     });
     if (kept2.length > 0)
@@ -73103,7 +73135,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "6f741a60" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "d9e948e9" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
