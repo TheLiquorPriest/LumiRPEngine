@@ -7,10 +7,19 @@ import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonPatchOp } from "../../shared/protocol";
 import type { WorldDoc } from "../../shared/world";
 import { kindIs } from "./selector-editor";
+import { COLLECTION_SPECS, type FieldSpec } from "./schema";
 
 /** Whether an entity being edited is a character: its kind is a person (the world's kinds and the packs'). */
 export function isCharacter(doc: WorldDoc, value: JsonValue | undefined): boolean {
   return isRecord(value) && typeof value.kind === "string" && kindIs(doc, value.kind, "person");
+}
+
+/** The entity form's fields that mean something only for a person: how they live and die, their Lumiverse card, their cues, their own day. */
+const PERSON_ONLY: Readonly<Record<string, true>> = { life: true, lifeKnownBy: true, characterId: true, cues: true, agent: true };
+
+/** The generic entity form's fields for this entity: all of them for a person, none of the person-only ones for a thing. */
+export function entityFormSpecs(doc: WorldDoc, value: JsonValue | undefined): readonly FieldSpec[] {
+  return isCharacter(doc, value) ? COLLECTION_SPECS.entities : COLLECTION_SPECS.entities.filter((s) => PERSON_ONLY[s.key] !== true);
 }
 
 /** Whether Build opens an item on the Character page: a person in the draft's entities. A new one (`new:` id) is made in the generic editor first. */

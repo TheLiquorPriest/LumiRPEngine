@@ -29,7 +29,8 @@ describe("Build's item helpers", () => {
     const world = modernUsWorld("w", "Riverton");
     const stage = world.tracks.first_week?.stages.coffee;
     if (!stage) throw new Error("no stage");
-    stage.objectives = [itemObjective("carries", "phone"), itemObjective("at", "phone", "cafe"), itemObjective("has_item", "phone")];
+    const phone = { id: "phone", name: "Phone" };
+    stage.objectives = [itemObjective("carries", phone), itemObjective("at", phone, { id: "cafe", name: "Café" }), itemObjective("has_item", phone)];
     expect(lintStructure(world, reg).filter((i) => i.path.startsWith("tracks.first_week"))).toEqual([]);
   });
 });

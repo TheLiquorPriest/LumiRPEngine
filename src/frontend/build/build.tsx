@@ -31,7 +31,7 @@ import { DraftBatchSheet } from "./batch-sheet";
 import { CheckView, issuePart, IssueRow } from "./check";
 import { COLLECTION_INFO, deleteItem, go, ItemHeader, itemLabel, NewItem, newItemName, OverflowMenu, PART_INFO } from "./chrome";
 import { CharacterPage } from "./character";
-import { opensCharacterPage } from "./character-model";
+import { entityFormSpecs, isCharacter, opensCharacterPage } from "./character-model";
 import { ContentsSection, RevealItem } from "./contents";
 import { commitDraft, discardDraft, draftSend, loadDraft } from "./draft";
 import { ChangedElsewhere, useHeld } from "./held";
@@ -706,7 +706,8 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
           </Banner>
         ))}
       {PackConfig ? <PackConfig world={props.world} config={isRecord(value.config) ? value.config : {}} lint={lintAt(draft?.lint ?? [], `${path}.config`)} onChange={(config) => setValue({ ...value, config })} /> : null}
-      <SchemaFields specs={COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields }} onChange={setValue} />
+      {/* A thing's page leaves out what only a person has (life, cues, their Lumiverse card, their own day). */}
+      <SchemaFields specs={props.collection === "entities" ? entityFormSpecs(formDoc, value) : COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields }} onChange={setValue} />
       {/* A thing can be hidden until searched for (DESIGN §7); an entity or a place lists what the world puts in it or there. */}
       {props.collection === "entities" ? <RevealItem kinds={formDoc.kinds} value={value} onChange={setValue} /> : null}
       {!isNew && (props.collection === "entities" || props.collection === "places") ? <ContentsSection world={props.world} collection={props.collection} id={id} /> : null}
@@ -736,7 +737,7 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
             );
           })
         : null}
-      {!isNew && (props.collection === "entities" || props.collection === "places") ? <LorePinsSection target={props.collection === "entities" ? "characters" : "places"} id={id} /> : null}
+      {!isNew && (props.collection === "places" || (props.collection === "entities" && isCharacter(formDoc, value))) ? <LorePinsSection target={props.collection === "entities" ? "characters" : "places"} id={id} /> : null}
       {/* A step template's placeholders, as its purpose and output get them (the vars panel Settings shows too). */}
       {props.collection === "steps" && isVarsKey(value.purpose) ? <VarsPanel step={value.purpose} output={value.output === "effects" ? "effects" : undefined} /> : null}
       {props.children}
