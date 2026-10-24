@@ -61,11 +61,14 @@ export function browseStart(index: PlaceIndex, current: PlaceId | null): PlaceId
   return place && place.parent !== null && index.byId.has(place.parent) ? place.parent : null;
 }
 
+/** A search shows at most this many: past it, another word narrows faster than scrolling would. */
+export const SEARCH_LIMIT = 60;
+
 /**
  * The places whose name or path has every word of the query (each a word's beginning): those with
- * every word in their own name first, then the shallower, then by name. At most `limit`.
+ * every word in their own name first, then the shallower, then by name. At most `SEARCH_LIMIT`.
  */
-export function searchPlaces(index: PlaceIndex, query: string, limit = 60): PlaceRef[] {
+export function searchPlaces(index: PlaceIndex, query: string): PlaceRef[] {
   const want = wordsOf(query);
   if (want.length === 0) return [];
   const hits: { place: PlaceRef; own: boolean }[] = [];
@@ -77,7 +80,7 @@ export function searchPlaces(index: PlaceIndex, query: string, limit = 60): Plac
     hits.push({ place, own: want.every(inName) });
   }
   hits.sort((a, b) => Number(b.own) - Number(a.own) || a.place.path.length - b.place.path.length || a.place.name.localeCompare(b.place.name));
-  return hits.slice(0, limit).map((h) => h.place);
+  return hits.slice(0, SEARCH_LIMIT).map((h) => h.place);
 }
 
 // ---------------------------------------------------------------- beds
@@ -104,8 +107,8 @@ export function isBed(bed: CharacterBed, option: BedOption): boolean {
   return bed.kind === "item" && bed.item?.id === option.item.id;
 }
 
-/** The things whose name or place has every word of the query, those named by it first. At most `limit`. */
-export function searchThings(things: readonly ThingRef[], query: string, limit = 60): ThingRef[] {
+/** The things whose name or place has every word of the query, those named by it first. At most `SEARCH_LIMIT`. */
+export function searchThings(things: readonly ThingRef[], query: string): ThingRef[] {
   const want = wordsOf(query);
   if (want.length === 0) return [];
   const hits: { thing: ThingRef; own: boolean }[] = [];
@@ -117,7 +120,7 @@ export function searchThings(things: readonly ThingRef[], query: string, limit =
     hits.push({ thing, own: want.every(inName) });
   }
   hits.sort((a, b) => Number(b.own) - Number(a.own) || a.thing.name.localeCompare(b.thing.name));
-  return hits.slice(0, limit).map((h) => h.thing);
+  return hits.slice(0, SEARCH_LIMIT).map((h) => h.thing);
 }
 
 // ---------------------------------------------------------------- lists of text

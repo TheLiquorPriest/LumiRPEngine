@@ -1,8 +1,8 @@
 // The bed picker (DESIGN §7, the Character model; beds §8): where someone sleeps, as a path, and a
 // sheet to change it. It offers what's likely first: sleeping at home (no bed of their own, the
-// default), the rooms in their home, then the likely beds lying there; then any other place through
-// the place picker, and any thing elsewhere found by its name or where it lies. `bedValue` is what
-// the `bed` field takes for a choice.
+// default), the rooms in their home, then the things lying there, the likely beds first (as
+// `lre.character` orders them); then any other place through the place picker, and any thing
+// elsewhere found by its name or where it lies. `bedValue` is what the `bed` field takes for a choice.
 
 import { useId, useMemo, useState } from "preact/hooks";
 import type { CharacterBed, CharacterDTO, PlaceRef, ThingRef } from "../../shared/character";
@@ -10,7 +10,7 @@ import { FormSheet } from "../build/form-kit";
 import { Badge, Button, Empty, List, ListRow, Section } from "../components";
 import { Icon } from "../icons";
 import { PlaceBadge, PlacePath, PlaceSheet } from "./place-picker";
-import { bedOf, bedOptions, isBed, pathLabel, searchThings, type BedOption } from "./places";
+import { bedOf, bedOptions, isBed, pathLabel, SEARCH_LIMIT, searchThings, type BedOption } from "./places";
 
 /** The `bed` field's value for a bed: none for sleeping at home, else the place's or the thing's id. What both pages write. */
 export function bedValue(bed: CharacterBed): string | null {
@@ -27,9 +27,9 @@ function bedWords(character: Pick<CharacterDTO, "bed" | "home">): string {
   return character.home ? `At home: ${pathLabel(character.home)}` : "At home (they have no home set)";
 }
 
-/** One of the sheet's choices as a row. */
-function OptionRow(props: { option: BedOption; bed: CharacterBed; onPick(bed: CharacterBed): void }) {
-  const { option } = props;
+/** One of the sheet's choices as a row. A room or a thing in their home says where in it, from the home down. */
+function OptionRow(props: { option: BedOption; home: PlaceRef | null; bed: CharacterBed; onPick(bed: CharacterBed): void }) {
+  const { option, home } = props;
   const now = isBed(props.bed, option);
   if (option.kind === "home") {
     return <ListRow icon="home" title="Sleeps at home" subtitle={option.place ? `No bed of their own · ${pathLabel(option.place)}` : "No bed of their own"} badge={now ? <Badge tone="accent">Now</Badge> : undefined} current={now} onClick={() => props.onPick(bedOf(option))} />;
@@ -37,7 +37,10 @@ function OptionRow(props: { option: BedOption; bed: CharacterBed; onPick(bed: Ch
   if (option.kind === "place") {
     return <ListRow icon="pin" title={option.place.name} subtitle={option.place.path.length > 0 ? option.place.path.join(" › ") : "In their home"} badge={now ? <Badge tone="accent">Now</Badge> : <PlaceBadge place={option.place} />} current={now} onClick={() => props.onPick(bedOf(option))} />;
   }
-  return <ListRow icon="box" title={option.item.name} subtitle={option.item.place ? pathLabel(option.item.place) : "Nowhere"} badge={now ? <Badge tone="accent">Now</Badge> : undefined} current={now} onClick={() => props.onPick(bedOf(option))} />;
+  const at = option.item.place;
+  // `bedChoices.items` lie in the home's subtree, so the home's depth is where their path enters it.
+  const where = at === null ? "Nowhere" : home ? [...at.path, at.name].slice(home.path.length).join(" › ") : pathLabel(at);
+  return <ListRow icon="box" title={option.item.name} subtitle={where} badge={now ? <Badge tone="accent">Now</Badge> : undefined} current={now} onClick={() => props.onPick(bedOf(option))} />;
 }
 
 /** A thing anywhere, found by its name or where it lies; each result with its place's path. */
@@ -71,11 +74,13 @@ function ThingSheet(props: { things: readonly ThingRef[]; bed: CharacterBed; onP
         ) : results.length === 0 ? (
           <Empty icon="search">Nothing matches “{query.trim()}”.</Empty>
         ) : (
-          <List>
-            {results.map((t) => (
-              <ListRow key={t.id} icon="box" title={t.name} subtitle={t.place ? pathLabel(t.place) : "Nowhere"} current={props.bed.kind === "item" && props.bed.item?.id === t.id} onClick={() => props.onPick(t)} />
-            ))}
-          </List>
+          <Section title={results.length === 1 ? "1 thing" : `${results.length} things${results.length === SEARCH_LIMIT ? ", keep typing to narrow" : ""}`} flush>
+            <List>
+              {results.map((t) => (
+                <ListRow key={t.id} icon="box" title={t.name} subtitle={t.place ? pathLabel(t.place) : "Nowhere"} current={props.bed.kind === "item" && props.bed.item?.id === t.id} onClick={() => props.onPick(t)} />
+              ))}
+            </List>
+          </Section>
         )}
       </div>
     </FormSheet>
@@ -88,7 +93,7 @@ export function BedPicker(props: { character: CharacterDTO; places: readonly Pla
   const [open, setOpen] = useState<"bed" | "place" | "thing" | null>(null);
   const options = bedOptions(character);
   const rooms = options.filter((o) => o.kind === "place");
-  const beds = options.filter((o) => o.kind === "item");
+  const homeThings = options.filter((o) => o.kind === "item");
   const pick = (bed: CharacterBed) => {
     setOpen(null);
     props.onPick(bed);
@@ -99,17 +104,17 @@ export function BedPicker(props: { character: CharacterDTO; places: readonly Pla
       <div class="lre-field">
         <span class="label">{props.label ?? "Sleeps"}</span>
         <div class="lre-cp-value">
-          {bed.kind === "item" && bed.item ? (
-            <span class="lre-cp-path">
-              <span class="lre-cp-path-name">{bed.item.name}</span>
-              {bed.item.place ? <span class="lre-cp-path-up">, in {pathLabel(bed.item.place)}</span> : null}
-            </span>
-          ) : bed.kind === "place" ? (
+          {bed.kind === "place" ? (
             <PlacePath place={bed.place} />
           ) : (
-            <span class="lre-cp-path">
-              <span class="lre-cp-path-name">At home</span>
-              {character.home ? <span class="lre-cp-path-up">, {pathLabel(character.home)}</span> : null}
+            // The bed's name over where it is, so the path never starts a line with a stray comma.
+            <span class="lre-cp-bed">
+              <span class="lre-cp-path-name">{bed.kind === "item" && bed.item ? bed.item.name : "At home"}</span>
+              {bed.kind === "item" && bed.item ? (
+                bed.item.place ? <span class="lre-cp-path-up">in {pathLabel(bed.item.place)}</span> : null
+              ) : character.home ? (
+                <span class="lre-cp-path-up">{pathLabel(character.home)}</span>
+              ) : null}
             </span>
           )}
           <Button size="sm" icon="moon" disabled={props.disabled} onClick={() => setOpen("bed")}>
@@ -122,28 +127,28 @@ export function BedPicker(props: { character: CharacterDTO; places: readonly Pla
           <div class="lre-cp-sheet" data-lre-bed-sheet="">
             <Section flush>
               <List>
-                <OptionRow option={options[0] ?? { kind: "home", place: character.home }} bed={bed} onPick={pick} />
+                <OptionRow option={options[0] ?? { kind: "home", place: character.home }} home={character.home} bed={bed} onPick={pick} />
               </List>
             </Section>
             {rooms.length > 0 ? (
               <Section title="Rooms in their home" flush>
                 <List>
                   {rooms.map((o) => (
-                    <OptionRow key={o.kind === "place" ? o.place.id : ""} option={o} bed={bed} onPick={pick} />
+                    <OptionRow key={o.kind === "place" ? o.place.id : ""} option={o} home={character.home} bed={bed} onPick={pick} />
                   ))}
                 </List>
               </Section>
             ) : null}
-            {beds.length > 0 ? (
-              <Section title="Beds there" flush>
+            {homeThings.length > 0 ? (
+              <Section title="Things in their home" flush>
                 <List>
-                  {beds.map((o) => (
-                    <OptionRow key={o.kind === "item" ? o.item.id : ""} option={o} bed={bed} onPick={pick} />
+                  {homeThings.map((o) => (
+                    <OptionRow key={o.kind === "item" ? o.item.id : ""} option={o} home={character.home} bed={bed} onPick={pick} />
                   ))}
                 </List>
               </Section>
             ) : null}
-            {rooms.length + beds.length === 0 ? <p class="lre-cp-note">{character.home ? "Nothing inside their home to sleep in yet." : "They have no home set, so there's nowhere nearer to offer."}</p> : null}
+            {rooms.length + homeThings.length === 0 ? <p class="lre-cp-note">{character.home ? "Nothing inside their home to sleep in yet." : "They have no home set, so there's nowhere nearer to offer."}</p> : null}
             <Section title="Somewhere else" flush>
               <List>
                 <ListRow icon="map" title="Another place…" subtitle="Any place, by search or by browsing" chevron onClick={() => setOpen("place")} />

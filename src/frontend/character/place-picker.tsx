@@ -11,7 +11,7 @@ import type { PlaceId } from "../../shared/ids";
 import { FormSheet } from "../build/form-kit";
 import { Badge, Button, Empty, IconButton, List, ListRow, Section } from "../components";
 import { Icon } from "../icons";
-import { browseStart, pathLabel, placeIndex, searchPlaces, trailTo, type PlaceIndex } from "./places";
+import { browseStart, pathLabel, placeIndex, SEARCH_LIMIT, searchPlaces, trailTo, type PlaceIndex } from "./places";
 
 /** A suggestion on top of the sheet: "Where they are", "Their home", "Where Sam is". */
 export interface PlaceSuggestion {
@@ -175,7 +175,7 @@ export function PlaceSheet(props: { places: readonly PlaceRef[]; value: PlaceId 
           results.length === 0 ? (
             <Empty icon="search">No place matches “{query.trim()}”.</Empty>
           ) : (
-            <Section title={results.length === 1 ? "1 place" : `${results.length} places${results.length === 60 ? ", keep typing to narrow" : ""}`} flush>
+            <Section title={results.length === 1 ? "1 place" : `${results.length} places${results.length === SEARCH_LIMIT ? ", keep typing to narrow" : ""}`} flush>
               <div data-lre-place-results="">
                 <List>
                   {results.map((p) => (
