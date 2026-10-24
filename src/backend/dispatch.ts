@@ -46,7 +46,7 @@ import { toChain } from "./ledger-io";
 import { JobError, type JobRunner } from "./jobs";
 import { bookDrift, saveFromChat } from "./lore";
 import { pinBooks, pinEntries, pinViews } from "./lore-pins";
-import { bookLoreProblem, writeBookLore } from "./book-lore";
+import { bookLoreProblem, secureIndexedSecrets, writeBookLore } from "./book-lore";
 import { bookLoreFieldsOf, engineWroteEntry } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, declineNote, playerReason, readRun, Runtime } from "./runtime";
@@ -721,6 +721,8 @@ export class Dispatcher {
         if (!body) throw new RequestError("bad_request", "not a valid Upgrade");
         const result = await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body });
         await this.syncBook(before.worldId, userId);
+        // The revision the chat moves to keeps its secrets indexed from World Info off in their books (DESIGN §4.2).
+        await secureIndexedSecrets(this.rt.host, (await this.rt.worlds.get(before.worldId, userId, r.to)).world, userId);
         // Mid-turn, the marker is held and lands when the turn ends (P2).
         return { revision: r.to, pending: result.pending };
       }

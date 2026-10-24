@@ -30,6 +30,7 @@ import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
+import { secureIndexedSecrets } from "./book-lore";
 import { applyProfile, profileChoices, profileOf } from "../shared/profiles/index";
 
 interface Draft {
@@ -277,6 +278,8 @@ export class WorldStore {
     }
     await this.writeJson(revisionFile(doc.id, rev), written, userId);
     this.remember(WorldStore.key(userId, doc.id, rev), written);
+    // A committed or imported world's secrets indexed from World Info stay off in their books (DESIGN §4.2).
+    await secureIndexedSecrets(this.host, written, userId);
     const index = await this.index(doc.id, userId);
     const revisions = index ? [...index.revisions.filter((r) => r !== rev), rev] : [rev];
     const moved = index?.head !== rev;
@@ -440,6 +443,8 @@ export class WorldStore {
     }
     const version = draft.version + 1;
     await this.writeJson(`${worldDir(worldId)}draft.json`, { base, doc, version }, userId);
+    // A secret entry the save made or changed keeps the World Info entry it was indexed from off at once.
+    await secureIndexedSecrets(this.host, doc, userId, (id) => !jsonEqual(doc.lore[id], draft.doc.lore[id]));
     changed?.(worldId, { version, stored: true, base });
     return { draft: doc, lint, base, stored: true, version };
   }

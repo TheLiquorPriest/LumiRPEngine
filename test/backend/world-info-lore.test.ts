@@ -13,6 +13,7 @@ import { worldInfoVerdict } from "../../src/backend/wi-interceptor";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
+import { bookTextHash } from "../../src/shared/lore";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
 import { Rig } from "../support/rig";
@@ -35,7 +36,7 @@ const secretEntry = (): HostBookEntryInput => entry("The wreck", `${SECRET}.`, {
  * returns the entry ids in order. `shipped`: Port Alder on every shipped pack, the space pack's Place
  * section among them, instead of the test pack's harbor.
  */
-async function bookChat(entries: HostBookEntryInput[] | ((here: string) => HostBookEntryInput[]), shipped = false): Promise<{ rig: Rig; chatId: string; bookId: string; ids: string[]; pov: string }> {
+async function bookChat(entries: HostBookEntryInput[] | ((here: string, world: WorldDoc) => HostBookEntryInput[]), shipped = false): Promise<{ rig: Rig; chatId: string; bookId: string; ids: string[]; pov: string }> {
   const rig = new Rig({ shipped });
   rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
   rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { enabled: false } } }));
@@ -46,7 +47,7 @@ async function bookChat(entries: HostBookEntryInput[] | ((here: string) => HostB
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   const bookId = await rig.host.books.create("Harbor notes", "", rig.host.userId);
   const ids: string[] = [];
-  for (const e of typeof entries === "function" ? entries(draft.start.place) : entries) ids.push(await rig.host.books.createEntry(bookId, e, rig.host.userId));
+  for (const e of typeof entries === "function" ? entries(draft.start.place, draft) : entries) ids.push(await rig.host.books.createEntry(bookId, e, rig.host.userId));
   const meta = await rig.host.chats.chatMetadata(chatId, rig.host.userId);
   const attached = Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : [];
   await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...attached, bookId] }, rig.host.userId);
@@ -113,6 +114,26 @@ describe("the World Info interceptor", () => {
     expect(inPrompt(rig, "FERRY-MARK")).toBe(false);
     expect(inPrompt(rig, "DOCK-MARK")).toBe(true);
   });
+
+  test("a secret world entry indexed from a book keeps that entry stored off: with the state unreadable or the interceptor throwing, it stays out", async () => {
+    const { rig, chatId, bookId, ids } = await bookChat([entry("The wreck", `${SECRET}.`)]);
+    const entryId = ids[0] ?? "";
+    const worldId = (await rig.rt.runOf(chatId, rig.host.userId))?.worldId ?? "";
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "wreck", value: { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: ["ferry"], links: [], secret: true, gate: GATE, source: { kind: "book", bookId, entryId, hash: bookTextHash(`${SECRET}.`) } } }));
+    const committed = rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    rig.body(await rig.send({ type: "lre.world", op: "upgrade", chatId, to: committed.revision }));
+    const stored = rig.host.storedEntry(entryId);
+    const unreadable = await worldInfoVerdict(
+      { registry: rig.rt.registry, playsWorld: () => true, head: async () => null, carried: () => new Set(), log: () => undefined },
+      { chatId, userId: rig.host.userId, chatMetadata: {}, entries: [{ id: entryId, bookId, disabled: stored?.disabled ?? false, extensions: stored?.extensions ?? {} }] },
+    );
+    expect(unreadable.disabled).toContain(entryId);
+    rig.host.worldInfoInterceptor = async () => {
+      throw new Error("the interceptor broke");
+    };
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(inPrompt(rig, SECRET)).toBe(false);
+  });
 });
 
 describe("Build's World Info lore editor", () => {
@@ -143,6 +164,14 @@ describe("the Place section's lore", () => {
     await rig.turn(chatId, "I wait.", "Gulls call.");
     expect(place(rig)).toContain("WALL-MARK");
     expect(alone(rig, ids[0] ?? "")).toBe(false);
+  });
+
+  test("a long entry about the town doesn't push the place's own description out of the section", async () => {
+    const long = Array.from({ length: 2000 }, (_, i) => `In year ${i} the town grew by a street.`).join(" ");
+    const { rig, chatId } = await bookChat((_here, world) => [about(world.places[world.start.place]?.parent ?? world.start.place, long)], true);
+    await rig.turn(chatId, "I wait.", "Gulls call.");
+    expect(place(rig)).toContain("Harbor Hardware");
+    expect(place(rig)).toContain("In year 0 the town grew");
   });
 
   test("a secret place entry stays out of the section and the prompt until its gate holds", async () => {
