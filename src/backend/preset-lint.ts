@@ -13,9 +13,10 @@ export interface PresetCaveat {
    * preset's warnings aren't known; `host_cannot_stop`: this Lumiverse can't stop a generation for
    * the engine run (DESIGN §5.1); `step_connection_missing` and `step_model_missing`: an enabled
    * step (or the helper model) names a connection the user no longer has, or a model its connection
-   * doesn't list, so its call would fail the turn (Caveats' pre-flight, DESIGN §5.3).
+   * doesn't list, so its call would fail the turn (Caveats' pre-flight, DESIGN §5.3);
+   * `step_model_unchecked`: a connection's models didn't come within the Preset check timeout.
    */
-  code: "preset_json_ledger" | "preset_low_max_tokens" | "preset_partial_outlets" | "preset_lint_pending" | "preset_lint_failed" | "host_cannot_stop" | "step_connection_missing" | "step_model_missing";
+  code: "preset_json_ledger" | "preset_low_max_tokens" | "preset_partial_outlets" | "preset_lint_pending" | "preset_lint_failed" | "host_cannot_stop" | "step_connection_missing" | "step_model_missing" | "step_model_unchecked";
   message: string;
 }
 
