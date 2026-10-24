@@ -646,9 +646,8 @@ export const gearPack: PackDef = {
           return out;
         }
         const stock = e.fields.stock;
-        // A container the world filled itself keeps what it was given: random stock is for those it left empty.
-        const authored = Object.values(ctx.world.entities).some((d) => d.relations.some((x) => x.type === "in" && x.to === entity));
-        if (typeof stock === "string" && e.fields.sampled !== true && !authored) {
+        // `stock` is the author asking for more of its kind: it adds to whatever the world put inside.
+        if (typeof stock === "string" && e.fields.sampled !== true) {
           const rows = Object.entries(ctx.tables.get("gear.items")?.rows ?? {}).filter(([, row]) => row.category === stock).map(([id]) => id).sort();
           const n = rows.length === 0 ? 0 : rng.int(2, 4);
           for (let i = 0; i < n; i++) {
