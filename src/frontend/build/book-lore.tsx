@@ -12,7 +12,7 @@ import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
 import { Badge, Banner, Button, IconButton, Section, useBusy } from "../components";
 import { ActionRow, ActionRows } from "../gm/ui";
-import { STEP_LABEL } from "../settings/steps";
+import { STEP_LABEL } from "../../shared/steps";
 import { useSelect } from "../store";
 import { draftSend } from "./draft";
 import { CheckField, Issues } from "./form-kit";
