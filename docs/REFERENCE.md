@@ -226,10 +226,11 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 | Effect | Arguments |
 |---|---|
 | `castlife.book_invitation` | `host` |
+| `castlife.company` | `with`, `to` |
 | `castlife.decide` | `key`, `choice` |
 | `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |
 | `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |
-| `castlife.satisfy` | `need`, `entity?`, `minutes?` |
+| `castlife.satisfy` | `need`, `entity?`, `minutes?`, `activity?`, `after?` |
 | `castlife.to_bed` | `entity?` |
 
 ### Formula functions
@@ -244,8 +245,12 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 |---|---|---|---|---|---|---|---|
 | `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |
 | `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |
-| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | rest, relax, take a break |
-| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |
+| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |
+| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |
+
+### Rules
+
+- `castlife.conversation`: on `{"event":"relationships.regard"}`
 
 ### Events
 
