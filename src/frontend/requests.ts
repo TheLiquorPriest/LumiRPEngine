@@ -96,6 +96,11 @@ export function travelRequest(action: string, params: JsonObject, chatId: ChatId
   return { type: "lre.action", chatId, action, params: { ...params }, source: "map" };
 }
 
+/** A character's model (DESIGN §7): from a world's draft in Build, or from a chat's head in GM, behind the GM gate. */
+export function characterRequest(entity: EntityId, from: { worldId: WorldId } | { chatId: ChatId }): Req<"lre.character"> {
+  return "worldId" in from ? { type: "lre.character", op: "get", entity, scope: "build", worldId: from.worldId } : { type: "lre.character", op: "get", entity, scope: "gm", chatId: from.chatId };
+}
+
 /** The staged action sent again (DESIGN §11): as tapped, which clears it, or with `now`, which plays it at once. */
 export function stagedRequest(chatId: ChatId, staged: NonNullable<StateView["staged"]>, now: boolean): Req<"lre.action"> {
   return { type: "lre.action", chatId, action: staged.action, params: { ...staged.params }, source: staged.source, ...(now ? { now: true } : {}) };

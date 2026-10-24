@@ -91,6 +91,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.diag": true,
   "lre.minds": true,
   "lre.routine": true,
+  "lre.character": true,
   "lre.agents": true,
   "lre.cancel": true,
 };

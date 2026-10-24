@@ -12,6 +12,7 @@ import type { InferredChecks, SheetSkill } from "./inferred";
 import type { BookLoreFields, LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
+import type { CharacterResult } from "./character";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
@@ -203,6 +204,13 @@ export interface GmRequest extends Request<"lre.gm"> {
  * may know it (`view: "player"`: what Cast shows, with why); `changed`, everyone the chat changed.
  */
 export type RoutineRequest = Request<"lre.routine"> & { chatId: ChatId } & RoutineRead;
+
+/**
+ * A character as its own model (DESIGN §7, the Character model), with every place for the picker.
+ * `scope: "build"` reads the world's draft (where the world starts them); `scope: "gm"` reads the
+ * chat's head, behind the GM gate as `lre.gm` is, and adds what they're doing now.
+ */
+export type CharacterRequest = Request<"lre.character"> & { op: "get"; entity: EntityId } & ({ scope: "build"; worldId: WorldId } | { scope: "gm"; chatId: ChatId });
 
 /**
  * A chat's state view, as a page's snapshot holds it, answered to an outside client (DESIGN §23),
@@ -698,6 +706,7 @@ export type FrontendToBackend =
   | DiagRequest
   | MindsRequest
   | RoutineRequest
+  | CharacterRequest
   | AgentsRequest
   | CancelTurnRequest;
 
@@ -790,6 +799,7 @@ export interface ResultBodies {
   /** Whether a run or read was under way to stop. */
   "lre.cancel": { cancelled: boolean };
   "lre.routine": RoutineReadResult;
+  "lre.character": CharacterResult;
   /** `kit`: this build, where its kit is, and whether the asking session checked in since the extension started; every other op answers the `view`. */
   "lre.agents": { view?: AgentsView; build?: string; kit?: KitReport | null; known?: boolean };
 }
