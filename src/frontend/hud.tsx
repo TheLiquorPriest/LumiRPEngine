@@ -222,7 +222,7 @@ function WorldDetails(props: { view: StateView; hud: HudView; onLeave(next: () =
   }, [fixing]);
   const fixes: Partial<Record<FixKey, FixTarget>> = hud.fixes;
   const target = fixing ? fixes[fixing] : undefined;
-  if (fixing && target) return <FixEditor label={FIX_LABEL[fixing]} target={target} onDone={() => setFixing(null)} />;
+  if (fixing && target) return <FixEditor label={FIX_LABEL[fixing]} title={fixing === "place" ? "Where you are" : undefined} target={target} onDone={() => setFixing(null)} />;
   const fix = (key: FixKey) =>
     fixes[key] ? (
       <IconButton

@@ -218,7 +218,7 @@ export function PersonSheet(props: SheetProps) {
       {whereFix ? (
         fixingWhere ? (
           <div class="lre-play-fix" onKeyDown={(event) => event.key === "Escape" && (event.stopPropagation(), setFixingWhere(false))}>
-            <FixEditor label="Where are they?" target={whereFix} onDone={() => setFixingWhere(false)} />
+            <FixEditor label="Where are they?" title={`Where is ${person.name}?`} target={whereFix} onDone={() => setFixingWhere(false)} />
           </div>
         ) : (
           <div>

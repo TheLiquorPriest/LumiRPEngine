@@ -116,7 +116,7 @@ function SceneCard(props: { state: StateView }) {
           setFixing(null);
         }}
       >
-        <FixEditor label={FIX_LABEL[fixing]} target={target} onDone={() => setFixing(null)} />
+        <FixEditor label={FIX_LABEL[fixing]} title={fixing === "place" ? "Where you are" : undefined} target={target} onDone={() => setFixing(null)} />
       </div>
     ) : null;
   const fact = (key: FixKey, icon: IconName, label: string, value: string, sub?: string) =>
