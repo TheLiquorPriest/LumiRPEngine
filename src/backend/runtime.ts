@@ -1760,11 +1760,18 @@ export class Runtime implements TurnHooks {
         return;
       }
       // Offer Apply only for what would apply now: a decline gets its own chip, a purchase nothing
-      // prices asks for a price; anything else that can't validate (an unknown item) is logged and dropped.
+      // prices asks for a price, and anything else refused gets a decline chip as under auto.
       const also = unsure.has(proposal);
       const [check] = applyProposals(this.registry, new Working(this.registry, context.world, w.state), [proposal], `${context.seed}:check`, bridge.runSeed);
-      // A move that can't happen (no way there, or a body the POV knows of) is declined in plain words,
-      // as under auto; one refused unseen comes back as no change and is dropped below.
+      // A move the reply only implied that can't happen is no told move that didn't: no chip, and no
+      // note tells the next reply it didn't happen (DESIGN §9.4).
+      if (check?.rejection && guessed.has(proposal)) {
+        this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped a guessed move (${check.rejection.code}: ${check.rejection.reason})`, input.userId);
+        return;
+      }
+      // A move that can't happen (a body the POV knows of, or no way there under the travel
+      // simulation) is declined in plain words, as under auto; one refused unseen comes back as no
+      // change and is dropped below.
       if (check?.rejection && proposal.type === "location") {
         declines.push({ proposal, reason: check.rejection.reason, payment: false, unpriced: false });
         return;
@@ -1786,6 +1793,13 @@ export class Runtime implements TurnHooks {
           expires: "next_send",
           payload: { type: "purchase", connection, proposal, reason: check.rejection.reason, seed: `${context.seed}:check` },
         });
+        return;
+      }
+      // Anything else refused is shown as an automatic refusal is, never vanishing: what it names is
+      // what the POV may know (`proposalKnown` dropped the rest before here), and a refusal unseen came
+      // back as no change. One that may be the Buy told again stays silent: the Buy itself was paid.
+      if (check?.rejection && !(also && check.rejection.code === "declined")) {
+        declines.push({ proposal, reason: check.rejection.reason, payment: false, unpriced: false });
         return;
       }
       if (!check || check.rejection || check.events.length === 0) {

@@ -74,7 +74,7 @@
     "lorePins": { "$ref": "#/$defs/lorePins" },
     "mapSettings": {
       "type": "object",
-      "description": "How the map shows the world, and the optional grid system. Absent: knowledge display, movement off, sight 3.",
+      "description": "How the map shows the world, the optional grid system, and the optional travel simulation. Absent: knowledge display, movement off, sight 3, no travel simulation.",
       "required": ["display", "grid"],
       "additionalProperties": false,
       "properties": {
@@ -87,7 +87,8 @@
             "movement": { "type": "boolean", "description": "The grid system: walls and doors steer the POV, things lie in cells, cells and zones trigger rules." },
             "sightRadius": { "type": "number", "minimum": 0, "description": "Cells the POV sees around it; read as a whole number up to 32." }
           }
-        }
+        },
+        "travelSimulation": { "type": "boolean", "description": "Moves need a route: a narrated move no route reaches is refused, and Go needs a walking route. Off or absent: moves are story first." }
       }
     },
     "classifications": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/facet" } },

@@ -326,7 +326,16 @@ export class Dispatcher {
           if ("code" in fixed) throw new RequestError("validation", fixed.reason);
           events = fixed.events;
         } else {
-          const edit = resolveEdit(this.rt.registry, world, state, [{ op: "set", entity: r.entity, field: r.field, value: r.value }], { gm: false, runSeed: this.runSeedOf(r.chatId) });
+          const set = { op: "set" as const, entity: r.entity, field: r.field, value: r.value };
+          // A place fixed with ✎ is a real move, as the GM's Move is: out of whatever holds them, onto
+          // the arrival cell, and their activity left behind where they were (as a narrated move
+          // leaves it). The field is checked as set first, so a locked place stays locked.
+          const checked = resolveEdit(this.rt.registry, world, state, [set], { gm: false, runSeed: this.runSeedOf(r.chatId) });
+          if ("rejection" in checked) throw new RequestError("validation", checked.rejection.reason);
+          const doing = state.entities[r.entity]?.fields.activity;
+          const moved = r.field === "place" && typeof r.value === "string" && r.value !== state.entities[r.entity]?.fields.place;
+          const ops = moved ? [{ op: "move" as const, entity: r.entity, to: String(r.value) }, ...(doing !== undefined && doing !== "idle" ? [{ op: "set" as const, entity: r.entity, field: "activity", value: "idle" }] : [])] : null;
+          const edit = ops ? resolveEdit(this.rt.registry, world, state, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) }) : checked;
           if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
           events = edit.events;
         }

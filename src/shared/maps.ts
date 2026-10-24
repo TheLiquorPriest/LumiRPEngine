@@ -107,7 +107,8 @@ export const DEFAULT_SIGHT_RADIUS = 3;
 
 /**
  * A world's map settings (DESIGN §12), each part read for itself: one missing or malformed is the
- * default (the map shows what the POV knows; the grid system off, sight 3 cells).
+ * default (the map shows what the POV knows; the grid system off, sight 3 cells; no travel
+ * simulation, so moves are story first).
  */
 export function mapSettingsOf(world: { readonly mapSettings?: unknown }): MapSettings {
   const raw = isRecord(world.mapSettings) ? world.mapSettings : {};
@@ -116,6 +117,7 @@ export function mapSettingsOf(world: { readonly mapSettings?: unknown }): MapSet
   return {
     display: raw.display === "fog" ? "fog" : "knowledge",
     grid: { movement: grid.movement === true, sightRadius: typeof radius === "number" && Number.isFinite(radius) ? Math.min(SIGHT_MAX, Math.max(0, Math.round(radius))) : DEFAULT_SIGHT_RADIUS },
+    travelSimulation: raw.travelSimulation === true,
   };
 }
 
