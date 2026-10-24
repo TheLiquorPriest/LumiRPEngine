@@ -45,7 +45,7 @@ async function cueChat(rig: Rig, gate: string): Promise<string> {
 }
 
 describe("the Stance section on the section budget", () => {
-  test("it opens with the shipped note, goes last by default, and goes where a world ranks it", async () => {
+  test("it opens with the shipped note, gives way before the facts ranked ahead of it, and goes where a world ranks it", async () => {
     const rig = new Rig({ shipped: true });
     // The host can't count: every section is priced by the estimate, so the same text costs the same.
     rig.host.tokenCount = null;
@@ -62,10 +62,12 @@ describe("the Stance section on the section budget", () => {
     expect(note.trim()).not.toBe("");
     expect(stance.startsWith(`[Stance]\n${note}`)).toBe(true);
     expect(stance).toContain("Danny Okafor");
-    // A budget of exactly what the other sections cost: Stance, ranked last, is the one left out.
-    const others = [...all].filter(([label]) => label !== "Stance").reduce((sum, [, text]) => sum + sectionTokens(text), 0);
+    // A budget of exactly what the sections ranked ahead of it cost: Stance, and every section ranked after it, give way.
+    const rankOf = (label: string): number => Object.values(DEFAULT_SECTIONS).find((s) => s.label === label)?.rank ?? 0;
+    const ahead = [...all].filter(([label]) => rankOf(label) < rankOf("Stance"));
+    const others = ahead.reduce((sum, [, text]) => sum + sectionTokens(text), 0);
     const tight = await sent(rig, first, others);
-    expect([...tight.keys()].sort()).toEqual([...all.keys()].filter((label) => label !== "Stance").sort());
+    expect([...tight.keys()].sort()).toEqual(ahead.map(([label]) => label).sort());
     // A world that ranks Stance just after the Scene keeps it on the same budget; a section ranked after it gives way.
     const sections = { ...DEFAULT_SECTIONS, stance: { ...DEFAULT_SECTIONS.stance!, rank: 2.5 } };
     for (const [id, value] of Object.entries(sections)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "sections", id, value }));

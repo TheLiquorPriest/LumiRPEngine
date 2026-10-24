@@ -64,7 +64,7 @@ describe("the Vehicles section", () => {
 
   test("the ones away from his site fold into one line, by where they are", () => {
     const out = lines((w) => {
-      w.places.ranch = { id: "ranch", name: "Cedar Draw", fields: {} };
+      w.places.ranch = { id: "ranch", name: "Willow Ranch", fields: {} };
       w.places.boathouse = { id: "boathouse", name: "the boathouse", parent: "ranch", fields: {} };
       for (let i = 0; i < 3; i++) w.entities[`atv${i}`] = vehicle(`atv${i}`, `ATV ${i}`, { owner: "you", place: "ranch" });
       w.entities.skiff = vehicle("skiff", "Skiff", { owner: "you", place: "boathouse" });
@@ -73,7 +73,7 @@ describe("the Vehicles section", () => {
     const elsewhere = out.filter((l) => l.startsWith("Elsewhere:"));
     expect(elsewhere).toHaveLength(1);
     expect(elsewhere[0]).toContain("4");
-    expect(elsewhere[0]).toContain("3 at Cedar Draw");
+    expect(elsewhere[0]).toContain("3 at Willow Ranch");
     expect(elsewhere[0]).toContain("1 at the boathouse");
     expect(out.some((l) => l.startsWith("Pickup truck:"))).toBe(true);
   });
