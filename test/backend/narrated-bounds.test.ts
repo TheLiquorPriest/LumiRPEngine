@@ -84,9 +84,9 @@ describe("a narrated time skip under confirm", () => {
     const confirm = got.chips.find((c) => c.kind === "confirm");
     if (!confirm) throw new Error("no confirm chip");
     expect(confirm.actions.map((a) => a.id)).toEqual(["confirm", "reject"]);
-    const read = (await got.state()).clock;
     got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: confirm.id, choice: "confirm" }));
-    expect((await got.state()).clock - read).toBe(45);
+    // The reply's skip is the turn's whole: its tick and the skip together come to it.
+    expect((await got.state()).clock - got.before).toBe(45);
     expect(got.rig.rt.ledger.errors).toEqual([]);
     const learning = await got.rig.rt.settings.learningOf(got.rig.host.userId);
     expect(learning.connections.active?.time_advance?.accepted).toBe(1);

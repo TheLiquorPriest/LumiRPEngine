@@ -275,24 +275,42 @@ const STATED_TIME = / \d{1,2}:\d{2}| (?:\d{1,2} ?(?:am|pm)|o clock|at \d+|noon|m
 const PART_LEADS: Readonly<Record<string, "until" | "today" | "next" | "tomorrow">> = { until: "until", till: "until", til: "until", to: "until", by: "until", "later that": "today", "later this": "today", "later in the": "today", that: "today", this: "today", next: "next", following: "next", tomorrow: "tomorrow" };
 /** Up to the player character's next shift or commitment ("until my next shift", "till work", "until my appointment"). */
 const COMMITMENT_SPAN = / (?:until|till|til)(?: my| the| our)?(?: next)? (shift|work|commitment|appointment)s?(?= )/g;
+/**
+ * Minutes a vague span stands for (DESIGN §9.2 typed time), read like a length stated in numbers:
+ * players say "a few minutes later" or "after a while" more often than they count.
+ */
+const VAGUE_SPANS: Readonly<Record<string, number>> = { "a moment": 5, "a few moments": 5, "a few minutes": 5, "a little while": 15, "a while": 30, "a few hours": 180 };
+const VAGUE_SPAN = new RegExp(` (${longestFirst(Object.keys(VAGUE_SPANS))})(?= )`, "g");
+
+/** A moment of the player character's own day a typed span runs up to: a meal, bedtime, or the morning he wakes. */
+export type SpanAnchor = "breakfast" | "lunch" | "dinner" | "bedtime" | "morning";
+/** The words that name an anchor. */
+const ANCHOR_WORDS: Readonly<Record<string, SpanAnchor>> = { breakfast: "breakfast", lunch: "lunch", dinner: "dinner", supper: "dinner", bedtime: "bedtime", morning: "morning" };
+/** The calendar's part of the day an anchor falls back to when his day has no block for it: the first of these the calendar has. */
+const ANCHOR_PARTS: Readonly<Record<SpanAnchor, readonly string[]>> = { breakfast: ["morning"], lunch: ["midday", "afternoon"], dinner: ["evening"], bedtime: ["night"], morning: ["morning"] };
+/** Up to an anchor: "until dinner", "till bedtime", "skip ahead to lunch", "until the morning". */
+const ANCHOR_SPAN = new RegExp(` (?:until|till|til|to|by)(?: the| my| our)? (${longestFirst(Object.keys(ANCHOR_WORDS))})(?= )`, "g");
 
 /**
  * The timelapse target a span typed in the player's own words names (DESIGN §9.2 typed time),
  * read the same way every time:
  * - a length: "over the next hour", "for the next two hours", "half an hour", "an hour and a half",
- *   "three hours later"; one gone by ("two hours ago") or a rate ("every hour") is none;
+ *   "three hours later"; a vague one by `VAGUE_SPANS` ("a few minutes later" is 5 minutes, "a while"
+ *   30, "a few hours" 180); one gone by ("two hours ago") or a rate ("every hour") is none;
  * - a part of the day: "skip ahead to evening", "until the afternoon" (its coming start, as the
  *   Timelapse sheet's Until runs it); "later that night", "this evening" and "tonight" only while
  *   that part is still ahead today; "the next morning" by `nextDayPart`; "tomorrow evening" that
  *   part tomorrow (before the day's first part it is still last night, so tomorrow is today);
+ * - an anchor of the player character's own day: "until dinner", "until lunch", "until breakfast",
+ *   "until bedtime" and "until morning" run to when `anchorAt` says his day has it (the start of his
+ *   meal or his bed, the end of his night's sleep), else to the calendar's matching part of the day;
  * - the next shift or commitment: "until my next shift", "till work", "until my appointment".
  *
  * It is read only once `interpret` has chosen to let time pass, so it never decides whether typed
  * text is a time skip. Words that also name a day and time ("Friday at 6 PM") are left to the
- * read's stated time; words that name no span ("a while", "a few hours"), or two different ones,
- * read as none.
+ * read's stated time; words that name no span ("for some time"), or two different ones, read as none.
  */
-export function typedSpan(cal: Calendar, now: number, words: string): TimelapseTarget | null {
+export function typedSpan(cal: Calendar, now: number, words: string, anchorAt?: (anchor: SpanAnchor) => number | null): TimelapseTarget | null {
   // A sentence's or a clause's end stays as a break ("|"), so lengths either side of it never add up;
   // a decimal point stays as it is.
   const t = ` ${words
@@ -316,6 +334,11 @@ export function typedSpan(cal: Calendar, now: number, words: string): TimelapseT
     if ((count === "next" && unit >= MINUTES_PER_DAY) || SPAN_NOT_BEFORE.test(t.slice(Math.max(0, m.index - SPAN_CONTEXT), m.index))) continue;
     lengths.push({ start: m.index, end: m.index + m[0].length, minutes: ((SPAN_COUNTS[count] ?? Number(count)) + (m[2] || m[4] ? 0.5 : 0)) * unit });
   }
+  for (const m of t.matchAll(VAGUE_SPAN)) {
+    if (SPAN_NOT_BEFORE.test(t.slice(Math.max(0, m.index - SPAN_CONTEXT), m.index))) continue;
+    lengths.push({ start: m.index, end: m.index + m[0].length, minutes: VAGUE_SPANS[m[1] ?? ""] ?? 0 });
+  }
+  lengths.sort((a, b) => a.start - b.start);
   // Lengths side by side ("an hour and twenty minutes") add up as one.
   const runs: { end: number; minutes: number }[] = [];
   for (const length of lengths) {
@@ -326,6 +349,18 @@ export function typedSpan(cal: Calendar, now: number, words: string): TimelapseT
     } else runs.push({ end: length.end, minutes: length.minutes });
   }
   for (const run of runs) if (run.minutes > 0 && !SPAN_NOT_AFTER.test(t.slice(run.end, run.end + SPAN_CONTEXT))) found.push({ type: "duration", minutes: Math.round(run.minutes) });
+  // An anchor of his own day: his block for it, else the calendar's part, so "until dinner" runs to
+  // his dinner rather than to the evening's start. It reads before "until <part>" ("until morning").
+  const anchored = new Set<number>();
+  for (const m of t.matchAll(ANCHOR_SPAN)) {
+    const anchor = ANCHOR_WORDS[m[1] ?? ""];
+    if (!anchor) continue;
+    anchored.add(m.index);
+    const at = anchorAt?.(anchor) ?? null;
+    const part = ANCHOR_PARTS[anchor].map((id) => cal.dayParts.find((p) => p.id === id)).find((p) => p !== undefined);
+    if (at !== null && at > now) found.push({ type: "at", at });
+    else if (part) found.push({ type: "day_part", dayPart: part.id });
+  }
   // Parts of the day, by id or label, longest first so "early morning" isn't read as "morning".
   const named = cal.dayParts.flatMap((p, index) => [p.id, p.label].map((n) => ({ name: plain(n), index }))).filter((n) => n.name !== "");
   const day = dateAt(cal, now);
@@ -334,7 +369,7 @@ export function typedSpan(cal: Calendar, now: number, words: string): TimelapseT
   for (const m of t.matchAll(new RegExp(` (${longestFirst(Object.keys(PART_LEADS))})(?: the)? (${longestFirst(named.map((n) => n.name))})(?= )`, "g"))) {
     const index = named.find((n) => n.name === m[2])?.index ?? -1;
     const lead = PART_LEADS[m[1] ?? ""];
-    if (index < 0) continue;
+    if (index < 0 || anchored.has(m.index)) continue;
     if (lead === "until") found.push({ type: "day_part", dayPart: cal.dayParts[index]?.id ?? "" });
     else if (lead === "next") found.push(nextDayPart(cal, now, index));
     else if (lead === "tomorrow") {
