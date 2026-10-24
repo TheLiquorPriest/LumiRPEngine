@@ -4,7 +4,7 @@
 // a part (a chat that never had minds) reads with that part empty.
 
 import type { EntityId } from "../../../shared/ids";
-import type { MindCommitment, MindNote, MindPlan, MindsCharacter, MindsMemoryConfig, MindsSlice, WitnessEntry } from "../../../shared/minds";
+import type { MindCommitment, MindDue, MindNote, MindPlan, MindsCharacter, MindsMemoryConfig, MindsSlice, WitnessEntry } from "../../../shared/minds";
 import { MINDS_KEEP, planInForce } from "../../../shared/minds";
 import { own } from "../../../engine/pack-kit";
 import type { WorldState } from "../../../engine/state";
@@ -28,6 +28,14 @@ export function readSlice(state: Readonly<WorldState>): MindsSlice {
 /** One character's minds state (read only); a character with none reads empty. */
 export function readCharacter(state: Readonly<WorldState>, id: EntityId): MindsCharacter {
   return own(readSlice(state).chars, id) ?? emptyCharacter();
+}
+
+/**
+ * When their mind was last due, called or not (DESIGN §24.1): what the cadence counts from and the
+ * level their tier reads. A mind recorded in the same round as a passed one came after it (the GM's run).
+ */
+export function lastDue(c: MindsCharacter): MindDue | null {
+  return c.passed && (!c.mind || c.passed.round > c.mind.round) ? c.passed : c.mind;
 }
 
 /** The slice for a reducer: created on first use, every part present. */

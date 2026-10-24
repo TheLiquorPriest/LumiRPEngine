@@ -26,6 +26,7 @@ import { pinsFor } from "../engine/lore-pins";
 import { own } from "../engine/pack-kit";
 import { hiddenNameCheck, playerKnows, witnessLines } from "../engine/player-events";
 import type { Registry } from "../engine/registry-impl";
+import { together } from "../engine/presence";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { findLeaks, loreGateReader, unrevealedSecrets } from "../engine/visibility";
@@ -397,7 +398,8 @@ export interface PreMindsInput {
 
 /**
  * The pre phase (DESIGN §24.1): the round (every turn with minds on, and once with them off after
- * they were on), then, unless the turn is a timelapse, the minds the ladder and the cadence pick.
+ * they were on), then, unless the turn is a timelapse, the minds the scene, the ladder and the
+ * cadence call. A mind due but not called is recorded on the round with the level it was due at.
  */
 export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<RunMindsResult> {
   const settings = await deps.settings.get(input.userId);
@@ -409,18 +411,24 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
   w.apply(round);
   const ctx = deps.registry.context(input.world, w.state);
   const texts = { user: input.user, reply: input.reply };
-  const scores = fidelityOf(ctx, texts);
-  const picks = pickMinds(ctx, scores, texts, settings.minds);
+  const picks = pickMinds(ctx, fidelityOf(ctx, texts), texts, settings.minds);
+  const calls = picks.filter((p) => p.call);
+  const passed = picks.filter((p) => !p.call);
+  // The round keeps where each passed mind stood and the level it was due at, as a mind recorded now
+  // would, and the minds called think on the state that holds it.
+  const opened: LedgerEvent = passed.length === 0 ? round : { type: MINDS_EVENTS.round, data: { at: input.state.clock, on: true, levels: Object.fromEntries(passed.map((p) => [p.entity, { level: p.level, place: placeOfEntity(w.state, p.entity) }])) } };
+  const thinking = opened === round ? w : new Working(deps.registry, input.world, input.state);
+  if (thinking !== w) thinking.apply(opened);
   const levels: Record<EntityId, Fidelity> = {};
   const reasons: Record<EntityId, string> = {};
-  for (const p of picks) {
+  for (const p of calls) {
     levels[p.entity] = p.level;
     reasons[p.entity] = p.reason;
   }
   // Each thinks for their own refresh reason; the moment itself is the player's message.
-  const moment: MindMoment = { kind: "turn", at: w.state.clock, reason: "", user: input.user, reply: input.reply };
-  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who: picks.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), phase: "pre" });
-  return { events: [round, ...ran.events], traces: ran.traces, ...(ran.report ? { report: ran.report } : {}) };
+  const moment: MindMoment = { kind: "turn", at: thinking.state.clock, reason: "", user: input.user, reply: input.reply };
+  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), phase: "pre" });
+  return { events: [opened, ...ran.events], traces: ran.traces, ...(ran.report ? { report: ran.report } : {}) };
 }
 
 export interface PostMindsInput {
@@ -442,13 +450,13 @@ export interface PostMindsInput {
   guidance?: { memory?: string; consolidate?: string };
 }
 
-/** Who is in the POV's scene in `state`: everyone acting at its place but the POV, whether it sees them or not. */
+/** Who is in the POV's scene in `state` (`together`): everyone acting there but the POV, whether it sees them or not. */
 export function presentWith(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): EntityId[] {
   const here = placeOfEntity(state, world.pov);
   if (here === null) return [];
   return Object.keys(state.entities)
     .sort()
-    .filter((id) => id !== world.pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && acts(world, state, id));
+    .filter((id) => id !== world.pov && together(world, here, placeOfEntity(state, id)) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && acts(world, state, id));
 }
 
 /**

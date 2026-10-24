@@ -1,11 +1,12 @@
-// The narrator's Minds section (DESIGN §24.3): this round's minds for the people at the POV's place
-// it can see, and anyone whose mind interrupted a skip; a mind from a time skip's beat only when the
-// skip ended on that beat, as the run went past any other. The world's `minds.secrecy` decides what goes:
-// `full` gives each monologue and intent, to be depicted and never stated; `brief` gives only the
-// depiction, written as behaviour, and only when it carries no unrevealed secret and names no one the
-// POV can't see (the screens Stance uses), checked again here whatever was checked when it was
-// recorded. Whoever gets a line here is left out of Stance (`minds.minded`); on the section's own
-// budget the engine run keeps the best on the ladder (`fitMindLines`), and Stance tells of the rest.
+// The narrator's Minds section (DESIGN §24.3): this round's minds for the people in the POV's scene
+// (`together`) it can see, and anyone whose mind interrupted a skip; a mind from a time skip's beat
+// only when the skip ended on that beat, as the run went past any other. The world's `minds.secrecy`
+// decides what goes: `full` gives each monologue and intent, to be depicted and never stated;
+// `brief` gives only the depiction, written as behaviour, and only when it carries no unrevealed
+// secret and names no one the POV can't see (the screens Stance uses), checked again here whatever
+// was checked when it was recorded. Whoever gets a line here is left out of Stance (`minds.minded`);
+// on the section's own budget the engine run keeps the best on the ladder (`fitMindLines`), and
+// Stance tells of the rest.
 
 import type { EntityId } from "../../../shared/ids";
 import { worldMindsOf } from "../../../shared/minds";
@@ -13,6 +14,7 @@ import { acts } from "../../../engine/life";
 import { own } from "../../../engine/pack-kit";
 import { hiddenNameCheck, playerKnows } from "../../../engine/player-events";
 import type { ReadContext } from "../../../engine/registry";
+import { together } from "../../../engine/presence";
 import { isGone, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { readSlice } from "./state";
@@ -52,7 +54,7 @@ export function mindLines(ctx: ReadContext): MindLine[] {
     if (!m || !e || m.round !== slice.round || id === pov || isGone(state, id) || !acts(world, state, id)) continue;
     // An earlier beat of the skip is past: the clock ran on after it.
     if (m.moment === "beat" && m.at !== state.clock) continue;
-    const present = here !== null && placeOfEntity(state, id) === here && canSeeEntity(reg, world, state, pov, id);
+    const present = together(world, here, placeOfEntity(state, id)) && canSeeEntity(reg, world, state, pov, id);
     if (!present && m.interrupt === null) continue;
     // Someone reaching the POV from elsewhere is named only when the POV knows them.
     const name = present || playerKnows(reg, world, state, pov, id) ? e.name : "Someone";

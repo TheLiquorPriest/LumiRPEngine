@@ -23,6 +23,7 @@ import { loreHeldBy, loreReadable, loreSearch, loreSnippet } from "../engine/lor
 import { fitPins, type PinnedText } from "../engine/lore-pins";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
+import { together } from "../engine/presence";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { agendaFor } from "../engine/tracks";
@@ -428,7 +429,7 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
   const e = own(state.entities, who);
   const c = readCharacter(state, who);
   const place = placeOfEntity(state, who);
-  const withPov = place !== null && placeOfEntity(state, world.pov) === place;
+  const withPov = together(world, place, placeOfEntity(state, world.pov));
   const cal = calendarOf(world);
   // How the last turn ended is theirs only if they heard it: someone the POV met at its end, or who
   // came in since, wasn't there for what it tells (DESIGN §24.4).

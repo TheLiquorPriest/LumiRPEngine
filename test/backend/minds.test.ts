@@ -325,14 +325,14 @@ describe("minds around a turn", () => {
     fakeModels(rig);
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
     const here = STARTER_WORLDS.modern_slice_of_life?.("a", "Alder").entities.pov?.fields.place;
-    // One hidden in the POV's room, one public but never met, away at the marina: both Live, by `always`.
+    // One hidden in the POV's room, one public but never met, away at the marina: both Live, by `always`. The GM's intent for the one away keeps her thinking off scene.
     for (const [id, name, place, extra] of [["lurker", "The Lurker", here, { visibility: "secret" }], ["drifter", "Vera Drift", "alder_harbor_marina", {}]] as const) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id, value: { id, kind: "person", name, tier: "background", fields: { place }, relations: [], ...extra } }));
     rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["danny_okafor", "lurker", "drifter"] } } }));
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     const chatId = rig.host.createChat("Morning.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { refreshLimit: 0 } } }));
-    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: here ?? "" }] }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: here ?? "" }, { op: "mind_intent", entity: "drifter", text: "Find out who keeps asking about the marina." }] }));
     await rig.turn(chatId, "Hello.", "They look up.");
     // Each of them thought, and the two in the room remembered.
     expect(mindCalls(rig).map((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1]).sort()).toEqual(["Danny Okafor", "The Lurker", "Vera Drift"]);

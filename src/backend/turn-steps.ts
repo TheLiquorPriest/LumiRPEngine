@@ -28,6 +28,7 @@ import type { Answers, Questions } from "../engine/decide";
 import { sample } from "../engine/decide";
 import { optionalQuery } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
+import { povLead } from "../engine/presence";
 import { readPass } from "../engine/read-pass";
 import type { Registry } from "../engine/registry-impl";
 import type { Rng } from "../engine/rng";
@@ -59,10 +60,12 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
     // Where the POV is, as every player surface names it: a place it can't see is somewhere unnamed.
     const place = povPlace(registry, world, state);
     out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
+    // People names the POV first; the line above already does, so its own line comes in only for the needs it adds.
+    const named = `${povLead(pov?.name ?? world.pov)}.`;
     for (const r of registry.renderers) {
       if (r.hint || r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT) continue;
       try {
-        for (const line of r.render(ctx)) if (findLeaks(line, secrets).length === 0 && !out.includes(line)) out.push(line);
+        for (const line of r.render(ctx)) if (line !== named && findLeaks(line, secrets).length === 0 && !out.includes(line)) out.push(line);
       } catch {
         // A renderer that can't render this state contributes nothing.
       }
