@@ -7,6 +7,7 @@
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { FeedScope } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
+import { accessOf, mayUse, owns } from "../../../engine/access";
 import { together } from "../../../engine/presence";
 import type { FeedLine, ReadContext } from "../../../engine/registry";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
@@ -96,9 +97,11 @@ function waysOut(ctx: ReadContext, here: PlaceId): PlaceId[] {
 
 /**
  * The Place section: the place's description; the things lying here the POV can see (not people,
- * vehicles or accounts, which have their own sections, nor anything inside something else); and a
- * layout digest, the rooms inside it and the ways out. In `scene` and `gm` scopes, a thing here or
- * a way out the POV can't see, marked; in `gm`, also who is in the places next door.
+ * vehicles or accounts, which have their own sections, nor anything inside something else), each
+ * with whose it is as the POV may know (`engine/access`): its own, another's, or lent to it to use;
+ * and a layout digest, the rooms inside it and the ways out. A place the POV can't see (it stands
+ * in a secret one) gives its description only in `gm` scope, under its real name. In `scene` and
+ * `gm` scopes, a thing here or a way out the POV can't see, marked; in `gm`, also who is next door.
  */
 export function placeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const pov = ctx.world.pov;
@@ -110,7 +113,12 @@ export function placeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const seePlace = (who: EntityId, id: PlaceId): boolean => canSeePlace(ctx.registry, ctx.world, ctx.state, who, id);
   const lines: FeedLine[] = [];
   const description = place.fields.description;
-  if (typeof description === "string" && description.trim() !== "") lines.push({ text: `${povPlace(ctx.registry, ctx.world, ctx.state)?.name ?? HIDDEN_PLACE_NAME}: ${description.trim()}`, known: "pov" });
+  if (typeof description === "string" && description.trim() !== "") {
+    // Told as the POV knows the place: one it can't see is never described on its player lines.
+    const shown = povPlace(ctx.registry, ctx.world, ctx.state);
+    if (shown?.id) lines.push({ text: `${shown.name}: ${description.trim()}`, known: "pov" });
+    else if (scope === "gm") lines.push({ text: `${place.name}: ${description.trim()}`, known: "gm" });
+  }
   const things = Object.keys(ctx.state.entities)
     .sort()
     .filter((id) => {
@@ -119,7 +127,14 @@ export function placeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       return !["person", "vehicle", "account", "property"].some((k) => kindIs(ctx.registry, ctx.world, e.kind, k));
     });
   const seen = things.filter((id) => seeThing(pov, id));
-  if (seen.length > 0) lines.push({ text: `Here: ${seen.slice(0, THINGS_CAP).map((id) => nameOf(ctx, id)).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
+  // Whose a thing is, as the POV may know: its own, one it may use by a grant, or another's it can see.
+  const whose = (id: EntityId): string => {
+    if (owns(ctx.state, pov, id)) return " (yours)";
+    if (mayUse(ctx.state, pov, id)) return " (yours to use)";
+    const owner = accessOf(ctx.state, id).owners.map((o) => o.party).find((p) => seeThing(pov, p));
+    return owner ? ` (${nameOf(ctx, owner)}'s)` : "";
+  };
+  if (seen.length > 0) lines.push({ text: `Here: ${seen.slice(0, THINGS_CAP).map((id) => `${nameOf(ctx, id)}${whose(id)}`).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
   for (const id of things.filter((t) => !seeThing(pov, t))) {
     const line = beyond(ctx, scope, `Here: ${nameOf(ctx, id)}.`, (who) => seeThing(who, id));
     if (line) lines.push(line);

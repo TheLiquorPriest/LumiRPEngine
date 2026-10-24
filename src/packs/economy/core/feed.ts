@@ -1,8 +1,9 @@
 // The Property section (DESIGN §6.11, §27.9): real estate and who holds it. In the player scope,
-// the properties the player character holds a role on (his own, or a group's he belongs to), each
-// with where it is (as he may see it), his role and share, and the other owners as he may know
-// them. In `scene` scope, the properties of the people with him, as theirs to know; in `gm`, every
-// other property too. Owners and shares are read through `engine/access`.
+// the properties the player character holds a role on and can see (his own, or a group's he
+// belongs to), each with where it is (as he may see it), his role and share, and the other owners as
+// he may know them. In `scene` scope, the properties of the people with him that they can see, as
+// they know them; in `gm`, every other one too, a secret one included. Owners and shares are read
+// through `engine/access`.
 
 import type { OwnerRole } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
@@ -37,7 +38,8 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   for (const id of propertyIds(ctx.state)) {
     if (isGone(ctx.state, id)) continue;
     const access = accessOf(ctx.state, id);
-    if (!owns(ctx.state, pov, id)) {
+    // One he holds a part in but can't see (a group's secret safehouse) is never a player line.
+    if (!owns(ctx.state, pov, id) || !see(pov, id)) {
       others.push(id);
       continue;
     }
@@ -58,10 +60,14 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     if (told >= OTHERS_CAP) break;
     const owners = accessOf(ctx.state, id).owners;
     if (owners.length === 0) continue;
-    const text = `${name(id)}${where(id, null)}: ${owners.map((o) => `${name(o.party)}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`;
-    const knowers = owners.filter((o) => withHim(o.party)).map((o) => name(o.party));
-    if (knowers.length > 0) lines.push({ text, known: "scene", who: knowers.join(", ") });
-    else if (scope === "gm") lines.push({ text, known: "gm" });
+    // Scene facts are only what an owner with him can see by the visibility rules (never a secret
+    // property), told as they may know it; the rest is the GM's, by real names.
+    const knowers = owners.filter((o) => withHim(o.party) && see(o.party, id)).map((o) => o.party);
+    const knower = knowers[0];
+    if (knower !== undefined) {
+      const text = `${name(id)}${where(id, knower)}: ${owners.map((o) => `${see(knower, o.party) || o.party === knower ? name(o.party) : "someone"}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`;
+      lines.push({ text, known: "scene", who: knowers.map(name).join(", ") });
+    } else if (scope === "gm") lines.push({ text: `${name(id)}${where(id, null)}: ${owners.map((o) => `${name(o.party)}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`, known: "gm" });
     else continue;
     told++;
   }

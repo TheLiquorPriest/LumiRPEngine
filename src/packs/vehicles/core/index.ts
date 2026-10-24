@@ -108,7 +108,8 @@ const OTHERS_CAP = 8;
  * level 2 his groups' (his family's), with whose they are; from level 3 the ones assigned or lent
  * to him; the ones away from his site folded into one line. Then other people's vehicles at his
  * site, with whose they are. Owners are named only as he may know them. In `scene` scope a vehicle
- * here he can't see whose owner is with him is added, marked; in `gm`, every one at his site.
+ * here he can't see is added, marked, when its owner is with him and can see it (a secret one never:
+ * no one can), its place as the owner may know it; in `gm`, every one at his site, by real name.
  */
 export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const pov = ctx.world.pov;
@@ -165,11 +166,13 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   if (scope === "player") return lines;
   for (const o of others.filter((x) => !see(pov, x.v))) {
     const name = own(ctx.state.entities, o.v)?.name ?? o.v;
-    const ownerHere = o.owner !== null && see(pov, o.owner) && together(ctx.world, here, placeOfEntity(ctx.state, o.owner));
-    const where = o.place ? (own(ctx.world.places, o.place)?.name ?? o.place) : "somewhere";
-    const text = `${name}: at ${where}, ${o.owner ? `${own(ctx.state.entities, o.owner)?.name ?? o.owner}'s` : "no one's"}.`;
-    if (ownerHere && o.owner) lines.push({ text, known: "scene", who: own(ctx.state.entities, o.owner)?.name ?? o.owner });
-    else if (scope === "gm") lines.push({ text, known: "gm" });
+    const ownerName = o.owner ? (own(ctx.state.entities, o.owner)?.name ?? o.owner) : null;
+    // Scene facts are only what someone with him can see by the visibility rules; the rest is the GM's.
+    const knower = o.owner !== null && see(pov, o.owner) && see(o.owner, o.v) && together(ctx.world, here, placeOfEntity(ctx.state, o.owner)) ? o.owner : null;
+    if (knower && ownerName) {
+      const where = o.place && canSeePlace(ctx.registry, ctx.world, ctx.state, knower, o.place) ? `at ${own(ctx.world.places, o.place)?.name ?? o.place}` : "somewhere";
+      lines.push({ text: `${name}: ${where}, ${ownerName}'s.`, known: "scene", who: ownerName });
+    } else if (scope === "gm") lines.push({ text: `${name}: at ${o.place ? (own(ctx.world.places, o.place)?.name ?? o.place) : "an unknown place"}, ${ownerName ? `${ownerName}'s` : "no one's"}.`, known: "gm" });
   }
   return lines;
 }

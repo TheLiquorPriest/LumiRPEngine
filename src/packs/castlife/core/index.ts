@@ -1514,8 +1514,9 @@ export function stanceLines(ctx: ReadContext): string[] {
 }
 
 /**
- * Stance by scope (DESIGN §6.11): its people's lines as the POV may read them; in `scene` and `gm`
- * scopes, each one's agendas that aren't public, at their stage, as theirs to know.
+ * Stance by scope (DESIGN §6.11): its people's lines as the POV may read them; in `scene` scope,
+ * each one's `known_by` agendas, at their stage, as theirs to know; a secret agenda is the GM's
+ * alone, so only the `gm` scope tells it.
  */
 export function stanceFeed(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const lines: FeedLine[] = stanceLines(ctx).map((text) => ({ text, known: "pov" }));
@@ -1524,7 +1525,10 @@ export function stanceFeed(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const name = own(ctx.state.entities, id)?.name ?? id;
     for (const a of agendaFor(ctx.world, ctx.state, id).filter((x) => !publicTrack(ctx.world, x.track))) {
       const track = own(ctx.world.tracks, a.track);
-      lines.push({ text: `${name}'s private agenda, ${track?.label ?? a.track}: ${a.stageLabel}.`, known: "scene", who: name });
+      const secret = visibilityOf(track?.visibility) === "secret";
+      const text = `${name}'s private agenda, ${track?.label ?? a.track}: ${a.stageLabel}.`;
+      if (!secret) lines.push({ text, known: "scene", who: name });
+      else if (scope === "gm") lines.push({ text, known: "gm" });
     }
   }
   return lines;

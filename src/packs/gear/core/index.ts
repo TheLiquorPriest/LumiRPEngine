@@ -87,7 +87,8 @@ const PRESENT_GEAR_CAP = 6;
 /**
  * What each person with the POV that it can see visibly wears and carries (DESIGN §6.11): worn and
  * equipped things and what they hold in hand, never what is in a bag or a pocket. Only what the POV
- * can see; in `scene` and `gm` scopes, a thing on them it can't see, marked as theirs to know.
+ * can see. In `scene` scope, a thing on them the POV can't see but they can (by the visibility rules,
+ * so never a secret one), marked as theirs to know; in `gm`, any other thing on them too.
  */
 export function presentGearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const pov = ctx.world.pov;
@@ -111,7 +112,10 @@ export function presentGearLines(ctx: ReadContext, scope: FeedScope): FeedLine[]
     if (parts.length > 0) lines.push({ text: `${person.name} ${parts.join("; ")}.`, known: "pov" });
     if (scope === "player") continue;
     const hidden = [...worn, ...held].filter((id) => !see(pov, id));
-    if (hidden.length > 0) lines.push({ text: `${person.name} has ${say(hidden)}.`, known: "scene", who: person.name });
+    const theirs = hidden.filter((id) => see(who, id));
+    const gms = hidden.filter((id) => !see(who, id));
+    if (theirs.length > 0) lines.push({ text: `${person.name} has ${say(theirs)}.`, known: "scene", who: person.name });
+    if (scope === "gm" && gms.length > 0) lines.push({ text: `${person.name} has ${say(gms)}.`, known: "gm" });
   }
   return lines;
 }

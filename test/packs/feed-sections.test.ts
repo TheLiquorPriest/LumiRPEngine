@@ -11,6 +11,7 @@ import { Working } from "../../src/engine/working";
 import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "./riverton";
 import { startState } from "./support";
+import { factLines, slotVars } from "../../src/backend/turn-steps";
 
 const reg = createRegistry(ALL_PACKS);
 
@@ -23,6 +24,16 @@ function lines(patch: (w: WorldDoc) => void, slot: string, scope: FeedScope = "p
 }
 
 const thing = (id: string, name: string, fields: EntityDef["fields"], extra: Partial<EntityDef> = {}): EntityDef => ({ id, kind: "item", name, tier: "background", fields, relations: [], ...extra });
+
+/** Everything a player surface reads for a world: every section's player lines, the helpers' fact lines and the step vars. */
+function playerSurfaces(patch: (w: WorldDoc) => void): string {
+  const world = modernUsWorld("w", "R");
+  patch(world);
+  const state = startState(world, reg);
+  const w = new Working(reg, world, state);
+  const player = reg.renderers.filter((r) => !r.hint).flatMap((r) => linesOf(r, w.ctx, "player").map((l) => l.text));
+  return [...player, ...factLines(reg, world, state, []), ...Object.values(slotVars(reg, world, state))].join("\n");
+}
 
 describe("the Place section", () => {
   const patch = (w: WorldDoc): void => {
@@ -77,5 +88,60 @@ describe("the Property section", () => {
     const line = out.find((l) => l.text.includes("The Elm Street house"))?.text ?? "";
     expect(line).toContain("60%");
     expect(line).toContain("Maya Chen");
+  });
+});
+
+describe("whose a thing lying here is", () => {
+  test("a thing lying here is told with its owner, and one lent to the player character as his to use", () => {
+    const base = (w: WorldDoc): void => {
+      w.entities.key = thing("key", "Brass key", { place: "apartment", owner: "maya" });
+      w.entities.drill = thing("drill", "Cordless drill", { place: "apartment", owner: "rosa" });
+    };
+    const here = (patch: (w: WorldDoc) => void): string => lines(patch, "place").map((l) => l.text).find((l) => l.includes("Brass key")) ?? "";
+    expect(here(base)).toContain("Maya Chen");
+    const lent = here((w) => {
+      base(w);
+      w.entities.you?.relations.push({ type: "uses", to: "drill" });
+    });
+    expect(lent).not.toEqual(here(base));
+  });
+});
+
+describe("secrets stay off every player surface", () => {
+  test("standing in a secret place, its description is in no player line, fact line or step var, and only the GM scope tells it", () => {
+    const patch = (w: WorldDoc): void => {
+      w.places.vault = { id: "vault", name: "Hidden vault", parent: "riverton", visibility: "secret", fields: { description: "A cold room lined with stolen paintings." } };
+      const you = w.entities.you;
+      if (you) you.fields.place = "vault";
+    };
+    expect(playerSurfaces(patch)).not.toContain("stolen paintings");
+    expect(lines(patch, "place", "scene").map((l) => l.text).join("\n")).not.toContain("stolen paintings");
+    expect(lines(patch, "place", "gm").filter((l) => l.text.includes("stolen paintings")).map((l) => l.known)).toEqual(["gm"]);
+  });
+
+  test("a secret safehouse his faction owns is in no player line, fact line or {{property}}, and only the GM scope tells it", () => {
+    const patch = (w: WorldDoc): void => {
+      w.entities.order = { id: "order", kind: "household", name: "Order of Ash", tier: "background", fields: {}, relations: [] };
+      w.entities.you?.relations.push({ type: "member_of", to: "order" });
+      w.entities.safehouse = { id: "safehouse", kind: "property", name: "Safehouse on Quarry Road", tier: "background", fields: { place: "park", owners: [{ party: "order", role: "owner" }], value: 9000000 }, relations: [], visibility: "secret" };
+    };
+    expect(playerSurfaces(patch)).not.toContain("Safehouse");
+    expect(lines(patch, "property", "gm").filter((l) => l.text.includes("Safehouse")).map((l) => l.known)).toEqual(["gm"]);
+  });
+
+  test("in the scene scope a companion's secret revolver, van and warehouse appear nowhere; in the GM scope they do, marked", () => {
+    const patch = (w: WorldDoc): void => {
+      w.places.bay = { id: "bay", name: "Hidden service bay", parent: "riverton", visibility: "secret", fields: {} };
+      w.entities.lee = { id: "lee", kind: "person", name: "Lee Park", tier: "supporting", fields: { place: "apartment" }, relations: [] };
+      w.entities.revolver = thing("revolver", "Snub-nosed revolver", { owner: "lee" }, { relations: [{ type: "in", to: "lee" }], visibility: "secret" });
+      w.entities.van = { id: "van", kind: "vehicle", name: "Unmarked van", tier: "background", fields: { owner: "lee", class: "minivan", place: "garage", status: "ok", fuel_pct: 50 }, relations: [], visibility: "secret" };
+      w.entities.warehouse = { id: "warehouse", kind: "property", name: "Pier 9 warehouse", tier: "background", fields: { place: "bay", owners: [{ party: "lee", role: "owner" }], value: 5000000 }, relations: [], visibility: "secret" };
+    };
+    const secrets = ["Snub-nosed revolver", "Unmarked van", "Pier 9 warehouse", "Hidden service bay"];
+    const scoped = (scope: FeedScope): FeedLine[] => ["people", "vehicles", "property"].flatMap((slot) => lines(patch, slot, scope));
+    const scene = scoped("scene").map((l) => l.text).join("\n");
+    for (const s of secrets) expect(scene).not.toContain(s);
+    const gm = scoped("gm");
+    for (const s of ["Snub-nosed revolver", "Unmarked van", "Pier 9 warehouse"]) expect(gm.filter((l) => l.text.includes(s)).map((l) => l.known)).toEqual(["gm"]);
   });
 });

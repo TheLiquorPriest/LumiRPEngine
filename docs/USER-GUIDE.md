@@ -322,15 +322,15 @@ A classification or tag you set here holds in this chat only, over what the worl
 
 ### What the narrator is fed
 
-Each section the narrator reads (Outcome, Scene, People and the rest) has settings. The world sets them in **Build → Sections**, and **GM → This chat → Sections** sets them for the chat you have open: tap a section, change what you like and tap **Save for this chat**, or **Use the world's** to go back to the world's. Each save is a GM edit with its own **Undo**.
+Each section the narrator reads (Outcome, Scene, People and the rest) has settings. The world sets them in **Build → Sections**, and **GM → This chat → Sections** sets them for the chat you have open: tap a section, change what you like and tap **Save for this chat**, or **Use the world's** to go back to the world's. The chat's settings stand in place of the world's for that section, whole: the form opens on the settings in force, and what you save is all of them, so you can lift a cap or a list of sources the world set. Each save is a GM edit with its own **Undo**.
 
 - **In the prompt**: off leaves the section out.
-- **At most lines**: only its first lines go in.
-- **At most tokens**: lines past it are cut from the end.
+- **At most lines** (**Cap its lines** in the GM page; off is no cap): only its first lines go in, the background hints included.
+- **At most tokens** (**Cap its tokens**; off is no cap): lines past it are cut from the end.
 - **Sources**: the renderers that fill the section, by name; none means its own. `location`, `calendar` and `weather` fill Scene, `people`, `routines` and `present_gear` People, `stance` and `cues` Stance, `conditions` Outcome, and `money`, `gear`, `vehicles`, `quest`, `place`, `property` and `minds` their own sections. A custom section with sources, say a **Weather** section with `weather`, gets those lines too.
 - **Whose knowledge**:
   - **What the player character knows** (the default): what every section has always told.
-  - **Also what the people with him know**: facts he doesn't know but someone with him does, such as a person in the room only Maya knows is there.
+  - **Also what the people with him know**: facts he doesn't know but someone with him does, such as a person in the room only Maya knows is there. Never a secret (something only the GM knows), nor a quest's hidden truth: only **Everything** tells those.
   - **Everything**: every fact, secrets included.
 
   A fact your character doesn't know is marked for the narrator ("[unknown to you; known to Maya]", "[unknown to you; GM only]"), and the narrator is told that marked facts are only for steering the story: never to reveal, narrate as known or let your character act on. The engine's own screens never show them: Play, chips, the Journal and the Context panel's sizes show only what your character knows. But marked facts are in the prompt, so anything in Lumiverse that shows the prompt or the engine's book shows them too; choosing a wider scope is choosing to put them there.
@@ -339,8 +339,8 @@ Each section the narrator reads (Outcome, Scene, People and the rest) has settin
 
 Two sections are new, both on unless the world or the GM switches them off, and ranked last, so a small budget leaves them out first. A world that lists its own sections gets them only when it adds them.
 
-- **Place**: the place's description, the things lying there your character can see (at most 12), the rooms inside it and the ways out; then the lore about it (at most 6 entries): each lore entry, your World Info included, that links the place or a place it's inside, nearest first, as your character may read it (a secret one only once its gate holds). An entry of your World Info that goes in this way is switched off for that prompt, so the narrator doesn't read it twice; one whose text holds a macro stays on too, where its macro runs.
-- **Property**: the property your character holds a part in (his own, or his family's), where it is, his role and share, and who else owns it.
+- **Place**: the place's description (only when your character knows the place), the things lying there your character can see (at most 12), each with whose it is when he knows, the rooms inside it and the ways out; then the lore about it (at most 6 entries): each lore entry, your World Info included, that links the place or a place it's inside, nearest first, as your character may read it (a secret one only once its gate holds). An entry of your World Info that goes in this way is switched off for that prompt, so the narrator doesn't read it twice; one whose text holds a macro stays on too, where its macro runs.
+- **Property**: the property your character holds a part in and knows of (his own, or his family's), where it is, his role and share, and who else owns it.
 
 People also tells what each person with your character visibly wears and carries (never what is in a bag or a pocket), at most 6 things each.
 
