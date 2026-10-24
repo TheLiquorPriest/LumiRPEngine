@@ -14,13 +14,14 @@ import { defaultTimeouts } from "../../src/shared/timeouts";
 import type { MindCommitment, MindNote, MindPlan, MindsGmCharacter, MindsGmView, WitnessEntry } from "../../src/shared/minds";
 import { calendarOf, formatClock } from "../../src/engine/calendar";
 import { faded, salienceNow } from "../../src/packs/minds/core/state";
-import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
+import type { FieldFixTarget, GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
 import type { MapDisplay, WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps } from "../../src/shared/maps";
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { inferredDefaults } from "../../src/shared/inferred";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { buildGmWorld } from "../../src/engine/gm-view";
+import { knownPlaceRefs } from "../../src/engine/character";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
 import { materializeAll } from "../../src/engine/materialize";
@@ -29,6 +30,12 @@ import { Working } from "../../src/engine/working";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { buildMapView } from "../../src/packs/space/core/view";
 import { NEED_DEFAULTS, NEED_IDS, NEED_WORDS } from "../../src/shared/needs";
+
+/** The HUD's place ✎ as the backend sends it: every place of the preview world the POV may know, with its path, for the place sheet. */
+function placeFixFixture(): FieldFixTarget {
+  const places = knownPlaceRefs(worldFixture(), () => true);
+  return { entity: "pov", field: "place", type: "ref", value: "diner", options: places.map((p) => ({ value: p.id, label: p.name })), places };
+}
 
 const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, ["invitation", "decline", "incident", "quest", "arrival"].includes(cls) ? "stop" : cls === "bill" ? "note" : "ignore"])) as Record<InterruptClass, InterruptPolicy>;
 
@@ -49,7 +56,7 @@ export function stateFixture(chatId: string): StateView {
       cash: { cents: 4600 },
       fixes: {
         time: { type: "time", value: "2026-10-20 07:42", gregorian: true, months: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, i) => ({ name, days: [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][i] ?? 30 })) },
-        place: { entity: "pov", field: "place", type: "ref", value: "diner", options: [{ value: "diner", label: "Rosie's Diner" }, { value: "apartment", label: "Apartment 4B" }, { value: "garage", label: "Kim's Garage" }] },
+        place: placeFixFixture(),
         cash: { entity: "pov", field: "cash", type: "money", value: 4600, min: 0 },
         weather: { entity: "region_maple", field: "weather", type: "text", value: "rain", options: [{ value: "clear", label: "Clear" }, { value: "cloudy", label: "Overcast" }, { value: "rain", label: "Rain" }, { value: "storm", label: "A storm" }, { value: "fog", label: "Fog" }, { value: "snow", label: "Snow" }] },
         scene: { entity: "pov", field: "scene", type: "text", value: "", options: [{ value: "", label: "Place default (Conversation)" }, { value: "conversation", label: "Conversation" }, { value: "action", label: "Action" }, { value: "exploration", label: "Exploration" }, { value: "downtime", label: "Downtime" }] },

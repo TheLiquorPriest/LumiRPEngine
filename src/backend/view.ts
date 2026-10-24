@@ -35,6 +35,7 @@ import { povLife } from "../engine/life";
 import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, findLeaks, povPlace, unrevealedTruths } from "../engine/visibility";
+import { knownPlaceRefs } from "../engine/character";
 import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import type { StoredChip } from "./chips";
 
@@ -101,9 +102,11 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   // now as the pill reads it, local to the POV's place; it needs the calendar, as a Timelapse does.
   if (ctx.levelOf(pov, "calendar") >= 1) fixes.time = { type: "time", value: formatStamp(cal, state.clock, offset), ...calendarMonths(cal) };
   if (placeId) {
-    // The ✎ offers the places the POV may see; a hidden one, even where it stands, is never offered.
-    const options = Object.values(world.places).filter((p) => canSeePlace(ctx.registry, world, state, pov, p.id));
-    fixes.place = { entity: pov, field: "place", type: "ref", value: shown?.id ?? null, options: options.map((p) => ({ value: p.id, label: p.name })) };
+    // The ✎ offers the places the POV may see; a hidden one, even where it stands, is never offered,
+    // nor named in another's path or as its parent (`knownPlaceRefs`), for the place sheet.
+    const seen = (id: string): boolean => canSeePlace(ctx.registry, world, state, pov, id);
+    const options = Object.values(world.places).filter((p) => seen(p.id));
+    fixes.place = { entity: pov, field: "place", type: "ref", value: shown?.id ?? null, options: options.map((p) => ({ value: p.id, label: p.name })), places: knownPlaceRefs(world, seen) };
   }
   // Cash from the economy panel is the POV's cash accounts: its ✎ posts a correction to them
   // (`lre.fix`), so it needs one. Without the panel's cash, the ✎ sets the cash field the pill shows.

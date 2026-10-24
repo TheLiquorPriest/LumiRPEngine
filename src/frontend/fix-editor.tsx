@@ -15,6 +15,7 @@ import { Button, Field, useBusy } from "./components";
 import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
 import { fixRequest, timeFixRequest, type Req } from "./requests";
+import { PlaceSheet } from "./character/place-picker";
 
 function initialText(target: FixTarget, currency: WorldCurrency): string {
   if (target.type === "money" && typeof target.value === "number") return formatMoneyInput(target.value, currency);
@@ -136,7 +137,12 @@ function TimeFixForm(props: { title: string; target: TimeFixTarget; busy: boolea
   );
 }
 
-export function FixEditor(props: { label: string; target: FixTarget; onDone(): void }) {
+/**
+ * `title` is the editor's heading in words ("Where is Dale Whitcomb?"); else "Fix <label>". A place
+ * fix with `places` opens the place sheet (search, paths, browsing by level) over exactly the places
+ * it offers, as a player sees them: nothing hidden is named, and no Secret badge shows.
+ */
+export function FixEditor(props: { label: string; title?: string; target: FixTarget; onDone(): void }) {
   const app = useApp();
   const view = useView();
   const id = useId();
@@ -154,7 +160,7 @@ export function FixEditor(props: { label: string; target: FixTarget; onDone(): v
   }, []);
   const chatId = view?.chatId;
   if (!chatId) return null;
-  const title = `Fix ${props.label.toLowerCase()}`;
+  const title = props.title ?? `Fix ${props.label.toLowerCase()}`;
   const send = (request: Req<"lre.fix">) =>
     run(async () => {
       const result = await app.request(request);
@@ -170,6 +176,7 @@ export function FixEditor(props: { label: string; target: FixTarget; onDone(): v
   };
   if (target.type === "time") return <TimeFixForm title={title} target={target} busy={busy} formRef={form} onSave={(time) => send(timeFixRequest(time, chatId))} onCancel={props.onDone} onKeyDown={cancelOnEscape} />;
   const save = (value: JsonValue) => send(fixRequest(target, value, chatId));
+  if (target.places && target.places.length > 0) return <PlaceSheet places={target.places} value={typeof target.value === "string" ? target.value : null} title={title} onClose={props.onDone} onPick={(place) => (place ? save(place.id) : props.onDone())} />;
   if (target.options && target.options.length > 0) {
     const now = JSON.stringify(target.value);
     return (

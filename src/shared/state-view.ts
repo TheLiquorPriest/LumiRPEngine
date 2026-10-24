@@ -30,6 +30,7 @@ import type { FinanceView } from "./finance";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
 import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, SectionFeed, StepPurpose, WorldCurrency } from "./world";
 import type { LorePolicy } from "./settings";
+import type { PlaceRef } from "./character";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
 
@@ -54,6 +55,12 @@ export interface FieldFixTarget {
   type: FieldType;
   value: JsonValue;
   options?: { value: JsonValue; label: string }[];
+  /**
+   * A place fix's places for the place sheet (search, paths, browsing by level): the same places
+   * `options` offers, each with its path and parent through places the POV may know only, and every
+   * one shown as public, so nothing hidden is named and no visibility is told.
+   */
+  places?: PlaceRef[];
   min?: number;
   max?: number;
 }

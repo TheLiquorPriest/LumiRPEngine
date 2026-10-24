@@ -79,6 +79,31 @@ export function placeRefs(world: Pick<WorldDoc, "places">): Map<PlaceId, PlaceRe
   return out;
 }
 
+/**
+ * The places a player may pick, as a picker shows them on a player surface (the place ✎ fixes):
+ * those `known` says the POV may know, in id order, each with its path through known places only,
+ * cut at the first one it may not know (so nothing around it is named), its parent only when known,
+ * and every one as public, since Play never shows how hidden a place really is.
+ */
+export function knownPlaceRefs(world: Pick<WorldDoc, "places">, known: (id: PlaceId) => boolean): PlaceRef[] {
+  const out: PlaceRef[] = [];
+  for (const id of Object.keys(world.places).sort()) {
+    const p = own(world.places, id);
+    if (!p || !known(id)) continue;
+    const path: string[] = [];
+    let cur = p.parent;
+    for (let guard = 0; cur !== undefined && guard < 64; guard++) {
+      const up = own(world.places, cur);
+      if (!up || !known(cur)) break;
+      path.unshift(up.name);
+      cur = up.parent;
+    }
+    const parent = p.parent !== undefined && own(world.places, p.parent) && known(p.parent) ? p.parent : null;
+    out.push({ id, name: p.name, path, parent, visibility: "public" });
+  }
+  return out;
+}
+
 /** The place an entity stands at: its own, else its holder's (`in`), outermost first. */
 function placeOf(bodies: Readonly<Record<EntityId, Body>>, id: EntityId): PlaceId | null {
   let cur: EntityId | undefined = id;
