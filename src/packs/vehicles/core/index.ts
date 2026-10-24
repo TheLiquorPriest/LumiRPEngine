@@ -20,8 +20,10 @@ import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
-import { kindIs, placeOfEntity } from "../../../engine/scope";
-import { canSeePlace } from "../../../engine/visibility";
+import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
+import { isMemberOf } from "../../../engine/selector";
+import { calendarOf, formatClock } from "../../../engine/calendar";
+import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { buildGarageView } from "./view";
 import classes from "./tables/modern-us/classes.json";
 import factors from "./tables/modern-us/factors.json";
@@ -85,6 +87,23 @@ export const VEHICLE: KindDef = {
 
 function classRow(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId): TableRow | undefined {
   return rowOf(ctx, "vehicles.classes", strOf(own(ctx.state.entities, vehicle)?.fields.class));
+}
+
+/** Whether it burns fuel: a known class with a fuel. A trailer, or a vehicle of no class the tables know, has no tank, so it shows no fuel or range. */
+function burnsFuel(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId): boolean {
+  const row = classRow(ctx, vehicle);
+  return row !== undefined && strOf(row.fuel_type, "gasoline") !== "none";
+}
+
+/** A place's top-level ancestor: the site a vehicle counts as "here" in, as the Vehicles section reads it. */
+function siteOf(world: { places: Record<PlaceId, { parent?: PlaceId }> }, place: PlaceId | null): PlaceId | null {
+  let at = place;
+  for (let depth = 0; at !== null && depth < 32; depth++) {
+    const parent = own(world.places, at)?.parent;
+    if (!parent) return at;
+    at = parent;
+  }
+  return at;
 }
 
 /** The class domain: road, marine or offroad. */
@@ -423,7 +442,7 @@ export const vehiclesPack: PackDef = {
         if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, entity) < 2) return [];
         const out: LedgerEvent[] = [];
         // "Runs fine" at level 1 means a usable tank: detail lands inside it.
-        if (typeof e.fields.fuel_pct !== "number") out.push({ type: "set", entity, field: "fuel_pct", value: rng.int(40, 90) });
+        if (typeof e.fields.fuel_pct !== "number" && burnsFuel(ctx, entity)) out.push({ type: "set", entity, field: "fuel_pct", value: rng.int(40, 90) });
         if (ownerLevel(ctx, entity) >= 3) {
           if (domainOf(ctx, entity) === "road" && typeof e.fields.odometer_mi !== "number") out.push({ type: "set", entity, field: "odometer_mi", value: rng.int(15000, 120000) });
           if (domainOf(ctx, entity) !== "road" && typeof e.fields.engine_hours !== "number") out.push({ type: "set", entity, field: "engine_hours", value: rng.int(50, 900) });
@@ -435,26 +454,48 @@ export const vehiclesPack: PackDef = {
 
     r.renderer({
       slot: "vehicles",
+      // What the player character may use (DESIGN §6, §9.3): his own; from level 2 his groups' (his
+      // family's), with whose they are; from level 3 the ones assigned or lent to him. Owners are
+      // named only as he may know them. The ones away from his site fold into one line.
       render(ctx) {
         const pov = ctx.world.pov;
         const level = ctx.levelOf(pov, "vehicles");
         if (level === 0) return [];
+        const cal = calendarOf(ctx.world);
+        const grants = new Map((own(ctx.state.entities, pov)?.relations ?? []).filter((r) => r.type === "uses").map((r) => [r.to, r]));
+        const site = siteOf(ctx.world, placeOfEntity(ctx.state, pov));
+        const ownerName = (owner: EntityId): string => (canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, owner) ? (own(ctx.state.entities, owner)?.name ?? "someone") : "someone");
         const lines: string[] = [];
+        const away = new Map<string, number>();
         for (const v of Object.keys(ctx.state.entities).sort()) {
           const e = own(ctx.state.entities, v);
-          if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || e.fields.owner !== pov) continue;
+          if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v)) continue;
+          const owner = typeof e.fields.owner === "string" ? e.fields.owner : null;
+          const grant = grants.get(v);
+          const whose = owner === pov ? "yours" : level >= 2 && owner !== null && isMemberOf(ctx.state, pov, owner) ? `${ownerName(owner)}'s` : level >= 3 && grant ? `${owner ? `${ownerName(owner)}'s, ` : ""}${grant.until !== undefined ? `lent to you until ${formatClock(cal, grant.until)}` : "assigned to you"}` : null;
+          if (whose === null || (owner !== pov && !canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, v))) continue;
           const place = placeOfEntity(ctx.state, v);
           // The narrator hears where it is as the player may: a place the POV can't see is somewhere.
           const where = !place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere";
+          if (site !== null && siteOf(ctx.world, place) !== site) {
+            away.set(where, (away.get(where) ?? 0) + 1);
+            continue;
+          }
           const parts = [`${e.name}: ${where}`];
           if (level === 1) parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
           else {
-            const range = rangeLeft(ctx, v);
-            parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? ` (~${Math.round(range.value)} ${range.unit})` : ""}`);
+            parts.push(whose);
+            if (burnsFuel(ctx, v)) {
+              const range = rangeLeft(ctx, v);
+              parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? ` (~${Math.round(range.value)} ${range.unit})` : ""}`);
+            }
             if (e.fields.status !== "ok" && e.fields.status !== undefined) parts.push(String(e.fields.status).replace(/_/g, " "));
           }
           lines.push(`${parts.join(", ")}.`);
         }
+        const elsewhere = [...away].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
+        const total = elsewhere.reduce((sum, [, n]) => sum + n, 0);
+        if (total > 0) lines.push(`Elsewhere: ${total} (${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}).`);
         return lines;
       },
     });

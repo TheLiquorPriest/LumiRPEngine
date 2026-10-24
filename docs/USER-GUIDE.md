@@ -413,7 +413,7 @@ The first *stop* you could see ends the Timelapse at the end of that time slot; 
 
 ### Montage
 
-A Timelapse turn is narrated from a **Montage**: the key events the point-of-view character would know (about people and places you have met; the weather counts when it is your region's), plus totals (money in and out per account at your Money level, distance travelled, changes in how people feel that crossed a band, notable needs). A field that changed several times in one batch, such as an hourly temperature, is listed once at its latest value. The narrator is told to narrate the interval from the Montage and not add events; when a short Timelapse has nothing for the Montage, the Montage is left out and the narrator is told only not to add events. The Outline never points the narrator at a section it doesn't have that turn. The Journal keeps the full list, with spans worded in days, hours or minutes. Under **Montage and limits** you can choose the **Montage granularity**: **Key events** (the default), **Per day** or **Per week**; it is shortened to fit the budget.
+A Timelapse turn is narrated from a **Montage**: the key events the point-of-view character would know (about people and places you have met; the weather counts when it is your region's), plus totals (money in and out per account at your Money level, distance travelled, anything you can see that crossed a band, such as how someone feels or a need going from calm to frantic, and net changes to your own and your belongings' other numbers; a field shown in bands is told by its band, never its number). A field that changed several times in one batch, such as an hourly temperature, is listed once at its latest value. The narrator is told to narrate the interval from the Montage and not add events; when a short Timelapse has nothing for the Montage, the Montage is left out and the narrator is told only not to add events. The Outline never points the narrator at a section it doesn't have that turn. The Journal keeps the full list, with spans worded in days, hours or minutes. Under **Montage and limits** you can choose the **Montage granularity**: **Key events** (the default), **Per day** or **Per week**; it is shortened to fit the budget.
 
 ### Speed through and Timelapse offers
 
@@ -438,7 +438,7 @@ Realism is how much of life the engine keeps track of. It is set **per domain**,
 |---|---|---|---|---|
 | **Money** | A wealth band | Cash plus one account | Accounts, cards (with autopay), recurring income and bills | Interest and APR, statements, minimum payments, loans, investments, withholding |
 | **Gear** | Notable items | Items, containers, cash in a wallet | Worn and equipped slots, kits, condition | Wear per use, consumables |
-| **Vehicles** | "Runs fine" | Fuel %, location, owner | Specs, consumption, odometer, loans, home base | Maintenance intervals, breakdowns, registration and insurance, marine and off-road specifics |
+| **Vehicles** | "Runs fine" | Fuel %, location, owner, your family's vehicles | Specs, consumption, odometer, loans and vehicles assigned or lent to you, home base | Maintenance intervals, breakdowns, registration and insurance, marine and off-road specifics |
 | **Cast life** | Day-part routines, agendas | Commitments set the day | A day planner | Needs and drives, invitations, NPC-to-NPC encounters, knowledge spreading |
 | **Relationships** | One band per pair | One number per pair | Several axes plus appraisal rules | Decay, history, group standing |
 | **Space and travel** | Named places | Places, routes and travel times | Grids and positions | Terrain multipliers, mode-specific routes |
@@ -447,6 +447,8 @@ Realism is how much of life the engine keeps track of. It is set **per domain**,
 | **Sheets and checks** | Bands as words | Stats plus one check | Skills and derived fields | The full sheet |
 
 The time controls and Timelapse need Calendar at level 1 or higher. At level 1, Timelapse targets round to parts of the day.
+
+**What the narrator is told of vehicles.** The Vehicles section lists what your character may use, each saying whose it is: his own at Vehicles 1, his family's from 2 (with their fuel and range), and those assigned or lent to him from 3 (a loan with when it's due). An owner he doesn't know of reads "someone". A trailer has no tank, so it shows no fuel. Vehicles away from where he is fold into one line, such as "Elsewhere: 12 (8 at Cedar Draw, 4 at the boathouse)".
 
 **Money detail.** Below the top Money level the money hub keeps the books simple, and at the top level it shows them all (see [Your money](#your-money)). Under any preset, a world can turn single money features on or off in **Build → Packs → economy** (**Money features** → **Feature switches**). Each runs from its usual level. Switched on, it runs from the lowest level it can (statements and interest from Money 3, cash machines and daily card limits from Money 2), and the hub shows that feature's own detail there and nothing more of the full books. Switched off, it doesn't run at any level, and its detail is gone from the hub at the top level too.
 
@@ -1343,6 +1345,9 @@ Caveats checks your preset against the open chat with a test prompt build, which
 
 **The AI keeps writing a JSON block, or the replies look wrong.**
 Some presets contain a **JSON-ledger block**: a block that makes the narrator append a JSON object (gold, inventory) to its replies. It can confuse reasoning models, and it competes with the engine's own record of money and belongings. The world checker warns you if the active preset has one, and **Settings → Caveats** shows the warning too. Use a preset without that block for world chats.
+
+**A section turns up outside my preset's blocks.**
+Your preset places some of the world's sections with `{{outlet::lre_…}}` but not all of them, so the ones it leaves out go in where the world places them. **Settings → Caveats** names the missing outlets; add them to the block where the others are.
 
 **A section says "not delivered".**
 The test prompt build didn't find it in the prompt. Check where the world's book and your preset place it (a position your preset doesn't assemble never reaches the prompt), then open **GM → This chat → Context** ([The Context inspector](#the-context-inspector)) again, which runs the check again.

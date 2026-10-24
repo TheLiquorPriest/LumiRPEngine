@@ -23,7 +23,9 @@ Each section the engine fills has an outlet named `lre_` and its slot. Put `{{ou
 | `minds` | Minds: each character's mind this turn, scoped to what they know (under `brief` secrecy, only how they come across). It has its own token budget (Settings → Minds), apart from the section budget | `{{outlet::lre_minds}}` |
 | — | The narrator rules (below) | `{{outlet::lre_narrator}}` |
 
-A world may define sections of its own (Build → Sections); each one's outlet is `lre_` and its id, so a section `weather` goes to `{{outlet::lre_weather}}`. Outlet names are matched without regard to case, as Lumiverse matches them.
+A world may list sections of its own (Build → Sections); each one's outlet is `lre_` and its id, so a section `stance` goes to `{{outlet::lre_stance}}`. A section is filled only by a pack that renders one with its id (weather, for example, goes into Scene, not a section of its own); one nothing fills is a lint warning (`section_unfed`) and never goes in. Outlet names are matched without regard to case, as Lumiverse matches them.
+
+Place all of the world's sections or none. A preset that places some with their outlets but leaves others out sends the rest in on their own, outside its blocks; Settings → Caveats warns about it (`preset_partial_outlets`) and names the missing outlets.
 
 Only blocks Lumiverse assembles in every prompt count. A block that is switched off, limited to some generation types (its injection trigger) or to characters with certain tags (its character tag trigger), or a second switched-on block under a radio category (Lumiverse keeps only the first one), places nothing: the section would go missing from the prompts that block isn't in, so the world's placement stands instead. A block Lumiverse leaves out for reasons the engine can't see, such as a preset profile's block states or a prompt-activation regex script, is caught when you open the Context panel: its test prompt build looks for each section the preset placed, and a section it doesn't find goes back to the world's placement until the preset changes.
 
