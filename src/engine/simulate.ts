@@ -165,13 +165,14 @@ function rngFactory(runSeed: string, process: string, slot: number): (entity: En
  * Steps one agent through one slot: its agent processes at its effective level. `povRoutine` false
  * while the story holds the POV (an ordinary turn's catch-up, a span the player's words spend, a
  * narrated skip): its routine doesn't move it, and its scene holds whoever is in it (DESIGN §8).
+ * `run`, the span the run passes (`SlotInfo.run`), when one does.
  */
-function stepAgent(reg: Registry, w: Working, agent: EntityId, slot: Slot, runSeed: string, povRoutine: boolean, timelapse: boolean): LedgerEvent[] {
+function stepAgent(reg: Registry, w: Working, agent: EntityId, slot: Slot, runSeed: string, povRoutine: boolean, timelapse: boolean, run?: { from: number; to: number }): LedgerEvent[] {
   const applied: LedgerEvent[] = [];
   for (const def of reg.processes) {
     if (def.scope !== "agent") continue;
     if (w.ctx.levelOf(agent, def.domain) < def.minLevel) continue;
-    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }), ...(timelapse ? { timelapse: true } : {}) }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
+    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }), ...(timelapse ? { timelapse: true } : {}), ...(run ? { run } : {}) }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
   }
   return applied;
 }
@@ -245,8 +246,10 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   let cursors = new Map<EntityId, number>();
   let next = 0;
 
+  /** The span this run passes: what was played before it, in turns, it only catches up. */
+  const run = { from, to };
   /** A slot as the processes read it: while the story holds the POV, its routine doesn't run and a scene with it holds whoever is in it. */
-  const infoOf = (slot: Slot): SlotInfo => ({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }), ...(timelapse ? { timelapse: true } : {}) });
+  const infoOf = (slot: Slot): SlotInfo => ({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }), ...(timelapse ? { timelapse: true } : {}), run });
 
   /**
    * The agents' own moments inside a slot after the clock (and after how far the world has run), and
@@ -314,7 +317,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       // Someone a death earlier in the slot stopped, or who dies on the way, steps no further.
       while (k < last && stillActs(w, agent)) {
         k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse, run);
         if (applied.length > 0) result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
       cursors.set(agent, k);

@@ -170,6 +170,10 @@ function metAt(ctx: ReadContext, who: EntityId, need: NeedId, at: number): Ledge
 const EAT_FOR = "minutes > 0 ? minutes : 30";
 /** A rest's time: the stated length, else half an hour. */
 const REST_FOR = "minutes > 0 ? minutes : 30";
+/** Going to bed's time: a stated nap's length, else the five minutes it takes to turn in (the night is a skip's). */
+const SLEEP_FOR = "minutes > 0 ? minutes : 5";
+/** What a stated nap meets at its end, fatigue; going to bed for the night meets nothing until it's slept through (no need). */
+const NAP_MEETS = "minutes > 0 ? 'fatigue' : ''";
 
 /** Taking someone to their bed, through the one move path; none without a bed or when they're there already. */
 function toBed(ctx: ReadContext, who: EntityId): LedgerEvent[] {
@@ -203,8 +207,9 @@ export function buildNeedsView(ctx: ReadContext): NeedsView | null {
   const tuning = tuningOf(ctx);
   return {
     needs: on.map((need) => {
-      const value = Math.round(needValue(ctx, pov, need));
-      return { need, name: NEEDS[need].name, label: NEEDS[need].label, value, pressing: value >= tuning[need].tell };
+      // Pressing from the value itself, as the narrator's line reads it: the gauge only shows it rounded.
+      const raw = needValue(ctx, pov, need);
+      return { need, name: NEEDS[need].name, label: NEEDS[need].label, value: Math.round(raw), pressing: raw >= tuning[need].tell };
     }),
   };
 }
@@ -703,6 +708,7 @@ function planMoments(ctx: ReadContext, who: EntityId, slot: SlotInfo): AgentInst
     }
   }
   if (ctx.levelOf(who, "castlife") >= 4) for (const a of asksOf(ctx, who, slotDays(ctx, slot))) if (inside(a.ask)) out.push({ at: a.ask, key: `invite:${a.key}` });
+  if (who === ctx.world.pov) out.push(...activityEndMoment(ctx, slot));
   return out;
 }
 
@@ -833,6 +839,7 @@ function liveSkipBlock(ctx: ReadContext, who: EntityId, block: SkipLived, at: nu
  * story moves them.
  */
 function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slot: SlotInfo): LedgerEvent[] {
+  if (moment.key === ACTIVITY_END) return povLivedNeeds(ctx, slot, moment.at);
   const cal = calendarOf(ctx.world);
   if (moment.key.startsWith("invite:")) {
     const ask = asksOf(ctx, who, [dateAt(cal, moment.at).dayIndex, dateAt(cal, moment.at).dayIndex + 1]).find((a) => `invite:${a.key}` === moment.key);
@@ -894,29 +901,62 @@ function inCompany(ctx: ReadContext): boolean {
 }
 
 /**
- * What the POV's time in a skip met by a slot's end (DESIGN §8): the needs the activity it lived up to
- * then meets (its sleep, its meals, time out), met when it stopped or at the slot's end, and company:
- * someone it knows with it meets its social need. A need already met by then records nothing.
+ * Where the time a skip passes in a slot begins (DESIGN §8): the slot's start, or the run's when it
+ * began inside the slot. A slot the run only catches the POV up through was played in ordinary turns,
+ * so it begins at or past that slot's end: what the POV did then is the story's, never read from now.
  */
-function povLivedNeeds(ctx: ReadContext, slot: SlotInfo): LedgerEvent[] {
+function passedFrom(slot: SlotInfo): number {
+  return Math.max(slot.start, slot.run?.from ?? slot.start);
+}
+
+/**
+ * What the POV's time in a skip met by `at` (DESIGN §8; a slot's end, or where the run stops inside
+ * the slot): the needs the activity it lived up to then meets (its sleep, its meals, time out), met
+ * when it stopped or at `at`, and at a slot's end company: someone it knows with it meets its social
+ * need. Only for time the run itself passes; a need already met by then records nothing.
+ */
+function povLivedNeeds(ctx: ReadContext, slot: SlotInfo, at = slot.end): LedgerEvent[] {
   const pov = ctx.world.pov;
+  const since = passedFrom(slot);
+  if (at <= since) return [];
   const activity = strOf(own(ctx.state.entities, pov)?.fields.activity);
-  const end = livedUntil(ctx, activity, slot.start, slot.end, slot.povRoutine !== false);
+  const end = livedUntil(ctx, activity, since, at, slot.povRoutine !== false);
   const met: [NeedId, number][] = end === null ? [] : needsMetBy(ctx, activity).map((n) => [n, end]);
-  if (!met.some(([n]) => n === "social") && needsOn(ctx.world).includes("social") && inCompany(ctx)) met.push(["social", slot.end]);
-  return met.flatMap(([need, at]) => metAt(ctx, pov, need, at));
+  if (at === slot.end && !met.some(([n]) => n === "social") && needsOn(ctx.world).includes("social") && inCompany(ctx)) met.push(["social", at]);
+  return met.flatMap(([need, t]) => metAt(ctx, pov, need, t));
 }
 
 /**
  * A moment that moves the POV off an activity it was living (its routine waking it, taking it from a
  * meal) meets what that activity met, then (DESIGN §8); a slot's step reads the rest (`povLivedNeeds`).
+ * A moment the run only catches up through meets nothing.
  */
 function povActivityEnds(ctx: ReadContext, who: EntityId, at: number, slot: SlotInfo, events: LedgerEvent[]): LedgerEvent[] {
-  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4) return events;
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4 || at <= passedFrom(slot)) return events;
   const was = strOf(own(ctx.state.entities, who)?.fields.activity);
   const moved = events.some((ev) => ev.type === "set" && ev.entity === who && ev.field === "activity" && ev.value !== was);
-  const end = moved ? livedUntil(ctx, was, slot.start, at, slot.povRoutine !== false) : null;
+  const end = moved ? livedUntil(ctx, was, passedFrom(slot), at, slot.povRoutine !== false) : null;
   return end === null ? events : [...needsMetBy(ctx, was).flatMap((n) => metAt(ctx, who, n, end)), ...events];
+}
+
+/** The moment the span of the POV's activity ends inside a slot, or the run does first (`AgentInstant.key`). */
+const ACTIVITY_END = "needs:end";
+
+/**
+ * The POV's moment in a slot where what it is doing stops being lived by this run (DESIGN §8): the end
+ * of the span its action gave it (`activity_until`), or the run's own end when that comes first inside
+ * the slot, so a skip ending mid-slot (a speed-through to 07:00) meets the activity's needs then.
+ * `povLivedNeeds` reads at that moment what it lived, so a span that ended before the run meets nothing.
+ */
+function activityEndMoment(ctx: ReadContext, slot: SlotInfo): AgentInstant[] {
+  const pov = ctx.world.pov;
+  const e = own(ctx.state.entities, pov);
+  if (ctx.levelOf(pov, "castlife") < 4 || needsMetBy(ctx, strOf(e?.fields.activity)).length === 0) return [];
+  const from = passedFrom(slot);
+  const until = e?.fields.activity_until;
+  const ends = [...(typeof until === "number" && until > from ? [until] : []), ...(slot.run ? [slot.run.to] : [])];
+  const at = ends.length > 0 ? Math.min(...ends) : null;
+  return at !== null && at > from && at < slot.end ? [{ at, key: ACTIVITY_END }] : [];
 }
 
 /**
@@ -1713,10 +1753,11 @@ export const castlifePack: PackDef = {
     r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?", "by?"], resolve: storyEvents });
 
     // A stated length ("rest for an hour", `minutes`) is the action's time; without one, its usual time.
-    // What it meets is met at its end. Sleep is met as it's slept through: a skip or a speed-through
-    // that passes the night (`povLivedNeeds`), so going to bed and getting up again rests no one.
+    // What it meets is met at its end. A stated nap ("sleep for 20 minutes") is one: the turn takes it
+    // and fatigue is met at its end. Going to bed for the night is met as it's slept through, a skip or a
+    // speed-through that passes it (`povLivedNeeds`), so going to bed and getting up again rests no one.
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger", minutes: `=${EAT_FOR}` } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: EAT_FOR, lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
-    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed (your own, if you have one) and sleep until morning, or for as long as you say.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.to_bed", args: { entity: "self" } }] }, duration: "5", activity: { type: "sleep", until: "minutes > 0 ? clock + minutes : next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
+    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed (your own, if you have one) and sleep until morning, or for as long as you say.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.to_bed", args: { entity: "self" } }, { type: "castlife.satisfy", args: { entity: "self", need: `=${NAP_MEETS}`, minutes: "=minutes" } }] }, duration: SLEEP_FOR, activity: { type: "sleep", until: "minutes > 0 ? clock + minutes : next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun", minutes: `=${REST_FOR}` } }] }, duration: REST_FOR, activity: { type: "waiting", until: `clock + (${REST_FOR})` }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }, { type: "castlife.book_invitation", args: { host: "host" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
 

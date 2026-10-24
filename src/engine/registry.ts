@@ -190,6 +190,13 @@ export interface SlotInfo {
    * (DESIGN §8, §24.1).
    */
   timelapse?: boolean;
+  /**
+   * The span the run stepping this slot passes: where `advance` started and the minute it runs to.
+   * A slot it catches someone up through, or the part of one before it started, was played in
+   * ordinary turns, so only the story knows what they did then (the POV's lived needs read only
+   * inside it, DESIGN §8). Absent: the whole slot.
+   */
+  run?: { from: number; to: number };
 }
 
 /** A moment inside a slot at which an agent process acts between its slot steps (`ProcessDef.instants`). */

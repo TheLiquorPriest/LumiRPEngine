@@ -11,7 +11,8 @@ import { createRegistry } from "../../../src/engine/registry-impl";
 import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
-import { planTurn } from "../../../src/engine/turn";
+import { planTurn, timelapseIntent, type EngineTurnPlan } from "../../../src/engine/turn";
+import { placeOfEntity } from "../../../src/engine/scope";
 import { typedIntent } from "../../../src/engine/typed-intent";
 import { Working } from "../../../src/engine/working";
 import { destinations } from "../../../src/frontend/play/play";
@@ -203,5 +204,62 @@ describe("beds", () => {
     const panels = reg.views.map((v) => JSON.stringify(v.build(w.ctx, { mapDisplay: null })));
     expect(panels.some((p) => p.includes(secret))).toBe(false);
     expect(playerLines(reg, w.world, w.state, "you", events, 200).some((l) => l.includes(secret))).toBe(false);
+  });
+});
+
+/** Plays a turn on the working state, as a chat does: its events applied, its plan returned. */
+function play(w: Working, seed: string, intent: { action: string; params: Record<string, JsonValue>; probabilities: Record<string, number> }, text = ""): EngineTurnPlan {
+  const plan = planTurn({ registry: reg, world: w.world, state: w.state, runSeed: "run", seed, kind: "normal", userTexts: [text], intent });
+  w.applyAll(plan.events);
+  return plan;
+}
+
+describe("what a skip meets (the replay review)", () => {
+  test("a skip meets no need for time the player character spent in ordinary play", () => {
+    const w = setup((world) => {
+      world.entities.you!.fields.place = "apartment_hall";
+    });
+    // A day alone: everyone else at the apartment goes out, and four three-hour rests run it to 19:30.
+    w.applyAll(Object.keys(w.state.entities).filter((id) => id !== "you" && placeOfEntity(w.state, id) === "apartment_hall" && w.state.entities[id]?.kind !== "item").map((id): LedgerEvent => ({ type: "set", entity: id, field: "place", value: "cafe" })));
+    for (let i = 0; i < 4; i++) play(w, `rest${i}`, { action: "rest", params: { minutes: 180 }, probabilities: { rest: 1 } }, "I rest.");
+    const before = needValue(w.ctx, "you", "social");
+    expect(before).toBeGreaterThan(30);
+    // Rosa comes over, then half an hour passes: she was no company for the day before she came.
+    w.apply({ type: "set", entity: "rosa", field: "place", value: "apartment_hall" });
+    const skip = play(w, "skip", timelapseIntent({ type: "duration", minutes: 30 }));
+    expect(skip.events.some((e) => e.type === "castlife.need" && "data" in e && e.data.need === "social")).toBe(false);
+    expect(needValue(w.ctx, "you", "social")).toBeGreaterThan(before);
+  });
+
+  test("a stated nap takes its length, and meets fatigue as it ends", () => {
+    const w = setup();
+    to(w, todayAt(w, 14 * 60));
+    const before = needValue(w.ctx, "you", "fatigue");
+    const nap = play(w, "nap", { action: "sleep", params: { minutes: 20 }, probabilities: { sleep: 1 } }, "I sleep for 20 minutes.");
+    expect(nap.elapsedMinutes).toBe(20);
+    expect(needValue(w.ctx, "you", "fatigue")).toBeLessThan(before);
+  });
+
+  test("going to bed at 23:00 and speeding through the night is rested by 07:00, when the night ends", () => {
+    const w = setup();
+    to(w, todayAt(w, 23 * 60));
+    const bed = play(w, "bed", { action: "sleep", params: {}, probabilities: { sleep: 1 } }, "I go to bed.");
+    const offer = bed.chips.find((c) => c.kind === "timelapse_offer");
+    if (!offer || offer.kind !== "timelapse_offer") throw new Error("no speed-through offered");
+    play(w, "night", timelapseIntent(offer.target));
+    expect(w.state.clock).toBe(todayAt(w, 7 * 60));
+    expect(needValue(w.ctx, "you", "fatigue")).toBe(0);
+  });
+
+  test("Play marks a need pressing exactly when the narrator is told of it", () => {
+    const w = setup();
+    // Hunger 59.6 an instant before the told point of 60: neither says it, though the gauge rounds to 60.
+    to(w, w.state.clock + 9 * 60 + 54);
+    const hunger = (): { value: number; pressing: boolean } | undefined => buildNeedsView(w.ctx)?.needs.find((n) => n.need === "hunger");
+    expect(hunger()).toMatchObject({ value: 60, pressing: false });
+    expect(povLine(w)).not.toContain("hungry");
+    to(w, w.state.clock + 6);
+    expect(hunger()?.pressing).toBe(true);
+    expect(povLine(w)).toContain("hungry");
   });
 });

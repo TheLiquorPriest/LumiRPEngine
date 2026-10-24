@@ -613,8 +613,8 @@ What meets a need meets it when it's done, so the need grows again from then:
 - **Eating** meets hunger at the end of the meal (half an hour, or as long as you say: "I eat for an hour").
 - **Resting** meets fun at the end of the rest (half an hour, or as long as you say: "I rest for an hour" takes an hour).
 - **Chatting** with someone meets your social need at the end of the chat (a quarter of an hour, or "I talk to Rosa for two hours").
-- **Sleep** meets fatigue as you sleep through it: **Go to bed** (until 07:00, or "I sleep for two hours"), then the Speed through or Timelapse offer; or any time skip your routine sleeps through. Going to bed and getting straight up again rests no one.
-- **Through a time skip**, what you live meets your needs: your meals and sleep, time out, and time with someone you know.
+- **Sleep** meets fatigue as you sleep through it: **Go to bed** sleeps until 07:00, then the Speed through or Timelapse offer rests you when the night ends; so does any time skip your routine sleeps through. A nap you give a length ("I sleep for 20 minutes") takes that long and rests you as it ends. Going to bed and getting straight up again rests no one.
+- **Through a time skip**, what you live during the skip meets your needs: your meals and sleep, time out, and time with someone you know. The time you played before it counts only as you played it.
 
 **Beds.** Anyone can have a **bed**: a place, or an item such as a cot, wherever it stands. Their nights at home happen there, and Go to bed takes your character to yours. Set it in Build (the person's **Bed** field) or in GM mode (the person's page, **Where it is → Bed**). A bed in a secret place stays secret.
 
