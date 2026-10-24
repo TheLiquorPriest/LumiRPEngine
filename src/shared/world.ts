@@ -224,7 +224,8 @@ export interface EntityDef {
   lifeKnownBy?: EntityId[];
   /** Lumiverse character id, for group chats. */
   characterId?: string;
-  visibility?: Visibility;
+  /** `discoverable` (things, DESIGN §7): hidden until the POV searches where it is or opens what holds it, then known for good. */
+  visibility?: Visibility | "discoverable";
   /** With `known_by`: who knows the entity besides those with a `knows` relation to it; matching is knowing (DESIGN §7). */
   knownBy?: Selector;
   /** Free-form labels selectors match (`tag`). Read live from the world. */

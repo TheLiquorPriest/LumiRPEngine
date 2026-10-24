@@ -739,6 +739,7 @@ Extends `container`.
 | `gear.receive` | `name`, `to`, `from?` |
 | `gear.remove` | `item` |
 | `gear.retrieve` | `item` |
+| `gear.search` | `who`, `target?` |
 | `gear.take_piece` | `kit`, `piece`, `to` |
 | `gear.transfer` | `item`, `to` |
 | `gear.use` | `item`, `user?` |
@@ -763,6 +764,7 @@ Extends `container`.
 | `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |
 | `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
 | `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
+| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |
 | `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |
 | `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |
 | `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |
@@ -772,8 +774,14 @@ Extends `container`.
 
 | Proposal | Bound by |
 |---|---|
+| `drop` | `ref` |
 | `give` | `ref` |
+| `item_condition` | `number` |
+| `lose` | `ref` |
 | `quantity` | `number` |
+| `take` | `ref` |
+| `use_up` | `number` |
+| `wear` | `ref` |
 
 ### Panels and slots
 
