@@ -17,7 +17,7 @@ import { Badge, Banner, Button, Disclosure, Empty, HostSwitch, IdText, Section }
 import { BedPicker } from "../character/bed-picker";
 import { PlacePicker, PlaceSheet } from "../character/place-picker";
 import { bringOp, characterRequest, partyOf } from "../requests";
-import { bedOp, homeOp, moveOp, partySwitchOp } from "./character-ops";
+import { bedOp, homeOp, moveOp, partySwitchOp, routineStanding, type RoutineStanding } from "./character-ops";
 import { formatMoney } from "../../shared/world";
 import type { Editor } from "./editor";
 import { nameOf } from "./editor";
@@ -39,6 +39,13 @@ export function bedText(bed: CharacterBed): string {
 
 /** The fields the sheet shows through its own controls, so All fields doesn't show them twice. */
 const SHOWN_ABOVE: Record<string, true> = { place: true, home: true, bed: true };
+
+/** Why what their routine has may not be what they're doing (a story hold says itself, with its words). */
+const STANDING_NOTE: Record<Exclude<RoutineStanding, "held" | "living">, string> = {
+  off: "Their routine is switched off: nothing reads it, not even the narrator.",
+  context: "Their routine is context only: the narrator and their mind may draw on it, but it never moves them. What they're doing is above, under Now.",
+  elsewhere: "They aren't where their routine has them right now.",
+};
 
 /** What a person holds on them: worn or equipped first, then carried, by name. */
 function carried(entity: GmEntity, editor: Editor): { id: string; name: string; how: string }[] {
@@ -105,6 +112,7 @@ export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId
   const minutes = editor.gm.minds.now;
   const current = routine?.day.blocks.find((b) => b.start <= minutes && b.end > minutes) ?? null;
   const next = routine?.day.blocks.find((b) => b.start > minutes) ?? null;
+  const standing = routine ? routineStanding(routine.follow.role, (character?.now?.holds ?? []).length > 0, current?.place ?? null, character?.place?.id ?? entity.place, places) : null;
   return (
     <GmPage
       name="character"
@@ -217,10 +225,15 @@ export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId
         {entity.pov ? null : (
           <Section title="Routine">
             <ActionRows label="Routine">
-              {current ? <ActionRow title="Now" value={`${current.label}, ${current.from}–${current.to}${current.placeName ? ` at ${current.placeName}` : ""}`} /> : null}
-              {next ? <ActionRow title="Next" value={`${next.label}, ${next.from}–${next.to}${next.placeName ? ` at ${next.placeName}` : ""}`} /> : null}
-              {!current && !next ? <ActionRow title="Today" value={routine ? "Nothing more today" : "—"} /> : null}
+              {current ? <ActionRow title="Their routine has now" value={`${current.label}, ${current.from}–${current.to}${current.placeName ? ` at ${current.placeName}` : ""}`} /> : null}
+              {next ? <ActionRow title="Next in their routine" value={`${next.label}, ${next.from}–${next.to}${next.placeName ? ` at ${next.placeName}` : ""}`} /> : null}
+              {!current && !next ? <ActionRow title="Their routine today" value={routine ? "Nothing more today" : "—"} /> : null}
             </ActionRows>
+            {standing && standing !== "living" ? (
+              <p class="lre-small lre-muted" data-lre-routine-standing={standing}>
+                {standing === "held" ? `The story holds them now (${character?.now?.holds[0]?.label ?? ""}), so their routine waits until it lets them go.` : STANDING_NOTE[standing]}
+              </p>
+            ) : null}
             <Button variant="secondary" iconAfter="chevron-right" onClick={() => app.ui.update((ui) => gmOpen(ui, "castlife.routines", entity.id))}>
               Open their routine
             </Button>

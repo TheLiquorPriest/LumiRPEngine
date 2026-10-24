@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { initialUi } from "../../src/frontend/app";
-import { bedOp, gmPageFor, homeOp, moveOp, partySwitchOp } from "../../src/frontend/gm/character-ops";
+import { bedOp, gmPageFor, homeOp, moveOp, partySwitchOp, routineStanding } from "../../src/frontend/gm/character-ops";
 import { focusTaken, gmOpen, revealTruth } from "../../src/frontend/gm/gate";
 import type { PlaceRef, ThingRef } from "../../src/shared/character";
 import { PARTY_RELATION } from "../../src/shared/party";
@@ -47,5 +47,21 @@ describe("the GM character sheet", () => {
     const linked = gmOpen(revealTruth(initialUi(false)), "minds.gm", "rosie");
     expect(linked.gm).toEqual({ revealed: true, section: "minds.gm", focus: "rosie" });
     expect(focusTaken(linked).gm).toEqual({ revealed: true, section: "minds.gm" });
+  });
+
+  test("the Routine section says why their routine and what they're doing differ", () => {
+    const places = [
+      { id: "diner", parent: null },
+      { id: "counter", parent: "diner" },
+      { id: "home", parent: null },
+    ];
+    // Informative and off never move them, wherever they are.
+    expect(routineStanding("informative", false, "diner", "home", places)).toBe("context");
+    expect(routineStanding("off", true, "diner", "home", places)).toBe("off");
+    // Enforced: a story hold comes first; a room inside the block's place is there.
+    expect(routineStanding("enforced", true, "diner", "home", places)).toBe("held");
+    expect(routineStanding("enforced", false, "diner", "counter", places)).toBe("living");
+    expect(routineStanding("enforced", false, "diner", "home", places)).toBe("elsewhere");
+    expect(routineStanding("enforced", false, null, "home", places)).toBe("living");
   });
 });

@@ -3,6 +3,7 @@
 
 import type { CharacterBed, PlaceRef } from "../../shared/character";
 import type { EditOp } from "../../shared/protocol";
+import type { RoutineRole } from "../../shared/routines";
 import type { GmEntity, GmView } from "../../shared/state-view";
 import { bedValue } from "../character/bed-picker";
 import { partyOf } from "../requests";
@@ -31,4 +32,26 @@ export function bedOp(entity: Pick<GmEntity, "id">, bed: CharacterBed): EditOp {
 export function partySwitchOp(entity: GmEntity, gm: Pick<GmView, "entities">, on: boolean): EditOp | null {
   const party = partyOf(entity, gm);
   return party && party.travels !== on ? party.op : null;
+}
+
+/**
+ * How what their routine has now stands against what they're doing (DESIGN §6.6), so the sheet can
+ * say why the two differ: `off` and `context` (informative) never move them; an enforced routine
+ * yields to a story hold (`held`), and may simply not have them there (`elsewhere`); else `living`.
+ * A place inside the block's (the counter in the diner) counts as there.
+ */
+export type RoutineStanding = "off" | "context" | "held" | "elsewhere" | "living";
+
+export function routineStanding(role: RoutineRole, held: boolean, blockPlace: string | null, place: string | null, places: readonly Pick<PlaceRef, "id" | "parent">[]): RoutineStanding {
+  if (role === "off") return "off";
+  if (role === "informative") return "context";
+  if (held) return "held";
+  if (blockPlace === null) return "living";
+  const parent = new Map(places.map((p) => [p.id, p.parent]));
+  const seen = new Set<string>();
+  for (let at = place; at !== null && !seen.has(at); at = parent.get(at) ?? null) {
+    if (at === blockPlace) return "living";
+    seen.add(at);
+  }
+  return "elsewhere";
 }
