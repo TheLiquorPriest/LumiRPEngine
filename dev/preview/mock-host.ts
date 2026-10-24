@@ -207,7 +207,8 @@ export function createMockHost(options: MockHostOptions): MockHost {
         destroy: () => button.remove(),
       };
     },
-    showConfirm: async () => ({ confirmed: true }),
+    // The browser's own confirm, so a question the extension asks shows and can be answered here.
+    showConfirm: async (options: { title: string; message: string }) => ({ confirmed: window.confirm(`${options.title}\n\n${options.message}`) }),
   };
 
   const components = {

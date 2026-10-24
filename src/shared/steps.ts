@@ -69,6 +69,13 @@ export const STEP_LABEL: Record<StepPurpose, string> = {
   consolidate: "Memory consolidation",
 };
 
+/** What a world step template's `output` means, as Build names it, in the order Build offers them. */
+export const STEP_OUTPUT_LABEL: Record<StepTemplateDef["output"], string> = {
+  text: "Text: instructions for the step's call",
+  effects: "Changes: effects it proposes after the reply",
+  decision: "A decision: the question its call answers",
+};
+
 /**
  * The engine placeholders a step template may use (all player-visible), and `character`, the name
  * of the character a minds step thinks for (DESIGN §24.5), empty in every other step.
@@ -114,14 +121,14 @@ const MIND_VARS = ["character", "world", "pov", "place", "clock"] as const;
  */
 export const STEP_VARS: Record<StepPurpose | "skip_plan", { phase: "before the reply" | "after the reply" | "with the minds" | "as a time skip starts"; vars: readonly string[]; note?: string }> = {
   interpret: { phase: "before the reply", vars: ["world", "pov"], note: "None on a Decision connection." },
-  "npc.choose": { phase: "before the reply", vars: [], note: "Sent as written." },
-  judge: { phase: "before the reply", vars: [], note: "Sent as written." },
-  "puzzle.answer": { phase: "before the reply", vars: [], note: "Sent as written." },
+  "npc.choose": { phase: "before the reply", vars: [] },
+  judge: { phase: "before the reply", vars: [] },
+  "puzzle.answer": { phase: "before the reply", vars: [] },
   brief: { phase: "before the reply", vars: PROSE_VARS },
   outline: { phase: "before the reply", vars: [...PROSE_VARS, "sections"] },
   extract: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
   choices: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
-  contradiction: { phase: "after the reply", vars: [], note: "A decision template is sent as written; an effects template gets extract's." },
+  contradiction: { phase: "after the reply", vars: [], note: "A world's effects template for this step gets the reply-reading placeholders (extract's)." },
   mind: { phase: "with the minds", vars: MIND_VARS },
   memory: { phase: "with the minds", vars: MIND_VARS },
   consolidate: { phase: "with the minds", vars: MIND_VARS },
@@ -134,6 +141,36 @@ export const PROSE_PROMPTS: Record<"brief" | "outline" | "choices", string> = {
   brief: "You brief a roleplay narrator before their next reply. In two or three sentences, say what matters right now in {{world}}: where {{pov}} is, who is present, what the player just did and how it turned out, and anything pressing. Use only the facts given; invent nothing.",
   outline: "You outline a roleplay narrator's next reply. Expand the engine's beats into two to four short beats, in order, consistent with the facts and the outcome. Don't decide anything the facts don't settle, and don't add events.",
   choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts. Each under twelve words, first person, as the player would type it.",
+};
+
+/** The decision steps' built-in questions, which a world template or the user's own prompt replaces; the choices, facts or scale stay the engine's. */
+export const DECISION_PROMPTS: Record<"npc.choose" | "contradiction" | "puzzle.answer" | "judge", string> = {
+  "npc.choose": "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.",
+  contradiction: "Does the narrator's reply contradict one of these engine facts? Pick the fact it contradicts, or none.",
+  "puzzle.answer": "Is the player's answer correct: the same as one of the accepted answers, allowing for wording and spelling?",
+  judge: "Judge how well the player's described approach suits what their character attempts.",
+};
+
+/**
+ * What the built-in instructions hold for the steps a prompt is added before, as Settings shows them.
+ * They are made fresh each turn from the scene and the world, so the parts are named, not quoted.
+ */
+export const ADDED_BEFORE: Record<"interpret" | "extract", string> = {
+  interpret: [
+    "The task: map the player's typed input to the engine actions it takes, in order.",
+    "The world and the player character.",
+    "The scene, the places nearby and the recent messages.",
+    "The action catalog: every action your character can take here, with its details.",
+    "The rules for reading it: ids and amounts, several actions in one message, time passing after them, routine changes.",
+    "The answer format.",
+  ].join("\n"),
+  extract: [
+    "The task: propose the changes the reply's prose says actually happened.",
+    "The world, and the change types switched on.",
+    "The rules: nothing considered, refused or hypothetical; world ids; amounts as written; the strict rule for each change type.",
+    "Where the reply leaves your character, and the usual routines of the people with them.",
+    "The answer format.",
+  ].join("\n"),
 };
 
 /** What a step's own prompt (the user's, else the world's template) does to its built-in one, as Settings says it. */

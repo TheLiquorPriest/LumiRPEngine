@@ -699,7 +699,7 @@ function valueWords(field: FieldSpec, value: JsonValue | undefined, ctx: FormCtx
     case "list":
       return Array.isArray(value) ? `${value.length} ${field.label.toLowerCase()}` : "";
     case "enum":
-      return typeof value === "string" ? words(value) : "";
+      return typeof value === "string" ? (field.labels?.[value] ?? words(value)) : "";
     case "text":
     case "expr":
     case "dice":

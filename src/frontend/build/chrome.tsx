@@ -65,9 +65,37 @@ export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string
   needs: { label: "Needs", hint: "Hunger, fatigue, company and fun: each on or off, how fast it grows, when it's told and when it alerts", icon: "sliders" },
 };
 
-/** Shows a Build page: the route is Build's whole stack position (Worlds → World → Collection → Item). */
+/** A new item's page held open (`holdNew`): what Build asks before leaving it. */
+interface NewHold {
+  confirm(): Promise<boolean>;
+}
+
+let newHold: NewHold | null = null;
+
+/**
+ * Holds a new item's page: nothing of it is in the draft until Create, so leaving it by Build's
+ * navigation (`go`) asks first. Returns the release, for its Create and when the page closes.
+ */
+export function holdNew(app: { host: Pick<App["host"], "confirm"> }, noun: string): () => void {
+  const hold: NewHold = { confirm: () => app.host.confirm(`Leave the new ${noun}?`, `It isn't in the draft until you create it, so leaving throws it away.`, "warning", "Leave") };
+  newHold = hold;
+  return () => {
+    if (newHold === hold) newHold = null;
+  };
+}
+
+/** Shows a Build page: the route is Build's whole stack position (Worlds → World → Collection → Item). Off a new item's page, only once the user says to leave it. */
 export function go(app: Pick<App, "ui">, build: BuildRoute): void {
-  app.ui.update((ui) => ({ ...ui, build }));
+  const hold = newHold;
+  if (!hold) {
+    app.ui.update((ui) => ({ ...ui, build }));
+    return;
+  }
+  void hold.confirm().then((leave) => {
+    if (!leave) return;
+    if (newHold === hold) newHold = null;
+    app.ui.update((ui) => ({ ...ui, build }));
+  });
 }
 
 /**

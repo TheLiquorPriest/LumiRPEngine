@@ -8,14 +8,14 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { JsonObject, JsonValue } from "../../shared/json";
+import { hasOwn, type JsonObject, type JsonValue } from "../../shared/json";
 import { mergeAdjusted, type MergeAdjustment } from "../../shared/json-patch";
 import type { SettingsResult } from "../../shared/protocol";
 import { EXTRACTION_TYPES, stepConfigOf } from "../../shared/settings";
 import type { AdjudicationPresetId, StepPurpose } from "../../shared/world";
 import type { SettingsPage } from "../app";
 import { useApp, useUi, useView } from "../app";
-import { Badge, Banner, Empty, HostSwitch, List, ListRow, PageHeader, Section, useBusy, useShowIds } from "../components";
+import { Badge, Banner, Button, Empty, HostSwitch, List, ListRow, PageHeader, Section, useBusy, useShowIds } from "../components";
 import { humanize } from "../format";
 import type { IconName } from "../icons";
 import { revealInScroller } from "../scroll";
@@ -31,6 +31,12 @@ import { McpServerPage } from "../agents";
 
 type Page = Exclude<SettingsPage, "home">;
 type Caveat = { code: string; message: string };
+
+/** Caveats that say a check is still running, not a warning: shown as information and never counted as one. */
+const STILL_CHECKING: Readonly<Record<string, true>> = { preset_lint_pending: true, step_model_unchecked: true };
+
+/** The page a caveat's fix is on: its banner opens it (the connection pre-flight's, DESIGN §5.3). */
+const CAVEAT_FIX: Readonly<Record<string, Page>> = { step_connection_missing: "steps", step_model_missing: "steps", step_model_unchecked: "steps" };
 
 const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = {
   helper: { title: "Helper model", subtitle: "What the engine's model calls run on", icon: "sliders" },
@@ -104,7 +110,7 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: "Show ids", value: showIds ? "On" : "Off" };
     case "caveats": {
       // A check still running isn't a warning: the row says it's checking until the dry run answers.
-      const found = caveats?.filter((c) => c.code !== "preset_lint_pending") ?? [];
+      const found = caveats?.filter((c) => !hasOwn(STILL_CHECKING, c.code)) ?? [];
       if (caveats === null || (found.length === 0 && caveats.length > 0)) return { subtitle: "Checking your preset…" };
       return found.length > 0 ? { subtitle: "Warnings and what to know", badge: <Badge tone="warn">{`${found.length} active`}</Badge> } : { subtitle: "What to know" };
     }
@@ -154,18 +160,32 @@ function DisplayPage() {
   );
 }
 
-function CaveatsPage(props: { caveats: readonly Caveat[] | null }) {
+function CaveatsPage(props: { caveats: readonly Caveat[] | null; open(page: Page): void }) {
   return (
     <div class="lre-stack" data-lre-settings-page="caveats">
       {props.caveats === null ? (
         <Empty>Checking your preset against this chat…</Empty>
       ) : props.caveats.length > 0 ? (
         <div class="lre-stack">
-          {props.caveats.map((caveat) => (
-            <Banner key={caveat.code} tone={caveat.code === "preset_lint_pending" ? "info" : "warn"}>
-              {caveat.message}
-            </Banner>
-          ))}
+          {props.caveats.map((caveat) => {
+            const fix = hasOwn(CAVEAT_FIX, caveat.code) ? CAVEAT_FIX[caveat.code] : undefined;
+            return (
+              <div key={caveat.code} data-lre-caveat={caveat.code}>
+                <Banner
+                  tone={hasOwn(STILL_CHECKING, caveat.code) ? "info" : "warn"}
+                  actions={
+                    fix ? (
+                      <Button size="sm" variant="secondary" icon={PAGE[fix].icon} onClick={() => props.open(fix)}>
+                        {`Open ${PAGE[fix].title}`}
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  {caveat.message}
+                </Banner>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <Empty icon="check">No warnings right now.</Empty>
@@ -276,7 +296,7 @@ export function Settings() {
     ) : page === "mcp" ? (
       <McpServerPage />
     ) : (
-      <CaveatsPage caveats={caveats} />
+      <CaveatsPage caveats={caveats} open={go} />
     );
   return (
     <div

@@ -12,14 +12,14 @@ import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
-import { isMindPurpose } from "../../shared/minds";
+import { isMindPurpose, MIND_PROMPT_DEFAULTS } from "../../shared/minds";
 import type { ComponentChildren } from "preact";
 import type { GateSettings, HelperDefault, JobSettings, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
 import { DEFAULT_RECENT, helperCallOf, JOB_SETTINGS_DEFAULTS, REASONING_CHOICES, recentOf, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
 import { LimitField, MindPromptEditor } from "./minds";
 import type { MindsSettings } from "../../shared/minds";
 import { SKIP_PLAN_PROMPT } from "../../shared/skip-plan";
-import { PROMPT_EFFECT, PROSE_PROMPTS, STEP_LABEL } from "../../shared/steps";
+import { ADDED_BEFORE, DECISION_PROMPTS, PROMPT_EFFECT, PROSE_PROMPTS, STEP_LABEL } from "../../shared/steps";
 import { PromptEditor } from "./prompt-editor";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
@@ -373,6 +373,18 @@ export function stepPromptPatch(purpose: StepPurpose, text: string | null, built
 }
 
 /**
+ * What a step's own prompt does to the built-in one, with the text Settings shows folded and
+ * read-only: a prompt `replaced` starts from the built-in text; one `added` goes before instructions
+ * made fresh each turn, whose parts are named. The time-skip step's card edits the skip plan's prompt.
+ */
+export function stepBuiltIn(purpose: StepPurpose): { use: "replaced" | "added"; text: string } {
+  if (purpose === "interpret" || purpose === "extract") return { use: "added", text: ADDED_BEFORE[purpose] };
+  if (purpose === "skip") return { use: "replaced", text: SKIP_PLAN_PROMPT };
+  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate") return { use: "replaced", text: MIND_PROMPT_DEFAULTS[purpose] };
+  return { use: "replaced", text: purpose === "brief" || purpose === "outline" || purpose === "choices" ? PROSE_PROMPTS[purpose] : DECISION_PROMPTS[purpose] };
+}
+
+/**
  * A step card's prompts (DESIGN §5.2): the user's own, which wins over the world's template and that
  * over the built-in. A mind's, a memory's and consolidation's are Settings → Minds' (the same
  * prompt); the time-skip step has its beats' (Settings → Minds' too) and the skip plan's.
@@ -380,13 +392,16 @@ export function stepPromptPatch(purpose: StepPurpose, text: string | null, built
 function StepPrompts(props: { purpose: StepPurpose; config: StepConfig; prompts: MindsSettings["prompts"]; busy: boolean; patch(patch: JsonObject): void }) {
   const { purpose, busy } = props;
   if (purpose === "mind" || purpose === "memory" || purpose === "consolidate") return <MindPromptEditor purpose={purpose} value={props.prompts[purpose]} busy={busy} patch={props.patch} />;
-  const builtIn = purpose === "skip" ? SKIP_PLAN_PROMPT : purpose === "brief" || purpose === "outline" || purpose === "choices" ? PROSE_PROMPTS[purpose] : undefined;
+  const built = stepBuiltIn(purpose);
+  const builtIn = built.use === "replaced" ? built.text : undefined;
+  const adds = built.use === "added" ? built.text : undefined;
   const own = (
     <PromptEditor
       id={purpose === "skip" ? "skip_plan" : purpose}
       label={purpose === "skip" ? "The skip plan" : "Your prompt"}
       note={purpose === "skip" ? "As a time skip starts, how the people the model plans spend it. Replaces the built-in instructions; the answer format stays." : `${PROMPT_EFFECT[purpose]} It wins over the world's step template.`}
       builtIn={builtIn}
+      adds={adds}
       value={props.config.template}
       max={STEP_PROMPT_MAX}
       vars={purpose === "skip" ? "skip_plan" : purpose}

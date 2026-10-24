@@ -596,7 +596,17 @@ export class MockBackend {
         return;
       case "lre.settings.caveats":
         // A dry run takes a moment: the home badge and the Caveats page show they're checking.
-        setTimeout(() => this.result(reqId, "lre.settings.caveats", { caveats: [{ code: "preset_json_ledger", message: "Your active preset “Default” has an enabled block “Caravan Ledger” that asks the narrator for JSON; replies will carry it. Turn it off in the preset if you don't want it." }] }), 900);
+        setTimeout(
+          () =>
+            this.result(reqId, "lre.settings.caveats", {
+              caveats: [
+                { code: "step_model_missing", message: "These name a model their connection doesn't list, so their calls may fail the turn: Scene brief (gpt-old on OpenRouter). Pick another in Settings → Steps and connections." },
+                { code: "step_model_unchecked", message: "Their connections didn't answer within the Preset check timeout, so these weren't checked: Prose outline. Open Caveats again in a moment." },
+                { code: "preset_json_ledger", message: "Your active preset “Default” has an enabled block “Caravan Ledger” that asks the narrator for JSON; replies will carry it. Turn it off in the preset if you don't want it." },
+              ],
+            }),
+          900,
+        );
         return;
       case "lre.settings.set": {
         const next = mergePatch(this.settings, message.patch) as UserSettings;

@@ -10,6 +10,7 @@ import { spawnTierOf } from "../../shared/tiers";
 import type { WorldDoc } from "../../shared/world";
 import { FEED_SCOPES } from "../../shared/world";
 import { NEED_IDS, type NeedId } from "../../shared/needs";
+import { STEP_LABEL, STEP_OUTPUT_LABEL } from "../../shared/steps";
 
 /** Each need as Build names it. */
 const NEED_LABELS: Record<NeedId, string> = { hunger: "Hunger", fatigue: "Fatigue", social: "Social", fun: "Fun" };
@@ -34,7 +35,7 @@ export type FieldSpec =
   | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number; optional?: boolean; hint?: string; when?: When }
   /** `reads`: how the engine reads a value that may not be a boolean (by default only `true` is on). */
   | { kind: "bool"; key: string; label: string; hint?: string; reads?: (value: JsonValue | undefined) => boolean }
-  /** `labels`: how a value reads in the choice, where its id isn't plain words. */
+  /** `labels`: what each value reads as, where its id isn't words (`npc.choose`); a value without one reads as its id in words. */
   | { kind: "enum"; key: string; label: string; values: readonly string[]; labels?: Readonly<Record<string, string>>; optional?: boolean; hint?: string; when?: When }
   /** `inline`: the value may also be an inline definition, which is then edited as JSON. */
   | { kind: "ref"; key: string; label: string; collection: RefCollection; optional?: boolean; any?: boolean; inline?: boolean; hint?: string; when?: When }
@@ -494,15 +495,15 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
     // The section's feed (DESIGN §6.11): the world's defaults, which the GM can set per chat.
     { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v) => v !== false },
-    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, optional: true, hint: "player: what the player character knows (default) · scene: also what the people with him know or plainly see · gm: everything, each fact he doesn't know marked for the narrator" },
+    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: { player: "What your character knows", scene: "Also what the people with your character know", gm: "Everything, with what your character doesn't know marked" }, optional: true, hint: "Unset, it's what your character knows. The wider choices also tell the narrator what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
     { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
     { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
     { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" },
   ],
   steps: [
-    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
+    { kind: "enum", key: "purpose", label: "Purpose", values: Object.keys(STEP_LABEL), labels: STEP_LABEL },
     { kind: "text", key: "template", label: "Template", multiline: true },
-    { kind: "enum", key: "output", label: "Output", values: ["text", "effects", "decision"] },
+    { kind: "enum", key: "output", label: "Output", values: Object.keys(STEP_OUTPUT_LABEL), labels: STEP_OUTPUT_LABEL },
     { kind: "tags", key: "signals", label: "Signals", noun: "signal" },
   ],
   packs: [

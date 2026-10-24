@@ -29,7 +29,7 @@ import { tierGroups } from "../batch";
 import { PickBox, SelectBar, useSelection } from "../multi-select";
 import { DraftBatchSheet } from "./batch-sheet";
 import { CheckView, issuePart, IssueRow } from "./check";
-import { COLLECTION_INFO, deleteItem, go, ItemHeader, itemLabel, NewItem, newItemName, OverflowMenu, PART_INFO } from "./chrome";
+import { COLLECTION_INFO, deleteItem, go, holdNew, ItemHeader, itemLabel, NewItem, newItemName, OverflowMenu, PART_INFO } from "./chrome";
 import { CharacterPage } from "./character";
 import { entityFormSpecs, isCharacter, opensCharacterPage } from "./character-model";
 import { ContentsSection, RevealItem } from "./contents";
@@ -687,13 +687,24 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
   // A pack's entry shows the pack's own config fields, when its ui registers them, above the JSON.
   const PackConfig = props.collection === "packs" ? app.catalog.configs.get(id) : undefined;
+  // A new item isn't in the draft until Create: leaving its page asks first.
+  const release = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    if (!isNew) return;
+    const free = holdNew(app, COLLECTION_INFO[props.collection].noun);
+    release.current = free;
+    return free;
+  }, [isNew, props.collection, props.id]);
   if (isRecord(stored) && typeof stored.map === "string") return <MapOwned worldId={props.world.id} collection={props.collection} id={id} value={stored} map={stored.map} />;
   const noun = COLLECTION_INFO[props.collection].noun;
   const name = itemLabel(props.collection, id, value, props.world.places);
   const save = () =>
     run(async () => {
       const message = await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "put", collection: props.collection, id, value });
-      if (message.type === "lre.result" && isNew) go(app, { view: "item", worldId: props.world.id, collection: props.collection, id });
+      if (message.type === "lre.result" && isNew) {
+        release.current();
+        go(app, { view: "item", worldId: props.world.id, collection: props.collection, id });
+      }
     });
   return (
     <div class="lre-build-page" data-lre-editor={props.collection}>
