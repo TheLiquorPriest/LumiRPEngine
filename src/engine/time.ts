@@ -646,8 +646,8 @@ export interface Montage {
   groups: { label: string; lines: string[] }[];
   /** Money in and out per POV-owned account over the interval. */
   money: { account: EntityId; label: string; in: number; out: number }[];
-  /** Net numeric changes on the POV and what it owns. */
-  changes: { entity: EntityId; field: string; label: string; delta: number }[];
+  /** Net numeric changes on the POV and what it owns; a banded field is left to `bands`, which words it, and `money` says the delta is in minor units. */
+  changes: { entity: EntityId; field: string; label: string; delta: number; money: boolean }[];
   /** Band crossings the POV can see (regard, sheets, needs). */
   bands: { entity: EntityId; field: string; label: string; from: string; to: string }[];
 }
@@ -727,7 +727,12 @@ export function buildMontage(reg: Registry, world: WorldDoc, before: Readonly<Wo
     granularity,
     groups: [...groups].map(([label, lines]) => ({ label, lines })),
     money: [...money].sort(([a], [b]) => a.localeCompare(b)).map(([account, m]) => ({ account, label: own(after.entities, account)?.name ?? account, in: m.in, out: m.out })),
-    changes: [...changes.values()].filter((c) => c.delta !== 0).map((c) => ({ ...c, label: `${own(after.entities, c.entity)?.name ?? c.entity} ${fieldDef(reg, world, own(after.entities, c.entity)?.kind ?? "", c.field)?.label ?? c.field.replace(/_/g, " ")}` })),
+    changes: [...changes.values()]
+      .filter((c) => c.delta !== 0)
+      .flatMap((c) => {
+        const def = fieldDef(reg, world, own(after.entities, c.entity)?.kind ?? "", c.field);
+        return def?.bands ? [] : [{ ...c, label: `${own(after.entities, c.entity)?.name ?? c.entity} ${def?.label ?? c.field.replace(/_/g, " ")}`, money: def?.type === "money" }];
+      }),
     bands,
   };
 }

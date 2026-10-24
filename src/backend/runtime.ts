@@ -2440,11 +2440,11 @@ export class Runtime implements TurnHooks {
   }
 
   private async lintOf(chatId: ChatId, assembly: DryRun, userId: UserId): Promise<PresetCaveat[]> {
-    const found = presetCaveats(assembly, null);
-    if (found.length === 0) return found;
-    // Named by the preset the host assembles with (block ids repeat across copied presets).
-    const preset = (await this.presets.current(chatId, userId)).preset;
-    return preset ? presetCaveats(assembly, preset.name) : found;
+    // Named by the preset the host assembles with (block ids repeat across copied presets); its outlets are read from its own blocks, which the dry run resolves away.
+    const config = await this.presets.current(chatId, userId);
+    const run = await this.runOf(chatId, userId);
+    const sections = run ? sectionsOf((await this.worlds.get(run.worldId, userId, run.revision)).world).map((s) => ({ outlet: outletOf(s.id), label: s.label })) : null;
+    return presetCaveats(assembly, config.preset?.name ?? null, sections ? { outlets: config.outlets, sections } : null);
   }
 
   /** The engine runs' section records kept for a chat (newest last). */
@@ -2747,7 +2747,8 @@ function planOutline(plan: EngineTurnPlan, prose: PlanProse | undefined): string
  * What the narrator must know about the turn's plan (DESIGN §6.2 Outcome, §9.2 Montage, §11): each
  * action's result in the order they played, with its roll, or why it couldn't run, and that the
  * rest of the message hasn't happened when the queue stopped; a fight's round; and a timelapse's
- * Montage groups and money. Why an action couldn't run is told as the player reads it, never as a
+ * Montage groups, money, the bands it crossed and its net changes, each already cut to what the
+ * POV may see (`buildMontage`). Why an action couldn't run is told as the player reads it, never as a
  * requirement's expression, which may name a secret track or someone the player doesn't know.
  */
 export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Registry): { outcome: string[]; montage: string[] } {
@@ -2781,6 +2782,8 @@ export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Regis
   if (m) {
     for (const g of m.groups.slice(0, 7)) montage.push(`${g.label}: ${g.lines.slice(0, 6).join("; ")}`);
     for (const a of m.money.slice(0, 4)) montage.push(`${a.label}: in ${formatMoney(a.in, world.currency)}, out ${formatMoney(a.out, world.currency)}`);
+    for (const b of m.bands.slice(0, 6)) montage.push(`${b.label}: ${b.from ? `${b.from} → ` : "now "}${b.to}`);
+    for (const c of m.changes.slice(0, 4)) montage.push(`${c.label}: ${c.delta > 0 ? "+" : "−"}${c.money ? formatMoney(Math.abs(c.delta), world.currency) : String(Math.round(Math.abs(c.delta) * 100) / 100)}`);
   }
   return { outcome, montage };
 }

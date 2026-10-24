@@ -28,6 +28,7 @@ import { initialState } from "./world-state";
 import { authorLines, playerLines } from "./player-events";
 import { typedIntent } from "./typed-intent";
 import { migrateMoney } from "./money-migrate";
+import { MINDS_SLOT } from "../shared/minds";
 
 // ---------------------------------------------------------------- documents
 
@@ -222,6 +223,9 @@ export function migrateWorld(stored: WorldDoc): WorldDoc {
   return compileMaps(out);
 }
 
+/** Sections the turn itself fills, besides the packs' renderers: the Outcome, the Montage, the Outline, Scene's elapsed time and the minds. */
+const TURN_FED_SECTIONS: Record<string, true> = { outcome: true, montage: true, outline: true, scene: true, [MINDS_SLOT]: true };
+
 /** Structural checks every world must pass, plus the registry's lint rules. */
 export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   const issues: LintIssue[] = [];
@@ -256,6 +260,11 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   // no escape sentinel or `<user>`-style shorthand either.
   for (const [id, s] of Object.entries(world.sections)) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0) err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
+  }
+  // A section only the engine's renderers or the turn itself fill: one neither feeds is skipped
+  // every turn, without a word (DESIGN §6).
+  for (const [id, s] of Object.entries(world.sections)) {
+    if (!hasOwn(TURN_FED_SECTIONS, id) && !registry.renderers.some((r) => r.slot === id)) warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}", so it never goes in`);
   }
   // World step templates (DESIGN §5.2): an output their purpose uses, known signals, engine placeholders.
   for (const [id, t] of Object.entries(world.steps)) {
