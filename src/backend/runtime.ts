@@ -25,6 +25,7 @@ import { fitMindLines, mindLines } from "../packs/minds/core/section";
 import { namedInText } from "../packs/minds/core/fidelity";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
+import { holderOf } from "../packs/gear/core/model";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
 import type { EngineTurnPlan, QueueStop } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
@@ -154,14 +155,25 @@ function povWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): 
   };
 }
 
-/** The prefix an extraction reads against: only entities and places the POV may know. */
-function prefixSummary(reg: Registry, world: WorldDoc, state: WorldState): JsonValue {
+/**
+ * The prefix an extraction reads against: only entities and places the POV may know. A thing names
+ * who holds it (one the POV may know), so a narrated hand-over reads from the right giver. The 30
+ * entities are the scene's people and things first and money accounts last, so a wallet's cards
+ * never crowd out who is in the room.
+ */
+export function prefixSummary(reg: Registry, world: WorldDoc, state: WorldState): JsonValue {
   const pov = state.entities[world.pov];
+  const here = placeOfEntity(state, world.pov);
+  const rank = (id: EntityId, kind: string): number => (kind === "account" ? 2 : here !== null && placeOfEntity(state, id) === here ? 0 : 1);
+  const known = Object.entries(state.entities)
+    .filter(([id]) => povMayKnow(reg, world, state, id))
+    .map(([id, e], i) => ({ id, e, i, rank: rank(id, e.kind) }))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .slice(0, 30);
   const people: JsonObject = {};
-  for (const [id, e] of Object.entries(state.entities)) {
-    if (Object.keys(people).length >= 30) break;
-    if (!povMayKnow(reg, world, state, id)) continue;
-    people[id] = { name: e.name, kind: e.kind, place: typeof e.fields.place === "string" ? e.fields.place : null };
+  for (const { id, e } of known) {
+    const holder = holderOf(state, id);
+    people[id] = { name: e.name, kind: e.kind, place: typeof e.fields.place === "string" ? e.fields.place : null, ...(holder !== null && povMayKnow(reg, world, state, holder) ? { holder } : {}) };
   }
   const places = Object.keys(world.places).filter((p) => canSeePlace(reg, world, state, world.pov, p)).slice(0, 40);
   return { clock: state.clock, pov: world.pov, povName: pov?.name ?? world.pov, cents: state.accounts[world.pov] ?? null, entities: people, places };

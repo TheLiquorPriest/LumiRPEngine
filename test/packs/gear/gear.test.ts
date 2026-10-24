@@ -197,4 +197,27 @@ describe("gear: containment, slots and use grants", () => {
     const r = applyEffects(reg, w, [{ type: "gear.transfer", args: { item: "phone", to: "maya" } }], { bindings: {}, rng: createRng("z") });
     expect(r.applied).toEqual([]);
   });
+
+  test("at Gear 1 a thing handed over that the world hadn't tracked shows, as a notable one does", () => {
+    const w = setup((wd) => {
+      wd.realism.levels.gear = 1;
+    });
+    const r = applyEffects(reg, w, [{ type: "gear.receive", args: { name: "Brass key", to: "you", from: "maya" } }], { bindings: {}, rng: createRng("r") });
+    expect(r.rejected).toEqual([]);
+    expect(buildGearView(w.ctx).carried.map((i) => i.name)).toContain("Brass key");
+  });
+
+  test("a narrated hand-over by name gives the thing the giver holds, never a second one", () => {
+    const w = setup((wd) => {
+      wd.entities.brass_key = { id: "brass_key", kind: "item", name: "Brass key", tier: "background", fields: { owner: "maya" }, relations: [{ type: "in", to: "maya" }] };
+    });
+    const give = reg.proposals.get("give");
+    if (!give) throw new Error("no give channel");
+    const p = { type: "give", item: "the brass key", from: "maya", to: "you" };
+    const count = Object.keys(w.state.entities).length;
+    expect(give.validate(p, w.ctx)).toBeNull();
+    expect(applyEffects(reg, w, give.toEffects(p, w.ctx), { bindings: {}, rng: createRng("g") }).rejected).toEqual([]);
+    expect(Object.keys(w.state.entities).length).toBe(count);
+    expect(w.state.entities.brass_key?.relations).toContainEqual({ type: "in", to: "you" });
+  });
 });

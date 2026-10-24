@@ -13,7 +13,7 @@ import { DOMAINS } from "../shared/ids";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, WorldDoc } from "../shared/world";
 import { ALIVE, BUILTIN_LIFE_STATES, isLifeState, MAX_SPAWN_CAP, objectiveWhen } from "../shared/world";
-import { compile } from "./expr";
+import { callsIn, compile } from "./expr";
 import { frozenPredicates } from "./realism";
 import { rulesetFloor, type Registry } from "./registry-impl";
 import { relationIssues } from "./relations";
@@ -23,6 +23,13 @@ import { kindDef, kindFields } from "./scope";
 import { classOf, classProblems, selectorProblems } from "./selector";
 import { own } from "./pack-kit";
 import { knownBySelector } from "./visibility";
+
+/** What each literal argument of a track condition's lookups must name: `carries(holder, item)`, `at(entity, place)`, `knows(who, entity or place)`. */
+const TRACK_REF_ARGS: Readonly<Record<string, readonly ("entity" | "place" | "either")[]>> = {
+  carries: ["entity", "entity"],
+  at: ["entity", "place"],
+  knows: ["entity", "either"],
+};
 
 function typeProblem(f: FieldDef, v: JsonValue, world: WorldDoc): string | null {
   if (v === null) return null;
@@ -222,6 +229,18 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
           compile(x);
         } catch (e) {
           err(`tracks.${id}.stages.${sid}`, "types", `A condition in ${t.label} doesn't parse: ${e instanceof Error ? e.message : String(e)}`);
+          continue;
+        }
+        // A typo'd id in a condition never holds, so the stage silently never advances.
+        for (const c of callsIn(x)) {
+          const sorts = own(TRACK_REF_ARGS, c.name);
+          if (!sorts) continue;
+          c.args.forEach((v, i) => {
+            const sort = sorts[i];
+            if (typeof v !== "string" || !sort) return;
+            const found = (sort !== "place" && own(world.entities, v) !== undefined) || (sort !== "entity" && own(world.places, v) !== undefined);
+            if (!found) warn(`tracks.${id}.stages.${sid}`, "unknown_condition_ref", `A condition in ${t.label} names "${v}" in ${c.name}(), which isn't ${sort === "place" ? "a place" : sort === "entity" ? "an entity" : "an entity or a place"} of this world, so it never holds.`);
+          });
         }
       }
     }
