@@ -13,7 +13,7 @@ import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_APPROACHES, MIN
 import { own } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
-import { addWitness, putCommitment, putNote, putPlan, readCharacter, readSlice, writeCharacter, writeSlice } from "./state";
+import { addWitness, dropPlan, putCommitment, putNote, putPlan, readCharacter, readSlice, sharePlan, writeCharacter, writeSlice } from "./state";
 
 const str = (v: JsonValue | undefined): v is string => typeof v === "string";
 const finite = (v: JsonValue | undefined): v is number => typeof v === "number" && Number.isFinite(v);
@@ -49,6 +49,9 @@ export function isPlan(v: JsonValue | undefined): v is MindPlan & JsonObject {
     (v.source === "mind" || v.source === "memory" || v.source === "gm") &&
     (v.closed === null || finite(v.closed)) &&
     (v.reason === null || str(v.reason)) &&
+    // Only a plan with others in it that isn't a payment or a loan is shared (`sharesPlan`).
+    (v.shared === undefined || (v.shared === true && v.with.length > 0 && v.kind !== "pay" && v.kind !== "lend")) &&
+    (v.by === undefined || (str(v.by) && v.shared === true)) &&
     // A pay or lend plan hands a whole positive amount to the first person it's with; no other kind carries one.
     (v.kind === "pay" || v.kind === "lend" ? finite(v.cents) && Number.isInteger(v.cents) && v.cents > 0 && v.with.length > 0 : v.cents === undefined)
   );
@@ -77,7 +80,7 @@ export function isCommitment(v: JsonValue | undefined): v is MindCommitment & Js
 
 /** Copies of model-shaped values as plain state (the event's own objects are never aliased into the state). */
 function planOf(v: MindPlan): MindPlan {
-  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason, ...(v.cents !== undefined ? { cents: v.cents } : {}) };
+  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason, ...(v.cents !== undefined ? { cents: v.cents } : {}), ...(v.shared === true ? { shared: true as const } : {}), ...(v.by !== undefined ? { by: v.by } : {}) };
 }
 
 function noteOf(v: MindNote): MindNote {
@@ -176,11 +179,14 @@ function validMemory(data: JsonObject): Rejection | null {
   return null;
 }
 
-/** `minds.memory`: what one character took from a turn: notes, commitments made and resolved, plans, what they told whom, their summary. */
+/**
+ * `minds.memory`: what one character took from a turn: notes, commitments made and resolved, plans,
+ * what they told whom, their summary. A plan everyone in it shares reaches each of them (`sharePlan`).
+ */
 const memory: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.memory,
   validate: (e, ctx) => person(ctx, e.data) ?? validMemory(e.data),
-  apply: (e, state) => {
+  apply: (e, state, ctx) => {
     const d = e.data;
     if (!str(d.entity)) return;
     const who = d.entity;
@@ -193,7 +199,7 @@ const memory: EventTypeDef<PackEvent> = {
       const open = c.commitments.find((x) => x.id === r.id && x.status === "open");
       if (open && (r.status === "kept" || r.status === "broken" || r.status === "released")) putCommitment(c, { ...open, status: r.status, closed: at });
     }
-    for (const p of Array.isArray(d.plans) ? d.plans : []) if (isPlan(p)) putPlan(c, planOf(p));
+    for (const p of Array.isArray(d.plans) ? d.plans : []) if (isPlan(p)) sharePlan(state, ctx.world.pov, who, planOf(p));
     if (str(d.summary)) c.summary = d.summary;
     // What they told others reaches the listeners' witness logs.
     for (const t of Array.isArray(d.told) ? d.told : []) {
@@ -257,7 +263,7 @@ const planStatus: EventTypeDef<PackEvent> = {
 };
 
 /** An edit event's three cases for one list: replace, add (a new id) or, with `value` null, delete. */
-function editDef(type: PackEvent["type"], key: "plan" | "note" | "commitment", valid: (v: JsonValue | undefined) => boolean, list: (c: MindsCharacter) => { id: string }[], put: (state: WorldState, who: EntityId, value: JsonValue) => void, remove: (state: WorldState, who: EntityId, id: string) => void): EventTypeDef<PackEvent> {
+function editDef(type: PackEvent["type"], key: "plan" | "note" | "commitment", valid: (v: JsonValue | undefined) => boolean, list: (c: MindsCharacter) => { id: string }[], put: (state: WorldState, who: EntityId, value: JsonValue, ctx: ReadContext) => void, remove: (state: WorldState, who: EntityId, id: string) => void): EventTypeDef<PackEvent> {
   return {
     type,
     validate: (e, ctx) => {
@@ -269,28 +275,26 @@ function editDef(type: PackEvent["type"], key: "plan" | "note" | "commitment", v
       if (d.value === null) return list(readCharacter(ctx.state, String(d.entity))).some((x) => x.id === id) ? null : { code: `missing_${key}`, reason: `that ${key} isn't theirs any more` };
       return valid(d.value) && isRecord(d.value) && d.value.id === id ? null : bad(`a ${key} edit's value is malformed`);
     },
-    apply: (e, state) => {
+    apply: (e, state, ctx) => {
       const d = e.data;
       const who = String(d.entity);
       if (d.value === null) remove(state, who, String(d[key]));
-      else if (d.value !== undefined && valid(d.value)) put(state, who, d.value);
+      else if (d.value !== undefined && valid(d.value)) put(state, who, d.value, ctx);
     },
     describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}'s ${key} ${e.data.value === null ? "deleted" : "edited"}`),
   };
 }
 
+// A shared plan is one plan: an edit reaches everyone in it, and a delete takes it from them all.
 const planEdit = editDef(
   MINDS_EVENTS.planEdit,
   "plan",
   isPlan,
   (c) => c.plans,
-  (state, who, v) => {
-    if (isPlan(v)) putPlan(writeCharacter(state, who), planOf(v));
+  (state, who, v, ctx) => {
+    if (isPlan(v)) sharePlan(state, ctx.world.pov, who, planOf(v));
   },
-  (state, who, id) => {
-    const c = writeCharacter(state, who);
-    c.plans = c.plans.filter((p) => p.id !== id);
-  },
+  dropPlan,
 );
 
 const noteEdit = editDef(

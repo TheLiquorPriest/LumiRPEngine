@@ -1316,7 +1316,7 @@ export function settingsFixture(): UserSettings {
   };
 }
 
-const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", routine: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm" };
+const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", routine: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm", take: "confirm", drop: "confirm", use_up: "confirm", wear: "confirm", lose: "confirm", item_condition: "confirm" };
 
 /** What the backend would derive: pins first, then learning on the connection, then D4 defaults. */
 export function extractionView(settings: UserSettings): Record<ExtractionType, ExtractionModeView> {

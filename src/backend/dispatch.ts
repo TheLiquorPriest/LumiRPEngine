@@ -36,6 +36,8 @@ import { actionOdds, resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
 import { hashParts } from "../shared/hash";
 import { Working } from "../engine/working";
+import { runRulesOnEvents } from "../engine/rules";
+import { stepTracks } from "../engine/tracks";
 import { canSeeEntity, canSeePlace } from "../engine/visibility";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { activeRecord } from "../engine/ledger/path";
@@ -178,6 +180,19 @@ export class Dispatcher {
     const runSeed = this.rt.bridgeOf(chatId)?.runSeed;
     if (runSeed === undefined) throw new RequestError("not_world_chat", "this chat is not attached to a world");
     return runSeed;
+  }
+
+  /**
+   * A chip-applied change with what follows from it on the head (DESIGN §4.3, §9.4): the rules its
+   * events fire (`rules`: a narrated time skip's own catch-up ran its rules already) and the tracks
+   * it advances, recorded in the same `confirm` entry, as an automatic read's post pass does, so a
+   * quest item taken on Apply moves its quest this turn rather than the next.
+   */
+  private consequences(w: Working, events: LedgerEvent[], seed: string, rules: boolean): LedgerEvent[] {
+    const mark = w.events.length;
+    if (rules) runRulesOnEvents(this.rt.registry, w, events, { seed: `${seed}:rules` });
+    stepTracks(this.rt.registry, w, `${seed}:tracks`);
+    return [...events, ...w.events.slice(mark)];
   }
 
   private async route(r: FrontendToBackend, userId: UserId, session: string | undefined, reply: <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]) => void, noted: DraftNoted): Promise<void> {
@@ -954,7 +969,7 @@ export class Dispatcher {
           if (!outcome || outcome.rejection) throw new RequestError("validation", outcome?.rejection?.reason ?? "the change no longer applies");
           events = [...outcome.materialized, ...outcome.events];
         }
-        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events } });
+        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, events, `${id}:confirm`, proposal.type !== "time_advance") } });
         await settle("accepted");
         return { applied: result.applied, pending: result.pending };
       }
@@ -1121,7 +1136,7 @@ export class Dispatcher {
           const [outcome] = applyProposals(this.rt.registry, w, [priced], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:${choice}`, this.runSeedOf(chatId));
           if (!outcome || outcome.rejection || outcome.events.length === 0) throw new RequestError("validation", outcome?.rejection?.reason ?? "the purchase no longer applies");
           await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
+          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${choice}`, true) } });
           return { applied: result.applied, pending: result.pending };
         }
         if (choice !== "other") throw new RequestError("bad_request", `unknown choice ${choice}`);
@@ -1131,7 +1146,7 @@ export class Dispatcher {
           const [outcome] = applyProposals(this.rt.registry, w, [{ ...proposal, method }], `${id}:${method}`, this.runSeedOf(chatId));
           if (!outcome || outcome.rejection || outcome.events.length === 0) continue;
           await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
+          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${method}`, true) } });
           return { applied: result.applied, pending: result.pending };
         }
         // Nothing covers it: the chip stays for Remove or Accept.
