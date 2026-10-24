@@ -227,6 +227,9 @@ export const spacePack: PackDef = {
       touches: (e) => [{ entity: strOf(e.data.entity), field: "x" }, { entity: strOf(e.data.entity), field: "y" }],
       // Steps are told by the action and the place they reach, never as coordinates.
       describe: () => "",
+      // A coarsened record (a Timelapse) moves each one once (DESIGN §4.3): where they stood first
+      // to where they stand last, so the record is never kept raw for its positions.
+      coarsen: { key: (e) => strOf(e.data.entity), merge: (earlier, later) => ({ ...later, data: { ...later.data, from: earlier.data.from ?? null } }) },
     });
     r.effect({
       type: "space.step",
@@ -338,17 +341,18 @@ export const spacePack: PackDef = {
         if (stopped) return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
         // Moves are story first: the one move path refuses one no route reaches only under the travel
         // simulation, and says so in what the POV may know.
-        const route = relocate(ctx, entity, place, { route: true });
+        const route = relocate(ctx, entity, place, { told: true });
         return "code" in route ? route : null;
       },
       // The one move path, as a told move: a move to another place doesn't carry over what they were
       // doing where they were (the shift their routine or the planner gave them), so their activity
-      // goes back to idle unless the proposal says what they do there.
+      // goes back to idle unless the proposal says what they do there, which holds even where they
+      // already are (the party brought them first).
       toEffects: (p, ctx) => {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
         const to = typeof p.place === "string" ? p.place : "";
-        const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
-        return [{ type: "move", args: { entity, to, activity, route: true } }];
+        const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : null;
+        return [{ type: "move", args: { entity, to, told: true, ...(activity !== null ? { activity } : {}) } }];
       },
     });
 

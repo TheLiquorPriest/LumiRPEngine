@@ -19,15 +19,24 @@ import { canSeePlace } from "./visibility";
 
 export interface RelocateOptions {
   /**
-   * A narrated move's activity rule: to another place, their activity becomes this ("idle" when the
-   * reply gives none), so what they did where they were stays behind. Absent: the activity is the
-   * writer's own business.
+   * A narrated move (the reply's, or ✎): it refuses a move no route reaches while the world's
+   * travel simulation is on, and its activity rule holds: to another place, their activity becomes
+   * `activity`, else `idle`, so what they did where they were stays behind; where they already are,
+   * a stated `activity` still applies.
    */
+  told?: boolean;
+  /** The activity a narrated move states. */
   activity?: string;
-  /** Refuse a move no route reaches, while the world's travel simulation is on (a narrated move). */
-  route?: boolean;
   /** The player character's party follows it there (a move the player character makes). */
   party?: boolean;
+  /** Someone coming along with another mover (a Go companion, a rider): what they did stays behind. */
+  along?: boolean;
+  /**
+   * People the same read or edit already sent somewhere other than where the player character is
+   * (its flat inside the building it stands in): still `together` with it, but the story put them
+   * there, so the party doesn't take them along.
+   */
+  stayed?: ReadonlySet<EntityId>;
 }
 
 /**
@@ -41,15 +50,23 @@ export function relocate(ctx: ReadContext, who: EntityId, to: PlaceId, opts: Rel
   // Moves are story first: only the world's travel simulation makes one across a gap no route spans
   // (off an island with no boat leg back) a move that didn't happen. The reason reaches the player:
   // a place the POV can't see is somewhere.
-  if (opts.route && from && from !== to && mapSettingsOf(ctx.world).travelSimulation === true) {
+  if (opts.told && from && from !== to && mapSettingsOf(ctx.world).travelSimulation === true) {
     const reach = optionalQuery(ctx, "space.reachable");
     const named = (id: PlaceId): string => (canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? (own(ctx.world.places, id)?.name ?? id) : "somewhere");
     if (reach && !reach(ctx, from, to)) return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(to)}` };
   }
+  const next = opts.told ? (from !== to ? (opts.activity ?? "idle") : opts.activity) : opts.along && from !== to ? "idle" : undefined;
+  // A move to where they already are still takes them out of what holds them and onto their cell.
   const out = moveEvents(ctx, who, to);
-  const doing = e.fields.activity;
-  if (opts.activity !== undefined && from !== to && doing !== undefined && doing !== opts.activity) out.push({ type: "set", entity: who, field: "activity", value: opts.activity });
-  if (opts.party && who === ctx.world.pov) for (const member of partyAt(ctx, from)) if (placeOfEntity(ctx.state, member) !== to) out.push(...moveEvents(ctx, member, to));
+  out.push(...activityEvents(ctx, who, next));
+  // The party comes along only on a move that goes somewhere: a "move" to where the player
+  // character already is (✎ Place, the GM's Move, a narrated move that stays) leaves them be.
+  if (opts.party && who === ctx.world.pov && from !== to) {
+    for (const member of partyAt(ctx, from)) {
+      if (opts.stayed?.has(member) || placeOfEntity(ctx.state, member) === to) continue;
+      out.push(...moveEvents(ctx, member, to), ...activityEvents(ctx, member, "idle"));
+    }
+  }
   return out;
 }
 
@@ -64,6 +81,12 @@ function moveEvents(ctx: ReadContext, who: EntityId, to: PlaceId): LedgerEvent[]
   return out;
 }
 
+/** Their activity set to `next`, for someone who has one and isn't doing it already. */
+function activityEvents(ctx: ReadContext, who: EntityId, next: string | undefined): LedgerEvent[] {
+  const doing = own(ctx.state.entities, who)?.fields.activity;
+  return next !== undefined && doing !== undefined && doing !== next ? [{ type: "set", entity: who, field: "activity", value: next }] : [];
+}
+
 /**
  * The player character's party in its scene: everyone who travels with it, acts, and is with it
  * where it is now. Someone the story already took elsewhere isn't with it, so doesn't follow.
@@ -76,4 +99,14 @@ export function partyAt(ctx: ReadContext, here: PlaceId | null): EntityId[] {
       const e = own(ctx.state.entities, id);
       return !!e && id !== pov && e.relations.some((r) => r.type === PARTY_RELATION && r.to === pov) && !isGone(ctx.state, id) && acts(ctx.world, ctx.state, id) && together(ctx.world, here, placeOfEntity(ctx.state, id));
     });
+}
+
+/**
+ * Who the events so far of one read or edit (a Working's) left somewhere other than `here`, by the
+ * last place each was given: the people the party mustn't take along from `here`.
+ */
+export function movedElsewhere(events: readonly LedgerEvent[], here: PlaceId | null): Set<EntityId> {
+  const last = new Map<EntityId, unknown>();
+  for (const ev of events) if (ev.type === "set" && ev.field === "place") last.set(ev.entity, ev.value);
+  return new Set([...last].filter(([, place]) => place !== here).map(([id]) => id));
 }
