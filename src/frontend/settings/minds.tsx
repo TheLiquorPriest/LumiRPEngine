@@ -5,15 +5,14 @@
 // disclosure, as they're long), and the four minds prompts, each beside its built-in default with
 // Reset. Every patch is `minds-patch.ts`'s. Styles: styles/minds.ts.
 
-import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { Limit, MindPurpose, MindSource, MindsReads, MindsSettings } from "../../shared/minds";
 import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, FIDELITIES, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_PURPOSES, MIND_SOURCES, MINDS_DEFAULTS } from "../../shared/minds";
 import { Badge, Button, Disclosure, HostSwitch, NumberStepper, Section } from "../components";
-import { Icon } from "../icons";
+import { PromptEditor } from "./prompt-editor";
 import type { MemoryField } from "./minds-patch";
 import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsPolicyPatch, mindsPromptPatch, mindsReadPatch, withMemoryLevel } from "./minds-patch";
-import { STEP_LABEL } from "./steps";
+import { STEP_LABEL } from "../../shared/steps";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
 const PROMPT_NOTE: Record<MindPurpose, string> = {
@@ -161,52 +160,9 @@ export function ReadRow(props: { source: MindSource; reads: MindsReads; memory: 
   );
 }
 
-function PromptEditor(props: { purpose: MindPurpose; value: string | undefined; busy: boolean; patch(patch: JsonObject): void }) {
-  const builtIn = MIND_PROMPT_DEFAULTS[props.purpose];
-  const saved = props.value ?? builtIn;
-  const [text, setText] = useState(saved);
-  useEffect(() => setText(saved), [saved]);
-  const save = mindsPromptPatch(props.purpose, text);
-  const label = STEP_LABEL[props.purpose];
-  return (
-    <div class="lre-minds-prompt" data-lre-minds-prompt={props.purpose}>
-      <Disclosure
-        summary={
-          <span class="lre-minds-prompt-head">
-            <span class="lre-minds-prompt-text">
-              <span class="lre-minds-prompt-title">{label}</span>
-              <span class="lre-minds-prompt-sub">{PROMPT_NOTE[props.purpose]}</span>
-            </span>
-            {props.value === undefined ? <Badge>Built-in</Badge> : <Badge tone="accent">Your own</Badge>}
-          </span>
-        }
-      >
-        <textarea class="lre-input lre-minds-prompt-input" rows={10} aria-label={`${label} prompt`} value={text} disabled={props.busy} onInput={(event) => setText(event.currentTarget.value)} />
-        {text.length > MIND_PROMPT_MAX ? (
-          <div class="lre-set-warn" role="note">
-            <Icon name="alert" size={16} />
-            <span>Too long: at most {MIND_PROMPT_MAX.toLocaleString()} characters.</span>
-          </div>
-        ) : null}
-        <div class="lre-minds-actions">
-          <Button size="sm" variant="primary" disabled={props.busy || save === null || text === saved} onClick={() => save && props.patch(save)}>
-            Save
-          </Button>
-          <Button size="sm" variant="ghost" disabled={props.busy || text === saved} onClick={() => setText(saved)}>
-            Revert
-          </Button>
-          <Button size="sm" icon="undo" disabled={props.busy || props.value === undefined} onClick={() => props.patch(mindsPromptPatch(props.purpose, null) ?? {})}>
-            Reset to the default
-          </Button>
-        </div>
-        <div class="lre-minds-default">
-          <Disclosure summary="The built-in default">
-            <pre class="lre-minds-code">{builtIn}</pre>
-          </Disclosure>
-        </div>
-      </Disclosure>
-    </div>
-  );
+/** A minds step's own prompt (`minds.prompts`), on the editor Settings → Steps and connections shares. */
+export function MindPromptEditor(props: { purpose: MindPurpose; value: string | undefined; busy: boolean; patch(patch: JsonObject): void }) {
+  return <PromptEditor id={props.purpose} label={STEP_LABEL[props.purpose]} note={PROMPT_NOTE[props.purpose]} builtIn={MIND_PROMPT_DEFAULTS[props.purpose]} value={props.value} max={MIND_PROMPT_MAX} vars={props.purpose} busy={props.busy} save={(text) => mindsPromptPatch(props.purpose, text)} patch={props.patch} />;
 }
 
 export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObject): void; busy: boolean }) {
@@ -303,7 +259,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
         <div class="lre-minds-prompts">
           <p class="lre-minds-note lre-minds-prompts-lead">Your prompt wins over the world's own step template for a purpose (Build → Step templates), and that over the built-in.</p>
           {MIND_PURPOSES.map((purpose) => (
-            <PromptEditor key={purpose} purpose={purpose} value={minds.prompts[purpose]} busy={busy} patch={props.patch} />
+            <MindPromptEditor key={purpose} purpose={purpose} value={minds.prompts[purpose]} busy={busy} patch={props.patch} />
           ))}
         </div>
       </Section>

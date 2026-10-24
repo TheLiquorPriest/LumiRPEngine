@@ -49,7 +49,25 @@ var RETIRED_SIGNALS = new Map([["classifier", "typed_input"]]);
 function knownSignal(s) {
   return STEP_SIGNALS.includes(s) || /^every_n:[1-9]\d*$/.test(s);
 }
-var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "character"];
+var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "gear", "money", "property", "positions", "knowledge", "character"];
+var PROSE_VARS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "gear", "money", "property", "positions", "knowledge"];
+var MIND_VARS = ["character", "world", "pov", "place", "clock"];
+var STEP_VARS = {
+  interpret: { phase: "before the reply", vars: ["world", "pov"], note: "None on a Decision connection." },
+  "npc.choose": { phase: "before the reply", vars: [], note: "Sent as written." },
+  judge: { phase: "before the reply", vars: [], note: "Sent as written." },
+  "puzzle.answer": { phase: "before the reply", vars: [], note: "Sent as written." },
+  brief: { phase: "before the reply", vars: PROSE_VARS },
+  outline: { phase: "before the reply", vars: [...PROSE_VARS, "sections"] },
+  extract: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
+  choices: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
+  contradiction: { phase: "after the reply", vars: [], note: "A decision template is sent as written; an effects template gets extract's." },
+  mind: { phase: "with the minds", vars: MIND_VARS },
+  memory: { phase: "with the minds", vars: MIND_VARS },
+  consolidate: { phase: "with the minds", vars: MIND_VARS },
+  skip: { phase: "as a time skip starts", vars: MIND_VARS, note: "The beats think for no one: character is empty." },
+  skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] }
+};
 var PURPOSE_PLACEHOLDERS = { extract: ["usual"], contradiction: ["usual"], choices: ["usual"], outline: ["sections"] };
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],

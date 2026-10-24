@@ -3784,7 +3784,45 @@ function currentSignals(signals) {
 function hasRetiredSignal(signals) {
   return signals.some((s) => RETIRED_SIGNALS.has(s));
 }
-var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "character"];
+var STEP_LABEL = {
+  interpret: "Interpret typed input",
+  "npc.choose": "NPC choices",
+  contradiction: "Contradiction check",
+  "puzzle.answer": "Puzzle answers",
+  brief: "Scene brief",
+  outline: "Prose outline",
+  extract: "Extract changes",
+  choices: "Suggested choices",
+  judge: "Judge your approach",
+  mind: "Character minds",
+  memory: "Character memory",
+  skip: "Time-skip beats",
+  consolidate: "Memory consolidation"
+};
+var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "gear", "money", "property", "positions", "knowledge", "character"];
+var PROSE_VARS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "gear", "money", "property", "positions", "knowledge"];
+var MIND_VARS = ["character", "world", "pov", "place", "clock"];
+var STEP_VARS = {
+  interpret: { phase: "before the reply", vars: ["world", "pov"], note: "None on a Decision connection." },
+  "npc.choose": { phase: "before the reply", vars: [], note: "Sent as written." },
+  judge: { phase: "before the reply", vars: [], note: "Sent as written." },
+  "puzzle.answer": { phase: "before the reply", vars: [], note: "Sent as written." },
+  brief: { phase: "before the reply", vars: PROSE_VARS },
+  outline: { phase: "before the reply", vars: [...PROSE_VARS, "sections"] },
+  extract: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
+  choices: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
+  contradiction: { phase: "after the reply", vars: [], note: "A decision template is sent as written; an effects template gets extract's." },
+  mind: { phase: "with the minds", vars: MIND_VARS },
+  memory: { phase: "with the minds", vars: MIND_VARS },
+  consolidate: { phase: "with the minds", vars: MIND_VARS },
+  skip: { phase: "as a time skip starts", vars: MIND_VARS, note: "The beats think for no one: character is empty." },
+  skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] }
+};
+var PROSE_PROMPTS = {
+  brief: "You brief a roleplay narrator before their next reply. In two or three sentences, say what matters right now in {{world}}: where {{pov}} is, who is present, what the player just did and how it turned out, and anything pressing. Use only the facts given; invent nothing.",
+  outline: "You outline a roleplay narrator's next reply. Expand the engine's beats into two to four short beats, in order, consistent with the facts and the outcome. Don't decide anything the facts don't settle, and don't add events.",
+  choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts. Each under twelve words, first person, as the player would type it."
+};
 var PURPOSE_PLACEHOLDERS = { extract: ["usual"], contradiction: ["usual"], choices: ["usual"], outline: ["sections"] };
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
@@ -60599,7 +60637,7 @@ var DIAG_RING = 400;
 var SLOW_MS = 1000;
 var CANNOT_STOP = "This Lumiverse can't stop generation; engine state may be missing.";
 var NOT_LAST_REPLY = "Lumiverse can only start the last reply again, so the engine can't prepare an earlier message's reply here. Use Edit and Send as a branch, or regenerate the last reply.";
-var STEP_LABEL = {
+var STEP_LABEL2 = {
   engine: "Running the engine\u2026",
   pre: "Planning\u2026",
   interpret: "Reading your action\u2026",
@@ -60629,7 +60667,7 @@ var STEP_LABEL = {
 function callLabel(purpose, count) {
   if (purpose === "mind")
     return `Asking ${count} mind${count === 1 ? "" : "s"}\u2026`;
-  return STEP_LABEL[purpose] ?? "Asking the model\u2026";
+  return STEP_LABEL2[purpose] ?? "Asking the model\u2026";
 }
 function suggestFix(reason2, call) {
   const r = reason2.toLowerCase();
@@ -60756,7 +60794,7 @@ class Diagnostics {
     this.schedule(at.chatId);
     return full;
   }
-  begin(at, label = STEP_LABEL.pre ?? "Working\u2026") {
+  begin(at, label = STEP_LABEL2.pre ?? "Working\u2026") {
     const prior = this.turns.get(at.chatId);
     if (prior && prior.at.turn !== at.turn)
       this.end(prior.at, { status: "skipped", reason: "a new turn started before it ended" });
@@ -60784,13 +60822,13 @@ class Diagnostics {
     this.add(at, { kind: "turn", level: status === "failed" ? "warn" : "info", turn: at.turn, phase: null, step: "turn", status, start: turn.start, end, ms: end - turn.start, ...reason2 ? { reason: reason2 } : {}, ...outcome?.fix ? { fix: outcome.fix } : {} });
     const step = turn.failed?.split("/").at(-1);
     if (failed !== null)
-      this.activities.set(at.chatId, { chatId: at.chatId, turn: at.turn, state: "failed", label: step ? `Failed: ${STEP_LABEL[step]?.replace("\u2026", "") ?? step}` : "Failed", since: end });
+      this.activities.set(at.chatId, { chatId: at.chatId, turn: at.turn, state: "failed", label: step ? `Failed: ${STEP_LABEL2[step]?.replace("\u2026", "") ?? step}` : "Failed", since: end });
     else
       this.activities.delete(at.chatId);
     this.send(at.chatId, at.userId);
   }
   async step(at, phase, step, fn, judge) {
-    const open = { at, phase, step, start: this.now(), calls: [], label: STEP_LABEL[step] ?? STEP_LABEL[phase] ?? "Working\u2026" };
+    const open = { at, phase, step, start: this.now(), calls: [], label: STEP_LABEL2[step] ?? STEP_LABEL2[phase] ?? "Working\u2026" };
     const stack = this.open.get(at.userId) ?? [];
     stack.push(open);
     this.open.set(at.userId, stack);
@@ -61325,7 +61363,7 @@ class LedgerService {
         const turn = p && e.messageId && userId ? { chatId: e.chatId, userId, core, observed, generationId: e.generationId, messageId: e.messageId, swipeId, kind: p.kind } : null;
         const diag = at && turn ? this.diag : null;
         if (at && diag)
-          diag.begin(at, STEP_LABEL.read);
+          diag.begin(at, STEP_LABEL2.read);
         if (this.hooks && turn && p && p.kind !== "impersonate") {
           const hooks = this.hooks;
           const text5 = p.kind === "continue" ? p.captured && e.content.length >= p.captured.len ? e.content.slice(p.captured.len) : "" : e.content;
@@ -61409,7 +61447,7 @@ class LedgerService {
     }
     const id = `engine-${crypto.randomUUID()}`;
     gate.halt = { id, generationId: started?.generationId ?? null, type, target: isSwipe(type) ? started?.targetMessageId ?? null : null, connectionId: input.connectionId, ...input.frontendSessionId ? { session: input.frontendSessionId } : {} };
-    this.diag?.begin({ chatId: input.chatId, userId: input.userId, turn: id }, STEP_LABEL.engine);
+    this.diag?.begin({ chatId: input.chatId, userId: input.userId, turn: id }, STEP_LABEL2.engine);
     return "cancel";
   }
   fresh(chatId, gate, p, type, started) {
@@ -61479,7 +61517,7 @@ class LedgerService {
     if (p.holder !== null)
       this.host.frontend.send(restartPush(chatId, p), userId, p.holder);
     else if (this.diag)
-      this.diag.rest({ chatId, userId }, STEP_LABEL.restart ?? "Ready; reopen the chat to continue");
+      this.diag.rest({ chatId, userId }, STEP_LABEL2.restart ?? "Ready; reopen the chat to continue");
   }
   askAgain(chatId, userId, session) {
     const gate = this.gates.get(chatId);
@@ -61496,7 +61534,7 @@ class LedgerService {
     if (p.holder === session)
       this.host.frontend.send(restartPush(chatId, p), userId, session);
     else if (here)
-      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: { chatId, turn: p.id, state: "running", label: STEP_LABEL.elsewhere ?? "Already started in another window", since: Date.now() } }, userId, session);
+      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: { chatId, turn: p.id, state: "running", label: STEP_LABEL2.elsewhere ?? "Already started in another window", since: Date.now() } }, userId, session);
   }
   claimRestart(chatId, userId, session, turn) {
     const gate = this.gates.get(chatId);
@@ -61585,7 +61623,7 @@ class LedgerService {
         this.diag?.failed({ chatId, userId, turn: p.id }, "plan", "plan", "the reply's generation couldn't take the prepared plan, so this turn commits without it");
       await this.hooks?.adopted(chatId, userId, p.id, generationId);
       this.diag?.rename(chatId, p.id, generationId);
-      this.diag?.rest({ chatId, userId }, STEP_LABEL.reply ?? "Waiting for the reply\u2026");
+      this.diag?.rest({ chatId, userId }, STEP_LABEL2.reply ?? "Waiting for the reply\u2026");
     });
   }
   unguarded(chatId, userId, generationId) {
@@ -61678,7 +61716,7 @@ class LedgerService {
         continue;
       }
       if (lease.chatId !== chatId)
-        this.diag?.rest(at, STEP_LABEL.book ?? "Waiting for another chat of this world\u2026");
+        this.diag?.rest(at, STEP_LABEL2.book ?? "Waiting for another chat of this world\u2026");
       await (gaveUp ? Promise.race([lease.moved.promise, gaveUp]) : lease.moved.promise);
     }
     this.leases.set(worldId, { chatId, owner, kind, moved: Promise.withResolvers() });
@@ -61759,7 +61797,7 @@ class LedgerService {
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared)
         return;
-      this.diag?.rest(at, as === "send" ? STEP_LABEL.ready ?? "Ready: press Send for the reply" : holder !== null || !this.host.capabilities.sessions ? STEP_LABEL.reply ?? "Waiting for the reply\u2026" : STEP_LABEL.restart ?? "Ready; reopen the chat to continue");
+      this.diag?.rest(at, as === "send" ? STEP_LABEL2.ready ?? "Ready: press Send for the reply" : holder !== null || !this.host.capabilities.sessions ? STEP_LABEL2.reply ?? "Waiting for the reply\u2026" : STEP_LABEL2.restart ?? "Ready; reopen the chat to continue");
       if (prepared.holder !== null)
         this.host.frontend.send(restartPush(chatId, prepared), userId, prepared.holder);
       else if (!this.host.capabilities.sessions)
@@ -68574,6 +68612,28 @@ function factLines(registry, world, state2, secrets) {
     return out.slice(0, 40);
   });
 }
+var VAR_SLOTS = { gear: ["gear"], money: ["money"], property: ["property", "vehicles"], positions: ["people"], knowledge: ["quest"] };
+var VAR_SLOT_SET = new Set(Object.values(VAR_SLOTS).flat());
+function slotVars(registry, world, state2) {
+  return readPass(() => {
+    const ctx = registry.context(world, state2);
+    const lines = new Map;
+    for (const r of registry.renderers) {
+      if (r.hint || !VAR_SLOT_SET.has(r.slot))
+        continue;
+      try {
+        const own2 = lines.get(r.slot) ?? [];
+        for (const line2 of r.render(ctx))
+          if (!own2.includes(line2))
+            own2.push(line2);
+        lines.set(r.slot, own2);
+      } catch {}
+    }
+    const of = (slots) => [...new Set(slots.flatMap((s) => lines.get(s) ?? []))].join(`
+`);
+    return { gear: of(VAR_SLOTS.gear), money: of(VAR_SLOTS.money), property: of(VAR_SLOTS.property), positions: of(VAR_SLOTS.positions), knowledge: of(VAR_SLOTS.knowledge) };
+  });
+}
 function presentAgents(registry, world, state2) {
   const here = placeOfEntity(state2, world.pov);
   if (!here)
@@ -68706,13 +68766,19 @@ function phaseBudget(settings, phase, parent) {
 function templatesFor(world, purpose) {
   return Object.values(world.steps).filter((t) => t.purpose === purpose).sort((a, b) => a.id.localeCompare(b.id));
 }
+var OWN_OUTPUT = { interpret: "text", "npc.choose": "decision", contradiction: "decision", "puzzle.answer": "decision", judge: "decision", brief: "text", outline: "text", extract: "text", choices: "text", mind: "text", memory: "text", skip: "text", consolidate: "text" };
+function ownTemplate(purpose, config3) {
+  const text5 = config3.template ?? "";
+  return text5.trim() === "" ? null : { id: "", purpose, template: text5, output: OWN_OUTPUT[purpose], signals: [] };
+}
 function runsOf(modelUse, world, purpose, facts, options = {}) {
   const config3 = stepConfigOf(modelUse.steps, purpose);
   if (!config3.enabled)
     return [];
   const guidance = options.guidance?.[purpose] ?? "";
   const recent = purpose === "interpret" ? [] : recentMessages(facts.earlier.messages, recentOf(purpose, config3), facts.earlier.hideJson);
-  const templates = templatesFor(world, purpose).filter((t) => options.output === undefined || t.output === options.output);
+  const own2 = ownTemplate(purpose, config3);
+  const templates = [...own2 ? [own2] : [], ...templatesFor(world, purpose).filter((t) => own2 === null || t.output === "effects")].filter((t) => options.output === undefined || t.output === options.output);
   if (templates.length === 0)
     return options.output === "effects" ? [] : fires(config3.signals, facts) ? [{ purpose, config: config3, template: null, guidance, recent }] : [];
   return templates.filter((t) => fires(t.signals.length > 0 ? t.signals : config3.signals, facts)).map((template) => ({ purpose, config: config3, template, guidance, recent }));
@@ -68728,11 +68794,6 @@ function safeVars(vars, secrets) {
 `);
   return out;
 }
-var BUILTIN = {
-  brief: "You brief a roleplay narrator before their next reply. In two or three sentences, say what matters right now in {{world}}: where {{pov}} is, who is present, what the player just did and how it turned out, and anything pressing. Use only the facts given; invent nothing.",
-  outline: "You outline a roleplay narrator's next reply. Expand the engine's beats into two to four short beats, in order, consistent with the facts and the outcome. Don't decide anything the facts don't settle, and don't add events.",
-  choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts. Each under twelve words, first person, as the player would type it."
-};
 var CONTRACT = {
   brief: 'Output JSON only: {"text": string}.',
   outline: 'Output JSON only: {"beats": string[]}.',
@@ -68765,7 +68826,7 @@ function proseLines(v, max, secrets, chars = 300, long = "cut") {
   return (long === "drop" ? all2.filter((x) => x.length <= chars) : all2).slice(0, max).filter((x) => findLeaks(x, secrets).length === 0).map((x) => x.slice(0, chars));
 }
 async function promptedText(steps, run2, kind, vars, secrets, userId, signal2, lore = null) {
-  const instructions = renderTemplate(run2.template?.template ?? BUILTIN[kind], vars);
+  const instructions = renderTemplate(run2.template?.template ?? PROSE_PROMPTS[kind], vars);
   const raw = await steps.helperJson(run2.purpose, `${instructions}
 ${CONTRACT[kind]}`, dataBlock(vars), run2.config, userId, signal2, { lore, guidance: run2.guidance, recent: run2.recent });
   if (!isRecord(raw))
@@ -69616,6 +69677,15 @@ async function runSkip(deps, input) {
   return { record: record3, traces };
 }
 
+// src/shared/skip-plan.ts
+var SKIP_PLAN_PROMPT = [
+  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, give a few blocks of time, only for what they do other than simply being at home asleep. Gaps are fine: whenever no block covers them, they go home to sleep and eat on their own, so don't plan hour by hour, and never plan a block just to send them home or to bed.",
+  "Their usual routine is background you may follow, bend or ignore as the story suggests; it is never a rule. What the story already set for them comes first. Keep each person in character and consistent with the latest reply.",
+  "Use only the places and activities listed, by id and word as given. Every block lies inside the skip, and one person's blocks never overlap. A label is a few plain words saying what they do, naming no one."
+].join(`
+`);
+var SKIP_PLAN_ANSWER = 'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.';
+
 // src/packs/castlife/core/skip-plan.ts
 var BUILTIN_ACTIVITIES = ["work", "socialize", "leisure"];
 var STORY_KINDS = { appointment: true, trip: true, plan: true };
@@ -69735,13 +69805,16 @@ function checkSkipPlan(ctx, brief, raw) {
 
 // src/backend/skip-plan.ts
 var REPLY_CAP = 2000;
-var SKIP_PLAN_SYSTEM = [
-  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, give a few blocks of time, only for what they do other than simply being at home asleep. Gaps are fine: whenever no block covers them, they go home to sleep and eat on their own, so don't plan hour by hour, and never plan a block just to send them home or to bed.",
-  "Their usual routine is background you may follow, bend or ignore as the story suggests; it is never a rule. What the story already set for them comes first. Keep each person in character and consistent with the latest reply.",
-  "Use only the places and activities listed, by id and word as given. Every block lies inside the skip, and one person's blocks never overlap. A label is a few plain words saying what they do, naming no one.",
-  'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.'
-].join(`
-`);
+function skipPlanSystem(reg, world, state2, from, config3) {
+  const mine = config3?.template ?? "";
+  if (mine.trim() === "")
+    return `${SKIP_PLAN_PROMPT}
+${SKIP_PLAN_ANSWER}`;
+  const here = placeOfEntity(state2, world.pov);
+  const vars = safeVars({ world: world.name, pov: own(state2.entities, world.pov)?.name ?? world.pov, place: here ? own(world.places, here)?.name ?? here : "", clock: formatClock(calendarOf(world), from) }, unrevealedSecrets(reg, world, state2));
+  return `${renderTemplate(mine, vars)}
+${SKIP_PLAN_ANSWER}`;
+}
 async function planSkip(deps, input) {
   const { target, opts } = timelapseOptions(input.intent, input.runSeed);
   const run2 = target ? TimelapseRun.start(deps.registry, new Working(deps.registry, input.world, input.state), target, opts) : null;
@@ -69768,11 +69841,12 @@ ${pinned.join(`
 ${chat.join(`
 `)}` : ""].filter((part) => part !== "");
   const signal2 = within4(input.signal, "skipPlanMs", input.limit);
+  const system = skipPlanSystem(deps.registry, input.world, input.state, from, input.config);
   const groups = routineSettingsOf(input.world).skipPlanCalls === "parallel" ? people.map((id) => [id]) : [people];
   const answers = await Promise.all(groups.map(async (group) => {
     const brief = skipPlanBrief(ctx, group, from, to);
     const failure = { reason: "" };
-    const raw = signal2.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, [skipPlanText(ctx, brief, told, journal), ...extra].join(`
+    const raw = signal2.aborted ? null : await deps.steps.helperJson("skip", system, [skipPlanText(ctx, brief, told, journal), ...extra].join(`
 
 `), input.config, input.userId, signal2, { failure, spared: true, guidance: input.guidance });
     if (raw !== null)
@@ -70283,9 +70357,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "81fbd5aad063525a74dc67975c2df76ade36ce521b9ea3f39ad406a3f58109f5";
+  const sha256 = "14bb2b8748c33c995b1221f51f3b1f330ff067ab32e33c5236e0dfc25a8e5ef3";
   const tools = ["0a9baadf30fa77cf7cb49d886cca019e", "be126719e8971c9663eddb1d75fbe1b9"].filter((f) => f !== undefined);
-  return { id: "e32361f4", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "b5c0ae1a", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -71358,6 +71432,7 @@ function loreOf(v) {
   const transport = oneOf3(v.transport, LORE_TRANSPORTS);
   return policy && tokens2 !== undefined ? { policy, tokens: tokens2, ...transport ? { transport } : {} } : undefined;
 }
+var OWN_PROMPT_ELSEWHERE = { mind: true, memory: true, consolidate: true };
 function stepOf(v, base, purpose) {
   if (!isRecord(v))
     return base;
@@ -71369,7 +71444,7 @@ function stepOf(v, base, purpose) {
     enabled: typeof v.enabled === "boolean" ? v.enabled : base?.enabled ?? false,
     signals: currentSignals(Array.isArray(v.signals) ? v.signals.filter((s) => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : base?.signals ?? []),
     ...route ? { route } : {},
-    ...typeof v.template === "string" ? { template: v.template.slice(0, 20000) } : {},
+    ...typeof v.template === "string" && !OWN_PROMPT_ELSEWHERE[purpose] ? { template: v.template.slice(0, 20000) } : {},
     ...maxTokens !== undefined ? { maxTokens } : {},
     ...lore2 ? { lore: { ...lore2 } } : {},
     ...recent ? { recent: { ...recent } } : {}
@@ -71482,7 +71557,13 @@ function expandPresets(settings, patch) {
     out.realism = { preset: realism, ...structuredClone(REALISM_PRESETS2[realism]) };
   const modelUse = isRecord(patch.modelUse) ? patch.modelUse.preset : undefined;
   if (modelUse === "lean" || modelUse === "standard" || modelUse === "full") {
+    const before = out.modelUse.steps;
     out.modelUse = { preset: modelUse, ...structuredClone(MODEL_USE_PRESETS[modelUse]) };
+    for (const purpose of STEP_PURPOSES) {
+      const template = before[purpose]?.template;
+      if (template !== undefined)
+        out.modelUse.steps[purpose] = { ...stepConfigOf(out.modelUse.steps, purpose), template };
+    }
     out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), reads: out.minds.reads, memory: out.minds.memory, prompts: out.minds.prompts };
   }
   return out;
@@ -73282,7 +73363,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "e32361f4" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "b5c0ae1a" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -73613,7 +73694,8 @@ class Runtime {
       user,
       reply,
       recent: recent.join(`
-`)
+`),
+      ...slotVars(this.registry, world, state2)
     };
   }
   async readIntent(bridge, text6, recorded, render, all2, earlier, settings, facts, budget, at2, left) {
@@ -74675,7 +74757,7 @@ ${rules.join(`
     if (!last)
       return;
     const why = (input.reason.startsWith(`${input.step} `) ? input.reason.slice(input.step.length + 1) : input.reason).replace(/(?:^|\b)(?:the )?call failed: /g, "");
-    const said2 = input.step === "mind" || input.step === "target" || input.step === "stale" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/\u2026$/, "")}: ${why}`;
+    const said2 = input.step === "mind" || input.step === "target" || input.step === "stale" ? why : `${(STEP_LABEL2[input.step] ?? input.step).replace(/\u2026$/, "")}: ${why}`;
     const cleared = input.step === "clear";
     const detail = `${said2.charAt(0).toUpperCase()}${said2.slice(1)}${cleared ? ". Nothing went out with them; try again, and if it keeps failing, Diagnostics shows each attempt." : ""}`;
     const retry = input.step === "target" || cleared ? [] : [{ id: "regenerate", label: "Retry", style: "primary" }];
@@ -74746,7 +74828,7 @@ ${rules.join(`
     }
   }
   async presetCaveats(userId, waitMs = CAVEATS_WAIT_MS) {
-    const host = this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }];
+    const host = [...this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }], ...await this.stepCaveats(userId)];
     const open = await this.host.chats.active(userId).catch(() => null);
     const chatId = open && await this.runOf(open, userId) ? open : this.lastWorldChat.get(userId);
     if (!chatId)
@@ -74770,6 +74852,38 @@ ${rules.join(`
     } finally {
       clearTimeout(timer);
     }
+  }
+  async stepCaveats(userId) {
+    const settings = await this.settings.get(userId);
+    const [helpers, decisions2] = await Promise.all([this.host.connections.list(userId).catch(() => null), this.host.connections.decisionList(userId).catch(() => null)]);
+    const gone = [];
+    const unlisted = [];
+    const check = async (label, connectionId, model, decision) => {
+      const list = decision ? decisions2 : helpers;
+      if (connectionId === null || list === null)
+        return;
+      const connection = list.find((c) => c.id === connectionId);
+      if (!connection) {
+        gone.push(label);
+        return;
+      }
+      if (decision || model === null || model === "")
+        return;
+      const models = await this.host.connections.models(connectionId, userId);
+      if (models && !models.includes(model))
+        unlisted.push(`${label} (${model} on ${connection.name})`);
+    };
+    await check("Helper model", settings.helper.connectionId, settings.helper.model, false);
+    for (const purpose of Object.keys(STEP_LABEL)) {
+      const config3 = stepConfigOf(settings.modelUse.steps, purpose);
+      if (!config3.enabled || !config3.route)
+        continue;
+      await check(STEP_LABEL[purpose], config3.route.connectionId, config3.route.model, config3.route.provider === "decision");
+    }
+    return [
+      ...gone.length > 0 ? [{ code: "step_connection_missing", message: `These name a connection you no longer have, so their calls would fail the turn: ${gone.join(", ")}. Pick another in Settings \u2192 Steps and connections.` }] : [],
+      ...unlisted.length > 0 ? [{ code: "step_model_missing", message: `These name a model their connection doesn't list, so their calls may fail the turn: ${unlisted.join(", ")}. Pick another in Settings \u2192 Steps and connections.` }] : []
+    ];
   }
   async lintOf(chatId, assembly, userId) {
     const config3 = await this.presets.current(chatId, userId);
@@ -77018,6 +77132,22 @@ function createSpindleHost() {
       async active(userId) {
         const c = (await spindle.connections.list(userId)).find((x) => x.is_default);
         return c ? { id: c.id, name: c.name } : null;
+      },
+      async list(userId) {
+        return (await spindle.connections.list(userId)).map((c) => ({ id: c.id, name: c.name }));
+      },
+      async models(connectionId, userId) {
+        const list = spindle.connections.getModels;
+        if (!list)
+          return null;
+        try {
+          return (await list.call(spindle.connections, connectionId, userId)).map((m) => m.id);
+        } catch {
+          return null;
+        }
+      },
+      async decisionList(userId) {
+        return (await spindle.decisions.listConnections({ userId })).map((c) => ({ id: c.id, name: c.name }));
       }
     },
     mcp: {

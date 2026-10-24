@@ -21,7 +21,7 @@ import { list, num, oneOf, optNum, str, strings } from "../decode";
 import { ActionRow, ActionRows } from "../gm/ui";
 import { Icon } from "../icons";
 import type { PanelProps } from "../registry";
-import { STEP_LABEL } from "../settings/steps";
+import { STEP_LABEL } from "../../shared/steps";
 import type { MindCallTrace } from "../../shared/minds";
 import { FIDELITIES, MIND_PURPOSES } from "../../shared/minds";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
