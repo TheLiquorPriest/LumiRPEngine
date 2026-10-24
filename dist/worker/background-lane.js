@@ -50,6 +50,7 @@ function knownSignal(s) {
   return STEP_SIGNALS.includes(s) || /^every_n:[1-9]\d*$/.test(s);
 }
 var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "character"];
+var PURPOSE_PLACEHOLDERS = { extract: ["usual"], contradiction: ["usual"], choices: ["usual"], outline: ["sections"] };
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
   "npc.choose": ["decision", "text"],
@@ -65,6 +66,254 @@ var STEP_OUTPUTS = {
   skip: ["text"],
   consolidate: ["text"]
 };
+
+// src/shared/minds.ts
+var FIDELITIES = ["live", "near", "far", "background"];
+var WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory"];
+var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
+  here: 45,
+  nearby: 20,
+  mentioned: 40,
+  regard: 10,
+  knows: 10,
+  owner: 15,
+  track: 8,
+  roles: { antagonist: 20 },
+  rule: 5,
+  pending: 15,
+  band: { principal: 15, supporting: 5, background: 0 },
+  recent: 10
+});
+var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
+var DEFAULT_MINDS_MEMORY = Object.freeze({
+  witness: { show: 8 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
+  notes: { show: 8, keep: 24 },
+  commitments: { show: 8 },
+  salience: { halfLifeDays: 7, floor: 0.5 },
+  consolidate: { enabled: true, periodDays: 1 }
+});
+var DEFAULT_WORLD_MINDS = Object.freeze({
+  secrecy: "brief",
+  weights: DEFAULT_FIDELITY_WEIGHTS,
+  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
+  always: null,
+  never: null,
+  memory: DEFAULT_MINDS_MEMORY
+});
+var MINDS_RANGES = {
+  weight: [-100, 200],
+  threshold: [0, 1000],
+  show: [0, 64],
+  keep: [1, 64],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
+  halfLifeDays: [0.1, 3650],
+  floor: [0, 5],
+  periodDays: [0.1, 365]
+};
+var num = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
+var whole = (v, range, fallback) => Math.round(num(v, range, fallback));
+var wholeOrNone = (v, range, fallback) => v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback;
+var obj = (v) => isRecord(v) ? v : {};
+function selectorOrNull(v) {
+  if (!isRecord(v))
+    return null;
+  const out = {};
+  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
+  const ids = list(v.ids);
+  const kind = list(v.kind);
+  const tier = list(v.tier);
+  const memberOf = list(v.memberOf);
+  const tag = list(v.tag);
+  if (ids)
+    out.ids = ids;
+  if (kind)
+    out.kind = kind;
+  if (tier)
+    out.tier = tier;
+  if (memberOf)
+    out.memberOf = memberOf;
+  if (tag)
+    out.tag = tag;
+  if (isRecord(v.class)) {
+    const classes = {};
+    for (const [facet, values] of Object.entries(v.class)) {
+      const vs = list(values);
+      if (safeKey(facet) && vs)
+        classes[facet] = vs;
+    }
+    out.class = classes;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
+  const m = obj(raw);
+  const witness = obj(m.witness);
+  const recall = obj(m.recall);
+  const notes = obj(m.notes);
+  const commitments = obj(m.commitments);
+  const salience = obj(m.salience);
+  const consolidate = obj(m.consolidate);
+  return {
+    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
+    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
+    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
+    salience: { halfLifeDays: num(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+  };
+}
+function worldMindsOf(world) {
+  const raw = obj(world.minds);
+  const w = obj(raw.weights);
+  const band = obj(w.band);
+  const d = DEFAULT_FIDELITY_WEIGHTS;
+  const weight = (v, fallback) => num(v, MINDS_RANGES.weight, fallback);
+  const roles = {};
+  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
+  for (const [value, points] of Object.entries(rawRoles))
+    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
+      roles[value] = weight(points, 0);
+  const t = obj(raw.thresholds);
+  const far = num(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  return {
+    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    weights: {
+      here: weight(w.here, d.here),
+      nearby: weight(w.nearby, d.nearby),
+      mentioned: weight(w.mentioned, d.mentioned),
+      regard: weight(w.regard, d.regard),
+      knows: weight(w.knows, d.knows),
+      owner: weight(w.owner, d.owner),
+      track: weight(w.track, d.track),
+      roles,
+      rule: weight(w.rule, d.rule),
+      pending: weight(w.pending, d.pending),
+      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
+      recent: weight(w.recent, d.recent)
+    },
+    thresholds: { live, near, far },
+    always: selectorOrNull(raw.always),
+    never: selectorOrNull(raw.never),
+    memory: memoryConfigOf(raw.memory)
+  };
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+function isMindPurpose(purpose) {
+  return MIND_PURPOSES.includes(purpose);
+}
+function worldMindTemplate(world, purpose) {
+  return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
+}
+var DEFAULT_MIND_READS = Object.freeze({
+  pinned: { on: true, tokens: "none" },
+  activated: { on: true, tokens: 1600 },
+  reply: { on: true, tokens: "none" },
+  message: { on: true, tokens: "none" },
+  history: { on: false, messages: 8, tokens: 3000 },
+  summary: { on: false, tokens: "none" },
+  memory: { on: false, tokens: "none" },
+  thoughts: { on: false, tokens: "none" },
+  recall: { on: false },
+  routine: { on: true, tokens: 400 },
+  life: { on: false, tokens: "none" }
+});
+var MINDS_PRESETS = Object.freeze({
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+});
+function defaultMindsSettings(preset = "standard") {
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
+}
+var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
+var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+function planInForce(p) {
+  return p.source !== "mind";
+}
+var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
+var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MIND_APPROACHES = ["reactive", "proactive"];
+var MINDS_KEEP = { notes: 64, openCommitments: 48, closedCommitments: 16, openPlans: 24, closedPlans: 16, witness: 48, presence: 400 };
+var MIND_TEXT_CAPS = {
+  monologue: 1200,
+  depiction: 600,
+  intent: 300,
+  gmIntent: 600,
+  reaction: 200,
+  reactions: 4,
+  plans: 4,
+  planWhat: 160,
+  mood: 40,
+  interrupt: 200,
+  note: 300,
+  notes: 4,
+  commitment: 240,
+  commitments: 3,
+  summary: 900,
+  told: 240,
+  tolds: 3,
+  reason: 160
+};
+var MINDS_EVENTS = {
+  round: "minds.round",
+  mind: "minds.mind",
+  memory: "minds.memory",
+  presence: "minds.presence",
+  plan: "minds.plan",
+  planEdit: "minds.plan_edit",
+  noteEdit: "minds.note_edit",
+  commitment: "minds.commitment",
+  commitmentEdit: "minds.commitment_edit",
+  consolidated: "minds.consolidated",
+  pin: "minds.pin",
+  refresh: "minds.refresh",
+  intent: "minds.intent",
+  skip: "minds.skip"
+};
+var MINDS_SLOT = "minds";
+var MIND_PROMPT_DEFAULTS = Object.freeze({
+  mind: [
+    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
+    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
+  ].join(`
+`),
+  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
+  ].join(`
+`),
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+});
+var MIND_ANSWER_FORMATS = Object.freeze({
+  mind: [
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
+    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
+    "- intent: what they mean to do next, in one sentence.",
+    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    "- mood: one or two words.",
+    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
+  ].join(`
+`),
+  memory: [
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
+    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
+    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
+    "- told: what they told whom in this turn, in a few words each.",
+    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+});
 
 // src/shared/ids.ts
 var DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"];
@@ -694,7 +943,8 @@ function mapSettingsOf(world) {
   const radius = grid.sightRadius;
   return {
     display: raw.display === "fog" ? "fog" : "knowledge",
-    grid: { movement: grid.movement === true, sightRadius: typeof radius === "number" && Number.isFinite(radius) ? Math.min(SIGHT_MAX, Math.max(0, Math.round(radius))) : DEFAULT_SIGHT_RADIUS }
+    grid: { movement: grid.movement === true, sightRadius: typeof radius === "number" && Number.isFinite(radius) ? Math.min(SIGHT_MAX, Math.max(0, Math.round(radius))) : DEFAULT_SIGHT_RADIUS },
+    travelSimulation: raw.travelSimulation === true
   };
 }
 function compileGrid(key, map, mine, places, grids) {
@@ -1151,7 +1401,7 @@ function plainRolling(p) {
 function threshold(v, fallback) {
   return v === null ? null : typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
 }
-function whole(v, [lo, hi], fallback) {
+function whole2(v, [lo, hi], fallback) {
   return typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : fallback;
 }
 function oneOf(v, values, fallback) {
@@ -1167,18 +1417,18 @@ function readAdjudication(raw) {
     return presetAdjudication(preset);
   const base = ADJUDICATION_PRESETS.crunchy;
   const d = isRecord(raw.description) ? raw.description : {};
-  const max = whole(d.max, ADJUDICATION_BOUNDS.descriptionMax, base.description.max);
+  const max = whole2(d.max, ADJUDICATION_BOUNDS.descriptionMax, base.description.max);
   return {
     preset,
     checks: oneOf(raw.checks, CHECK_TIMINGS, base.checks),
     riskyAt: threshold(raw.riskyAt, base.riskyAt) ?? base.riskyAt,
     trivialAt: threshold(raw.trivialAt, base.trivialAt),
     impossibleAt: threshold(raw.impossibleAt, base.impossibleAt),
-    description: { weight: oneOf(d.weight, DESCRIPTION_WEIGHTS, base.description.weight), max, advantageAt: whole(d.advantageAt, [1, max], Math.min(max, base.description.advantageAt)) },
+    description: { weight: oneOf(d.weight, DESCRIPTION_WEIGHTS, base.description.weight), max, advantageAt: whole2(d.advantageAt, [1, max], Math.min(max, base.description.advantageAt)) },
     authority: oneOf(raw.authority, CHECK_AUTHORITIES, base.authority),
-    closeBy: whole(raw.closeBy, ADJUDICATION_BOUNDS.closeBy, base.closeBy),
+    closeBy: whole2(raw.closeBy, ADJUDICATION_BOUNDS.closeBy, base.closeBy),
     retry: oneOf(raw.retry, RETRY_RULES, base.retry),
-    retryAfter: whole(raw.retryAfter, ADJUDICATION_BOUNDS.retryAfter, base.retryAfter)
+    retryAfter: whole2(raw.retryAfter, ADJUDICATION_BOUNDS.retryAfter, base.retryAfter)
   };
 }
 
@@ -1285,254 +1535,6 @@ function clampBand(policy, said) {
   const index = Math.min(bandAt(policy.difficulty.highest), Math.max(bandAt(policy.difficulty.lowest), n !== null ? Math.max(0, named) : named < 0 ? bandAt("moderate") : named));
   return DIFFICULTY_BANDS[index] ?? { id: "moderate", label: "Moderate", dc: 10 };
 }
-
-// src/shared/minds.ts
-var FIDELITIES = ["live", "near", "far", "background"];
-var WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory"];
-var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
-  here: 45,
-  nearby: 20,
-  mentioned: 40,
-  regard: 10,
-  knows: 10,
-  owner: 15,
-  track: 8,
-  roles: { antagonist: 20 },
-  rule: 5,
-  pending: 15,
-  band: { principal: 15, supporting: 5, background: 0 },
-  recent: 10
-});
-var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
-var DEFAULT_MINDS_MEMORY = Object.freeze({
-  witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 4000 },
-  notes: { show: 8, keep: 24 },
-  commitments: { show: 8 },
-  salience: { halfLifeDays: 7, floor: 0.5 },
-  consolidate: { enabled: true, periodDays: 1 }
-});
-var DEFAULT_WORLD_MINDS = Object.freeze({
-  secrecy: "brief",
-  weights: DEFAULT_FIDELITY_WEIGHTS,
-  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
-  always: null,
-  never: null,
-  memory: DEFAULT_MINDS_MEMORY
-});
-var MINDS_RANGES = {
-  weight: [-100, 200],
-  threshold: [0, 1000],
-  show: [0, 64],
-  keep: [1, 64],
-  recallTokens: [0, Number.MAX_SAFE_INTEGER],
-  halfLifeDays: [0.1, 3650],
-  floor: [0, 5],
-  periodDays: [0.1, 365]
-};
-var num = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
-var whole2 = (v, range, fallback) => Math.round(num(v, range, fallback));
-var wholeOrNone = (v, range, fallback) => v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback;
-var obj = (v) => isRecord(v) ? v : {};
-function selectorOrNull(v) {
-  if (!isRecord(v))
-    return null;
-  const out = {};
-  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
-  const ids = list(v.ids);
-  const kind = list(v.kind);
-  const tier = list(v.tier);
-  const memberOf = list(v.memberOf);
-  const tag = list(v.tag);
-  if (ids)
-    out.ids = ids;
-  if (kind)
-    out.kind = kind;
-  if (tier)
-    out.tier = tier;
-  if (memberOf)
-    out.memberOf = memberOf;
-  if (tag)
-    out.tag = tag;
-  if (isRecord(v.class)) {
-    const classes = {};
-    for (const [facet, values] of Object.entries(v.class)) {
-      const vs = list(values);
-      if (safeKey(facet) && vs)
-        classes[facet] = vs;
-    }
-    out.class = classes;
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
-  const m = obj(raw);
-  const witness = obj(m.witness);
-  const recall = obj(m.recall);
-  const notes = obj(m.notes);
-  const commitments = obj(m.commitments);
-  const salience = obj(m.salience);
-  const consolidate = obj(m.consolidate);
-  return {
-    witness: { show: whole2(witness.show, MINDS_RANGES.show, base.witness.show) },
-    recall: { recent: whole2(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole2(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
-    notes: { show: whole2(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole2(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
-    commitments: { show: whole2(commitments.show, MINDS_RANGES.show, base.commitments.show) },
-    salience: { halfLifeDays: num(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
-    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
-  };
-}
-function worldMindsOf(world) {
-  const raw = obj(world.minds);
-  const w = obj(raw.weights);
-  const band = obj(w.band);
-  const d = DEFAULT_FIDELITY_WEIGHTS;
-  const weight = (v, fallback) => num(v, MINDS_RANGES.weight, fallback);
-  const roles = {};
-  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
-  for (const [value, points] of Object.entries(rawRoles))
-    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
-      roles[value] = weight(points, 0);
-  const t = obj(raw.thresholds);
-  const far = num(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
-  const near = Math.max(far, num(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
-  const live = Math.max(near, num(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
-  return {
-    secrecy: raw.secrecy === "full" ? "full" : "brief",
-    weights: {
-      here: weight(w.here, d.here),
-      nearby: weight(w.nearby, d.nearby),
-      mentioned: weight(w.mentioned, d.mentioned),
-      regard: weight(w.regard, d.regard),
-      knows: weight(w.knows, d.knows),
-      owner: weight(w.owner, d.owner),
-      track: weight(w.track, d.track),
-      roles,
-      rule: weight(w.rule, d.rule),
-      pending: weight(w.pending, d.pending),
-      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
-      recent: weight(w.recent, d.recent)
-    },
-    thresholds: { live, near, far },
-    always: selectorOrNull(raw.always),
-    never: selectorOrNull(raw.never),
-    memory: memoryConfigOf(raw.memory)
-  };
-}
-var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
-function isMindPurpose(purpose) {
-  return MIND_PURPOSES.includes(purpose);
-}
-function worldMindTemplate(world, purpose) {
-  return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
-}
-var DEFAULT_MIND_READS = Object.freeze({
-  pinned: { on: true, tokens: "none" },
-  activated: { on: true, tokens: 1600 },
-  reply: { on: true, tokens: "none" },
-  message: { on: true, tokens: "none" },
-  history: { on: false, messages: 8, tokens: 3000 },
-  summary: { on: false, tokens: "none" },
-  memory: { on: false, tokens: "none" },
-  thoughts: { on: false, tokens: "none" },
-  recall: { on: false },
-  routine: { on: true, tokens: 400 },
-  life: { on: false, tokens: "none" }
-});
-var MINDS_PRESETS = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
-});
-function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
-}
-var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
-var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
-var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
-function planInForce(p) {
-  return p.source !== "mind";
-}
-var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
-var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
-var MIND_APPROACHES = ["reactive", "proactive"];
-var MINDS_KEEP = { notes: 64, openCommitments: 48, closedCommitments: 16, openPlans: 24, closedPlans: 16, witness: 48, presence: 400 };
-var MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  gmIntent: 600,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160
-};
-var MINDS_EVENTS = {
-  round: "minds.round",
-  mind: "minds.mind",
-  memory: "minds.memory",
-  presence: "minds.presence",
-  plan: "minds.plan",
-  planEdit: "minds.plan_edit",
-  noteEdit: "minds.note_edit",
-  commitment: "minds.commitment",
-  commitmentEdit: "minds.commitment_edit",
-  consolidated: "minds.consolidated",
-  pin: "minds.pin",
-  refresh: "minds.refresh",
-  intent: "minds.intent",
-  skip: "minds.skip"
-};
-var MINDS_SLOT = "minds";
-var MIND_PROMPT_DEFAULTS = Object.freeze({
-  mind: [
-    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
-    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
-  ].join(`
-`),
-  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
-  skip: [
-    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
-    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
-  ].join(`
-`),
-  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
-});
-var MIND_ANSWER_FORMATS = Object.freeze({
-  mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
-    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
-    "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- mood: one or two words.",
-    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
-  ].join(`
-`),
-  memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
-    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
-    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
-    "- told: what they told whom in this turn, in a few words each.",
-    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
-    "Use empty lists for anything the turn didn't give."
-  ].join(`
-`),
-  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
-});
 
 // src/shared/settings.ts
 var HELPER_MAX_TOKENS = 8192;
@@ -9197,6 +9199,11 @@ function scheduleOverlaps(reg, world) {
 }
 
 // src/engine/world-lint.ts
+var TRACK_REF_ARGS = {
+  carries: ["entity", "entity"],
+  at: ["entity", "place"],
+  knows: ["entity", "either"]
+};
 function typeProblem(f, v, world) {
   if (v === null)
     return null;
@@ -9425,6 +9432,20 @@ function lintStructure(world, reg) {
           compile(x);
         } catch (e) {
           err(`tracks.${id}.stages.${sid}`, "types", `A condition in ${t.label} doesn't parse: ${e instanceof Error ? e.message : String(e)}`);
+          continue;
+        }
+        for (const c of callsIn(x)) {
+          const sorts = own(TRACK_REF_ARGS, c.name);
+          if (!sorts)
+            continue;
+          c.args.forEach((v, i) => {
+            const sort = sorts[i];
+            if (typeof v !== "string" || !sort)
+              return;
+            const found = sort !== "place" && own(world.entities, v) !== undefined || sort !== "entity" && own(world.places, v) !== undefined;
+            if (!found)
+              warn(`tracks.${id}.stages.${sid}`, "unknown_condition_ref", `A condition in ${t.label} names "${v}" in ${c.name}(), which isn't ${sort === "place" ? "a place" : sort === "entity" ? "an entity" : "an entity or a place"} of this world, so it never holds.`);
+          });
         }
       }
     }
@@ -9738,6 +9759,7 @@ function typedIntent(reg, world, state, text3) {
 function isWorldDoc(v) {
   return isRecord(v) && v.format === WORLD_FORMAT && typeof v.id === "string" && isRecord(v.entities) && isRecord(v.places) && typeof v.pov === "string";
 }
+var TURN_FED_SECTIONS = { outcome: true, montage: true, outline: true, scene: true, [MINDS_SLOT]: true };
 function lintWorld(world, registry) {
   const issues = [];
   const err = (path, code, message) => {
@@ -9782,17 +9804,26 @@ function lintWorld(world, registry) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0)
       err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
   }
+  for (const [id, s] of Object.entries(world.sections)) {
+    if (!hasOwn(TURN_FED_SECTIONS, id) && !registry.renderers.some((r) => r.slot === id))
+      warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}", so it never goes in`);
+  }
   for (const [id, t] of Object.entries(world.steps)) {
     if (t.id !== id)
       err(`steps.${id}.id`, "id_mismatch", "the id must match its key");
     if (!(STEP_OUTPUTS[t.purpose] ?? []).includes(t.output))
       warn(`steps.${id}.output`, "step_output", `a ${t.purpose} template can't produce ${t.output}; it would never run`);
+    else if (t.purpose === "contradiction" && t.output !== "decision")
+      warn(`steps.${id}.output`, "step_contradiction_output", `a contradiction template with output ${t.output} takes the place of the built-in contradiction check, so no reply is checked against the facts; make it a decision to keep the check`);
     for (const s of t.signals)
       if (!knownSignal(s))
         warn(`steps.${id}.signals`, "unknown_signal", `unknown signal "${s}"`);
+    if (t.template.trim() === "" && !MIND_PURPOSES.includes(t.purpose))
+      warn(`steps.${id}.template`, "step_blank", `this ${t.purpose} template is blank: it takes the place of the built-in instructions with none`);
+    const known = [...STEP_PLACEHOLDERS, ...PURPOSE_PLACEHOLDERS[t.purpose] ?? []];
     for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g))
-      if (!STEP_PLACEHOLDERS.includes((m[1] ?? "").toLowerCase()))
-        warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder; it renders empty`);
+      if (!known.includes((m[1] ?? "").toLowerCase()))
+        warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder for a ${t.purpose} step; it renders empty`);
   }
   issues.push(...lintStructure(world, registry));
   for (const rule of registry.lints)
@@ -10893,6 +10924,10 @@ var SPAN_COUNTS = { a: 1, an: 1, one: 1, next: 1, "a couple of": 2, "couple of":
 var SPAN_UNITS = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
 var longestFirst = (words3) => [...words3].sort((a, b) => b.length - a.length).join("|");
 var SPAN_TERM = new RegExp(` (${longestFirst(Object.keys(SPAN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?(?= )`, "g");
+var VAGUE_SPANS = { "a moment": 5, "a few moments": 5, "a few minutes": 5, "a little while": 15, "a while": 30, "a few hours": 180 };
+var VAGUE_SPAN = new RegExp(` (${longestFirst(Object.keys(VAGUE_SPANS))})(?= )`, "g");
+var ANCHOR_WORDS = { breakfast: "breakfast", lunch: "lunch", dinner: "dinner", supper: "dinner", bedtime: "bedtime", morning: "morning" };
+var ANCHOR_SPAN = new RegExp(` (?:until|till|til|to|by)(?: the| my| our)? (${longestFirst(Object.keys(ANCHOR_WORDS))})(?= )`, "g");
 function parseOverrides(v) {
   const out = {};
   if (!isRecord(v))
@@ -11104,7 +11139,10 @@ function buildMontage(reg, world, before, after, events2, granularity) {
     granularity,
     groups: [...groups].map(([label, lines]) => ({ label, lines })),
     money: [...money].sort(([a], [b]) => a.localeCompare(b)).map(([account, m]) => ({ account, label: own(after.entities, account)?.name ?? account, in: m.in, out: m.out })),
-    changes: [...changes.values()].filter((c) => c.delta !== 0).map((c) => ({ ...c, label: `${own(after.entities, c.entity)?.name ?? c.entity} ${fieldDef(reg, world, own(after.entities, c.entity)?.kind ?? "", c.field)?.label ?? c.field.replace(/_/g, " ")}` })),
+    changes: [...changes.values()].filter((c) => c.delta !== 0).flatMap((c) => {
+      const def = fieldDef(reg, world, own(after.entities, c.entity)?.kind ?? "", c.field);
+      return def?.bands ? [] : [{ ...c, label: `${own(after.entities, c.entity)?.name ?? c.entity} ${def?.label ?? c.field.replace(/_/g, " ")}`, money: def?.type === "money" }];
+    }),
     bands
   };
 }
@@ -12162,6 +12200,16 @@ function nominalRoute(ctx, from, to, mode) {
   const minutes = level === 0 ? 0 : NOMINAL_MOVE_MINUTES;
   return { mode, legs: [{ from, to, minutes, distanceKm: 0, terrain: null }], minutes, distanceKm: 0 };
 }
+var GO_MODES = ["walk", "road", "offroad", "water"];
+function goMinutes(ctx, from, to) {
+  const walk2 = routeAt(ctx, from, to, "walk");
+  if (walk2)
+    return walk2.minutes;
+  if (mapSettingsOf(ctx.world).travelSimulation === true)
+    return null;
+  const times = GO_MODES.flatMap((m) => routeAt(ctx, from, to, m)?.minutes ?? []);
+  return times.length > 0 ? Math.min(...times) : NOMINAL_MOVE_MINUTES;
+}
 
 // src/packs/space/core/view.ts
 function itemsOn(ctx, scope, grid, cells, sight, here) {
@@ -12275,9 +12323,9 @@ function buildMapView(ctx, chosen = null) {
     for (const id of targets) {
       if (id === here)
         continue;
-      const plan2 = routeAt(ctx, here, id, "walk");
+      const minutes = goMinutes(ctx, here, id);
       const name = own(world.places, id)?.name ?? id;
-      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: plan2?.minutes ?? 0, action: "go", params: { to: id }, ...plan2 ? {} : { disabled: "no walking route" } });
+      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: minutes ?? 0, action: "go", params: { to: id }, ...minutes !== null ? {} : { disabled: "no walking route" } });
     }
     const vehicles = optionalQuery(ctx, "vehicles.travel_options");
     if (vehicles) {
@@ -12310,7 +12358,7 @@ function gridLint(world) {
   const raw = world.mapSettings;
   const grid = isRecord(raw) ? raw.grid : undefined;
   if (raw !== undefined && !isRecord(raw))
-    err("mapSettings", "Map settings are an object: display, and the grid system's movement and sightRadius.");
+    err("mapSettings", "Map settings are an object: display, the grid system's movement and sightRadius, and travelSimulation.");
   else if (isRecord(raw)) {
     if (raw.display !== undefined && raw.display !== "knowledge" && raw.display !== "fog")
       err("mapSettings.display", 'The map shows "knowledge" (what the POV knows) or "fog".');
@@ -12321,6 +12369,8 @@ function gridLint(world) {
     const radius = isRecord(grid) ? grid.sightRadius : undefined;
     if (radius !== undefined && (typeof radius !== "number" || !Number.isInteger(radius) || radius < 0 || radius > SIGHT_MAX))
       err("mapSettings.grid.sightRadius", `The sight radius is a whole number of cells from 0 to ${SIGHT_MAX}.`);
+    if (raw.travelSimulation !== undefined && typeof raw.travelSimulation !== "boolean")
+      err("mapSettings.travelSimulation", "The travel simulation is on (true) or off (false).");
   }
   const movement = mapSettingsOf(world).grid.movement;
   if (movement && world.realism.levels.space < GRID_SPACE_FLOOR)
@@ -12485,6 +12535,8 @@ var spacePack = {
     r.formula("travel_minutes", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.minutes ?? 0);
     r.formula("distance_km", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.distanceKm ?? 0);
     r.formula("route_exists", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode)) !== null);
+    r.formula("go_minutes", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) ?? 0);
+    r.formula("can_go", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) !== null);
     r.formula("within", (ctx, place, ancestor) => placeWithin(ctx.world, String(place ?? ""), String(ancestor ?? "")));
     r.formula("grid_minutes", (ctx, place, x, y) => {
       const path = gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0));
@@ -12499,13 +12551,13 @@ var spacePack = {
     r.action({
       id: "go",
       label: "Go to",
-      description: "Walk to another place: a room, a building, a street, another part of town.",
+      description: "Go to another place: a room, a building, a street, another part of town.",
       pack: "space",
       params: { to: { type: "ref", ref: "place", label: "Place" } },
-      requires: ["to != here", "level.space < 2 or route_exists(here, to, 'walk')"],
+      requires: ["to != here", "can_go(here, to)"],
       outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to" } }] },
-      duration: "level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')",
-      activity: { type: "travel", until: "clock + (level.space < 2 ? 15 : travel_minutes(here, to, 'walk'))" },
+      duration: "go_minutes(here, to)",
+      activity: { type: "travel", until: "clock + (level.space < 2 ? 15 : go_minutes(here, to))" },
       lexicon: ["go to", "walk to", "head to", "head over to", "leave for"],
       observable: "leaves"
     });
@@ -12571,7 +12623,7 @@ var spacePack = {
           return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
         const from = placeOfEntity(ctx.state, entity);
         const named = (id) => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
-        if (from && !reachable(ctx, from, place))
+        if (from && mapSettingsOf(ctx.world).travelSimulation && !reachable(ctx, from, place))
           return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
         return null;
       },
@@ -23614,7 +23666,7 @@ function spawnId2(ctx, spec) {
 }
 var spawn = (ctx, spec) => {
   const row = spec.catalog ? rowOf(ctx, "gear.items", spec.catalog) ?? rowOf(ctx, "gear.containers", spec.catalog) : undefined;
-  const fields = {};
+  const fields = { notable: true };
   if (spec.owner)
     fields.owner = spec.owner;
   if (spec.catalog)
@@ -23649,6 +23701,13 @@ function usedUp(ctx, item, done) {
   const e = own(ctx.state.entities, item);
   return done && e?.fields.claimed === true && e.fields.consumable === true && e.fields[GONE_FIELD] !== true ? [{ type: "set", entity: item, field: GONE_FIELD, value: true }] : [];
 }
+function heldItem(ctx, item, from) {
+  if (own(ctx.state.entities, item) || from === "")
+    return item;
+  const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
+  const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
+  return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
+}
 function claimId(ctx, c) {
   for (let n = 0;; n++) {
     const id = `item:claim_${hashParts("lre.claim", c.salt, c.name, String(n)).slice(0, 12)}`;
@@ -23672,7 +23731,7 @@ var claim = (ctx, c) => {
   if (c.at === "here" && !place)
     return reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
   const row = c.like ? rowOf(ctx, "gear.items", c.like) ?? rowOf(ctx, "gear.containers", c.like) : undefined;
-  const fields = { claimed: true };
+  const fields = { claimed: true, notable: true };
   if (c.at === "held")
     fields.owner = c.by;
   else if (place)
@@ -23998,7 +24057,7 @@ var gearPack = {
       type: "give",
       boundField: "ref",
       validate(p, ctx) {
-        const item = strOf(p.item);
+        const item = heldItem(ctx, strOf(p.item), strOf(p.from));
         const e = own(ctx.state.entities, item);
         if (!own(ctx.state.entities, strOf(p.to)))
           return reject9("missing_entity", `no recipient ${labelOf(ctx, strOf(p.to))}`);
@@ -24012,7 +24071,10 @@ var gearPack = {
           return reject9("is_money", "a cash give is a transfer");
         return null;
       },
-      toEffects: (p, ctx) => own(ctx.state.entities, strOf(p.item)) ? [{ type: "gear.give", args: { item: strOf(p.item), from: strOf(p.from), to: strOf(p.to) } }] : [{ type: "gear.receive", args: { name: strOf(p.item), from: strOf(p.from), to: strOf(p.to) } }]
+      toEffects: (p, ctx) => {
+        const item = heldItem(ctx, strOf(p.item), strOf(p.from));
+        return own(ctx.state.entities, item) ? [{ type: "gear.give", args: { item, from: strOf(p.from), to: strOf(p.to) } }] : [{ type: "gear.receive", args: { name: item, from: strOf(p.from), to: strOf(p.to) } }];
+      }
     });
     r.proposal({
       type: "quantity",
@@ -24202,6 +24264,20 @@ var VEHICLE = {
 };
 function classRow(ctx, vehicle) {
   return rowOf(ctx, "vehicles.classes", strOf(own(ctx.state.entities, vehicle)?.fields.class));
+}
+function burnsFuel(ctx, vehicle) {
+  const row = classRow(ctx, vehicle);
+  return row !== undefined && strOf(row.fuel_type, "gasoline") !== "none";
+}
+function siteOf(world, place) {
+  let at = place;
+  for (let depth = 0;at !== null && depth < 32; depth++) {
+    const parent = own(world.places, at)?.parent;
+    if (!parent)
+      return at;
+    at = parent;
+  }
+  return at;
 }
 function domainOf(ctx, vehicle) {
   const d = strOf(classRow(ctx, vehicle)?.domain, strOf(own(ctx.state.entities, vehicle)?.fields.domain, "road"));
@@ -24542,7 +24618,7 @@ var vehiclesPack = {
         if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, entity) < 2)
           return [];
         const out = [];
-        if (typeof e.fields.fuel_pct !== "number")
+        if (typeof e.fields.fuel_pct !== "number" && burnsFuel(ctx, entity))
           out.push({ type: "set", entity, field: "fuel_pct", value: rng.int(40, 90) });
         if (ownerLevel(ctx, entity) >= 3) {
           if (domainOf(ctx, entity) === "road" && typeof e.fields.odometer_mi !== "number")
@@ -24562,24 +24638,45 @@ var vehiclesPack = {
         const level = ctx.levelOf(pov, "vehicles");
         if (level === 0)
           return [];
+        const cal = calendarOf(ctx.world);
+        const grants2 = new Map((own(ctx.state.entities, pov)?.relations ?? []).filter((r2) => r2.type === "uses").map((r2) => [r2.to, r2]));
+        const site = siteOf(ctx.world, placeOfEntity(ctx.state, pov));
+        const ownerName = (owner) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, owner) ? own(ctx.state.entities, owner)?.name ?? "someone" : "someone";
         const lines = [];
+        const away = new Map;
         for (const v of Object.keys(ctx.state.entities).sort()) {
           const e = own(ctx.state.entities, v);
-          if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || e.fields.owner !== pov)
+          if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v))
+            continue;
+          const owner = typeof e.fields.owner === "string" ? e.fields.owner : null;
+          const grant = grants2.get(v);
+          const whose = owner === pov ? "yours" : level >= 2 && owner !== null && isMemberOf(ctx.state, pov, owner) ? `${ownerName(owner)}'s` : level >= 3 && grant ? `${owner ? `${ownerName(owner)}'s, ` : ""}${grant.until !== undefined ? `lent to you until ${formatClock(cal, grant.until)}` : "assigned to you"}` : null;
+          if (whose === null || owner !== pov && !canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, v))
             continue;
           const place = placeOfEntity(ctx.state, v);
           const where = !place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere";
+          if (site !== null && siteOf(ctx.world, place) !== site) {
+            away.set(where, (away.get(where) ?? 0) + 1);
+            continue;
+          }
           const parts = [`${e.name}: ${where}`];
           if (level === 1)
             parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
           else {
-            const range = rangeLeft(ctx, v);
-            parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? ` (~${Math.round(range.value)} ${range.unit})` : ""}`);
+            parts.push(whose);
+            if (burnsFuel(ctx, v)) {
+              const range = rangeLeft(ctx, v);
+              parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? ` (~${Math.round(range.value)} ${range.unit})` : ""}`);
+            }
             if (e.fields.status !== "ok" && e.fields.status !== undefined)
               parts.push(String(e.fields.status).replace(/_/g, " "));
           }
           lines.push(`${parts.join(", ")}.`);
         }
+        const elsewhere = [...away].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
+        const total = elsewhere.reduce((sum, [, n]) => sum + n, 0);
+        if (total > 0)
+          lines.push(`Elsewhere: ${total} (${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}).`);
         return lines;
       }
     });
@@ -25134,6 +25231,7 @@ var relationshipsPack = {
     r.query("relationships.faction_regard", groupRegard);
     r.query("relationships.view", regardView);
     r.query("relationships.words", regardWords);
+    r.query("relationships.voice", voiceLine);
     r.formula("regard", (ctx, from, to, axis) => regardValue(ctx, String(from ?? ""), String(to ?? ""), typeof axis === "string" && axis !== "" ? axis : undefined));
     r.formula("regard_band", (ctx, from, to) => regardBand(ctx, String(from ?? ""), String(to ?? "")));
     r.formula("faction_regard", (ctx, group, to) => groupRegard(ctx, String(group ?? ""), String(to ?? "")));
@@ -25153,28 +25251,6 @@ var relationshipsPack = {
     });
     r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }] }, duration: "15", lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
     r.action({ id: "give_gift", label: "Give a gift", description: "Give someone here a present.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
-    r.renderer({
-      slot: "people",
-      render(ctx) {
-        const here = placeOfEntity(ctx.state, ctx.world.pov);
-        if (!here)
-          return [];
-        const lines = [];
-        for (const id of Object.keys(ctx.state.entities).sort()) {
-          if (id === ctx.world.pov || placeOfEntity(ctx.state, id) !== here)
-            continue;
-          if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id))
-            continue;
-          const life = povLife(ctx.world, ctx.state, id);
-          if (life && !life.acts)
-            continue;
-          const line2 = voiceLine(ctx, id);
-          if (line2)
-            lines.push(line2);
-        }
-        return lines;
-      }
-    });
     r.proposal({
       type: "regard",
       boundField: "number",
@@ -25484,6 +25560,55 @@ function routineShapeProblems(v) {
   return out;
 }
 var ROUTINE_SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" };
+
+// src/engine/lore-pins.ts
+var CHAIN_MAX = 16;
+function placeChain(world, place) {
+  const out = [];
+  for (let at = place ?? undefined;at !== undefined && hasOwn(world.places, at) && !out.includes(at) && out.length < CHAIN_MAX; at = world.places[at]?.parent)
+    out.push(at);
+  return out;
+}
+
+// src/engine/presence.ts
+var LEVELS_APART = 2;
+var INTERIOR_WALK_MINUTES = 10;
+function farRoute(route) {
+  const walk2 = route.modes.walk;
+  return walk2 === undefined || walk2.minutes > INTERIOR_WALK_MINUTES;
+}
+var spreadOf = new WeakMap;
+function spreadPlaces(world) {
+  const hit = spreadOf.get(world);
+  if (hit)
+    return hit;
+  const out = new Set;
+  for (const r of Object.values(world.routes)) {
+    if (!farRoute(r))
+      continue;
+    const from = new Set(placeChain(world, r.from).slice(1));
+    for (const p of placeChain(world, r.to).slice(1))
+      if (from.has(p))
+        out.add(p);
+  }
+  spreadOf.set(world, out);
+  return out;
+}
+function together(world, a, b) {
+  if (a === null || b === null)
+    return false;
+  if (a === b)
+    return true;
+  const within3 = (inner, outer) => {
+    const up = placeChain(world, inner).slice(1, LEVELS_APART + 1);
+    const at = up.indexOf(outer);
+    return at >= 0 && !up.slice(0, at + 1).some((p) => spreadPlaces(world).has(p));
+  };
+  return within3(a, b) || within3(b, a);
+}
+function povLead(name) {
+  return `${name} (you)`;
+}
 
 // src/packs/castlife/core/places.ts
 function homeOf(ctx, who) {
@@ -27778,7 +27903,7 @@ function stanceCast(ctx) {
   const pov = world.pov;
   const here = placeOfEntity(state2, pov);
   const minded = new Set(optionalQuery(ctx, "minds.minded")?.(ctx) ?? []);
-  const people = here === null ? [] : Object.keys(state2.entities).sort().filter((id) => id !== pov && placeOfEntity(state2, id) === here && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state2, pov, id) && !isGone(state2, id) && povLife(world, state2, id)?.acts !== false && !minded.has(id));
+  const people = here === null ? [] : Object.keys(state2.entities).sort().filter((id) => id !== pov && together(world, here, placeOfEntity(state2, id)) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state2, pov, id) && !isGone(state2, id) && povLife(world, state2, id)?.acts !== false && !minded.has(id));
   let check = null;
   const safe = (text4) => {
     if (!check) {
@@ -27911,22 +28036,23 @@ var castlifePack = {
       slot: "people",
       render(ctx) {
         const pov = ctx.world.pov;
-        const lines = [];
+        const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
+        const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
+        const lines = [urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`];
         const here = placeOfEntity(ctx.state, pov);
+        const voice = optionalQuery(ctx, "relationships.voice");
         for (const id of Object.keys(ctx.state.entities).sort()) {
           const e = own(ctx.state.entities, id);
-          if (!e || id === pov || !here || placeOfEntity(ctx.state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id))
+          if (!e || id === pov || !together(ctx.world, here, placeOfEntity(ctx.state, id)) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id))
             continue;
           if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id))
             continue;
           const life = povLife(ctx.world, ctx.state, id);
           const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
           lines.push(life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
-        }
-        if (ctx.levelOf(pov, "castlife") >= 4) {
-          const urgent = Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label);
-          if (urgent.length > 0)
-            lines.push(`You feel ${urgent.join(" and ")}.`);
+          const regard = life && !life.acts ? null : voice?.(ctx, id) ?? null;
+          if (regard)
+            lines.push(regard);
         }
         return lines;
       }
@@ -29627,6 +29753,9 @@ function readSlice(state2) {
 function readCharacter(state2, id) {
   return own(readSlice(state2).chars, id) ?? emptyCharacter();
 }
+function lastDue(c) {
+  return c.passed && (!c.mind || c.passed.round > c.mind.round) ? c.passed : c.mind;
+}
 function writeSlice(state2) {
   const s = state2.packs[PACK5] ?? {};
   s.round ??= 0;
@@ -29745,11 +29874,20 @@ function nameOf4(ctx, id) {
 var PLAN_STATUSES = ["open", "done", "dropped"];
 var round = {
   type: MINDS_EVENTS.round,
-  validate: (e) => finite2(e.data.at) && typeof e.data.on === "boolean" ? null : bad("a minds round needs its clock and whether minds are on"),
+  validate: (e, ctx) => {
+    const levels = e.data.levels;
+    const passedOk = levels === undefined || isRecord(levels) && Object.entries(levels).every(([id, v]) => own(ctx.state.entities, id) !== undefined && isRecord(v) && isFidelity(v.level) && (v.place === null || str13(v.place)));
+    return finite2(e.data.at) && typeof e.data.on === "boolean" && passedOk ? null : bad("a minds round needs its clock, whether minds are on, and each passed mind's level and place");
+  },
   apply: (e, state2) => {
     const s = writeSlice(state2);
     s.round += 1;
     s.on = e.data.on === true;
+    const at = finite2(e.data.at) ? e.data.at : state2.clock;
+    const levels = isRecord(e.data.levels) ? e.data.levels : {};
+    for (const [id, v] of Object.entries(levels))
+      if (isRecord(v) && isFidelity(v.level))
+        writeCharacter(state2, id).passed = { at, round: s.round, level: v.level, place: str13(v.place) ? v.place : null };
   },
   describe: (e, _ctx, viewer) => viewer !== undefined ? "" : e.data.on === true ? "Minds round" : "Minds switched off"
 };
@@ -30258,6 +30396,14 @@ function reason(out, label, points) {
     out.push({ label, points: Math.round(points * 10) / 10 });
   return points;
 }
+function appointmentsWith(state2, who, other, until) {
+  const list = own(state2.entities, who)?.fields.appointments;
+  return (Array.isArray(list) ? list : []).filter((raw) => {
+    const a = objOf(raw);
+    const withList = Array.isArray(a.with) ? a.with : [];
+    return typeof a.at === "number" && a.at >= state2.clock && a.at <= until && withList.includes(other);
+  }).length;
+}
 function pendingWith(ctx, id) {
   const { world, state: state2 } = ctx;
   const pov = world.pov;
@@ -30266,15 +30412,7 @@ function pendingWith(ctx, id) {
   if (invited && invited(ctx, id) === true)
     n++;
   const now = state2.clock;
-  const appointments = (who, other) => {
-    const list = own(state2.entities, who)?.fields.appointments;
-    return (Array.isArray(list) ? list : []).filter((raw) => {
-      const a = objOf(raw);
-      const withList = Array.isArray(a.with) ? a.with : [];
-      return typeof a.at === "number" && a.at >= now && withList.includes(other);
-    }).length;
-  };
-  n += appointments(id, pov) + appointments(pov, id);
+  n += appointmentsWith(state2, id, pov, Number.POSITIVE_INFINITY) + appointmentsWith(state2, pov, id, Number.POSITIVE_INFINITY);
   const c = readCharacter(state2, id);
   n += openPlans(c).filter((p) => p.with.includes(pov) && p.when.to >= now).length;
   n += openCommitments(c).filter((x) => x.with.includes(pov)).length;
@@ -30516,7 +30654,7 @@ function mindLines(ctx) {
       continue;
     if (m.moment === "beat" && m.at !== state2.clock)
       continue;
-    const present2 = here !== null && placeOfEntity(state2, id) === here && canSeeEntity(reg, world, state2, pov, id);
+    const present2 = together(world, here, placeOfEntity(state2, id)) && canSeeEntity(reg, world, state2, pov, id);
     if (!present2 && m.interrupt === null)
       continue;
     const name = present2 || playerKnows(reg, world, state2, pov, id) ? e.name : "Someone";
@@ -30560,7 +30698,7 @@ var mindsPack = {
     r.query("minds.plans", (ctx, who) => keptPlans(readCharacter(ctx.state, who)));
     r.query("minds.tier", (ctx, who) => {
       const c = readCharacter(ctx.state, who);
-      return c.pin ?? c.mind?.level ?? "background";
+      return c.pin ?? lastDue(c)?.level ?? "background";
     });
     r.query("minds.minded", minded);
     r.query("minds.on", mindsOn);

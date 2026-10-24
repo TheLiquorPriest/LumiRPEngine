@@ -1,4 +1,4 @@
-// node_modules/preact/dist/preact.mjs
+// ../../LumiRPEngine/node_modules/preact/dist/preact.mjs
 var n;
 var t;
 var i;
@@ -347,7 +347,7 @@ n = { __e: function(n2, t2, i2, r2) {
   return n2.__v.__b - t2.__v.__b;
 }, e = Symbol(), l = /(PointerCapture)$|Capture$/i, c = 0, a = {}, s = 0;
 
-// node_modules/preact/hooks/dist/hooks.mjs
+// ../../LumiRPEngine/node_modules/preact/hooks/dist/hooks.mjs
 var t2;
 var r2;
 var u2;
@@ -1104,7 +1104,7 @@ function humanize(id) {
   const words = id.replace(/[_.]+/g, " ").trim();
   return words.length === 0 ? id : words[0]?.toUpperCase() + words.slice(1);
 }
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
+// ../../LumiRPEngine/node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
 var o3 = 0;
 function u3(t3, e3, n2, f3, u4, i3) {
   e3 || (e3 = {});
@@ -2826,7 +2826,8 @@ var PART_SPECS = {
             { kind: "bool", key: "movement", label: "Grid movement", hint: "Walls and doors steer the POV across grids, things lie in cells, and cells and zones trigger rules; Space plays at 3 or more" },
             { kind: "number", key: "sightRadius", label: "Sight radius (cells the POV sees around it)", min: 0, max: 32, step: 1 }
           ]
-        }
+        },
+        { kind: "bool", key: "travelSimulation", label: "Travel simulation: moves need a route", hint: "Off (the default): moves are story first, so a move the reply tells always lands and Go goes even where no route leads. On: a narrated move no route reaches didn't happen, and Go needs a walking route" }
       ]
     }
   ]
@@ -13831,7 +13832,8 @@ function mapSettingsOf(world) {
   const radius = grid.sightRadius;
   return {
     display: raw.display === "fog" ? "fog" : "knowledge",
-    grid: { movement: grid.movement === true, sightRadius: typeof radius === "number" && Number.isFinite(radius) ? Math.min(SIGHT_MAX, Math.max(0, Math.round(radius))) : DEFAULT_SIGHT_RADIUS }
+    grid: { movement: grid.movement === true, sightRadius: typeof radius === "number" && Number.isFinite(radius) ? Math.min(SIGHT_MAX, Math.max(0, Math.round(radius))) : DEFAULT_SIGHT_RADIUS },
+    travelSimulation: raw.travelSimulation === true
   };
 }
 function compileGrid(key, map, mine, places2, grids) {
