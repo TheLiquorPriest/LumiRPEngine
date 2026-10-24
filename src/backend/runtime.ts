@@ -13,7 +13,7 @@ import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, StepConfig, UserSettings } from "../shared/settings";
 import { EXTRACTION_TYPES, helperCallOf, recentOf, stepConfigOf, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
-import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
+import type { ActionDef, AdjudicationDef, LoreEntryDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
 import { LORE_AUDIENCE } from "../shared/lore";
 import { isMindPurpose, MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEventData } from "../shared/minds";
@@ -636,8 +636,8 @@ export class Runtime implements TurnHooks {
   private readonly prePhase = new Map<string, { facts: SignalFacts; text: string; start: PlanStart; connectionId: string | null; preset: PresetConfig }>();
   /** Each generation's lore traces, step by step (the inspector shows them, DESIGN §6.5). */
   private readonly loreTraces = new Map<string, LoreStepTrace[]>();
-  /** Each engine run's world with its World Info lore read live, by its turn id: one read for its phases (DESIGN §4.2). */
-  private readonly liveWorlds = new Map<string, WorldDoc>();
+  /** Each engine run's lore with World Info read live, by its turn id: one read for its phases (DESIGN §4.2). */
+  private readonly liveLores = new Map<string, Record<string, LoreEntryDef>>();
   /** The World Info entries the sections the guard wrote for a chat's prompt carried, as `bookId/entryId` (DESIGN §6.11): the interceptor switches them off for it. */
   private readonly carriedEntries = new Map<ChatId, ReadonlySet<string>>();
   /** Each generation's minds calls, with no text (the inspector shows them, DESIGN §24.5). */
@@ -965,7 +965,7 @@ export class Runtime implements TurnHooks {
         start.applyAll(bridge.prePlan(text));
         const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
         const log = (message: string): void => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
-        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: from.world, state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: stepConfigOf(settings.modelUse.steps, "skip"), guidance: preset.guidance.skip ?? "" }));
+        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: await this.liveWorld(p.generationId, input.chatId, input.userId, from.world), state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: stepConfigOf(settings.modelUse.steps, "skip"), guidance: preset.guidance.skip ?? "" }));
       }
     }
     // A timelapse with minds on is a time skip (DESIGN §24.7): its beats and the minds at them are
@@ -983,7 +983,8 @@ export class Runtime implements TurnHooks {
         return ran;
       };
       try {
-        skip = await runSkip({ registry: this.registry, steps: this.steps, minds: beatMinds, host: this.host }, { chatId: input.chatId, userId: input.userId, world: base.world, state: start.state, intent, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
+        // Minds at the skip's beats and at its end read the lore the run read (DESIGN §4.2, §24.7).
+        skip = await runSkip({ registry: this.registry, steps: this.steps, minds: beatMinds, host: this.host }, { chatId: input.chatId, userId: input.userId, world: await this.liveWorld(p.generationId, input.chatId, input.userId, base.world), state: start.state, intent, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
       } catch (error) {
         this.diag.failed(runAt, "skip", "skip", `the time skip didn't run: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -2203,7 +2204,10 @@ export class Runtime implements TurnHooks {
     lruSet(this.lastWorldChat, input.userId, input.chatId, 1024);
     const render = input.core.renderState(input.observed);
     if (!render) throw new Error("the chat's world revision isn't loaded");
-    const { world, state } = render;
+    const { world: folded, state } = render;
+    // The sections read the lore the engine run read, World Info included (DESIGN §4.2): the Place
+    // section's lore and the leak checks alike.
+    const world = await this.liveWorld(input.generationId, input.chatId, input.userId, folded);
     const index = await this.worlds.index(run.worldId, input.userId);
     if (!index) throw new Error("the chat's world is gone");
     // A slot entry deleted in the host's UI is made again, and each sits where this chat's revision puts it.
@@ -2439,14 +2443,15 @@ export class Runtime implements TurnHooks {
   }
 
   /**
-   * An engine run's world with the lore its World Info books hold now (DESIGN §4.2, `liveLore`), read
-   * once per run, under its turn id, so its phases and its checks read the same entries.
+   * `world` with the lore its World Info books hold now (DESIGN §4.2, `liveLore`), read once per
+   * engine run, under its turn id, so its phases, its sections, its time skip and its checks read the
+   * same entries; each caller keeps its own world, with that lore.
    */
   private async liveWorld(key: string, chatId: ChatId, userId: UserId, world: WorldDoc): Promise<WorldDoc> {
-    const kept = this.liveWorlds.get(key);
-    if (kept) return kept;
+    const kept = this.liveLores.get(key);
+    if (kept) return kept === world.lore ? world : { ...world, lore: kept };
     const live = await liveLore(this.host, world, chatId, userId);
-    lruSet(this.liveWorlds, key, live, 64);
+    lruSet(this.liveLores, key, live.lore, 64);
     return live;
   }
 
@@ -2474,7 +2479,7 @@ export class Runtime implements TurnHooks {
     rekey(this.prePhase, from, to);
     rekey(this.loreTraces, from, to);
     // The reply's steps read the World Info the engine run read, not the books again.
-    rekey(this.liveWorlds, from, to);
+    rekey(this.liveLores, from, to);
     rekey(this.mindTraces, from, to);
     const own = this.runLines.get(from);
     this.runLines.delete(from);

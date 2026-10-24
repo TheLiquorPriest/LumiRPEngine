@@ -339,7 +339,7 @@ Each section the narrator reads (Outcome, Scene, People and the rest) has settin
 
 Two sections are new, both on unless the world or the GM switches them off, and ranked last, so a small budget leaves them out first. A world that lists its own sections gets them only when it adds them.
 
-- **Place**: the place's description, the things lying there your character can see (at most 12), the rooms inside it and the ways out.
+- **Place**: the place's description, the things lying there your character can see (at most 12), the rooms inside it and the ways out; then the lore about it (at most 6 entries): each lore entry, your World Info included, that links the place or a place it's inside, nearest first, as your character may read it (a secret one only once its gate holds). An entry of your World Info that goes in this way is switched off for that prompt, so the narrator doesn't read it twice; one whose text holds a macro stays on too, where its macro runs.
 - **Property**: the property your character holds a part in (his own, or his family's), where it is, his role and share, and who else owns it.
 
 People also tells what each person with your character visibly wears and carries (never what is in a bag or a pocket), at most 6 things each.
@@ -965,7 +965,7 @@ Your own lore books work in a world chat as they do anywhere else in Lumiverse: 
 - The sections share the section budget in rank order. The Outcome section is never left out.
 - World Info recursion follows your own settings, so a section's text can trigger one of your entries, as any other entry's text can.
 - If the engine stalls, the world's sections are missing from that turn's prompt (they stay switched off) and the Context inspector has no entry for it; a turn the engine couldn't plan in time is also marked **Not fully simulated**.
-- The world's own lore (Build → Lore) is kept in the world. The engine's helpers read it ([Lore for the helpers](#lore-for-the-helpers)); the narrator doesn't get it yet.
+- The world's own lore (Build → Lore) is kept in the world. The engine's helpers read it ([Lore for the helpers](#lore-for-the-helpers)), and the narrator gets the lore about where your character is in the **Place** section.
 
 ### JSON blocks in replies
 
@@ -1248,7 +1248,7 @@ Secret truth never lives in a World Book. It stays in the world and enters a sec
 
 ### World lore
 
-**Build → Lore** holds what the world knows. It is kept in the world and travels with it when you export it. The engine's own helpers read it ([Lore for the helpers](#lore-for-the-helpers)); the narrator doesn't get it yet. The list's search box finds entries by title, alias, topic, keyword or text, and badges secret entries, where an entry came from, and entries whose book has changed. Its **Tools** open the **Lookup table** and the two indexing tools. **New** asks for the new entry's name and takes its id from it, as in any collection.
+**Build → Lore** holds what the world knows. It is kept in the world and travels with it when you export it. The engine's own helpers read it ([Lore for the helpers](#lore-for-the-helpers)), and the narrator gets an entry when it links where your character is, in the **Place** section. The list's search box finds entries by title, alias, topic, keyword or text, and badges secret entries, where an entry came from, and entries whose book has changed. Its **Tools** open the **Lookup table** and the two indexing tools. **New** asks for the new entry's name and takes its id from it, as in any collection.
 
 **Entries.** An entry's page has its **Entry** (a title and its text), then **How it's found**: **Aliases** (other names its subject goes by, such as *the old lighthouse*), **Topics** it belongs under (*Harbor law*) and **Keywords**, each a row of removable chips (type one and press Enter or tap **Add**; the topic and keyword boxes suggest the ones your other entries use), then **links** to the places and people it is about, and optionally a **group** and a **priority**. Then come its **Source** and **Secrecy**. A problem with one of these fields shows under it. Its **Item actions** button (⋯) holds **Delete**, which names what leads to it ("Terms and topics that lead to it will show in Problems."). The text is kept exactly as you wrote it, macros included, as in any World Book; that is why a world from someone else is worth a look before you play it (see [Import and export](#import-and-export)).
 
