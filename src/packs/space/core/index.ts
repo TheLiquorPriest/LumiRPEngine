@@ -30,12 +30,13 @@ import { placeOfEntity, placeWithin } from "../../../engine/scope";
 import { relocate } from "../../../engine/relocate";
 import { PARTY_RELATION } from "../../../shared/party";
 import { observeCells } from "../../../engine/seen";
-import { canSeeEntity, canSeePlace, HIDDEN_PLACE_NAME, knownBySelector, povPlace } from "../../../engine/visibility";
+import { canSeeEntity, canSeePlace, knownBySelector } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
 import { closedRoutes, goMinutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
 import { buildMapView } from "./view";
+import { placeLines, sceneLines } from "./feed";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
 export type RouteQuery = (ctx: ReadContext, from: PlaceId, to: PlaceId, mode: TravelMode) => TravelPlan | null;
@@ -302,34 +303,9 @@ export const spacePack: PackDef = {
       observable: "moves across the area",
     });
 
-    r.renderer({
-      slot: "scene",
-      // A section's `include` picks it by this name (DESIGN §6.11).
-      source: "location",
-      render(ctx) {
-        const level = ctx.levelOf(ctx.world.pov, "space");
-        if (level === 0) return [];
-        const here = placeOfEntity(ctx.state, ctx.world.pov);
-        const place = here ? own(ctx.world.places, here) : undefined;
-        if (!place) return [];
-        // The narrator hears where the POV is as every player surface names it (`povPlace`), and of
-        // the place around it only when the POV can see that too.
-        const sees = (id: PlaceId): boolean => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
-        const parent = place.parent && sees(place.parent) ? own(ctx.world.places, place.parent)?.name : undefined;
-        const lines = [`Place: ${povPlace(ctx.registry, ctx.world, ctx.state)?.name ?? HIDDEN_PLACE_NAME}${parent ? ` (in ${parent})` : ""}.`];
-        if (level >= 2) {
-          const exits: string[] = [];
-          for (const id of Object.keys(ctx.world.places).sort()) {
-            // The narrator hears only of exits to places the POV knows (a hidden one stays hidden).
-            if (id === here || !canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id)) continue;
-            const plan = routeAt(ctx, here as string, id, "walk");
-            if (plan && plan.legs.length === 1) exits.push(`${own(ctx.world.places, id)?.name ?? id} ${plan.minutes} min on foot`);
-          }
-          if (exits.length > 0) lines.push(`Nearby: ${exits.slice(0, 6).join("; ")}.`);
-        }
-        return lines;
-      },
-    });
+    // A section's `include` picks these by their source (DESIGN §6.11).
+    r.renderer({ slot: "scene", source: "location", render: (ctx) => sceneLines(ctx, "player").map((l) => l.text), feed: sceneLines });
+    r.renderer({ slot: "place", render: (ctx) => placeLines(ctx, "player").map((l) => l.text), feed: placeLines });
 
     r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay) as unknown as JsonValue });
 

@@ -326,13 +326,22 @@ Each section the narrator reads (Outcome, Scene, People and the rest) has settin
 - **In the prompt**: off leaves the section out.
 - **At most lines**: only its first lines go in.
 - **At most tokens**: lines past it are cut from the end.
-- **Sources**: the renderers that fill the section, by name; none means its own. `location`, `calendar` and `weather` fill Scene, `people` and `routines` People, `stance` and `cues` Stance, `conditions` Outcome, and `money`, `gear`, `vehicles`, `quest` and `minds` their own sections. A custom section with sources, say a **Weather** section with `weather`, gets those lines too.
+- **Sources**: the renderers that fill the section, by name; none means its own. `location`, `calendar` and `weather` fill Scene, `people`, `routines` and `present_gear` People, `stance` and `cues` Stance, `conditions` Outcome, and `money`, `gear`, `vehicles`, `quest`, `place`, `property` and `minds` their own sections. A custom section with sources, say a **Weather** section with `weather`, gets those lines too.
 - **Whose knowledge**:
   - **What the player character knows** (the default): what every section has always told.
   - **Also what the people with him know**: facts he doesn't know but someone with him does, such as a person in the room only Maya knows is there.
   - **Everything**: every fact, secrets included.
 
-  A fact your character doesn't know is marked for the narrator ("[unknown to you; known to Maya]", "[unknown to you; GM only]"), and the narrator is told that marked facts are only for steering the story: never to reveal, narrate as known or let your character act on. Only the narrator gets them. Play, chips, the Journal and the Context panel's sizes show only what your character knows. Today People takes the wider scopes; the other sections tell what your character knows in every scope.
+  A fact your character doesn't know is marked for the narrator ("[unknown to you; known to Maya]", "[unknown to you; GM only]"), and the narrator is told that marked facts are only for steering the story: never to reveal, narrate as known or let your character act on. The engine's own screens never show them: Play, chips, the Journal and the Context panel's sizes show only what your character knows. But marked facts are in the prompt, so anything in Lumiverse that shows the prompt or the engine's book shows them too; choosing a wider scope is choosing to put them there.
+
+  What each section adds: People, someone here your character can't see (and, from what people carry, a thing on them he can't see); Scene, the place around his and nearby exits he doesn't know; Stance, people's private agendas; Money, the money of the people with him; Gear, a thing on him he doesn't know of; Vehicles, cars at his site he can't see; Quest, quests and secrets he doesn't know; Place, hidden things here, hidden ways out and, under **Everything**, who is next door; Property, other people's property.
+
+Two sections are new, both on unless the world or the GM switches them off, and ranked last, so a small budget leaves them out first. A world that lists its own sections gets them only when it adds them.
+
+- **Place**: the place's description, the things lying there your character can see (at most 12), the rooms inside it and the ways out.
+- **Property**: the property your character holds a part in (his own, or his family's), where it is, his role and share, and who else owns it.
+
+People also tells what each person with your character visibly wears and carries (never what is in a bag or a pocket), at most 6 things each.
 
 ## Swipes, edits and branches
 
@@ -471,7 +480,7 @@ Realism is how much of life the engine keeps track of. It is set **per domain**,
 
 The time controls and Timelapse need Calendar at level 1 or higher. At level 1, Timelapse targets round to parts of the day.
 
-**What the narrator is told of vehicles.** The Vehicles section lists what your character may use, each saying whose it is: his own at Vehicles 1, his family's from 2 (with their fuel and range), and those assigned or lent to him from 3 (a loan with when it's due). An owner he doesn't know of reads "someone". A trailer has no tank, so it shows no fuel. Vehicles away from where he is fold into one line, such as "Elsewhere: 12 (8 at Cedar Draw, 4 at the boathouse)".
+**What the narrator is told of vehicles.** The Vehicles section lists what your character may use, each saying whose it is: his own at Vehicles 1, his family's from 2 (with their fuel and range), and those assigned or lent to him from 3 (a loan with when it's due). An owner he doesn't know of reads "someone". A trailer has no tank, so it shows no fuel. Vehicles away from where he is fold into one line, such as "Elsewhere: 12 (8 at Cedar Draw, 4 at the boathouse)". Then other people's vehicles at the same site (a house with its garage and driveway, a marina; not the whole town) that he can see, with whose they are, up to 8.
 
 **Money detail.** Below the top Money level the money hub keeps the books simple, and at the top level it shows them all (see [Your money](#your-money)). Under any preset, a world can turn single money features on or off in **Build → Packs → economy** (**Money features** → **Feature switches**). Each runs from its usual level. Switched on, it runs from the lowest level it can (statements and interest from Money 3, cash machines and daily card limits from Money 2), and the hub shows that feature's own detail there and nothing more of the full books. Switched off, it doesn't run at any level, and its detail is gone from the hub at the top level too.
 

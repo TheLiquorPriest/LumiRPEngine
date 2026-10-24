@@ -142,6 +142,8 @@ The slots a world gets when it defines none, kept in rank order on the section b
 | `outline` | Outline | 8 |
 | `stance` | Stance | 9 |
 | `minds` | Minds | 10 |
+| `place` | Place | 11 |
+| `property` | Property | 12 |
 
 ### Realism
 
@@ -643,7 +645,7 @@ Checks it adds to: `post`.
 
 ### Panels and slots
 
-Panels: `economy.money`. Slots it writes: `money`.
+Panels: `economy.money`. Slots it writes: `money`, `property`.
 
 ### Simulation
 
@@ -785,7 +787,7 @@ Extends `container`.
 
 ### Panels and slots
 
-Panels: `gear.gear`. Slots it writes: `gear`.
+Panels: `gear.gear`. Slots it writes: `gear`, `people`.
 
 ### Simulation
 
@@ -1038,7 +1040,7 @@ Its own: `space.pos`, `space.route`.
 
 ### Panels and slots
 
-Panels: `space.map`. Slots it writes: `scene`.
+Panels: `space.map`. Slots it writes: `place`, `scene`.
 
 ### Lint codes
 
