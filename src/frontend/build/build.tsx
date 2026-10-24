@@ -30,6 +30,8 @@ import { PickBox, SelectBar, useSelection } from "../multi-select";
 import { DraftBatchSheet } from "./batch-sheet";
 import { CheckView, issuePart, IssueRow } from "./check";
 import { COLLECTION_INFO, deleteItem, go, ItemHeader, itemLabel, NewItem, newItemName, OverflowMenu, PART_INFO } from "./chrome";
+import { CharacterPage } from "./character";
+import { opensCharacterPage } from "./character-model";
 import { ContentsSection, RevealItem } from "./contents";
 import { commitDraft, discardDraft, draftSend, loadDraft } from "./draft";
 import { ChangedElsewhere, useHeld } from "./held";
@@ -756,7 +758,9 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   const send = useMemo(() => draftSend(app), [app]);
   if (!draft) return null;
   const registered = app.catalog.editors.get(props.collection);
-  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
+  // A person opens the Character page, never the generic editor (DESIGN §13 characters); a new entity is made in the generic one first.
+  const character = opensCharacterPage({ ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } }, props.collection, props.id);
+  const Editor = registered ? registered.component : character ? CharacterPage : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 

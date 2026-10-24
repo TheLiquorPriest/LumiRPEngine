@@ -1103,7 +1103,9 @@ export function worldFixture(): WorldDoc {
     },
     relations: { roommate: { id: "roommate", label: "Roommate", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: {} } },
     entities: {
-      pov: { id: "pov", kind: "person", name: "Sam Rivera", tier: "principal", fields: { cash: 4600, energy: 62, job: "Server", xp: 450, level: 2, might: 14, hp: 9 }, relations: [{ type: "roommate", to: "npc_dev" }, { type: "member_of", to: "apt_4b", fields: { role: "Tenant", since: "2025-06-01" } }, { type: "member_of", to: "diner_crew", fields: { role: "Server", rank: 2 } }], class: { story_role: ["lead"] } },
+      pov: { id: "pov", kind: "person", name: "Sam Rivera", tier: "principal", fields: { cash: 4600, energy: 62, job: "Server", xp: 450, level: 2, might: 14, hp: 9, home: "apartment", bed: "sam_bed" }, relations: [{ type: "roommate", to: "npc_dev" }, { type: "member_of", to: "apt_4b", fields: { role: "Tenant", since: "2025-06-01" } }, { type: "member_of", to: "diner_crew", fields: { role: "Server", rank: 2 } }], class: { story_role: ["lead"] } },
+      // Where Sam sleeps, for the Character page's Sleeps picker: a bed in a room of their home.
+      sam_bed: { id: "sam_bed", kind: "item", name: "Futon bed", tier: "background", fields: { place: "apartment_bedroom", owner: "pov" }, relations: [] },
       npc_rosie: { id: "npc_rosie", kind: "npc", name: "Rosie Alvarez", tier: "principal", fields: { cash: 120000, mood: "calm" }, relations: [{ type: "member_of", to: "diner_crew", fields: { role: "Owner", rank: 1 } }], agent: true, class: { story_role: ["mentor"], secret: ["in_debt"] }, tags: ["early_riser"] },
       npc_dev: { id: "npc_dev", kind: "npc", name: "Dev Patel", tier: "regulars", fields: { mood: "happy" }, relations: [{ type: "owns", to: "boat1" }, { type: "member_of", to: "apt_4b", fields: { role: "Tenant" } }], agent: true, class: { story_role: ["best_friend"] }, tags: ["mechanic", "night_owl"] },
       npc_mara: { id: "npc_mara", kind: "npc", name: "Mara Kim", tier: "supporting", fields: { mood: "calm" }, relations: [{ type: "member_of", to: "diner_crew", fields: { role: "Cook", rank: 2 } }], class: { story_role: ["rival"], secret: ["informant"] }, tags: ["night_owl"] },
@@ -1135,6 +1137,7 @@ export function worldFixture(): WorldDoc {
       maple: { id: "maple", name: "Maple Falls", timeZone: "America/New_York", grid: "town", fields: {} },
       diner: { id: "diner", name: "Rosie's Diner", parent: "maple", sceneType: "conversation", cell: { x: 7, y: 5 }, fields: {} },
       apartment: { id: "apartment", name: "Apartment 4B", parent: "maple", sceneType: "downtime", cell: { x: 2, y: 9 }, fields: {} },
+      apartment_bedroom: { id: "apartment_bedroom", name: "Bedroom", parent: "apartment", fields: {} },
     },
     routes: { r1: { id: "r1", from: "apartment", to: "diner", modes: { walk: { minutes: 18 }, road: { minutes: 5, distanceKm: 2.4 } }, bidirectional: true } },
     grids: { town: { id: "town", width: 16, height: 12, cellMeters: 100, terrain, blocked: [20, 21, 36, 37], zones: { downtown: [87, 88, 89, 103, 104, 105] } } },
