@@ -21,6 +21,7 @@ import { LEVEL_LABEL } from "../settings/realism";
 import type { Editor } from "./editor";
 import { nameOf } from "./editor";
 import { ActionRow, ActionRows, GmPage } from "./ui";
+import { BedPicker } from "./bed-picker";
 
 const LEVELS = [0, 1, 2, 3, 4] as const;
 
@@ -560,6 +561,11 @@ export function EntityPage(props: { entity: GmEntity; editor: Editor; onBack(): 
           </Section>
         ))}
         <Placement entity={entity} editor={editor} />
+        {entity.fields.some((f) => f.id === "bed") ? (
+          <Section title="Where they sleep">
+            <BedPicker entity={entity} editor={editor} />
+          </Section>
+        ) : null}
         <Relations entity={entity} editor={editor} />
         <Simulation key={`${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`} entity={entity} editor={editor} />
         <Life key={JSON.stringify(entity.life)} entity={entity} editor={editor} />

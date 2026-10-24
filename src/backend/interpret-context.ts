@@ -117,6 +117,8 @@ function paramWords(ctx: ReadContext, action: ActionDef, name: string, def: Para
     if (sold.length > 0) return `${head} (text${label}; sold here: ${sold.join(" | ")})`;
   }
   if (def.type === "money") return `${head} (an amount in ${world.currency.code} as written${label})`;
+  // A length only when the input states one, so an action without it keeps its own time.
+  if (def.type === "duration") return `${head} (minutes: only a length the input states, "for an hour" is 60, "talk for two hours" 120${label})`;
   return `${head} (${def.type}${label})`;
 }
 

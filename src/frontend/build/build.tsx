@@ -12,6 +12,7 @@ import type { WorldId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
 import { mapSettingsOf } from "../../shared/maps";
+import { needsSettingsOf } from "../../shared/needs";
 import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute } from "../app";
@@ -735,6 +736,9 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
       return doc.realism as unknown as JsonObject;
     case "time":
       return doc.time as unknown as JsonObject;
+    case "needs":
+      // Each need as the world plays it, the defaults filled in; a save stores only what differs from them.
+      return structuredClone(needsSettingsOf(doc)) as unknown as JsonObject;
     case "meta":
       // Map settings and the spawn cap show as the world plays them: a world without them, with the defaults.
       return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };

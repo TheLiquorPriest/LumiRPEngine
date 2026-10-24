@@ -232,3 +232,29 @@ test("a malformed routine or routine settings is refused, naming the field, thro
   await call("lre_routine_settings", { worldId, value: {} });
   expect((await draftNow()).draft.routineSettings).toBeUndefined();
 });
+
+test("needs settings are refused when the engine can't read them, store only what differs from the defaults, and Check world flags an alert below its told point", async () => {
+  const { conn, call } = await tools();
+  const worldId = String((await call("lre_world_create", { name: "Port Alder", template: "modern_slice_of_life" })).worldId);
+  const refusal = async (send: () => Promise<unknown>): Promise<string> => {
+    try {
+      await send();
+    } catch (error) {
+      if (error instanceof LreError) return error.message;
+      throw error;
+    }
+    throw new Error("the write was taken");
+  };
+  const before = await conn.request("lre.editor", { op: "get", worldId, base: null });
+  expect(await refusal(() => conn.request("lre.editor", { op: "set", worldId, base: null, part: "needs", value: { thirst: { rate: 2 } } }))).toContain("thirst");
+  expect(await refusal(() => conn.request("lre.editor", { op: "set", worldId, base: null, part: "needs", value: { hunger: { rate: -1 } } }))).toContain("hunger.rate");
+  expect(await refusal(() => conn.request("lre.editor", { op: "patch", worldId, base: null, ops: [{ op: "add", path: "/needs", value: { fun: { on: "yes" } } }] }))).toContain("fun.on");
+  expect((await conn.request("lre.editor", { op: "get", worldId, base: null })).version).toBe(before.version);
+  // Every part at its default is no settings; only what differs is stored.
+  const set = await conn.request("lre.editor", { op: "set", worldId, base: null, part: "needs", value: { hunger: { on: true, rate: 6, tell: 60, alert: 80 }, fatigue: { on: true, rate: 3, tell: 60, alert: 80 } } });
+  expect(set.draft.needs).toEqual({ hunger: { rate: 6 } });
+  const odd = await conn.request("lre.editor", { op: "set", worldId, base: null, part: "needs", value: { social: { tell: 70, alert: 40 } } });
+  expect(odd.lint.some((i) => i.code === "castlife.needs" && i.path === "needs.social" && i.severity === "warning")).toBe(true);
+  const cleared = await conn.request("lre.editor", { op: "set", worldId, base: null, part: "needs", value: {} });
+  expect(cleared.draft.needs).toBeUndefined();
+});

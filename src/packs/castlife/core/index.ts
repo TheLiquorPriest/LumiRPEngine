@@ -28,6 +28,7 @@ import { facetsInOrder, facetTree } from "../../../shared/classes";
 import { MINDS_EVENTS } from "../../../shared/minds";
 import { tierLabel, tierOf, tiersInOrder } from "../../../shared/tiers";
 import type { FacetId, FacetValueId, ScheduleDef, WorldDoc } from "../../../shared/world";
+import type { LintIssue } from "../../../shared/protocol";
 import { initialState, minutesBetween } from "../../../engine/world-state";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, formatTimeOfDay, MINUTES_PER_DAY, parseHHMM } from "../../../engine/calendar";
@@ -37,6 +38,8 @@ import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } fro
 import type { AgentInstant, EventTypeDef, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { PlayerBlock, RoutineEditOp, RoutineSociability, SkipBlock } from "../../../shared/routines";
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
+import type { NeedId, NeedTuning } from "../../../shared/needs";
+import { isNeedId, NEED_DEFAULTS, NEED_IDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
@@ -53,7 +56,7 @@ import { loreReadable } from "../../../engine/lore";
 import { commitments, isPlayed, laidPlans, livesPlans, planTier, plansOf, type CommitmentBlock } from "./commitments";
 import { cueIssues, cuesFor } from "./cues";
 import { birthdayOf, FOND, occasionOf } from "./occasions";
-import { homeOf, placeOfType } from "./places";
+import { bedPlace, homeOf, placeOfType } from "./places";
 import { activeBlocks, blockOnDay, blockPlace, chatScheduleDefs, followOf, ROUTINE_OPTION, routineDay, routineLived, routineRole, routinesLint, routineYields, scheduleOff, schedulesLint, skipLifeOf, skipPlanOf, withPov, worldRoutines } from "./routines";
 import { ROUTINE_EFFECT, routineChannel, storyEvents } from "./story";
 import { usualRoutineHints } from "./usual";
@@ -63,41 +66,67 @@ export { commitments, type CommitmentBlock, type CommitmentKind } from "./commit
 // ---------------------------------------------------------------- needs
 
 /**
- * Need growth per hour (0 = satisfied, 100 = urgent), the activities that satisfy each, and the
- * times of day (minutes) a routine satisfies it. Only the POV's needs, and one a rule or an action set
- * for someone, are recorded; an NPC's follow what their day's plan has them do (DESIGN §24.8), and
- * the routine's times stand in before the day has met a need and for anyone the planner doesn't plan.
+ * The needs (DESIGN §8, §24.8; 0 = met, 100 = urgent): what each is called, the word the narrator is
+ * told it in, the activities that meet it and the times of day (minutes) a routine meets it. Whether
+ * each is on, how fast it grows and the points it is told and alerts at are the world's
+ * (`world.needs`, `needsSettingsOf`). Only the POV's needs, and one a rule or an action set for
+ * someone, are recorded; an NPC's follow what their day's plan has them do, and the routine's times
+ * stand in before the day has met a need and for anyone the planner doesn't plan.
  */
-export const NEEDS: Record<string, { rate: number; satisfiedBy: string[]; label: string; daily: number[] }> = {
-  hunger: { rate: 4, satisfiedBy: ["eat", "meal", "lunch", "dinner", "breakfast"], label: "hungry", daily: [420, 750, 1110] },
-  fatigue: { rate: 3, satisfiedBy: ["sleep"], label: "tired", daily: [420] },
-  social: { rate: 1.5, satisfiedBy: ["socialize", "chat", "drinks"], label: "lonely", daily: [1140] },
-  fun: { rate: 1, satisfiedBy: ["leisure", "exercise", "drinks", "socialize"], label: "bored", daily: [1200] },
+export const NEEDS: Record<NeedId, { name: string; label: string; satisfiedBy: string[]; daily: number[] }> = {
+  hunger: { name: "Hunger", label: "hungry", satisfiedBy: ["eat", "meal", "lunch", "dinner", "breakfast"], daily: [420, 750, 1110] },
+  fatigue: { name: "Fatigue", label: "tired", satisfiedBy: ["sleep"], daily: [420] },
+  social: { name: "Social", label: "lonely", satisfiedBy: ["socialize", "chat", "drinks"], daily: [1140] },
+  fun: { name: "Fun", label: "bored", satisfiedBy: ["leisure", "exercise", "drinks", "socialize"], daily: [1200] },
 };
-/** A need at or above this raises a `needs` interrupt for the POV (Cast life 4). */
-export const NEED_ALERT = 80;
 
-function satisfies(activity: string, need: string): boolean {
-  return own(NEEDS, need)?.satisfiedBy.some((w) => activity.includes(w)) ?? false;
+function satisfies(activity: string, need: NeedId): boolean {
+  return NEEDS[need].satisfiedBy.some((w) => activity.includes(w));
+}
+
+/** The needs an activity meets, of those the world has on. */
+function needsMetBy(ctx: ReadContext, activity: string): NeedId[] {
+  return needsOn(ctx.world).filter((n) => satisfies(activity, n));
 }
 
 /** How fast the social and fun needs grow for each sociability (DESIGN §8): half as fast, as they are, half again. */
 const SOCIABILITY_RATE: Record<RoutineSociability, number> = { reserved: 0.5, usual: 1, outgoing: 1.5 };
 
-/** A need's growth per hour for someone: the world's sociability sets an NPC's social and fun needs; the POV's are its own. */
-function rateOf(ctx: ReadContext, who: EntityId, need: string, rate: number): number {
+/** Each world's needs as read, kept by its settings' identity: needs are read in the planner's inner loops. */
+const TUNINGS = new WeakMap<object, Record<NeedId, NeedTuning>>();
+
+/**
+ * The needs as a chat reads them: the world's settings; or, folding an event an earlier build recorded
+ * without the value it started from (`legacy`), the defaults those builds had fixed in code, so an
+ * older chat folds as it did whatever its world now sets.
+ */
+function tuningOf(ctx: ReadContext, legacy = false): Record<NeedId, NeedTuning> {
+  const set = ctx.world.needs;
+  if (legacy || set === undefined) return NEED_DEFAULTS;
+  const known = TUNINGS.get(set);
+  if (known) return known;
+  const read = needsSettingsOf(ctx.world);
+  TUNINGS.set(set, read);
+  return read;
+}
+
+/** A need's growth per hour for someone: the world's rate, and its sociability for an NPC's social and fun needs; the POV's are its own. */
+function rateOf(ctx: ReadContext, who: EntityId, need: NeedId, rate: number): number {
   return who === ctx.world.pov || (need !== "social" && need !== "fun") ? rate : rate * SOCIABILITY_RATE[routineSettingsOf(ctx.world).sociability];
 }
 
 /**
  * A need at `at` given the blocks of the person's day: from its recorded anchor `{v, t}` (the POV's
- * starts at 20 at the world's start); else from when those blocks last met it (the end of the latest
- * satisfying block begun by then, or `at` while they're in it), else from the routine's last time.
+ * starts at 20 at the world's start; one a need met at the end of an activity is at that end, the need
+ * held there until then); else from when those blocks last met it (the end of the latest satisfying
+ * block begun by then, or `at` while they're in it), else from the routine's last time. A need the
+ * world has off is always 0: it never grows, shows, is told or alerts.
  */
-function needIn(ctx: ReadContext, who: EntityId, need: string, at: number, blocks: readonly Pick<PlanBlock, "start" | "end" | "activity">[]): number {
-  const def = own(NEEDS, need);
-  if (!def) return 0;
-  const rate = rateOf(ctx, who, need, def.rate);
+function needIn(ctx: ReadContext, who: EntityId, need: string, at: number, blocks: readonly Pick<PlanBlock, "start" | "end" | "activity">[], legacy = false): number {
+  if (!isNeedId(need)) return 0;
+  const tuned = tuningOf(ctx, legacy)[need];
+  if (!tuned.on) return 0;
+  const rate = rateOf(ctx, who, need, tuned.rate);
   const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need));
   if (typeof n.t === "number" || who === ctx.world.pov) {
     const v = numOf(n.v, 20);
@@ -108,7 +137,7 @@ function needIn(ctx: ReadContext, who: EntityId, need: string, at: number, block
   for (const b of blocks) if (b.start <= at && satisfies(b.activity, need)) met = Math.max(met, Math.min(b.end, at));
   if (met === -Infinity) {
     const minute = dateAt(calendarOf(ctx.world), at).minuteOfDay;
-    met = at - Math.min(...def.daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
+    met = at - Math.min(...NEEDS[need].daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
   }
   return Math.min(100, (rate * (at - met)) / 60);
 }
@@ -116,14 +145,71 @@ function needIn(ctx: ReadContext, who: EntityId, need: string, at: number, block
 /**
  * A need now (DESIGN §8, §24.8): recorded, or for an NPC the planner plans (an LOD1 agent from Cast
  * life 3) from what their day's plan had them do by then, else from the routine's times. `legacy`
- * reads the day as the template of earlier builds laid it: only to fold a `castlife.need` event they
- * recorded without the value it started from, so an older chat folds as it did.
+ * reads the day as the template of earlier builds laid it, at the rates they had: only to fold a
+ * `castlife.need` event they recorded without the value it started from, so an older chat folds as it did.
  */
 export function needValue(ctx: ReadContext, who: EntityId, need: string, at = ctx.state.clock, legacy = false): number {
   const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need)).t === "number";
   const planned = !recorded && livesPlans(ctx, who);
   const day = dateAt(calendarOf(ctx.world), at).dayIndex;
-  return needIn(ctx, who, need, at, planned ? (legacy ? legacyDayPlan(ctx, who, day) : dayPlan(ctx, who, day)).blocks : []);
+  return needIn(ctx, who, need, at, planned ? (legacy ? legacyDayPlan(ctx, who, day) : dayPlan(ctx, who, day)).blocks : [], legacy);
+}
+
+/**
+ * The event that meets a need at `at` (DESIGN §8): it starts from the need as it stands then, so a
+ * fold reads no day plan, and records nothing for a need already met then (or off). `at` may be ahead
+ * of the clock, the end of what meets it: the need grows again only from that end.
+ */
+function metAt(ctx: ReadContext, who: EntityId, need: NeedId, at: number): LedgerEvent[] {
+  const v = needValue(ctx, who, need, at);
+  return v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at, from: v } }] : [];
+}
+
+/** A meal's time: the stated length, else half an hour. */
+const EAT_FOR = "minutes > 0 ? minutes : 30";
+/** A rest's time: the stated length, else half an hour. */
+const REST_FOR = "minutes > 0 ? minutes : 30";
+
+/**
+ * Taking someone to their bed: the events the `move` effect writes (out of whatever holds them, the
+ * place, where they stand there), for the one move path to take over; none without a bed or when
+ * they're there already.
+ */
+function toBed(ctx: ReadContext, who: EntityId): LedgerEvent[] {
+  const e = own(ctx.state.entities, who);
+  const to = bedPlace(ctx, who);
+  if (!e || to === null || placeOfEntity(ctx.state, who) === to) return [];
+  return [...e.relations.filter((r) => r.type === "in").map((r): LedgerEvent => ({ type: "unlink", rel: "in", from: who, to: r.to })), { type: "set", entity: who, field: "place", value: to }, ...(optionalService(ctx, "space.arrival")?.(ctx, who, to) ?? [])];
+}
+
+/** The player character's needs as Play's Me shows them (DESIGN §8): each the world has on, from Cast life 4. */
+export interface NeedsView {
+  needs: { need: NeedId; name: string; label: string; value: number; pressing: boolean }[];
+}
+
+/** The needs view, or none below Cast life 4, with every need off, or for a POV that doesn't act: Play then shows no Needs. */
+export function buildNeedsView(ctx: ReadContext): NeedsView | null {
+  const pov = ctx.world.pov;
+  const on = needsOn(ctx.world);
+  if (ctx.levelOf(pov, "castlife") < 4 || on.length === 0 || !acts(ctx, pov)) return null;
+  const tuning = tuningOf(ctx);
+  return {
+    needs: on.map((need) => {
+      const value = Math.round(needValue(ctx, pov, need));
+      return { need, name: NEEDS[need].name, label: NEEDS[need].label, value, pressing: value >= tuning[need].tell };
+    }),
+  };
+}
+
+/** The world's needs settings as Check world reads them: what a write would refuse, and an alert set below the point the need is told at. */
+function needsIssues(world: WorldDoc): LintIssue[] {
+  if (world.needs === undefined) return [];
+  const problems = needsSettingsProblems(world.needs);
+  if (problems.length > 0) return problems.map((message) => ({ severity: "error", code: "castlife.needs", message: `Needs settings: ${message}; the engine reads it as its default.`, path: "needs" }));
+  const tuning = needsSettingsOf(world);
+  return NEED_IDS.flatMap((need): LintIssue[] =>
+    tuning[need].on && tuning[need].alert < tuning[need].tell ? [{ severity: "warning", code: "castlife.needs", message: `${NEEDS[need].name}'s alert (${tuning[need].alert}) is below the point the narrator is told of it (${tuning[need].tell}): a skip may stop for it before the story ever mentions it.`, path: `needs.${need}` }] : [],
+  );
 }
 
 // ---------------------------------------------------------------- planning
@@ -195,7 +281,7 @@ export function legacyDayOptions(ctx: ReadContext, who: EntityId, dayStart: numb
   const home = homeOf(ctx, who);
   const cal = calendarOf(ctx.world);
   const hourOf = (t: number): number => dateAt(cal, t).minuteOfDay / 60;
-  const need = (n: string, t: number, laid: readonly PlanBlock[]): number => (level >= 4 ? needIn(ctx, who, n, t, laid) : 0);
+  const need = (n: string, t: number, laid: readonly PlanBlock[]): number => (level >= 4 ? needIn(ctx, who, n, t, laid, true) : 0);
   const pressed =
     (n: string, word: string) =>
     (t: number, laid: readonly PlanBlock[]): string[] => {
@@ -286,7 +372,7 @@ export function planFor(ctx: ReadContext, who: EntityId, day: number, rng: Rng, 
   const fixed = commitments(ctx, who, start, end);
   const person = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
   const level = ctx.levelOf(who, "castlife");
-  const routine = !legacy && person ? routineDay(ctx, who, day, fixed, { need: (n, t, laid) => (level >= 4 ? needIn(ctx, who, n, t, laid) : 0), meets: (activity) => Object.keys(NEEDS).filter((n) => satisfies(activity, n)) }) : { fixed: [], options: [] };
+  const routine = !legacy && person ? routineDay(ctx, who, day, fixed, { need: (n, t, laid) => (level >= 4 ? needIn(ctx, who, n, t, laid) : 0), meets: (activity) => needsMetBy(ctx, activity) }) : { fixed: [], options: [] };
   const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day, [...fixed, ...routine.fixed]);
   const options = legacy ? legacyDayOptions(ctx, who, start) : [...routine.options, ...groundedOptions(ctx, who, start)];
   const plan = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
@@ -725,6 +811,59 @@ function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slo
 }
 
 /**
+ * Until when the POV lived `activity` in the span (`since`, `at`] (DESIGN §8): `at`, while its routine
+ * runs and the block of its day holding then is that activity (it sleeps at night by routine); else
+ * the end of the span the action that began it gave it (`activity_until`), when that reaches past
+ * `since`. Null when nothing says it lived it then: an activity the story left behind long ago meets nothing.
+ */
+function livedUntil(ctx: ReadContext, activity: string, since: number, at: number, routine: boolean): number | null {
+  if (activity === "") return null;
+  const pov = ctx.world.pov;
+  if (routine) {
+    const plan = dayPlan(ctx, pov, dateAt(calendarOf(ctx.world), at - 1).dayIndex);
+    if (plan.blocks.some((b) => b.start < at && at <= b.end && blockActivity(b.activity) === activity)) return at;
+  }
+  const until = own(ctx.state.entities, pov)?.fields.activity_until;
+  return typeof until === "number" && until > since ? Math.min(until, at) : null;
+}
+
+/** Whether someone the POV knows (seen and met, still acting) is with it now: time with them is company. */
+function inCompany(ctx: ReadContext): boolean {
+  const pov = ctx.world.pov;
+  const here = placeOfEntity(ctx.state, pov);
+  if (here === null) return false;
+  return Object.entries(ctx.state.entities).some(
+    ([id, e]) => id !== pov && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, id) && acts(ctx, id) && together(ctx.world, here, placeOfEntity(ctx.state, id)) && playerKnows(ctx.registry, ctx.world, ctx.state, pov, id),
+  );
+}
+
+/**
+ * What the POV's time in a skip met by a slot's end (DESIGN §8): the needs the activity it lived up to
+ * then meets (its sleep, its meals, time out), met when it stopped or at the slot's end, and company:
+ * someone it knows with it meets its social need. A need already met by then records nothing.
+ */
+function povLivedNeeds(ctx: ReadContext, slot: SlotInfo): LedgerEvent[] {
+  const pov = ctx.world.pov;
+  const activity = strOf(own(ctx.state.entities, pov)?.fields.activity);
+  const end = livedUntil(ctx, activity, slot.start, slot.end, slot.povRoutine !== false);
+  const met: [NeedId, number][] = end === null ? [] : needsMetBy(ctx, activity).map((n) => [n, end]);
+  if (!met.some(([n]) => n === "social") && needsOn(ctx.world).includes("social") && inCompany(ctx)) met.push(["social", slot.end]);
+  return met.flatMap(([need, at]) => metAt(ctx, pov, need, at));
+}
+
+/**
+ * A moment that moves the POV off an activity it was living (its routine waking it, taking it from a
+ * meal) meets what that activity met, then (DESIGN §8); a slot's step reads the rest (`povLivedNeeds`).
+ */
+function povActivityEnds(ctx: ReadContext, who: EntityId, at: number, slot: SlotInfo, events: LedgerEvent[]): LedgerEvent[] {
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4) return events;
+  const was = strOf(own(ctx.state.entities, who)?.fields.activity);
+  const moved = events.some((ev) => ev.type === "set" && ev.entity === who && ev.field === "activity" && ev.value !== was);
+  const end = moved ? livedUntil(ctx, was, slot.start, at, slot.povRoutine !== false) : null;
+  return end === null ? events : [...needsMetBy(ctx, was).flatMap((n) => metAt(ctx, who, n, end)), ...events];
+}
+
+/**
  * Steps one LOD1 agent through one slot (Cast life ≥ 3): plan the day, live the block (the POV only
  * while its routine runs: `SlotInfo.povRoutine`), settle their plans, needs, encounters and
  * invitations; nothing for someone who doesn't act.
@@ -759,10 +898,17 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
   out.push(...planOutcomes(ctx, who, slot));
   if (level < 4) return out;
 
-  // Needs: only the POV's are recorded (an NPC's follow their day's plan); it gets alerts when it is an agent.
+  // Needs: only the POV's are recorded (an NPC's follow their day's plan). It is stepped only in a
+  // skip, which meets what it lived through (its sleep, its meals, time out, company); a need that
+  // crossed its alert point and wasn't met raises the alert.
   if (who === pov) {
-    for (const need of Object.keys(NEEDS)) {
-      if (needValue(ctx, who, need, slot.end) >= NEED_ALERT && needValue(ctx, who, need, slot.start) < NEED_ALERT) out.push({ type: ENGINE_EVENTS.signal, data: { class: "needs", text: `You're getting ${own(NEEDS, need)?.label ?? need}.`, entity: pov } });
+    const lived = povLivedNeeds(ctx, slot);
+    out.push(...lived);
+    const met = new Set(lived.map((ev) => ("data" in ev ? strOf(ev.data.need) : "")));
+    const tuning = tuningOf(ctx);
+    for (const need of needsOn(ctx.world)) {
+      const alert = tuning[need].alert;
+      if (!met.has(need) && needValue(ctx, who, need, slot.end) >= alert && needValue(ctx, who, need, slot.start) < alert) out.push({ type: ENGINE_EVENTS.signal, data: { class: "needs", text: `You're getting ${NEEDS[need].label}.`, entity: pov } });
     }
     return out;
   }
@@ -1085,7 +1231,6 @@ export interface CastGroup {
 
 export interface CastView {
   level: number;
-  needs: { need: string; value: number; label: string }[];
   people: CastPerson[];
   /** The facets players can see (`shown`), in order, each value with its parent, depth first: Cast groups and filters by them. */
   facets: { id: FacetId; label: string; multiple: boolean; values: { id: FacetValueId; label: string; parent?: FacetValueId }[] }[];
@@ -1206,7 +1351,6 @@ export function buildCastView(ctx: ReadContext): CastView {
     if (next) p.next = { at: formatClock(cal, next.start), label: next.label };
     people.push(p);
   }
-  const needs = level >= 4 ? Object.entries(NEEDS).map(([need, def]) => ({ need, value: Math.round(needValue(ctx, pov, need)), label: def.label })) : [];
   const group = (id: EntityId): CastGroup => {
     const g = own(ctx.state.entities, id);
     return { id, name: g?.name ?? id, kind: kindDef(ctx.registry, ctx.world, g?.kind ?? "")?.label ?? g?.kind ?? "" };
@@ -1217,7 +1361,6 @@ export function buildCastView(ctx: ReadContext): CastView {
   const tiers = [...tiersInOrder(ctx.world).map(([id]) => id).filter((id) => tierIds.has(id)), ...[...tierIds].filter((id) => !tierOf(ctx.world, id)).sort()];
   return {
     level,
-    needs,
     people,
     facets: facets.map(([id, f]) => ({ id, label: f.label, multiple: f.multiple === true, values: facetTree(f.values).map((v) => ({ id: v.id, label: v.value.label, ...(v.value.parent !== undefined ? { parent: v.value.parent } : {}) })) })),
     tiers: tiers.map((id) => ({ id, label: tierLabel(ctx.world, id) })),
@@ -1372,7 +1515,7 @@ export const castlifePack: PackDef = {
     r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
-    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: atPlanMoment });
+    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)) });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     // Whatever the level: a plan nothing lives is still settled.
     r.process({ id: "castlife.plans", domain: "castlife", minLevel: 0, step: (slot, ctx) => dropUnlived(slot, ctx) });
@@ -1405,8 +1548,20 @@ export const castlifePack: PackDef = {
       return commitments(ctx, id, ctx.state.clock, ctx.state.clock + 1).length > 0;
     });
 
-    // The need it starts from rides with the event, so a fold reads no day plan (DESIGN §8).
-    r.effect({ type: "castlife.satisfy", args: ["need", "entity?"], resolve: (a, ctx) => { const who = strOf(a.entity) || ctx.world.pov; const need = strOf(a.need); const v = needValue(ctx, who, need); return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock, from: v } }] : []; } });
+    // The need it starts from rides with the event, so a fold reads no day plan (DESIGN §8). What an
+    // action meets it meets at the end of the action's own time (`minutes`), not as it starts.
+    r.effect({
+      type: "castlife.satisfy",
+      args: ["need", "entity?", "minutes?"],
+      resolve: (a, ctx) => {
+        const who = strOf(a.entity) || ctx.world.pov;
+        const need = strOf(a.need);
+        return isNeedId(need) && own(ctx.state.entities, who) ? metAt(ctx, who, need, ctx.state.clock + Math.max(0, Math.round(numOf(a.minutes, 0)))) : [];
+      },
+    });
+    // Going to bed takes the sleeper to their bed (DESIGN §8): nothing when they have none, it's
+    // nowhere, or they're there already.
+    r.effect({ type: "castlife.to_bed", args: ["entity?"], resolve: (a, ctx) => toBed(ctx, strOf(a.entity) || ctx.world.pov) });
     r.effect({ type: "castlife.decide", args: ["key", "choice"], resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
     r.effect({
       type: "castlife.override",
@@ -1434,17 +1589,22 @@ export const castlifePack: PackDef = {
     r.proposal(routineChannel);
     r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?", "by?"], resolve: storyEvents });
 
-    r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
-    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
-    r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
+    // A stated length ("rest for an hour", `minutes`) is the action's time; without one, its usual time.
+    // What it meets is met at its end. Sleep is met as it's slept through: a skip or a speed-through
+    // that passes the night (`povLivedNeeds`), so going to bed and getting up again rests no one.
+    r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger", minutes: `=${EAT_FOR}` } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: EAT_FOR, lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
+    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed (your own, if you have one) and sleep until morning, or for as long as you say.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.to_bed", args: { entity: "self" } }] }, duration: "5", activity: { type: "sleep", until: "minutes > 0 ? clock + minutes : next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
+    r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun", minutes: `=${REST_FOR}` } }] }, duration: REST_FOR, activity: { type: "waiting", until: `clock + (${REST_FOR})` }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
 
     r.renderer({
       slot: "people",
       render(ctx) {
         const pov = ctx.world.pov;
-        // The POV leads, by name, so the narrator knows who "you" is, with the needs pressing on it.
-        const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
+        // The POV leads, by name, so the narrator knows who "you" is, with the needs pressing on it:
+        // each the world has on, from the point the world tells it at.
+        const tuning = tuningOf(ctx);
+        const urgent = ctx.levelOf(pov, "castlife") >= 4 ? needsOn(ctx.world).filter((n) => needValue(ctx, pov, n) >= tuning[n].tell).map((n) => NEEDS[n].label) : [];
         const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
         const lines: string[] = [urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`];
         const here = placeOfEntity(ctx.state, pov);
@@ -1470,9 +1630,11 @@ export const castlifePack: PackDef = {
     // rides last on the budget and stays out of the helpers' facts.
     r.renderer({ slot: "people", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) as unknown as JsonValue });
+    r.view({ panel: "castlife.needs", build: (ctx) => buildNeedsView(ctx) as unknown as JsonValue });
     r.renderer({ slot: "stance", render: stanceLines });
     r.renderer({ slot: "stance", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
+    r.lint({ code: "castlife.needs", check: needsIssues });
     // A birthday the planner can't read is no occasion: say so where it is written.
     r.lint({
       code: "castlife.birthday",

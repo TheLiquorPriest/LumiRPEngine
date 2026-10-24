@@ -53,7 +53,7 @@ import { selectEntities, selectorProblems } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity } from "../../../engine/visibility";
 import { occasionOf, type Occasion } from "./occasions";
-import { homeOf, placeOfType, workPlace } from "./places";
+import { bedPlace, homeOf, placeOfType, workPlace } from "./places";
 
 /** The planner's option id prefix for a routine block: `routine:<block id>`. */
 export const ROUTINE_OPTION = "routine:";
@@ -287,13 +287,14 @@ function companyOf(ctx: ReadContext, who: EntityId, block: RoutineBlock): Entity
 /**
  * Where a block happens for someone: their home, their work (else home), wherever they are (null),
  * the home of the first of its company (a friend's birthday: the friend's), a place, or the nearest
- * place of a scene type to their home. A place the world doesn't have is home.
+ * place of a scene type to their home. A place the world doesn't have is home. Sleep at home is in
+ * their bed, wherever it is, when they have one (`bedPlace`).
  */
 export function blockPlace(ctx: ReadContext, who: EntityId, block: RoutineBlock, occasion?: Occasion): PlaceId | null {
   const home = homeOf(ctx, who);
   const p = block.place ?? "home";
   if (p === "here") return null;
-  if (p === "home") return home;
+  if (p === "home") return block.activity === "sleep" ? (bedPlace(ctx, who) ?? home) : home;
   if (p === "work") return workPlace(ctx, who) ?? home;
   if (p === "with") {
     const host = companyOf(ctx, who, block)[0] ?? occasion?.friends[0];

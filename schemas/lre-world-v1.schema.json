@@ -53,6 +53,7 @@
     "schedules": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/schedule" } },
     "routines": { "type": "object", "description": "Routines by id: the soft shape of people's days, owner by owner (absent: none; everyone keeps the basic needs).", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/routine" } },
     "routineSettings": { "$ref": "#/$defs/routineSettings" },
+    "needs": { "$ref": "#/$defs/needsSettings" },
     "tracks": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/track" } },
     "tables": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/table" } },
     "realism": { "$ref": "#/$defs/realism" },
@@ -749,6 +750,27 @@
         },
         "narrator": { "type": "boolean", "description": "Whether the narrator gets the present characters' usual routines as soft context." },
         "paletteFollowsRoutine": { "type": "boolean", "description": "Whether the palette Timelapse's Follow my routine starts on." }
+      }
+    },
+    "needsSettings": {
+      "type": "object",
+      "description": "Each need (from Cast life 4) on or off, how fast it grows an hour on its 0 to 100 scale, the point the narrator is told of it and Play marks it (tell) and the point it raises the needs alert in a timelapse (alert). A part left out keeps its default: every need on; hunger 4, fatigue 3, social 1.5 and fun 1 an hour; tell 60; alert 80.",
+      "additionalProperties": false,
+      "properties": {
+        "hunger": { "$ref": "#/$defs/needSetting" },
+        "fatigue": { "$ref": "#/$defs/needSetting" },
+        "social": { "$ref": "#/$defs/needSetting" },
+        "fun": { "$ref": "#/$defs/needSetting" }
+      }
+    },
+    "needSetting": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "on": { "type": "boolean", "description": "Off: the need never grows, shows, is told or alerts." },
+        "rate": { "type": "number", "minimum": 0, "maximum": 100, "description": "Growth an hour." },
+        "tell": { "type": "number", "minimum": 0, "maximum": 100, "description": "At or above this the narrator is told of it and Play marks it." },
+        "alert": { "type": "number", "minimum": 0, "maximum": 100, "description": "At or above this it raises the needs alert in a timelapse." }
       }
     },
     "stage": {

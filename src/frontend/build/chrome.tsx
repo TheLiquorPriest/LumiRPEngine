@@ -62,6 +62,7 @@ export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string
   minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
   lorePins: { label: "Pinned lore", hint: "Lore every call for a character, at a place, or of a step always reads", icon: "pin" },
   routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" },
+  needs: { label: "Needs", hint: "Hunger, fatigue, company and fun: each on or off, how fast it grows, when it's told and when it alerts", icon: "sliders" },
 };
 
 /** Shows a Build page: the route is Build's whole stack position (Worlds → World → Collection → Item). */
