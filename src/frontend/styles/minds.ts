@@ -91,7 +91,7 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-gm-minds-due{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2);min-width:0}
 .lre-gm-minds-due>.lre-input{flex:1 1 10em;width:auto}
 .lre-gm-minds-due>.lre-btn{flex:0 0 auto}
-/* GM → Minds: a run on demand (packs/minds/ui/run.tsx), choosing who to run, and the pinned lore */
+/* GM → Minds: a run on demand (packs/minds/ui/run.tsx) and the pinned lore; choosing who to run is the shared multi-select (styles/select.ts) */
 .lre-gm-minds-run-meter{padding:var(--lre-s3) var(--lre-s3) var(--lre-s1)}
 .lre-gm-minds-run-note{margin:0;padding:var(--lre-s2) var(--lre-s3);font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
 .lre-gm-minds-run-sub{display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -99,8 +99,6 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-gm-minds-run-pins{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
 .lre-gm-minds-run-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2);padding:var(--lre-s2) var(--lre-s3) var(--lre-s3);min-width:0}
 .lre-gm-minds-run-actions:empty{display:none}
-.lre-gm-minds-pick{flex:none;width:22px;height:22px;margin:0;accent-color:var(--lre-accent);pointer-events:none}
-.lre-gm-minds-pickbar{position:sticky;bottom:0;z-index:1;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-height:var(--lre-tap-lg);padding:var(--lre-s2) var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-surface);font-weight:600}
 .lre-gm-minds-pinned{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
 /* Build → an entity's or place's page, Pinned lore (build/lore-pins.tsx) */
 .lre-form-pins-add{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}

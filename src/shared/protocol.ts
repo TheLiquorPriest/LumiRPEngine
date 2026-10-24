@@ -185,6 +185,13 @@ export interface EditRequest extends Request<"lre.edit"> {
   ops: EditOp[];
 }
 
+/**
+ * The most operations one GM edit carries (`lre.edit`): the engine refuses more, the tools' schemas
+ * take no more, and the GM view's bulk changes send a larger selection in chunks of this many, each
+ * chunk one edit with its own Undo.
+ */
+export const EDIT_OPS_MAX = 64;
+
 /** The GM view's data (DESIGN §7), asked for when the GM view opens: never in a state push. */
 export interface GmRequest extends Request<"lre.gm"> {
   chatId: ChatId;

@@ -86,7 +86,7 @@ import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
-import { applyProposals, type EnginePipeline, type PlanProse, type ReadStep, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
+import { applyProposals, type EnginePipeline, type PlanProse, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
 import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { StudioBridge } from "./studio";
@@ -1220,8 +1220,9 @@ export class Runtime implements TurnHooks {
       bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
       const target = (result.action === TIMELAPSE_ACTION ? interpretedTarget(result.params, render.world, render.state, text, this.registry) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text, this.registry) : null) ?? interpretedTarget({ span: text }, render.world, render.state, text, this.registry);
       if (!target) this.host.log("info", `[LumiRPEngine] interpret: lets time pass but states no span it can read; the turn plays as roleplay`, userId);
-      // A short span runs in the turn; a longer one is offered (a misread can't skip days unasked).
-      const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
+      // A span up to how long the user lets a skip run without asking runs in the turn; a longer one
+      // is offered (a misread can't skip days unasked).
+      const over = target?.type === "duration" && target.minutes > settings.time.askBeyondMinutes;
       bridge.setOffer(text, over ? target : null);
       // A span the player's words spend ("for the next two hours, I service the fleet") keeps the POV
       // where the story has it until it's over (DESIGN §8); a run to a routine point follows its routine.
@@ -1716,7 +1717,7 @@ export class Runtime implements TurnHooks {
       if (bounded.mode === "auto" && !unsure.has(p) && !guessed.has(p)) auto.push(fitted);
       else confirm.push(fitted);
     }
-    bridge.prepareRead(input.content, { auto, post, events: decisions, minds: minded.events });
+    bridge.prepareRead(input.content, { auto, post, events: decisions, minds: minded.events, askBeyond: settings.time.askBeyondMinutes });
     // `choices` and `contradiction` become chips below, with the read's others.
     // Each automatic proposal gets an undo chip; each confirm proposal a confirm chip (DESIGN §11).
     // An automatic proposal the engine refuses gets a decline chip instead, never silence: a payment
@@ -1758,7 +1759,7 @@ export class Runtime implements TurnHooks {
       // whole, with its catch-up, after this read's automatic changes. One that fits is offered for
       // Apply; a longer one, or one whose catch-up can't run whole, gets the Timelapse chip instead.
       if (proposal.type === "time_advance") {
-        const advance = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+        const advance = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: settings.time.askBeyondMinutes, unitCap: w.state.time.unitCap });
         if (advance.chip) stored.push(skipAheadChip(`adv:${messageId}:${swipeId}:c${i}`, { messageId, swipeId }, advance.chip.target, advance.reason === "unit_cap" ? "unit_cap" : "over_cap"));
         else if (advance.applied) {
           stored.push({
@@ -1964,7 +1965,7 @@ export class Runtime implements TurnHooks {
     if (offer) {
       const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
       const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(chipWorld, headState, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
-      const detail = offer.type === "duration" && offer.minutes > INTERPRETED_TIMELAPSE_CAP ? "That's longer than one turn runs on its own. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
+      const detail = offer.type === "duration" && offer.minutes > (await this.settings.get(input.userId)).time.askBeyondMinutes ? "That's longer than a skip runs without asking. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) as JsonValue } });
     }
     // What the turn didn't play of the message (DESIGN §5.2, §11): the queued actions left when the
@@ -2660,9 +2661,6 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   life: "Life and death",
   routine: "Routine changes",
 };
-
-/** The longest typed timelapse a turn runs on its own (minutes); longer ones are offered as a chip. */
-export const INTERPRETED_TIMELAPSE_CAP = 1440;
 
 /**
  * A typed timelapse's target from `interpret`'s read of it (DESIGN §9.2): its `span`, the player's
