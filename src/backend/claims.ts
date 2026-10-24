@@ -16,7 +16,7 @@ import type { Registry } from "../engine/registry-impl";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { Claim } from "../engine/steps";
-import { canSeeEntity, canSeePlace } from "../engine/visibility";
+import { canSeePlace } from "../engine/visibility";
 import { matchCatalog } from "../packs/economy/core/index";
 import { catalogName, itemName } from "../packs/economy/core/items";
 import { claimCap, FOOD_AND_DRINK, priceOf } from "../packs/economy/core/model";
@@ -51,30 +51,6 @@ function typedName(value: string, said: readonly string[]): string | null {
   return null;
 }
 
-/** Whether a thing's name is what `name` names: the same main noun, with every word of it; null when `name` names no thing. */
-function namesThing(name: string): ((other: string) => boolean) | null {
-  const said = itemName(name);
-  if (!said) return null;
-  return (other) => {
-    const n = itemName(other);
-    return n !== null && n.head === said.head && [...said.words].every((w) => n.words.has(w));
-  };
-}
-
-/**
- * Whether an authored thing hidden from the POV (secret, or known only to others) goes by `name`,
- * a hidden quest key say: a claim of it would make a second one beside the one the story is
- * keeping back. A thing that is merely elsewhere isn't hidden, and a claim of it asks or adds as before.
- */
-function hiddenBy(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, name: string): boolean {
-  const names = namesThing(name);
-  if (!names) return false;
-  return Object.keys(world.entities).some((id) => {
-    const e = own(state.entities, id);
-    return e !== undefined && !canSeeEntity(registry, world, state, world.pov, id) && !isGone(state, id) && kindIs(registry, world, e.kind, "item") && names(e.name);
-  });
-}
-
 /**
  * What the POV may know that `name` names (the same main noun, with every word of it): a thing,
  * one it holds first, then one where it is, then by id; "place" for a place it can see, named in
@@ -82,8 +58,11 @@ function hiddenBy(registry: Registry, world: WorldDoc, state: Readonly<WorldStat
  */
 function knownBy(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, name: string, mayKnow: (id: EntityId) => boolean): EntityId | "place" | null {
   const said = itemName(name);
-  const names = namesThing(name);
-  if (!said || !names) return null;
+  if (!said) return null;
+  const names = (other: string): boolean => {
+    const n = itemName(other);
+    return n !== null && n.head === said.head && [...said.words].every((w) => n.words.has(w));
+  };
   const here = placeOfEntity(state, world.pov);
   const rank = (id: EntityId): number => (isInside(state, id, world.pov) ? 0 : placeOfEntity(state, id) === here ? 1 : 2);
   const things = Object.keys(state.entities)
@@ -137,9 +116,6 @@ export function claimFor(input: { registry: Registry; world: WorldDoc; state: Re
   if (known !== null) return { kind: "known", params: { ...input.params, [unfit.param]: known } };
   // Cash and accounts belong to the economy, whatever the preset.
   if (cashGift(name, world.currency) !== null || input.thing === "money") return { kind: "hold", reason: "money is never made from what you say you have" };
-  // A hidden authored thing by those words is never made twice: the claim is declined as any is
-  // under Hold me to the world, with the usual words, so nothing tells the player it exists.
-  if (hiddenBy(registry, world, state, name)) return { kind: "hold" };
   const ctx = registry.context(world, state);
   if (input.policy.mode === "hold" || !optionalService(ctx, "gear.claim") || ctx.levelOf(world.pov, "gear") === 0) return { kind: "hold" };
   const here = placeOfEntity(state, world.pov);
