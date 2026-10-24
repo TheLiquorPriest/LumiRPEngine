@@ -92,7 +92,7 @@ export function ActivityBanner() {
         <span class="lre-chat-pulse" aria-hidden="true" />
         <span class="lre-activity-label">{activity.label}</span>
         <span class="lre-num lre-activity-time">{elapsedText(now - activity.since)}</span>
-        <CancelTurn chatId={chatId} />
+        {activity.cancellable === true ? <CancelTurn chatId={chatId} /> : null}
       </div>
     );
   return (

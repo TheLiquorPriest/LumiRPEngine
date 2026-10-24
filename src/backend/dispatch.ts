@@ -262,6 +262,10 @@ export class Dispatcher {
           const { world, state } = await this.head(r.chatId, userId);
           const action = (hasOwn(world.actions, r.action) ? world.actions[r.action] : undefined) ?? this.rt.registry.actions.get(r.action);
           if (!action) throw new RequestError("not_found", `unknown action ${r.action}`);
+          // A request plays no id the player character can't know of: the read's own check, so a
+          // guessed id of a hidden person or place is refused as one naming nothing.
+          const refused = this.rt.requestRefusal(world, state, action, r.params, "seen");
+          if (refused) throw new RequestError("validation", refused);
           const picked = Object.entries(r.params).flatMap(([k, v]) => {
             if (typeof v === "number") return [action.params[k]?.type === "money" ? formatMoney(v, world.currency) : String(v)];
             if (typeof v !== "string" || v === "") return [];
@@ -1078,7 +1082,18 @@ export class Dispatcher {
         const text = typeof chip.payload.text === "string" ? chip.payload.text : "";
         const edited = choice === "edit" ? (typeof payload?.text === "string" ? payload.text : null) : undefined;
         if (edited === null) throw new RequestError("bad_request", "Edit needs the edited text");
-        if (chip.kind === "intent_gate") return { applied: this.rt.passIntent(chatId, text, edited === undefined ? undefined : paramsOf(edited)), pending: false };
+        if (chip.kind === "intent_gate") {
+          if (edited === undefined) return { applied: this.rt.passIntent(chatId, text), pending: false };
+          // Edited details get the read's own check: a ref to something the player character can't
+          // know of is refused as one naming nothing, and the chip stays for another try.
+          const params = paramsOf(edited);
+          const read = this.rt.bridgeOf(chatId)?.intentOf(text);
+          const { world, state } = await this.head(chatId, userId);
+          const action = read?.action ? ((hasOwn(world.actions, read.action) ? world.actions[read.action] : undefined) ?? this.rt.registry.actions.get(read.action)) : undefined;
+          const refused = action ? this.rt.requestRefusal(world, state, action, params, "read", read?.claim?.param) : null;
+          if (refused) throw new RequestError("validation", refused);
+          return { applied: this.rt.passIntent(chatId, text, params), pending: false };
+        }
         const shown = Array.isArray(chip.payload.lines) ? chip.payload.lines.filter((l): l is string => typeof l === "string") : [];
         const held = Array.isArray(chip.payload.held) ? chip.payload.held.filter((l): l is string => typeof l === "string") : [];
         // Lines the player wrote are words for the narrator, never macros the prompt would run.

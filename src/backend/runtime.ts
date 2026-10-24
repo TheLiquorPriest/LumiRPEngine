@@ -707,6 +707,7 @@ export class Runtime implements TurnHooks {
   start(): void {
     this.ledger.hooks = this;
     this.ledger.diag = this.diag;
+    this.diag.cancellable = (chatId) => this.ledger.cancellable(chatId);
     this.ledger.attach();
     this.agents.start();
     this.host.on("MESSAGE_SENT", (e, userId) => {
@@ -2089,6 +2090,20 @@ export class Runtime implements TurnHooks {
   /** Play or Edit on the intent gate (DESIGN §5.1 preview gates): the read plays, with `params` when the player edited them, on the Regenerate that follows. */
   passIntent(chatId: ChatId, text: string, params?: JsonObject): boolean {
     return this.bridges.get(chatId)?.passIntent(text, params) ?? false;
+  }
+
+  /**
+   * Why an action's params from a request (the intent gate's Edit, `lre.action`) can't play, in the
+   * read's own words ("Go: it names no place you know"): a ref that names nothing the player character
+   * may know of (`unfitRef`), so no request path plays a guessed id of a hidden thing. `know` is what
+   * counts as known: `read`, a typed read's own rule (`povMayKnow`), for edited details; `seen`, what
+   * the player's own surfaces may offer (`canSeeEntity`: the player's accounts and payments too), for
+   * a palette, panel or tool request. `skip` is a claim's param, which the claim makes real. Null when every ref fits.
+   */
+  requestRefusal(world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, know: "read" | "seen", skip?: string): string | null {
+    const mayKnow = (id: EntityId): boolean => (know === "read" ? povMayKnow(this.registry, world, state, id) : id === world.pov || canSeeEntity(this.registry, world, state, world.pov, id));
+    const unfit = unfitRef(this.registry, action, params, world, state, mayKnow, skip);
+    return unfit ? `${action.label}: ${unfitReason(this.registry, world, state, unfit, "", unrevealedSecrets(this.registry, world, state), mayKnow)}` : null;
   }
 
   /** Play or Edit on the outline gate (DESIGN §5.1 preview gates): the Regenerate that follows plays the plan the player was shown, told `lines`. */

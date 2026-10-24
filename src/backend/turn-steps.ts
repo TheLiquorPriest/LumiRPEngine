@@ -37,7 +37,7 @@ import { kindIs, placeOfEntity } from "../engine/scope";
 import { povLife } from "../engine/life";
 import type { WorldState } from "../engine/state";
 import type { EngineTurnPlan } from "../engine/turn";
-import { canSeeEntity, findLeaks, povPlace } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, povPlace } from "../engine/visibility";
 import { LookupBudget, type StepLore } from "./lore-steps";
 import type { Guidance } from "./preset-binding";
 import { inMinorUnits, type Steps } from "./steps";
@@ -176,9 +176,9 @@ export interface UnfitRef {
  * every one does: an entity of the param's kind (with inheritance), or a place where the param takes
  * places. Typed text that names nothing that fits ("I take the cash" when cash is an account, not an
  * item) is roleplay for the narrator and `extract`, not an action that would fail; its reply says why
- * on a decline chip (DESIGN §9.4). An entity the POV may not know of (`mayKnow`) counts as nothing:
- * a guessed id of a hidden thing must read as one nothing has, or the outcome would tell the player
- * it exists.
+ * on a decline chip (DESIGN §9.4). An entity the POV may not know of (`mayKnow`), or a place it
+ * can't see, counts as nothing: a guessed id of a hidden thing must read as one nothing has, or the
+ * outcome would tell the player it exists.
  */
 export function unfitRef(registry: Registry, action: ActionDef, params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, mayKnow: (id: EntityId) => boolean, skip?: string): UnfitRef | null {
   for (const [name, def] of Object.entries(action.params)) {
@@ -195,7 +195,7 @@ export function unfitRef(registry: Registry, action: ActionDef, params: JsonObje
       if (!mayKnow(value) || (def.ref && !kindIs(registry, world, entity.kind, def.ref))) return { param: name, def, value };
       continue;
     }
-    if (!hasOwn(world.places, value) || (def.ref !== undefined && def.ref !== "place")) return { param: name, def, value };
+    if (!hasOwn(world.places, value) || (def.ref !== undefined && def.ref !== "place") || !canSeePlace(registry, world, state, world.pov, value)) return { param: name, def, value };
   }
   return null;
 }

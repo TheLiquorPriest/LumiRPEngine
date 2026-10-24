@@ -14,12 +14,14 @@ import { Rig } from "../support/rig";
 const INTERPRET_MARK = "You map a player's typed input";
 const OUTLINE_MARK = "You outline a roleplay narrator's next reply";
 
-/** A Port Alder chat after `settings` patches, with minds off (no model answers them here). */
-async function alder(settings: JsonObject[]): Promise<{ rig: Rig; chatId: string }> {
+/** A Port Alder chat after `settings` patches, with minds off (no model answers them here), and `places` committed first. */
+async function alder(settings: JsonObject[], places: [string, JsonObject][] = []): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
   rig.host.quietReply = () => "{}";
   for (const patch of [...settings, { minds: { enabled: false } }]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+  for (const [id, value] of places) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "places", id, value }));
+  if (places.length > 0) rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   return { rig, chatId };
@@ -90,5 +92,33 @@ describe("the outline gate", () => {
     // The resume writes no new outline: the edited one stands in for it.
     expect(outlines).toBe(1);
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("no request plays a place the player character can't know of", () => {
+  const vault: [string, JsonObject] = ["hidden_vault", { id: "hidden_vault", name: "The Vault", parent: "port_alder", visibility: "secret", fields: {} }];
+
+  test("the intent gate's Edit to a secret place is refused, and the chip stays", async () => {
+    const { rig, chatId } = await alder([{ gates: { intent: true } }], [vault]);
+    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify({ action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9 }) : "{}");
+    rig.host.sendUser(chatId, "I walk to Bluebird Coffee.");
+    await rig.host.settle();
+    await rig.host.start(chatId, { type: "normal" });
+    const gate = await chipOf(rig, chatId, "intent_gate");
+    const answer = await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "edit", payload: { text: JSON.stringify({ to: "hidden_vault" }) } });
+    expect(answer.type).toBe("lre.error");
+    expect(await chipOf(rig, chatId, "intent_gate")).toBeDefined();
+    expect(await where(rig, chatId)).not.toBe("hidden_vault");
+  });
+
+  test("an lre.action to a secret place is refused, and the player character stays put", async () => {
+    const { rig, chatId } = await alder([], [vault]);
+    const before = await where(rig, chatId);
+    const answer = await rig.send({ type: "lre.action", chatId, action: "go", params: { to: "hidden_vault" }, source: "palette", now: true });
+    expect(answer.type).toBe("lre.error");
+    // The turn after the request plays out, whatever it left.
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    if (!reply.halted) await rig.host.finish(reply, "Time passes.");
+    expect(await where(rig, chatId)).toBe(before);
   });
 });
