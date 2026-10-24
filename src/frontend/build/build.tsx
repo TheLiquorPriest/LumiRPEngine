@@ -41,6 +41,7 @@ import type { StudioOfferState } from "./studio-offer";
 import { StudioOfferReview, useStudioOffer } from "./studio-offer";
 import { TableEditor } from "./table-editor";
 import { TiersEditor } from "./tiers-editor";
+import { isVarsKey, VarsPanel } from "../settings/prompt-editor";
 
 /** The world's content in the story's own groups. */
 const GROUPS: readonly { title: string; collections: readonly WorldCollection[] }[] = [
@@ -704,6 +705,8 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
           })
         : null}
       {!isNew && (props.collection === "entities" || props.collection === "places") ? <LorePinsSection target={props.collection === "entities" ? "characters" : "places"} id={id} /> : null}
+      {/* A step template's placeholders, as its purpose and output get them (the vars panel Settings shows too). */}
+      {props.collection === "steps" && isVarsKey(value.purpose) ? <VarsPanel step={value.purpose} output={value.output === "effects" ? "effects" : undefined} /> : null}
       {props.children}
       <SaveBar>
         <Button variant="primary" disabled={!changed && !isNew} busy={busy} onClick={save}>

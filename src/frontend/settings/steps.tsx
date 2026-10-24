@@ -13,9 +13,14 @@ import type { JsonObject } from "../../shared/json";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
 import { isMindPurpose } from "../../shared/minds";
+import type { ComponentChildren } from "preact";
 import type { HelperDefault, JobSettings, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
 import { DEFAULT_RECENT, helperCallOf, JOB_SETTINGS_DEFAULTS, REASONING_CHOICES, recentOf, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
-import { LimitField } from "./minds";
+import { LimitField, MindPromptEditor } from "./minds";
+import type { MindsSettings } from "../../shared/minds";
+import { SKIP_PLAN_PROMPT } from "../../shared/skip-plan";
+import { PROMPT_EFFECT, PROSE_PROMPTS } from "../../shared/steps";
+import { PromptEditor } from "./prompt-editor";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
@@ -331,17 +336,19 @@ export function HelperSection(props: { helper: HelperDefault; patch(patch: JsonO
   );
 }
 
-export function StepsSection(props: { modelUse: ModelUseSettings; helper: HelperDefault; jobs: JobSettings; patch(patch: JsonObject): void; openHelper(): void; busy: boolean }) {
+export function StepsSection(props: { modelUse: ModelUseSettings; helper: HelperDefault; jobs: JobSettings; prompts: MindsSettings["prompts"]; patch(patch: JsonObject): void; openHelper(): void; busy: boolean }) {
   const connections = useConnections();
   const update = (purpose: StepPurpose, next: StepConfig) => props.patch(stepUpdatePatch(purpose, next));
   return (
     <div class="lre-stack" data-lre-settings-page="steps">
-      <p class="lre-set-lead">Each step is one small job a model can do. A helper step runs on the helper model, unless you set its own connection, model or parameters here. Changing a step makes your model use Custom.</p>
+      <p class="lre-set-lead">Each step is one small job a model can do. A helper step runs on the helper model, unless you set its own connection, model or parameters here. Changing a step makes your model use Custom; your own prompts stay whatever preset you pick.</p>
       <List>
         <ListRow icon="sliders" title="Helper model" subtitle={helperSummary(props.helper, connections)} chevron onClick={props.openHelper} />
       </List>
       {(Object.keys(STEP_LABEL) as StepPurpose[]).map((purpose) => (
-        <StepCard key={purpose} purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} helper={props.helper} connections={connections} busy={props.busy} update={(next) => update(purpose, next)} />
+        <StepCard key={purpose} purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} helper={props.helper} connections={connections} busy={props.busy} update={(next) => update(purpose, next)}>
+          <StepPrompts purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} prompts={props.prompts} busy={props.busy} patch={props.patch} />
+        </StepCard>
       ))}
       {/* Build's jobs take the brief step's connection and max tokens above; what they read is set here, apart from the presets. */}
       <Section title="Build jobs">
@@ -363,7 +370,50 @@ export function StepsSection(props: { modelUse: ModelUseSettings; helper: Helper
   );
 }
 
-function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: HelperDefault; connections: readonly Connection[]; busy: boolean; update(next: StepConfig): void }) {
+/** The longest own prompt a step keeps (`settings-store` cuts there), as a minds prompt's. */
+const STEP_PROMPT_MAX = 20_000;
+
+/** A step's own prompt (`template`) as a settings patch: null, blank or the built-in clears it, so the world's template or the built-in runs; null when it's too long. */
+export function stepPromptPatch(purpose: StepPurpose, text: string | null, builtIn: string | undefined): JsonObject | null {
+  if (text !== null && text.length > STEP_PROMPT_MAX) return null;
+  const own = text === null || text.trim() === "" || (builtIn !== undefined && text.trim() === builtIn.trim()) ? null : text;
+  return { modelUse: { steps: { [purpose]: { template: own } } } };
+}
+
+/**
+ * A step card's prompts (DESIGN §5.2): the user's own, which wins over the world's template and that
+ * over the built-in. A mind's, a memory's and consolidation's are Settings → Minds' (the same
+ * prompt); the time-skip step has its beats' (Settings → Minds' too) and the skip plan's.
+ */
+function StepPrompts(props: { purpose: StepPurpose; config: StepConfig; prompts: MindsSettings["prompts"]; busy: boolean; patch(patch: JsonObject): void }) {
+  const { purpose, busy } = props;
+  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate") return <MindPromptEditor purpose={purpose} value={props.prompts[purpose]} busy={busy} patch={props.patch} />;
+  const builtIn = purpose === "skip" ? SKIP_PLAN_PROMPT : purpose === "brief" || purpose === "outline" || purpose === "choices" ? PROSE_PROMPTS[purpose] : undefined;
+  const own = (
+    <PromptEditor
+      id={purpose === "skip" ? "skip_plan" : purpose}
+      label={purpose === "skip" ? "The skip plan" : "Your prompt"}
+      note={purpose === "skip" ? "As a time skip starts, how the people the model plans spend it. Replaces the built-in instructions; the answer format stays." : `${PROMPT_EFFECT[purpose]} It wins over the world's step template.`}
+      builtIn={builtIn}
+      value={props.config.template}
+      max={STEP_PROMPT_MAX}
+      vars={purpose === "skip" ? "skip_plan" : purpose}
+      busy={busy}
+      save={(text) => stepPromptPatch(purpose, text, builtIn)}
+      patch={props.patch}
+    />
+  );
+  return purpose === "skip" ? (
+    <>
+      <MindPromptEditor purpose="skip" value={props.prompts.skip} busy={busy} patch={props.patch} />
+      {own}
+    </>
+  ) : (
+    own
+  );
+}
+
+function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: HelperDefault; connections: readonly Connection[]; busy: boolean; update(next: StepConfig): void; children?: ComponentChildren }) {
   const { purpose, config, busy, update } = props;
   const route: StepRoute = config.route ?? { provider: purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
   const call = helperCallOf({ ...config, route }, props.helper);
@@ -443,6 +493,7 @@ function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: Hel
             ) : null}
           </Field>
         )}
+        <Field label="Prompt">{props.children}</Field>
         <Disclosure summary="Advanced: signals and lore">
           <label class="lre-field">
             <span class="label">Signals (comma separated)</span>
