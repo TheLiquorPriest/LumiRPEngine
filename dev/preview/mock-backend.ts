@@ -8,6 +8,7 @@ import { readInferred } from "../../src/shared/inferred";
 import type { DiagCall, DiagRecord } from "../../src/shared/diagnostics";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { hasOwn, isRecord } from "../../src/shared/json";
+import { applyPatch } from "../../src/shared/json-patch";
 import type { MindsRunView } from "../../src/shared/minds";
 import type { LoreBookEntryView, LorePinView } from "../../src/shared/protocol";
 import type { BookLoreFields } from "../../src/shared/lore";
@@ -679,6 +680,8 @@ export class MockBackend {
         if (message.op === "discard") this.draft = structuredClone(this.world);
         else if (message.op === "put") (doc[message.collection] ??= {})[message.id] = message.value;
         else if (message.op === "remove") delete doc[message.collection]?.[message.id];
+        // A draft patch (the Character page's save, batch edits) applies as the backend applies one.
+        else if (message.op === "patch") this.draft = applyPatch(this.draft as unknown as JsonValue, message.ops) as unknown as WorldDoc;
         else if (message.op === "set" && message.part === "meta" && isRecord(message.value)) Object.assign(this.draft, message.value);
         else if (message.op === "set" && message.part === "tiers" && isRecord(message.value) && isRecord(message.value.tiers)) {
           this.draft.tiers = structuredClone(message.value.tiers) as unknown as WorldDoc["tiers"];

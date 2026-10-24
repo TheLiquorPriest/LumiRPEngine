@@ -20,7 +20,7 @@ import { characterRequest } from "../requests";
 import { useSelect } from "../store";
 import { entityPatch, GROUP_LABEL, relationGroups, type RelationGroup } from "./character-model";
 import { deleteItem, go, ItemHeader } from "./chrome";
-import { ContentsSection } from "./contents";
+import { authoredContents } from "../../shared/items-build";
 import { CheckField, FormGroup, ItemRow, RefPicker, type RefOption } from "./form-kit";
 import { useHeld } from "./held";
 import { LorePinsSection } from "./lore-pins";
@@ -111,6 +111,7 @@ export function CharacterPage(props: EditorProps) {
       </Section>
       <People world={formDoc} id={id} value={value} onChange={setValue} />
       <Section title="Stats">
+        {(character?.sections.find((s) => s.id === "stats")?.fields.length ?? 0) === 0 ? <span class="lre-small lre-muted">Their kind has no sheet numbers or conditions.</span> : null}
         <SectionFields section="stats" model={character} value={value} ctx={ctx} onField={setField} />
       </Section>
       <ThingsTheyHave world={props.world} id={id} />
@@ -175,17 +176,19 @@ function WhereTheyLive(props: { model: CharacterResult; value: JsonObject; world
   };
   return (
     <Section title="Where they live">
-      <PlacePicker title="Their home" label="Home" places={places} value={home?.id ?? null} clearLabel="No home" onPick={(p) => props.onField("home", p?.id)} />
-      <BedPicker character={character} places={places} things={things} onPick={(next) => props.onField("bed", bedValue(next) ?? undefined)} />
-      <PlacePicker
-        title="Where the story starts them"
-        label="Where the story starts them"
-        places={places}
-        value={start?.id ?? null}
-        suggestions={home ? [{ label: "Their home", place: home }] : []}
-        onPick={(p) => props.onField("place", p?.id)}
-      />
-      <RefPicker label="Starts inside" value={typeof inside?.to === "string" ? inside.to : ""} options={entitiesOfKind(props.world, "vehicle")} none="Nothing (on foot)" placeholder="Pick a vehicle" onChange={setInside} />
+      <div class="lre-stack">
+        <PlacePicker title="Their home" label="Home" places={places} value={home?.id ?? null} clearLabel="No home" onPick={(p) => props.onField("home", p?.id)} />
+        <BedPicker character={character} places={places} things={things} onPick={(next) => props.onField("bed", bedValue(next) ?? undefined)} />
+        <PlacePicker
+          title="Where the story starts them"
+          label="Where the story starts them"
+          places={places}
+          value={start?.id ?? null}
+          suggestions={home ? [{ label: "Their home", place: home }] : []}
+          onPick={(p) => props.onField("place", p?.id)}
+        />
+        <RefPicker label="Starts inside" value={typeof inside?.to === "string" ? inside.to : ""} options={entitiesOfKind(props.world, "vehicle")} none="Nothing (on foot)" placeholder="Pick a vehicle" onChange={setInside} />
+      </div>
     </Section>
   );
 }
@@ -275,16 +278,19 @@ function ThingsTheyHave(props: { world: WorldDoc; id: string }) {
   const app = useApp();
   const owns = (e: WorldDoc["entities"][string]): boolean => e.fields.owner === props.id || (Array.isArray(e.fields.owners) && e.fields.owners.includes(props.id));
   const owned = Object.values(props.world.entities).filter((e) => (kindIs(props.world, e.kind, "vehicle") || kindIs(props.world, e.kind, "property")) && owns(e));
+  const carried = authoredContents(props.world, props.id, "entities");
+  const open = (id: string): void => go(app, { view: "item", worldId: props.world.id, collection: "entities", id });
   return (
-    <>
-      <ContentsSection world={props.world} collection="entities" id={props.id} />
-      {owned.length > 0 ? (
-        <Section title="Vehicles and property">
-          {owned.map((e) => (
-            <ItemRow key={e.id} title={e.name} subtitle={humanize(e.kind)} openLabel={`Open ${e.name}`} onOpen={() => go(app, { view: "item", worldId: props.world.id, collection: "entities", id: e.id })} />
-          ))}
-        </Section>
-      ) : null}
-    </>
+    <div data-lre-contents={props.id}>
+      <Section title="Things they have">
+        {carried.length === 0 && owned.length === 0 ? <span class="lre-small lre-muted">Nothing the world puts on them, and no vehicle or property of theirs.</span> : null}
+        {carried.map((row) => (
+          <ItemRow key={row.id} title={row.name} subtitle="On them" badge={row.hidden ? <Badge tone="gm">Hidden until searched</Badge> : undefined} openLabel={`Open ${row.name}`} onOpen={() => open(row.id)} />
+        ))}
+        {owned.map((e) => (
+          <ItemRow key={e.id} title={e.name} subtitle={`Theirs · ${humanize(e.kind)}`} openLabel={`Open ${e.name}`} onOpen={() => open(e.id)} />
+        ))}
+      </Section>
+    </div>
   );
 }
