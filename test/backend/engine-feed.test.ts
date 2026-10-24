@@ -107,6 +107,25 @@ describe("feed scopes", () => {
     expect(JSON.stringify(rig.latestView(chatId))).not.toContain(SECRET);
     expect(JSON.stringify(await rig.rt.view(chatId, rig.host.userId))).not.toContain(SECRET);
   });
+
+  test("a scene-scope fact reaches the narrator marked, and no player surface, Journal line or panel", async () => {
+    const rig = new Rig({ shipped: true });
+    const FLASK = "Engraved silver flask";
+    const chatId = await alder(rig, null, {
+      nora: { id: "nora", kind: "person", name: "Nora Pell", tier: "supporting", fields: { place: "harbor_street_114" }, relations: [] },
+      flask: { id: "flask", kind: "item", name: FLASK, tier: "background", fields: { owner: "nora" }, relations: [{ type: "in", to: "nora" }], visibility: "secret" },
+    });
+    await edit(rig, chatId, { op: "feed", section: "people", to: { scope: "scene" } });
+    await rig.turn(chatId, "I look around.", "Quiet.");
+    const people = sent(rig).get(DEFAULT_SECTIONS.people?.label ?? "People") ?? [];
+    const line = people.find((l) => l.includes(FLASK));
+    expect(line).toBe(markedText({ text: `Nora Pell has ${FLASK}.`, known: "scene", who: "Nora Pell" }));
+    // Play's view as pushed and as asked for, with every panel the chat has: nothing of it.
+    expect(JSON.stringify(rig.latestView(chatId))).not.toContain(FLASK);
+    const view = await rig.rt.view(chatId, rig.host.userId);
+    expect(JSON.stringify(view)).not.toContain(FLASK);
+    for (const panel of Object.keys(view.panels)) expect(JSON.stringify(rig.body(await rig.send({ type: "lre.view.open", chatId, panel })))).not.toContain(FLASK);
+  });
 });
 
 describe("World Info sources", () => {

@@ -96,6 +96,22 @@ export function together(world: WorldDoc, a: PlaceId | null, b: PlaceId | null):
   return within(a, b) || within(b, a);
 }
 
+/**
+ * The site a place belongs to: its outermost enclosing place with nothing spread out on the way up
+ * (a house with its driveway and garage, a marina), so things at the same site are a short walk
+ * apart. A place that is itself spread out (a town) is its own site.
+ */
+export function siteOf(world: WorldDoc, place: PlaceId | null): PlaceId | null {
+  if (place === null) return null;
+  const chain = placeChain(world, place);
+  let site = place;
+  for (const up of chain.slice(1)) {
+    if (spreadPlaces(world).has(up)) break;
+    site = up;
+  }
+  return site;
+}
+
 /** Whether `id` is in the POV's scene (`together`); the POV itself isn't. */
 export function inPovScene(world: WorldDoc, state: Readonly<WorldState>, id: EntityId): boolean {
   return id !== world.pov && together(world, placeOfEntity(state, world.pov), placeOfEntity(state, id));

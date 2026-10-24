@@ -22,16 +22,99 @@ import type { EntityDef, KindDef, WorldCurrency } from "../../../shared/world";
 import { calendarOf, clockOfPhrase } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
-import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
+import type { FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { carriedBy, contentsOf, findPiece, fitProblem, grants, hasItem, holderOf, isInside, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
 import { canSeeEntity, isDiscoverable, knows } from "../../../engine/visibility";
+import { together } from "../../../engine/presence";
+import type { FeedScope } from "../../../shared/world";
 import type { EntityState } from "../../../engine/state";
 import { buildGearView } from "./view";
 import containers from "./tables/modern-us/containers.json";
 import items from "./tables/modern-us/items.json";
 import kits from "./tables/modern-us/kits.json";
 import slots from "./tables/modern-us/slots.json";
+
+/** What a thing reads as in a gear line: its name, a count above one, and from Gear 3 a kit's pieces present. */
+function gearLabel(ctx: ReadContext, id: EntityId, level: number): string {
+  const e = own(ctx.state.entities, id);
+  if (!e) return id;
+  const qty = numOf(e.fields.qty, 1);
+  const kit = level >= 3 ? kitStatus(ctx, id) : null;
+  return `${e.name}${qty > 1 ? ` ×${qty}` : ""}${kit ? ` (${kit.present}/${kit.total})` : ""}`;
+}
+
+/** What a holder wears or has equipped. */
+function wornBy(ctx: ReadContext, who: EntityId): EntityId[] {
+  return Object.keys(ctx.state.entities)
+    .sort()
+    .filter((id) => own(ctx.state.entities, id)?.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who));
+}
+
+/**
+ * The Gear section (DESIGN §6, §6.11): what the POV carries (only notable things at Gear 1), from
+ * Gear 3 what it wears, and what it has lent and borrowed; only what it can see. In `gm` scope,
+ * something it carries without knowing (a thing planted on it) is added, marked.
+ */
+export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
+  const pov = ctx.world.pov;
+  const level = ctx.levelOf(pov, "gear");
+  if (level === 0) return [];
+  const see = (id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
+  const carried = carriedBy(ctx.state, pov).filter((id) => own(ctx.state.entities, id)?.kind !== "account");
+  const shown = carried.filter((id) => see(id) && (level >= 2 || own(ctx.state.entities, id)?.fields.notable === true));
+  const lines: FeedLine[] = [];
+  if (shown.length > 0) lines.push({ text: `Carrying: ${shown.slice(0, 12).map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+  if (level >= 3) {
+    const worn = wornBy(ctx, pov).filter(see);
+    if (worn.length > 0) lines.push({ text: `Wearing: ${worn.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+  }
+  for (const g of grants(ctx.state)) {
+    if (!see(g.thing)) continue;
+    if (g.owner === pov) lines.push({ text: `Lent: ${own(ctx.state.entities, g.thing)?.name ?? g.thing} to ${see(g.borrower) ? (own(ctx.state.entities, g.borrower)?.name ?? g.borrower) : "someone"}${g.overdue ? " (overdue)" : ""}.`, known: "pov" });
+    else if (g.borrower === pov) lines.push({ text: `Borrowed: ${own(ctx.state.entities, g.thing)?.name ?? g.thing}${g.overdue ? " (overdue — should go back)" : ""}.`, known: "pov" });
+  }
+  if (scope === "gm") {
+    const unknown = [...carried, ...wornBy(ctx, pov)].filter((id) => !see(id));
+    if (unknown.length > 0) lines.push({ text: `On you without your knowing: ${unknown.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "gm" });
+  }
+  return lines;
+}
+
+/** At most this many things are told of each person with the POV. */
+const PRESENT_GEAR_CAP = 6;
+
+/**
+ * What each person with the POV that it can see visibly wears and carries (DESIGN §6.11): worn and
+ * equipped things and what they hold in hand, never what is in a bag or a pocket. Only what the POV
+ * can see; in `scene` and `gm` scopes, a thing on them it can't see, marked as theirs to know.
+ */
+export function presentGearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
+  const pov = ctx.world.pov;
+  if (ctx.levelOf(pov, "gear") === 0) return [];
+  const see = (who: EntityId, id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
+  const here = placeOfEntity(ctx.state, pov);
+  const lines: FeedLine[] = [];
+  for (const who of Object.keys(ctx.state.entities).sort()) {
+    const person = own(ctx.state.entities, who);
+    if (!person || who === pov || !kindIs(ctx.registry, ctx.world, person.kind, "person") || isGone(ctx.state, who) || !see(pov, who) || !together(ctx.world, here, placeOfEntity(ctx.state, who))) continue;
+    const level = Math.max(1, ctx.levelOf(who, "gear"));
+    const worn = wornBy(ctx, who);
+    const held = contentsOf(ctx.state, who).filter((id) => {
+      const e = own(ctx.state.entities, id);
+      return !!e && e.kind !== "account" && e.fields.slot !== "pocket" && !worn.includes(id);
+    });
+    const say = (ids: readonly EntityId[]): string => ids.slice(0, PRESENT_GEAR_CAP).map((id) => gearLabel(ctx, id, level)).join(", ");
+    const wornSeen = worn.filter((id) => see(pov, id));
+    const heldSeen = held.filter((id) => see(pov, id)).slice(0, Math.max(0, PRESENT_GEAR_CAP - wornSeen.length));
+    const parts = [...(wornSeen.length > 0 ? [`wears ${say(wornSeen)}`] : []), ...(heldSeen.length > 0 ? [`carries ${say(heldSeen)}`] : [])];
+    if (parts.length > 0) lines.push({ text: `${person.name} ${parts.join("; ")}.`, known: "pov" });
+    if (scope === "player") continue;
+    const hidden = [...worn, ...held].filter((id) => !see(pov, id));
+    if (hidden.length > 0) lines.push({ text: `${person.name} has ${say(hidden)}.`, known: "scene", who: person.name });
+  }
+  return lines;
+}
 
 const TABLES: DataTable[] = [items, containers, kits, slots] as unknown as DataTable[];
 
@@ -662,34 +745,9 @@ export const gearPack: PackDef = {
       },
     });
 
-    r.renderer({
-      slot: "gear",
-      render(ctx) {
-        const pov = ctx.world.pov;
-        const level = ctx.levelOf(pov, "gear");
-        if (level === 0) return [];
-        const carried = carriedBy(ctx.state, pov).filter((id) => own(ctx.state.entities, id)?.kind !== "account");
-        const shown = carried.filter((id) => level >= 2 || own(ctx.state.entities, id)?.fields.notable === true);
-        const lines: string[] = [];
-        const label = (id: EntityId): string => {
-          const e = own(ctx.state.entities, id);
-          if (!e) return id;
-          const qty = numOf(e.fields.qty, 1);
-          const kit = level >= 3 ? kitStatus(ctx, id) : null;
-          return `${e.name}${qty > 1 ? ` ×${qty}` : ""}${kit ? ` (${kit.present}/${kit.total})` : ""}`;
-        };
-        if (shown.length > 0) lines.push(`Carrying: ${shown.slice(0, 12).map(label).join(", ")}.`);
-        if (level >= 3) {
-          const worn = Object.keys(ctx.state.entities).filter((id) => own(ctx.state.entities, id)?.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === pov));
-          if (worn.length > 0) lines.push(`Wearing: ${worn.map(label).join(", ")}.`);
-        }
-        for (const g of grants(ctx.state)) {
-          if (g.owner === pov) lines.push(`Lent: ${own(ctx.state.entities, g.thing)?.name ?? g.thing} to ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}${g.overdue ? " (overdue)" : ""}.`);
-          else if (g.borrower === pov) lines.push(`Borrowed: ${own(ctx.state.entities, g.thing)?.name ?? g.thing}${g.overdue ? " (overdue — should go back)" : ""}.`);
-        }
-        return lines;
-      },
-    });
+    r.renderer({ slot: "gear", render: (ctx) => gearLines(ctx, "player").map((l) => l.text), feed: gearLines });
+    // What the people with the POV visibly wear and carry (DESIGN §6.11), beside them in People.
+    r.renderer({ slot: "people", source: "present_gear", render: (ctx) => presentGearLines(ctx, "player").map((l) => l.text), feed: presentGearLines });
 
     r.view({ panel: "gear.gear", build: (ctx) => buildGearView(ctx) as unknown as JsonValue });
 

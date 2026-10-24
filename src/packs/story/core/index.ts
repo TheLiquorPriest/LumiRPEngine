@@ -7,15 +7,16 @@
 import type { TrackId } from "../../../shared/ids";
 import { hasOwn, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import type { WorldDoc } from "../../../shared/world";
+import type { FeedScope, WorldDoc } from "../../../shared/world";
 import { wordsOf } from "../../../engine/lore";
 import { labelOf, mutableSlice, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
-import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
+import type { FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
 import { effectLists } from "../../../engine/ruleset-lint";
-import { kindIs } from "../../../engine/scope";
+import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { checkAnswer } from "../../../engine/tracks";
-import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, type PlayerTrack } from "../../../engine/visibility";
+import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, trackKnown, type PlayerTrack } from "../../../engine/visibility";
+import { together } from "../../../engine/presence";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -33,6 +34,42 @@ export interface QuestLogView {
   active: PlayerTrack[];
   done: PlayerTrack[];
   failed: PlayerTrack[];
+}
+
+/**
+ * The Quest section (DESIGN §6, §6.11): each active track the POV can see, with its objectives
+ * still open, the hints it has earned and the truths revealed. In `scene` scope, a quest or secret
+ * the POV doesn't know of (or knows only as "something is going on") whose owner or someone it lets
+ * know is with the POV, as theirs to know; in `gm`, every such one, with its stage.
+ */
+export function questLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
+  const lines: FeedLine[] = [];
+  for (const t of buildQuestLog(ctx).active) {
+    lines.push({ text: `${t.label}: ${t.cue ?? t.stage}`, known: "pov" });
+    for (const o of t.objectives) if (!o.done) lines.push({ text: `- ${o.label}`, known: "pov" });
+    for (const h of t.hints) lines.push({ text: `Hint: ${h}`, known: "pov" });
+    for (const truth of t.truths) lines.push({ text: `Known: ${truth}`, known: "pov" });
+  }
+  if (scope === "player") return lines;
+  const pov = ctx.world.pov;
+  const here = placeOfEntity(ctx.state, pov);
+  const withHim = Object.keys(ctx.state.entities)
+    .sort()
+    .filter((id) => {
+      const e = own(ctx.state.entities, id);
+      return !!e && id !== pov && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, id) && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id) && together(ctx.world, here, placeOfEntity(ctx.state, id));
+    });
+  for (const [id, t] of Object.entries(ctx.world.tracks).sort(([a], [b]) => a.localeCompare(b))) {
+    const shown = playerTrack(ctx.registry, ctx.world, ctx.state, pov, id);
+    if (shown && shown.label === t.label) continue;
+    const stage = own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start);
+    if (!stage || (stage.next.length === 0 && !stage.fail)) continue;
+    const text = `${t.label}: ${stage.label}${stage.truth ? ` (the truth: ${stage.truth})` : ""}.`;
+    const who = withHim.filter((k) => trackKnown(ctx.registry, ctx.world, ctx.state, k, t)).map((k) => own(ctx.state.entities, k)?.name ?? k);
+    if (who.length > 0) lines.push({ text, known: "scene", who: who.join(", ") });
+    else if (scope === "gm") lines.push({ text, known: "gm" });
+  }
+  return lines;
 }
 
 /**
@@ -329,19 +366,7 @@ export const storyPack: PackDef = {
       observable: "answers",
     });
 
-    r.renderer({
-      slot: "quest",
-      render(ctx) {
-        const lines: string[] = [];
-        for (const t of buildQuestLog(ctx).active) {
-          lines.push(`${t.label}: ${t.cue ?? t.stage}`);
-          for (const o of t.objectives) if (!o.done) lines.push(`- ${o.label}`);
-          for (const h of t.hints) lines.push(`Hint: ${h}`);
-          for (const truth of t.truths) lines.push(`Known: ${truth}`);
-        }
-        return lines;
-      },
-    });
+    r.renderer({ slot: "quest", render: (ctx) => questLines(ctx, "player").map((l) => l.text), feed: questLines });
     r.view({ panel: "story.quests", build: (ctx) => buildQuestLog(ctx) as unknown as JsonValue });
 
     r.lint({

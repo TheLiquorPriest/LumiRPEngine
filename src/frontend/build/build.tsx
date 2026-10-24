@@ -30,6 +30,7 @@ import { PickBox, SelectBar, useSelection } from "../multi-select";
 import { DraftBatchSheet } from "./batch-sheet";
 import { CheckView, issuePart, IssueRow } from "./check";
 import { COLLECTION_INFO, deleteItem, go, ItemHeader, itemLabel, NewItem, newItemName, OverflowMenu, PART_INFO } from "./chrome";
+import { ContentsSection, RevealItem } from "./contents";
 import { commitDraft, discardDraft, draftSend, loadDraft } from "./draft";
 import { ChangedElsewhere, useHeld } from "./held";
 import { JOB_INFO, jobStore, JobStatusBadge, JobView, keptJobs } from "./jobs";
@@ -704,6 +705,9 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
         ))}
       {PackConfig ? <PackConfig world={props.world} config={isRecord(value.config) ? value.config : {}} lint={lintAt(draft?.lint ?? [], `${path}.config`)} onChange={(config) => setValue({ ...value, config })} /> : null}
       <SchemaFields specs={COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields }} onChange={setValue} />
+      {/* A thing can be hidden until searched for (DESIGN §7); an entity or a place lists what the world puts in it or there. */}
+      {props.collection === "entities" ? <RevealItem kinds={formDoc.kinds} value={value} onChange={setValue} /> : null}
+      {!isNew && (props.collection === "entities" || props.collection === "places") ? <ContentsSection world={props.world} collection={props.collection} id={id} /> : null}
       {props.collection === "places"
         ? app.catalog.placeFields.map((def) => {
             // A pack's place field is edited inside the place's `fields`, which the JSON above shows too.
