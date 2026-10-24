@@ -37,6 +37,7 @@ import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotDat
 import { closedRoutes, goMinutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
 import { buildMapView } from "./view";
 import { placeLines, sceneLines } from "./feed";
+import { placeLoreLines } from "../../../engine/place-lore";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
 export type RouteQuery = (ctx: ReadContext, from: PlaceId, to: PlaceId, mode: TravelMode) => TravelPlan | null;
@@ -306,6 +307,8 @@ export const spacePack: PackDef = {
     // A section's `include` picks these by their source (DESIGN §6.11).
     r.renderer({ slot: "scene", source: "location", render: (ctx) => sceneLines(ctx, "player").map((l) => l.text), feed: sceneLines });
     r.renderer({ slot: "place", render: (ctx) => placeLines(ctx, "player").map((l) => l.text), feed: placeLines });
+    // The place's lore, after what the place itself shows, so a section cut to its tokens loses lore first.
+    r.renderer({ slot: "place", source: "place_lore", render: (ctx) => placeLoreLines(ctx, "player").map((l) => l.text), feed: placeLoreLines });
 
     r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay) as unknown as JsonValue });
 

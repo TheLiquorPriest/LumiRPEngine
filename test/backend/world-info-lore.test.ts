@@ -1,11 +1,14 @@
-// World Info as lore (DESIGN §4.2, §6.1): a chat's World Info entries are read live as lore by the
-// helpers, an LRE-secret one only once its gate holds; the interceptor keeps a secret entry out of
-// the main generation's prompt until then, and keeps it out whenever it can't tell; an entry an engine
-// section carried is switched off for that prompt.
+// World Info as lore (DESIGN §4.2, §6.1, §6.11): a chat's World Info entries are read live as lore by
+// the helpers and minds, an LRE-secret one only once its gate holds; the interceptor keeps a secret
+// entry out of the main generation's prompt until then, and keeps it out whenever it can't tell; an
+// entry an engine section carried, such as the Place section's lore, is switched off for that prompt.
 
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_SECTIONS } from "../../src/backend/book";
 import type { HostBookEntryInput, QuietRequest } from "../../src/backend/host";
 import type { Delivered } from "../../src/backend/ledger-io";
+import { toChain } from "../../src/backend/ledger-io";
+import { calendarOf, clockAt, dateAt } from "../../src/engine/calendar";
 import { worldInfoVerdict } from "../../src/backend/wi-interceptor";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
@@ -27,19 +30,23 @@ const entry = (comment: string, content: string, over: Partial<HostBookEntryInpu
 /** A book entry LRE keeps secret: stored switched off, with its gate in its LRE fields. */
 const secretEntry = (): HostBookEntryInput => entry("The wreck", `${SECRET}.`, { disabled: true, extensions: { [LEDGER_NAMESPACE]: { lore: { secret: true, gate: GATE } } } });
 
-/** A world chat with a user book attached that holds `entries`; returns the entry ids in order. */
-async function bookChat(entries: HostBookEntryInput[]): Promise<{ rig: Rig; chatId: string; bookId: string; ids: string[]; pov: string }> {
-  const rig = new Rig();
+/**
+ * A world chat with a user book attached that holds `entries` (made knowing where the POV starts);
+ * returns the entry ids in order. `shipped`: Port Alder on every shipped pack, the space pack's Place
+ * section among them, instead of the test pack's harbor.
+ */
+async function bookChat(entries: HostBookEntryInput[] | ((here: string) => HostBookEntryInput[]), shipped = false): Promise<{ rig: Rig; chatId: string; bookId: string; ids: string[]; pov: string }> {
+  const rig = new Rig({ shipped });
   rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
   rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { enabled: false } } }));
-  const worldId = await rig.newWorld("Harbor");
+  const worldId = shipped ? await rig.newWorld("Alder", "modern_slice_of_life") : await rig.newWorld("Harbor");
   const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc;
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning, Sam.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   const bookId = await rig.host.books.create("Harbor notes", "", rig.host.userId);
   const ids: string[] = [];
-  for (const e of entries) ids.push(await rig.host.books.createEntry(bookId, e, rig.host.userId));
+  for (const e of typeof entries === "function" ? entries(draft.start.place) : entries) ids.push(await rig.host.books.createEntry(bookId, e, rig.host.userId));
   const meta = await rig.host.chats.chatMetadata(chatId, rig.host.userId);
   const attached = Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : [];
   await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...attached, bookId] }, rig.host.userId);
@@ -120,5 +127,63 @@ describe("Build's World Info lore editor", () => {
     expect(ungated.type === "lre.error" && ungated.code).toBe("bad_request");
     rig.body(await write(null));
     expect(rig.host.storedEntry(entryId)).toMatchObject({ disabled: false, extensions: { other_tool: { note: "kept" } } });
+  });
+});
+
+describe("the Place section's lore", () => {
+  /** Port Alder's player character becomes the harbor master: the gate below holds once they are. */
+  const HARBOR_MASTER = "self.occupation == 'harbor_master'";
+  /** An entry about `place`, with LRE's `extra` fields beside its link. */
+  const about = (place: string, content: string, extra: JsonObject = {}, over: Partial<HostBookEntryInput> = {}): HostBookEntryInput => entry("The harbor wall", content, { keys: [], ...over, extensions: { [LEDGER_NAMESPACE]: { lore: { links: [place], ...extra } } } });
+  const place = (rig: Rig): string => rig.host.section(DEFAULT_SECTIONS.place?.label ?? "Place");
+  const alone = (rig: Rig, id: string): boolean => rig.host.assembled.some((e) => e.id === id);
+
+  test("carries a place-linked entry the player character may read, and the interceptor switches that entry off for the same prompt", async () => {
+    const { rig, chatId, ids } = await bookChat((here) => [about(here, "WALL-MARK: the harbor wall is older than the town.")], true);
+    await rig.turn(chatId, "I wait.", "Gulls call.");
+    expect(place(rig)).toContain("WALL-MARK");
+    expect(alone(rig, ids[0] ?? "")).toBe(false);
+  });
+
+  test("a secret place entry stays out of the section and the prompt until its gate holds", async () => {
+    const { rig, chatId, pov, ids } = await bookChat((here) => [about(here, `${SECRET}.`, { secret: true, gate: HARBOR_MASTER }, { disabled: true })], true);
+    await rig.turn(chatId, "I wait.", "Gulls call.");
+    expect(inPrompt(rig, SECRET)).toBe(false);
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: pov, field: "occupation", value: "harbor_master" }] }));
+    await rig.turn(chatId, "I wait some more.", "Gulls call again.");
+    expect(place(rig)).toContain(SECRET);
+    expect(alone(rig, ids[0] ?? "")).toBe(false);
+  });
+});
+
+describe("minds in a time skip", () => {
+  const MIND = "You are the private mind of";
+
+  test("a mind at a skip's beat reads a live World Info entry", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes(MIND) ? JSON.stringify({ monologue: "Nothing yet.", depiction: "busy", intent: "Keep working.", reactions: [], plans: [], mood: "calm" }) : "{}");
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc;
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    // Every place's name brings the entry up, so a mind anywhere reads it.
+    const bookId = await rig.host.books.create("Town notes", "", rig.host.userId);
+    await rig.host.books.createEntry(bookId, entry("Town notes", "BEAT-MARK: the town council meets on Thursdays.", { keys: Object.values(draft.places).map((p) => p.name), constant: false }), rig.host.userId);
+    const meta = await rig.host.chats.chatMetadata(chatId, rig.host.userId);
+    await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...(Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : []), bookId] }, rig.host.userId);
+    await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
+    // Marcus, pinned Live, means to meet the player character tomorrow evening: the skip's beat.
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const clock = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state.clock ?? 0;
+    const cal = calendarOf(draft);
+    const meet = clockAt(cal, dateAt(cal, clock).dayIndex + 1, 19 * 60);
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_pin", entity: "marcus_delgado", level: "live" }, { op: "mind_memory", entity: "marcus_delgado", part: "plan", id: null, value: { what: "Talk to Jordan about the books", kind: "meet", when: { from: meet, to: meet + 60 }, with: ["pov"], priority: 4 } }] }));
+    const before = rig.host.quietCalls.length;
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 3 * 1440 }, overrides: { invitation: "note" } }, source: "palette", now: true }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "Days pass.");
+    const minds = rig.host.quietCalls.slice(before).filter((c) => (c.messages[0]?.content ?? "").includes(MIND));
+    expect(minds.length).toBeGreaterThan(0);
+    expect(minds.some((c) => JSON.stringify(c.messages).includes("BEAT-MARK"))).toBe(true);
   });
 });
