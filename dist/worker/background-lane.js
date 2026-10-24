@@ -1288,6 +1288,42 @@ function objectiveWhen(o) {
 function objectiveLabel(o) {
   return typeof o === "string" ? o : o.label;
 }
+var FEED_SCOPES = ["player", "scene", "gm"];
+var SECTION_FEED_KEYS = ["enabled", "maxTokens", "maxLines", "include", "scope"];
+function readSectionFeed(raw) {
+  if (!isRecord(raw))
+    return null;
+  const out = {};
+  for (const key of Object.keys(raw))
+    if (!SECTION_FEED_KEYS.some((k) => k === key))
+      return null;
+  if (raw.enabled !== undefined) {
+    if (typeof raw.enabled !== "boolean")
+      return null;
+    out.enabled = raw.enabled;
+  }
+  for (const key of ["maxTokens", "maxLines"]) {
+    const v = raw[key];
+    if (v === undefined)
+      continue;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 1)
+      return null;
+    out[key] = v;
+  }
+  if (raw.include !== undefined) {
+    if (!Array.isArray(raw.include) || !raw.include.every((s) => typeof s === "string" && s.trim() !== ""))
+      return null;
+    if (raw.include.length > 0)
+      out.include = raw.include;
+  }
+  if (raw.scope !== undefined) {
+    const scope = FEED_SCOPES.find((s) => s === raw.scope);
+    if (!scope)
+      return null;
+    out.scope = scope;
+  }
+  return out;
+}
 var DEFAULT_SPAWN_CAP = 24;
 var MAX_SPAWN_CAP = 500;
 function spawnCapOf(world) {
@@ -1544,6 +1580,7 @@ var DEFAULT_RECENT = Object.freeze({ on: true, messages: 8, tokens: 3000 });
 var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
+var TIMELAPSE_REACH_MINUTES = 366 * 1440;
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -5511,7 +5548,7 @@ function relationIssues(reg, world) {
 var TIME_LIMITS = Object.freeze({
   tickMinutes: MINUTES_PER_DAY,
   scale: [0.25, 10],
-  timelapseMinutes: 366 * MINUTES_PER_DAY,
+  timelapseMinutes: TIMELAPSE_REACH_MINUTES,
   unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
   thresholdMinutes: SPEED_THRESHOLD_MINUTES
 });
@@ -5636,6 +5673,34 @@ function initialState(world, revision, types) {
   seedLife(world, state);
   return state;
 }
+
+// src/engine/feed.ts
+var FEED_KEY = "feed";
+var FEED_EVENT = "engine.feed";
+function sourceOf(r) {
+  return r.source ?? r.slot;
+}
+var feedEvent = {
+  type: FEED_EVENT,
+  validate: (e) => {
+    if (typeof e.data.section !== "string" || e.data.section.trim() === "")
+      return { code: "bad_event", reason: "a section override names its section" };
+    return e.data.to === null || readSectionFeed(e.data.to) ? null : { code: "bad_event", reason: "a section override is enabled, maxTokens, maxLines, include or scope" };
+  },
+  apply: (e, state) => {
+    const section = typeof e.data.section === "string" ? e.data.section : "";
+    const s = state.packs.engine ?? {};
+    state.packs.engine = s;
+    const current = isRecord(s[FEED_KEY]) ? { ...s[FEED_KEY] } : {};
+    const to = e.data.to === null ? null : readSectionFeed(e.data.to);
+    if (to && Object.keys(to).length > 0)
+      current[section] = to;
+    else
+      delete current[section];
+    s[FEED_KEY] = current;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `the ${typeof e.data.section === "string" ? e.data.section : "?"} section's settings in this chat`
+};
 
 // src/engine/engine-pack.ts
 var ENGINE_PACK = "engine";
@@ -6035,6 +6100,7 @@ var enginePack = {
   register(r) {
     for (const def of events)
       r.event(def);
+    r.event(feedEvent);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);
@@ -9804,9 +9870,19 @@ function lintWorld(world, registry) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0)
       err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
   }
+  const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
   for (const [id, s] of Object.entries(world.sections)) {
-    if (!hasOwn(TURN_FED_SECTIONS, id) && !registry.renderers.some((r) => r.slot === id))
-      warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}", so it never goes in`);
+    const feed = readSectionFeed(Object.fromEntries(SECTION_FEED_KEYS.flatMap((k) => s[k] !== undefined ? [[k, s[k]]] : [])));
+    if (!feed) {
+      err(`sections.${id}`, "section_feed", `"${s.label}": enabled is on or off, maxTokens and maxLines are whole numbers from 1, include is a list of sources, scope is player, scene or gm`);
+      continue;
+    }
+    for (const source of feed.include ?? [])
+      if (!sources.has(source))
+        warn(`sections.${id}.include`, "section_source", `"${s.label}" includes "${source}", which no pack renders`);
+    const fed = feed.include ? feed.include.some((source) => sources.has(source)) : registry.renderers.some((r) => r.slot === id);
+    if (!hasOwn(TURN_FED_SECTIONS, id) && !fed)
+      warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}"${feed.include ? " or one it includes" : ""}, so it never goes in`);
   }
   for (const [id, t] of Object.entries(world.steps)) {
     if (t.id !== id)
@@ -11591,6 +11667,7 @@ var calendarPack = {
     r.formula("weekday_name", (ctx) => weekdayName(calendarOf(ctx.world), dateAt(calendarOf(ctx.world), ctx.state.clock).weekday));
     r.renderer({
       slot: "scene",
+      source: "calendar",
       render(ctx) {
         const level = ctx.levelOf(ctx.world.pov, "calendar");
         if (level === 0)
@@ -12575,6 +12652,7 @@ var spacePack = {
     });
     r.renderer({
       slot: "scene",
+      source: "location",
       render(ctx) {
         const level = ctx.levelOf(ctx.world.pov, "space");
         if (level === 0)
@@ -24947,6 +25025,7 @@ var weatherPack = {
     r.process({ id: "weather.climate", domain: "weather", minLevel: 2, step: (slot, ctx, rng) => stepRegions(slot, ctx, rng) });
     r.renderer({
       slot: "scene",
+      source: "weather",
       render(ctx) {
         const v = buildWeatherView(ctx);
         if (v.level === 0 || v.label === "")
@@ -25578,18 +25657,50 @@ function farRoute(route) {
   return walk2 === undefined || walk2.minutes > INTERIOR_WALK_MINUTES;
 }
 var spreadOf = new WeakMap;
+function joined(parts, part) {
+  let rep = part;
+  for (let next = parts.get(rep);next !== undefined && next !== rep; next = parts.get(rep))
+    rep = next;
+  parts.set(part, rep);
+  return rep;
+}
 function spreadPlaces(world) {
   const hit = spreadOf.get(world);
   if (hit)
     return hit;
   const out = new Set;
+  const joins = new Map;
   for (const r of Object.values(world.routes)) {
-    if (!farRoute(r))
+    const from = placeChain(world, r.from);
+    const to = placeChain(world, r.to);
+    for (let i = 1;i < from.length; i++) {
+      const place = from[i];
+      const fromPart = from[i - 1];
+      const j = place === undefined ? -1 : to.indexOf(place);
+      const toPart = to[j - 1];
+      if (place === undefined || fromPart === undefined || j < 1 || toPart === undefined)
+        continue;
+      const parts = joins.get(place) ?? new Map;
+      joins.set(place, parts);
+      if (farRoute(r))
+        out.add(place);
+      else
+        parts.set(joined(parts, fromPart), joined(parts, toPart));
+    }
+  }
+  const partsOf = new Map;
+  for (const p of Object.values(world.places)) {
+    if (!p.parent)
       continue;
-    const from = new Set(placeChain(world, r.from).slice(1));
-    for (const p of placeChain(world, r.to).slice(1))
-      if (from.has(p))
-        out.add(p);
+    const parts = partsOf.get(p.parent);
+    if (parts)
+      parts.push(p.id);
+    else
+      partsOf.set(p.parent, [p.id]);
+  }
+  for (const [place, parts] of joins) {
+    if (new Set((partsOf.get(place) ?? []).map((part) => joined(parts, part))).size > 1)
+      out.add(place);
   }
   spreadOf.set(world, out);
   return out;
@@ -26826,7 +26937,7 @@ function storyEvents(args, ctx) {
 }
 
 // src/packs/castlife/core/usual.ts
-function joined(words3) {
+function joined2(words3) {
   return words3.length <= 1 ? words3[0] ?? "" : `${words3.slice(0, -1).join(", ")} and ${words3[words3.length - 1] ?? ""}`;
 }
 function weekdaysPhrase(cal, days) {
@@ -26837,7 +26948,7 @@ function weekdaysPhrase(cal, days) {
     return "weekdays";
   if (set.join() === "0,6")
     return "weekends";
-  return `on ${joined(set.map((d) => weekdayName(cal, d)))}`;
+  return `on ${joined2(set.map((d) => weekdayName(cal, d)))}`;
 }
 function blockDays(cal, d) {
   if (!d)
@@ -26856,7 +26967,7 @@ function blockDays(cal, d) {
   if (d.birthday === "friend")
     parts.push("on a friend's birthday");
   if (d.seasons)
-    parts.push(`in ${joined(d.seasons)}`);
+    parts.push(`in ${joined2(d.seasons)}`);
   if (d.weather)
     parts.push(`in ${d.weather} weather`);
   return parts.filter((p) => p !== "").join(", ");
@@ -27953,6 +28064,42 @@ function stanceCues(ctx) {
     return cues.length > 0 ? [listed(`${own(ctx.state.entities, id)?.name ?? id}'s cues`, cues)] : [];
   });
 }
+function peopleLines(ctx, scope) {
+  const pov = ctx.world.pov;
+  const see = (who, id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
+  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
+  const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
+  const lines = [{ text: urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`, known: "pov" }];
+  const here = placeOfEntity(ctx.state, pov);
+  const voice = optionalQuery(ctx, "relationships.voice");
+  const present2 = Object.keys(ctx.state.entities).sort().filter((id) => {
+    const e = own(ctx.state.entities, id);
+    return !!e && id !== pov && together(ctx.world, here, placeOfEntity(ctx.state, id)) && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, id);
+  });
+  for (const id of present2) {
+    const e = own(ctx.state.entities, id);
+    if (!e)
+      continue;
+    if (!see(pov, id)) {
+      if (scope === "player")
+        continue;
+      const knowers = present2.filter((k) => k !== id && see(pov, k) && see(k, id)).map((k) => own(ctx.state.entities, k)?.name ?? k);
+      const act2 = typeof e.fields.activity === "string" && e.fields.activity !== "idle" ? ` (${e.fields.activity.replace(/_/g, " ")})` : "";
+      if (knowers.length > 0)
+        lines.push({ text: `${e.name}${act2} is here.`, known: "scene", who: knowers.join(", ") });
+      else if (scope === "gm")
+        lines.push({ text: `${e.name}${act2} is here.`, known: "gm" });
+      continue;
+    }
+    const life = povLife(ctx.world, ctx.state, id);
+    const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
+    lines.push({ text: life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`, known: "pov" });
+    const regard = life && !life.acts ? null : voice?.(ctx, id) ?? null;
+    if (regard)
+      lines.push({ text: regard, known: "pov" });
+  }
+  return lines;
+}
 var castlifePack = {
   id: "castlife",
   label: "Cast life",
@@ -28032,35 +28179,11 @@ var castlifePack = {
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
-    r.renderer({
-      slot: "people",
-      render(ctx) {
-        const pov = ctx.world.pov;
-        const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
-        const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
-        const lines = [urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`];
-        const here = placeOfEntity(ctx.state, pov);
-        const voice = optionalQuery(ctx, "relationships.voice");
-        for (const id of Object.keys(ctx.state.entities).sort()) {
-          const e = own(ctx.state.entities, id);
-          if (!e || id === pov || !together(ctx.world, here, placeOfEntity(ctx.state, id)) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id))
-            continue;
-          if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id))
-            continue;
-          const life = povLife(ctx.world, ctx.state, id);
-          const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
-          lines.push(life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
-          const regard = life && !life.acts ? null : voice?.(ctx, id) ?? null;
-          if (regard)
-            lines.push(regard);
-        }
-        return lines;
-      }
-    });
-    r.renderer({ slot: "people", hint: true, render: usualRoutineHints });
+    r.renderer({ slot: "people", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
+    r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
     r.renderer({ slot: "stance", render: stanceLines });
-    r.renderer({ slot: "stance", hint: true, render: stanceCues });
+    r.renderer({ slot: "stance", source: "cues", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
     r.lint({
       code: "castlife.birthday",
@@ -28331,6 +28454,7 @@ var sheetsPack = {
     });
     r.renderer({
       slot: "outcome",
+      source: "conditions",
       render(ctx) {
         const conditions = activeConditions(ctx, ctx.world.pov);
         return conditions.length > 0 ? [`You are ${conditions.map((c) => c.label.toLowerCase()).join(", ")}.`] : [];
@@ -30330,8 +30454,8 @@ function namedIn(name, said2) {
   if (own2.length === 0 || said2.length === 0)
     return false;
   const whole4 = own2.join(" ");
-  const joined2 = ` ${said2.join(" ")} `;
-  if (joined2.includes(` ${whole4} `))
+  const joined3 = ` ${said2.join(" ")} `;
+  if (joined3.includes(` ${whole4} `))
     return true;
   const present2 = new Set(said2);
   return own2.some((w) => w.length >= 3 && !NAME_FILLER[w] && present2.has(w));

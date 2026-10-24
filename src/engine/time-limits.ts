@@ -3,7 +3,7 @@
 // world document, an imported ledger or an intent can never ask for an unbounded run.
 
 import type { Level } from "../shared/ids";
-import { SPEED_THRESHOLD_MINUTES } from "../shared/settings";
+import { SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "../shared/settings";
 import { MINUTES_PER_DAY } from "./calendar";
 
 export const TIME_LIMITS = Object.freeze({
@@ -12,7 +12,7 @@ export const TIME_LIMITS = Object.freeze({
   /** The time scale's range (it applies to ticks only). */
   scale: [0.25, 10] as const,
   /** The farthest a timelapse may reach from now; Continue-timelapse segments stay inside it. */
-  timelapseMinutes: 366 * MINUTES_PER_DAY,
+  timelapseMinutes: TIMELAPSE_REACH_MINUTES,
   /** The unit cap's ceiling per segment: the default cap. */
   unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
   /** A Speed-through threshold's range, in minutes. */

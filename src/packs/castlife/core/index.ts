@@ -27,14 +27,14 @@ import type { EntityId, PlaceId, TierId } from "../../../shared/ids";
 import { facetsInOrder, facetTree } from "../../../shared/classes";
 import { MINDS_EVENTS } from "../../../shared/minds";
 import { tierLabel, tierOf, tiersInOrder } from "../../../shared/tiers";
-import type { FacetId, FacetValueId, ScheduleDef, WorldDoc } from "../../../shared/world";
+import type { FacetId, FacetValueId, FeedScope, ScheduleDef, WorldDoc } from "../../../shared/world";
 import { initialState, minutesBetween } from "../../../engine/world-state";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, formatTimeOfDay, MINUTES_PER_DAY, parseHHMM } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sliceOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
-import type { AgentInstant, EventTypeDef, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
+import type { AgentInstant, EventTypeDef, FeedLine, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { PlayerBlock, RoutineEditOp, RoutineSociability, SkipBlock } from "../../../shared/routines";
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
 import { createRng, type Rng } from "../../../engine/rng";
@@ -1343,6 +1343,51 @@ export function stanceCues(ctx: ReadContext): string[] {
   });
 }
 
+/**
+ * The People section (DESIGN §6.6, §6.11): the POV by name with its pressing needs, then each person
+ * with it that it can see, what they are doing as it may see it and how they regard it. In `scene`
+ * scope, also someone here the POV can't see whom another person here knows, marked with who; in
+ * `gm`, someone here no one the POV can see knows of, marked as the GM's.
+ */
+export function peopleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
+  const pov = ctx.world.pov;
+  const see = (who: EntityId, id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
+  // The POV leads, by name, so the narrator knows who "you" is, with the needs pressing on it.
+  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
+  const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
+  const lines: FeedLine[] = [{ text: urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`, known: "pov" }];
+  const here = placeOfEntity(ctx.state, pov);
+  const voice = optionalQuery(ctx, "relationships.voice");
+  const present = Object.keys(ctx.state.entities)
+    .sort()
+    .filter((id) => {
+      const e = own(ctx.state.entities, id);
+      return !!e && id !== pov && together(ctx.world, here, placeOfEntity(ctx.state, id)) && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, id);
+    });
+  for (const id of present) {
+    const e = own(ctx.state.entities, id);
+    if (!e) continue;
+    if (!see(pov, id)) {
+      // The narrator is told only who the POV can see, unless the scope asks for more, marked.
+      if (scope === "player") continue;
+      const knowers = present.filter((k) => k !== id && see(pov, k) && see(k, id)).map((k) => own(ctx.state.entities, k)?.name ?? k);
+      const act = typeof e.fields.activity === "string" && e.fields.activity !== "idle" ? ` (${e.fields.activity.replace(/_/g, " ")})` : "";
+      if (knowers.length > 0) lines.push({ text: `${e.name}${act} is here.`, known: "scene", who: knowers.join(", ") });
+      else if (scope === "gm") lines.push({ text: `${e.name}${act} is here.`, known: "gm" });
+      continue;
+    }
+    // What they are doing is a field: told only when the POV may see it. A life state the POV
+    // knows reads instead ("lies dead"); one it doesn't know of is never told.
+    const life = povLife(ctx.world, ctx.state, id);
+    const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
+    lines.push({ text: life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`, known: "pov" });
+    // How they regard the POV follows them; a body the POV knows of holds no regard to voice.
+    const regard = life && !life.acts ? null : (voice?.(ctx, id) ?? null);
+    if (regard) lines.push({ text: regard, known: "pov" });
+  }
+  return lines;
+}
+
 declare module "../../../engine/registry" {
   interface ServiceMap {
     /** The GM's routine controls (DESIGN §8): a character's follow setting, one block of their routine and one of their schedules in this chat, as events. */
@@ -1445,39 +1490,13 @@ export const castlifePack: PackDef = {
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
 
-    r.renderer({
-      slot: "people",
-      render(ctx) {
-        const pov = ctx.world.pov;
-        // The POV leads, by name, so the narrator knows who "you" is, with the needs pressing on it.
-        const urgent = ctx.levelOf(pov, "castlife") >= 4 ? Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label) : [];
-        const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
-        const lines: string[] = [urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`];
-        const here = placeOfEntity(ctx.state, pov);
-        const voice = optionalQuery(ctx, "relationships.voice");
-        for (const id of Object.keys(ctx.state.entities).sort()) {
-          const e = own(ctx.state.entities, id);
-          if (!e || id === pov || !together(ctx.world, here, placeOfEntity(ctx.state, id)) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id)) continue;
-          // The narrator is told only who the POV can see: a secret or unknown person stays out of the prose.
-          if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) continue;
-          // What they are doing is a field: told only when the POV may see it. A life state the POV
-          // knows reads instead ("lies dead"); one it doesn't know of is never told.
-          const life = povLife(ctx.world, ctx.state, id);
-          const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
-          lines.push(life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
-          // How they regard the POV follows them; a body the POV knows of holds no regard to voice.
-          const regard = life && !life.acts ? null : (voice?.(ctx, id) ?? null);
-          if (regard) lines.push(regard);
-        }
-        return lines;
-      },
-    });
+    r.renderer({ slot: "people", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
     // Their usual routine as background the narrator may use or ignore (DESIGN §6.6): a hint, so it
     // rides last on the budget and stays out of the helpers' facts.
-    r.renderer({ slot: "people", hint: true, render: usualRoutineHints });
+    r.renderer({ slot: "people", source: "routines", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) as unknown as JsonValue });
     r.renderer({ slot: "stance", render: stanceLines });
-    r.renderer({ slot: "stance", hint: true, render: stanceCues });
+    r.renderer({ slot: "stance", source: "cues", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
     // A birthday the planner can't read is no occasion: say so where it is written.
     r.lint({

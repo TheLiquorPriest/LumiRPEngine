@@ -47,7 +47,7 @@ import { pinBooks, pinEntries, pinViews } from "./lore-pins";
 import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, declineNote, playerReason, readRun, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
-import { applyProposals, TIME_ADVANCE_CAP } from "./turn-model";
+import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
 import { recentLines, TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
@@ -945,7 +945,7 @@ export class Dispatcher {
           // A narrated time skip applies as it would have automatically (DESIGN §9.4): whole, with its
           // catch-up, from the clock the head stands at now, or not at all; never while a fight holds
           // the clock, which may have started since the chip was offered.
-          const advance = applyTimeAdvance(this.rt.registry, w, typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: this.runSeedOf(chatId), capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+          const advance = applyTimeAdvance(this.rt.registry, w, typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: this.runSeedOf(chatId), capMinutes: (await this.rt.settings.get(userId)).time.askBeyondMinutes, unitCap: w.state.time.unitCap });
           if (!advance.applied) throw new RequestError("validation", advance.reason === "unit_cap" ? "too much happens in between to run it inside the turn" : advance.reason === "in_fight" ? `${IN_FIGHT}, and its rounds take no clock time` : "the time skip no longer applies");
           events = [...w.events];
         } else {

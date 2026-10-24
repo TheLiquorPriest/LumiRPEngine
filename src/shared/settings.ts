@@ -185,6 +185,10 @@ export const SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"] as 
 export const SPEED_DEFAULT: Readonly<{ mode: "offer" | "auto"; thresholdMinutes: number }> = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 /** A Speed-through threshold's range in whole minutes, 1 minute to 7 days (DESIGN §9.2): what Settings keeps, the controls offer and the engine reads. */
 export const SPEED_THRESHOLD_MINUTES = [1, 7 * 1440] as const;
+/** The farthest a timelapse reaches from now, 366 days in minutes (DESIGN §9.2): the engine's hard maximum, and the most a skip can run without asking. */
+export const TIMELAPSE_REACH_MINUTES = 366 * 1440;
+/** How long a skip runs without asking unless the user sets otherwise (`TimeSettings.askBeyondMinutes`): a day. */
+export const ASK_BEYOND_DEFAULT = 1440;
 
 /** A phase's model calls; how long the phase may take is a timeout (`TimeoutSettings`), apart from any preset. */
 export interface PhaseBudget {
@@ -217,6 +221,12 @@ export interface TimeSettings {
   speedThrough: Record<string, { mode: "offer" | "auto"; thresholdMinutes: number }>;
   montage: "key" | "day" | "week";
   unitCap: { agentDays: number; events: number };
+  /**
+   * How long a skip runs without asking (DESIGN §9.2, §9.4), in whole minutes from 0 to the
+   * timelapse's reach: a typed span or a narrated jump longer than this is offered as a Timelapse
+   * chip instead. Unlike the rest, it isn't a seed for new chats: every chat reads it as it plays.
+   */
+  askBeyondMinutes: number;
 }
 
 /** Extraction proposal types with a per-type mode (DESIGN §9.4, §11). */
