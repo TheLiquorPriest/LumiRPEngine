@@ -229,7 +229,8 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 | `castlife.decide` | `key`, `choice` |
 | `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |
 | `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |
-| `castlife.satisfy` | `need`, `entity?` |
+| `castlife.satisfy` | `need`, `entity?`, `minutes?` |
+| `castlife.to_bed` | `entity?` |
 
 ### Formula functions
 
@@ -242,9 +243,9 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
 | `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |
-| `eat` | Eat | Have a meal or a snack. |  |  | `default` | `30` | eat, have lunch, have dinner, grab a bite |
-| `rest` | Rest | Rest or relax for a while. |  |  | `default` | `30` | rest, relax, take a break |
-| `sleep` | Go to bed | Go to bed and sleep until morning. |  |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |
+| `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |
+| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | rest, relax, take a break |
+| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |
 
 ### Events
 
@@ -258,7 +259,7 @@ Its own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlif
 
 ### Panels and slots
 
-Panels: `castlife.cast`. Slots it writes: `people`, `stance`.
+Panels: `castlife.cast`, `castlife.needs`. Slots it writes: `people`, `stance`.
 
 ### Simulation
 
@@ -270,7 +271,7 @@ Panels: `castlife.cast`. Slots it writes: `people`, `stance`.
 
 ### Lint codes
 
-`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.routines`.
+`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.needs`, `castlife.routines`.
 
 ## Combat pack (`combat`)
 
@@ -892,7 +893,7 @@ No fields of its own.
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person` |  | `default` | `15` | chat with, talk to, catch up with |
+| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person`, `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 15` | chat with, talk to, catch up with |
 | `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default` | `5` | give a gift, surprise |
 
 ### Events
@@ -965,6 +966,7 @@ Extends `thing`.
 | `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |
 | `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |
 | `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |
+| `bed` | Bed (a place or an item) | ref |  |  |  |  | live from castlife 1 |
 | `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |
 | `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |
 | `chores` | Chores | list |  |  |  |  | live from castlife 3 |
