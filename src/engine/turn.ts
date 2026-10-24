@@ -17,12 +17,13 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hashParts } from "../shared/hash";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent, TimelapseTarget } from "../shared/ledger";
+import type { WorldDoc } from "../shared/world";
 import type { Judgement } from "./adjudication";
 import { outline } from "./beats";
 import { ENGINE_EVENTS, signalOf } from "./engine-pack";
 import { materializeAll } from "./materialize";
 import type { Registry } from "./registry-impl";
-import { resolveAction, type Resolution } from "./resolve";
+import { findAction, resolveAction, type Resolution } from "./resolve";
 import { resolveTry, TRY_ACTION } from "./inferred";
 import { createRng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick } from "./rules";
@@ -31,6 +32,7 @@ import { isGone, placeOfEntity } from "./scope";
 import { advance, catchUp, coarsen, interruptPolicy } from "./simulate";
 import type { Claim, InterpretOutput, PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
 import { buildMontage, fightHoldsClock, IN_FIGHT, pauseBookkeeping, parseOverrides, parseTarget, replaySkip, runTimelapse, sceneKey, speedThrough, turnElapsed, type Montage, type TimelapseOptions, type TimelapseOutcome } from "./time";
+import { TIME_LIMITS } from "./time-limits";
 import { stepTracks } from "./tracks";
 import { signalVisible } from "./visibility";
 import { Working } from "./working";
@@ -41,9 +43,10 @@ export const TIMELAPSE_ACTION = "timelapse";
 export const AGENTS_PER_TURN = 4;
 export const TURN_AGENT_DAYS = 30;
 
+/** `povRoutine` false: the timelapse holds the POV where the story has it (`TimelapseOptions.povRoutine`). */
 export type TurnChip =
-  | { kind: "timelapse_offer"; activity: string; target: TimelapseTarget; remaining: number }
-  | { kind: "continue_timelapse"; target: TimelapseTarget; remaining: number };
+  | { kind: "timelapse_offer"; activity: string; target: TimelapseTarget; remaining: number; povRoutine?: false }
+  | { kind: "continue_timelapse"; target: TimelapseTarget; remaining: number; povRoutine?: false };
 
 /** Why a turn's action queue stopped before its last action (DESIGN §11). */
 export type QueueStop = "check" | "failure" | "interruption";
@@ -75,6 +78,18 @@ interface TurnStep {
   params: JsonObject;
   judgement: Judgement | null;
   claim: Claim | null;
+}
+
+/**
+ * Whether the player's own words gave the action its length: a `duration` param it was given, which
+ * interpret fills only from a length the input states (DESIGN §8), so the span is theirs to spend.
+ */
+function statedSpan(reg: Registry, world: WorldDoc, step: TurnStep | null): boolean {
+  const def = step ? findAction(reg, world, step.action) : undefined;
+  return Object.entries(def?.params ?? {}).some(([name, p]) => {
+    const given = step?.params[name];
+    return p.type === "duration" && typeof given === "number" && given > 0;
+  });
 }
 
 /**
@@ -220,14 +235,25 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
       if (act && elapsed && elapsed.source !== "paused" && !fighting) {
         const remaining = act.until - w.state.clock;
         const mode = speedThrough(w.state, act.type, remaining);
+        // A span the player's own words gave the action ("sleep for eight hours") is theirs to spend
+        // (DESIGN §8): the policy carries all of it past the action's own time.
+        const stated = statedSpan(reg, w.world, step);
         if (mode !== "elapse") {
           speeding = true;
           const until: TimelapseTarget = { type: "at", at: act.until };
+          // Its Timelapse holds the POV in it to its end, as a typed out-of-character span does, so its
+          // routine doesn't wake a daytime sleeper for dinner. Going to bed for the night follows the routine.
+          const hold = stated ? { povRoutine: false as const } : {};
+          const offer: TurnChip = { kind: "timelapse_offer", activity: act.type, target: until, remaining, ...hold };
           if (mode === "auto") {
-            const outcome = runTimelapse(reg, w, until, { runSeed: input.runSeed });
-            if ("code" in outcome) chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
+            const outcome = runTimelapse(reg, w, until, { runSeed: input.runSeed, ...hold });
+            if ("code" in outcome) chips.push(offer);
             else timelapse = outcome;
-          } else chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
+          } else chips.push(offer);
+        } else if (stated && remaining > 0) {
+          // Under its threshold, or with no policy, the rest passes within the turn (DESIGN §9.2):
+          // "sleep for 20 minutes" is a 20-minute turn though going to bed takes five.
+          advance(reg, w, Math.min(act.until, w.state.clock + TIME_LIMITS.timelapseMinutes), { runSeed: input.runSeed, mode: "turn", cause: "action" });
         }
       }
       const left = steps.length - 1 - i;

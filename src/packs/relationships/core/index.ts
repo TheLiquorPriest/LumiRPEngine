@@ -28,7 +28,7 @@ import type { EventTypeDef, PackDef, ReadContext, Rejection } from "../../../eng
 import { bandOf } from "../../../engine/scope";
 import { GROUP_KIND, MEMBER_OF, membersOf } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
-import { STATED_MINUTES } from "../../../shared/needs";
+import { CONVERSATION, STATED_MINUTES } from "../../../shared/needs";
 
 export interface Axis {
   id: string;
@@ -74,8 +74,6 @@ const HISTORY = 8;
 export const REGARD_CHANNEL_CAP = 10;
 /** A chat's time: the stated length, else a quarter of an hour. */
 const CHAT_FOR = "minutes > 0 ? minutes : 15";
-/** The appraisal a chat makes, and the `why` of its regard: what other packs read the chat by (Cast life's company). */
-export const CONVERSATION = "conversation";
 
 export type AppraiseService = (ctx: ReadContext, from: EntityId, to: EntityId, appraisal: string | Record<string, number>, why?: string, mutual?: boolean) => LedgerEvent[];
 

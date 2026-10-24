@@ -414,10 +414,12 @@ export interface TimelapseOutcome {
   /** Minutes left to the target when the unit cap or the before-the-reply clock ended the segment. */
   remaining: number;
   /** A Continue-timelapse chip when the cap or the before-the-reply clock ended the segment early. */
-  chip: { kind: "continue_timelapse"; target: TimelapseTarget; remaining: number } | null;
+  chip: { kind: "continue_timelapse"; target: TimelapseTarget; remaining: number; povRoutine?: false } | null;
   montage: Montage;
   /** With a mind's stop (DESIGN §24.7): the character's name when the POV knows them; null words it as someone. */
   mindName?: string | null;
+  /** False when the run held the POV where the story has it (`TimelapseOptions.povRoutine`): its Continue holds it too. */
+  povRoutine?: false;
 }
 
 /**
@@ -545,14 +547,16 @@ export class TimelapseRun {
     w.apply(summary);
     const remaining = result.stop === "cap" ? Math.max(0, this.to - result.to) : 0;
     const montage = buildMontage(this.reg, w.world, this.before, w.state, w.events.slice(this.start), w.state.time.montage);
+    const held = this.opts.povRoutine === false ? { povRoutine: false as const } : {};
     return {
       ok: true,
       result,
       summary,
       remaining,
-      chip: remaining > 0 ? { kind: "continue_timelapse", target: this.target.type === "duration" ? { type: "duration", minutes: remaining } : this.target, remaining } : null,
+      chip: remaining > 0 ? { kind: "continue_timelapse", target: this.target.type === "duration" ? { type: "duration", minutes: remaining } : this.target, remaining, ...held } : null,
       montage,
       ...(stop?.by === "mind" ? { mindName: playerKnows(this.reg, w.world, w.state, w.world.pov, stop.entity) ? (own(w.state.entities, stop.entity)?.name ?? null) : null } : {}),
+      ...held,
     };
   }
 }

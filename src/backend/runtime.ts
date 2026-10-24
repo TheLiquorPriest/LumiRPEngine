@@ -2010,13 +2010,14 @@ export class Runtime implements TurnHooks {
     await this.ageNotes(input.chatId, input.userId, input.messageId);
     const headState = input.core.fold(input.observed).state;
     const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
-    // A span the player's words spent held the POV where the story has it; its Continue keeps that (DESIGN §8).
-    const hold: JsonObject = bridge.intentOf(userText)?.params.povRoutine === false ? { povRoutine: false } : {};
+    // A span the player's words spent held the POV where the story has it, typed as one or stated to an
+    // action the turn sped through ("sleep for eight hours"); its Speed through and Continue keep that (DESIGN §8).
+    const hold: JsonObject = bridge.intentOf(userText)?.params.povRoutine === false || plan?.timelapse?.povRoutine === false ? { povRoutine: false } : {};
     for (const [i, chip] of (plan?.chips ?? []).entries()) {
       // DESIGN §9.2 wording: "Timelapse to 07:00 (8 h 55 min)?"
       const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(chipWorld, headState, chip.target.at)}` : "";
       const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(chip.remaining)})?` : `Continue timelapse (${compactSpan(chip.remaining)} left)`;
-      stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue, ...(chip.kind === "continue_timelapse" ? hold : {}) } });
+      stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue, ...(chip.povRoutine === false ? { povRoutine: false } : chip.kind === "continue_timelapse" ? hold : {}) } });
     }
     // A typed timelapse longer than a turn runs on its own: offered, never run unasked. Time the
     // message lets pass after its actions isn't offered while some of them are left to play.
