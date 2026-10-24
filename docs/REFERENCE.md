@@ -223,6 +223,7 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 
 | Effect | Arguments |
 |---|---|
+| `castlife.book_invitation` | `host` |
 | `castlife.decide` | `key`, `choice` |
 | `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |
 | `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |
