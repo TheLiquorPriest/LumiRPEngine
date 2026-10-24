@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
-import { planSkip } from "../../src/backend/skip-plan";
+import { planSkip, skipPlanSystem } from "../../src/backend/skip-plan";
 import { SKIP_PLAN_ANSWER } from "../../src/shared/skip-plan";
 import { CallMeter, Steps } from "../../src/backend/steps";
 import { calendarOf, clockOfStamp, formatStamp } from "../../src/engine/calendar";
@@ -25,6 +25,7 @@ import { Rig } from "../support/rig";
 import { held, pin, whereabouts } from "../packs/castlife/town";
 import { skipLifeOf } from "../../src/packs/castlife/core/routines";
 import { livesPlans } from "../../src/packs/castlife/core/commitments";
+import { modernUsWorld } from "../packs/riverton";
 
 const reg = createRegistry(ALL_PACKS);
 const INTERPRET_MARK = "You map a player's typed input";
@@ -322,5 +323,19 @@ describe("how the skip plan asks", () => {
     expect(typeof note).toBe("string");
     expect(String(note)).toContain("1 of 2");
     expect(String(note)).not.toContain("Marcus");
+  });
+});
+
+describe("the user's skip-plan prompt", () => {
+  test("its {{place}} is the place as the player character knows it, never a secret place's real name", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const world = modernUsWorld("w", "R");
+    world.places.vault = { id: "vault", name: "Vault of Sorrows", parent: "riverton", visibility: "secret", fields: {} };
+    const you = world.entities.you;
+    if (you) you.fields.place = "vault";
+    world.start.place = "vault";
+    const state = new Working(reg, world, startState(world, reg)).state;
+    const system = skipPlanSystem(reg, world, state, state.clock, { template: "Plan the skip for {{pov}}, who is at {{place}}." });
+    expect(system).not.toContain("Vault of Sorrows");
   });
 });

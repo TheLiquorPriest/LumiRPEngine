@@ -105,7 +105,8 @@ export interface MergeAdjustment {
 export function mergeAdjusted(patch: JsonValue, after: JsonValue): MergeAdjustment[] {
   return mergeLeaves(patch).flatMap(({ tokens, value }) => {
     const now = getAt(after, tokens);
-    return (value === null ? now === undefined : jsonEqual(now, value)) ? [] : [{ pointer: pointerOf(tokens), sent: value, now }];
+    // A null deletes in a merge patch, but a reader may keep it as null (a step's "use the helper's" connection): both are what was sent.
+    return (value === null ? now === undefined || now === null : jsonEqual(now, value)) ? [] : [{ pointer: pointerOf(tokens), sent: value, now }];
   });
 }
 

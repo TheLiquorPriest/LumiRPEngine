@@ -16,9 +16,9 @@ import type { WorldDoc } from "../shared/world";
 import { SKIP_PLAN_ANSWER, SKIP_PLAN_PROMPT } from "../shared/skip-plan";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
-import { unrevealedSecrets } from "../engine/visibility";
+import { povPlace, unrevealedSecrets } from "../engine/visibility";
 import type { Registry } from "../engine/registry-impl";
-import { isGone, kindIs, placeOfEntity } from "../engine/scope";
+import { isGone, kindIs } from "../engine/scope";
 import { pinsFor } from "../engine/lore-pins";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
@@ -47,8 +47,8 @@ const REPLY_CAP = 2_000;
 export function skipPlanSystem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, from: number, config: Pick<StepConfig, "template"> | null): string {
   const mine = config?.template ?? "";
   if (mine.trim() === "") return `${SKIP_PLAN_PROMPT}\n${SKIP_PLAN_ANSWER}`;
-  const here = placeOfEntity(state, world.pov);
-  const vars = safeVars({ world: world.name, pov: own(state.entities, world.pov)?.name ?? world.pov, place: here ? (own(world.places, here)?.name ?? here) : "", clock: formatClock(calendarOf(world), from) }, unrevealedSecrets(reg, world, state));
+  // The place as the player character knows it: a secret place's real name never reaches the prompt.
+  const vars = safeVars({ world: world.name, pov: own(state.entities, world.pov)?.name ?? world.pov, place: povPlace(reg, world, state)?.name ?? "", clock: formatClock(calendarOf(world), from) }, unrevealedSecrets(reg, world, state));
   return `${renderTemplate(mine, vars)}\n${SKIP_PLAN_ANSWER}`;
 }
 

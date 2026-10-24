@@ -5,7 +5,10 @@
 import { describe, expect, test } from "bun:test";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { noFacts, runsOf } from "../../src/backend/turn-steps";
-import type { ModelUseSettings } from "../../src/shared/settings";
+import { stepUpdatePatch } from "../../src/frontend/settings/steps";
+import type { JsonValue } from "../../src/shared/json";
+import { mergeAdjusted } from "../../src/shared/json-patch";
+import { stepConfigOf, type ModelUseSettings } from "../../src/shared/settings";
 import { baseWorld } from "../packs/support";
 import { Rig } from "../support/rig";
 
@@ -76,5 +79,38 @@ describe("Settings → Caveats' pre-flight", () => {
     expect(await codes()).toContain("step_model_missing");
     rig.body(await rig.send({ type: "lre.settings.set", patch: route("deleted", null) }));
     expect(await codes()).toContain("step_connection_missing");
+  });
+});
+
+describe("Settings → Caveats' pre-flight within the Preset check timeout", () => {
+  test("a connection whose models never come leaves its steps unchecked, not missing, asks it once, and Caveats answers in time", async () => {
+    const rig = new Rig();
+    rig.host.activeConnection = { id: "main", name: "Main" };
+    rig.host.connectionProfiles = [{ id: "slow", name: "Slow", models: ["big-1"] }];
+    let asked = 0;
+    rig.host.connections.models = () => {
+      asked++;
+      return Promise.withResolvers<string[] | null>().promise;
+    };
+    const on = { enabled: true, signals: ["always"], route: { provider: "helper", connectionId: "slow", model: "big-1" } };
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { timeouts: { caveatsMs: 50 } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { brief: on, outline: on } } } }));
+    const stalled = Promise.withResolvers<"stalled">();
+    const timer = setTimeout(() => stalled.resolve("stalled"), 2_000);
+    const answer = await Promise.race([rig.send({ type: "lre.settings.caveats" }).then((reply) => (rig.body(reply).caveats as { code: string }[]).map((c) => c.code)), stalled.promise]);
+    clearTimeout(timer);
+    expect(answer).toContain("step_model_unchecked");
+    expect(answer).not.toContain("step_model_missing");
+    expect(asked).toBe(1);
+  });
+});
+
+describe("Settings → Steps saves", () => {
+  test("changing a step reports nothing kept other than sent", async () => {
+    const rig = new Rig();
+    const card = stepConfigOf((await rig.rt.settings.get(rig.host.userId)).modelUse.steps, "extract");
+    const patch = stepUpdatePatch("extract", { ...card, enabled: !card.enabled });
+    const saved = rig.body(await rig.send({ type: "lre.settings.set", patch }));
+    expect(mergeAdjusted(patch, saved.settings as JsonValue)).toEqual([]);
   });
 });

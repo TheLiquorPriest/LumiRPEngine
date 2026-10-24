@@ -17,7 +17,7 @@ import type { ActionDef, AdjudicationDef, LoreEntryDef, SectionTemplate, StepPur
 import { formatMoney, offersAction } from "../shared/world";
 import { LORE_AUDIENCE } from "../shared/lore";
 import { isMindPurpose, MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEventData } from "../shared/minds";
-import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
+import { firedTimeout, TimeoutFired, TIMEOUTS, timerMs } from "../shared/timeouts";
 import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { planSkip } from "./skip-plan";
@@ -142,8 +142,8 @@ const READ_CHIP_KINDS: ReadonlySet<string> = new Set(["undo", "confirm", "declin
  * or above the real tokenizers); a larger count is ignored and the estimate stands in.
  */
 const TOKEN_COUNT_CAP = 4;
-/** How long Settings → Caveats waits on the preset lint's dry run before saying it's still running (the frontend gives a request 30 s). */
-const CAVEATS_WAIT_MS = 20_000;
+/** What Settings → Caveats' timer gives when the Preset check timeout (`caveatsMs`) fires first. */
+const LATE: unique symbol = Symbol("late");
 
 /** The chat's run as its metadata holds it (DESIGN §4.1), or null for a chat that plays no world. */
 export function readRun(meta: JsonObject): ChatRun | null {
@@ -2613,37 +2613,41 @@ export class Runtime implements TurnHooks {
    * The D32 preset lint (DESIGN §13) for Settings → Caveats: a dry run of the world chat the user has
    * open, else the one they last played; none when there is neither. A dry run is a whole prompt
    * assembly, which takes long on a long chat, so its finding is kept per chat, preset revision and
-   * settings revision, and the wait for it is bounded by `waitMs`: past that the answer says the check
-   * is still running, and the run carries on for the next ask. A failed run reads as a caveat too,
-   * and is run again on the next ask.
+   * settings revision. The answer waits at most the user's Preset check timeout (`caveatsMs`, or
+   * `waitMs`), one timer for the step pre-flight and the dry run: past it the answer says what is
+   * still being checked, and the dry run carries on for the next ask. A failed run reads as a caveat
+   * too, and is run again on the next ask.
    */
-  async presetCaveats(userId: UserId, waitMs = CAVEATS_WAIT_MS): Promise<PresetCaveat[]> {
-    // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1).
-    const host: PresetCaveat[] = [...(this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop" as const, message: CANNOT_STOP }]), ...(await this.stepCaveats(userId))];
-    const open = await this.host.chats.active(userId).catch(() => null);
-    const chatId = open && (await this.runOf(open, userId)) ? open : this.lastWorldChat.get(userId);
-    if (!chatId) return host;
-    const preset = (await this.presets.current(chatId, userId)).preset;
-    const key = `${userId}\u0000${chatId}\u0000${preset?.id ?? ""}\u0000${preset?.revision ?? ""}\u0000${this.settings.revision(userId)}`;
-    let run = this.caveatRuns.get(key);
-    if (!run) {
-      run = this.host
-        .dryRun(chatId, userId)
-        .then((assembly) => this.lintOf(chatId, assembly, userId))
-        .catch((error: unknown): PresetCaveat[] => {
-          const message = error instanceof Error ? error.message : String(error);
-          this.host.log("warn", `[LumiRPEngine] preset lint: ${message}`, userId);
-          this.caveatRuns.delete(key);
-          return [{ code: "preset_lint_failed", message: `The preset check couldn't build a test prompt for this chat (${message.slice(0, 200)}), so its warnings aren't known. Open Caveats again to retry.` }];
-        });
-      lruSet(this.caveatRuns, key, run, 64);
-    }
-    const pending = Promise.withResolvers<PresetCaveat[]>();
-    const timer = setTimeout(() => pending.resolve([{ code: "preset_lint_pending", message: "The preset check is still building a test prompt for this chat, which takes a while on a long chat. Open Caveats again in a moment." }]), waitMs);
+  async presetCaveats(userId: UserId, waitMs?: number): Promise<PresetCaveat[]> {
+    const settings = await this.settings.get(userId);
+    const ms = waitMs ?? timerMs(settings.timeouts.caveatsMs);
+    const late = Promise.withResolvers<typeof LATE>();
+    const timer = ms === null ? null : setTimeout(() => late.resolve(LATE), ms);
     try {
-      return [...host, ...(await Promise.race([run, pending.promise]))];
+      // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1).
+      const host: PresetCaveat[] = [...(this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop" as const, message: CANNOT_STOP }]), ...(await this.stepCaveats(userId, settings, late.promise))];
+      const open = await this.host.chats.active(userId).catch(() => null);
+      const chatId = open && (await this.runOf(open, userId)) ? open : this.lastWorldChat.get(userId);
+      if (!chatId) return host;
+      const preset = (await this.presets.current(chatId, userId)).preset;
+      const key = `${userId}\u0000${chatId}\u0000${preset?.id ?? ""}\u0000${preset?.revision ?? ""}\u0000${this.settings.revision(userId)}`;
+      let run = this.caveatRuns.get(key);
+      if (!run) {
+        run = this.host
+          .dryRun(chatId, userId)
+          .then((assembly) => this.lintOf(chatId, assembly, userId))
+          .catch((error: unknown): PresetCaveat[] => {
+            const message = error instanceof Error ? error.message : String(error);
+            this.host.log("warn", `[LumiRPEngine] preset lint: ${message}`, userId);
+            this.caveatRuns.delete(key);
+            return [{ code: "preset_lint_failed", message: `The preset check couldn't build a test prompt for this chat (${message.slice(0, 200)}), so its warnings aren't known. Open Caveats again to retry.` }];
+          });
+        lruSet(this.caveatRuns, key, run, 64);
+      }
+      const pending: PresetCaveat[] = [{ code: "preset_lint_pending", message: "The preset check is still building a test prompt for this chat, which takes a while on a long chat. Open Caveats again in a moment." }];
+      return [...host, ...(await Promise.race([run, late.promise.then(() => pending)]))];
     } finally {
-      clearTimeout(timer);
+      clearTimeout(timer ?? undefined);
     }
   }
 
@@ -2651,34 +2655,51 @@ export class Runtime implements TurnHooks {
    * Caveats' pre-flight (DESIGN §5.3): the helper model's connection and every enabled step's own
    * name a connection the user has (a Decision step's, a Decisions API one), and its model one that
    * connection lists, since either gone fails the turn's call. A list the host can't give says
-   * nothing; neither does a model list a provider doesn't answer.
+   * nothing; neither does a model list a provider doesn't answer. Each connection's models are asked
+   * once, side by side, until `late`: a list still coming then leaves its steps unchecked, never missing.
    */
-  private async stepCaveats(userId: UserId): Promise<PresetCaveat[]> {
-    const settings = await this.settings.get(userId);
-    const [helpers, decisions] = await Promise.all([this.host.connections.list(userId).catch(() => null), this.host.connections.decisionList(userId).catch(() => null)]);
+  private async stepCaveats(userId: UserId, settings: UserSettings, late: Promise<typeof LATE>): Promise<PresetCaveat[]> {
+    const named = [
+      { label: "Helper model", connectionId: settings.helper.connectionId, model: settings.helper.model, decision: false },
+      ...(Object.keys(STEP_NAME) as StepPurpose[]).flatMap((purpose) => {
+        const config = stepConfigOf(settings.modelUse.steps, purpose);
+        return config.enabled && config.route ? [{ label: STEP_NAME[purpose], connectionId: config.route.connectionId, model: config.route.model, decision: config.route.provider === "decision" }] : [];
+      }),
+    ].filter((n): n is typeof n & { connectionId: string } => n.connectionId !== null);
+    const lists = await Promise.race([Promise.all([this.host.connections.list(userId).catch(() => null), this.host.connections.decisionList(userId).catch(() => null)]), late]);
     const gone: string[] = [];
     const unlisted: string[] = [];
-    const check = async (label: string, connectionId: string | null, model: string | null, decision: boolean): Promise<void> => {
-      const list = decision ? decisions : helpers;
-      if (connectionId === null || list === null) return;
-      const connection = list.find((c) => c.id === connectionId);
-      if (!connection) {
-        gone.push(label);
-        return;
+    const unchecked: string[] = [];
+    if (lists === LATE) unchecked.push(...named.map((n) => n.label));
+    else {
+      const [helpers, decisions] = lists;
+      const lookups = new Map<string, Promise<string[] | null | typeof LATE>>();
+      const checks = named.flatMap((n) => {
+        const list = n.decision ? decisions : helpers;
+        if (list === null) return [];
+        const connection = list.find((c) => c.id === n.connectionId);
+        if (!connection) {
+          gone.push(n.label);
+          return [];
+        }
+        if (n.decision || n.model === null || n.model === "") return [];
+        let lookup = lookups.get(n.connectionId);
+        if (!lookup) {
+          lookup = Promise.race([this.host.connections.models(n.connectionId, userId).catch(() => null), late]);
+          lookups.set(n.connectionId, lookup);
+        }
+        return [{ ...n, model: n.model, connection: connection.name, lookup }];
+      });
+      for (const c of checks) {
+        const models = await c.lookup;
+        if (models === LATE) unchecked.push(c.label);
+        else if (models && !models.includes(c.model)) unlisted.push(`${c.label} (${c.model} on ${c.connection})`);
       }
-      if (decision || model === null || model === "") return;
-      const models = await this.host.connections.models(connectionId, userId);
-      if (models && !models.includes(model)) unlisted.push(`${label} (${model} on ${connection.name})`);
-    };
-    await check("Helper model", settings.helper.connectionId, settings.helper.model, false);
-    for (const purpose of Object.keys(STEP_NAME) as StepPurpose[]) {
-      const config = stepConfigOf(settings.modelUse.steps, purpose);
-      if (!config.enabled || !config.route) continue;
-      await check(STEP_NAME[purpose], config.route.connectionId, config.route.model, config.route.provider === "decision");
     }
     return [
       ...(gone.length > 0 ? [{ code: "step_connection_missing" as const, message: `These name a connection you no longer have, so their calls would fail the turn: ${gone.join(", ")}. Pick another in Settings → Steps and connections.` }] : []),
       ...(unlisted.length > 0 ? [{ code: "step_model_missing" as const, message: `These name a model their connection doesn't list, so their calls may fail the turn: ${unlisted.join(", ")}. Pick another in Settings → Steps and connections.` }] : []),
+      ...(unchecked.length > 0 ? [{ code: "step_model_unchecked" as const, message: `Their connections didn't answer within the Preset check timeout, so these weren't checked: ${unchecked.join(", ")}. Open Caveats again in a moment.` }] : []),
     ];
   }
 
