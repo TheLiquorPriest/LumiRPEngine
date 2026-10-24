@@ -7,6 +7,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { jsonEqual, mergeAdjusted } from "../shared/json-patch";
 import type { ResultBodies } from "../shared/protocol";
+import { TIMELAPSE_REACH_MINUTES } from "../shared/settings";
 import type { DiagRecord } from "../shared/diagnostics";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, ToolError } from "./args";
@@ -35,7 +36,7 @@ const SECTIONS: Readonly<Record<string, string>> = {
   overrideWorldDefaults: "Realism and Time: new chats use these settings over a world's own defaults.",
   adjudication: 'Checks for new chats (preset "narrative", "balanced", "crunchy" or "custom"; checks, riskyAt, trivialAt, impossibleAt, description, authority, closeBy, retry, retryAfter).',
   overrideWorldAdjudication: "Checks: new chats use these over a world's own adjudication.",
-  time: "Time for new chats: sceneTicks, scale, interrupts, speedThrough, montage, unitCap; and, for every chat, askBeyondMinutes: how long a typed or narrated skip runs without asking (whole minutes, 0 to 527040; longer becomes a Timelapse chip).",
+  time: `Time for new chats: sceneTicks, scale, interrupts, speedThrough, montage, unitCap; and, for every chat, askBeyondMinutes: how long a typed or narrated skip runs without asking (whole minutes, 0 to ${TIMELAPSE_REACH_MINUTES}; longer becomes a Timelapse chip).`,
   extraction: 'Changes from the reply: a pinned mode per change type ("auto", "confirm", "never", maxDelta); null unpins one, so learning decides it again.',
   swipeDefault: 'Swipes: what a swipe does ("rerun" or "renarrate").',
   hideJsonBlocks: "Preset: hide each reply's <json> block in world chats.",
