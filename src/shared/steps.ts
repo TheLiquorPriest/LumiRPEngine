@@ -52,6 +52,23 @@ export function hasRetiredSignal(signals: readonly string[]): boolean {
   return signals.some((s) => RETIRED_SIGNALS.has(s));
 }
 
+/** Each step by the name Settings and Build give it, and what Caveats' pre-flight calls it. */
+export const STEP_LABEL: Record<StepPurpose, string> = {
+  interpret: "Interpret typed input",
+  "npc.choose": "NPC choices",
+  contradiction: "Contradiction check",
+  "puzzle.answer": "Puzzle answers",
+  brief: "Scene brief",
+  outline: "Prose outline",
+  extract: "Extract changes",
+  choices: "Suggested choices",
+  judge: "Judge your approach",
+  mind: "Character minds",
+  memory: "Character memory",
+  skip: "Time-skip beats",
+  consolidate: "Memory consolidation",
+};
+
 /**
  * The engine placeholders a step template may use (all player-visible), and `character`, the name
  * of the character a minds step thinks for (DESIGN §24.5), empty in every other step.

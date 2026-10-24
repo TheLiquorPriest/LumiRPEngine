@@ -59,3 +59,22 @@ describe("the vars a prompted step reads", () => {
     expect(between("money", kept)).toContain("$85.00");
   });
 });
+
+// ---------------------------------------------------------------- Caveats' pre-flight
+
+describe("Settings → Caveats' pre-flight", () => {
+  test("a step on a deleted connection, or on a model its connection doesn't list, is flagged; one that exists isn't", async () => {
+    const rig = new Rig();
+    rig.host.activeConnection = { id: "main", name: "Main" };
+    rig.host.connectionProfiles = [{ id: "fast", name: "Fast", models: ["small-1", "small-2"] }];
+    const codes = async (): Promise<string[]> => (rig.body(await rig.send({ type: "lre.settings.caveats" })).caveats as { code: string }[]).map((c) => c.code);
+    const route = (connectionId: string, model: string | null) => ({ modelUse: { steps: { brief: { enabled: true, signals: ["always"], route: { provider: "helper", connectionId, model } } } } });
+    rig.body(await rig.send({ type: "lre.settings.set", patch: route("fast", "small-2") }));
+    expect(await codes()).not.toContain("step_connection_missing");
+    expect(await codes()).not.toContain("step_model_missing");
+    rig.body(await rig.send({ type: "lre.settings.set", patch: route("fast", "small-9") }));
+    expect(await codes()).toContain("step_model_missing");
+    rig.body(await rig.send({ type: "lre.settings.set", patch: route("deleted", null) }));
+    expect(await codes()).toContain("step_connection_missing");
+  });
+});

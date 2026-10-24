@@ -19,7 +19,7 @@ import { DEFAULT_RECENT, helperCallOf, JOB_SETTINGS_DEFAULTS, REASONING_CHOICES,
 import { LimitField, MindPromptEditor } from "./minds";
 import type { MindsSettings } from "../../shared/minds";
 import { SKIP_PLAN_PROMPT } from "../../shared/skip-plan";
-import { PROMPT_EFFECT, PROSE_PROMPTS } from "../../shared/steps";
+import { PROMPT_EFFECT, PROSE_PROMPTS, STEP_LABEL } from "../../shared/steps";
 import { PromptEditor } from "./prompt-editor";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
@@ -62,22 +62,6 @@ const LORE_TRANSPORT: { value: LoreTransport; label: string }[] = [
   { value: "tools", label: "Tools" },
   { value: "need", label: "Ask form" },
 ];
-
-export const STEP_LABEL: Record<StepPurpose, string> = {
-  interpret: "Interpret typed input",
-  "npc.choose": "NPC choices",
-  contradiction: "Contradiction check",
-  "puzzle.answer": "Puzzle answers",
-  brief: "Scene brief",
-  outline: "Prose outline",
-  extract: "Extract changes",
-  choices: "Suggested choices",
-  judge: "Judge your approach",
-  mind: "Character minds",
-  memory: "Character memory",
-  skip: "Time-skip beats",
-  consolidate: "Memory consolidation",
-};
 
 /** What each step does, in a line (docs/USER-GUIDE.md, The steps). */
 const STEP_PLAIN: Record<StepPurpose, string> = {

@@ -1355,6 +1355,9 @@ The same limit applies to the helper calls (reading typed text, reading replies,
 **Settings → Caveats says it's still checking.**
 Caveats checks your preset against the open chat with a test prompt build, which takes a while on a long chat. The page and its row on the Settings list say **Checking your preset…** until it answers; if the build is still running after 20 seconds, the page says so and the next visit picks up the answer, and if the build fails, the page says the preset's warnings aren't known. Settings itself never waits for it.
 
+**Settings → Caveats says a step's connection or model is gone.**
+Caveats checks the helper model's connection and every switched-on step's own connection and model before your preset: a connection you deleted in Lumiverse, or a model its connection no longer lists, would make that step's call fail and stop the turn. Pick another in **Settings → Steps and connections** (or **Helper model**). When Settings saves a value other than the one you gave (out of range, say), the page says what it kept.
+
 **The AI keeps writing a JSON block, or the replies look wrong.**
 Some presets contain a **JSON-ledger block**: a block that makes the narrator append a JSON object (gold, inventory) to its replies. It can confuse reasoning models, and it competes with the engine's own record of money and belongings. The world checker warns you if the active preset has one, and **Settings → Caveats** shows the warning too. Use a preset without that block for world chats.
 

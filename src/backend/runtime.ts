@@ -92,6 +92,8 @@ import { StudioBridge } from "./studio";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
 import { CANNOT_STOP, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
+// The steps by their Settings names, apart from the activity line's in-flight labels above.
+import { STEP_LABEL as STEP_NAME } from "../shared/steps";
 
 export interface RuntimeOptions {
   host: HostPort;
@@ -2448,7 +2450,7 @@ export class Runtime implements TurnHooks {
    */
   async presetCaveats(userId: UserId, waitMs = CAVEATS_WAIT_MS): Promise<PresetCaveat[]> {
     // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1).
-    const host: PresetCaveat[] = this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }];
+    const host: PresetCaveat[] = [...(this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop" as const, message: CANNOT_STOP }]), ...(await this.stepCaveats(userId))];
     const open = await this.host.chats.active(userId).catch(() => null);
     const chatId = open && (await this.runOf(open, userId)) ? open : this.lastWorldChat.get(userId);
     if (!chatId) return host;
@@ -2474,6 +2476,41 @@ export class Runtime implements TurnHooks {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Caveats' pre-flight (DESIGN §5.3): the helper model's connection and every enabled step's own
+   * name a connection the user has (a Decision step's, a Decisions API one), and its model one that
+   * connection lists, since either gone fails the turn's call. A list the host can't give says
+   * nothing; neither does a model list a provider doesn't answer.
+   */
+  private async stepCaveats(userId: UserId): Promise<PresetCaveat[]> {
+    const settings = await this.settings.get(userId);
+    const [helpers, decisions] = await Promise.all([this.host.connections.list(userId).catch(() => null), this.host.connections.decisionList(userId).catch(() => null)]);
+    const gone: string[] = [];
+    const unlisted: string[] = [];
+    const check = async (label: string, connectionId: string | null, model: string | null, decision: boolean): Promise<void> => {
+      const list = decision ? decisions : helpers;
+      if (connectionId === null || list === null) return;
+      const connection = list.find((c) => c.id === connectionId);
+      if (!connection) {
+        gone.push(label);
+        return;
+      }
+      if (decision || model === null || model === "") return;
+      const models = await this.host.connections.models(connectionId, userId);
+      if (models && !models.includes(model)) unlisted.push(`${label} (${model} on ${connection.name})`);
+    };
+    await check("Helper model", settings.helper.connectionId, settings.helper.model, false);
+    for (const purpose of Object.keys(STEP_NAME) as StepPurpose[]) {
+      const config = stepConfigOf(settings.modelUse.steps, purpose);
+      if (!config.enabled || !config.route) continue;
+      await check(STEP_NAME[purpose], config.route.connectionId, config.route.model, config.route.provider === "decision");
+    }
+    return [
+      ...(gone.length > 0 ? [{ code: "step_connection_missing" as const, message: `These name a connection you no longer have, so their calls would fail the turn: ${gone.join(", ")}. Pick another in Settings → Steps and connections.` }] : []),
+      ...(unlisted.length > 0 ? [{ code: "step_model_missing" as const, message: `These name a model their connection doesn't list, so their calls may fail the turn: ${unlisted.join(", ")}. Pick another in Settings → Steps and connections.` }] : []),
+    ];
   }
 
   private async lintOf(chatId: ChatId, assembly: DryRun, userId: UserId): Promise<PresetCaveat[]> {

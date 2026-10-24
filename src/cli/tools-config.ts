@@ -5,7 +5,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import { getAt, jsonEqual, pointerOf } from "../shared/json-patch";
+import { jsonEqual, mergeAdjusted } from "../shared/json-patch";
 import type { ResultBodies } from "../shared/protocol";
 import type { DiagRecord } from "../shared/diagnostics";
 import type { Args } from "./args";
@@ -75,14 +75,6 @@ async function settingsRead(args: Args, ctx: ToolContext): Promise<ToolResult> {
   return read.ok ? { text: read.text } : { text: read.text, isError: true };
 }
 
-/** The leaves of a merge patch, by JSON Pointer into the settings: what each says the setting becomes (null: deleted). */
-function leaves(patch: JsonValue, at: readonly string[] = []): { tokens: string[]; value: JsonValue }[] {
-  if (!isRecord(patch)) return [{ tokens: [...at], value: patch }];
-  const entries = Object.entries(patch);
-  // An empty object merges as nothing changing there, so it says nothing to check.
-  return entries.flatMap(([key, value]) => leaves(value as JsonValue, [...at, key]));
-}
-
 /** The patch with each named preset made Custom where it changes what that preset sets, and what that did. */
 function withCustom(patch: JsonObject): { patch: JsonObject; custom: string[] } {
   const out = structuredClone(patch);
@@ -115,11 +107,7 @@ async function settingsSet(args: Args, ctx: ToolContext): Promise<ToolResult> {
     const body = await live.conn.request("lre.settings.set", { patch });
     const after = { settings: body.settings as unknown as JsonValue, extractionModes: body.extraction as unknown as JsonValue };
     // What the backend made of the patch where it isn't what was sent: a value out of range, a preset's expansion, an unknown key.
-    const adjusted = leaves(patch).flatMap(({ tokens, value }) => {
-      const now = getAt(after.settings, tokens);
-      if (value === null ? now === undefined : jsonEqual(now, value)) return [];
-      return [{ pointer: pointerOf(tokens), sent: value, now: now ?? "(not set)" }];
-    });
+    const adjusted = mergeAdjusted(patch, after.settings).map((a) => ({ pointer: a.pointer, sent: a.sent, now: a.now ?? "(not set)" }));
     const changed = Object.keys(SECTIONS).filter((k) => !jsonEqual(before.settings[k], isRecord(after.settings) ? after.settings[k] : undefined));
     const values = Object.fromEntries(changed.map((k) => [k, isRecord(after.settings) ? (after.settings[k] ?? null) : null]));
     // The caveats read the preset and the chat with the settings now; the backend waits a bounded time for them.

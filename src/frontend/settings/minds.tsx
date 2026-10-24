@@ -12,7 +12,7 @@ import { Badge, Button, Disclosure, HostSwitch, NumberStepper, Section } from ".
 import { PromptEditor } from "./prompt-editor";
 import type { MemoryField } from "./minds-patch";
 import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsPolicyPatch, mindsPromptPatch, mindsReadPatch, withMemoryLevel } from "./minds-patch";
-import { STEP_LABEL } from "./steps";
+import { STEP_LABEL } from "../../shared/steps";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
 const PROMPT_NOTE: Record<MindPurpose, string> = {

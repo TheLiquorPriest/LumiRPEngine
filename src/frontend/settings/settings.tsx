@@ -8,7 +8,8 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { JsonObject } from "../../shared/json";
+import type { JsonObject, JsonValue } from "../../shared/json";
+import { mergeAdjusted, type MergeAdjustment } from "../../shared/json-patch";
 import type { SettingsResult } from "../../shared/protocol";
 import { EXTRACTION_TYPES, stepConfigOf } from "../../shared/settings";
 import type { AdjudicationPresetId, StepPurpose } from "../../shared/world";
@@ -22,7 +23,8 @@ import { ChecksPage, RealismPage, TimePage } from "./defaults";
 import { MindsSection } from "./minds";
 import { PresetPage } from "./preset";
 import { ExtractionPage, SwipesPage } from "./replies";
-import { type Connection, HelperSection, helperSummary, ModelUseSection, STEP_LABEL, StepsSection, useConnections } from "./steps";
+import { type Connection, HelperSection, helperSummary, ModelUseSection, StepsSection, useConnections } from "./steps";
+import { STEP_LABEL } from "../../shared/steps";
 import { limitText, TimeoutsSection } from "./timeouts";
 import { DiagnosticsPage } from "../diagnostics";
 import { McpServerPage } from "../agents";
@@ -189,6 +191,8 @@ export function Settings() {
   const [caveats, setCaveats] = useState<Caveat[] | null>(null);
   const caveatsAsked = useRef(0);
   const [busy, run] = useBusy();
+  const [adjusted, setAdjusted] = useState<MergeAdjustment[]>([]);
+  useEffect(() => setAdjusted([]), [page]);
   const root = useRef<HTMLDivElement>(null);
   // The page last opened from home, so Back returns focus to its row.
   const opener = useRef<Page | null>(null);
@@ -221,7 +225,10 @@ export function Settings() {
   const patch = (body: JsonObject) =>
     run(async () => {
       const result = await app.request({ type: "lre.settings.set", patch: body });
-      if (result) setData(result);
+      if (!result) return;
+      setData(result);
+      // What came out other than sent (a value out of range, of the wrong kind, a key it doesn't know), said here as the MCP tools say it.
+      setAdjusted(mergeAdjusted(body, result.settings as unknown as JsonValue));
     });
   if (!data) return failed ? <Empty icon="alert">Settings could not be loaded.</Empty> : <Empty>Loading settings…</Empty>;
   if (page === "home") {
@@ -284,6 +291,13 @@ export function Settings() {
       }}
     >
       <PageHeader title={PAGE[page].title} subtitle={PAGE[page].subtitle} onBack={() => go("home")} backLabel="Settings" />
+      {adjusted.length > 0 ? (
+        <Banner tone="info">
+          <span data-lre-settings-adjusted>
+            Saved, kept within what each setting takes: {adjusted.map((a) => `${a.pointer.slice(1).replace(/\//g, " → ")} is ${a.now === undefined ? "not set" : JSON.stringify(a.now)}, not ${JSON.stringify(a.sent)}`).join("; ")}.
+          </span>
+        </Banner>
+      ) : null}
       {body}
     </div>
   );
