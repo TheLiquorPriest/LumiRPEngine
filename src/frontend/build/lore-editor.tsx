@@ -19,7 +19,7 @@ import { Badge, Banner, Button, Empty, List, ListRow, PageHeader, SaveBar, Secti
 import { strings } from "../decode";
 import { Icon } from "../icons";
 import type { EditorProps } from "../registry";
-import { STEP_LABEL } from "../settings/steps";
+import { STEP_LABEL } from "../../shared/steps";
 import { useSelect } from "../store";
 import { deleteItem, go, ItemHeader, NewItem, newItemName } from "./chrome";
 import { CheckField, Issues } from "./form-kit";

@@ -357,7 +357,7 @@
         "life": { "$ref": "#/$defs/id", "description": "the life state it starts in; absent: alive" },
         "lifeKnownBy": { "$ref": "#/$defs/ids", "description": "who knows the life state it starts in, besides itself; everyone else takes it for alive. Absent or empty: everyone" },
         "characterId": { "type": "string" },
-        "visibility": { "$ref": "#/$defs/visibility" },
+        "visibility": { "enum": ["public", "known_by", "secret", "discoverable"], "description": "discoverable: hidden until the player character searches where it is or opens what holds it" },
         "knownBy": { "$ref": "#/$defs/selector" },
         "tags": { "$ref": "#/$defs/strings" },
         "class": { "type": "object", "description": "facet → values", "additionalProperties": { "$ref": "#/$defs/ids" } },
@@ -959,6 +959,11 @@
         "label": { "type": "string" },
         "rank": { "type": "number", "description": "lower ranks are kept first on the section budget" },
         "template": { "type": "string", "description": "may hold only the {{lines}} macro" },
+        "enabled": { "type": "boolean", "description": "false leaves the section out of the prompt; absent, on" },
+        "maxTokens": { "type": "integer", "minimum": 1, "description": "at most this many tokens of the section; lines past it are cut from the end" },
+        "maxLines": { "type": "integer", "minimum": 1, "description": "at most this many lines" },
+        "include": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "the renderer sources that fill it; absent, the renderers of its own slot" },
+        "scope": { "enum": ["player", "scene", "gm"], "description": "whose knowledge its facts come from: the player character's (default), also the people with him, or everything, each fact beyond his marked for the narrator" },
         "position": {
           "anyOf": [
             { "title": "{\"type\": \"native\"}", "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "enum": ["native"] } } },

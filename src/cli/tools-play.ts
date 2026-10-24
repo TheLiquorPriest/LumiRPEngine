@@ -19,7 +19,7 @@ import { chipRegenerates } from "../shared/state-view";
 import type { AdjudicationDef } from "../shared/world";
 import { TIME_CONTROLS } from "../engine/events";
 // The one limit on a GM edit's operations: the schemas take no more than the engine accepts.
-import { EDIT_OPS_MAX } from "../engine/edits";
+import { EDIT_OPS_MAX } from "../shared/protocol";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
 import type { RequestFields, RequestType } from "./connection";
@@ -426,7 +426,7 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_gm_edit",
     description:
-      'GM edits on the chat\'s latest message (GM view → Edit): the operations in order, all or none, as one edit with an Undo chip; locked fields are writable. Each names its op: set {entity, field, value}; add {entity, field, delta}; link {rel, from, to, fields?, until?}; unlink {rel, from, to}; move {entity, to: place}; put {entity, into: entity or null}; adjust {account, cents} (money in or out against a correction); stage {track, to}; entity {entity, tier?, agent?, levels?}; classify {entity, class, tags}; life {entity, to?, tell?}; spawn {kind, name, id?, tier?, place?, agent?}; despawn {entity}; restore {entity}; mind_pin, mind_refresh, mind_memory, mind_intent (as lre_mind_edit); effect {effect, args}. Ids come from lre_gm. Needs spoilers: true.',
+      'GM edits on the chat\'s latest message (GM view → Edit): the operations in order, all or none, as one edit with an Undo chip; locked fields are writable. Each names its op: set {entity, field, value}; add {entity, field, delta}; link {rel, from, to, fields?, until?}; unlink {rel, from, to}; move {entity, to: place}; put {entity, into: entity or null}; adjust {account, cents} (money in or out against a correction); stage {track, to}; entity {entity, tier?, agent?, levels?}; classify {entity, class, tags}; life {entity, to?, tell?}; spawn {kind, name, id?, tier?, place?, agent?}; despawn {entity}; restore {entity}; mind_pin, mind_refresh, mind_memory, mind_intent (as lre_mind_edit); effect {effect, args}; feed {section, to: {enabled?, maxTokens?, maxLines?, include?, scope?: "player", "scene" or "gm"} or null} sets a section\'s settings in this chat over the world\'s (null returns them). Ids come from lre_gm. Needs spoilers: true.',
     inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: EDIT_OPS_MAX, items: OPS_ITEM, description: 'The operations, applied in order: [{"op": "set", "entity": "pov", "field": "mood", "value": "calm"}].' } }, ["chatId", "spoilers", "ops"]),
     write: { destructive: true, idempotent: false },
     run: (args, ctx) => gmEdit(args, ctx, "lre_gm_edit"),

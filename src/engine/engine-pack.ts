@@ -26,6 +26,7 @@ import { classOf, classProblems, inClass, isMemberOf, tagsOf } from "./selector"
 import type { EntityState, WorldState } from "./state";
 import { own } from "./pack-kit";
 import { minutesBetween } from "./world-state";
+import { feedEvent } from "./feed";
 
 export const ENGINE_PACK = "engine";
 
@@ -459,6 +460,8 @@ export const enginePack: PackDef = {
   requires: [],
   register(r) {
     for (const def of events) r.event(def);
+    // The GM's per-chat section settings (DESIGN §6.11).
+    r.event(feedEvent);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);

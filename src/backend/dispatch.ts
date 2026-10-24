@@ -36,6 +36,9 @@ import { actionOdds, resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
 import { hashParts } from "../shared/hash";
 import { Working } from "../engine/working";
+import { runRulesOnEvents } from "../engine/rules";
+import { stepTracks } from "../engine/tracks";
+import { canSeeEntity, canSeePlace } from "../engine/visibility";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { activeRecord } from "../engine/ledger/path";
 import type { StoredChip } from "./chips";
@@ -46,7 +49,7 @@ import { pinBooks, pinEntries, pinViews } from "./lore-pins";
 import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, declineNote, playerReason, readRun, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
-import { applyProposals, TIME_ADVANCE_CAP } from "./turn-model";
+import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
 import { recentLines, TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
@@ -177,6 +180,19 @@ export class Dispatcher {
     const runSeed = this.rt.bridgeOf(chatId)?.runSeed;
     if (runSeed === undefined) throw new RequestError("not_world_chat", "this chat is not attached to a world");
     return runSeed;
+  }
+
+  /**
+   * A chip-applied change with what follows from it on the head (DESIGN §4.3, §9.4): the rules its
+   * events fire (`rules`: a narrated time skip's own catch-up ran its rules already) and the tracks
+   * it advances, recorded in the same `confirm` entry, as an automatic read's post pass does, so a
+   * quest item taken on Apply moves its quest this turn rather than the next.
+   */
+  private consequences(w: Working, events: LedgerEvent[], seed: string, rules: boolean): LedgerEvent[] {
+    const mark = w.events.length;
+    if (rules) runRulesOnEvents(this.rt.registry, w, events, { seed: `${seed}:rules` });
+    stepTracks(this.rt.registry, w, `${seed}:tracks`);
+    return [...events, ...w.events.slice(mark)];
   }
 
   private async route(r: FrontendToBackend, userId: UserId, session: string | undefined, reply: <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]) => void, noted: DraftNoted): Promise<void> {
@@ -327,15 +343,15 @@ export class Dispatcher {
           events = fixed.events;
         } else {
           const set = { op: "set" as const, entity: r.entity, field: r.field, value: r.value };
-          // A place fixed with ✎ is a real move, as the GM's Move is: out of whatever holds them, onto
-          // the arrival cell, and their activity left behind where they were (as a narrated move
-          // leaves it). The field is checked as set first, so a locked place stays locked.
-          const checked = resolveEdit(this.rt.registry, world, state, [set], { gm: false, runSeed: this.runSeedOf(r.chatId) });
-          if ("rejection" in checked) throw new RequestError("validation", checked.rejection.reason);
+          // A place fixed with ✎ (the player character's, or where someone in People is) is a real move
+          // through the one move path, as the GM's Move is, and their activity is left behind where they
+          // were (as a narrated move leaves it). Only a place the POV may know, for someone it can see:
+          // anything else reads as no place at all, as the ✎ never offered it.
+          if (r.field === "place" && (typeof r.value !== "string" || !canSeePlace(this.rt.registry, world, state, world.pov, r.value) || !canSeeEntity(this.rt.registry, world, state, world.pov, r.entity))) throw new RequestError("validation", "no such place");
           const doing = state.entities[r.entity]?.fields.activity;
-          const moved = r.field === "place" && typeof r.value === "string" && r.value !== state.entities[r.entity]?.fields.place;
-          const ops = moved ? [{ op: "move" as const, entity: r.entity, to: String(r.value) }, ...(doing !== undefined && doing !== "idle" ? [{ op: "set" as const, entity: r.entity, field: "activity", value: "idle" }] : [])] : null;
-          const edit = ops ? resolveEdit(this.rt.registry, world, state, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) }) : checked;
+          const moved = r.field === "place" && r.value !== state.entities[r.entity]?.fields.place;
+          const ops = moved && doing !== undefined && doing !== "idle" ? [set, { op: "set" as const, entity: r.entity, field: "activity", value: "idle" }] : [set];
+          const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) });
           if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
           events = edit.events;
         }
@@ -944,7 +960,7 @@ export class Dispatcher {
           // A narrated time skip applies as it would have automatically (DESIGN §9.4): whole, with its
           // catch-up, from the clock the head stands at now, or not at all; never while a fight holds
           // the clock, which may have started since the chip was offered.
-          const advance = applyTimeAdvance(this.rt.registry, w, typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: this.runSeedOf(chatId), capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+          const advance = applyTimeAdvance(this.rt.registry, w, typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: this.runSeedOf(chatId), capMinutes: (await this.rt.settings.get(userId)).time.askBeyondMinutes, unitCap: w.state.time.unitCap });
           if (!advance.applied) throw new RequestError("validation", advance.reason === "unit_cap" ? "too much happens in between to run it inside the turn" : advance.reason === "in_fight" ? `${IN_FIGHT}, and its rounds take no clock time` : "the time skip no longer applies");
           events = [...w.events];
         } else {
@@ -953,7 +969,7 @@ export class Dispatcher {
           if (!outcome || outcome.rejection) throw new RequestError("validation", outcome?.rejection?.reason ?? "the change no longer applies");
           events = [...outcome.materialized, ...outcome.events];
         }
-        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events } });
+        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, events, `${id}:confirm`, proposal.type !== "time_advance") } });
         await settle("accepted");
         return { applied: result.applied, pending: result.pending };
       }
@@ -1120,7 +1136,7 @@ export class Dispatcher {
           const [outcome] = applyProposals(this.rt.registry, w, [priced], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:${choice}`, this.runSeedOf(chatId));
           if (!outcome || outcome.rejection || outcome.events.length === 0) throw new RequestError("validation", outcome?.rejection?.reason ?? "the purchase no longer applies");
           await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
+          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${choice}`, true) } });
           return { applied: result.applied, pending: result.pending };
         }
         if (choice !== "other") throw new RequestError("bad_request", `unknown choice ${choice}`);
@@ -1130,7 +1146,7 @@ export class Dispatcher {
           const [outcome] = applyProposals(this.rt.registry, w, [{ ...proposal, method }], `${id}:${method}`, this.runSeedOf(chatId));
           if (!outcome || outcome.rejection || outcome.events.length === 0) continue;
           await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
+          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${method}`, true) } });
           return { applied: result.applied, pending: result.pending };
         }
         // Nothing covers it: the chip stays for Remove or Accept.

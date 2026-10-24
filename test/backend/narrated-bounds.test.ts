@@ -101,8 +101,9 @@ describe("a narrated time skip under confirm", () => {
     expect((await got.state()).clock).toBe(read);
   });
 
-  test("a skip past the cap is offered as a Timelapse, not applied", async () => {
-    const got = await chat([{ type: "time_advance", minutes: 600 }], { time_advance: { mode: "confirm" } });
+  test("a skip past how long one runs without asking is offered as a Timelapse, not applied", async () => {
+    // A day and an hour: past the default of a day.
+    const got = await chat([{ type: "time_advance", minutes: 1500 }], { time_advance: { mode: "confirm" } });
     expect(got.chips.some((c) => c.kind === "confirm")).toBe(false);
     const offer = got.chips.find((c) => c.kind === "timelapse_offer" && c.label.includes("skipped ahead"));
     expect(offer).toBeDefined();

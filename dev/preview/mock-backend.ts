@@ -300,7 +300,7 @@ export class MockBackend {
     for (const op of ops) {
       if (op.op === "spawn") {
         const id = op.id ?? `${op.kind}:${gm.entities.length}`;
-        gm.entities.push({ id, name: op.name, kind: op.kind, tier: op.tier ?? "background", agent: op.agent ?? false, pov: false, gone: false, spawned: true, visibility: "public", place: op.place ?? null, holder: null, claimed: false, fields: [], relations: [], levels: [], class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] } });
+        gm.entities.push({ id, name: op.name, kind: op.kind, tier: op.tier ?? "background", agent: op.agent ?? false, pov: false, person: op.kind === "person", gone: false, spawned: true, visibility: "public", place: op.place ?? null, holder: null, claimed: false, fields: [], relations: [], levels: [], class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] } });
         lines.push(`${op.name} is here`);
         continue;
       }
@@ -314,6 +314,11 @@ export class MockBackend {
       // No engine here to run a pack's effect: the preview notes it and changes nothing.
       if (op.op === "effect") {
         lines.push(`Ran ${op.effect.replace(/[._]/g, " ")}`);
+        continue;
+      }
+      // Section settings shape only the prompt, which the preview doesn't build.
+      if (op.op === "feed") {
+        lines.push(`The ${op.section} section's settings changed`);
         continue;
       }
       const id = op.op === "link" || op.op === "unlink" ? op.from : op.op === "adjust" ? op.account : op.entity;

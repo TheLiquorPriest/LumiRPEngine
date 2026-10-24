@@ -611,6 +611,22 @@ export function createSpindleHost(): HostPort {
         const c = (await spindle.connections.list(userId)).find((x) => x.is_default);
         return c ? { id: c.id, name: c.name } : null;
       },
+      async list(userId) {
+        return (await spindle.connections.list(userId)).map((c) => ({ id: c.id, name: c.name }));
+      },
+      async models(connectionId, userId) {
+        // Older hosts can't list models, and a provider may not answer: then nothing is said of a model.
+        const list = spindle.connections.getModels;
+        if (!list) return null;
+        try {
+          return (await list.call(spindle.connections, connectionId, userId)).map((m) => m.id);
+        } catch {
+          return null;
+        }
+      },
+      async decisionList(userId) {
+        return (await spindle.decisions.listConnections({ userId })).map((c) => ({ id: c.id, name: c.name }));
+      },
     },
     mcp: {
       granted: () => spindle.permissions.has(MCP_PERMISSION),

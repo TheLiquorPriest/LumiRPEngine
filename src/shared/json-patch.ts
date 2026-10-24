@@ -83,6 +83,32 @@ export function jsonEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
+/** The leaves of a merge patch, by token path: what each says the value becomes (null: deleted). */
+function mergeLeaves(patch: JsonValue, at: readonly string[] = []): { tokens: string[]; value: JsonValue }[] {
+  if (!isRecord(patch)) return [{ tokens: [...at], value: patch }];
+  // An empty object merges as nothing changing there, so it says nothing to check.
+  return Object.entries(patch).flatMap(([key, value]) => mergeLeaves(value as JsonValue, [...at, key]));
+}
+
+/** One leaf of a merge patch that came out other than sent. */
+export interface MergeAdjustment {
+  pointer: string;
+  sent: JsonValue;
+  now: JsonValue | undefined;
+}
+
+/**
+ * What a merge patch came out as where it isn't what was sent, by JSON Pointer: a value the reader
+ * kept within what it takes, of the wrong kind, or a key it doesn't know (now `undefined`). Settings
+ * and the MCP tools both say these.
+ */
+export function mergeAdjusted(patch: JsonValue, after: JsonValue): MergeAdjustment[] {
+  return mergeLeaves(patch).flatMap(({ tokens, value }) => {
+    const now = getAt(after, tokens);
+    return (value === null ? now === undefined : jsonEqual(now, value)) ? [] : [{ pointer: pointerOf(tokens), sent: value, now }];
+  });
+}
+
 function insert(doc: JsonValue, tokens: readonly string[], value: JsonValue, replace: boolean): JsonValue {
   if (tokens.length === 0) return value;
   const { parent, key } = parentOf(doc, tokens, replace ? "replace" : "add");

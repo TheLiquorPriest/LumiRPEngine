@@ -14,7 +14,7 @@ import type { WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import { Badge, Button, Disclosure, IconButton, IdText, NumberStepper, PageHeader, SaveBar, useBusy } from "../components";
 import { Icon } from "../icons";
-import { STEP_LABEL } from "../settings/steps";
+import { STEP_LABEL } from "../../shared/steps";
 import { MEMORY_FIELDS, memoryValue } from "../settings/minds-patch";
 import { useSelect } from "../store";
 import { itemLabel, PART_INFO } from "./chrome";

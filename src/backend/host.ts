@@ -452,6 +452,12 @@ export interface HostPort {
   connections: {
     /** The user's default connection: the one a generation without its own route uses. */
     active(userId: UserId): Promise<{ id: string; name: string } | null>;
+    /** The user's connection profiles, by id and name: what a step's own connection must be one of (Settings → Caveats' pre-flight). */
+    list(userId: UserId): Promise<{ id: string; name: string }[]>;
+    /** The models a connection's provider offers, by id; null when the host can't list them or the provider doesn't answer, so nothing is said of a model. */
+    models(connectionId: string, userId: UserId): Promise<string[] | null>;
+    /** The user's Decisions API connection profiles, by id and name: what a Decision step's own connection must be one of. */
+    decisionList(userId: UserId): Promise<{ id: string; name: string }[]>;
   };
   /**
    * Lumiverse's MCP server profiles (`spindle.mcp.servers`, the `mcp_servers` permission; DESIGN §23,

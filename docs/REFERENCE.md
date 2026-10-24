@@ -34,7 +34,7 @@ Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1,
 | `check` | `check`, `actor?`, `target?`, `outcomes` |
 | `life` | `entity`, `to?`, `tell?` |
 | `link` | `rel`, `from`, `to`, `until?`, `fields?` |
-| `move` | `entity`, `to` |
+| `move` | `entity`, `to`, `activity?`, `route?`, `with?` |
 | `note` | `text`, `visibility?` |
 | `post` | `lines`, `memo?` |
 | `recover` | `entity`, `field`, `amount?`, `full?` |
@@ -89,7 +89,7 @@ Taxonomy and life states:
 
 Core: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.
 
-Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`.
+Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`.
 
 ### Relation types
 
@@ -123,7 +123,7 @@ Built in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `re
 
 Signals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.
 
-Template placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.
+Template placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `gear`, `knowledge`, `money`, `outcome`, `place`, `positions`, `pov`, `present`, `property`, `recent`, `reply`, `scene`, `user`, `world`.
 
 ### Sections
 
@@ -223,6 +223,7 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 
 | Effect | Arguments |
 |---|---|
+| `castlife.book_invitation` | `host` |
 | `castlife.decide` | `key`, `choice` |
 | `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |
 | `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |
@@ -738,6 +739,7 @@ Extends `container`.
 | `gear.receive` | `name`, `to`, `from?` |
 | `gear.remove` | `item` |
 | `gear.retrieve` | `item` |
+| `gear.search` | `who`, `target?` |
 | `gear.take_piece` | `kit`, `piece`, `to` |
 | `gear.transfer` | `item`, `to` |
 | `gear.use` | `item`, `user?` |
@@ -762,6 +764,7 @@ Extends `container`.
 | `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |
 | `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
 | `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
+| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |
 | `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |
 | `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |
 | `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |
@@ -771,8 +774,14 @@ Extends `container`.
 
 | Proposal | Bound by |
 |---|---|
+| `drop` | `ref` |
 | `give` | `ref` |
+| `item_condition` | `number` |
+| `lose` | `ref` |
 | `quantity` | `number` |
+| `take` | `ref` |
+| `use_up` | `number` |
+| `wear` | `ref` |
 
 ### Panels and slots
 
@@ -987,6 +996,7 @@ Extends `thing`.
 | Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |
 |---|---|---|---|---|---|---|---|
 | `in` | In | `*` | `*` | many_one |  |  | none |
+| `travels_with` | Travels with | `person` | `person` | many_one |  |  | none |
 
 ### Effects
 
@@ -1013,7 +1023,7 @@ Extends `thing`.
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |
+| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |
 | `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |
 
 ### Events

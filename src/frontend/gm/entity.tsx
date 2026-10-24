@@ -4,6 +4,7 @@
 // facets too) and tags, and Remove or Restore. Each Save is one edit with its own Undo. Classes and
 // tags are set for this chat; kinds and places are the world's definitions, edited in Build.
 
+import type { ComponentChildren } from "preact";
 import { useId, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import { formatMoneyInput, parseMoneyInput } from "../../shared/money";
@@ -16,7 +17,8 @@ import { parseFixValue } from "../fix-editor";
 import { formatMinutes, humanize } from "../format";
 import { Icon } from "../icons";
 import { MoneyInput } from "../money-input";
-import { adjustOp, classifyOp, entityStateOp, lifeEditOp, relationFields } from "../requests";
+import { adjustOp, bringOp, classifyOp, entityStateOp, lifeEditOp, partyOf, placesMatching, relationFields } from "../requests";
+import { PARTY_RELATION } from "../../shared/party";
 import { LEVEL_LABEL } from "../settings/realism";
 import type { Editor } from "./editor";
 import { nameOf } from "./editor";
@@ -217,18 +219,48 @@ function SheetRow(props: { row: SheetRowView }) {
   );
 }
 
-/** Where it is: a place, inside something, or taken out; and an account's money in or out. */
-function Placement(props: { entity: GmEntity; editor: Editor }) {
+/**
+ * Where it is: a place, inside something, or taken out; and an account's money in or out. The current
+ * place comes first with a one-tap Bring to the player character's place and a searchable place
+ * picker (each a move through the one move path, with its own Undo), and whether a person travels
+ * with the player character. `children` take their place beside the location picker (a bed).
+ */
+function Placement(props: { entity: GmEntity; editor: Editor; children?: ComponentChildren }) {
   const { entity, editor } = props;
   const [amount, setAmount] = useState("");
+  const [search, setSearch] = useState("");
   const move = useId();
   const put = useId();
   const add = adjustOp(entity.id, amount, editor.currency, false);
   const take = adjustOp(entity.id, amount, editor.currency, true);
+  const bring = bringOp(entity, editor.gm);
+  const party = entity.person && editor.gm.relationTypes.some((t) => t.id === PARTY_RELATION) ? partyOf(entity, editor.gm) : null;
+  const found = placesMatching(editor.gm.places, search);
   return (
     <Section title="Where it is">
       <ActionRows>
-        <ActionRow title="At" value={nameOf(editor.gm, entity.place)} />
+        <ActionRow
+          title="At"
+          value={nameOf(editor.gm, entity.place)}
+          actions={
+            bring ? (
+              <Button size="sm" disabled={editor.busy} onClick={() => void editor.edit([bring])}>
+                Bring to {nameOf(editor.gm, editor.gm.entities.find((e) => e.pov)?.id ?? null)}'s place
+              </Button>
+            ) : undefined
+          }
+        />
+        {party ? (
+          <ActionRow
+            title={`Travels with ${party.pov.name}`}
+            value={party.travels ? "Yes" : "No"}
+            actions={
+              <Button size="sm" disabled={editor.busy} onClick={() => void editor.edit([party.op])}>
+                {party.travels ? "Leave the party" : "Join the party"}
+              </Button>
+            }
+          />
+        ) : null}
         {entity.holder ? (
           <ActionRow
             title="Inside"
@@ -242,16 +274,18 @@ function Placement(props: { entity: GmEntity; editor: Editor }) {
         ) : null}
         {entity.balance !== undefined ? <ActionRow title="Balance" value={formatMoney(entity.balance, editor.currency)} tone={entity.balance < 0 ? "neg" : undefined} /> : null}
       </ActionRows>
-      <Field label="Move to a place" for={move}>
+      <Field label="Move to a place" for={move} help="Type to narrow the places, then pick one.">
+        <input class="lre-input" type="search" placeholder="Search places" aria-label="Search places" value={search} onInput={(event) => setSearch(event.currentTarget.value)} />
         <select id={move} class="lre-input" value="" disabled={editor.busy} onChange={(event) => event.currentTarget.value !== "" && void editor.edit([{ op: "move", entity: entity.id, to: event.currentTarget.value }])}>
-          <option value="">Choose a place…</option>
-          {editor.gm.places.map((p) => (
+          <option value="">{found.length === 0 ? "No place matches" : "Choose a place…"}</option>
+          {found.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
             </option>
           ))}
         </select>
       </Field>
+      {props.children}
       <Field label="Put inside" for={put}>
         <select id={put} class="lre-input" value="" disabled={editor.busy} onChange={(event) => event.currentTarget.value !== "" && void editor.edit([{ op: "put", entity: entity.id, into: event.currentTarget.value }])}>
           <option value="">Choose what holds it…</option>
@@ -560,12 +594,9 @@ export function EntityPage(props: { entity: GmEntity; editor: Editor; onBack(): 
             </ActionRows>
           </Section>
         ))}
-        <Placement entity={entity} editor={editor} />
-        {entity.fields.some((f) => f.id === "bed") ? (
-          <Section title="Where they sleep">
-            <BedPicker entity={entity} editor={editor} />
-          </Section>
-        ) : null}
+        <Placement entity={entity} editor={editor}>
+          <BedPicker entity={entity} editor={editor} />
+        </Placement>
         <Relations entity={entity} editor={editor} />
         <Simulation key={`${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`} entity={entity} editor={editor} />
         <Life key={JSON.stringify(entity.life)} entity={entity} editor={editor} />

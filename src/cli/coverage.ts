@@ -51,6 +51,7 @@ export const COVERAGE: Coverage = {
     routine_block: { tools: ["lre_gm_edit", "lre_routine_edit"] },
     schedule_override: { tools: ["lre_gm_edit", "lre_routine_edit"] },
     effect: { tools: ["lre_gm_edit"] },
+    feed: { tools: ["lre_gm_edit"] },
   },
   "lre.gm": { tools: ["lre_gm", "lre_minds"] },
   "lre.marker": { tools: ["lre_marker", "lre_upgrade"] },

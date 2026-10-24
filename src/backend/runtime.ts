@@ -53,6 +53,7 @@ import { secretLoreNames } from "../engine/lore";
 import { pinsFor, type PinnedText } from "../engine/lore-pins";
 import { namesHidden, povMayKnow } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
+import { feedOf, linesOf, MARKED_FACTS_RULE, markedText, renderersOf } from "../engine/feed";
 import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { resolveUsualMoves, usualRoutineForExtract } from "../packs/castlife/core/usual";
@@ -69,7 +70,7 @@ import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
-import { claimFor } from "./claims";
+import { claimFor, outOfHand } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { pinReader } from "./lore-pins";
 import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
@@ -85,13 +86,15 @@ import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
-import { applyProposals, type EnginePipeline, type PlanProse, type ReadStep, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
-import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
+import { applyProposals, type EnginePipeline, type PlanProse, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
+import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, slotVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { StudioBridge } from "./studio";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
 import { CANNOT_STOP, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
+// The steps by their Settings names, apart from the activity line's in-flight labels above.
+import { STEP_LABEL as STEP_NAME } from "../shared/steps";
 
 export interface RuntimeOptions {
   host: HostPort;
@@ -1032,15 +1035,17 @@ export class Runtime implements TurnHooks {
   /**
    * The sections the narrator will have this turn, by label, as the outline step is told them
    * (DESIGN §9.5): the Outcome, the Scene and the Outline itself, a timelapse's Montage when it has
-   * lines, Minds when someone's mind has one, and any other when its renderers have one. The budget
+   * lines, Minds when someone's mind has one, and any other when its renderers have one; never one
+   * the chat's feed switches off (§6.11). The budget
    * may still leave one out: the Outline is checked again when it is written (`withoutMissing`).
    */
   private narratorSections(world: WorldDoc, state: WorldState, plan: EngineTurnPlan | undefined): string[] {
     return readPass(() => {
       const ctx = this.registry.context(world, state);
-      const has = (slot: string): boolean =>
-        this.registry.renderers.some((r) => {
-          if (r.slot !== slot || r.hint) return false;
+      // A section's player lines decide it, as the Outline names only what the player's view holds.
+      const has = (section: SectionTemplate): boolean =>
+        renderersOf(this.registry.renderers, section, feedOf(section, state)).some((r) => {
+          if (r.hint) return false;
           try {
             return r.render(ctx).length > 0;
           } catch {
@@ -1049,7 +1054,8 @@ export class Runtime implements TurnHooks {
         });
       const montage = plan ? planLines(plan, world, this.registry).montage.length > 0 : false;
       return sectionsOf(world)
-        .filter((s) => (s.id === "outcome" || s.id === "scene" || s.id === "outline" ? true : s.id === MINDS_SLOT ? mindLines(ctx).length > 0 : (s.id === "montage" && montage) || has(s.id)))
+        .filter((s) => feedOf(s, state).enabled !== false)
+        .filter((s) => (s.id === "outcome" || s.id === "scene" || s.id === "outline" ? true : s.id === MINDS_SLOT ? mindLines(ctx).length > 0 : (s.id === "montage" && montage) || has(s)))
         .map((s) => s.label);
     });
   }
@@ -1096,6 +1102,8 @@ export class Runtime implements TurnHooks {
       user,
       reply,
       recent: recent.join("\n"),
+      // What the player character has and knows, as the sections tell it (`slotVars`).
+      ...slotVars(this.registry, world, state),
     };
   }
 
@@ -1216,8 +1224,9 @@ export class Runtime implements TurnHooks {
       bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
       const target = (result.action === TIMELAPSE_ACTION ? interpretedTarget(result.params, render.world, render.state, text, this.registry) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text, this.registry) : null) ?? interpretedTarget({ span: text }, render.world, render.state, text, this.registry);
       if (!target) this.host.log("info", `[LumiRPEngine] interpret: lets time pass but states no span it can read; the turn plays as roleplay`, userId);
-      // A short span runs in the turn; a longer one is offered (a misread can't skip days unasked).
-      const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
+      // A span up to how long the user lets a skip run without asking runs in the turn; a longer one
+      // is offered (a misread can't skip days unasked).
+      const over = target?.type === "duration" && target.minutes > settings.time.askBeyondMinutes;
       bridge.setOffer(text, over ? target : null);
       // A span the player's words spend ("for the next two hours, I service the fleet") keeps the POV
       // where the story has it until it's over (DESIGN §8); a run to a routine point follows its routine.
@@ -1240,7 +1249,9 @@ export class Runtime implements TurnHooks {
     // §11), since the queue stops at that check, and leaving it in words would offer the same attempt again.
     let rolls = false;
     const take = (def: ActionDef, given: JsonObject, words: string, thing: ThingSort | undefined, said: readonly string[]): void => {
-      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow);
+      // The player character's own thing that the world keeps elsewhere is a tracking gap, not a veto:
+      // it goes to the claims policy rather than failing and stopping the message (DESIGN §9.4).
+      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state);
       if (!ref) {
         steps.push({ action: def.id, params: given, text: words });
         rolls ||= checkOf(render.world, def.check) !== null;
@@ -1601,7 +1612,7 @@ export class Runtime implements TurnHooks {
     // L27: a timelapse or speed-through turn's time passed as its timelapse, so its reply proposes no skip.
     const skipped = facts.timelapse || !!plan?.timelapse;
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent)
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "")
       : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
@@ -1712,7 +1723,7 @@ export class Runtime implements TurnHooks {
       if (bounded.mode === "auto" && !unsure.has(p) && !guessed.has(p)) auto.push(fitted);
       else confirm.push(fitted);
     }
-    bridge.prepareRead(input.content, { auto, post, events: decisions, minds: minded.events });
+    bridge.prepareRead(input.content, { auto, post, events: decisions, minds: minded.events, askBeyond: settings.time.askBeyondMinutes });
     // `choices` and `contradiction` become chips below, with the read's others.
     // Each automatic proposal gets an undo chip; each confirm proposal a confirm chip (DESIGN §11).
     // An automatic proposal the engine refuses gets a decline chip instead, never silence: a payment
@@ -1754,7 +1765,7 @@ export class Runtime implements TurnHooks {
       // whole, with its catch-up, after this read's automatic changes. One that fits is offered for
       // Apply; a longer one, or one whose catch-up can't run whole, gets the Timelapse chip instead.
       if (proposal.type === "time_advance") {
-        const advance = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+        const advance = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: settings.time.askBeyondMinutes, unitCap: w.state.time.unitCap });
         if (advance.chip) stored.push(skipAheadChip(`adv:${messageId}:${swipeId}:c${i}`, { messageId, swipeId }, advance.chip.target, advance.reason === "unit_cap" ? "unit_cap" : "over_cap"));
         else if (advance.applied) {
           stored.push({
@@ -1960,7 +1971,7 @@ export class Runtime implements TurnHooks {
     if (offer) {
       const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
       const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(chipWorld, headState, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
-      const detail = offer.type === "duration" && offer.minutes > INTERPRETED_TIMELAPSE_CAP ? "That's longer than one turn runs on its own. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
+      const detail = offer.type === "duration" && offer.minutes > (await this.settings.get(input.userId)).time.askBeyondMinutes ? "That's longer than a skip runs without asking. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) as JsonValue } });
     }
     // What the turn didn't play of the message (DESIGN §5.2, §11): the queued actions left when the
@@ -2169,8 +2180,11 @@ export class Runtime implements TurnHooks {
     const uncounted: string[] = [];
     // What goes into the book, in rank order: each entry and its text.
     const fills: { id: string; content: string }[] = [];
-    // Sections with hint lines (Stance's cues, §6.6), which ride once every section has its place.
-    const hinted: { fill: { content: string }; label: string; template: string; lines: string[]; hints: string[]; cost: number }[] = [];
+    // Sections with lines that ride once every section has its place: hints (Stance's cues, §6.6) and
+    // facts beyond the POV's that a scope adds (§6.11), neither counted in what the player sees.
+    const hinted: { fill: { id: string; content: string } | null; entryId: string; label: string; template: string; lines: string[]; marked: { text: string; source?: { bookId: string; entryId: string } }[]; hints: string[]; cost: number; maxTokens: number | undefined }[] = [];
+    // The World Info entries the delivered lines carry (§6.11): that entry can stay out of the prompt.
+    const sources: { bookId: string; entryId: string }[] = [];
     // The entry a section fills: the preset places the section itself when an enabled block holds
     // `{{outlet::lre_<slot>}}` (DESIGN §6.8), so its outlet twin is filled; else its own entry.
     const entryOf = (section: SectionTemplate): string | null => {
@@ -2194,15 +2208,36 @@ export class Runtime implements TurnHooks {
       // The sections filled so far, in rank order: the Outline points only at those (DESIGN §9.5).
       const filled = new Set<string>();
       for (const section of sectionsOf(world)) {
+        // The world's settings for the section, the GM's in this chat over them (§6.11).
+        const feed = feedOf(section, state);
+        if (feed.enabled === false) continue;
         const entryId = entryOf(section);
         if (!entryId) continue;
         const minds = section.id === MINDS_SLOT;
+        const scope = feed.scope ?? "player";
         const lines: string[] = minds ? mindsFit.map((l) => l.line) : [];
+        const lineSources: ({ bookId: string; entryId: string } | undefined)[] = lines.map(() => undefined);
         const hints: string[] = [];
-        for (const r of this.registry.renderers) {
-          if (r.slot !== section.id || minds) continue;
+        const marked: { text: string; source?: { bookId: string; entryId: string } }[] = [];
+        for (const r of renderersOf(this.registry.renderers, section, feed)) {
+          if (minds) continue;
           try {
-            (r.hint ? hints : lines).push(...r.render(ctx));
+            if (r.hint) {
+              hints.push(...r.render(ctx));
+              continue;
+            }
+            for (const l of linesOf(r, ctx, scope)) {
+              if (l.known === "pov") {
+                lines.push(l.text);
+                lineSources.push(l.source);
+                continue;
+              }
+              // A fact beyond the POV's only in the scope that asks for it, marked for the narrator. Only
+              // the GM scope's skip the leak screen, and only here: no player surface reads this copy.
+              if (scope === "player" || (l.known === "gm" && scope !== "gm")) continue;
+              if (scope !== "gm" && findLeaks(l.text, secrets).length > 0) continue;
+              marked.push({ text: markedText(l), ...(l.source ? { source: l.source } : {}) });
+            }
           } catch (error) {
             this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
           }
@@ -2214,13 +2249,26 @@ export class Runtime implements TurnHooks {
           lines.push(minutes > 0 ? `This turn took ${spanText(minutes)}.` : "No time passes this turn.");
         }
         // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.
-        if (section.id === "outcome") lines.unshift(...planned.outcome);
+        if (section.id === "outcome") {
+          lines.unshift(...planned.outcome);
+          lineSources.unshift(...planned.outcome.map(() => undefined));
+        }
         if (section.id === "montage") lines.push(...planned.montage);
-        const safe = minds ? lines : lines.filter((l) => findLeaks(l, secrets).length === 0);
+        while (lineSources.length < lines.length) lineSources.push(undefined);
+        const screened = lines.map((text, i) => ({ text, source: lineSources[i] })).filter((l) => minds || findLeaks(l.text, secrets).length === 0);
+        // The section's own caps (§6.11): its first lines, then cut from the end to its tokens.
+        const capped = feed.maxLines !== undefined ? screened.slice(0, feed.maxLines) : [...screened];
+        const markedRoom = feed.maxLines !== undefined ? Math.max(0, feed.maxLines - capped.length) : marked.length;
+        if (feed.maxTokens !== undefined) while (capped.length > 0 && sectionCost(renderSection(section.label, section.template, capped.map((l) => l.text))) > feed.maxTokens) capped.pop();
+        const safe = capped.map((l) => l.text);
+        const facts = marked.slice(0, markedRoom);
+        const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
         if (safe.length === 0) {
           // A Minds section whose best line alone is over its budget is left out whole.
           if (minds && allMinds.length > 0) record.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
-          // Hints alone never make a section: its being there would tell of them.
+          // Hints alone never make a section: its being there would tell of them. Marked facts may,
+          // in what the budget leaves, with no trace the player sees.
+          if (facts.length > 0) hinted.push({ fill: null, entryId, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens });
           continue;
         }
         const content = renderSection(section.label, section.template, safe);
@@ -2229,36 +2277,64 @@ export class Runtime implements TurnHooks {
         if (counted === undefined) uncounted.push(content);
         const cost = counted ?? sectionTokens(content);
         const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
+        const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - capped.length);
         // Whether it reached the prompt is known once the reply's World Info activates (`onActivated`).
-        record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(minds && mindsFit.length < allMinds.length ? { cut: allMinds.length - mindsFit.length } : {}), delivery: "unchecked" });
+        record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(cut > 0 ? { cut } : {}), delivery: "unchecked" });
         if (clipped) continue;
         if (!minds) budget -= cost;
         const fill = { id: entryId, content };
         fills.push(fill);
         filled.add(section.id);
         (record.entries ??= {})[section.id] = entryId;
-        const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
-        if (safeHints.length > 0) hinted.push({ fill, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
+        sources.push(...capped.flatMap((l) => (l.source ? [l.source] : [])));
+        if (safeHints.length > 0 || facts.length > 0) hinted.push({ fill, entryId, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens });
       }
     });
-    // The preset's narrator rules, for world chats only: at its `{{outlet::lre_narrator}}`, else
-    // before the character. They are the preset's own text, apart from the section budget.
-    const rules = preset.guidance.narrator;
-    const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
-    if (rules && rulesAt) fills.push({ id: rulesAt, content: `[Narrator rules]\n${rules}` });
     record.budget.used = settings.modelUse.tokens.sections - budget;
-    // Hints follow what the POV doesn't know (a hidden flag, a lore gate), so they ride last, in what
-    // the budget has left, and the inspector counts none of them: no clip, size or total the player
-    // sees moves when an off-screen secret changes (§6.2).
+    // Hints follow what the POV doesn't know (a hidden flag, a lore gate), and marked facts go beyond
+    // it, so both ride last, in what the budget has left, and the inspector counts none of them: no
+    // clip, size or total the player sees moves when an off-screen secret changes (§6.2, §6.11).
+    // Marked facts go first, one at a time while they fit; hints still all or none.
+    let markedSent = false;
     for (const h of hinted) {
-      const content = renderSection(h.label, h.template, [...h.lines, ...h.hints]);
-      const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content));
-      if (counted === undefined) uncounted.push(content);
-      const extra = Math.max(0, (counted ?? sectionTokens(content)) - h.cost);
-      if (extra > budget) continue;
-      budget -= extra;
-      h.fill.content = content;
+      const fits = (extra: number, total: number): boolean => extra <= budget && (h.maxTokens === undefined || total <= h.maxTokens);
+      const costOf = (body: string[]): number => {
+        const content = renderSection(h.label, h.template, body);
+        const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content));
+        if (counted === undefined) uncounted.push(content);
+        return counted ?? sectionTokens(content);
+      };
+      const body = [...h.lines];
+      let cost = h.cost;
+      const carried: { bookId: string; entryId: string }[] = [];
+      for (const m of h.marked) {
+        const next = costOf([...body, m.text]);
+        if (!fits(next - cost, next)) break;
+        budget -= next - cost;
+        cost = next;
+        body.push(m.text);
+        if (m.source) carried.push(m.source);
+        markedSent = true;
+      }
+      if (h.hints.length > 0) {
+        const next = costOf([...body, ...h.hints]);
+        if (fits(Math.max(0, next - cost), next)) {
+          budget -= Math.max(0, next - cost);
+          body.push(...h.hints);
+        }
+      }
+      if (body.length === h.lines.length) continue;
+      const content = renderSection(h.label, h.template, body);
+      if (h.fill) h.fill.content = content;
+      else fills.push({ id: h.entryId, content });
+      sources.push(...carried);
     }
+    // The narrator rules, for world chats only: at the preset's `{{outlet::lre_narrator}}`, else
+    // before the character, apart from the section budget. The preset's own text, led by the
+    // engine's rule for marked facts when the turn carries any (§6.11).
+    const rules = [markedSent ? MARKED_FACTS_RULE : null, preset.guidance.narrator ?? null].filter((r): r is string => r !== null && r !== "");
+    const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
+    if (rules.length > 0 && rulesAt) fills.push({ id: rulesAt, content: `[Narrator rules]\n${rules.join("\n")}` });
     this.countLater(input.userId, uncounted);
     record.forced = fills.map((f) => f.id);
     await this.inspector.add(input.chatId, input.userId, record);
@@ -2267,7 +2343,7 @@ export class Runtime implements TurnHooks {
     const sent = new Set(record.sections.filter((s) => !s.clipped).map((s) => s.slot));
     this.diag.sections({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, `${pending?.kind ?? "continue"} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent.has(s.id) })), started);
     // Nothing goes into the book yet: the guard of the generation that takes the turn writes it (`fill`).
-    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}` };
+    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}`, sources };
   }
 
   /**
@@ -2446,7 +2522,7 @@ export class Runtime implements TurnHooks {
    */
   async presetCaveats(userId: UserId, waitMs = CAVEATS_WAIT_MS): Promise<PresetCaveat[]> {
     // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1).
-    const host: PresetCaveat[] = this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }];
+    const host: PresetCaveat[] = [...(this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop" as const, message: CANNOT_STOP }]), ...(await this.stepCaveats(userId))];
     const open = await this.host.chats.active(userId).catch(() => null);
     const chatId = open && (await this.runOf(open, userId)) ? open : this.lastWorldChat.get(userId);
     if (!chatId) return host;
@@ -2472,6 +2548,41 @@ export class Runtime implements TurnHooks {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Caveats' pre-flight (DESIGN §5.3): the helper model's connection and every enabled step's own
+   * name a connection the user has (a Decision step's, a Decisions API one), and its model one that
+   * connection lists, since either gone fails the turn's call. A list the host can't give says
+   * nothing; neither does a model list a provider doesn't answer.
+   */
+  private async stepCaveats(userId: UserId): Promise<PresetCaveat[]> {
+    const settings = await this.settings.get(userId);
+    const [helpers, decisions] = await Promise.all([this.host.connections.list(userId).catch(() => null), this.host.connections.decisionList(userId).catch(() => null)]);
+    const gone: string[] = [];
+    const unlisted: string[] = [];
+    const check = async (label: string, connectionId: string | null, model: string | null, decision: boolean): Promise<void> => {
+      const list = decision ? decisions : helpers;
+      if (connectionId === null || list === null) return;
+      const connection = list.find((c) => c.id === connectionId);
+      if (!connection) {
+        gone.push(label);
+        return;
+      }
+      if (decision || model === null || model === "") return;
+      const models = await this.host.connections.models(connectionId, userId);
+      if (models && !models.includes(model)) unlisted.push(`${label} (${model} on ${connection.name})`);
+    };
+    await check("Helper model", settings.helper.connectionId, settings.helper.model, false);
+    for (const purpose of Object.keys(STEP_NAME) as StepPurpose[]) {
+      const config = stepConfigOf(settings.modelUse.steps, purpose);
+      if (!config.enabled || !config.route) continue;
+      await check(STEP_NAME[purpose], config.route.connectionId, config.route.model, config.route.provider === "decision");
+    }
+    return [
+      ...(gone.length > 0 ? [{ code: "step_connection_missing" as const, message: `These name a connection you no longer have, so their calls would fail the turn: ${gone.join(", ")}. Pick another in Settings → Steps and connections.` }] : []),
+      ...(unlisted.length > 0 ? [{ code: "step_model_missing" as const, message: `These name a model their connection doesn't list, so their calls may fail the turn: ${unlisted.join(", ")}. Pick another in Settings → Steps and connections.` }] : []),
+    ];
   }
 
   private async lintOf(chatId: ChatId, assembly: DryRun, userId: UserId): Promise<PresetCaveat[]> {
@@ -2590,10 +2701,13 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   spawn: "New characters",
   life: "Life and death",
   routine: "Routine changes",
+  take: "Things picked up",
+  drop: "Things put down",
+  use_up: "Things used up",
+  wear: "Things put on or off",
+  lose: "Things lost or stolen",
+  item_condition: "Wear and damage",
 };
-
-/** The longest typed timelapse a turn runs on its own (minutes); longer ones are offered as a chip. */
-export const INTERPRETED_TIMELAPSE_CAP = 1440;
 
 /**
  * A typed timelapse's target from `interpret`'s read of it (DESIGN §9.2): its `span`, the player's
@@ -3022,6 +3136,19 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
       return `${s("from")} → ${s("to")}: ${s("axis")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "knows":
       return `${s("who")} learns: ${s("fact")}`;
+    // The reply's item changes (DESIGN §9.4), each by who and what, as the POV may know them.
+    case "take":
+      return `${s("entity")} picked up ${s("item")}`;
+    case "drop":
+      return `${s("entity")} put down ${s("item")}`;
+    case "use_up":
+      return `${s("entity")} used up ${s("item")}${typeof p.qty === "number" && p.qty > 1 ? ` ×${p.qty}` : ""}`;
+    case "wear":
+      return `${s("entity")} ${p.off === true ? "took off" : "put on"} ${s("item")}`;
+    case "lose":
+      return typeof p.by === "string" && p.by !== "" ? `${s("by")} stole ${s("item")} from ${s("entity")}` : `${s("entity")} lost ${s("item")}`;
+    case "item_condition":
+      return `${s("item")}: condition ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
     case "spawn":
       return `New: ${s("name")}`;
     case "life":

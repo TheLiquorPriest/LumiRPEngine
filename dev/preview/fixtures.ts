@@ -396,6 +396,12 @@ export function stateFixture(chatId: string): StateView {
       realism: { preset: "story", levels: { money: 3, gear: 3, vehicles: 3, castlife: 3, relationships: 2, space: 3, calendar: 3, weather: 2, sheets: 2 }, tierCaps: { principal: {}, supporting: {}, background: { money: 1, castlife: 1 } }, bandTiers: { principal: ["Leads"], supporting: ["Regulars", "Supporting"], background: ["Background"] }, floors: { sheets: 3 }, claims: { mode: "real", capped: false } },
       adjudication: presetAdjudication("balanced"),
       inferred: inferredDefaults("story", 3),
+      sections: [
+        { id: "outcome", label: "Outcome", world: {}, chat: null },
+        { id: "scene", label: "Scene", world: {}, chat: null },
+        { id: "people", label: "People", world: { scope: "scene" }, chat: { scope: "gm", maxLines: 12 } },
+        { id: "gear", label: "Gear", world: {}, chat: { enabled: false } },
+      ],
       skills: [
         { id: "athletics", label: "Athletics" },
         { id: "insight", label: "Read People" },
@@ -874,7 +880,7 @@ function gmMinds(): MindsGmView {
 }
 
 export function gmFixture(): GmView {
-  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, claimed: false, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
+  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, person: kind === "person", gone: false, spawned: false, visibility: "public", place, holder: null, claimed: false, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
   return {
     entities: [
       entity("pov", "Sam Rivera", "person", "principal", "diner", {
@@ -1296,7 +1302,7 @@ export function settingsFixture(): UserSettings {
       tokens: { sections: 600 },
     },
     realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} }, claims: { mode: "real", capped: false } },
-    time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, scale: 1, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 } },
+    time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, scale: 1, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 }, askBeyondMinutes: 1440 },
     overrideWorldDefaults: false,
     adjudication: presetAdjudication("crunchy"),
     overrideWorldAdjudication: false,
@@ -1310,7 +1316,7 @@ export function settingsFixture(): UserSettings {
   };
 }
 
-const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", routine: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm" };
+const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", routine: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm", take: "confirm", drop: "confirm", use_up: "confirm", wear: "confirm", lose: "confirm", item_condition: "confirm" };
 
 /** What the backend would derive: pins first, then learning on the connection, then D4 defaults. */
 export function extractionView(settings: UserSettings): Record<ExtractionType, ExtractionModeView> {
