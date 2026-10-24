@@ -76,7 +76,9 @@ On the last turn reviewed:
    - secrets are stored switched off and switched on once their gate holds, and stay off if the hook fails;
    - an entry a section already carries is switched off on the same turn.
 
-## Group 1: quick fixes (in progress)
+## Group 1: quick fixes (shipped October 2026)
+
+**The scene rule as built:** two places are together when they're the same place, or one is at most two levels inside the other with nothing spread out on the way up. A place is spread out only if some route inside it needs a mode other than walking, or a walk longer than 10 minutes. Interior walks between rooms never spread a building, and people in sibling rooms are apart.
 
 **A. Presence, People and minds**
 
