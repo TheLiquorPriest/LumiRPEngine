@@ -670,7 +670,11 @@ export function clockFix(reg: Registry, world: WorldDoc, state: Readonly<WorldSt
 
 // ---------------------------------------------------------------- speed through
 
-/** `elapse` for spans at or under the threshold (they pass within the turn), else the activity's mode. */
+/**
+ * `elapse` for spans at or under the threshold, or with no policy: no Speed through, so a stated length
+ * runs on within the turn and any other span's time passes in the turns that follow (DESIGN §9.2);
+ * else the activity's mode.
+ */
 export function speedThrough(state: Readonly<WorldState>, activity: string, remainingMinutes: number): "elapse" | "offer" | "auto" {
   const policy = own(state.time.speedThrough, activity);
   if (!policy || remainingMinutes <= clampThreshold(policy.thresholdMinutes)) return "elapse";
