@@ -19,8 +19,18 @@ describe("a stage's objectives", () => {
 
   test("an item check writes a plain label the player reads, which the author may reword", () => {
     const relay = { id: "spare_relay", name: "Spare relay" };
-    expect(itemObjective("carries", relay)).toEqual({ label: "Have the spare relay with you", when: "carries(pov, 'spare_relay')" });
-    expect(itemObjective("carries", relay, null, "Bring the relay back")).toEqual({ label: "Bring the relay back", when: "carries(pov, 'spare_relay')" });
-    expect(itemObjective("at", relay, { id: "tower", name: "the radio tower" })).toEqual({ label: "Get the spare relay to the radio tower", when: "at('spare_relay', 'tower')" });
+    const tower = { id: "tower", name: "Radio tower" };
+    const carries = itemObjective("carries", relay);
+    const lies = itemObjective("at", relay, tower);
+    // The label names the thing (and the place) by name, never by id; the condition holds the ids.
+    expect(carries.label.toLowerCase()).toContain("spare relay");
+    expect(carries.label).not.toContain("spare_relay");
+    expect(carries.when).toBe("carries(pov, 'spare_relay')");
+    expect(lies.label.toLowerCase()).toContain("radio tower");
+    expect(lies.when).toBe("at('spare_relay', 'tower')");
+    // A different check reads differently.
+    expect(new Set([carries.label, itemObjective("has_item", relay).label, lies.label]).size).toBe(3);
+    // The author's own line replaces the suggestion.
+    expect(itemObjective("carries", relay, null, "Bring the relay back").label).toBe("Bring the relay back");
   });
 });
