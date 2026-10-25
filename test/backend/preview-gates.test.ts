@@ -172,3 +172,36 @@ describe("an outline let through is for its one turn", () => {
     expect((await chipOf(rig, chatId, "outline_gate"))?.detail).toContain("Beat number 2.");
   });
 });
+
+describe("the intent gate's Edit and a claimed thing (DESIGN §9.4)", () => {
+  /** "I give Danny a coffee" with no coffee: the read gives a coffee it makes real. */
+  async function claimed() {
+    const { rig, chatId } = await alder([{ gates: { intent: true } }]);
+    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify({ action: "give", params: { item: "coffee", to: "danny_okafor" }, thing: "drink", confidence: 0.9 }) : "{}");
+    rig.host.sendUser(chatId, "I give Danny a coffee.");
+    await rig.host.settle();
+    await rig.host.start(chatId, { type: "normal" });
+    const gate = await chipOf(rig, chatId, "intent_gate");
+    if (!gate) throw new Error("no gate");
+    return { rig, chatId, gate };
+  }
+
+  test("an edit naming, for the claimed thing, something the palette doesn't offer is refused", async () => {
+    const { rig, chatId, gate } = await claimed();
+    // Marcus's office key is across town in his pocket: the player character can't hand it over.
+    const answer = await rig.send({ type: "lre.chip", chatId, chip: gate.id, choice: "edit", payload: { params: { item: "shop_office_key", to: "danny_okafor" } } });
+    expect(answer.type).toBe("lre.error");
+    expect(await chipOf(rig, chatId, "intent_gate")).toBeDefined();
+  });
+
+  test("a real pick for the claimed thing wins: the pocketknife is given and no coffee is made", async () => {
+    const { rig, chatId, gate } = await claimed();
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: gate.id, choice: "edit", payload: { params: { item: "pov_pocketknife", to: "danny_okafor" } } })).applied).toBe(true);
+    const reply = await rig.host.start(chatId, { type: "regenerate" });
+    await rig.host.finish(reply, "Danny turns the knife over in his hands.");
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+    expect(state?.entities.pov_pocketknife?.fields.owner).toBe("danny_okafor");
+    expect(Object.values(state?.entities ?? {}).some((e) => e.fields.claimed === true)).toBe(false);
+  });
+});

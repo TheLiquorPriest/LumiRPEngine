@@ -2119,19 +2119,21 @@ export class Runtime implements TurnHooks {
 
   /**
    * Why the intent gate's Edit can't play the action as picked again (DESIGN §5.1): the read's own
-   * check (`requestRefusal`), then every person or place the edit changed must be one the Actions
-   * palette offers the player character for it (`paramCandidates`, and `companionCandidates` for who
-   * comes along), so a hand-made request can't aim it where the palette never would. A pick the read
-   * made itself stands, and `skip` is a claim's param, which the claim makes real.
+   * check (`requestRefusal`), then every person, place or thing the edit changed must be one the
+   * Actions palette offers the player character for it (`paramCandidates`, and `companionCandidates`
+   * for who comes along), so a hand-made request can't aim it where the palette never would. A pick
+   * the read made itself stands; so does a claim's param (`claim`) left as read, which the claim makes
+   * real. A claim's param the edit changed is a pick like any other, checked as one.
    */
-  editRefusal(world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, read: JsonObject, skip?: string): string | null {
-    const refused = this.requestRefusal(world, state, action, params, "read", skip);
+  editRefusal(world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, read: JsonObject, claim?: string): string | null {
+    const kept = (name: string): boolean => JSON.stringify(params[name] ?? null) === JSON.stringify(read[name] ?? null);
+    const refused = this.requestRefusal(world, state, action, params, "read", claim !== undefined && kept(claim) ? claim : undefined);
     if (refused) return refused;
     const mayKnow = (id: EntityId): boolean => povMayKnow(this.registry, world, state, id);
     const why = (param: string, def: ParamDef, value: JsonValue): string => `${action.label}: ${unfitReason(this.registry, world, state, { param, def, value }, "", unrevealedSecrets(this.registry, world, state), mayKnow)}`;
     for (const [name, def] of Object.entries(action.params)) {
       const value = params[name];
-      if (name === skip || value === undefined || value === null || value === "" || JSON.stringify(value) === JSON.stringify(read[name] ?? null)) continue;
+      if (value === undefined || value === null || value === "" || kept(name)) continue;
       if (def.type === "ref" && !(typeof value === "string" && paramCandidates(this.registry, world, state, action, name).includes(value))) return why(name, def, value);
       if (def.type === "list" && def.ref !== undefined) {
         const along = companionCandidates(this.registry, world, state, action, name);
