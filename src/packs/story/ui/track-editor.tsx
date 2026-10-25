@@ -207,6 +207,8 @@ interface StageSave {
 function ObjectivesEditor(props: { stage: StageDef; world: WorldDoc; identifiers: readonly string[]; functions: readonly string[]; lint: readonly LintIssue[]; path: string; onChange(objectives: Objective[]): void }) {
   const list = props.stage.objectives ?? [];
   const put = (i: number, parts: ObjectiveParts): void => props.onChange(list.map((o, j) => (j === i ? objectiveFrom(parts) : o)));
+  // One id for the list, each row's input named by it and its index, so each visible label names its own input.
+  const base = useId();
   return (
     <FormGroup title="Objectives" aside={<span class="lre-small lre-muted">The player sees each label in their quests</span>}>
       {list.length === 0 ? <span class="lre-small lre-muted">None yet.</span> : null}
@@ -218,8 +220,8 @@ function ObjectivesEditor(props: { stage: StageDef; world: WorldDoc; identifiers
               <span class="grow">Objective {i + 1}</span>
               <IconButton icon="trash" label={`Remove objective ${i + 1}`} onClick={() => props.onChange(list.filter((_, j) => j !== i))} />
             </div>
-            <Field label="What the player reads" help={parts.label === "" ? "With none, the player reads the condition itself: give it words." : undefined}>
-              <input class="lre-input" value={parts.label} placeholder="Find the spare relay" onChange={(event) => put(i, { ...parts, label: event.currentTarget.value })} />
+            <Field label="What the player reads" for={`${base}-${i}`} help={parts.label === "" ? "With none, the player reads the condition itself: give it words." : undefined}>
+              <input id={`${base}-${i}`} class="lre-input" value={parts.label} onChange={(event) => put(i, { ...parts, label: event.currentTarget.value })} />
             </Field>
             <ExprEditor label="Met when" value={parts.when} identifiers={props.identifiers} functions={props.functions} doc={props.world} lint={lintAt(props.lint, `${props.path}.objectives.${i}`)} onChange={(when) => put(i, { ...parts, when })} />
           </div>
@@ -336,6 +338,7 @@ function StageSheet(props: { track: TrackDef; id: string; world: WorldDoc; ident
 function NewStageSheet(props: { track: TrackDef; after: string | null; onAdd(track: TrackDef, id: string): void; onClose(): void }) {
   const [name, setName] = useState("");
   const [after, setAfter] = useState(props.after ?? "");
+  const nameId = useId();
   const id = deriveId(name || "stage", new Set(Object.keys(props.track.stages)));
   const stages: RefOption[] = Object.entries(props.track.stages).map(([sid, s]) => ({ value: sid, label: s.label || nameOfId(sid) }));
   return (
@@ -351,8 +354,8 @@ function NewStageSheet(props: { track: TrackDef; after: string | null; onAdd(tra
           props.onAdd({ ...props.track, stages }, id);
         }}
       >
-        <Field label="Name">
-          <input class="lre-input" value={name} placeholder="Ask Rosie" onInput={(event) => setName(event.currentTarget.value)} />
+        <Field label="Name" for={nameId}>
+          <input id={nameId} class="lre-input" value={name} onInput={(event) => setName(event.currentTarget.value)} />
         </Field>
         <IdText id={id} />
         <RefPicker label="Comes after" value={after} options={stages} none="Nothing yet" onChange={setAfter} />
@@ -369,6 +372,7 @@ function NewStageSheet(props: { track: TrackDef; after: string | null; onAdd(tra
 
 export function TrackEditor(props: EditorProps) {
   const app = useApp();
+  const labelId = useId();
   const isNew = props.id?.startsWith("new:") ?? false;
   const id = isNew ? (props.id ?? "").slice(4) : props.id;
   const stored = id ? props.world.tracks[id] : undefined;
@@ -411,8 +415,8 @@ export function TrackEditor(props: EditorProps) {
       <Issues issues={lint.filter((issue) => issue.path === `tracks.${id}` || !issue.path.startsWith(`tracks.${id}.stages`))} />
       <Section title="The track">
         <div class="lre-stack">
-          <Field label="Label">
-            <input class="lre-input" value={track.label} onChange={(event) => setTrack({ ...track, label: event.currentTarget.value })} />
+          <Field label="Label" for={labelId}>
+            <input id={labelId} class="lre-input" value={track.label} onChange={(event) => setTrack({ ...track, label: event.currentTarget.value })} />
           </Field>
           <Field label="Kind">
             <Seg<TrackKind> label="Kind" value={track.kind} options={KINDS} onChange={(kind) => setTrack({ ...track, kind })} />
