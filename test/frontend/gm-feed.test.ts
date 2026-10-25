@@ -3,7 +3,7 @@
 // ticked by what they tell; ticking just a section's own is no pick at all.
 
 import { describe, expect, test } from "bun:test";
-import { chatFeedOf, feedSummary, ownSources, SCOPE_LABEL, sourcesTaken } from "../../src/frontend/gm/feed";
+import { chatFeedOf, feedSummary, ownSources, SCOPE_LABEL, sourcesMissing, sourcesTaken } from "../../src/frontend/gm/feed";
 
 const SOURCES = [
   { id: "location", slot: "scene", label: "Where" },
@@ -37,5 +37,17 @@ describe("the GM's section settings form", () => {
     const off = feedSummary({ enabled: false, scope: "gm" });
     expect(off).not.toContain(SCOPE_LABEL.gm);
     expect(off).not.toBe(feedSummary({ scope: "gm" }));
+  });
+
+  test("a section with no sources of its own saves its caps for this chat; one with sources needs one ticked", () => {
+    // Outline: no renderer fills it, so its boxes start empty and stay so.
+    const own = ownSources(SOURCES, "outline");
+    const picked = sourcesTaken({}, SOURCES, "outline");
+    const draft = { maxTokens: 300 };
+    expect(sourcesMissing(draft, picked, own)).toBe(false);
+    expect(chatFeedOf(draft, picked, own)).toEqual({ maxTokens: 300 });
+    // Place has its own: nothing ticked blocks the save, unless the section is switched off.
+    expect(sourcesMissing({}, [], ownSources(SOURCES, "place"))).toBe(true);
+    expect(sourcesMissing({ enabled: false }, [], ownSources(SOURCES, "place"))).toBe(false);
   });
 });

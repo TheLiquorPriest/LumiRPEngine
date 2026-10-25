@@ -59,6 +59,16 @@ export function chatFeedOf(draft: SectionFeed, picked: readonly string[], own: r
   return to;
 }
 
+/**
+ * Whether the boxes leave a section that is on with nothing it would take: none ticked though it has
+ * sources of its own, which the engine would read as "its own", the opposite of what they show. A
+ * section with no sources of its own (Outline and Montage, which the turn writes; a world's section
+ * no pack fills) takes nothing from them either way, so its other settings save as they are.
+ */
+export function sourcesMissing(draft: SectionFeed, picked: readonly string[], own: readonly string[]): boolean {
+  return draft.enabled !== false && own.length > 0 && picked.length === 0;
+}
+
 /** A cap's default when it is switched on. */
 const CAP_START = { maxLines: 12, maxTokens: 400 } as const;
 
@@ -80,8 +90,7 @@ function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: read
       if (result?.pending) app.toast("Saved — it applies when the reply finishes.", "info");
       if (result) props.onDone();
     });
-  // No source picked would read as "its own" to the engine, the opposite of what the boxes show.
-  const noneTaken = draft.enabled !== false && picked.length === 0;
+  const noneTaken = sourcesMissing(draft, picked, own);
   return (
     <div class="lre-stack" data-lre-feed-form={props.row.id}>
       <span class="lre-small lre-muted">{props.row.chat ? "This chat has its own settings for this section." : "This chat follows the world's settings for this section."}</span>
@@ -98,6 +107,7 @@ function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: read
       ) : null}
       <Section title="What it tells" flush>
         <div class="lre-stack" data-lre-feed-sources>
+          {own.length === 0 ? <span class="lre-small lre-muted">No source fills this section by itself (the turn writes Outline and Montage). A source you tick here adds its lines.</span> : null}
           {offered.map((s) => (
             <CheckField key={s.id} label={s.label} help={own.includes(s.id) ? "Its own" : undefined} checked={picked.includes(s.id)} onChange={(on) => setPicked((p) => (on ? [...p, s.id] : p.filter((id) => id !== s.id)))} />
           ))}
