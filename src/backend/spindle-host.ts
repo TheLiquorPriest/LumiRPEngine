@@ -436,7 +436,7 @@ export function createSpindleHost(): HostPort {
     registerWorldInfoInterceptor(handler) {
       spindle.registerWorldInfoInterceptor(async (ctx: WorldInfoInterceptorCtxDTO) => {
         if (!ctx.userId) return {};
-        const entries = ctx.entries.map((e): WorldInfoCandidate => ({ id: e.id, bookId: e.world_book_id, disabled: e.disabled, extensions: isRecord(e.extensions) ? (e.extensions as JsonObject) : {} }));
+        const entries = ctx.entries.map((e): WorldInfoCandidate => ({ id: e.id, bookId: e.world_book_id, disabled: e.disabled, extensions: isRecord(e.extensions) ? (e.extensions as JsonObject) : {}, comment: typeof e.comment === "string" ? e.comment : "", content: typeof e.content === "string" ? e.content : "" }));
         return await handler({ chatId: ctx.chatId, userId: ctx.userId, entries, chatMetadata: ctx.chatMetadata as JsonObject });
       }, 100);
     },
@@ -528,13 +528,15 @@ export function createSpindleHost(): HostPort {
         return (await spindle.world_books.get(bookId, userId)) !== null;
       },
       async list(userId) {
-        const out: { id: string; name: string; engine: boolean; character: boolean; added: number | null }[] = [];
+        const out: { id: string; name: string; engine: boolean; character: boolean; added: number | null; updated: number | null }[] = [];
+        const seconds = (t: unknown): number | null => (typeof t === "number" && Number.isFinite(t) ? t : null);
         for (let offset = 0; offset < 100_000; offset += 200) {
           const page = await spindle.world_books.list({ limit: 200, offset, userId });
           for (const b of page.data) {
             const meta: Record<string, unknown> = isRecord(b.metadata) ? b.metadata : {};
-            // Core marks a book it made from a character's card with that character (`source_character_id`).
-            out.push({ id: b.id, name: b.name, engine: meta.lumi_rp_engine === true, character: typeof meta.source_character_id === "string" && meta.source_character_id !== "", added: typeof b.created_at === "number" && Number.isFinite(b.created_at) ? b.created_at : null });
+            // Core marks a book it made from a character's card with that character (`source_character_id`),
+            // and bumps a book's `updated_at` whenever it or any of its entries changes.
+            out.push({ id: b.id, name: b.name, engine: meta.lumi_rp_engine === true, character: typeof meta.source_character_id === "string" && meta.source_character_id !== "", added: seconds(b.created_at), updated: seconds(b.updated_at) });
           }
           if (page.data.length < 200 || out.length >= page.total) break;
         }

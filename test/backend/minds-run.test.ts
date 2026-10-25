@@ -114,6 +114,26 @@ describe("Run minds now (GM → Minds)", () => {
     expect(done.entries[0]?.reason).toBe("the answer was empty");
     expect(done.undo).toBeNull();
   });
+
+  test("reads World Info as a turn's minds do: a world entry over a book entry made secret in Build reaches no mind it runs", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig, { text: "TURN-MARK" });
+    const user = rig.host.userId;
+    const book = await rig.host.books.create("Town lore", "", user);
+    const text = "RUMOR-PIN: the harbor master takes bribes.";
+    const entryId = await rig.host.books.createEntry(book, { comment: "Harbor rumor", content: text, keys: [], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} }, user);
+    const chatId = await alderChat(rig, async (worldId) => {
+      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "rumor", value: { id: "rumor", title: "Harbor rumor", content: text, keys: [], links: [], source: { kind: "book", bookId: book, entryId, hash: bookTextHash(text) } } }));
+      rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: { danny_okafor: [{ lore: "rumor" }] }, places: {} } }));
+    });
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId: book, entryId, fields: { secret: true, gate: "false" } }));
+    const before = mindCalls(rig).length;
+    const run = rig.body(await rig.send({ type: "lre.minds", op: "run", chatId, who: ["danny_okafor"] })).run as MindsRunView;
+    expect((await runEnd(rig, run.runId)).status).toBe("done");
+    const calls = mindCalls(rig).slice(before);
+    expect(calls.map(nameOf)).toEqual(["Danny Okafor"]);
+    expect(JSON.stringify(calls)).not.toContain("RUMOR-PIN");
+  });
 });
 
 describe("lore pins", () => {

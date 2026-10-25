@@ -2,8 +2,10 @@
 // text comes from the world document, a World Info book's from the host each time a call reads it,
 // so a pinned book entry always reads as its book has it now (switched off in the book or not: the
 // pin is the author's choice), and a pinned whole book as its switched-on entries are now, a new one
-// included. Also what Build and the GM view show of the pins (each entry's title, where it comes
-// from and whether it reads), and the books and entries a pin may name.
+// included. A pinned book entry is as secret as the World Info interceptor and live lore hold it
+// (`secrecyParts`): its own fields, the world entry indexed from it, and every secret its text is.
+// Also what Build and the GM view show of the pins (each entry's title, where it comes from and
+// whether it reads), and the books and entries a pin may name.
 
 import type { ChatId, UserId } from "../shared/ids";
 import { hasOwn } from "../shared/json";
@@ -12,7 +14,8 @@ import type { LoreBookEntryView, LoreBookView, LorePinView, LorePinsView } from 
 import type { LorePin, WorldDoc } from "../shared/world";
 import { worldPinText, type PinRef, type PinnedText } from "../engine/lore-pins";
 import type { HostBookEntry, HostPort } from "./host";
-import { bookEntryTitle, bookLoreEntry, copyOriginal, namedAlikeEntries, ownSecret, secretCopyOf, twinned } from "./book-lore";
+import { bookEntryLore, bookEntryTitle } from "./book-lore";
+import { loreIndex, secrecyParts, secretTexts, twinViews, type SecretTexts } from "./lore-secrets";
 
 /** An entry the engine wrote (`engineWroteEntry`: its own books' sections, the Minds section among them, which holds other minds): never read through a pin, whatever names it. */
 function engineWrote(e: HostBookEntry): boolean {
@@ -61,23 +64,26 @@ async function bookReads(host: Pick<HostPort, "books" | "log">, pins: readonly L
 
 /**
  * A book entry as pinned text, under the key a pin of that one entry has, so a call reads it once
- * however it is pinned; it keeps the part its pin keeps. One with LRE's fields is lore as a world
- * entry is (`entry`), so its secrecy, audience, holders and Known by links hold for every reader of
- * the pin, the traces included.
+ * however it is pinned; it keeps the part its pin keeps. One anything holds back (`secrecyParts`:
+ * its LRE fields, the world entry indexed from it, a secret its text is) is lore as a world entry is
+ * (`entry`), so that secrecy, audience, holders and Known by hold for every reader of the pin, the
+ * traces included.
  */
-function bookText(e: HostBookEntry, ref: PinRef): PinnedText {
-  const entry = bookLoreFieldsOf(e.extensions) !== null ? bookLoreEntry(e) : null;
-  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on: ref.on, title: bookEntryTitle(e), content: e.content, entry, keep: ref.pin.keep ?? "start" };
+function bookText(e: HostBookEntry, ref: PinRef, texts: SecretTexts): PinnedText {
+  const parts = secrecyParts(e, texts);
+  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on: ref.on, title: bookEntryTitle(e), content: e.content, entry: parts.length > 0 ? bookEntryLore(e, parts) : null, keep: ref.pin.keep ?? "start" };
 }
 
 /**
  * Reads, once, every book entry and whole book `refs` name, and gives the text of any of those refs
  * in order (DESIGN §24.5): a world entry from the world, a book entry from its book, a whole book's
  * switched-on entries in the book's order; each entry once, where it first comes. A pin whose entry
- * or book is gone, or can't be read, gives nothing; lint and the pin views name it.
+ * or book is gone, or can't be read, gives nothing; lint and the pin views name it. `world` is the
+ * world as the call reads lore (`liveLore`), whose entries say what their sources are held to.
  */
 export async function pinReader(host: Pick<HostPort, "books" | "log">, world: WorldDoc, refs: readonly PinRef[], userId: UserId): Promise<(refs: readonly PinRef[]) => PinnedText[]> {
-  const read = await bookReads(host, refs.map((r) => r.pin), userId);
+  const [read, index] = await Promise.all([bookReads(host, refs.map((r) => r.pin), userId), refs.some((r) => !("lore" in r.pin)) ? loreIndex(host, userId) : null]);
+  const texts = secretTexts(index, { world });
   return (some) => {
     const out: PinnedText[] = [];
     const seen = new Set<string>();
@@ -90,8 +96,8 @@ export async function pinReader(host: Pick<HostPort, "books" | "log">, world: Wo
       if ("lore" in ref.pin) give(worldPinText(world, ref));
       else if ("entry" in ref.pin) {
         const e = read.entries.get(ref.key);
-        give(e ? bookText(e, ref) : null);
-      } else for (const e of read.books.get(ref.pin.book) ?? []) if (!e.disabled) give(bookText(e, ref));
+        give(e ? bookText(e, ref, texts) : null);
+      } else for (const e of read.books.get(ref.pin.book) ?? []) if (!e.disabled) give(bookText(e, ref, texts));
     }
     return out;
   };
@@ -153,17 +159,14 @@ export async function pinBooks(host: Pick<HostPort, "books" | "chats">, chatId: 
 
 /**
  * One book's entries, for a pin picker and the lore editor (`lre.lore entries`), in the book's order,
- * each with its LRE fields when it has any, its twins in the user's other books of that name (what
- * its secrecy keeps off with it), and, for a twin kept secret as a copy, the entry it follows.
+ * each with its LRE fields when it has any, its twins in any of the user's books (what its secrecy
+ * keeps off with it: `twinViews`), and, for a twin kept secret as a copy, the entry it follows.
  */
-export async function pinEntries(host: Pick<HostPort, "books">, bookId: string, userId: UserId): Promise<LoreBookEntryView[]> {
-  const [entries, others] = await Promise.all([host.books.entries(bookId, userId), namedAlikeEntries(host, bookId, userId)]);
+export async function pinEntries(host: Pick<HostPort, "books" | "log">, bookId: string, userId: UserId): Promise<LoreBookEntryView[]> {
+  const [entries, index] = await Promise.all([host.books.entries(bookId, userId), loreIndex(host, userId)]);
   return entries.map((e) => {
     const lore = bookLoreFieldsOf(e.extensions);
-    const twins = others.filter((o) => twinned(e, o) || secretCopyOf(o.extensions)?.entry === `${e.bookId}/${e.id}`).map((o) => ({ bookId: o.bookId, entryId: o.id }));
-    const copy = secretCopyOf(e.extensions);
-    const original = copy ? copyOriginal(copy) : null;
-    const kept = original !== null && others.some((o) => o.bookId === original.bookId && o.id === original.entryId && ownSecret(o) !== null);
-    return { id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length, ...(lore ? { lore } : {}), ...(twins.length > 0 ? { twins } : {}), ...(original ? { copyOf: { ...original, kept } } : {}) };
+    const { twins, copyOf } = twinViews(index, e);
+    return { id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length, ...(lore ? { lore } : {}), ...(twins.length > 0 ? { twins } : {}), ...(copyOf ? { copyOf } : {}) };
   });
 }

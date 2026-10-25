@@ -46,7 +46,8 @@ import { toChain } from "./ledger-io";
 import { JobError, type JobRunner } from "./jobs";
 import { bookDrift, saveFromChat } from "./lore";
 import { pinBooks, pinEntries, pinViews } from "./lore-pins";
-import { bookLoreProblem, keptOriginal, secretCopyOf, secureIndexedSecrets, secureTwins, withSecretCopy, writeBookLore } from "./book-lore";
+import { bookLoreProblem, secureIndexedSecrets, writeBookLore } from "./book-lore";
+import { copyKeepers, lorePass, noteEntry, secretCopyOf, secureCopies, withSecretCopy } from "./lore-secrets";
 import { bookLoreFieldsOf, engineWroteEntry } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, declineNote, playerReason, readRun, Runtime } from "./runtime";
@@ -566,22 +567,27 @@ export class Dispatcher {
           return;
         }
         if (r.op === "fields") {
-          if (typeof r.bookId !== "string" || r.bookId === "" || typeof r.entryId !== "string" || r.entryId === "") throw new RequestError("bad_request", "name the book and its entry");
-          const entry = await this.rt.host.books.entry(r.entryId, userId);
-          if (!entry || entry.bookId !== r.bookId) throw new RequestError("not_found", "that book has no such entry");
-          if (engineWroteEntry(entry.extensions)) throw new RequestError("bad_request", "the engine wrote that entry; a world's own lore is its document's");
-          // A twin kept secret as a copy follows its original: its secrecy is changed there, and comes back with it.
-          const copy = secretCopyOf(entry.extensions);
-          if (copy && (await keptOriginal(this.rt.host, copy, userId))) throw new RequestError("bad_request", "that entry is kept secret as a twin of the same entry in another of your books: change that one, and this one follows");
+          const { bookId, entryId } = r;
+          if (typeof bookId !== "string" || bookId === "" || typeof entryId !== "string" || entryId === "") throw new RequestError("bad_request", "name the book and its entry");
           const fields = r.fields === null ? null : bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: r.fields } });
           if (r.fields !== null && fields === null) throw new RequestError("bad_request", "give the fields as an object, or null to take them off");
           const problem = fields ? bookLoreProblem(fields) : null;
           if (problem) throw new RequestError("bad_request", problem);
-          // A copy whose original is gone or public is the author's own entry now: the note goes.
-          await writeBookLore(this.rt.host, copy ? { ...entry, extensions: withSecretCopy(entry.extensions, null) } : entry, fields, userId);
-          // Its twins in the books named like its own go with it: kept secret with it, or put back as they stood.
-          await secureTwins(this.rt.host, userId, new Set([r.bookId]));
-          reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
+          const host = this.rt.host;
+          // One pass with every other of the user's: no twin pass reads the entry between this write and its twins' (DESIGN §4.2).
+          await lorePass(host, userId, async (index) => {
+            const entry = await host.books.entry(entryId, userId);
+            if (!entry || entry.bookId !== bookId) throw new RequestError("not_found", "that book has no such entry");
+            if (engineWroteEntry(entry.extensions)) throw new RequestError("bad_request", "the engine wrote that entry; a world's own lore is its document's");
+            // A twin kept secret as a copy follows the secrets of its text: its secrecy is changed there, and comes back with them.
+            const copy = secretCopyOf(entry.extensions);
+            if (copy && (await copyKeepers(host, index, entry, userId)).length > 0) throw new RequestError("bad_request", "that entry is kept secret as a twin of a secret entry with the same text: change that one, and this one follows");
+            // A copy no secret keeps now is the author's own entry: the note goes.
+            noteEntry(index, await writeBookLore(host, copy ? { ...entry, extensions: withSecretCopy(entry.extensions, null) } : entry, fields, userId));
+            // Its twins in any book go with it: kept secret with it, or put back as they stood.
+            await secureCopies(host, index, userId);
+          });
+          reply("lre.lore", { entries: await pinEntries(host, bookId, userId) });
           return;
         }
         if (r.op === "pins") {

@@ -274,9 +274,9 @@ function idsOf(value: JsonValue | undefined): string[] | undefined {
 }
 
 /**
- * One entry's LRE fields, edited as a world entry's are until saved to its book. Its twins, the same
- * entry in the user's other books of that name, go with its secrecy, and the form names them by their
- * books' `labels`; a twin kept secret as a copy is changed through its original, and says so.
+ * One entry's LRE fields, edited as a world entry's are until saved to its book. Its twins, entries of
+ * the same text anywhere in the user's books, go with its secrecy, and the form names them by their
+ * books' `labels`; a twin kept secret as a copy is changed through the secret it follows, and says so.
  */
 function EntryFields(props: { entry: LoreBookEntryView; doc: WorldDoc; functions: readonly string[]; labels: Readonly<Record<string, string>>; busy: boolean; onSave(fields: BookLoreFields | null): void }) {
   const [fields, setFields] = useState<BookLoreFields>(props.entry.lore ?? {});
@@ -297,17 +297,17 @@ function EntryFields(props: { entry: LoreBookEntryView; doc: WorldDoc; functions
   if (copy?.kept) {
     return (
       <div class="lre-form-lore-fields" data-lre-book-entry={props.entry.id}>
-        <Banner tone="info">The same entry is secret in {bookOf(copy.bookId)}, so this one is kept off with it: it comes on for a prompt once that one's gate holds, and back on for good when that one is made public. Change its secrecy there.</Banner>
+        <Banner tone="info">The same text is secret in {bookOf(copy.bookId)}, so this entry is kept off with it: it comes on for a prompt once that one's gate holds, and back on for good when that one is made public. Change its secrecy there.</Banner>
       </div>
     );
   }
   const twins = [...new Set((props.entry.twins ?? []).map((t) => bookOf(t.bookId)))];
   return (
     <div class="lre-form-lore-fields" data-lre-book-entry={props.entry.id}>
-      {copy ? <Banner tone="info">It was kept secret with the same entry in {bookOf(copy.bookId)}, which is gone: make it public here to switch it back on.</Banner> : null}
+      {copy ? <Banner tone="info">It was kept secret with the same text in {bookOf(copy.bookId)}, which is no longer secret there: make it public here to switch it back on.</Banner> : null}
       <CheckField label="Make this entry secret" help="It is stored switched off: it reaches no prompt and no helper until its gate holds." checked={secret} onChange={(on) => set({ secret: on })} />
       {/* Its twins go with it, whichever book a chat scans: say which before and after. */}
-      {twins.length > 0 ? <p class="lre-build-note" data-lre-book-twins>{props.entry.lore && loreIsSecret(props.entry.lore) ? `The same entry in ${listWords(twins)} is kept off with it, and comes back on with it.` : `The same entry is in ${listWords(twins)}: making this one secret keeps ${twins.length === 1 ? "that one" : "those"} off too, and making it public again switches them back on.`}</p> : null}
+      {twins.length > 0 ? <p class="lre-build-note" data-lre-book-twins>{props.entry.lore && loreIsSecret(props.entry.lore) ? `The same text in ${listWords(twins)} is kept off with it, and comes back on with it.` : `The same text is in ${listWords(twins)}: making this entry secret keeps ${twins.length === 1 ? "that one" : "those"} off too, and making it public again switches them back on.`}</p> : null}
       {secret ? (
         <>
           <FieldInput spec={SECRET_GATE_SPEC} value={fields.gate} ctx={ctx} path={ctx.path} parent={{}} onChange={(next) => set({ gate: typeof next === "string" && next !== "" ? next : undefined })} />
@@ -387,7 +387,7 @@ export function BookEntriesSection() {
                 <ActionRow
                   key={e.id}
                   title={e.title}
-                  subtitle={e.copyOf?.kept ? `Kept off with the same entry in “${labels[e.copyOf.bookId] ?? "another book"}”` : undefined}
+                  subtitle={e.copyOf?.kept ? `Kept off with the same text in “${labels[e.copyOf.bookId] ?? "another book"}”` : undefined}
                   value={e.lore && loreIsSecret(e.lore) ? <Badge tone="gm">Secret</Badge> : e.lore ? <Badge>Lore fields</Badge> : e.disabled ? <Badge>Off in its book</Badge> : undefined}
                   actions={<IconButton icon={open === e.id ? "close" : "edit"} label={open === e.id ? `Close ${e.title}` : `Edit ${e.title}'s lore fields`} onClick={() => setOpen(open === e.id ? null : e.id)} />}
                 >
