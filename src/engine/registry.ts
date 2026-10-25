@@ -246,9 +246,9 @@ export interface ProcessDef {
   lived?(ctx: ReadContext, agent: EntityId, span: { from: number; to: number }): LedgerEvent[];
   /**
    * What an activity met as its span ended within a turn's time (`activity`, ending at `until`;
-   * DESIGN §9.2), read for the player character at that end: the span the turn's own action gave it,
-   * as part of that action, so an Undo of it takes this too; or one an earlier turn began, short
-   * enough to pass in turns, that this turn's time saw out.
+   * DESIGN §9.2), read for the player character at that end: the span an action of the turn gave it,
+   * as part of that action, so an Undo of it takes this too; or one an earlier turn began that they
+   * are still doing, where they began it, as this turn's time saw it out.
    */
   ended?(ctx: ReadContext, agent: EntityId, activity: { type: string; until: number }): LedgerEvent[];
 }

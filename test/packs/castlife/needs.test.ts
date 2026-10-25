@@ -4,10 +4,11 @@
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { JsonValue } from "../../../src/shared/json";
-import { ACTIVITY_SPAN_OF, ENGINE_FIELDS, type WorldDoc } from "../../../src/shared/world";
+import { ACTIVITY_PLACE, ACTIVITY_SPAN_OF, ENGINE_FIELDS, type WorldDoc } from "../../../src/shared/world";
 import type { EditOp } from "../../../src/shared/protocol";
 import { resolveEdit } from "../../../src/engine/edits";
 import { applyMarker } from "../../../src/engine/events";
+import { palette } from "../../../src/backend/view";
 import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY } from "../../../src/shared/minds";
 import { mindContext } from "../../../src/backend/minds-context";
 import { buildCharacter } from "../../../src/engine/character";
@@ -445,18 +446,6 @@ describe("needs an ordinary turn lives", () => {
     expect(metAtOf(w.events.slice(mark), "hunger")).toEqual([]);
   });
 
-  test("a Speed through turned down rests no one, however much time passes after", () => {
-    const w = hall();
-    to(w, todayAt(w, 13 * 60));
-    const nap = play(w, "nap", intent("sleep", { minutes: 120 }), "I lie down for a two-hour nap.");
-    expect(nap.chips.some((c) => c.kind === "timelapse_offer")).toBe(true);
-    const mark = w.events.length;
-    // The offer goes with the next message: they sit up and read instead, on past the nap's end, and the reply tells an hour passing.
-    for (let i = 0; i < 2; i++) play(w, `read${i}`, intent("read"), "I can't sleep; I sit up and read.");
-    expect(applyTimeAdvance(reg, w, 60, { runSeed: "run", capMinutes: 24 * 60 }).applied).toBe(true);
-    expect(metAtOf(w.events.slice(mark), "fatigue")).toEqual([]);
-  });
-
   test("an activity short enough to pass in turns is met as a later turn sees it out, and not when they stop it first", () => {
     const passed = hall();
     to(passed, todayAt(passed, 18 * 60));
@@ -475,14 +464,16 @@ describe("needs an ordinary turn lives", () => {
     expect(metAtOf(after, "fun")).toEqual([]);
   });
 
-  test("a skip right after the turns reads none of their time again", () => {
-    // Alone, from 12:10: a nap they turn down by reading on, so it ends unmet as that turn begins;
-    // Rosa is back as they end. A skip that read their time again would meet fatigue for the nap.
+  test("a skip reads only the time it passes, never what came before it", () => {
+    // Alone from 12:10: a bath whose span outlasts the turns that follow, then the clock set on past its
+    // end (a GM's fix, which no turn reads); Rosa is back as the skip starts. A skip that read the time
+    // before it would meet fun for the bath, and social for whoever it finds there.
     const w = hall();
     w.apply({ type: "set", entity: "rosa", field: "place", value: "cafe" });
     to(w, todayAt(w, 12 * 60 + 10));
-    play(w, "nap", intent("sleep", { minutes: 120 }), "I lie down for a two-hour nap.");
-    play(w, "read", intent("read"), "I get up and read.");
+    play(w, "bath", intent("bath"), "I run a bath.");
+    play(w, "read", intent("read"), "I read in the bath.");
+    to(w, todayAt(w, 15 * 60));
     const end = w.state.clock;
     w.apply({ type: "set", entity: "rosa", field: "place", value: "apartment_hall" });
     const mark = w.events.length;
@@ -498,9 +489,10 @@ describe("needs an ordinary turn lives", () => {
     const w = hall();
     to(w, todayAt(w, 13 * 60));
     const records = Object.keys(ENGINE_FIELDS);
-    // The nap is offered a Speed through, so it leaves every record.
     play(w, "nap", intent("sleep", { minutes: 120 }), "I lie down for a two-hour nap.");
-    for (const f of records) expect(w.state.entities.you?.fields[f]).toBeDefined();
+    for (const f of [ACTIVITY_SPAN_OF, ACTIVITY_PLACE]) expect(w.state.entities.you?.fields[f]).toBeDefined();
+    // A chat played on an earlier build holds the offer it recorded too.
+    w.apply({ type: "set", entity: "you", field: "_activity_offered", value: w.state.clock + 115 });
     // Rosa's own rest gives her a span too.
     expect(resolveAction(reg, w, { actor: "rosa", action: "rest", params: {} }, createRng("rosa")).ok).toBe(true);
     expect(w.state.entities.rosa?.fields[ACTIVITY_SPAN_OF]).toBeDefined();
@@ -552,8 +544,64 @@ describe("needs an ordinary turn lives", () => {
   });
 
   /** A Timelapse from the palette, holding the POV where the story has it, as the palette does unless told to follow the routine. */
-  const palette = (minutes: number): InterpretOutput => timelapseIntent({ type: "duration", minutes }, undefined, 1, false);
+  const heldSkip = (minutes: number): InterpretOutput => timelapseIntent({ type: "duration", minutes }, undefined, 1, false);
   const nothing: InterpretOutput = { action: null, params: {}, probabilities: {} };
+  /** Going to bed at 23:00, with the Speed through to 07:00 offered. */
+  function toBed(): Working {
+    const w = hall();
+    to(w, todayAt(w, 23 * 60));
+    expect(told(w, "fatigue")).toBe(true);
+    expect(play(w, "bed", intent("sleep"), "I go to bed.").chips.some((c) => c.kind === "timelapse_offer")).toBe(true);
+    return w;
+  }
+
+  test("a line of talk after going to bed keeps them going to sleep, so a narrated night rests them", () => {
+    const w = toBed();
+    play(w, "talk", nothing, "Goodnight, Rosa.");
+    const mark = w.events.length;
+    expect(applyTimeAdvance(reg, w, 8 * 60, { runSeed: "run", capMinutes: 24 * 60 }).applied).toBe(true);
+    expect(metAtOf(w.events.slice(mark), "fatigue").length).toBeGreaterThan(0);
+    expect(told(w, "fatigue")).toBe(false);
+  });
+
+  test("getting up, or doing something else, ends the night: no skip after rests them", () => {
+    for (const [up, wanted] of [[intent("get_up"), "idle"], [intent("eat"), "meal"]] as const) {
+      const w = toBed();
+      play(w, "up", up, "I get up again.");
+      expect(w.state.entities.you?.fields.activity).toBe(wanted);
+      const mark = w.events.length;
+      play(w, "skip", heldSkip(8 * 60));
+      expect(metAtOf(w.events.slice(mark), "fatigue")).toEqual([]);
+      expect(told(w, "fatigue")).toBe(true);
+    }
+  });
+
+  test("moving ends the night too: no skip after rests them where they went", () => {
+    const w = toBed();
+    const moved = resolveEdit(reg, w.world, w.state, [{ op: "move", entity: "you", to: "cafe" }], { gm: true, runSeed: "run" });
+    if ("rejection" in moved) throw new Error(moved.rejection.reason);
+    w.applyAll(moved.events);
+    // Still "sleep", as nothing set another activity: the move alone ends it.
+    expect(w.state.entities.you?.fields.activity).toBe("sleep");
+    const mark = w.events.length;
+    play(w, "skip", heldSkip(8 * 60));
+    expect(metAtOf(w.events.slice(mark), "fatigue")).toEqual([]);
+  });
+
+  test("Get up is on the Actions sheet while they sleep or rest, and locked while they're up", () => {
+    const w = hall();
+    to(w, todayAt(w, 13 * 60));
+    const getUp = () => palette(w.world, w.state, reg).entries.find((e) => e.action === "get_up")?.options[0];
+    expect(getUp()?.disabled).toBeDefined();
+    for (const [action, params] of [["sleep", { minutes: 120 }], ["rest", { minutes: 120 }]] as const) {
+      const lying = hall();
+      to(lying, todayAt(lying, 13 * 60));
+      play(lying, action, intent(action, params), "I lie down.");
+      const option = palette(lying.world, lying.state, reg).entries.find((e) => e.action === "get_up")?.options[0];
+      expect(option).toBeDefined();
+      expect(option?.disabled).toBeUndefined();
+    }
+  });
 
   test("going to bed and skipping to the morning another way than the offer's own rests them all the same", () => {
     const w = hall();
@@ -561,7 +609,7 @@ describe("needs an ordinary turn lives", () => {
     expect(told(w, "fatigue")).toBe(true);
     expect(play(w, "bed", intent("sleep"), "I go to bed.").chips.some((c) => c.kind === "timelapse_offer")).toBe(true);
     const mark = w.events.length;
-    play(w, "skip", palette(8 * 60));
+    play(w, "skip", heldSkip(8 * 60));
     expect(metAtOf(w.events.slice(mark), "fatigue").length).toBeGreaterThan(0);
     expect(told(w, "fatigue")).toBe(false);
   });
@@ -576,18 +624,6 @@ describe("needs an ordinary turn lives", () => {
     expect(w.state.clock).toBeGreaterThan(from);
   });
 
-  test("a night begun while the clock is paused is never turned down: no offer was made to turn down", () => {
-    const w = hall();
-    to(w, todayAt(w, 23 * 60));
-    applyMarker(w.state, { kind: "time", control: "pause", scope: { all: true }, to: true });
-    expect(play(w, "bed", intent("sleep"), "I go to bed.").chips.some((c) => c.kind === "timelapse_offer")).toBe(false);
-    play(w, "dark", nothing, "I lie there in the dark.");
-    applyMarker(w.state, { kind: "time", control: "pause", scope: { all: true }, to: false });
-    const mark = w.events.length;
-    play(w, "skip", palette(8 * 60));
-    expect(metAtOf(w.events.slice(mark), "fatigue").length).toBeGreaterThan(0);
-  });
-
   test("a chat while the clock is paused meets social at once, since no paused turn reaches its end", () => {
     const w = hall();
     to(w, todayAt(w, 13 * 60));
@@ -597,23 +633,25 @@ describe("needs an ordinary turn lives", () => {
     expect(needValue(w.ctx, "you", "social")).toBe(0);
   });
 
-  test("the GM's Activity and Activity ends, set together in either order, read as that activity's span", () => {
-    for (const endFirst of [false, true]) {
+  test("the GM's Activity and Activity ends read as that activity's span, set together or one edit after the other, in either order", () => {
+    const set = (field: string, value: JsonValue): EditOp => ({ op: "set", entity: "you", field, value });
+    for (const order of ["together", "together, end first", "activity, then end", "end, then activity"] as const) {
       const w = hall();
       to(w, todayAt(w, 13 * 60));
       play(w, "go", intent("go", { to: "cafe" }), "I walk to the café.");
       // The walk left a span of its own behind.
       expect(w.state.entities.you?.fields[ACTIVITY_SPAN_OF]).toBe("travel");
-      const ops: EditOp[] = [
-        { op: "set", entity: "you", field: "activity", value: "sleep" },
-        { op: "set", entity: "you", field: "activity_until", value: w.state.clock + 120 },
-      ];
-      const edit = resolveEdit(reg, w.world, w.state, endFirst ? [...ops].reverse() : ops, { gm: true, runSeed: "run" });
-      if ("rejection" in edit) throw new Error(edit.rejection.reason);
-      w.applyAll(edit.events);
+      const activity = set("activity", "sleep");
+      const end = set("activity_until", w.state.clock + 120);
+      const edits = order === "together" ? [[activity, end]] : order === "together, end first" ? [[end, activity]] : order === "activity, then end" ? [[activity], [end]] : [[end], [activity]];
+      for (const ops of edits) {
+        const edit = resolveEdit(reg, w.world, w.state, ops, { gm: true, runSeed: "run" });
+        if ("rejection" in edit) throw new Error(edit.rejection.reason);
+        w.applyAll(edit.events);
+      }
       expect(buildCharacter(reg, w.world, "you", w.state)?.character.now?.until ?? null).not.toBeNull();
       const mark = w.events.length;
-      play(w, "skip", palette(3 * 60));
+      play(w, "skip", heldSkip(3 * 60));
       expect(metAtOf(w.events.slice(mark), "fatigue").length).toBeGreaterThan(0);
     }
   });

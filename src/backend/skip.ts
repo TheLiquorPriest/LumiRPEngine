@@ -255,7 +255,7 @@ export async function runSkip(deps: SkipDeps, input: SkipInput): Promise<SkipRun
   const reg = deps.registry;
   const cal = calendarOf(input.world);
   const w = new Working(reg, input.world, input.state);
-  turnStart(reg, w, input.runSeed, input.intent);
+  turnStart(reg, w, input.runSeed);
   // A fight's rounds take no clock time (DESIGN §11): the plan refuses the timelapse, so no one is asked.
   if (fightHoldsClock(w.ctx)) return null;
   const scanned = scanBeats(reg, input.world, w.state, input.intent, input.runSeed);

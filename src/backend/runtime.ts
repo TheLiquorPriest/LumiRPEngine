@@ -187,6 +187,19 @@ export function prefixSummary(reg: Registry, world: WorldDoc, state: WorldState)
 }
 
 /**
+ * Events in the order the turn's record holds them, the order an Undo finds them in (`refsOf`): what
+ * an earlier action's activity met while a later queued action played comes after that one's events.
+ */
+function inRecordOrder(record: readonly LedgerEvent[], events: readonly LedgerEvent[]): LedgerEvent[] {
+  const at = new Map<string, number>();
+  record.forEach((e, i) => {
+    const key = JSON.stringify(e);
+    if (!at.has(key)) at.set(key, i);
+  });
+  return [...events].sort((a, b) => (at.get(JSON.stringify(a)) ?? 0) - (at.get(JSON.stringify(b)) ?? 0));
+}
+
+/**
  * Whether every entity and place a proposal names is one the POV may know; others never become chips
  * or changes. A value is matched as the channels read it, trimmed (and lowercased when only that
  * names something), so `" vera "` is Vera. The one exception is a `knows` proposal's place: hearing
@@ -1990,7 +2003,7 @@ export class Runtime implements TurnHooks {
       // Typed text `interpret` read as actions (DESIGN §9.4, §11): one tap undoes what they did.
       const done = played.filter((res) => res.ok && res.events.length > 0);
       if (done.length > 0 && input.kind !== "renarrate" && input.kind !== "continue" && bridge.wasInterpreted(userText)) {
-        stored.push({ id: `not_action:${at}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as ${done.map((res) => `"${labelOf(res)}"`).join(", then ")}. Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(done.flatMap((res) => res.events))) as JsonValue } });
+        stored.push({ id: `not_action:${at}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as ${done.map((res) => `"${labelOf(res)}"`).join(", then ")}. Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(inRecordOrder(plan?.events ?? [], done.flatMap((res) => res.events)))) as JsonValue } });
       }
     }
     // `interpret` couldn't read the typed text (DESIGN §9.4): its call failed, or a Decision route's choice

@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
+import { optionalQuery } from "../../src/engine/pack-kit";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { JsonObject } from "../../src/shared/json";
 import { Rig } from "../support/rig";
@@ -101,5 +102,38 @@ describe("a read belongs to its turn", () => {
     await rerun(rig, chatId, "You head out to the market.");
     expect(await where(rig, chatId)).toBe("alder_market");
     expect(reads.calls).toBe(3);
+  });
+});
+
+describe("Not an action? on a queued message", () => {
+  /** How warmly Danny Okafor regards the player character (a gift's warmth is its largest part), in the chat as it folds now. */
+  async function warmthOf(rig: Rig, chatId: string): Promise<number> {
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+    const world = state ? core?.worldAt(state.revision) : undefined;
+    if (!state || !world) throw new Error("no state");
+    const ctx = rig.rt.registry.context(world, state);
+    return optionalQuery(ctx, "regard")?.(ctx, "danny_okafor", "pov", "warmth") ?? NaN;
+  }
+
+  test("undoes every action of the message, though an earlier one's activity ended while a later one played", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    // A bath whose span outlasts the gift, and a long read that sees it out: world actions of no effect of their own.
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "actions", id: "bath", value: { id: "bath", label: "Run a bath", params: {}, requires: [], outcomes: { default: [] }, duration: "1", activity: { type: "leisure", until: "clock + 60" }, lexicon: ["run a bath"] } }));
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "actions", id: "read", value: { id: "read", label: "Read", params: {}, requires: [], outcomes: { default: [] }, duration: "120", lexicon: ["read"] } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.host.quietReply = (req: QuietRequest) => {
+      if (!(req.messages[0]?.content ?? "").includes(INTERPRET_MARK)) return "{}";
+      return JSON.stringify({ action: "bath", params: {}, confidence: 0.9, more: [{ action: "give_gift", params: { target: "danny_okafor" }, text: "I give Danny his present" }, { action: "read", params: {}, text: "I read" }] });
+    };
+    const before = await warmthOf(rig, chatId);
+    await rig.turn(chatId, "I run a bath, then give Danny his present, then read.", "You soak, hand Danny the parcel, and settle in with a book.");
+    expect(await warmthOf(rig, chatId)).toBeGreaterThan(before + 4);
+    await notAnAction(rig, chatId, rig.host.head(chatId)?.id ?? "");
+    // The gift taken back with the rest; what the turn's hours did to regard on their own stays.
+    expect(await warmthOf(rig, chatId)).toBeCloseTo(before, 0);
   });
 });

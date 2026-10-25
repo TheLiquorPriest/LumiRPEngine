@@ -245,6 +245,7 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 |---|---|---|---|---|---|---|---|
 | `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |
 | `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |
+| `get_up` | Get up | Get up from bed or from a rest and get on with the day. |  |  | `default` | `2` | get up, wake up, get out of bed |
 | `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |
 | `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |
 
