@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import { heldBy } from "../shared/finance";
-import { ACTIVITY_SPAN_OF, type ActionDef, type CheckDef, type EffectSpec, type Expr, type WorldDoc } from "../shared/world";
+import { spanRecords, type ActionDef, type CheckDef, type EffectSpec, type Expr, type WorldDoc } from "../shared/world";
 import { tableRowKey } from "../shared/tables";
 import { plainRolling } from "../shared/adjudication";
 import { approachShift, closeCall, fightRound, judgedOutcome, oddsSignature, outcomeChoices, passOutcome, policyFor, ratingOf, tryKey, verdictOf, type Adjudged, type Judgement, type Verdict } from "./adjudication";
@@ -321,7 +321,8 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
   if (activity) {
     w.apply({ type: "set", entity: p.actor, field: "activity", value: activity.type });
     w.apply({ type: "set", entity: p.actor, field: "activity_until", value: activity.until });
-    w.apply({ type: "set", entity: p.actor, field: ACTIVITY_SPAN_OF, value: activity.type });
+    // What it was given for and where it began: another activity, or a move, ends it (`activitySpanEnd`).
+    w.applyAll(spanRecords(p.actor, own(w.state.entities, p.actor)?.fields));
   }
   return {
     ...base,
