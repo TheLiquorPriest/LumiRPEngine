@@ -5,10 +5,10 @@
 
 import type { CharacterBed, CharacterDTO, CharacterField, CharacterNow, CharacterRelation, CharacterResult, CharacterSchedule, CharacterSection, PlaceRef, ThingRef, VisibilityValue } from "../shared/character";
 import type { JsonObject, JsonValue } from "../shared/json";
-import { isRecord } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { PARTY_RELATION } from "../shared/party";
-import { ACTIVITY_SPAN_OF, activitySpanEnd, ALIVE, lifeStateOf, type FieldDef, type Recurrence, type RelationInstance, type RelationTypeDef, type ScheduleDef, type ScheduleSlot, type WorldDoc } from "../shared/world";
+import { activitySpanEnd, ALIVE, ENGINE_FIELDS, lifeStateOf, type FieldDef, type Recurrence, type RelationInstance, type RelationTypeDef, type ScheduleDef, type ScheduleSlot, type WorldDoc } from "../shared/world";
 import { calendarOf, formatStamp, formatTimeOfDay, placeOffset, weekdayName } from "./calendar";
 import { lifeOf } from "./life";
 import { optionalQuery, own } from "./pack-kit";
@@ -362,8 +362,8 @@ function sectionsOf(reg: Registry, world: WorldDoc, e: Body): CharacterSection[]
     id = k?.extends;
   }
   const sections = new Map<CharacterSection["id"], CharacterField[]>(SECTION_ORDER.map((s) => [s, []]));
-  // The activity a span was given for is the engine's own record, never a field of theirs.
-  const ids = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])].filter((field) => field !== ACTIVITY_SPAN_OF);
+  // The engine's own records of a span are never fields of theirs.
+  const ids = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])].filter((field) => !hasOwn(ENGINE_FIELDS, field));
   for (const field of ids) {
     const def = own(defs, field);
     const section: CharacterSection["id"] = def?.locked || def?.derived !== undefined ? "advanced" : (SECTION_OF[field] ?? (sheet.has(field) ? "stats" : authored.has(field) ? "identity" : "advanced"));

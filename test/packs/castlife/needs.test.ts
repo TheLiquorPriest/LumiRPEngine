@@ -4,7 +4,10 @@
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { JsonValue } from "../../../src/shared/json";
-import { ACTIVITY_SPAN_OF, type WorldDoc } from "../../../src/shared/world";
+import { ACTIVITY_SPAN_OF, ENGINE_FIELDS, type WorldDoc } from "../../../src/shared/world";
+import type { EditOp } from "../../../src/shared/protocol";
+import { resolveEdit } from "../../../src/engine/edits";
+import { applyMarker } from "../../../src/engine/events";
 import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY } from "../../../src/shared/minds";
 import { mindContext } from "../../../src/backend/minds-context";
 import { buildCharacter } from "../../../src/engine/character";
@@ -337,13 +340,16 @@ describe("what a skip meets (the replay review)", () => {
 });
 
 describe("needs an ordinary turn lives", () => {
-  /** The POV at the hall; dinner, a long bath and an hour's reading are world actions with no effect on needs. */
+  /** The POV at the hall; dinner, a long bath, an hour's reading, a train ride and a snack they brought are world actions with no effect on needs. */
   function atHall(world: WorldDoc): void {
     world.entities.you!.fields.place = "apartment_hall";
     world.actions.dine = { id: "dine", label: "Have dinner", params: {}, requires: [], outcomes: { default: [] }, duration: "45", activity: { type: "dinner", until: "clock + 45" } };
     // Leisure has no Speed through policy, so the bath's span runs on past the turn that begins it.
     world.actions.bath = { id: "bath", label: "Run a long bath", params: {}, requires: [], outcomes: { default: [] }, duration: "10", activity: { type: "leisure", until: "clock + 120" } };
     world.actions.read = { id: "read", label: "Read", params: {}, requires: [], outcomes: { default: [] }, duration: "60" };
+    // Travel past its threshold: boarding takes five minutes and the ride is offered as a Speed through.
+    world.actions.board = { id: "board", label: "Board the train", params: {}, requires: [], outcomes: { default: [] }, duration: "5", activity: { type: "travel", until: "clock + 180" } };
+    world.actions.snack = { id: "snack", label: "Eat what I brought", params: { food: { type: "ref", ref: "item" } }, requires: [], outcomes: { default: [] }, duration: "30", activity: { type: "meal", until: "clock + 30" } };
   }
 
   /** The POV at the hall, knowing Rosa, who is there. */
@@ -488,21 +494,24 @@ describe("needs an ordinary turn lives", () => {
     expect(met.filter((at) => at <= end)).toEqual([]);
   });
 
-  test("which activity a span was given for is the engine's own record: no field list or mind reads it", () => {
+  test("the engine's own records of a span are its own: no field list or mind reads them", () => {
     const w = hall();
     to(w, todayAt(w, 13 * 60));
+    const records = Object.keys(ENGINE_FIELDS);
+    // The nap is offered a Speed through, so it leaves every record.
     play(w, "nap", intent("sleep", { minutes: 120 }), "I lie down for a two-hour nap.");
+    for (const f of records) expect(w.state.entities.you?.fields[f]).toBeDefined();
     // Rosa's own rest gives her a span too.
     expect(resolveAction(reg, w, { actor: "rosa", action: "rest", params: {} }, createRng("rosa")).ok).toBe(true);
+    expect(w.state.entities.rosa?.fields[ACTIVITY_SPAN_OF]).toBeDefined();
     for (const who of ["you", "rosa"]) {
-      expect(w.state.entities[who]?.fields[ACTIVITY_SPAN_OF]).toBeDefined();
       const gm = buildGmWorld(reg, w.world, w.state).entities.find((e) => e.id === who);
-      expect(gm?.fields.map((f) => f.id)).not.toContain(ACTIVITY_SPAN_OF);
+      expect(gm?.fields.map((f) => f.id).filter((f) => records.includes(f))).toEqual([]);
       const page = buildCharacter(reg, w.world, who, w.state);
-      expect(page?.character.sections.flatMap((s) => s.fields.map((f) => f.id))).not.toContain(ACTIVITY_SPAN_OF);
+      expect(page?.character.sections.flatMap((s) => s.fields.map((f) => f.id)).filter((f) => records.includes(f))).toEqual([]);
+      const mind = mindContext({ reg, world: w.world, state: w.state, who, memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, reads: DEFAULT_MIND_READS, moment: { kind: "turn", at: w.state.clock, reason: "", user: "", reply: "" } });
+      for (const f of records) expect(mind).not.toContain(f.replace(/_/g, " ").trim());
     }
-    const mind = mindContext({ reg, world: w.world, state: w.state, who: "rosa", memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, reads: DEFAULT_MIND_READS, moment: { kind: "turn", at: w.state.clock, reason: "", user: "", reply: "" } });
-    expect(mind).not.toContain(ACTIVITY_SPAN_OF.replace(/_/g, " ").trim());
   });
 
   test("a mind reads when what it's doing ends as the world's day and time, and nothing once that end has gone by", () => {
@@ -540,5 +549,109 @@ describe("needs an ordinary turn lives", () => {
     expect(folded.clock).toBe(w.state.clock);
     expect(folded.entities.you?.fields.needs).toEqual(w.state.entities.you?.fields.needs);
     for (const need of NEED_IDS) expect(needValue(reg.context(world, folded), "you", need)).toBeCloseTo(needValue(w.ctx, "you", need), 9);
+  });
+
+  /** A Timelapse from the palette, holding the POV where the story has it, as the palette does unless told to follow the routine. */
+  const palette = (minutes: number): InterpretOutput => timelapseIntent({ type: "duration", minutes }, undefined, 1, false);
+  const nothing: InterpretOutput = { action: null, params: {}, probabilities: {} };
+
+  test("going to bed and skipping to the morning another way than the offer's own rests them all the same", () => {
+    const w = hall();
+    to(w, todayAt(w, 23 * 60));
+    expect(told(w, "fatigue")).toBe(true);
+    expect(play(w, "bed", intent("sleep"), "I go to bed.").chips.some((c) => c.kind === "timelapse_offer")).toBe(true);
+    const mark = w.events.length;
+    play(w, "skip", palette(8 * 60));
+    expect(metAtOf(w.events.slice(mark), "fatigue").length).toBeGreaterThan(0);
+    expect(told(w, "fatigue")).toBe(false);
+  });
+
+  test("a Timelapse to their arrival after a long ride they set off on runs, rather than finding no trip", () => {
+    const w = hall();
+    to(w, todayAt(w, 10 * 60));
+    expect(play(w, "board", intent("board"), "I board the train.").chips.some((c) => c.kind === "timelapse_offer")).toBe(true);
+    const from = w.state.clock;
+    const arrive = play(w, "arrive", timelapseIntent({ type: "arrival" }));
+    expect(arrive.timelapse).not.toBeNull();
+    expect(w.state.clock).toBeGreaterThan(from);
+  });
+
+  test("a night begun while the clock is paused is never turned down: no offer was made to turn down", () => {
+    const w = hall();
+    to(w, todayAt(w, 23 * 60));
+    applyMarker(w.state, { kind: "time", control: "pause", scope: { all: true }, to: true });
+    expect(play(w, "bed", intent("sleep"), "I go to bed.").chips.some((c) => c.kind === "timelapse_offer")).toBe(false);
+    play(w, "dark", nothing, "I lie there in the dark.");
+    applyMarker(w.state, { kind: "time", control: "pause", scope: { all: true }, to: false });
+    const mark = w.events.length;
+    play(w, "skip", palette(8 * 60));
+    expect(metAtOf(w.events.slice(mark), "fatigue").length).toBeGreaterThan(0);
+  });
+
+  test("a chat while the clock is paused meets social at once, since no paused turn reaches its end", () => {
+    const w = hall();
+    to(w, todayAt(w, 13 * 60));
+    applyMarker(w.state, { kind: "time", control: "pause", scope: { all: true }, to: true });
+    expect(needValue(w.ctx, "you", "social")).toBeGreaterThan(0);
+    play(w, "chat", intent("chat_with", { target: "rosa" }), "I talk with Rosa.");
+    expect(needValue(w.ctx, "you", "social")).toBe(0);
+  });
+
+  test("the GM's Activity and Activity ends, set together in either order, read as that activity's span", () => {
+    for (const endFirst of [false, true]) {
+      const w = hall();
+      to(w, todayAt(w, 13 * 60));
+      play(w, "go", intent("go", { to: "cafe" }), "I walk to the café.");
+      // The walk left a span of its own behind.
+      expect(w.state.entities.you?.fields[ACTIVITY_SPAN_OF]).toBe("travel");
+      const ops: EditOp[] = [
+        { op: "set", entity: "you", field: "activity", value: "sleep" },
+        { op: "set", entity: "you", field: "activity_until", value: w.state.clock + 120 },
+      ];
+      const edit = resolveEdit(reg, w.world, w.state, endFirst ? [...ops].reverse() : ops, { gm: true, runSeed: "run" });
+      if ("rejection" in edit) throw new Error(edit.rejection.reason);
+      w.applyAll(edit.events);
+      expect(buildCharacter(reg, w.world, "you", w.state)?.character.now?.until ?? null).not.toBeNull();
+      const mark = w.events.length;
+      play(w, "skip", palette(3 * 60));
+      expect(metAtOf(w.events.slice(mark), "fatigue").length).toBeGreaterThan(0);
+    }
+  });
+
+  test("a claimed thing's Undo takes back the need its activity met", () => {
+    const w = hall();
+    to(w, todayAt(w, 18 * 60));
+    const start = structuredClone(w.state);
+    const plan = play(w, "snack", { ...intent("snack"), claim: { param: "food", name: "sandwich", at: "held", kind: "item", consumable: true } }, "I eat the sandwich I brought.");
+    const claimed = plan.resolutions[0]?.claimed;
+    if (!claimed) throw new Error("no claimed thing");
+    // Its chip's Undo takes the claimed thing's events, what was done with it among them.
+    const undone = new Set(claimed.events.map((e) => JSON.stringify(e)));
+    const after = fold(reg, w.world, start, plan.events.filter((e) => !undone.has(JSON.stringify(e))));
+    expect(needValue(reg.context(w.world, after), "you", "hunger")).toBeGreaterThan(30);
+  });
+
+  test("what an activity a queued action began met is that action's, whichever later step sees it out", () => {
+    const w = hall();
+    to(w, todayAt(w, 18 * 60));
+    const start = structuredClone(w.state);
+    const plan = play(w, "bath", { ...intent("bath"), queue: [{ action: "read", params: {}, text: "I read." }, { action: "read", params: {}, text: "I read on." }] }, "I run a bath, then read, then read on.");
+    expect(plan.resolutions).toHaveLength(3);
+    expect(metAtOf(plan.events, "fun")).toHaveLength(1);
+    // "Not an action?" takes back every action of the message, and what each one's activity met.
+    const undone = new Set(plan.resolutions.flatMap((r) => r.events.map((e) => JSON.stringify(e))));
+    const after = fold(reg, w.world, start, plan.events.filter((e) => !undone.has(JSON.stringify(e))));
+    expect(needValue(reg.context(w.world, after), "you", "fun")).toBeGreaterThan(30);
+  });
+
+  test("a world rule on a need hears the need an activity met", () => {
+    const w = hall((world) => {
+      world.rules.fed = { id: "fed", on: { event: "castlife.need" }, when: "event.data.need == 'hunger'", do: [{ type: "set", args: { entity: "self", field: "fed", value: true } }] };
+    });
+    // Rosa is out, so no company of hers is met in the turn.
+    w.apply({ type: "set", entity: "rosa", field: "place", value: "cafe" });
+    to(w, todayAt(w, 18 * 60));
+    play(w, "dine", intent("dine"), "I have dinner.");
+    expect(w.state.entities.you?.fields.fed).toBe(true);
   });
 });

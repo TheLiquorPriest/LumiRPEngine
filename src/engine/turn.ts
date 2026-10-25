@@ -17,7 +17,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hashParts } from "../shared/hash";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent, TimelapseTarget } from "../shared/ledger";
-import { activitySpanEnd, type WorldDoc } from "../shared/world";
+import { ACTIVITY_OFFERED, activitySpanEnd, type WorldDoc } from "../shared/world";
 import type { Judgement } from "./adjudication";
 import { outline } from "./beats";
 import { ENGINE_EVENTS, signalOf } from "./engine-pack";
@@ -99,19 +99,27 @@ function povSpan(w: Working): { type: string; until: number } | null {
   return until !== null && typeof fields?.activity === "string" ? { type: fields.activity, until } : null;
 }
 
+/** Which of this turn's resolutions began `span` for `pov` (a queued action's too), or -1 when none did. */
+function spanOwner(resolutions: readonly Resolution[], pov: EntityId, span: { type: string; until: number }): number {
+  for (let k = resolutions.length - 1; k >= 0; k--) {
+    const a = resolutions[k]?.activity;
+    if (resolutions[k]?.actor === pov && a?.type === span.type && a.until === span.until) return k;
+  }
+  return -1;
+}
+
 /**
- * An activity span an earlier turn left running, still long enough for its Speed through, ends
- * unmet as this turn begins (DESIGN §9.2): the offer its turn made goes at the next send, so the
- * next turn is the decline. Only its own Speed through, the chip's Timelapse to its end or that
- * Timelapse's Continue, carries it on: no later turn or skip meets a nap the player got up from. A
- * span short enough to pass in turns (under its threshold, or with no policy) goes on, and is met
- * when a turn's time sees it out. Nothing is recorded when no span is cut.
+ * A Speed through its turn offered, turned down (DESIGN §9.2): the span ends, unmet, as the next turn
+ * begins that lets no time pass. The offer goes at the next send, so that turn is the decline. Any
+ * time skip carries the span on instead (the chip's Timelapse or its Continue, the palette's, a typed
+ * one), since skipping time gets no one up. A span no turn offered (`ACTIVITY_OFFERED`: short enough
+ * to pass in turns, or begun while the clock was paused or a fight held it) goes on, and is met when a
+ * turn's time sees it out. Nothing is recorded when no span is cut.
  */
 function lapsedSpan(w: Working, intent: InterpretOutput | null): LedgerEvent[] {
+  if (intent?.action === TIMELAPSE_ACTION) return [];
   const span = povSpan(w);
-  if (span === null || span.until <= w.state.clock || speedThrough(w.state, span.type, span.until - w.state.clock) === "elapse") return [];
-  const target = intent?.action === TIMELAPSE_ACTION ? parseTarget(intent.params.target) : null;
-  if (target?.type === "at" && target.at === span.until) return [];
+  if (span === null || span.until <= w.state.clock || own(w.state.entities, w.world.pov)?.fields[ACTIVITY_OFFERED] !== span.until) return [];
   return [{ type: "set", entity: w.world.pov, field: "activity_until", value: w.state.clock }];
 }
 
@@ -138,13 +146,15 @@ function queueStop(w: Working, res: Resolution, since: number, scene: string, sp
 
 /**
  * What every planned turn does first (DESIGN §5.1 step 2): a fresh pause is pinned to its scene, or
- * a lifted one cleared, and the POV's representation materializes. A time skip's pre phase starts
- * here too, so it reaches its beats in the state the plan will (DESIGN §24.7).
+ * a lifted one cleared, the POV's representation materializes, and a Speed through the turn declines
+ * ends (`lapsedSpan`). A time skip's pre phase starts here too, so it reaches its beats in the state
+ * the plan will (DESIGN §24.7).
  */
-export function turnStart(reg: Registry, w: Working, runSeed: string): void {
+export function turnStart(reg: Registry, w: Working, runSeed: string, intent: InterpretOutput | null): void {
   w.applyAll(pauseBookkeeping(w.world, w.state));
   // The POV is always shown (HUD, panels): its representation materializes in its first planned turn.
   materializeAll(reg, w, w.world.pov, runSeed);
+  w.applyAll(lapsedSpan(w, intent));
 }
 
 /** A timelapse intent's target and run options, read alike by the plan and by a time skip's pre phase (DESIGN §24.7). */
@@ -177,8 +187,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   const w = new Working(reg, input.world, input.state);
   const rng = createRng(input.seed);
   const chips: TurnChip[] = [];
-  turnStart(reg, w, input.runSeed);
-  w.applyAll(lapsedSpan(w, input.intent));
+  turnStart(reg, w, input.runSeed, input.intent);
   const from = w.state.clock;
   const intent = input.intent;
   const resolutions: Resolution[] = [];
@@ -265,6 +274,8 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         const stated = statedSpan(reg, w.world, step);
         if (mode !== "elapse") {
           speeding = true;
+          // What the next turn that lets no time pass turns down (`lapsedSpan`): only a span offered so.
+          w.apply({ type: "set", entity: w.world.pov, field: ACTIVITY_OFFERED, value: act.until });
           const until: TimelapseTarget = { type: "at", at: act.until };
           // Its Timelapse holds the POV in it to its end, as a typed out-of-character span does, so its
           // routine doesn't wake a daytime sleeper for dinner. Going to bed for the night follows the routine.
@@ -282,20 +293,25 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         }
       }
       // The player character's activity span that ended within this step's time meets its needs at
-      // its end (`ProcessDef.ended`): the action's own is part of the action, so "Not an action?"
-      // takes it back with the rest (DESIGN §9.2); one an earlier turn began is this turn's time's.
-      // One its Speed through runs is met by that Timelapse; a long one turned down ended as the
-      // turn began (`lapsedSpan`).
+      // its end (`ProcessDef.ended`). The action of this turn that began it, a queued one's too, owns
+      // what it met, so "Not an action?" and a claimed thing's Undo take it back with the rest (DESIGN
+      // §9.2); one an earlier turn began is this turn's time's. One its Speed through runs is met by
+      // that Timelapse; one turned down ended as the turn began (`lapsedSpan`).
       const span = speeding ? null : povSpan(w);
       if (span && span.until > began && span.until <= w.state.clock) {
         const met: LedgerEvent[] = [];
         for (const def of reg.processes) {
           if (def.scope === "agent" && def.ended && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel) met.push(...w.applyAll(def.ended(w.ctx, w.world.pov, span)));
         }
-        if (resolution && met.length > 0 && act?.type === span.type && act.until === span.until) {
-          resolution = { ...resolution, events: [...resolution.events, ...met] };
-          resolutions[resolutions.length - 1] = resolution;
+        const owner = spanOwner(resolutions, w.world.pov, span);
+        const starter = owner >= 0 ? resolutions[owner] : undefined;
+        if (starter && met.length > 0) {
+          const owned: Resolution = { ...starter, events: [...starter.events, ...met], ...(starter.claimed ? { claimed: { ...starter.claimed, events: [...starter.claimed.events, ...met] } } : {}) };
+          resolutions[owner] = owned;
+          if (resolution && owner === resolutions.length - 1) resolution = owned;
         }
+        // World rules hear what an activity met, as they hear what a turn's own time met.
+        if (met.length > 0) runRulesOnEvents(reg, w, met, { seed: hashParts(seed, "ended") });
       }
       const left = steps.length - 1 - i;
       const cause = resolution && left > 0 ? queueStop(w, resolution, mark, scene, speeding) : null;

@@ -16,7 +16,7 @@ import type { Limit, MindMoment, MindsCharacter, MindsMemoryConfig, MindsReads }
 import { limitOf, planWords } from "../shared/minds";
 import { loreIsSecret } from "../shared/lore";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
-import { ACTIVITY_SPAN_OF, activitySpanEnd, formatMoney } from "../shared/world";
+import { activitySpanEnd, ENGINE_FIELDS, formatMoney } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock, formatHHMM, holidaysOn } from "../engine/calendar";
 import { cuesOf } from "../engine/cues";
 import { loreHeldBy, loreReadable, loreSearch, loreSnippet } from "../engine/lore";
@@ -82,7 +82,7 @@ export interface MindContextReport {
 }
 
 /** Fields a person's sheet holds that the context says elsewhere or that are the engine's own bookkeeping. */
-const SKIPPED_FIELDS: Readonly<Record<string, true>> = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true, [ACTIVITY_SPAN_OF]: true };
+const SKIPPED_FIELDS: Readonly<Record<string, true>> = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true, ...ENGINE_FIELDS };
 
 const STOP: Readonly<Record<string, true>> = Object.fromEntries("the and for with that this from into have has had was were are you your they them their there here what when where which who how why just very some more most other then than about would could should will been being does did not but all any can its it's i'm he's she's".split(" ").map((w) => [w, true] as const));
 
