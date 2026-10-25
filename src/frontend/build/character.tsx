@@ -151,7 +151,7 @@ function SectionFields(props: { section: CharacterSection["id"]; model: Characte
           if (def.type === "list" && (def.of === undefined || def.of === "text") && (v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string")))) {
             return <TextListEditor key={f.id} label={f.label} value={Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []} onChange={(next) => props.onField(f.id, next.length > 0 ? next : undefined)} />;
           }
-          // The model's help in place of the builder's notes; a number's range the number input shows itself, so its `hint` would say it twice.
+          // The model's help in place of the builder's notes; a number's range the number input shows itself.
           return <DefInput key={f.id} name={f.id} def={{ ...def, label: f.label }} defs={defs} value={v} ctx={props.ctx} path={`${props.ctx.path}.fields.${f.id}`} words={f.help ? [f.help] : []} onChange={(next) => props.onField(f.id, next)} />;
         })}
     </>

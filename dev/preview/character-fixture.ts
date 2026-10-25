@@ -97,11 +97,10 @@ export const PICKER_CHARACTER: CharacterDTO = {
     places: [inHome(`${HOME}_bedroom`), inHome(`${HOME}_kitchen`), inHome(`${HOME}_bedroom_closet`)],
     items: PICKER_THINGS.filter((t) => t.place?.id.startsWith(HOME)),
   },
-  employer: null,
   schedules: [{ id: "maya_place", label: "Weekdays 6:00 AM–2:00 PM: Daybreak Café", summary: "Weekdays 6:00 AM–2:00 PM: Daybreak Café" }],
   relations: [
-    { type: "regard", typeLabel: "Regard", group: "feelings", to: { id: "you", name: "Sam Rivera" }, words: "warm" },
-    { type: "member_of", typeLabel: "Member of", group: "groups", to: { id: "chen_household", name: "The Chens" }, words: "Role: Daughter" },
+    { type: "regard", to: { id: "you", name: "Sam Rivera" }, words: "warm" },
+    { type: "member_of", to: { id: "chen_household", name: "The Chens" }, words: "Role: Daughter" },
   ],
   sections: [{ id: "identity", fields: [{ id: "traits", label: "Traits", type: "list", of: "text", value: ["patient", "night owl"] }] }],
 };
