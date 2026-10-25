@@ -458,11 +458,19 @@ export class TurnBridge implements TurnModel {
     return events;
   }
 
-  /** The player let this text's read play from the intent gate (Play, or Edit's Apply with its params). */
+  /**
+   * The player let this text's read play from the intent gate (Play, or Edit with its params). A real
+   * pick the edit made for the claim's param wins over the claim (DESIGN §9.4): the claimed thing is
+   * made only while that param stays as read.
+   */
   passIntent(userText: string, params?: JsonObject): boolean {
     const intent = this.intents.get(userText);
     if (!intent) return false;
-    if (params) this.intents.set(userText, { ...intent, params });
+    if (params) {
+      const { claim, ...rest } = intent;
+      const kept = claim !== undefined && JSON.stringify(params[claim.param] ?? null) === JSON.stringify(intent.params[claim.param] ?? null);
+      this.intents.set(userText, { ...rest, params, ...(claim && kept ? { claim } : {}) });
+    }
     this.intentsPassed.add(userText);
     if (this.intentsPassed.size > 64) this.intentsPassed.delete(this.intentsPassed.values().next().value ?? "");
     return true;

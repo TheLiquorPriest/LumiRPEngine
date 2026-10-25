@@ -35,7 +35,7 @@ import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import { povLife } from "../engine/life";
 import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
-import { canSeeEntity, canSeePlace, findLeaks, povPlace, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
 import { knownPlaceRefs } from "../engine/character";
 import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import type { StoredChip } from "./chips";
@@ -175,9 +175,11 @@ function paramLabel(action: ActionDef, name: string, world: WorldDoc, registry: 
 
 /**
  * An action's picks in words, as the palette names them ("Bluebird Coffee, with Danny Okafor"):
- * each place or person by name, a list of people after "with", an amount in the world's currency,
- * a number with its label, and a text pick as written. Never an id: a pick the player character may
- * not know of (a hidden place, someone it hasn't met) is left out, as is text naming a secret.
+ * each place or person by name, a list of people after "with", an amount in the world's currency, a
+ * number with its label, a table row, a stat or a quest by the label the palette and the quest log
+ * give it, and other text as written. Never an id: a pick the player character may not know of (a
+ * hidden place, someone it hasn't met) is left out, as is text naming a secret, and text written as
+ * an id that names nothing the player has words for.
  */
 export function actionWords(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject): string {
   const secrets = unrevealedSecrets(registry, world, state);
@@ -188,6 +190,20 @@ export function actionWords(registry: Registry, world: WorldDoc, state: Readonly
     const place = own(world.places, value);
     if (place) return canSeePlace(registry, world, state, world.pov, value) ? place.name : null;
     return null;
+  };
+  // A text pick as the palette and the quest log label it: a table row, a stat, a quest row (by the id its row goes by, a stand-in included).
+  const labelOf = (table: string | undefined, value: string): string | null => {
+    if (table !== undefined) return tableChoices(own(world.tables, table)).find((row) => row.key === value)?.label ?? null;
+    const ctx = registry.context(world, state);
+    const stat = (optionalQuery(ctx, "sheets.stats")?.(ctx) ?? []).find((s) => s.id === value);
+    if (stat) return stat.label;
+    for (const id of Object.keys(world.tracks)) {
+      const shown = playerTrack(registry, world, state, world.pov, id);
+      if (shown?.id === value) return shown.label;
+    }
+    if (hasOwn(state.entities, value) || hasOwn(world.places, value)) return nameOf(value);
+    // Written as an id (one word with `_` or `~`), it names nothing the player has words for.
+    return /^\S+$/.test(value) && /[_~]/.test(value) ? null : value;
   };
   const parts: string[] = [];
   for (const [name, def] of Object.entries(action.params)) {
@@ -202,8 +218,7 @@ export function actionWords(registry: Registry, world: WorldDoc, state: Readonly
     } else if (def.type === "money" && typeof value === "number") parts.push(formatMoney(value, world.currency));
     else if (def.type === "number" && typeof value === "number") parts.push(`${value} ${paramLabel(action, name, world, registry).toLowerCase()}`);
     else if (typeof value === "string") {
-      // Text that is an id reads as what it names, or not at all; other text is the player's words.
-      const text = hasOwn(state.entities, value) || hasOwn(world.places, value) ? nameOf(value) : value;
+      const text = labelOf(def.table, value);
       if (text && findLeaks(text, secrets).length === 0) parts.push(text);
     }
   }
