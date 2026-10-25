@@ -1119,7 +1119,8 @@ export function DefInput(props: { name: string; def: FieldDef; defs: Readonly<Re
     default: {
       // A text field naming a row of a data table picks the row by its name, while the world has the table.
       const table = def.table && hasOwn(ctx.doc.tables, def.table) ? ctx.doc.tables[def.table] : undefined;
-      if (table) return <RefInput label={label} value={props.value} options={tableChoices(table).map((c) => ({ value: c.key, label: c.label }))} optional unmarked={props.words !== undefined} hint={[`A row of ${table.label}`, help].filter((h) => h).join(" · ")} issues={issues} onChange={props.onChange} />;
+      // The page's own words already name the table where its name adds something, so they stand alone.
+      if (table) return <RefInput label={label} value={props.value} options={tableChoices(table).map((c) => ({ value: c.key, label: c.label }))} optional unmarked={props.words !== undefined} hint={(props.words ? [help] : [`A row of ${table.label}`, help]).filter((h) => h).join(" · ") || undefined} issues={issues} onChange={props.onChange} />;
       return <TextInput label={label} value={props.value} optional placeholder={placeholder} hint={help} issues={issues} onChange={props.onChange} />;
     }
   }

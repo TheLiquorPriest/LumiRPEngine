@@ -11,6 +11,7 @@ import type { WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS } from "../../src/packs/index";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { modernUsWorld } from "../packs/riverton";
+import { DefInput } from "../../src/frontend/build/schema-form";
 
 const reg = createRegistry(ALL_PACKS);
 
@@ -74,5 +75,21 @@ describe("Build's Character page", () => {
     expect(employerPicker(doc, "brightline")).toBe("business");
     expect(employerPicker(doc, "")).toBe("place");
     expect(employerPicker(doc, "gone_shop")).toBe("business");
+  });
+
+  test("a table field takes the page's own words alone; the builder's form still names the table", () => {
+    const doc = draft();
+    const table = doc.tables["economy.occupations"];
+    if (!table) throw new Error("no occupations table");
+    const hint = (words?: readonly string[]): string => {
+      const el = DefInput({ name: "occupation", def: { type: "text", table: table.id }, defs: {}, value: undefined, ctx: { doc, lint: [], path: "entities.maya", identifiers: [], functions: [] }, path: "entities.maya.fields.occupation", words, onChange: () => undefined });
+      const props: { hint?: unknown } = el && typeof el === "object" && "props" in el ? el.props : {};
+      return typeof props.hint === "string" ? props.hint : "";
+    };
+    const occurrences = (text: string): number => text.split(table.label).length - 1;
+    // The model words it once where the name adds something, and leaves it out where it doesn't.
+    expect(occurrences(hint([`A row of ${table.label}`]))).toBe(1);
+    expect(occurrences(hint([]))).toBe(0);
+    expect(occurrences(hint())).toBe(1);
   });
 });
