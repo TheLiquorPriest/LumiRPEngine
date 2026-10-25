@@ -1593,6 +1593,28 @@ function mapLint(world) {
 // src/shared/world.ts
 var WORLD_FORMAT = "lre-world-v1";
 var EFFECT_ONLY_FUNCTIONS = ["roll"];
+var ACTIVITY_SPAN_OF = "_activity_span";
+var ACTIVITY_PLACE = "_activity_place";
+var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activity_offered: true };
+function activitySpanEnd(fields) {
+  const until = fields?.activity_until;
+  if (typeof until !== "number")
+    return null;
+  const of = fields?.[ACTIVITY_SPAN_OF];
+  const at = fields?.[ACTIVITY_PLACE];
+  if (of !== undefined && of !== fields?.activity)
+    return null;
+  return typeof at === "string" && at !== fields?.place ? null : until;
+}
+function spanRecords(entity, fields) {
+  const out = [];
+  if (typeof fields?.activity === "string" && fields[ACTIVITY_SPAN_OF] !== fields.activity)
+    out.push({ type: "set", entity, field: ACTIVITY_SPAN_OF, value: fields.activity });
+  const place = typeof fields?.place === "string" ? fields.place : null;
+  if ((fields?.[ACTIVITY_PLACE] ?? null) !== place)
+    out.push({ type: "set", entity, field: ACTIVITY_PLACE, value: place });
+  return out;
+}
 function offersAction(world, action) {
   return action.combat === undefined || world.ruleset?.combat !== undefined;
 }
@@ -8312,6 +8334,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
   if (activity) {
     w.apply({ type: "set", entity: p.actor, field: "activity", value: activity.type });
     w.apply({ type: "set", entity: p.actor, field: "activity_until", value: activity.until });
+    w.applyAll(spanRecords(p.actor, own(w.state.entities, p.actor)?.fields));
   }
   return {
     ...base,
@@ -10496,6 +10519,13 @@ function advance(reg, w, to, opts) {
       result.open = open;
     }
   }
+  if (!timelapse && w.state.clock > from && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov)) {
+    const span = { from, to: w.state.clock };
+    for (const def of reg.processes) {
+      if (def.scope === "agent" && def.lived && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel)
+        e.emit(def.lived(w.ctx, w.world.pov, span));
+    }
+  }
   for (const [agent, slot] of cursors)
     settle(agent, slot);
   result.to = w.state.clock;
@@ -10861,8 +10891,8 @@ function resolveTarget(reg, world, state, target) {
       break;
     }
     case "arrival": {
-      const until = own(state.entities, world.pov)?.fields.activity_until;
-      if (typeof until !== "number" || until <= now)
+      const until = activitySpanEnd(own(state.entities, world.pov)?.fields);
+      if (until === null || until <= now)
         return { code: "no_trip", reason: "no active trip" };
       to = until;
       label = "arrival";
@@ -11723,6 +11753,19 @@ function statedSpan(reg, world, step) {
     return p.type === "duration" && typeof given === "number" && given > 0;
   });
 }
+function povSpan(w) {
+  const fields = own(w.state.entities, w.world.pov)?.fields;
+  const until = activitySpanEnd(fields);
+  return until !== null && typeof fields?.activity === "string" ? { type: fields.activity, until } : null;
+}
+function spanOwner(resolutions, pov, span) {
+  for (let k = resolutions.length - 1;k >= 0; k--) {
+    const a = resolutions[k]?.activity;
+    if (resolutions[k]?.actor === pov && a?.type === span.type && a.until === span.until)
+      return k;
+  }
+  return -1;
+}
 function queueStop(w, res, since, scene, speeding) {
   if (!res.ok || res.rejected.length > 0)
     return "failure";
@@ -11816,6 +11859,7 @@ function planTurn(input) {
       }
       const fighting = fightHoldsClock(w.ctx);
       const elapsed = inFight && fighting || i > 0 && !resolution?.ok ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
+      const began = w.state.clock;
       if (elapsed && elapsed.minutes > 0)
         advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
       const act = resolution?.activity;
@@ -11840,6 +11884,24 @@ function planTurn(input) {
         } else if (stated && remaining > 0) {
           advance(reg, w, Math.min(act.until, w.state.clock + TIME_LIMITS.timelapseMinutes), { runSeed: input.runSeed, mode: "turn", cause: "action" });
         }
+      }
+      const span = speeding ? null : povSpan(w);
+      if (span && span.until > began && span.until <= w.state.clock) {
+        const met = [];
+        for (const def of reg.processes) {
+          if (def.scope === "agent" && def.ended && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel)
+            met.push(...w.applyAll(def.ended(w.ctx, w.world.pov, span)));
+        }
+        const owner = spanOwner(resolutions, w.world.pov, span);
+        const starter = owner >= 0 ? resolutions[owner] : undefined;
+        if (starter && met.length > 0) {
+          const owned2 = { ...starter, events: [...starter.events, ...met], ...starter.claimed ? { claimed: { ...starter.claimed, events: [...starter.claimed.events, ...met] } } : {} };
+          resolutions[owner] = owned2;
+          if (resolution && owner === resolutions.length - 1)
+            resolution = owned2;
+        }
+        if (met.length > 0)
+          runRulesOnEvents(reg, w, met, { seed: hashParts(seed, "ended") });
       }
       const left = steps.length - 1 - i;
       const cause = resolution && left > 0 ? queueStop(w, resolution, mark, scene, speeding) : null;
@@ -16535,6 +16597,7 @@ function registerProperty(r) {
 // src/packs/economy/core/feed.ts
 var OTHERS_CAP = 10;
 var ROLE_LABEL = { owner: "owner", joint: "joint owner", custodian: "custodian", beneficiary: "beneficiary", trustee: "trustee", authorized_user: "authorized user" };
+var OWNING = { owner: true, joint: true, custodian: false, beneficiary: false, trustee: false, authorized_user: false };
 function propertyLines(ctx, scope) {
   const pov = ctx.world.pov;
   if (ctx.levelOf(pov, "money") === 0)
@@ -16547,6 +16610,7 @@ function propertyLines(ctx, scope) {
       return "";
     return viewer === null || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place) ? ` at ${own(ctx.world.places, place)?.name ?? place}` : " somewhere";
   };
+  const roleOf = (o) => `${ROLE_LABEL[o.role]}${o.worth > 0 ? `, ${Math.round(o.worth)}%` : ""}`;
   const lines = [];
   const others = [];
   for (const id of propertyIds(ctx.state)) {
@@ -16557,10 +16621,18 @@ function propertyLines(ctx, scope) {
       others.push(id);
       continue;
     }
-    const mine = access.owners.find((o) => o.party === pov) ?? access.owners.find((o) => isMemberOf(ctx.state, pov, o.party));
-    const stake = mine ? `${mine.party === pov ? "yours" : `${see(pov, mine.party) ? name(mine.party) : "someone"}'s`} (${ROLE_LABEL[mine.role]}${mine.worth > 0 && mine.worth < 100 ? `, ${Math.round(mine.worth)}%` : ""})` : "yours";
-    const co = access.owners.filter((o) => o !== mine).map((o) => `${see(pov, o.party) ? name(o.party) : "someone"}${o.worth > 0 ? ` ${Math.round(o.worth)}%` : ""}`);
-    lines.push({ text: `${name(id)}${where(id, pov)}: ${stake}${co.length > 0 ? `, with ${co.join(", ")}` : ""}.`, known: "pov" });
+    const holder = (o) => `${see(pov, o.party) ? name(o.party) : "someone"} (${roleOf(o)})`;
+    const direct = access.owners.find((o) => o.party === pov);
+    const through = direct ? undefined : access.owners.find((o) => isMemberOf(ctx.state, pov, o.party));
+    const rest = access.owners.filter((o) => o !== direct).map(holder);
+    let stake;
+    if (direct && OWNING[direct.role])
+      stake = `yours (${roleOf(direct)})${rest.length > 0 ? `, with ${rest.join(", ")}` : ""}`;
+    else {
+      const you = direct ? `you: ${ROLE_LABEL[direct.role]}` : through ? `you: through ${see(pov, through.party) ? name(through.party) : "someone"}` : null;
+      stake = [rest.length > 0 ? `held by ${rest.join(", ")}` : null, you].filter((p) => p !== null).join("; ");
+    }
+    lines.push({ text: `${name(id)}${where(id, pov)}${stake !== "" ? `: ${stake}` : ""}.`, known: "pov" });
   }
   if (scope === "player")
     return lines;
@@ -16579,10 +16651,10 @@ function propertyLines(ctx, scope) {
     const knowers = owners.filter((o) => withHim(o.party) && see(o.party, id)).map((o) => o.party);
     const knower = knowers[0];
     if (knower !== undefined) {
-      const text3 = `${name(id)}${where(id, knower)}: ${owners.map((o) => `${see(knower, o.party) || o.party === knower ? name(o.party) : "someone"}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`;
+      const text3 = `${name(id)}${where(id, knower)}: held by ${owners.map((o) => `${see(knower, o.party) || o.party === knower ? name(o.party) : "someone"} (${roleOf(o)})`).join(", ")}.`;
       lines.push({ text: text3, known: "scene", who: knowers.map(name).join(", ") });
     } else if (scope === "gm")
-      lines.push({ text: `${name(id)}${where(id, null)}: ${owners.map((o) => `${name(o.party)}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`, known: "gm" });
+      lines.push({ text: `${name(id)}${where(id, null)}: held by ${owners.map((o) => `${name(o.party)} (${roleOf(o)})`).join(", ")}.`, known: "gm" });
     else
       continue;
     told++;
@@ -26809,6 +26881,12 @@ function chatFollow(state2, who) {
   const skips = SKIP_LIVES.find((s) => s === raw.skips) ?? null;
   return mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips };
 }
+function chatRoles(state2) {
+  return Object.keys(objOf(sliceOf(state2, "castlife").follow)).sort().flatMap((entity) => {
+    const role = chatFollow(state2, entity)?.role ?? null;
+    return role === null ? [] : [{ entity, role }];
+  });
+}
 function chatBlocks(state2, who) {
   const out = {};
   for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state2, "castlife").routines), who)))) {
@@ -28156,9 +28234,9 @@ function needValue(ctx, who, need2, at = ctx.state.clock, legacy = false) {
   const day2 = dateAt(calendarOf(ctx.world), at).dayIndex;
   return needIn(ctx, who, need2, at, planned ? (legacy ? legacyDayPlan(ctx, who, day2) : dayPlan(ctx, who, day2)).blocks : [], legacy);
 }
-function metAt(ctx, who, need2, at) {
+function metAt(ctx, who, need2, at, lived = false) {
   const v = needValue(ctx, who, need2, at);
-  return v > 0 ? [{ type: "castlife.need", data: { entity: who, need: need2, delta: -v, at, from: v } }] : [];
+  return v > 0 ? [{ type: "castlife.need", data: { entity: who, need: need2, delta: -v, at, from: v, ...lived ? { lived: true } : {} } }] : [];
 }
 var EAT_FOR = "minutes > 0 ? minutes : 30";
 var REST_FOR = "minutes > 0 ? minutes : 30";
@@ -28175,8 +28253,9 @@ function companyMet(ctx, pair) {
   const e = own(ctx.state.entities, pov);
   if (!e || !pair.includes(pov))
     return [];
-  const until = e.fields.activity === "chat" && typeof e.fields.activity_until === "number" ? Math.max(ctx.state.clock, e.fields.activity_until) : ctx.state.clock;
-  return metAt(ctx, pov, "social", until);
+  const end = e.fields.activity === "chat" ? activitySpanEnd(e.fields) : null;
+  const held2 = clockPaused(ctx.world, ctx.state) || fightHoldsClock(ctx);
+  return end !== null && end > ctx.state.clock && !held2 ? [] : metAt(ctx, pov, "social", ctx.state.clock);
 }
 function buildNeedsView(ctx) {
   const pov = ctx.world.pov;
@@ -28687,8 +28766,9 @@ function livedUntil(ctx, activity, since, at, routine) {
     if (plan2.blocks.some((b) => b.start < at && at <= b.end && blockActivity(b.activity) === activity))
       return at;
   }
-  const until = own(ctx.state.entities, pov)?.fields.activity_until;
-  return typeof until === "number" && until > since ? Math.min(until, at) : null;
+  const fields = own(ctx.state.entities, pov)?.fields;
+  const until = fields?.activity === activity ? activitySpanEnd(fields) : null;
+  return until !== null && until > since ? Math.min(until, at) : null;
 }
 function inCompany(ctx) {
   const pov = ctx.world.pov;
@@ -28712,6 +28792,16 @@ function povLivedNeeds(ctx, slot, at = slot.end) {
     met.push(["social", at]);
   return met.flatMap(([need2, t]) => metAt(ctx, pov, need2, t));
 }
+function povTurnNeeds(ctx, who, span) {
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4 || !needsOn(ctx.world).includes("social") || !inCompany(ctx))
+    return [];
+  return metAt(ctx, who, "social", span.to, true);
+}
+function povSpanEnded(ctx, who, activity) {
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4)
+    return [];
+  return needsMetBy(ctx, activity.type).flatMap((n) => metAt(ctx, who, n, activity.until));
+}
 function povActivityEnds(ctx, who, at, slot, events2) {
   if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4 || at <= passedFrom(slot))
     return events2;
@@ -28727,8 +28817,8 @@ function activityEndMoment(ctx, slot) {
   if (ctx.levelOf(pov, "castlife") < 4 || needsMetBy(ctx, strOf(e?.fields.activity)).length === 0)
     return [];
   const from = passedFrom(slot);
-  const until = e?.fields.activity_until;
-  const ends = [...typeof until === "number" && until > from ? [until] : [], ...slot.run ? [slot.run.to] : []];
+  const until = activitySpanEnd(e?.fields);
+  const ends = [...until !== null && until > from ? [until] : [], ...slot.run ? [slot.run.to] : []];
   const at = ends.length > 0 ? Math.min(...ends) : null;
   return at !== null && at > from && at < slot.end ? [{ at, key: ACTIVITY_END }] : [];
 }
@@ -28877,7 +28967,7 @@ var EVENTS3 = [
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
     coarsen: { key: (e) => typeof e.data.from === "number" ? `${strOf(e.data.entity)}:${strOf(e.data.need)}` : null, merge: (_earlier, later) => later },
-    describe: (e) => `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`
+    describe: (e) => e.data.lived === true ? "" : `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`
   },
   {
     type: "castlife.decision",
@@ -29292,7 +29382,8 @@ var castlifePack = {
     r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
-    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)) });
+    r.query("castlife.chat_roles", (ctx) => chatRoles(ctx.state));
+    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)), lived: povTurnNeeds, ended: povSpanEnded });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     r.process({ id: "castlife.plans", domain: "castlife", minLevel: 0, step: (slot, ctx) => dropUnlived(slot, ctx) });
     r.query("castlife.activity", shownActivity);
@@ -29358,6 +29449,7 @@ var castlifePack = {
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger", minutes: `=${EAT_FOR}` } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: EAT_FOR, lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed (your own, if you have one) and sleep until morning, or for as long as you say.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.to_bed", args: { entity: "self" } }, { type: "castlife.satisfy", args: { entity: "self", need: `=${NAP_MEETS}`, minutes: "=minutes", activity: "sleep", after: `=${SLEEP_TURN}` } }] }, duration: SLEEP_TURN, activity: { type: "sleep", until: SLEEP_UNTIL }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun", minutes: `=${REST_FOR}`, activity: "waiting", after: `=${REST_TURN}` } }] }, duration: REST_TURN, activity: { type: "waiting", until: `clock + (${REST_FOR})` }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
+    r.action({ id: "get_up", label: "Get up", description: "Get up from bed or from a rest and get on with the day.", pack: "castlife", params: {}, requires: ["self.activity == 'sleep' or self.activity == 'waiting'"], outcomes: { default: [{ type: "set", args: { entity: "self", field: "activity", value: "idle" } }] }, duration: "2", lexicon: ["get up", "wake up", "get out of bed"], observable: "gets up" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }, { type: "castlife.book_invitation", args: { host: "host" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
     r.renderer({ slot: "people", label: "Who is here and how they feel about your character", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
     r.renderer({ slot: "people", source: "routines", label: "People's usual routines, as background", hint: true, render: usualRoutineHints });

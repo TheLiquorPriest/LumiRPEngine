@@ -136,6 +136,9 @@ function bundledKitOf(module) {
 // src/shared/world.ts
 var WORLD_FORMAT = "lre-world-v1";
 var ENGINE_VERSION = "0.1.0";
+var ACTIVITY_SPAN_OF = "_activity_span";
+var ACTIVITY_PLACE = "_activity_place";
+var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activity_offered: true };
 
 // src/shared/studio-bridge.ts
 var ENGINE_EXTENSION = "lumi_rp_engine";
@@ -921,7 +924,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "496efeef";
+var BUILD = "3cd0efe2";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

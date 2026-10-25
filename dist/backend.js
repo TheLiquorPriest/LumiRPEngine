@@ -59,6 +59,28 @@ var EXPORT_FORMAT = "lre-world-export-v1";
 var ENGINE_VERSION = "0.1.0";
 var EFFECT_ONLY_FUNCTIONS = ["roll"];
 var BUILTIN_RELATIONS = ["in", "owns", "uses", "worn_by", "equipped", "knows", "member_of", "regard", "route"];
+var ACTIVITY_SPAN_OF = "_activity_span";
+var ACTIVITY_PLACE = "_activity_place";
+var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activity_offered: true };
+function activitySpanEnd(fields) {
+  const until = fields?.activity_until;
+  if (typeof until !== "number")
+    return null;
+  const of = fields?.[ACTIVITY_SPAN_OF];
+  const at = fields?.[ACTIVITY_PLACE];
+  if (of !== undefined && of !== fields?.activity)
+    return null;
+  return typeof at === "string" && at !== fields?.place ? null : until;
+}
+function spanRecords(entity, fields) {
+  const out = [];
+  if (typeof fields?.activity === "string" && fields[ACTIVITY_SPAN_OF] !== fields.activity)
+    out.push({ type: "set", entity, field: ACTIVITY_SPAN_OF, value: fields.activity });
+  const place = typeof fields?.place === "string" ? fields.place : null;
+  if ((fields?.[ACTIVITY_PLACE] ?? null) !== place)
+    out.push({ type: "set", entity, field: ACTIVITY_PLACE, value: place });
+  return out;
+}
 function offersAction(world, action) {
   return action.combat === undefined || world.ruleset?.combat !== undefined;
 }
@@ -10025,6 +10047,13 @@ function advance(reg, w, to, opts) {
       result.open = open;
     }
   }
+  if (!timelapse && w.state.clock > from && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov)) {
+    const span = { from, to: w.state.clock };
+    for (const def of reg.processes) {
+      if (def.scope === "agent" && def.lived && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel)
+        e.emit(def.lived(w.ctx, w.world.pov, span));
+    }
+  }
   for (const [agent, slot] of cursors)
     settle(agent, slot);
   result.to = w.state.clock;
@@ -10391,8 +10420,8 @@ function resolveTarget(reg, world, state, target) {
       break;
     }
     case "arrival": {
-      const until = own(state.entities, world.pov)?.fields.activity_until;
-      if (typeof until !== "number" || until <= now)
+      const until = activitySpanEnd(own(state.entities, world.pov)?.fields);
+      if (until === null || until <= now)
         return { code: "no_trip", reason: "no active trip" };
       to = until;
       label = "arrival";
@@ -15534,6 +15563,7 @@ function registerProperty(r) {
 // src/packs/economy/core/feed.ts
 var OTHERS_CAP = 10;
 var ROLE_LABEL = { owner: "owner", joint: "joint owner", custodian: "custodian", beneficiary: "beneficiary", trustee: "trustee", authorized_user: "authorized user" };
+var OWNING = { owner: true, joint: true, custodian: false, beneficiary: false, trustee: false, authorized_user: false };
 function propertyLines(ctx, scope) {
   const pov = ctx.world.pov;
   if (ctx.levelOf(pov, "money") === 0)
@@ -15546,6 +15576,7 @@ function propertyLines(ctx, scope) {
       return "";
     return viewer === null || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place) ? ` at ${own(ctx.world.places, place)?.name ?? place}` : " somewhere";
   };
+  const roleOf = (o) => `${ROLE_LABEL[o.role]}${o.worth > 0 ? `, ${Math.round(o.worth)}%` : ""}`;
   const lines = [];
   const others = [];
   for (const id of propertyIds(ctx.state)) {
@@ -15556,10 +15587,18 @@ function propertyLines(ctx, scope) {
       others.push(id);
       continue;
     }
-    const mine = access.owners.find((o) => o.party === pov) ?? access.owners.find((o) => isMemberOf(ctx.state, pov, o.party));
-    const stake = mine ? `${mine.party === pov ? "yours" : `${see(pov, mine.party) ? name(mine.party) : "someone"}'s`} (${ROLE_LABEL[mine.role]}${mine.worth > 0 && mine.worth < 100 ? `, ${Math.round(mine.worth)}%` : ""})` : "yours";
-    const co = access.owners.filter((o) => o !== mine).map((o) => `${see(pov, o.party) ? name(o.party) : "someone"}${o.worth > 0 ? ` ${Math.round(o.worth)}%` : ""}`);
-    lines.push({ text: `${name(id)}${where(id, pov)}: ${stake}${co.length > 0 ? `, with ${co.join(", ")}` : ""}.`, known: "pov" });
+    const holder = (o) => `${see(pov, o.party) ? name(o.party) : "someone"} (${roleOf(o)})`;
+    const direct = access.owners.find((o) => o.party === pov);
+    const through = direct ? undefined : access.owners.find((o) => isMemberOf(ctx.state, pov, o.party));
+    const rest = access.owners.filter((o) => o !== direct).map(holder);
+    let stake;
+    if (direct && OWNING[direct.role])
+      stake = `yours (${roleOf(direct)})${rest.length > 0 ? `, with ${rest.join(", ")}` : ""}`;
+    else {
+      const you = direct ? `you: ${ROLE_LABEL[direct.role]}` : through ? `you: through ${see(pov, through.party) ? name(through.party) : "someone"}` : null;
+      stake = [rest.length > 0 ? `held by ${rest.join(", ")}` : null, you].filter((p) => p !== null).join("; ");
+    }
+    lines.push({ text: `${name(id)}${where(id, pov)}${stake !== "" ? `: ${stake}` : ""}.`, known: "pov" });
   }
   if (scope === "player")
     return lines;
@@ -15578,10 +15617,10 @@ function propertyLines(ctx, scope) {
     const knowers = owners.filter((o) => withHim(o.party) && see(o.party, id)).map((o) => o.party);
     const knower = knowers[0];
     if (knower !== undefined) {
-      const text3 = `${name(id)}${where(id, knower)}: ${owners.map((o) => `${see(knower, o.party) || o.party === knower ? name(o.party) : "someone"}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`;
+      const text3 = `${name(id)}${where(id, knower)}: held by ${owners.map((o) => `${see(knower, o.party) || o.party === knower ? name(o.party) : "someone"} (${roleOf(o)})`).join(", ")}.`;
       lines.push({ text: text3, known: "scene", who: knowers.map(name).join(", ") });
     } else if (scope === "gm")
-      lines.push({ text: `${name(id)}${where(id, null)}: ${owners.map((o) => `${name(o.party)}'s${o.worth > 0 && o.worth < 100 ? ` (${Math.round(o.worth)}%)` : ""}`).join(", ")}.`, known: "gm" });
+      lines.push({ text: `${name(id)}${where(id, null)}: held by ${owners.map((o) => `${name(o.party)} (${roleOf(o)})`).join(", ")}.`, known: "gm" });
     else
       continue;
     told++;
@@ -25844,6 +25883,12 @@ function chatFollow(state2, who) {
   const skips = SKIP_LIVES.find((s) => s === raw.skips) ?? null;
   return mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips };
 }
+function chatRoles(state2) {
+  return Object.keys(objOf(sliceOf(state2, "castlife").follow)).sort().flatMap((entity) => {
+    const role = chatFollow(state2, entity)?.role ?? null;
+    return role === null ? [] : [{ entity, role }];
+  });
+}
 function chatBlocks(state2, who) {
   const out = {};
   for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state2, "castlife").routines), who)))) {
@@ -27251,9 +27296,9 @@ function needValue(ctx, who, need2, at = ctx.state.clock, legacy = false) {
   const day2 = dateAt(calendarOf(ctx.world), at).dayIndex;
   return needIn(ctx, who, need2, at, planned ? (legacy ? legacyDayPlan(ctx, who, day2) : dayPlan(ctx, who, day2)).blocks : [], legacy);
 }
-function metAt(ctx, who, need2, at) {
+function metAt(ctx, who, need2, at, lived = false) {
   const v = needValue(ctx, who, need2, at);
-  return v > 0 ? [{ type: "castlife.need", data: { entity: who, need: need2, delta: -v, at, from: v } }] : [];
+  return v > 0 ? [{ type: "castlife.need", data: { entity: who, need: need2, delta: -v, at, from: v, ...lived ? { lived: true } : {} } }] : [];
 }
 var EAT_FOR = "minutes > 0 ? minutes : 30";
 var REST_FOR = "minutes > 0 ? minutes : 30";
@@ -27270,8 +27315,9 @@ function companyMet(ctx, pair) {
   const e = own(ctx.state.entities, pov);
   if (!e || !pair.includes(pov))
     return [];
-  const until = e.fields.activity === "chat" && typeof e.fields.activity_until === "number" ? Math.max(ctx.state.clock, e.fields.activity_until) : ctx.state.clock;
-  return metAt(ctx, pov, "social", until);
+  const end = e.fields.activity === "chat" ? activitySpanEnd(e.fields) : null;
+  const held2 = clockPaused(ctx.world, ctx.state) || fightHoldsClock(ctx);
+  return end !== null && end > ctx.state.clock && !held2 ? [] : metAt(ctx, pov, "social", ctx.state.clock);
 }
 function buildNeedsView(ctx) {
   const pov = ctx.world.pov;
@@ -27782,8 +27828,9 @@ function livedUntil(ctx, activity, since, at, routine) {
     if (plan2.blocks.some((b) => b.start < at && at <= b.end && blockActivity(b.activity) === activity))
       return at;
   }
-  const until = own(ctx.state.entities, pov)?.fields.activity_until;
-  return typeof until === "number" && until > since ? Math.min(until, at) : null;
+  const fields = own(ctx.state.entities, pov)?.fields;
+  const until = fields?.activity === activity ? activitySpanEnd(fields) : null;
+  return until !== null && until > since ? Math.min(until, at) : null;
 }
 function inCompany(ctx) {
   const pov = ctx.world.pov;
@@ -27807,6 +27854,16 @@ function povLivedNeeds(ctx, slot, at = slot.end) {
     met.push(["social", at]);
   return met.flatMap(([need2, t]) => metAt(ctx, pov, need2, t));
 }
+function povTurnNeeds(ctx, who, span) {
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4 || !needsOn(ctx.world).includes("social") || !inCompany(ctx))
+    return [];
+  return metAt(ctx, who, "social", span.to, true);
+}
+function povSpanEnded(ctx, who, activity) {
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4)
+    return [];
+  return needsMetBy(ctx, activity.type).flatMap((n) => metAt(ctx, who, n, activity.until));
+}
 function povActivityEnds(ctx, who, at, slot, events2) {
   if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4 || at <= passedFrom(slot))
     return events2;
@@ -27822,8 +27879,8 @@ function activityEndMoment(ctx, slot) {
   if (ctx.levelOf(pov, "castlife") < 4 || needsMetBy(ctx, strOf(e?.fields.activity)).length === 0)
     return [];
   const from = passedFrom(slot);
-  const until = e?.fields.activity_until;
-  const ends = [...typeof until === "number" && until > from ? [until] : [], ...slot.run ? [slot.run.to] : []];
+  const until = activitySpanEnd(e?.fields);
+  const ends = [...until !== null && until > from ? [until] : [], ...slot.run ? [slot.run.to] : []];
   const at = ends.length > 0 ? Math.min(...ends) : null;
   return at !== null && at > from && at < slot.end ? [{ at, key: ACTIVITY_END }] : [];
 }
@@ -27972,7 +28029,7 @@ var EVENTS3 = [
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
     coarsen: { key: (e) => typeof e.data.from === "number" ? `${strOf(e.data.entity)}:${strOf(e.data.need)}` : null, merge: (_earlier, later) => later },
-    describe: (e) => `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`
+    describe: (e) => e.data.lived === true ? "" : `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`
   },
   {
     type: "castlife.decision",
@@ -28387,7 +28444,8 @@ var castlifePack = {
     r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
-    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)) });
+    r.query("castlife.chat_roles", (ctx) => chatRoles(ctx.state));
+    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)), lived: povTurnNeeds, ended: povSpanEnded });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     r.process({ id: "castlife.plans", domain: "castlife", minLevel: 0, step: (slot, ctx) => dropUnlived(slot, ctx) });
     r.query("castlife.activity", shownActivity);
@@ -28453,6 +28511,7 @@ var castlifePack = {
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger", minutes: `=${EAT_FOR}` } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: EAT_FOR, lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed (your own, if you have one) and sleep until morning, or for as long as you say.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.to_bed", args: { entity: "self" } }, { type: "castlife.satisfy", args: { entity: "self", need: `=${NAP_MEETS}`, minutes: "=minutes", activity: "sleep", after: `=${SLEEP_TURN}` } }] }, duration: SLEEP_TURN, activity: { type: "sleep", until: SLEEP_UNTIL }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: { minutes: STATED_MINUTES }, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun", minutes: `=${REST_FOR}`, activity: "waiting", after: `=${REST_TURN}` } }] }, duration: REST_TURN, activity: { type: "waiting", until: `clock + (${REST_FOR})` }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
+    r.action({ id: "get_up", label: "Get up", description: "Get up from bed or from a rest and get on with the day.", pack: "castlife", params: {}, requires: ["self.activity == 'sleep' or self.activity == 'waiting'"], outcomes: { default: [{ type: "set", args: { entity: "self", field: "activity", value: "idle" } }] }, duration: "2", lexicon: ["get up", "wake up", "get out of bed"], observable: "gets up" });
     r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }, { type: "castlife.book_invitation", args: { host: "host" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
     r.renderer({ slot: "people", label: "Who is here and how they feel about your character", render: (ctx) => peopleLines(ctx, "player").map((l) => l.text), feed: peopleLines });
     r.renderer({ slot: "people", source: "routines", label: "People's usual routines, as background", hint: true, render: usualRoutineHints });
@@ -29274,6 +29333,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
   if (activity) {
     w.apply({ type: "set", entity: p.actor, field: "activity", value: activity.type });
     w.apply({ type: "set", entity: p.actor, field: "activity_until", value: activity.until });
+    w.applyAll(spanRecords(p.actor, own(w.state.entities, p.actor)?.fields));
   }
   return {
     ...base,
@@ -58389,6 +58449,19 @@ function statedSpan(reg, world, step) {
     return p.type === "duration" && typeof given === "number" && given > 0;
   });
 }
+function povSpan(w) {
+  const fields = own(w.state.entities, w.world.pov)?.fields;
+  const until = activitySpanEnd(fields);
+  return until !== null && typeof fields?.activity === "string" ? { type: fields.activity, until } : null;
+}
+function spanOwner(resolutions, pov, span) {
+  for (let k = resolutions.length - 1;k >= 0; k--) {
+    const a = resolutions[k]?.activity;
+    if (resolutions[k]?.actor === pov && a?.type === span.type && a.until === span.until)
+      return k;
+  }
+  return -1;
+}
 function queueStop(w, res, since, scene, speeding) {
   if (!res.ok || res.rejected.length > 0)
     return "failure";
@@ -58482,6 +58555,7 @@ function planTurn(input) {
       }
       const fighting = fightHoldsClock(w.ctx);
       const elapsed = inFight && fighting || i > 0 && !resolution?.ok ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
+      const began = w.state.clock;
       if (elapsed && elapsed.minutes > 0)
         advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
       const act2 = resolution?.activity;
@@ -58506,6 +58580,24 @@ function planTurn(input) {
         } else if (stated && remaining > 0) {
           advance(reg, w, Math.min(act2.until, w.state.clock + TIME_LIMITS.timelapseMinutes), { runSeed: input.runSeed, mode: "turn", cause: "action" });
         }
+      }
+      const span = speeding ? null : povSpan(w);
+      if (span && span.until > began && span.until <= w.state.clock) {
+        const met = [];
+        for (const def of reg.processes) {
+          if (def.scope === "agent" && def.ended && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel)
+            met.push(...w.applyAll(def.ended(w.ctx, w.world.pov, span)));
+        }
+        const owner = spanOwner(resolutions, w.world.pov, span);
+        const starter2 = owner >= 0 ? resolutions[owner] : undefined;
+        if (starter2 && met.length > 0) {
+          const owned2 = { ...starter2, events: [...starter2.events, ...met], ...starter2.claimed ? { claimed: { ...starter2.claimed, events: [...starter2.claimed.events, ...met] } } : {} };
+          resolutions[owner] = owned2;
+          if (resolution && owner === resolutions.length - 1)
+            resolution = owned2;
+        }
+        if (met.length > 0)
+          runRulesOnEvents(reg, w, met, { seed: hashParts(seed, "ended") });
       }
       const left = steps.length - 1 - i;
       const cause = resolution && left > 0 ? queueStop(w, resolution, mark2, scene, speeding) : null;
@@ -59983,6 +60075,15 @@ function resolveEdit(reg, world, state2, ops, opts) {
   const rng = createRng(hashParts("lre.edit", opts.runSeed, JSON.stringify(ops)));
   for (const [i, op] of ops.entries()) {
     const rejection = applyOp(reg, w, op, opts, rng.fork(`op:${i}`));
+    if (rejection)
+      return { rejection };
+  }
+  const spans = ops.flatMap((op) => op.op === "set" && (op.field === "activity_until" || opts.gm && op.field === "activity") ? [op.entity] : []);
+  for (const entity of new Set(spans)) {
+    const fields = own(w.state.entities, entity)?.fields;
+    if (typeof fields?.activity_until !== "number")
+      continue;
+    const rejection = applyAll2(w, spanRecords(entity, fields));
     if (rejection)
       return { rejection };
   }
@@ -64236,7 +64337,7 @@ var QUOTE_MAX = 240;
 var PLACES_LISTED = 80;
 var CHECK_DAYS = 14;
 var FLAGGED_CONFIDENCE = 0.4;
-var STATE_FIELDS = { place: true, activity: true, x: true, y: true, needs: true, holds: true, known_places: true, visibility: true, knownBy: true };
+var STATE_FIELDS = { place: true, activity: true, x: true, y: true, needs: true, holds: true, known_places: true, visibility: true, knownBy: true, ...ENGINE_FIELDS };
 var NOT_TIES = { in: true, worn_by: true, equipped: true, hostile: true, member_of: true };
 var BASIC_IDS = { sleep: true, breakfast: true, lunch: true, dinner: true };
 var PLACE_ROLES = { home: "home", work: "work", here: "here", with: "with" };
@@ -65318,6 +65419,519 @@ function applyPatch(doc, ops, budget) {
   return out;
 }
 
+// src/backend/lore-secrets.ts
+var message = (error) => error instanceof Error ? error.message : String(error);
+function textOf(content) {
+  const text5 = content.replace(/\s+/g, " ").trim();
+  return text5 === "" ? "" : hashParts("lre-lore-text-v1", text5);
+}
+function keyOf2(e) {
+  return `${e.bookId}/${e.id}`;
+}
+function secretCopyOf(extensions) {
+  const ns = isRecord(extensions) ? extensions[LEDGER_NAMESPACE] : undefined;
+  const raw = isRecord(ns) ? ns.secretCopyOf : undefined;
+  if (!isRecord(raw) || typeof raw.entry !== "string")
+    return null;
+  return { entry: raw.entry, off: raw.off === true, fields: isRecord(raw.fields) ? bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: raw.fields } }) : null };
+}
+function withSecretCopy(extensions, copy) {
+  const held3 = extensions[LEDGER_NAMESPACE];
+  const ns = isRecord(held3) ? { ...held3 } : {};
+  if (copy === null)
+    delete ns.secretCopyOf;
+  else
+    ns.secretCopyOf = { entry: copy.entry, off: copy.off, fields: copy.fields === null ? null : JSON.parse(JSON.stringify(copy.fields)) };
+  const out = { ...extensions };
+  if (Object.keys(ns).length === 0)
+    delete out[LEDGER_NAMESPACE];
+  else
+    out[LEDGER_NAMESPACE] = ns;
+  return out;
+}
+function ownSecret(e) {
+  const fields = bookLoreFieldsOf(e.extensions);
+  return fields !== null && loreIsSecret(fields) && secretCopyOf(e.extensions) === null ? fields : null;
+}
+function copyOriginal(copy) {
+  const slash = copy.entry.indexOf("/");
+  return { bookId: copy.entry.slice(0, Math.max(0, slash)), entryId: copy.entry.slice(slash + 1) };
+}
+function restricts(fields) {
+  return loreIsSecret(fields) || fields.visibility === "known_by";
+}
+function indexed(e) {
+  return { id: e.id, bookId: e.bookId, text: textOf(e.content), fields: bookLoreFieldsOf(e.extensions), copy: secretCopyOf(e.extensions), disabled: e.disabled };
+}
+function sameIndexed(a, b) {
+  return a !== undefined && JSON.stringify(a) === JSON.stringify(b);
+}
+var indexes = new WeakMap;
+function indexOf(host, userId) {
+  let users = indexes.get(host.books);
+  if (!users) {
+    users = new Map;
+    indexes.set(host.books, users);
+  }
+  let index = users.get(userId);
+  if (!index) {
+    index = { books: new Map, listed: null, ready: false, warming: null, unlisted: null, unread: new Map, told: new Set, worlds: new Map, notes: new Map, changed: true, reading: Promise.resolve(), writing: Promise.resolve() };
+    users.set(userId, index);
+  }
+  return index;
+}
+function complete(index) {
+  return index.listed !== null && index.listed.every((id) => index.books.has(id));
+}
+function entriesById(index) {
+  return new Map([...index.books.values()].flatMap((b) => b.entries.map((e) => [e.id, e])));
+}
+async function refresh2(host, index, userId) {
+  let books;
+  try {
+    books = (await host.books.list(userId)).filter((b) => !b.engine);
+  } catch (error) {
+    if (index.listed === null)
+      index.unlisted = message(error);
+    host.log("warn", `[LumiRPEngine] your World Info books weren't listed, so their secrets are as last read${complete(index) ? "" : "; some never were, so every book entry is held back until they are"}: ${message(error)}`, userId);
+    return;
+  }
+  index.unlisted = null;
+  index.told.delete("");
+  const listed2 = new Set(books.map((b) => b.id));
+  for (const id of [...index.books.keys()]) {
+    if (listed2.has(id))
+      continue;
+    index.books.delete(id);
+    index.changed = true;
+  }
+  for (const id of [...index.unread.keys()])
+    if (!listed2.has(id))
+      index.unread.delete(id);
+  index.listed = books.map((b) => b.id);
+  await Promise.all(books.map(async (b) => {
+    const was = index.books.get(b.id);
+    if (was && b.updated !== null && was.stamp === b.updated && b.updated < was.at)
+      return;
+    const at = Math.floor(Date.now() / 1000);
+    const notes = index.notes.get(b.id) ?? 0;
+    try {
+      const entries2 = (await host.books.entries(b.id, userId)).filter((e) => !engineWroteEntry(e.extensions)).map(indexed);
+      index.unread.delete(b.id);
+      index.told.delete(b.id);
+      if ((index.notes.get(b.id) ?? 0) !== notes)
+        return;
+      if (!was || JSON.stringify(was.entries) !== JSON.stringify(entries2))
+        index.changed = true;
+      index.books.set(b.id, { stamp: b.updated, at, entries: entries2 });
+    } catch (error) {
+      if (!was)
+        index.unread.set(b.id, { name: b.name, reason: message(error) });
+      host.log("warn", `[LumiRPEngine] World Info book ${b.id} wasn't read, so its secrets are as last read${was ? "" : "; it never was, so every book entry is held back until it is"}: ${message(error)}`, userId);
+    }
+  }));
+  index.ready = true;
+}
+async function loreIndex(host, userId) {
+  const index = indexOf(host, userId);
+  const read = index.reading.then(() => refresh2(host, index, userId));
+  index.reading = read.catch(() => {
+    return;
+  });
+  await read;
+  return index;
+}
+function lastLoreIndex(host, userId) {
+  return indexOf(host, userId);
+}
+function warmLoreIndex(host, userId) {
+  const index = indexOf(host, userId);
+  if (index.ready || index.warming)
+    return;
+  index.warming = loreIndex(host, userId).then(() => {
+    index.warming = null;
+  }, () => {
+    index.warming = null;
+  });
+}
+async function readyLoreIndex(host, userId) {
+  if (indexOf(host, userId).ready)
+    return loreIndex(host, userId);
+  warmLoreIndex(host, userId);
+  return null;
+}
+function unreadBooks(index) {
+  return { unlisted: index.unlisted, books: [...index.unread].map(([id, { name, reason: reason2 }]) => ({ id, name, reason: reason2 })) };
+}
+function untold(index) {
+  const unlisted = index.unlisted !== null && !index.told.has("");
+  if (unlisted)
+    index.told.add("");
+  const books = [...index.unread].filter(([id]) => !index.told.has(id)).map(([id, { name }]) => {
+    index.told.add(id);
+    return name;
+  });
+  return { unlisted, books };
+}
+function lorePass(host, userId, fn) {
+  const index = indexOf(host, userId);
+  const run2 = index.writing.then(async () => fn(await loreIndex(host, userId)));
+  index.writing = run2.then(() => {
+    return;
+  }, () => {
+    return;
+  });
+  return run2;
+}
+function noteEntry(index, e, written = true) {
+  if (written)
+    index.notes.set(e.bookId, (index.notes.get(e.bookId) ?? 0) + 1);
+  const book = index.books.get(e.bookId);
+  if (!book || engineWroteEntry(e.extensions))
+    return;
+  const next = indexed(e);
+  const at = book.entries.findIndex((x) => x.id === e.id);
+  if (sameIndexed(book.entries[at], next))
+    return;
+  if (at >= 0)
+    book.entries[at] = next;
+  else
+    book.entries.push(next);
+  index.changed = true;
+}
+function worldFields(entry) {
+  const secret = loreIsSecret(entry);
+  const visibility = entry.visibility;
+  const knownBy = visibility !== undefined && visibility !== "public";
+  if (!secret && !knownBy)
+    return null;
+  const ids2 = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : [];
+  const out = {};
+  if (secret) {
+    out.secret = true;
+    out.gate = typeof entry.gate === "string" ? entry.gate : "";
+  }
+  const audience = ids2(entry.audience).filter((p) => LORE_AUDIENCE.includes(p));
+  if (audience.length > 0)
+    out.audience = audience;
+  const holders = ids2(entry.holders);
+  if (holders.length > 0)
+    out.holders = holders;
+  if (knownBy) {
+    out.visibility = "known_by";
+    out.links = visibility === "known_by" ? ids2(entry.links) : [];
+  }
+  return out;
+}
+function add(map, key, fields) {
+  if (key === "")
+    return;
+  const list = map.get(key);
+  if (list)
+    list.push(fields);
+  else
+    map.set(key, [fields]);
+}
+function worldSources(world, byId, sourcesOnly) {
+  const out = { sources: new Map, texts: new Map };
+  for (const entry of Object.values(world.lore)) {
+    const fields = worldFields(entry);
+    if (!fields)
+      continue;
+    const source = loreSourceOf(entry.source);
+    if (source.kind !== "book" && sourcesOnly)
+      continue;
+    add(out.texts, textOf(typeof entry.content === "string" ? entry.content : ""), fields);
+    if (source.kind !== "book")
+      continue;
+    add(out.sources, `${source.bookId}/${source.entryId}`, fields);
+    const now = byId?.get(source.entryId);
+    if (now)
+      add(out.texts, now.text, fields);
+  }
+  return out;
+}
+function recordWorld(index, world) {
+  const next = worldSources(world, entriesById(index), true);
+  const was = index.worlds.get(world.id);
+  const flat = (w) => JSON.stringify([[...w.sources], [...w.texts]]);
+  if (was && flat(was) === flat(next))
+    return;
+  index.worlds.set(world.id, next);
+  index.changed = true;
+}
+function secretFields(e) {
+  return e.fields !== null && loreIsSecret(e.fields);
+}
+function heldBy2(e, byId, whole4) {
+  const out = [];
+  if (e.copy === null) {
+    if (e.fields && restricts(e.fields))
+      out.push(e.fields);
+    return out;
+  }
+  if (e.copy.fields && restricts(e.copy.fields))
+    out.push(e.copy.fields);
+  const named = byId.get(copyOriginal(e.copy).entryId);
+  if (!(named ? secretFields(named) : whole4))
+    return out;
+  if (e.fields && restricts(e.fields))
+    out.push(e.fields);
+  if (named?.fields)
+    out.push(named.fields);
+  return out;
+}
+function secretTexts(index, also = {}) {
+  const whole4 = index !== null && complete(index);
+  const out = { known: whole4, texts: new Map, sources: new Map, originals: new Map };
+  const byId = index ? entriesById(index) : null;
+  const merge = (from) => {
+    for (const [key, list] of from.sources)
+      for (const fields of list)
+        add(out.sources, key, fields);
+    for (const [key, list] of from.texts)
+      for (const fields of list)
+        add(out.texts, key, fields);
+  };
+  if (index && byId) {
+    for (const e of byId.values()) {
+      for (const fields of heldBy2(e, byId, whole4))
+        add(out.texts, e.text, fields);
+      if (e.fields && secretFields(e))
+        out.originals.set(e.id, e.fields);
+    }
+    for (const w of index.worlds.values())
+      merge(w);
+  }
+  if (also.world)
+    merge(worldSources(also.world, byId, false));
+  for (const e of also.entries ?? []) {
+    if (engineWroteEntry(e.extensions) || secretCopyOf(e.extensions) !== null)
+      continue;
+    const fields = bookLoreFieldsOf(e.extensions);
+    if (fields && restricts(fields))
+      add(out.texts, textOf(e.content), fields);
+  }
+  return out;
+}
+function stricter(all2) {
+  const out = {};
+  const secrets = all2.filter((f) => loreIsSecret(f));
+  if (secrets.length > 0) {
+    const gates = [...new Set(secrets.map((f) => (f.gate ?? "").trim()))].sort();
+    out.secret = true;
+    out.gate = gates.includes("") ? "" : gates.length === 1 ? gates[0] ?? "" : gates.map((g) => `(${g})`).join(" && ");
+  }
+  const joined3 = (pick) => {
+    const lists = all2.map(pick).filter((list) => list !== undefined);
+    return lists.length === 0 ? undefined : [...new Set(lists.flat())];
+  };
+  const audience = joined3((f) => f.audience)?.filter((p) => LORE_AUDIENCE.includes(p));
+  if (audience)
+    out.audience = audience;
+  const holders = joined3((f) => f.holders);
+  if (holders)
+    out.holders = holders;
+  const links = joined3((f) => f.links);
+  const knownBy = all2.filter((f) => f.visibility === "known_by");
+  if (knownBy.length > 0) {
+    out.visibility = "known_by";
+    out.links = knownBy.some((f) => (f.links ?? []).length === 0) ? [] : links ?? [];
+  } else if (links)
+    out.links = links;
+  const aliases = joined3((f) => f.aliases);
+  if (aliases)
+    out.aliases = aliases;
+  return out;
+}
+var UNREAD = { secret: true, gate: "" };
+function secrecyParts(e, texts2) {
+  if (engineWroteEntry(e.extensions))
+    return [];
+  const out = [];
+  const own2 = bookLoreFieldsOf(e.extensions);
+  if (own2)
+    out.push(own2);
+  const copy = secretCopyOf(e.extensions);
+  if (copy?.fields)
+    out.push(copy.fields);
+  const named = copy ? copyOriginal(copy).entryId : null;
+  const original = named !== null && named !== e.id ? texts2.originals.get(named) : undefined;
+  if (original)
+    out.push(original);
+  out.push(...texts2.sources.get(keyOf2(e)) ?? []);
+  if (copy && copy.entry !== keyOf2(e))
+    out.push(...texts2.sources.get(copy.entry) ?? []);
+  out.push(...textParts(texts2, e.content, true));
+  return out;
+}
+function bookSecrecy(e, texts2) {
+  const parts = secrecyParts(e, texts2);
+  return parts.length === 0 ? null : stricter(parts);
+}
+function textParts(texts2, content, fromBook) {
+  return [...texts2.texts.get(textOf(content)) ?? [], ...fromBook && !texts2.known ? [UNREAD] : []];
+}
+function heldTo(entry, parts) {
+  const own2 = worldFields(entry);
+  const mine = own2 === null ? null : JSON.stringify(own2);
+  const held3 = parts.filter((p) => restricts(p) && JSON.stringify(p) !== mine);
+  if (held3.length === 0)
+    return entry;
+  const s = stricter(own2 ? [own2, ...held3] : held3);
+  const out = { ...entry };
+  if (s.secret) {
+    out.secret = true;
+    out.gate = s.gate ?? "";
+  }
+  if (s.audience)
+    out.audience = s.audience;
+  if (s.holders)
+    out.holders = s.holders;
+  if (s.visibility === "known_by") {
+    out.visibility = "known_by";
+    out.links = (s.links ?? []).length === 0 ? [] : [...new Set([...entry.links, ...s.links ?? []])];
+  }
+  return out;
+}
+function keeperMap(byId) {
+  const out = new Map;
+  const push = (text5, o) => {
+    if (text5 === "")
+      return;
+    const list = out.get(text5);
+    if (!list)
+      out.set(text5, [o]);
+    else if (!list.some((x) => x.id === o.id))
+      list.push(o);
+  };
+  for (const e of byId.values()) {
+    if (e.copy === null) {
+      if (secretFields(e))
+        push(e.text, e);
+      continue;
+    }
+    const named = byId.get(copyOriginal(e.copy).entryId);
+    if (named && secretFields(named))
+      push(e.text, named);
+  }
+  return out;
+}
+function keepersIn(byId, keeps, e) {
+  const out = (keeps.get(e.text) ?? []).filter((o) => o.id !== e.id);
+  const named = e.copy ? byId.get(copyOriginal(e.copy).entryId) : undefined;
+  if (named && named.id !== e.id && secretFields(named) && !out.some((o) => o.id === named.id))
+    out.push(named);
+  return out.sort((a, b) => keyOf2(a).localeCompare(keyOf2(b)));
+}
+async function readTwins(host, index, text5, id, userId) {
+  const ids2 = [...entriesById(index).values()].filter((x) => x.text === text5 && x.id !== id).map((x) => x.id);
+  const read = await Promise.all(ids2.map((x) => host.books.entry(x, userId)));
+  const out = read.filter((p) => p !== null && !engineWroteEntry(p.extensions) && textOf(p.content) === text5);
+  for (const p of out)
+    noteEntry(index, p, false);
+  return out;
+}
+async function freshKeepers(host, index, e, userId) {
+  const text5 = textOf(e.content);
+  const twins = text5 === "" ? [] : await readTwins(host, index, text5, e.id, userId);
+  const copy = secretCopyOf(e.extensions);
+  const namedId = copy ? copyOriginal(copy).entryId : null;
+  const follows = new Set(twins.flatMap((p) => {
+    const c = secretCopyOf(p.extensions);
+    return c ? [copyOriginal(c).entryId] : [];
+  }));
+  if (namedId !== null)
+    follows.add(namedId);
+  follows.delete(e.id);
+  const read = new Map(twins.map((p) => [p.id, p]));
+  await Promise.all([...follows].filter((id) => !read.has(id)).map(async (id) => {
+    const o = await host.books.entry(id, userId);
+    read.set(id, o && !engineWroteEntry(o.extensions) ? o : null);
+    if (o)
+      noteEntry(index, o, false);
+  }));
+  const keepers = new Map;
+  for (const p of twins)
+    if (ownSecret(p) !== null)
+      keepers.set(p.id, p);
+  for (const id of follows) {
+    const o = read.get(id);
+    if (o && loreIsSecret(bookLoreFieldsOf(o.extensions) ?? {}))
+      keepers.set(o.id, o);
+  }
+  return { keepers: [...keepers.values()].sort((a, b) => keyOf2(a).localeCompare(keyOf2(b))), named: namedId === null ? undefined : read.get(namedId) ?? null };
+}
+async function settle3(host, index, id, sources, userId) {
+  const e = await host.books.entry(id, userId);
+  if (!e || engineWroteEntry(e.extensions) || sources.has(keyOf2(e)))
+    return;
+  noteEntry(index, e, false);
+  if (ownSecret(e) !== null)
+    return;
+  const copy = secretCopyOf(e.extensions);
+  const { keepers, named } = await freshKeepers(host, index, e, userId);
+  const write = async (extensions, disabled) => {
+    if (e.disabled === disabled && JSON.stringify(extensions) === JSON.stringify(e.extensions))
+      return;
+    await host.books.setExtensions(e.id, extensions, disabled, userId);
+    noteEntry(index, { ...e, extensions, disabled });
+  };
+  if (keepers.length > 0) {
+    const keys = keepers.map(keyOf2);
+    const note = copy ? { ...copy, entry: keys.includes(copy.entry) ? copy.entry : keys[0] ?? copy.entry } : { entry: keys[0] ?? "", off: e.disabled, fields: bookLoreFieldsOf(e.extensions) };
+    await write(withSecretCopy(withBookLoreFields(e.extensions, stricter(keepers.map((o) => bookLoreFieldsOf(o.extensions) ?? {}))), note), true);
+    return;
+  }
+  if (!copy)
+    return;
+  if (named === null)
+    await write(withSecretCopy(e.extensions, null), true);
+  else
+    await write(withSecretCopy(withBookLoreFields(e.extensions, copy.fields), null), copy.off);
+}
+async function secureCopies(host, index, userId) {
+  if (!index.changed)
+    return;
+  index.changed = false;
+  const byId = entriesById(index);
+  const whole4 = complete(index);
+  const sources = new Set([...index.worlds.values()].flatMap((w) => [...w.sources.keys()]));
+  const keeps = keeperMap(byId);
+  const asStored = (fields) => JSON.stringify(bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: JSON.parse(JSON.stringify(fields)) } }));
+  for (const e of byId.values()) {
+    if (sources.has(keyOf2(e)) || e.copy === null && secretFields(e))
+      continue;
+    const by = keepersIn(byId, keeps, e);
+    const orphan = e.copy !== null && whole4 && !byId.has(copyOriginal(e.copy).entryId);
+    if (by.length === 0 && e.copy === null)
+      continue;
+    if (!orphan && by.length > 0 && e.copy !== null && e.disabled && by.some((o) => keyOf2(o) === e.copy?.entry) && JSON.stringify(e.fields) === asStored(stricter(by.map((o) => o.fields ?? {}))))
+      continue;
+    try {
+      await settle3(host, index, e.id, sources, userId);
+    } catch (error) {
+      index.changed = true;
+      host.log("warn", `[LumiRPEngine] World Info entry ${keyOf2(e)} wasn't kept secret with the secret it is a copy of: ${message(error)}`, userId);
+    }
+  }
+}
+async function copyKeepers(host, index, e, userId) {
+  return (await freshKeepers(host, index, e, userId)).keepers;
+}
+function twinViews(index, e) {
+  const byId = entriesById(index);
+  const text5 = textOf(e.content);
+  const twins = [...byId.values()].filter((o) => o.id !== e.id && (text5 !== "" && o.text === text5 || o.copy !== null && copyOriginal(o.copy).entryId === e.id)).map((o) => ({ bookId: o.bookId, entryId: o.id }));
+  const copy = secretCopyOf(e.extensions);
+  if (!copy)
+    return { twins, copyOf: null };
+  const named = copyOriginal(copy);
+  const original = byId.get(named.entryId);
+  const kept2 = keepersIn(byId, keeperMap(byId), indexed(e)).length > 0;
+  return { twins, copyOf: { bookId: original?.bookId ?? named.bookId, entryId: named.entryId, kept: kept2 } };
+}
+
 // src/backend/book-lore.ts
 var TITLE_WORDS = 8;
 function bookEntryTitle(e) {
@@ -65346,74 +65960,69 @@ async function writeBookLore(host, e, fields, userId) {
   const was = bookLoreFieldsOf(e.extensions);
   const secret = fields !== null && loreIsSecret(fields);
   const disabled = secret ? true : was !== null && loreIsSecret(was) ? false : null;
-  await host.books.setExtensions(e.id, withBookLoreFields(e.extensions, fields), disabled, userId);
+  const extensions = withBookLoreFields(e.extensions, fields);
+  await host.books.setExtensions(e.id, extensions, disabled, userId);
+  return { ...e, extensions, disabled: disabled ?? e.disabled };
 }
 async function secureIndexedSecrets(host, world, userId, only, before) {
-  for (const [id, entry] of Object.entries(world.lore)) {
-    const source = loreSourceOf(entry.source);
-    if (source.kind !== "book" || !loreIsSecret(entry) || only && !only(id))
-      continue;
-    try {
-      const e = await host.books.entry(source.entryId, userId);
-      if (!e || e.bookId !== source.bookId || engineWroteEntry(e.extensions))
+  await lorePass(host, userId, async (index) => {
+    recordWorld(index, world);
+    for (const [id, entry] of Object.entries(world.lore)) {
+      const source = loreSourceOf(entry.source);
+      if (source.kind !== "book" || !loreIsSecret(entry) || only && !only(id))
         continue;
-      const own2 = bookLoreFieldsOf(e.extensions);
       const gate = typeof entry.gate === "string" ? entry.gate : undefined;
       const was = before && hasOwn(before.lore, id) ? before.lore[id]?.gate : undefined;
-      const kept2 = own2 !== null && loreIsSecret(own2) && own2.gate !== gate && (was === undefined || own2.gate !== was);
-      if (kept2 || own2 !== null && loreIsSecret(own2) && own2.gate === gate) {
-        if (!e.disabled)
-          await host.books.setExtensions(e.id, e.extensions, true, userId);
+      const read = index.books.get(source.bookId)?.entries.find((x) => x.id === source.entryId);
+      if (read && heldAsSource(read.disabled, read.copy === null ? read.fields : null, gate, was))
         continue;
+      try {
+        const e = await host.books.entry(source.entryId, userId);
+        if (!e || e.bookId !== source.bookId || engineWroteEntry(e.extensions))
+          continue;
+        noteEntry(index, e, false);
+        const copy = secretCopyOf(e.extensions);
+        const own2 = copy ? copy.fields : bookLoreFieldsOf(e.extensions);
+        if (!copy && heldAsSource(true, own2, gate, was)) {
+          if (!e.disabled) {
+            await host.books.setExtensions(e.id, e.extensions, true, userId);
+            noteEntry(index, { ...e, disabled: true });
+          }
+          continue;
+        }
+        const { gate: _mirrored, ...rest } = own2 ?? {};
+        noteEntry(index, await writeBookLore(host, copy ? { ...e, extensions: withSecretCopy(e.extensions, null) } : e, { ...rest, secret: true, ...gate !== undefined ? { gate } : {} }, userId));
+      } catch (error) {
+        host.log("warn", `[LumiRPEngine] the World Info entry secret lore ${id} was indexed from wasn't switched off: ${error instanceof Error ? error.message : String(error)}`, userId);
       }
-      const { gate: _mirrored, ...rest } = own2 ?? {};
-      await writeBookLore(host, e, { ...rest, secret: true, ...gate !== undefined ? { gate } : {} }, userId);
-    } catch (error) {
-      host.log("warn", `[LumiRPEngine] the World Info entry secret lore ${id} was indexed from wasn't switched off: ${error instanceof Error ? error.message : String(error)}`, userId);
     }
-  }
+    await secureCopies(host, index, userId);
+  });
 }
-function indexedEntry(entry, e) {
-  const out = e.content.trim() === "" ? { ...entry } : { ...entry, content: e.content };
-  const fields = bookLoreFieldsOf(e.extensions);
-  if (fields === null)
-    return out;
-  const gates = [...loreIsSecret(entry) ? [typeof entry.gate === "string" ? entry.gate : ""] : [], ...loreIsSecret(fields) ? [fields.gate ?? ""] : []];
-  if (gates.length > 0) {
-    out.secret = true;
-    out.gate = gates.some((g) => g.trim() === "") ? "" : [...new Set(gates)].map((g) => `(${g})`).join(" && ");
-  }
-  const joined3 = (a, b) => [...new Set([...Array.isArray(a) ? a.filter((x) => typeof x === "string") : [], ...b ?? []])];
-  if (fields.audience)
-    out.audience = joined3(entry.audience, fields.audience).filter((p) => LORE_AUDIENCE.includes(p));
-  if (fields.holders)
-    out.holders = joined3(entry.holders, fields.holders);
-  if (fields.visibility === "known_by" || entry.visibility === "known_by" || entry.visibility !== undefined && entry.visibility !== "public") {
-    out.visibility = "known_by";
-    out.links = joined3(entry.links, fields.links);
-  }
-  return out;
+function heldAsSource(disabled, own2, gate, was) {
+  return disabled && own2 !== null && loreIsSecret(own2) && (own2.gate === gate || was === undefined || own2.gate !== was);
 }
-function bookLoreEntry(e) {
+function indexedEntry(entry, e, parts) {
+  return heldTo(e.content.trim() === "" ? entry : { ...entry, content: e.content }, parts);
+}
+function bookLoreEntry(e, parts) {
   if (engineWroteEntry(e.extensions) || e.content.trim() === "")
     return null;
-  const fields = bookLoreFieldsOf(e.extensions);
-  if (e.disabled && fields === null)
+  if (e.disabled && bookLoreFieldsOf(e.extensions) === null)
     return null;
-  return {
+  return bookEntryLore(e, parts);
+}
+function bookEntryLore(e, parts) {
+  const fields = bookLoreFieldsOf(e.extensions);
+  return heldTo({
     id: bookLoreId(e.bookId, e.id),
     title: bookEntryTitle(e),
     content: e.content,
     keys: e.keys.filter((k) => k.trim() !== ""),
     links: fields?.links ?? [],
     ...fields?.aliases ? { aliases: fields.aliases } : {},
-    ...fields?.secret !== undefined ? { secret: fields.secret } : {},
-    ...fields?.gate !== undefined ? { gate: fields.gate } : {},
-    ...fields?.audience ? { audience: fields.audience } : {},
-    ...fields?.visibility ? { visibility: fields.visibility } : {},
-    ...fields?.holders ? { holders: fields.holders } : {},
     source: { kind: "book", bookId: e.bookId, entryId: e.id, hash: bookTextHash(e.content) }
-  };
+  }, parts);
 }
 async function loreBookIds(host, world, chatId, userId) {
   const listed2 = loreBooksOf(world);
@@ -65425,38 +66034,47 @@ async function loreBookIds(host, world, chatId, userId) {
   return { read: ids2.filter((id) => known.get(id) === false), gone: listed2.filter((id) => !known.has(id)) };
 }
 async function liveLore(host, world, chatId, userId) {
-  const books = await loreBookIds(host, world, chatId, userId);
+  const which = loreBookIds(host, world, chatId, userId).catch((error) => {
+    host.log("warn", `[LumiRPEngine] the World Info books this chat reads weren't told, so none is read as lore this run: ${error instanceof Error ? error.message : String(error)}`, userId);
+    return { read: [], gone: [] };
+  });
+  const [books, index] = await Promise.all([which, loreIndex(host, userId)]);
   for (const id of books.gone)
     host.log("warn", `[LumiRPEngine] lore book ${id} the world lists is gone: no call reads it (Build \u2192 Lore \u2192 Lore books)`, userId);
   const sources = [...new Set(Object.values(world.lore).flatMap((entry) => {
     const source = loreSourceOf(entry.source);
     return source.kind === "book" && !books.read.includes(source.bookId) ? [source.bookId] : [];
   }))];
-  if (books.read.length === 0 && sources.length === 0)
-    return world;
   const entriesOf = (ids2) => Promise.all(ids2.map((id) => host.books.entries(id, userId).catch((error) => {
     host.log("warn", `[LumiRPEngine] lore book ${id} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
     return [];
   })));
   const [read, sourced] = await Promise.all([entriesOf(books.read), entriesOf(sources)]);
+  const texts2 = secretTexts(index, { world });
   const live = new Map(read.flat().map((e) => [bookLoreId(e.bookId, e.id), e]));
   const fromBooks = new Map([...live, ...sourced.flat().map((e) => [bookLoreId(e.bookId, e.id), e])]);
   const lore = {};
-  const indexed = new Set;
+  const indexed2 = new Set;
   for (const [id, entry] of Object.entries(world.lore)) {
     const source = loreSourceOf(entry.source);
     const key = source.kind === "book" ? bookLoreId(source.bookId, source.entryId) : null;
     const now = key ? fromBooks.get(key) : undefined;
     if (key && now)
-      indexed.add(key);
-    lore[id] = now && !engineWroteEntry(now.extensions) ? indexedEntry(entry, now) : entry;
+      indexed2.add(key);
+    lore[id] = now && !engineWroteEntry(now.extensions) ? indexedEntry(entry, now, secrecyParts(now, texts2)) : heldTo(entry, textParts(texts2, entry.content, key !== null));
   }
+  const seen = new Set(Object.values(lore).map((entry) => textOf(entry.content)));
   for (const [key, e] of live) {
-    if (indexed.has(key) || hasOwn(lore, key))
+    if (indexed2.has(key) || hasOwn(lore, key))
       continue;
-    const entry = bookLoreEntry(e);
-    if (entry)
-      lore[key] = entry;
+    const text5 = textOf(e.content);
+    if (text5 !== "" && seen.has(text5))
+      continue;
+    const entry = bookLoreEntry(e, secrecyParts(e, texts2));
+    if (!entry)
+      continue;
+    lore[key] = entry;
+    seen.add(text5);
   }
   return { ...world, lore };
 }
@@ -66115,8 +66733,8 @@ var WORLD_PARTS = { calendar: true, realism: true, time: true, meta: true, tiers
 class WorldError extends Error {
   code;
   lint;
-  constructor(code, message, lint = []) {
-    super(message);
+  constructor(code, message2, lint = []) {
+    super(message2);
     this.code = code;
     this.lint = lint;
     this.name = "WorldError";
@@ -66362,6 +66980,7 @@ class WorldStore {
     }
     if (request.base !== null && request.base !== draft.base)
       throw new WorldError("conflict", "the world changed; reload and retry");
+    const loreBefore = { ...draft.doc.lore };
     let doc = draft.doc;
     let base = draft.base;
     let lint;
@@ -66436,7 +67055,7 @@ class WorldStore {
     }
     const version = draft.version + 1;
     await this.writeJson(`${worldDir(worldId)}draft.json`, { base, doc, version }, userId);
-    await secureIndexedSecrets(this.host, doc, userId, (id) => !jsonEqual(doc.lore[id], draft.doc.lore[id]), draft.doc);
+    await secureIndexedSecrets(this.host, doc, userId, (id) => !jsonEqual(doc.lore[id], loreBefore[id]), { ...draft.doc, lore: loreBefore });
     changed?.(worldId, { version, stored: true, base });
     return { draft: doc, lint, base, stored: true, version };
   }
@@ -66483,10 +67102,10 @@ class WorldStore {
         throw error;
       throw new WorldError(ops[error.index]?.op === "test" ? "conflict" : "bad_request", error.message);
     }
-    const refusal = (tokens2, message) => {
+    const refusal = (tokens2, message2) => {
       const index = ops.findIndex((op2) => writesAt(op2, tokens2));
       const op = ops[index];
-      return new WorldError("bad_request", op ? new PatchError(index, message, op).message : message);
+      return new WorldError("bad_request", op ? new PatchError(index, message2, op).message : message2);
     };
     if (!isRecord(after))
       throw refusal([], "the patch must leave a world document");
@@ -66888,8 +67507,8 @@ function boundedInput(kind, input) {
 
 class JobError extends Error {
   code;
-  constructor(code, message) {
-    super(message);
+  constructor(code, message2) {
+    super(message2);
     this.code = code;
   }
 }
@@ -67018,26 +67637,26 @@ class JobRunner {
       this.update(job, { status: "failed", progress: 1, message: event.state === "timed_out" ? laneTimedOut(event.error) : event.error ?? `the background lane ${event.state === "completed" ? "ended without a result" : event.state.replace("_", " ")}` });
     }
   }
-  onLane(message) {
-    if (!isRecord(message) || typeof message.jobId !== "string")
+  onLane(message2) {
+    if (!isRecord(message2) || typeof message2.jobId !== "string")
       return;
-    const job = this.jobs.get(message.jobId);
+    const job = this.jobs.get(message2.jobId);
     if (!job)
       return;
-    if (typeof message.error === "string") {
-      this.update(job, { status: "failed", progress: 1, message: message.error });
+    if (typeof message2.error === "string") {
+      this.update(job, { status: "failed", progress: 1, message: message2.error });
       return;
     }
-    if (message.done === true && isRecord(message.result)) {
-      const turns = Array.isArray(message.result.turns) ? message.result.turns : [];
-      const lint = Array.isArray(message.result.lint) ? message.result.lint : [];
+    if (message2.done === true && isRecord(message2.result)) {
+      const turns = Array.isArray(message2.result.turns) ? message2.result.turns : [];
+      const lint = Array.isArray(message2.result.lint) ? message2.result.lint : [];
       const result = JSON.parse(JSON.stringify({ turns, lint }));
       this.update(job, { status: "done", progress: 1, result });
       job.lane?.stop();
       return;
     }
-    if (typeof message.progress === "number")
-      this.update(job, { status: "running", progress: message.progress });
+    if (typeof message2.progress === "number")
+      this.update(job, { status: "running", progress: message2.progress });
   }
   update(job, u, partial) {
     const msg = { lre: PROTOCOL_VERSION, type: "lre.job.update", jobId: job.id, kind: job.kind, ...u };
@@ -67154,7 +67773,7 @@ ${reader.retry}`, "retry"), calls: 2 };
     const rest = read < pass.batches.length && last !== null ? pass.batches.slice(read).reduce((n, b) => n + b.owners.length, 0) : 0;
     const bare = pass.bare.length > 0 ? `${pass.bare.length} had nothing in their sheets or the lore to go on (${pass.bare.slice(0, 6).map((id) => own(draft.entities, id)?.name ?? id).join(", ")}${pass.bare.length > 6 ? "\u2026" : ""}), so they get none.` : null;
     const flagged = proposals.filter((p) => (p.problems?.length ?? 0) > 0).length;
-    const message = [
+    const message2 = [
       rest > 0 ? `${rest} people and groups weren't read in this pass's ${ROUTINE_MAX_CALLS} calls; continue for the rest.` : null,
       unread,
       loreCutMessage(scope, pass.cut, loreTokens),
@@ -67164,7 +67783,7 @@ ${reader.retry}`, "retry"), calls: 2 };
       flagged > 0 ? `${flagged} proposal(s) have problems to look at; they start unticked.` : null
     ].filter((m) => m !== null);
     const next = rest > 0 && last !== null ? { ...request.owners ? { owners: request.owners } : {}, after: last } : null;
-    this.update(job, { status: "done", progress: 1, result: { proposals, ...next ? { next } : {} }, ...message.length > 0 ? { message: message.join(" ") } : {} });
+    this.update(job, { status: "done", progress: 1, result: { proposals, ...next ? { next } : {} }, ...message2.length > 0 ? { message: message2.join(" ") } : {} });
   }
   async run(job, worldId, input) {
     const { world, revision } = await this.worlds.get(worldId, job.userId);
@@ -67240,8 +67859,8 @@ ${reader.retry}`, "retry"), calls: 2 };
       const skipped = entries2.length - calls * IMPORT_CHUNK;
       const drops2 = new Map;
       const proposals2 = review(raw2, drops2);
-      const message2 = [skipped > 0 ? `${skipped} entries past the first ${calls * IMPORT_CHUNK} were not read; import them in another pass.` : null, dropSummary(raw2.length, proposals2.length, drops2)].filter((m) => m !== null).join(" ");
-      this.update(job, { status: "done", progress: 1, result: { proposals: proposals2 }, ...message2 ? { message: message2 } : {} });
+      const message3 = [skipped > 0 ? `${skipped} entries past the first ${calls * IMPORT_CHUNK} were not read; import them in another pass.` : null, dropSummary(raw2.length, proposals2.length, drops2)].filter((m) => m !== null).join(" ");
+      this.update(job, { status: "done", progress: 1, result: { proposals: proposals2 }, ...message3 ? { message: message3 } : {} });
       return;
     }
     if (job.kind === "describe_map") {
@@ -67272,8 +67891,8 @@ ${reader.retry}`, "retry"), calls: 2 };
         throw new Error(`the helper's answer isn't a map${wrong ? " after the repair either" : ""}:
 ${problemLines(answer.problems.slice(0, 6))}`);
       const errors = answer.problems.some((p) => p.severity === "error");
-      const message2 = wrong ? errors ? "The repair call left problems; the map's note lists them, and it starts unticked." : "The first map had problems; a repair call fixed them." : undefined;
-      this.update(job, { status: "done", progress: 1, result: { proposals: [mapProposal(request, { ...answer, map: answer.map })] }, ...message2 ? { message: message2 } : {} });
+      const message3 = wrong ? errors ? "The repair call left problems; the map's note lists them, and it starts unticked." : "The first map had problems; a repair call fixed them." : undefined;
+      this.update(job, { status: "done", progress: 1, result: { proposals: [mapProposal(request, { ...answer, map: answer.map })] }, ...message3 ? { message: message3 } : {} });
       return;
     }
     if (job.kind === "propose_routines") {
@@ -67292,12 +67911,12 @@ ${problemLines(answer.problems.slice(0, 6))}`);
           throw new Error("pick a World Info book");
         if (bookId === (await this.worlds.index(worldId, job.userId))?.loreBookId)
           throw new Error("that is the world's own engine book; pick one of your books");
-        const indexed = new Set(Object.values(draft.lore).flatMap((l) => {
+        const indexed2 = new Set(Object.values(draft.lore).flatMap((l) => {
           const s = loreSourceOf(l.source);
           return s.kind === "book" && s.bookId === bookId ? [s.entryId] : [];
         }));
         const withText = (await this.host.books.entries(bookId, job.userId)).filter((e) => e.content.trim() !== "" && !e.disabled);
-        const fresh = withText.filter((e) => !indexed.has(e.id));
+        const fresh = withText.filter((e) => !indexed2.has(e.id));
         if (fresh.length === 0)
           throw new Error(withText.length > 0 ? "every entry of that book with text is already in the world's lore" : "that book has no entries with text");
         if (fresh.length < withText.length)
@@ -67329,8 +67948,8 @@ ${problemLines(answer.problems.slice(0, 6))}`);
       }
       const drops2 = new Map;
       const proposals2 = checkIndexProposals(draft, raw2, book, drops2);
-      const message2 = [...notes, dropSummary(raw2.length, proposals2.length, drops2)].filter((m) => m !== null).join(" ");
-      this.update(job, { status: "done", progress: 1, result: { proposals: proposals2 }, ...message2 ? { message: message2 } : {} });
+      const message3 = [...notes, dropSummary(raw2.length, proposals2.length, drops2)].filter((m) => m !== null).join(" ");
+      this.update(job, { status: "done", progress: 1, result: { proposals: proposals2 }, ...message3 ? { message: message3 } : {} });
       return;
     }
     const instructions = typeof input.instructions === "string" ? input.instructions.trim() : "";
@@ -67342,8 +67961,8 @@ ${problemLines(answer.problems.slice(0, 6))}`);
     const raw = readProposals(reply, "refine");
     const drops = new Map;
     const proposals = checkProposals(world, this.registry, raw, "refine", undefined, drops);
-    const message = dropSummary(raw.length, proposals.length, drops);
-    this.update(job, { status: "done", progress: 1, result: { proposals }, ...message ? { message } : {} });
+    const message2 = dropSummary(raw.length, proposals.length, drops);
+    this.update(job, { status: "done", progress: 1, result: { proposals }, ...message2 ? { message: message2 } : {} });
   }
 }
 
@@ -67609,12 +68228,13 @@ async function bookReads(host, pins, userId) {
   }));
   return out;
 }
-function bookText(e, ref) {
-  const entry = bookLoreFieldsOf(e.extensions) !== null ? bookLoreEntry(e) : null;
-  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on: ref.on, title: bookEntryTitle(e), content: e.content, entry, keep: ref.pin.keep ?? "start" };
+function bookText(e, ref, texts2) {
+  const parts = secrecyParts(e, texts2);
+  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on: ref.on, title: bookEntryTitle(e), content: e.content, entry: parts.length > 0 ? bookEntryLore(e, parts) : null, keep: ref.pin.keep ?? "start" };
 }
 async function pinReader(host, world, refs, userId) {
-  const read = await bookReads(host, refs.map((r) => r.pin), userId);
+  const [read, index] = await Promise.all([bookReads(host, refs.map((r) => r.pin), userId), refs.some((r) => !("lore" in r.pin)) ? loreIndex(host, userId) : null]);
+  const texts2 = secretTexts(index, { world });
   return (some) => {
     const out = [];
     const seen = new Set;
@@ -67629,11 +68249,11 @@ async function pinReader(host, world, refs, userId) {
         give2(worldPinText(world, ref));
       else if ("entry" in ref.pin) {
         const e = read.entries.get(ref.key);
-        give2(e ? bookText(e, ref) : null);
+        give2(e ? bookText(e, ref, texts2) : null);
       } else
         for (const e of read.books.get(ref.pin.book) ?? [])
           if (!e.disabled)
-            give2(bookText(e, ref));
+            give2(bookText(e, ref, texts2));
     }
     return out;
   };
@@ -67677,9 +68297,11 @@ async function pinBooks(host, chatId, userId) {
   return (await host.books.list(userId)).filter((b) => !b.engine).map((b) => ({ id: b.id, name: b.name, attached: attached.has(b.id), character: b.character, added: b.added })).sort((a, b) => Number(b.attached) - Number(a.attached) || a.name.localeCompare(b.name));
 }
 async function pinEntries(host, bookId, userId) {
-  return (await host.books.entries(bookId, userId)).map((e) => {
+  const [entries2, index] = await Promise.all([host.books.entries(bookId, userId), loreIndex(host, userId)]);
+  return entries2.map((e) => {
     const lore = bookLoreFieldsOf(e.extensions);
-    return { id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length, ...lore ? { lore } : {} };
+    const { twins, copyOf } = twinViews(index, e);
+    return { id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length, ...lore ? { lore } : {}, ...twins.length > 0 ? { twins } : {}, ...copyOf ? { copyOf } : {} };
   });
 }
 
@@ -67928,7 +68550,7 @@ function nowOf(world, state2, id) {
   return {
     activity,
     activityLabel: words5(activity),
-    until: when2(e?.fields.activity_until),
+    until: when2(activitySpanEnd(e?.fields)),
     party: e?.relations.some((r) => r.type === PARTY_RELATION && r.to === world.pov) ?? false,
     holds: Object.keys(holds).sort().flatMap((field) => {
       const until = when2(holds[field]);
@@ -67951,7 +68573,7 @@ function sectionsOf2(reg, world, e) {
     id = k?.extends;
   }
   const sections = new Map(SECTION_ORDER.map((s) => [s, []]));
-  const ids2 = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])];
+  const ids2 = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])].filter((field) => !hasOwn(ENGINE_FIELDS, field));
   for (const field of ids2) {
     const def = own(defs, field);
     const section = def?.locked || def?.derived !== undefined ? "advanced" : SECTION_OF[field] ?? (sheet.has(field) ? "stats" : authored2.has(field) ? "identity" : "advanced");
@@ -68093,6 +68715,60 @@ function paramLabel(action, name, world, registry) {
     return kind.label;
   const words6 = name.replace(/_/g, " ");
   return words6.charAt(0).toUpperCase() + words6.slice(1);
+}
+function actionWords(registry, world, state2, action, params) {
+  const secrets = unrevealedSecrets(registry, world, state2);
+  const nameOf7 = (value) => {
+    if (typeof value !== "string" || value === "")
+      return null;
+    const entity = own(state2.entities, value);
+    if (entity)
+      return povMayKnow(registry, world, state2, value) ? entity.name : null;
+    const place = own(world.places, value);
+    if (place)
+      return canSeePlace(registry, world, state2, world.pov, value) ? place.name : null;
+    return null;
+  };
+  const labelOf2 = (table, value) => {
+    if (table !== undefined)
+      return tableChoices(own(world.tables, table)).find((row) => row.key === value)?.label ?? null;
+    const ctx = registry.context(world, state2);
+    const stat = (optionalQuery(ctx, "sheets.stats")?.(ctx) ?? []).find((s) => s.id === value);
+    if (stat)
+      return stat.label;
+    for (const id of Object.keys(world.tracks)) {
+      const shown3 = playerTrack(registry, world, state2, world.pov, id);
+      if (shown3?.id === value)
+        return shown3.label;
+    }
+    if (hasOwn(state2.entities, value) || hasOwn(world.places, value))
+      return nameOf7(value);
+    return /^\S+$/.test(value) && /[_~]/.test(value) ? null : value;
+  };
+  const parts = [];
+  for (const [name, def] of Object.entries(action.params)) {
+    const value = params[name];
+    if (value === undefined || value === null || value === "")
+      continue;
+    if (def.type === "ref") {
+      const named = nameOf7(value);
+      if (named)
+        parts.push(named);
+    } else if (def.type === "list" && def.ref !== undefined) {
+      const names2 = (Array.isArray(value) ? value : []).map(nameOf7).filter((n) => n !== null);
+      if (names2.length > 0)
+        parts.push(`with ${names2.join(" and ")}`);
+    } else if (def.type === "money" && typeof value === "number")
+      parts.push(formatMoney(value, world.currency));
+    else if (def.type === "number" && typeof value === "number")
+      parts.push(`${value} ${paramLabel(action, name, world, registry).toLowerCase()}`);
+    else if (typeof value === "string") {
+      const text5 = labelOf2(def.table, value);
+      if (text5 && findLeaks(text5, secrets).length === 0)
+        parts.push(text5);
+    }
+  }
+  return parts.join(", ");
 }
 function palette(world, state2, registry) {
   const actions = new Map;
@@ -68598,7 +69274,7 @@ function entityOf(reg, ctx, id) {
   const defs = kindFields(reg, world, e.kind);
   const fields = Object.entries(defs).map(([field, def]) => fieldOf2(reg, ctx, id, field, def, own(e.fields, field)));
   for (const [field, value] of Object.entries(e.fields)) {
-    if (field === GONE_FIELD || own(defs, field))
+    if (field === GONE_FIELD || hasOwn(ENGINE_FIELDS, field) || own(defs, field))
       continue;
     fields.push({ id: field, label: field.replace(/_/g, " "), type: typeof value === "number" ? "number" : typeof value === "boolean" ? "bool" : Array.isArray(value) ? "list" : "text", value, extra: true });
   }
@@ -68673,7 +69349,8 @@ function buildGmWorld(reg, world, state2) {
     })),
     relationTypes: [...relationTypes.values()].sort((a, b) => a.label.localeCompare(b.label)),
     money: optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [],
-    encounter: optionalQuery(ctx, "combat.gm")?.(ctx) ?? null
+    encounter: optionalQuery(ctx, "combat.gm")?.(ctx) ?? null,
+    routineRoles: optionalQuery(ctx, "castlife.chat_roles")?.(ctx) ?? []
   };
 }
 
@@ -68927,7 +69604,7 @@ function timelapseEntry(world, state2) {
   return {
     id: TIMELAPSE_ACTION2,
     label: "Let time pass",
-    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it). span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state2)})`,
+    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it), except input that first gets up or goes somewhere with another action ("I get out of bed and make coffee. (OOC: skip an hour.)"), which is that action with the time as its then. span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state2)})`,
     params: ["span (text: the input's words for how long or until when)", "minutes? (number)", "until? (text)", "at? (text)"],
     needs: [],
     lexicon: TIMELAPSE_LEXICON
@@ -69030,7 +69707,7 @@ function recentMessages(messages, recent, hideJson) {
 }
 
 // src/backend/minds-context.ts
-var SKIPPED_FIELDS = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true };
+var SKIPPED_FIELDS = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true, ...ENGINE_FIELDS };
 var STOP2 = Object.fromEntries("the and for with that this from into have has had was were are you your they them their there here what when where which who how why just very some more most other then than about would could should will been being does did not but all any can its it's i'm he's she's".split(" ").map((w) => [w, true]));
 function wordsOf4(text5) {
   return (text5.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []).filter((w) => w.length >= 4 && !STOP2[w]);
@@ -69140,10 +69817,16 @@ function sheetLines(scope) {
   for (const [field, value] of Object.entries(e.fields).sort(([a], [b]) => a.localeCompare(b))) {
     if (SKIPPED_FIELDS[field] || value === null)
       continue;
+    const label = fieldDef(reg, world, e.kind, field)?.label ?? field.replace(/_/g, " ");
+    if (field === "activity_until") {
+      const end = activitySpanEnd(e.fields);
+      if (end !== null && end > state2.clock)
+        out.push(`- ${label}: ${formatClock(calendarOf(world), end)}`);
+      continue;
+    }
     const items = Array.isArray(value) ? value.filter((v) => typeof v === "string") : typeof value === "object" ? [] : [value];
     if (items.length === 0)
       continue;
-    const label = fieldDef(reg, world, e.kind, field)?.label ?? field.replace(/_/g, " ");
     out.push(`- ${label}: ${items.map((v) => typeof v === "string" && (own(state2.entities, v) || own(world.places, v)) ? nameOf7(scope, v) : String(v).replace(/_/g, " ")).join(", ")}`);
   }
   return out;
@@ -69298,8 +69981,8 @@ function mindContext(scope, report) {
   const heardLast = said2 === undefined || said2.who.includes(who);
   const why = moment.user.trim() === "" ? sentence(moment.reason) : "";
   const ended = reads.reply.on && moment.kind !== "beat" && withPov2 && heardLast && moment.reply.trim() !== "" ? latestReply(scope, moment.reply) : "";
-  const message = reads.message.on && withPov2 && moment.kind !== "beat" && moment.user.trim() !== "" ? clip(moment.user, charsOf(reads.message.tokens)) : "";
-  const now = moment.kind === "beat" ? [`It is ${formatClock(cal, moment.at)}. ${sentence(moment.reason)}`.trim()] : withPov2 ? [ended !== "" || message !== "" ? storyVoice(scope) : "", ended !== "" ? `The story so far ended: ${ended}` : "", why, message !== "" ? `Now ${povLabel(scope)} says or does: ${message}` : `${povLabel(scope)} is here with you.`] : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`, why];
+  const message2 = reads.message.on && withPov2 && moment.kind !== "beat" && moment.user.trim() !== "" ? clip(moment.user, charsOf(reads.message.tokens)) : "";
+  const now = moment.kind === "beat" ? [`It is ${formatClock(cal, moment.at)}. ${sentence(moment.reason)}`.trim()] : withPov2 ? [ended !== "" || message2 !== "" ? storyVoice(scope) : "", ended !== "" ? `The story so far ended: ${ended}` : "", why, message2 !== "" ? `Now ${povLabel(scope)} says or does: ${message2}` : `${povLabel(scope)} is here with you.`] : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`, why];
   const about2 = withPov2 && moment.kind === "turn" ? `${moment.user}
 ${heardLast ? readableReply(moment.reply, scope.hideJson) : ""}` : place ? nameOf7(scope, place) : "";
   const recall = reads.recall.on ? recallFor(scope, about2) : [];
@@ -69370,8 +70053,8 @@ function consolidateContext(scope, notes) {
 
 // src/engine/decide.ts
 class DecideError extends Error {
-  constructor(message) {
-    super(message);
+  constructor(message2) {
+    super(message2);
     this.name = "DecideError";
   }
 }
@@ -69810,14 +70493,14 @@ async function interpret(steps, text5, context, actions, config3, userId, signal
     `Only the player character's own deliberate actions count, whether said in the first person ("I", "we"), as a stage direction ("[${pov.name} heads to the roof]") or as narration about ${pov.name} in the third person. "I'll \u2026" about what the player character does now is an action.`,
     `No action ("action": null) for speech alone, out-of-character text ("OOC:", "((\u2026))") that doesn't say time passes, questions, requests to others, what someone else does, hypotheticals, plans for another time, recaps or feelings.`,
     ...actions.some((a) => a.id === TIMELAPSE_ACTION) ? [
-      `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then".`
+      `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then". The one exception is input that first has the player character get up or go somewhere with a catalog action, before the time passes ("I get out of bed and make coffee. (OOC: skip an hour.)", "I head down to the docks. OOC: two hours later."): read that action, and any actions after it, as usual, and the time as their "then".`
     ] : [],
     `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null. An incidental action that fits none, or names someone or somewhere nothing lists, is left out: it never hides the actions after it.`,
     `An action on a thing the player says they have that nothing lists ("I pour Theresa a coffee" with no coffee listed) is still read, in order with the rest: its param holds the thing in the input's own words ("coffee"), and "thing" says what sort of thing it is: "food", "drink", "weapon", "key", "document", "money" or "other".`,
     `When the input and its context still leave it unclear which action or which target is meant, give "action": null and a short "reason"; never guess.`,
     `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
     `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
-    `If, in character, the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
+    `If the input lets time pass after its last action, in character ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM") or out of character after getting up or going somewhere, add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
     `If the input itself plainly states, as settled fact, a lasting change to someone's week (the player character's own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he's started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input's words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: any place the input names for it, as a place id, or in the input's own words when nothing lists it ("the community pool"); left out only when the input names none (for "move", the new home), "with"?: people's ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input's own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone's thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".`
   ];
   if (actions.some((a) => a.id === TRY_ACTION)) {
@@ -69929,14 +70612,14 @@ Output JSON only: {"proposals":[{"type":...}, ...]}.`;
   const asked = `${moves ? `${system}
 ${EXTRACT_WHERE}` : system}${routines ? `
 ${EXTRACT_USUAL}` : ""}`;
-  const message = said2.trim() !== "" ? `The player's message this reply answers (context only; propose only what the narration states happened):
+  const message2 = said2.trim() !== "" ? `The player's message this reply answers (context only; propose only what the narration states happened):
 ${said2.trim()}
 ` : "";
   const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}
 ${routines ? `Usual routines (where a described move goes; never a move by itself):
 ${usual.join(`
 `)}
-` : ""}${message}Narration:
+` : ""}${message2}Narration:
 ${narration}`, config3, userId, signal2, { lore, guidance, recent });
   const list2 = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals = [];
@@ -70539,21 +71222,21 @@ var CONTRACT = {
 };
 function dataBlock(vars) {
   const parts = [];
-  const add = (label, key) => {
+  const add2 = (label, key) => {
     const v = vars[key];
     if (v && v.trim() !== "")
       parts.push(`${label}:
 ${v}`);
   };
-  add("Facts", "facts");
-  add("Present", "present");
-  add("Outcome", "outcome");
-  add("Engine beats", "beats");
-  add("Brief", "brief");
-  add("Sections the narrator has this turn (point at no other)", "sections");
-  add("Recent turns", "recent");
-  add("The player wrote", "user");
-  add("The narrator's reply", "reply");
+  add2("Facts", "facts");
+  add2("Present", "present");
+  add2("Outcome", "outcome");
+  add2("Engine beats", "beats");
+  add2("Brief", "brief");
+  add2("Sections the narrator has this turn (point at no other)", "sections");
+  add2("Recent turns", "recent");
+  add2("The player wrote", "user");
+  add2("The narrator's reply", "reply");
   return parts.join(`
 
 `) || "(no facts)";
@@ -71115,8 +71798,8 @@ var BETWEEN_TURNS = "Nothing new has been said since; take stock of where things
 
 class RunError extends Error {
   code;
-  constructor(code, message) {
-    super(message);
+  constructor(code, message2) {
+    super(message2);
     this.code = code;
     this.name = "RunError";
   }
@@ -71171,6 +71854,7 @@ class MindsRuns {
     const waiting = last?.isUser === true;
     const reply = waiting ? messages.slice(0, -1).findLast((m) => !m.isUser) : messages.findLast((m) => !m.isUser);
     const moment = { kind: "turn", at: state2.clock, reason: waiting ? "" : BETWEEN_TURNS, user: waiting ? text5(last) : "", reply: text5(reply) };
+    const live = await this.rt.readLore(chatId, userId, world);
     const view = { runId: `mr${Date.now().toString(36)}${(++this.seq).toString(36)}`, status: "running", startedAt: Date.now(), entries: picked.map((id) => ({ entity: id, name: own(state2.entities, id)?.name ?? id, level: levels[id] ?? "near", status: "waiting" })), message: null, pending: false, undo: null };
     const run2 = { view, stop: new AbortController, cancelled: false };
     this.runs.set(key, run2);
@@ -71184,7 +71868,7 @@ class MindsRuns {
     const signal2 = within4(run2.stop.signal, "mindsRunMs", settings.timeouts.mindsRunMs);
     (async () => {
       try {
-        const ran = await runMinds(this.rt.minds, { chatId, userId, world, state: state2, who: picked, moment, levels, reasons: Object.fromEntries(picked.map((id) => [id, "gm"])), signal: signal2, messages, concurrency: RUN_CONCURRENCY, progress });
+        const ran = await runMinds(this.rt.minds, { chatId, userId, world: live, state: state2, who: picked, moment, levels, reasons: Object.fromEntries(picked.map((id) => [id, "gm"])), signal: signal2, messages, concurrency: RUN_CONCURRENCY, progress });
         for (const entry of ran.report ?? [])
           progress(run2.cancelled && entry.status !== "recorded" ? { ...entry, status: "cancelled", reason: "you cancelled the run" } : entry);
         if (run2.cancelled)
@@ -71201,9 +71885,9 @@ class MindsRuns {
     })();
     return structuredClone(view);
   }
-  end(run2, status, message) {
+  end(run2, status, message2) {
     run2.view.status = status;
-    run2.view.message = message;
+    run2.view.message = message2;
   }
   async record(chatId, userId, run2, events3) {
     const written = await this.rt.ledger.write(chatId, userId, { kind: "post", id: `${run2.view.runId}w`, target: "head", entry: { kind: "fix", gm: true, events: events3 } });
@@ -71237,14 +71921,14 @@ function scanBeats(reg, world, state2, intent2, runSeed) {
   const person2 = (id) => id !== pov && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person");
   const beats = [];
   const after = Math.max(run2.from, ranTo(state2));
-  const add = (at, reason2, rank, who) => {
+  const add2 = (at, reason2, rank, who) => {
     if (at > after && at <= end)
       beats.push({ at, reason: reason2, source: "scan", who, rank });
   };
   const appointments = own(state2.entities, pov)?.fields.appointments;
   for (const raw of Array.isArray(appointments) ? appointments : []) {
     if (isRecord(raw) && typeof raw.at === "number")
-      add(raw.at, `the player character's appointment${typeof raw.label === "string" ? `: ${raw.label}` : ""}`, RANK.appointment, []);
+      add2(raw.at, `the player character's appointment${typeof raw.label === "string" ? `: ${raw.label}` : ""}`, RANK.appointment, []);
   }
   const tier = optionalQuery(ctx, "minds.tier");
   const plans = optionalQuery(ctx, "minds.plans");
@@ -71258,7 +71942,7 @@ function scanBeats(reg, world, state2, intent2, runSeed) {
       for (const b of laid(ctx, id, run2.from, end)) {
         const p = withPov2.find((x) => x.id === b.plan);
         if (p)
-          add(b.start, `${nameOf8(id)}'s plan with the player character: ${p.what}`, RANK.plan, [id, ...p.with.filter(person2)]);
+          add2(b.start, `${nameOf8(id)}'s plan with the player character: ${p.what}`, RANK.plan, [id, ...p.with.filter(person2)]);
       }
     }
   }
@@ -71269,15 +71953,15 @@ function scanBeats(reg, world, state2, intent2, runSeed) {
       clock += e.minutes;
     else if (e.type === "stage") {
       const track = own(world.tracks, e.track);
-      add(clock, `a story moment: ${track?.label ?? e.track}`, RANK.story, track?.owner && person2(track.owner) ? [track.owner] : []);
+      add2(clock, `a story moment: ${track?.label ?? e.track}`, RANK.story, track?.owner && person2(track.owner) ? [track.owner] : []);
     } else if (e.type === "castlife.invitation" && "data" in e && typeof e.data.agent === "string")
-      add(clock, `${nameOf8(e.data.agent)}'s invitation`, RANK.invitation, [e.data.agent]);
+      add2(clock, `${nameOf8(e.data.agent)}'s invitation`, RANK.invitation, [e.data.agent]);
     else if (e.type === ENGINE_EVENTS.fired && "data" in e) {
       const rule = rules.find((r) => r.id === e.data.rule);
       if (rule && (("at" in rule.on) || rule.interrupt === true || rule.beat !== undefined))
-        add(clock, `the rule ${rule.id}`, RANK.story, []);
+        add2(clock, `the rule ${rule.id}`, RANK.story, []);
     } else if (e.type === ENGINE_EVENTS.signal && "data" in e && e.data.entity === pov && (e.data.class === "bill" || e.data.class === "decline"))
-      add(typeof e.data.at === "number" ? e.data.at : clock, `the player character's money: ${String(e.data.text ?? e.data.class)}`, RANK.money, []);
+      add2(typeof e.data.at === "number" ? e.data.at : clock, `the player character's money: ${String(e.data.text ?? e.data.class)}`, RANK.money, []);
   }
   return { from: run2.from, to: run2.to, after, beats };
 }
@@ -72093,9 +72777,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "15558e7baec6982434989651fb4cf27862eabf493a92d3da1b4b65369a1cd8e4";
-  const tools = ["6b5406dec2baede9b01be7124d955827", "0e881c190ee5dba9818c25eacb17f81f"].filter((f) => f !== undefined);
-  return { id: "496efeef", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  const sha256 = "f600ddfd0877cf5017991664a6f0badd222016db7a561586c9ce2618628fc12e";
+  const tools = ["3363864e19637152d71e37196938c410", "21566d9a8cef394277c636eb45e09b64"].filter((f) => f !== undefined);
+  return { id: "3cd0efe2", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72791,20 +73475,20 @@ class MessageCache {
     return next;
   }
 }
-function sent(list2, message) {
-  if (replaced(list2, message))
+function sent(list2, message2) {
+  if (replaced(list2, message2))
     return true;
   const last = list2.at(-1);
-  if (last && message.index <= last.index)
+  if (last && message2.index <= last.index)
     return false;
-  list2.push(message);
+  list2.push(message2);
   return true;
 }
-function replaced(list2, message) {
-  const at = list2.findIndex((m) => m.id === message.id);
+function replaced(list2, message2) {
+  const at = list2.findIndex((m) => m.id === message2.id);
   if (at < 0)
     return false;
-  list2[at] = message;
+  list2[at] = message2;
   return true;
 }
 function deleted(list2, messageId) {
@@ -73662,51 +74346,53 @@ function outOfHand(action, params, world, state2, mayKnow) {
 }
 
 // src/backend/wi-interceptor.ts
-var keyOf2 = (e) => `${e.bookId}/${e.id}`;
-function ownSecrets(entries3) {
-  const out = new Map;
-  for (const e of entries3) {
-    const fields = bookLoreFieldsOf(e.extensions);
-    if (fields !== null && loreIsSecret(fields))
-      out.set(e.id, fields.gate);
-  }
-  return out;
+var keyOf3 = (e) => `${e.bookId}/${e.id}`;
+function usersOwn(entries3) {
+  return entries3.filter((e) => !engineWroteEntry(e.extensions));
+}
+function secretsOf(entries3, texts2) {
+  return entries3.filter((e) => loreIsSecret(bookSecrecy(e, texts2) ?? {})).map((e) => e.id);
+}
+function switchedOffForSecrecy(e) {
+  const copy = secretCopyOf(e.extensions);
+  if (copy)
+    return !copy.off;
+  return loreIsSecret(bookLoreFieldsOf(e.extensions) ?? {});
 }
 async function worldInfoVerdict(gate, input) {
   try {
     return await verdict(gate, input);
   } catch (error) {
     gate.log(`World Info: its secret entries stay off for this prompt (${error instanceof Error ? error.message : String(error)})`, input.userId);
-    return { disabled: [...ownSecrets(input.entries).keys()], enabled: [] };
+    const entries3 = usersOwn(input.entries);
+    return { disabled: secretsOf(entries3, secretTexts(gate.lastSecrets(input.userId), { entries: entries3 })), enabled: [] };
   }
 }
 async function verdict(gate, input) {
   if (!gate.playsWorld(input.chatMetadata))
     return { disabled: [], enabled: [] };
   const carried = gate.carried(input.chatId);
-  const disabled = input.entries.filter((e) => carried.has(keyOf2(e))).map((e) => e.id);
-  const rest = input.entries.filter((e) => !carried.has(keyOf2(e)));
-  const own2 = ownSecrets(rest);
-  const head = await gate.head(input.chatId, input.userId);
+  const disabled = input.entries.filter((e) => carried.has(keyOf3(e))).map((e) => e.id);
+  const rest = usersOwn(input.entries.filter((e) => !carried.has(keyOf3(e))));
+  const reading = gate.head(input.chatId, input.userId).catch((error) => {
+    gate.log(`World Info: the chat's state wasn't read, so its secret entries stay off for this prompt (${error instanceof Error ? error.message : String(error)})`, input.userId);
+    return null;
+  });
+  const [index, head] = await Promise.all([gate.secrets(input.userId), reading]);
+  if (!index && rest.length > 0)
+    gate.log("World Info: your books are still being read for the first time since the engine started, so your entries stay off for this prompt", input.userId);
+  const texts2 = secretTexts(index, { world: head?.world ?? null, entries: rest });
   if (!head)
-    return { disabled: [...disabled, ...own2.keys()], enabled: [] };
-  const indexed = new Map;
-  for (const entry of Object.values(head.world.lore)) {
-    const source = loreSourceOf(entry.source);
-    if (source.kind === "book" && loreIsSecret(entry))
-      indexed.set(`${source.bookId}/${source.entryId}`, typeof entry.gate === "string" ? entry.gate : undefined);
-  }
+    return { disabled: [...disabled, ...secretsOf(rest, texts2)], enabled: [] };
   const open = loreGateReader(gate.registry, head.world, head.state);
-  const holds = (key, gateText) => open({ id: key, title: "", content: "", keys: [], links: [], secret: true, ...gateText !== undefined ? { gate: gateText } : {} });
   const enabled = [];
   for (const e of rest) {
-    const key = keyOf2(e);
-    if (!own2.has(e.id) && !indexed.has(key))
+    const secrecy = bookSecrecy(e, texts2);
+    if (!secrecy || !loreIsSecret(secrecy))
       continue;
-    const gates = [...own2.has(e.id) ? [own2.get(e.id)] : [], ...indexed.has(key) ? [indexed.get(key)] : []];
-    if (!gates.every((g) => holds(key, g)))
+    if (!open({ id: keyOf3(e), title: "", content: "", keys: [], links: [], secret: true, gate: secrecy.gate ?? "" }))
       disabled.push(e.id);
-    else if (e.disabled)
+    else if (e.disabled && switchedOffForSecrecy(e))
       enabled.push(e.id);
   }
   return { disabled, enabled };
@@ -74561,8 +75247,11 @@ class TurnBridge {
     const intent2 = this.intents.get(userText);
     if (!intent2)
       return false;
-    if (params)
-      this.intents.set(userText, { ...intent2, params });
+    if (params) {
+      const { claim: claim2, ...rest } = intent2;
+      const kept2 = claim2 !== undefined && JSON.stringify(params[claim2.param] ?? null) === JSON.stringify(intent2.params[claim2.param] ?? null);
+      this.intents.set(userText, { ...rest, params, ...claim2 && kept2 ? { claim: claim2 } : {} });
+    }
     this.intentsPassed.add(userText);
     if (this.intentsPassed.size > 64)
       this.intentsPassed.delete(this.intentsPassed.values().next().value ?? "");
@@ -74887,6 +75576,15 @@ function prefixSummary(reg, world, state2) {
   }
   const places2 = Object.keys(world.places).filter((p) => canSeePlace(reg, world, state2, world.pov, p)).slice(0, 40);
   return { clock: state2.clock, pov: world.pov, povName: pov?.name ?? world.pov, cents: state2.accounts[world.pov] ?? null, entities: people, places: places2 };
+}
+function inRecordOrder(record3, events3) {
+  const at2 = new Map;
+  record3.forEach((e, i) => {
+    const key = JSON.stringify(e);
+    if (!at2.has(key))
+      at2.set(key, i);
+  });
+  return [...events3].sort((a, b) => (at2.get(JSON.stringify(a)) ?? 0) - (at2.get(JSON.stringify(b)) ?? 0));
 }
 function proposalKnown(p, reg, world, state2) {
   const named = (s) => {
@@ -75232,7 +75930,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "496efeef" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "3cd0efe2" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -75410,10 +76108,12 @@ class Runtime {
     }
     const read = bridge.intentOf(text6);
     if (settings.gates.intent && typed && lastUser && read?.action && !shown4 && !bridge.intentPassed(text6)) {
-      const label = (render.world.actions[read.action] ?? this.registry.actions.get(read.action))?.label ?? read.action;
-      const params = JSON.stringify(read.params, null, 2);
-      const actions = [{ id: "play", label: "Play", style: "primary" }, { id: "edit", label: "Edit", input: { type: "text", label: `${label}: its details (JSON)`, value: params } }, { id: "cancel", label: "Cancel" }];
-      await this.chips.add(input.chatId, input.userId, [{ id: `intent_gate:${lastUser.id}`, kind: "intent_gate", messageId: lastUser.id, label: `Play ${label}?`, ...Object.keys(read.params).length > 0 ? { detail: JSON.stringify(read.params) } : {}, actions, expires: "next_send", payload: { text: text6 } }]);
+      const def = render.world.actions[read.action] ?? this.registry.actions.get(read.action);
+      const label = def?.label ?? read.action;
+      const words6 = def ? actionWords(this.registry, render.world, render.state, def, read.params) : "";
+      const edit = def ? this.intentEdit(render.world, render.state, def, read.params) : null;
+      const actions = [{ id: "play", label: "Play", style: "primary" }, ...edit ? [{ id: "edit", label: "Edit", input: edit }] : [], { id: "cancel", label: "Cancel" }];
+      await this.chips.add(input.chatId, input.userId, [{ id: `intent_gate:${lastUser.id}`, kind: "intent_gate", messageId: lastUser.id, label: `Play ${label}?`, ...words6 !== "" ? { detail: words6 } : {}, actions, expires: "next_send", payload: { text: text6 } }]);
       this.push.changed(input.chatId, input.userId);
       return { waiting: `waiting for you to play the read action: ${label}` };
     }
@@ -75446,7 +76146,7 @@ class Runtime {
         const start = new Working(this.registry, from.world, from.state);
         start.applyAll(bridge.prePlan(text6));
         const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
-        const log = (message) => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
+        const log = (message2) => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message2}`, input.userId);
         bridge.setSkipPlan(text6, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: await this.liveWorld(p.generationId, input.chatId, input.userId, from.world), state: start.state, intent: intent2, runSeed: bridge.runSeed, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: stepConfigOf(settings.modelUse.steps, "skip"), guidance: preset.guidance.skip ?? "" }));
       }
     }
@@ -76261,7 +76961,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       }
       const done = played.filter((res) => res.ok && res.events.length > 0);
       if (done.length > 0 && input.kind !== "renarrate" && input.kind !== "continue" && bridge.wasInterpreted(userText)) {
-        stored.push({ id: `not_action:${at2}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as ${done.map((res) => `"${labelOf2(res)}"`).join(", then ")}. Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(done.flatMap((res) => res.events))) } });
+        stored.push({ id: `not_action:${at2}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as ${done.map((res) => `"${labelOf2(res)}"`).join(", then ")}. Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(inRecordOrder(plan2?.events ?? [], done.flatMap((res) => res.events)))) } });
       }
     }
     if (input.kind !== "continue" && userText.trim() !== "" && bridge.wasUnread(userText)) {
@@ -76349,6 +77049,48 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const mayKnow = (id) => know === "read" ? povMayKnow(this.registry, world, state2, id) : id === world.pov || canSeeEntity(this.registry, world, state2, world.pov, id);
     const unfit = unfitRef(this.registry, action, params, world, state2, mayKnow, skip2);
     return unfit ? `${action.label}: ${unfitReason(this.registry, world, state2, unfit, "", unrevealedSecrets(this.registry, world, state2), mayKnow)}` : null;
+  }
+  editRefusal(world, state2, action, params, read, claim2) {
+    const kept2 = (name) => JSON.stringify(params[name] ?? null) === JSON.stringify(read[name] ?? null);
+    const refused = this.requestRefusal(world, state2, action, params, "read", claim2 !== undefined && kept2(claim2) ? claim2 : undefined);
+    if (refused)
+      return refused;
+    const mayKnow = (id) => povMayKnow(this.registry, world, state2, id);
+    const why = (param, def, value) => `${action.label}: ${unfitReason(this.registry, world, state2, { param, def, value }, "", unrevealedSecrets(this.registry, world, state2), mayKnow)}`;
+    for (const [name, def] of Object.entries(action.params)) {
+      const value = params[name];
+      if (value === undefined || value === null || value === "" || kept2(name))
+        continue;
+      if (def.type === "ref" && !(typeof value === "string" && paramCandidates(this.registry, world, state2, action, name).includes(value)))
+        return why(name, def, value);
+      if (def.type === "list" && def.ref !== undefined) {
+        const along = companionCandidates(this.registry, world, state2, action, name);
+        const stray = Array.isArray(value) ? value.find((id) => typeof id !== "string" || !along.includes(id)) : value;
+        if (stray !== undefined)
+          return why(name, def, stray ?? null);
+      }
+    }
+    return null;
+  }
+  intentEdit(world, state2, action, params) {
+    if (!palette(world, state2, this.registry).entries.some((e) => e.action === action.id))
+      return null;
+    const picks = {};
+    for (const [name, def] of Object.entries(action.params)) {
+      const value = params[name];
+      if (value === undefined || value === null)
+        continue;
+      if (def.type === "ref") {
+        if (typeof value === "string" && paramCandidates(this.registry, world, state2, action, name).includes(value))
+          picks[name] = value;
+      } else if (def.type === "list" && def.ref !== undefined) {
+        const along = companionCandidates(this.registry, world, state2, action, name);
+        if (Array.isArray(value))
+          picks[name] = value.filter((id) => typeof id === "string" && along.includes(id));
+      } else
+        picks[name] = value;
+    }
+    return { type: "action", label: `Change ${action.label}`, action: action.id, params: picks };
   }
   passOutline(chatId, text6, lines2) {
     return this.bridges.get(chatId)?.passOutline(text6, lines2) ?? false;
@@ -76659,9 +77401,33 @@ ${rules.join(`
     const kept2 = this.liveLores.get(key);
     if (kept2)
       return kept2 === world.lore ? world : { ...world, lore: kept2 };
-    const [live] = await Promise.all([liveLore(this.host, world, chatId, userId), secureIndexedSecrets(this.host, world, userId)]);
+    const live = await this.readLore(chatId, userId, world);
     lruSet(this.liveLores, key, live.lore, 64);
     return live;
+  }
+  async readLore(chatId, userId, world) {
+    await secureIndexedSecrets(this.host, world, userId);
+    const live = await liveLore(this.host, world, chatId, userId);
+    this.tellUnread(lastLoreIndex(this.host, userId), userId);
+    return live;
+  }
+  warmLore(userId) {
+    warmLoreIndex(this.host, userId);
+  }
+  tellUnread(index, userId) {
+    const { unlisted, books } = untold(index);
+    if (unlisted)
+      this.host.toast("World Info is off in your world chats: LumiRPEngine can't list your World Info books. Settings \u2192 Caveats says more.", userId);
+    for (const name of books)
+      this.host.toast(`World Info is off in your world chats: LumiRPEngine can't read your World Info book \u201C${name}\u201D. Settings \u2192 Caveats says what to do.`, userId);
+  }
+  async loreCaveats(userId) {
+    const index = await readyLoreIndex(this.host, userId) ?? lastLoreIndex(this.host, userId);
+    const { unlisted, books } = unreadBooks(index);
+    return [
+      ...unlisted !== null ? [{ code: "lore_books_unlisted", message: `LumiRPEngine can't list your World Info books (${unlisted.slice(0, 200)}), so it keeps all of your World Info off in world chats until it can: any entry could be the twin of a secret it hasn't read. It tries again at the next turn.` }] : [],
+      ...books.map((b) => ({ code: "lore_book_unread", message: `LumiRPEngine can't read your World Info book \u201C${b.name}\u201D (${b.reason.slice(0, 200)}), so it keeps all of your World Info off in world chats until it can: any of your entries could be the twin of a secret in that book. Open the book in Lumiverse's World Info panel to check it, or delete it if you don't need it; LumiRPEngine reads it again at the next turn.` }))
+    ];
   }
   worldInfoGate() {
     return {
@@ -76669,7 +77435,13 @@ ${rules.join(`
       playsWorld: (meta) => readRun(meta) !== null,
       head: (chatId, userId) => this.ledger.narratorState(chatId, userId),
       carried: (chatId) => this.carriedEntries.get(chatId) ?? new Set,
-      log: (message, userId) => this.host.log("warn", `[LumiRPEngine] ${message}`, userId)
+      secrets: async (userId) => {
+        const index = await readyLoreIndex(this.host, userId);
+        this.tellUnread(index ?? lastLoreIndex(this.host, userId), userId);
+        return index;
+      },
+      lastSecrets: (userId) => lastLoreIndex(this.host, userId),
+      log: (message2, userId) => this.host.log("warn", `[LumiRPEngine] ${message2}`, userId)
     };
   }
   async adopted(chatId, userId, from, to) {
@@ -76743,10 +77515,10 @@ ${rules.join(`
   async activeConnectionId(userId) {
     return (await this.host.connections.active(userId).catch(() => null))?.id ?? ACTIVE_CONNECTION;
   }
-  async presetCard(userId, add) {
+  async presetCard(userId, add2) {
     const open = await this.host.chats.active(userId).catch(() => null);
     const chatId = open ?? this.lastWorldChat.get(userId) ?? null;
-    const config3 = add ? await this.presets.addBlocks(chatId, userId) : await this.presets.current(chatId, userId);
+    const config3 = add2 ? await this.presets.addBlocks(chatId, userId) : await this.presets.current(chatId, userId);
     if (!config3)
       return null;
     const run2 = open ? await this.runOf(open, userId) : null;
@@ -76779,7 +77551,7 @@ ${rules.join(`
     const late = Promise.withResolvers();
     const timer = ms === null ? null : setTimeout(() => late.resolve(LATE), ms);
     try {
-      const host = [...this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }], ...await this.stepCaveats(userId, settings, late.promise)];
+      const host = [...this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }], ...await this.loreCaveats(userId), ...await this.stepCaveats(userId, settings, late.promise)];
       const open = await this.host.chats.active(userId).catch(() => null);
       const chatId = open && await this.runOf(open, userId) ? open : this.lastWorldChat.get(userId);
       if (!chatId)
@@ -76789,10 +77561,10 @@ ${rules.join(`
       let run2 = this.caveatRuns.get(key);
       if (!run2) {
         run2 = this.host.dryRun(chatId, userId).then((assembly) => this.lintOf(chatId, assembly, userId)).catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          this.host.log("warn", `[LumiRPEngine] preset lint: ${message}`, userId);
+          const message2 = error instanceof Error ? error.message : String(error);
+          this.host.log("warn", `[LumiRPEngine] preset lint: ${message2}`, userId);
           this.caveatRuns.delete(key);
-          return [{ code: "preset_lint_failed", message: `The preset check couldn't build a test prompt for this chat (${message.slice(0, 200)}), so its warnings aren't known. Open Caveats again to retry.` }];
+          return [{ code: "preset_lint_failed", message: `The preset check couldn't build a test prompt for this chat (${message2.slice(0, 200)}), so its warnings aren't known. Open Caveats again to retry.` }];
         });
         lruSet(this.caveatRuns, key, run2, 64);
       }
@@ -77445,8 +78217,8 @@ function upgradePreview(reg, plan2, state2, after, inForce2) {
 class RequestError extends Error {
   code;
   lint;
-  constructor(code, message, lint) {
-    super(message);
+  constructor(code, message2, lint) {
+    super(message2);
     this.code = code;
     this.lint = lint;
     this.name = "RequestError";
@@ -77472,8 +78244,8 @@ class Dispatcher {
     this.minds = new MindsRuns(rt);
   }
   start() {
-    this.rt.host.frontend.onMessage((message, userId, session) => {
-      this.handle(message, userId, session);
+    this.rt.host.frontend.onMessage((message2, userId, session) => {
+      this.handle(message2, userId, session);
     });
   }
   async handle(raw, userId, session) {
@@ -77501,6 +78273,7 @@ class Dispatcher {
     const what = `${raw.type}${isRecord(raw) && typeof raw.op === "string" ? ` ${raw.op}` : ""}`;
     const t0 = performance.now();
     try {
+      this.rt.warmLore(userId);
       await this.rt.studio.serve(userId);
       await this.route(raw, userId, session, reply, noted2);
     } catch (error) {
@@ -77915,21 +78688,29 @@ class Dispatcher {
           return;
         }
         if (r.op === "fields") {
-          if (typeof r.bookId !== "string" || r.bookId === "" || typeof r.entryId !== "string" || r.entryId === "")
+          const { bookId, entryId } = r;
+          if (typeof bookId !== "string" || bookId === "" || typeof entryId !== "string" || entryId === "")
             throw new RequestError("bad_request", "name the book and its entry");
-          const entry = await this.rt.host.books.entry(r.entryId, userId);
-          if (!entry || entry.bookId !== r.bookId)
-            throw new RequestError("not_found", "that book has no such entry");
-          if (engineWroteEntry(entry.extensions))
-            throw new RequestError("bad_request", "the engine wrote that entry; a world's own lore is its document's");
           const fields = r.fields === null ? null : bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: r.fields } });
           if (r.fields !== null && fields === null)
             throw new RequestError("bad_request", "give the fields as an object, or null to take them off");
           const problem = fields ? bookLoreProblem(fields) : null;
           if (problem)
             throw new RequestError("bad_request", problem);
-          await writeBookLore(this.rt.host, entry, fields, userId);
-          reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
+          const host = this.rt.host;
+          await lorePass(host, userId, async (index) => {
+            const entry = await host.books.entry(entryId, userId);
+            if (!entry || entry.bookId !== bookId)
+              throw new RequestError("not_found", "that book has no such entry");
+            if (engineWroteEntry(entry.extensions))
+              throw new RequestError("bad_request", "the engine wrote that entry; a world's own lore is its document's");
+            const copy = secretCopyOf(entry.extensions);
+            if (copy && (await copyKeepers(host, index, entry, userId)).length > 0)
+              throw new RequestError("bad_request", "that entry is kept secret as a twin of a secret entry with the same text: change that one, and this one follows");
+            noteEntry(index, await writeBookLore(host, copy ? { ...entry, extensions: withSecretCopy(entry.extensions, null) } : entry, fields, userId));
+            await secureCopies(host, index, userId);
+          });
+          reply("lre.lore", { entries: await pinEntries(host, bookId, userId) });
           return;
         }
         if (r.op === "pins") {
@@ -78328,7 +79109,7 @@ class Dispatcher {
     const learning = await this.rt.settings.learningOf(userId);
     const type = EXTRACTION_TYPES.find((t) => t === chip.payload.type);
     const connection = typeof chip.payload.connection === "string" ? chip.payload.connection : ACTIVE_CONNECTION;
-    const settle3 = async (outcome) => {
+    const settle4 = async (outcome) => {
       await this.rt.takeChip(chatId, userId, id);
       if (!type)
         return;
@@ -78344,7 +79125,7 @@ class Dispatcher {
     switch (chip.kind) {
       case "confirm": {
         if (choice !== "confirm" && choice !== "amount") {
-          await settle3("rejected");
+          await settle4("rejected");
           this.rt.push.changed(chatId, userId);
           return { applied: false, pending: false };
         }
@@ -78372,7 +79153,7 @@ class Dispatcher {
           events3 = [...outcome.materialized, ...outcome.events];
         }
         const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, events3, `${id}:confirm`, proposal.type !== "time_advance") } });
-        await settle3("accepted");
+        await settle4("accepted");
         return { applied: result.applied, pending: result.pending };
       }
       case "undo": {
@@ -78400,14 +79181,14 @@ class Dispatcher {
               throw new RequestError("validation", rejection.reason);
           }
           const result2 = repriced.length > 0 ? await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: repriced } }) : { applied: false, pending: false };
-          await settle3("accepted");
+          await settle4("accepted");
           return { applied: result2.applied, pending: result2.pending };
         }
         const refs = Runtime.refsOf(rec, events3);
         if (refs.length === 0)
           return { applied: false, pending: false };
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
-        await settle3("rejected");
+        await settle4("rejected");
         return { applied: result.applied, pending: result.pending };
       }
       case "mode_change": {
@@ -78463,21 +79244,26 @@ class Dispatcher {
         if (choice !== "play" && choice !== "edit")
           throw new RequestError("bad_request", `unknown choice ${choice}`);
         const text6 = typeof chip.payload.text === "string" ? chip.payload.text : "";
-        const edited = choice === "edit" ? typeof payload?.text === "string" ? payload.text : null : undefined;
-        if (edited === null)
-          throw new RequestError("bad_request", "Edit needs the edited text");
         if (chip.kind === "intent_gate") {
-          if (edited === undefined)
+          if (choice === "play")
             return { applied: this.rt.passIntent(chatId, text6), pending: false };
-          const params = paramsOf2(edited);
+          if (!isRecord(payload?.params))
+            throw new RequestError("bad_request", "Edit needs the action's details");
           const read = this.rt.bridgeOf(chatId)?.intentOf(text6);
           const { world, state: state2 } = await this.head(chatId, userId);
           const action = read?.action ? (hasOwn(world.actions, read.action) ? world.actions[read.action] : undefined) ?? this.rt.registry.actions.get(read.action) : undefined;
-          const refused = action ? this.rt.requestRefusal(world, state2, action, params, "read", read?.claim?.param) : null;
+          if (!read || !action)
+            throw new RequestError("not_found", "the read has lapsed");
+          const sent2 = payload.params;
+          const params = Object.fromEntries(Object.entries(sent2).filter(([key]) => hasOwn(action.params, key)));
+          const refused = this.rt.editRefusal(world, state2, action, params, read.params, read.claim?.param);
           if (refused)
             throw new RequestError("validation", refused);
           return { applied: this.rt.passIntent(chatId, text6, params), pending: false };
         }
+        const edited = choice === "edit" ? typeof payload?.text === "string" ? payload.text : null : undefined;
+        if (edited === null)
+          throw new RequestError("bad_request", "Edit needs the edited text");
         const shown4 = Array.isArray(chip.payload.lines) ? chip.payload.lines.filter((l) => typeof l === "string") : [];
         const held3 = Array.isArray(chip.payload.held) ? chip.payload.held.filter((l) => typeof l === "string") : [];
         const lines2 = edited === undefined ? shown4 : edited.split(`
@@ -78620,20 +79406,9 @@ function chipValue(chip, choice, payload) {
     return null;
   if (input.type === "money")
     return typeof payload.cents === "number" && Number.isSafeInteger(payload.cents) && payload.cents > 0 ? payload.cents : null;
-  if (input.type === "text")
+  if (input.type === "text" || input.type === "action")
     return null;
   return typeof payload.value === "string" && input.options.some((o) => o.value === payload.value) ? payload.value : null;
-}
-function paramsOf2(text6) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text6);
-  } catch {
-    throw new RequestError("bad_request", "the details aren't JSON");
-  }
-  if (!isRecord(parsed))
-    throw new RequestError("bad_request", "the details must be a JSON object");
-  return parsed;
 }
 function targetLabel(t) {
   switch (t.type) {
@@ -78787,16 +79562,16 @@ function decodeEvent(event, p) {
     }
     case "MESSAGE_SENT":
     case "MESSAGE_EDITED": {
-      const message = decodeMessage(isRecord(p) ? p.message : null, chatId);
-      return message ? { chatId, message } : null;
+      const message2 = decodeMessage(isRecord(p) ? p.message : null, chatId);
+      return message2 ? { chatId, message: message2 } : null;
     }
     case "MESSAGE_SWIPED": {
-      const message = decodeMessage(isRecord(p) ? p.message : null, chatId);
+      const message2 = decodeMessage(isRecord(p) ? p.message : null, chatId);
       const action = SWIPE_ACTIONS[str18(p, "action") ?? ""];
-      if (!message || !action)
+      if (!message2 || !action)
         return null;
       const previousSwipeId = num6(p, "previousSwipeId");
-      return { chatId, message, action, swipeId: num6(p, "swipeId") ?? message.swipeId, ...previousSwipeId !== undefined ? { previousSwipeId } : {} };
+      return { chatId, message: message2, action, swipeId: num6(p, "swipeId") ?? message2.swipeId, ...previousSwipeId !== undefined ? { previousSwipeId } : {} };
     }
     case "CHAT_DELETED":
       return { chatId };
@@ -78877,8 +79652,8 @@ class DiagnosticsLog {
   users = new Map;
   dirty = new Set;
   timer = null;
-  add(level2, message, userId, turn) {
-    const line2 = `${new Date().toISOString()} ${level2.toUpperCase().padEnd(5)} ${turn ? `[turn ${turn.slice(0, 8)}] ` : ""}${message}`;
+  add(level2, message2, userId, turn) {
+    const line2 = `${new Date().toISOString()} ${level2.toUpperCase().padEnd(5)} ${turn ? `[turn ${turn.slice(0, 8)}] ` : ""}${message2}`;
     const list2 = userId ? this.users.get(userId) ?? [] : this.lines;
     list2.push(line2);
     if (list2.length > 1000)
@@ -79044,7 +79819,7 @@ function createSpindleHost() {
       spindle.registerWorldInfoInterceptor(async (ctx) => {
         if (!ctx.userId)
           return {};
-        const entries3 = ctx.entries.map((e) => ({ id: e.id, bookId: e.world_book_id, disabled: e.disabled, extensions: isRecord(e.extensions) ? e.extensions : {} }));
+        const entries3 = ctx.entries.map((e) => ({ id: e.id, bookId: e.world_book_id, disabled: e.disabled, extensions: isRecord(e.extensions) ? e.extensions : {}, comment: typeof e.comment === "string" ? e.comment : "", content: typeof e.content === "string" ? e.content : "" }));
         return await handler({ chatId: ctx.chatId, userId: ctx.userId, entries: entries3, chatMetadata: ctx.chatMetadata });
       }, 100);
     },
@@ -79111,15 +79886,15 @@ function createSpindleHost() {
       }
     },
     frontend: {
-      send(message, userId, frontendSessionId) {
-        spindle.sendToFrontend(message, userId ?? undefined, frontendSessionId ? { frontendSessionId } : undefined);
+      send(message2, userId, frontendSessionId) {
+        spindle.sendToFrontend(message2, userId ?? undefined, frontendSessionId ? { frontendSessionId } : undefined);
       },
       onMessage(handler) {
         return spindle.onFrontendMessage(handler);
       },
       closeDrawer: (userId) => spindle.ui.closeDrawer({ userId })
     },
-    toast: (message, userId) => spindle.toast.info(message, { title: "LumiRPEngine", userId }),
+    toast: (message2, userId) => spindle.toast.info(message2, { title: "LumiRPEngine", userId }),
     books: {
       async create(name, description, userId) {
         const book = await spindle.world_books.create({ name, description, metadata: { lumi_rp_engine: true } }, userId);
@@ -79130,11 +79905,12 @@ function createSpindleHost() {
       },
       async list(userId) {
         const out = [];
+        const seconds = (t) => typeof t === "number" && Number.isFinite(t) ? t : null;
         for (let offset = 0;offset < 1e5; offset += 200) {
           const page = await spindle.world_books.list({ limit: 200, offset, userId });
           for (const b of page.data) {
             const meta = isRecord(b.metadata) ? b.metadata : {};
-            out.push({ id: b.id, name: b.name, engine: meta.lumi_rp_engine === true, character: typeof meta.source_character_id === "string" && meta.source_character_id !== "", added: typeof b.created_at === "number" && Number.isFinite(b.created_at) ? b.created_at : null });
+            out.push({ id: b.id, name: b.name, engine: meta.lumi_rp_engine === true, character: typeof meta.source_character_id === "string" && meta.source_character_id !== "", added: seconds(b.created_at), updated: seconds(b.updated_at) });
           }
           if (page.data.length < 200 || out.length >= page.total)
             break;
@@ -79318,14 +80094,14 @@ function createSpindleHost() {
       unregister: (channel) => spindle.rpcPool.unregister(channel),
       read: (endpoint) => spindle.rpcPool.read(endpoint)
     },
-    log(level2, message, userId, turn) {
+    log(level2, message2, userId, turn) {
       if (level2 === "error")
-        spindle.log.error(message);
+        spindle.log.error(message2);
       else if (level2 === "warn")
-        spindle.log.warn(message);
+        spindle.log.warn(message2);
       else if (level2 === "info")
-        spindle.log.info(message);
-      diagnostics.add(level2, message, userId, turn);
+        spindle.log.info(message2);
+      diagnostics.add(level2, message2, userId, turn);
     }
   };
 }

@@ -1133,7 +1133,15 @@ var WORLD_FORMAT = "lre-world-v1";
 var ENGINE_VERSION = "0.1.0";
 var EFFECT_ONLY_FUNCTIONS = ["roll"];
 var BUILTIN_RELATIONS = ["in", "owns", "uses", "worn_by", "equipped", "knows", "member_of", "regard", "route"];
+var ACTIVITY_SPAN_OF = "_activity_span";
+var ACTIVITY_PLACE = "_activity_place";
+var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activity_offered: true };
 var FEED_SCOPES = ["player", "scene", "gm"];
+var SCOPE_LABEL = {
+  player: "What your character knows",
+  scene: "Also what the people with your character know",
+  gm: "Everything, with what your character doesn't know marked"
+};
 var DEFAULT_CURRENCY = { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" };
 var DEFAULT_SPAWN_CAP = 24;
 var MAX_SPAWN_CAP = 500;
@@ -4196,7 +4204,7 @@ var COLLECTION_SPECS = {
     { kind: "text", key: "template", label: "Template", multiline: true },
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
     { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v3) => v3 !== false },
-    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: { player: "What your character knows", scene: "Also what the people with your character know", gm: "Everything, with what your character doesn't know marked" }, optional: true, hint: "Unset, it's what your character knows. The wider choices also tell the narrator what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
+    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: SCOPE_LABEL, optional: true, hint: "Unset, it's what your character knows. The wider choices also tell the narrator what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
     { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
     { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
     { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" }
@@ -8467,16 +8475,46 @@ function EntryFields(props) {
   const issues = secret && balanced && problem !== null ? [{ severity: "error", path: "book.gate", code: "gate", message: sentence(problem) }] : [];
   const ctx = { doc: props.doc, lint: issues, path: "book", identifiers, functions: props.functions };
   const set = (patch) => setFields({ ...fields, ...patch });
+  const bookOf = (bookId) => `“${props.labels[bookId] ?? "another book"}”`;
+  const copy = props.entry.copyOf;
+  if (copy?.kept) {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-form-lore-fields",
+      "data-lre-book-entry": props.entry.id,
+      children: /* @__PURE__ */ u3(Banner, {
+        tone: "info",
+        children: [
+          "This entry is a copy of a secret entry in ",
+          bookOf(copy.bookId),
+          ", so it is kept off with it, even after either is edited: it comes on for a prompt once that one's gate holds, and back on for good when that one is made public. Change its secrecy there."
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  const twins = [...new Set((props.entry.twins ?? []).map((t3) => bookOf(t3.bookId)))];
   return /* @__PURE__ */ u3("div", {
     class: "lre-form-lore-fields",
     "data-lre-book-entry": props.entry.id,
     children: [
+      copy ? /* @__PURE__ */ u3(Banner, {
+        tone: "info",
+        children: [
+          "It was kept secret as a copy of an entry in ",
+          bookOf(copy.bookId),
+          ", which is no longer secret: make it public here to switch it back on."
+        ]
+      }, undefined, true, undefined, this) : null,
       /* @__PURE__ */ u3(CheckField, {
         label: "Make this entry secret",
         help: "It is stored switched off: it reaches no prompt and no helper until its gate holds.",
         checked: secret,
         onChange: (on) => set({ secret: on })
       }, undefined, false, undefined, this),
+      twins.length > 0 ? /* @__PURE__ */ u3("p", {
+        class: "lre-build-note",
+        "data-lre-book-twins": true,
+        children: props.entry.lore && loreIsSecret(props.entry.lore) ? `The same text in ${listWords(twins)} is kept off with it, and comes back on with it.` : `The same text is in ${listWords(twins)}: making this entry secret keeps ${twins.length === 1 ? "that one" : "those"} off too, and making it public again switches them back on.`
+      }, undefined, false, undefined, this) : null,
       secret ? /* @__PURE__ */ u3(M, {
         children: [
           /* @__PURE__ */ u3(FieldInput, {
@@ -8629,6 +8667,7 @@ function BookEntriesSection() {
             label: "Entries",
             children: entries.map((e3) => /* @__PURE__ */ u3(ActionRow, {
               title: e3.title,
+              subtitle: e3.copyOf?.kept ? `Kept off with a secret in “${labels[e3.copyOf.bookId] ?? "another book"}”` : undefined,
               value: e3.lore && loreIsSecret(e3.lore) ? /* @__PURE__ */ u3(Badge, {
                 tone: "gm",
                 children: "Secret"
@@ -8646,6 +8685,7 @@ function BookEntriesSection() {
                 entry: e3,
                 doc: draft.doc,
                 functions: draft.functions,
+                labels,
                 busy,
                 onSave: (fields) => save(e3.id, fields)
               }, undefined, false, undefined, this) : null
@@ -13949,6 +13989,21 @@ function Receipt(props) {
     ]
   }, undefined, true, undefined, this);
 }
+async function sendChipChoice(app, chip, choice, chatId, payload) {
+  const intent = chipIntent(chip, choice, chatId, payload);
+  if (intent.request) {
+    const message = await app.send(intent.request);
+    if (message.type === "lre.error") {
+      app.toast(message.message, "error");
+      return false;
+    }
+    if (message.request === "lre.chip" && message.body.pending && !intent.regenerate)
+      app.toast("Saved — it applies when the reply finishes.", "info");
+  }
+  if (intent.regenerate && !await app.host.generate("regenerate"))
+    app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
+  return true;
+}
 function useChipAction(chip, chatId) {
   const app = useApp();
   const [busy, run] = useBusy();
@@ -13957,31 +14012,30 @@ function useChipAction(chip, chatId) {
     (choice, payload) => run(async () => {
       if (choice === "diagnostics")
         return openDiagnostics();
-      const intent = chipIntent(chip, choice, chatId, payload);
-      if (intent.request) {
-        const message = await app.send(intent.request);
-        if (message.type === "lre.error") {
-          app.toast(message.message, "error");
-          return;
-        }
-        if (message.request === "lre.chip" && message.body.pending && !intent.regenerate)
-          app.toast("Saved — it applies when the reply finishes.", "info");
-      }
-      if (intent.regenerate && !await app.host.generate("regenerate"))
-        app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
+      await sendChipChoice(app, chip, choice, chatId, payload);
     })
   ];
 }
 function useChipControls(chip, chatId) {
+  const app = useApp();
   const view = useView();
   const [busy, choose] = useChipAction(chip, chatId);
   const [asking, setAsking] = d2(null);
   const open = chip.actions.find((action) => action.id === asking);
+  const press = (action) => {
+    const input = action.input;
+    if (input?.type === "action")
+      app.overlays.openPalette("actions", { chatId, chip, action: input.action, params: input.params });
+    else if (input)
+      setAsking(asking === action.id ? null : action.id);
+    else
+      choose(action.id);
+  };
   return {
     busy,
     asking,
-    press: (action) => action.input ? setAsking(asking === action.id ? null : action.id) : choose(action.id),
-    form: open?.input ? /* @__PURE__ */ u3(ChipInputForm, {
+    press,
+    form: open?.input && open.input.type !== "action" ? /* @__PURE__ */ u3(ChipInputForm, {
       action: open,
       input: open.input,
       currency: view?.currency ?? DEFAULT_CURRENCY,
@@ -13999,7 +14053,7 @@ function ActionButton(props) {
     type: "button",
     class: props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`,
     disabled: controls.busy,
-    "aria-expanded": action.input ? controls.asking === action.id : undefined,
+    "aria-expanded": action.input && action.input.type !== "action" ? controls.asking === action.id : undefined,
     onClick: () => controls.press(action),
     children: [
       icon ? /* @__PURE__ */ u3(Icon, {
@@ -26359,7 +26413,7 @@ function TimeControlsEditor(props) {
                   humanize(activity),
                   policy ? null : /* @__PURE__ */ u3("span", {
                     class: "lre-gm-subtitle-note",
-                    children: " · passes within the turn"
+                    children: " · never sped through: its time passes in your turns"
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
@@ -26710,11 +26764,6 @@ function PinsAndUpgrade(props) {
 }
 
 // src/frontend/gm/feed.tsx
-var SCOPE_LABEL = {
-  player: "What your character knows",
-  scene: "Also what the people with your character know",
-  gm: "Everything, with what your character doesn't know marked"
-};
 function feedSummary(feed) {
   if (feed.enabled === false)
     return "Left out of the prompt";
@@ -26723,6 +26772,18 @@ function feedSummary(feed) {
   if (feed.include)
     parts.push(`${feed.include.length} picked ${feed.include.length === 1 ? "source" : "sources"}`);
   return parts.join(" · ");
+}
+function feedNotice(label, to) {
+  if (to === null)
+    return `${label}: the world's settings again, this chat`;
+  if (to.enabled === false)
+    return `${label}: left out of the prompt, this chat`;
+  const caps = [to.maxLines !== undefined ? `${to.maxLines} lines` : null, to.maxTokens !== undefined ? `${to.maxTokens} tokens` : null].filter((c3) => c3 !== null);
+  const parts = [to.scope !== undefined && to.scope !== "player" ? SCOPE_LABEL[to.scope].toLowerCase() : null, caps.length > 0 ? `at most ${caps.join(", ")}` : null, to.include ? `${to.include.length} picked ${to.include.length === 1 ? "source" : "sources"}` : null].filter((p3) => p3 !== null);
+  return `${label}: ${parts.length > 0 ? parts.join(", ") : "in the prompt with no cap"}, this chat`;
+}
+function feedNoticeStands(notice, chips) {
+  return notice.undo.every((chip) => chips.some((c3) => c3.id === chip));
 }
 function ownSources(sources, section) {
   return sources.filter((s3) => s3.slot === section).map((s3) => s3.id);
@@ -26763,7 +26824,7 @@ function SectionFeedForm(props) {
     if (result?.pending)
       app.toast("Saved — it applies when the reply finishes.", "info");
     if (result)
-      props.onDone();
+      props.onDone(result.undo !== null ? { text: feedNotice(props.row.label, to), undo: [result.undo] } : null);
   });
   const noneTaken = sourcesMissing(draft, picked, own);
   return /* @__PURE__ */ u3("div", {
@@ -26863,7 +26924,10 @@ function SectionFeedForm(props) {
   }, undefined, true, undefined, this);
 }
 function FeedThisChat(props) {
+  const app = useApp();
   const pages = usePages();
+  const [notice, setNotice] = d2(null);
+  const [busy, run] = useBusy();
   const rows = props.controls?.sections ?? [];
   if (rows.length === 0)
     return /* @__PURE__ */ u3(Empty, {
@@ -26871,6 +26935,19 @@ function FeedThisChat(props) {
       children: "Section settings appear once the chat has started."
     }, undefined, false, undefined, this);
   const row = rows.find((r3) => r3.id === pages.page);
+  const shown = notice && feedNoticeStands(notice, props.chips) ? notice : null;
+  const undo = (chips) => run(async () => {
+    let all = true;
+    for (const chip of chips) {
+      if (await app.request({ type: "lre.chip", chatId: props.chatId, chip, choice: "undo" }))
+        continue;
+      all = false;
+      break;
+    }
+    if (all)
+      app.toast("Undone.", "info");
+    setNotice(null);
+  });
   return /* @__PURE__ */ u3("div", {
     ref: pages.host.ref,
     class: "lre-gm-pages",
@@ -26909,8 +26986,17 @@ function FeedThisChat(props) {
           chatId: props.chatId,
           row,
           sources: props.controls?.sources ?? [],
-          onDone: pages.back
+          onDone: (made) => {
+            setNotice(made);
+            pages.back();
+          }
         }, row.id, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      shown ? /* @__PURE__ */ u3(EditNoticeBar, {
+        notice: shown,
+        busy,
+        onUndo: () => undo(shown.undo),
+        onDismiss: () => setNotice(null)
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -27084,7 +27170,8 @@ function ThisChat(props) {
         onBack: pages.back,
         children: /* @__PURE__ */ u3(FeedThisChat, {
           chatId: view.chatId,
-          controls
+          controls,
+          chips: view.chips
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : page === "pins" ? /* @__PURE__ */ u3(GmPage, {
         name: "pins",
@@ -29835,7 +29922,9 @@ function Drawer(props) {
       }
       if (scroller) {
         const style = getComputedStyle(scroller);
-        const fill = scroller.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
+        const top = parseFloat(style.paddingTop) || 0;
+        const fill = scroller.clientHeight - top - (parseFloat(style.paddingBottom) || 0);
+        el.style.setProperty("--lre-stick-top", `${-top}px`);
         el.style.setProperty("--lre-fill-h", `${Math.max(0, Math.floor(fill))}px`);
       }
     };
@@ -30596,10 +30685,11 @@ function paletteTabs(palette) {
 }
 function PaletteSheet(props) {
   const view = useView();
-  const [tab, setTab] = d2(props.tab === "actions" && view?.palette?.encounter?.yours ? "combat" : props.tab);
-  const panelId = P2();
   const palette = view?.palette ?? null;
-  const tabs = palette ? paletteTabs(palette) : [];
+  const editing = props.edit && palette ? palette.entries.find((entry) => entry.action === props.edit?.action) : undefined;
+  const [tab, setTab] = d2(editing ? GROUP_TAB[editing.group] : props.tab === "actions" && view?.palette?.encounter?.yours ? "combat" : props.tab);
+  const panelId = P2();
+  const tabs = palette ? editing ? paletteTabs(palette).filter((t3) => t3.id === GROUP_TAB[editing.group]) : paletteTabs(palette) : [];
   const active = tabs.some((entry) => entry.id === tab) ? tab : tabs[0]?.id ?? tab;
   return /* @__PURE__ */ u3("div", {
     class: props.desk ? "lre lre-sheet desk" : "lre lre-sheet",
@@ -30621,7 +30711,7 @@ function PaletteSheet(props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("h2", {
             class: "title",
-            children: active === "timelapse" ? "Timelapse" : "Actions"
+            children: editing ? "Change the action" : active === "timelapse" ? "Timelapse" : "Actions"
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(ClockToggle, {
             view
@@ -30649,7 +30739,7 @@ function PaletteSheet(props) {
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
         children: [
-          /* @__PURE__ */ u3("div", {
+          editing ? null : /* @__PURE__ */ u3("div", {
             class: "lre-chat-tabs",
             children: /* @__PURE__ */ u3(Tabs, {
               label: "Action groups",
@@ -30659,17 +30749,22 @@ function PaletteSheet(props) {
               onChange: (id) => setTab(id)
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          active === "timelapse" && palette.timelapse ? /* @__PURE__ */ u3(TimelapsePanel, {
+          active === "timelapse" && palette.timelapse && !editing ? /* @__PURE__ */ u3(TimelapsePanel, {
             view,
             timelapse: palette.timelapse,
             panel: tabPanel(panelId, active),
             onSent: props.onClose
           }, undefined, false, undefined, this) : /* @__PURE__ */ u3(ActionList, {
             view,
-            head: active === "combat" && palette.encounter ? /* @__PURE__ */ u3(EncounterHead, {
+            head: editing ? /* @__PURE__ */ u3("p", {
+              class: "lre-chat-hint",
+              "data-lre-palette-edit": true,
+              children: "Change what your message plays. It plays this instead of what was read."
+            }, undefined, false, undefined, this) : active === "combat" && palette.encounter ? /* @__PURE__ */ u3(EncounterHead, {
               encounter: palette.encounter
             }, undefined, false, undefined, this) : null,
-            entries: palette.entries.filter((entry) => GROUP_TAB[entry.group] === active),
+            entries: editing ? [editing] : palette.entries.filter((entry) => GROUP_TAB[entry.group] === active),
+            edit: editing && props.edit ? { gate: props.edit, entry: editing } : undefined,
             panel: tabPanel(panelId, active),
             onSent: props.onClose
           }, active, false, undefined, this)
@@ -30834,6 +30929,20 @@ function OptionRow2(props) {
 function samePick(a3, b3) {
   return a3 !== undefined && b3 !== undefined && JSON.stringify(a3.params) === JSON.stringify(b3.params);
 }
+function picksFor(entry, params) {
+  const matches = (option) => Object.entries(option.params).every(([key, value]) => JSON.stringify(params[key]) === JSON.stringify(value));
+  const picks = [];
+  let options = entry.options;
+  for (;; ) {
+    const hit = options.find(matches);
+    if (!hit)
+      return picks;
+    picks.push(hit);
+    if (!hit.next)
+      return picks;
+    options = hit.next.options;
+  }
+}
 function NextStep(props) {
   const ref = T2(null);
   const after = JSON.stringify(props.after.params);
@@ -30884,12 +30993,23 @@ function NextStep(props) {
 }
 function ActionList(props) {
   const app = useApp();
-  const [selected, setSelected] = d2(null);
-  const [amount, setAmount] = d2("");
-  const [count, setCount] = d2(null);
-  const [people, setPeople] = d2([]);
-  const [busy, run] = useBusy();
   const currency = props.view.currency ?? DEFAULT_CURRENCY;
+  const read = props.edit?.gate.params;
+  const readValue = (param) => read && param ? read[param] : undefined;
+  const [selected, setSelected] = d2(() => props.edit && read ? { entry: props.edit.entry, picks: picksFor(props.edit.entry, read) } : null);
+  const [amount, setAmount] = d2(() => {
+    const cents = readValue(props.edit?.entry.amount?.param);
+    return typeof cents === "number" ? formatMoneyInput(cents, currency) : "";
+  });
+  const [count, setCount] = d2(() => {
+    const n2 = readValue(props.edit?.entry.number?.param);
+    return typeof n2 === "number" ? String(n2) : null;
+  });
+  const [people, setPeople] = d2(() => {
+    const along = readValue(props.edit?.entry.people?.param);
+    return Array.isArray(along) ? along.filter((id) => typeof id === "string") : [];
+  });
+  const [busy, run] = useBusy();
   const amountCents = parseMoneyInput(amount, currency);
   const range = selected?.entry.amount;
   const amountOk = !range || amountCents !== null && amountCents >= range.min && (range.max === null || amountCents <= range.max);
@@ -30912,13 +31032,16 @@ function ActionList(props) {
     if (!selected || pending || !amountOk || !countOk)
       return;
     run(async () => {
-      const result = await app.request(paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people));
-      if (result)
+      const request = paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people);
+      const edit = props.edit?.gate;
+      const sent = edit ? await sendChipChoice(app, edit.chip, "edit", edit.chatId, { params: request.params }) : await app.request(request) !== null;
+      if (sent)
         props.onSent();
     });
   };
   const chain = selected ? selected.picks.map((p3) => p3.label).filter((part) => part !== selected.entry.label) : [];
-  const label = !selected ? "Choose an action" : pending ? `Choose ${pending.label.toLowerCase()}` : chain.length > 0 ? `${selected.entry.label}: ${chain.join(" → ")}` : selected.entry.label;
+  const what = !selected ? "Choose an action" : pending ? `Choose ${pending.label.toLowerCase()}` : chain.length > 0 ? `${selected.entry.label}: ${chain.join(" → ")}` : selected.entry.label;
+  const label = props.edit && selected && !pending ? `Play ${what}` : what;
   const span = range ? `${formatMoney(range.min, currency)}${range.max !== null ? `–${formatMoney(range.max, currency)}` : " or more"}` : "";
   return /* @__PURE__ */ u3(M, {
     children: [
@@ -31394,6 +31517,7 @@ class WidgetSurface {
 }
 function createOverlays(app, host) {
   let paletteTab = "actions";
+  let paletteEdit;
   let worldHeight = 0;
   const setOverlay = (kind, visible) => app.ui.update((ui) => ({ ...ui, overlay: visible ? kind : ui.overlay === kind ? null : ui.overlay }));
   let heads = null;
@@ -31452,6 +31576,7 @@ function createOverlays(app, host) {
       children: [
         /* @__PURE__ */ u3(PaletteSheet, {
           tab: paletteTab,
+          edit: paletteEdit,
           desk: !isMobile(host.viewport.get()),
           onClose: () => paletteControl.close()
         }, `${paletteTab}:${Date.now()}`, false, undefined, this),
@@ -31515,12 +31640,14 @@ function createOverlays(app, host) {
   const surfaces = { map, palette, world };
   const controls = { map: mapControl, palette: paletteControl, world: worldControl };
   return {
-    async open(kind, tab) {
+    async open(kind, tab, edit) {
       for (const other of ["map", "palette", "world"])
         if (other !== kind)
           surfaces[other].hide();
-      if (kind === "palette")
+      if (kind === "palette") {
         paletteTab = tab ?? "actions";
+        paletteEdit = edit;
+      }
       await controls[kind].open();
     },
     close(kind) {
@@ -51305,6 +51432,7 @@ var STAGE_TAIL = [
 function ObjectivesEditor(props) {
   const list2 = props.stage.objectives ?? [];
   const put = (i3, parts) => props.onChange(list2.map((o4, j3) => j3 === i3 ? objectiveFrom(parts) : o4));
+  const base = P2();
   return /* @__PURE__ */ u3(FormGroup, {
     title: "Objectives",
     aside: /* @__PURE__ */ u3("span", {
@@ -51341,11 +51469,12 @@ function ObjectivesEditor(props) {
             }, undefined, true, undefined, this),
             /* @__PURE__ */ u3(Field, {
               label: "What the player reads",
+              for: `${base}-${i3}`,
               help: parts.label === "" ? "With none, the player reads the condition itself: give it words." : undefined,
               children: /* @__PURE__ */ u3("input", {
+                id: `${base}-${i3}`,
                 class: "lre-input",
                 value: parts.label,
-                placeholder: "Find the spare relay",
                 onChange: (event) => put(i3, { ...parts, label: event.currentTarget.value })
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this),
@@ -51598,6 +51727,7 @@ function StageSheet(props) {
 function NewStageSheet(props) {
   const [name, setName] = d2("");
   const [after, setAfter] = d2(props.after ?? "");
+  const nameId = P2();
   const id = deriveId(name || "stage", new Set(Object.keys(props.track.stages)));
   const stages = Object.entries(props.track.stages).map(([sid, s3]) => ({ value: sid, label: s3.label || nameOfId(sid) }));
   return /* @__PURE__ */ u3(FormSheet, {
@@ -51619,10 +51749,11 @@ function NewStageSheet(props) {
       children: [
         /* @__PURE__ */ u3(Field, {
           label: "Name",
+          for: nameId,
           children: /* @__PURE__ */ u3("input", {
+            id: nameId,
             class: "lre-input",
             value: name,
-            placeholder: "Ask Rosie",
             onInput: (event) => setName(event.currentTarget.value)
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this),
@@ -51656,6 +51787,7 @@ function NewStageSheet(props) {
 }
 function TrackEditor(props) {
   const app = useApp();
+  const labelId = P2();
   const isNew = props.id?.startsWith("new:") ?? false;
   const id = isNew ? (props.id ?? "").slice(4) : props.id;
   const stored = id ? props.world.tracks[id] : undefined;
@@ -51716,7 +51848,9 @@ function TrackEditor(props) {
           children: [
             /* @__PURE__ */ u3(Field, {
               label: "Label",
+              for: labelId,
               children: /* @__PURE__ */ u3("input", {
+                id: labelId,
                 class: "lre-input",
                 value: track2.label,
                 onChange: (event) => setTrack({ ...track2, label: event.currentTarget.value })
@@ -52725,6 +52859,9 @@ function pickedSummary(gm, ids) {
   const who = people2.length === 0 ? null : you ? people2.length === 1 ? "you" : `${people2.length} people, you among them` : people2.length === 1 ? "1 person" : `${people2.length} people`;
   return [who, things === 0 ? null : things === 1 ? "1 thing" : `${things} things`].filter((part) => part !== null).join(" and ");
 }
+function routineStanding2(gm, entity) {
+  return gm.routineRoles.find((r3) => r3.entity === entity)?.role ?? "world";
+}
 function bulkDone(gm, change, count) {
   switch (change.kind) {
     case "tier":
@@ -52794,6 +52931,10 @@ function BatchPage(props) {
   const levelOf = (e3) => {
     const level = LEVELS5.find((n2) => n2 === e3.levels.find((l3) => l3.domain === choices.domain)?.override);
     return level === undefined ? "from the tier" : `set to ${level} · ${LEVEL_LABEL[level]}`;
+  };
+  const routineOf = (id) => {
+    const standing = routineStanding2(gm, id);
+    return standing === "world" ? "as the world has it" : `set to ${ROUTINE_ROLE_LABEL[standing]}`;
   };
   const apply = (card3, change) => {
     const ops = bulkOps(reach(card3), change);
@@ -52923,7 +53064,7 @@ function BatchPage(props) {
           title: "Their routine",
           note: `How much their usual day steers them in this chat. “As the world has it” undoes this chat's choice. ${charactersOnly}`,
           reach: chars.length,
-          now: null,
+          now: chars.length > 0 ? mixOf(chars.map((c3) => routineOf(c3.entity))) : null,
           ...card2("role"),
           children: /* @__PURE__ */ u3(Field, {
             label: "Routine role",
@@ -54867,7 +55008,7 @@ var BUILD_CSS = `
 .lre-build,.lre-build-page{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
 .lre-character-page .lre-field:not([data-lre-derived]) .lre-form-optional{display:none}
 .lre-character-page .lre-section-body>*+*{margin-top:var(--lre-s3)}
-.lre-build-bar{position:sticky;top:var(--lre-modebar-h,0px);z-index:5;display:flex;flex-direction:column;margin:calc(-1 * var(--lre-s3)) calc(-1 * (var(--lre-s3) + var(--lre-gutter-r,0px))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l,0px)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r,0px)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l,0px));background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline)}
+.lre-build-bar{position:sticky;top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px));z-index:5;display:flex;flex-direction:column;margin:calc(-1 * var(--lre-s3)) calc(-1 * (var(--lre-s3) + var(--lre-gutter-r,0px))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l,0px)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r,0px)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l,0px));background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline)}
 .lre-build-bar-row{display:flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap-lg);min-width:0}
 .lre-build-bar-row>.lre-iconbtn:first-child{margin-left:calc(-1 * var(--lre-s2))}
 .lre-build-bar-row>.lre-btn{flex:none}
@@ -55366,8 +55507,8 @@ var DIAGNOSTICS_CSS = `
 .lre .lre-chat-status>.lre-activity.failed{flex:none}
 .lre .lre-chat-status-line>.lre-activity{flex:none;max-width:62%}
 
-/* The drawer's bar under the mode bar, sticky with it */
-.lre-activity-bar{position:sticky;top:var(--lre-modebar-h,0px);z-index:5;display:flex;align-items:center;gap:var(--lre-s2);min-height:36px;margin:0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l));background:var(--lre-accent-soft);border-bottom:1px solid var(--lre-hairline);font-size:var(--lre-fs-sm);color:var(--lre-fg)}
+/* The drawer's bar under the mode bar, sticky with it; its tint laid over the bar's own background, so nothing shows through */
+.lre-activity-bar{position:sticky;top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px));z-index:5;display:flex;align-items:center;gap:var(--lre-s2);min-height:36px;margin:0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l));background:linear-gradient(var(--lre-accent-soft),var(--lre-accent-soft)),var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);font-size:var(--lre-fs-sm);color:var(--lre-fg)}
 .lre-activity-bar>.lre-activity-label{flex:1}
 .lre-activity-banner{margin-top:var(--lre-s3)}
 
@@ -55452,7 +55593,7 @@ textarea.lre-input.lre-expr-input.page{font-size:var(--lre-fs-md)}
 .lre-expr-suggest.scroll>.lre-form-chip{flex:none;max-width:none;white-space:nowrap}
 .lre-expr-readout{margin:0;font-size:var(--lre-fs-sm);line-height:1.4;color:var(--lre-muted);overflow-wrap:anywhere}
 .lre-expr-page{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
-.lre-expr-compose{position:sticky;top:var(--lre-modebar-h,0px);z-index:3;display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0;padding:var(--lre-s2) 0;border-bottom:1px solid var(--lre-hairline);background:var(--lre-bar-bg)}
+.lre-expr-compose{position:sticky;top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px));z-index:3;display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0;padding:var(--lre-s2) 0;border-bottom:1px solid var(--lre-hairline);background:var(--lre-bar-bg)}
 .lre-expr-palette{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
 .lre-expr-palette.inline{max-height:360px;overflow:auto;overscroll-behavior:contain;padding:var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-well)}
 .lre-expr-group{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0}
@@ -56164,7 +56305,7 @@ var SETTINGS_CSS = `
 // src/frontend/styles/shell.ts
 var SHELL_CSS = `
 .lre-drawer{--lre-gutter-l:0px;--lre-gutter-r:0px;display:flex;flex-direction:column;min-height:var(--lre-fill-h,100%);padding:0 calc(var(--lre-s3) + var(--lre-gutter-r)) 0 calc(var(--lre-s3) + var(--lre-gutter-l))}
-.lre-modebar{position:sticky;top:0;z-index:6;margin:0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:6px calc(var(--lre-s3) + var(--lre-gutter-r)) 6px calc(var(--lre-s3) + var(--lre-gutter-l));background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);container-type:inline-size}
+.lre-modebar{position:sticky;top:var(--lre-stick-top,0px);z-index:6;margin:0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:6px calc(var(--lre-s3) + var(--lre-gutter-r)) 6px calc(var(--lre-s3) + var(--lre-gutter-l));background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);container-type:inline-size}
 .lre-modeseg{display:flex;gap:2px;min-height:var(--lre-tap-lg);padding:2px;border-radius:var(--lre-r-lg);background:var(--lre-well);box-shadow:inset 0 0 0 1px var(--lre-hairline)}
 .lre-modeseg>button{flex:1 1 auto;min-width:0;min-height:var(--lre-tap);padding:0 var(--lre-s1);display:flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:calc(var(--lre-r-lg) - 2px);background:transparent;color:var(--lre-muted);font-size:var(--lre-fs-sm);font-weight:500;transition:background-color var(--lre-fast),color var(--lre-fast),box-shadow var(--lre-fast)}
 .lre-modeseg>button:hover{color:var(--lre-fg)}
@@ -56182,7 +56323,7 @@ var SHELL_CSS = `
 .lre-play-main,.lre-play-sheet{flex:1;display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;padding-bottom:var(--lre-s3)}
 .lre-play>:last-child:not(.lre-bottomnav){padding-bottom:var(--lre-s5)}
 .lre-play-away>.lre-empty{margin:auto 0}
-.lre-play-tabs{position:sticky;top:var(--lre-modebar-h,0px);z-index:4;margin:calc(-1 * var(--lre-s3)) calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:var(--lre-s2) calc(var(--lre-s3) + var(--lre-gutter-r)) var(--lre-s2) calc(var(--lre-s3) + var(--lre-gutter-l));background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline)}
+.lre-play-tabs{position:sticky;top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px));z-index:4;margin:calc(-1 * var(--lre-s3)) calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:var(--lre-s2) calc(var(--lre-s3) + var(--lre-gutter-r)) var(--lre-s2) calc(var(--lre-s3) + var(--lre-gutter-l));background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline)}
 .lre-play-host{min-width:0}
 .lre-play-fill{flex:1 1 auto;display:flex;flex-direction:column;min-height:320px}
 .lre-play-fill>*{flex:1 1 auto;min-height:0}
@@ -56503,7 +56644,7 @@ function setup(ctx) {
     overlays: {
       openMap: () => overlays?.open("map") ?? Promise.resolve(),
       closeMap: () => overlays?.close("map"),
-      openPalette: (tab2) => overlays?.open("palette", tab2) ?? Promise.resolve(),
+      openPalette: (tab2, edit) => overlays?.open("palette", tab2, edit) ?? Promise.resolve(),
       closePalette: () => overlays?.close("palette"),
       openWorld: () => overlays?.open("world") ?? Promise.resolve(),
       closeWorld: () => overlays?.close("world")
