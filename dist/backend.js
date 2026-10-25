@@ -61526,7 +61526,13 @@ class LedgerCore {
     }
     const reason2 = this.apply(w, observed);
     this.snapshot(observed);
-    return reason2 ? { applied: false, pending: false, reason: reason2 } : { applied: true, pending: false };
+    if (reason2)
+      return { applied: false, pending: false, reason: reason2 };
+    if (w.kind !== "post")
+      return { applied: true, pending: false };
+    const chain = this.chain(observed);
+    const head = chain[chain.map((m) => !m.isUser).lastIndexOf(true)];
+    return { applied: true, pending: false, ...head ? { posted: { messageId: head.id, swipeId: head.swipeId, seq: this.journal.seq } } : {} };
   }
   apply(w, observed) {
     const j = this.journal;
@@ -67677,145 +67683,309 @@ async function pinEntries(host, bookId, userId) {
   });
 }
 
-// src/engine/gm-view.ts
-function fieldOf(reg, ctx, entity, id, def, stored) {
-  const numeric = def.type === "number" || def.type === "money" || def.type === "duration";
-  const derived = def.derived !== undefined;
-  const read = derived ? scopeEnv({ reg, ctx, bindings: { self: entity } }).lookup(["self", id]) : undefined;
-  return {
-    id,
-    label: def.label ?? id.replace(/_/g, " "),
-    type: def.type,
-    value: derived ? read ?? null : stored ?? def.default ?? null,
-    ...def.values ? { values: def.values } : {},
-    ...numeric ? fieldBounds(reg, ctx, entity, def) : {},
-    ...def.ref ? { ref: def.ref } : {},
-    ...derived ? { derived: true } : {},
-    ...def.locked ? { locked: true } : {}
+// src/engine/character.ts
+var SECTION_OF = {
+  birthday: "identity",
+  occupation: "identity",
+  region: "identity",
+  wealth: "identity",
+  place: "where",
+  home: "where",
+  bed: "where",
+  scene: "where",
+  activity: "day",
+  appointments: "day",
+  trips: "day",
+  chores: "day",
+  employer: "work",
+  pay_prefs: "work",
+  filing_status: "work",
+  local_tax: "work",
+  conditions: "stats"
+};
+var SECTION_ORDER = ["identity", "where", "day", "work", "stats", "advanced"];
+var HOLD_WORDS = { place: "Stays where they are", activity: "Keeps doing what they're doing" };
+var BEDLIKE = /\b(bed|beds|bunk|cot|futon|couch|sofa|hammock|sleeping[ _-]?bag)\b/i;
+function placeRefs(world) {
+  const out = new Map;
+  const pathOf = (id) => {
+    const names2 = [];
+    let cur = own(world.places, id)?.parent;
+    for (let guard = 0;cur !== undefined && guard < 64; guard++) {
+      const p = own(world.places, cur);
+      if (!p)
+        break;
+      names2.unshift(p.name);
+      cur = p.parent;
+    }
+    return names2;
   };
-}
-function entityOf(reg, ctx, id) {
-  const { world, state: state2 } = ctx;
-  const e = own(state2.entities, id);
-  if (!e)
-    return null;
-  const defs = kindFields(reg, world, e.kind);
-  const fields = Object.entries(defs).map(([field, def]) => fieldOf(reg, ctx, id, field, def, own(e.fields, field)));
-  for (const [field, value] of Object.entries(e.fields)) {
-    if (field === GONE_FIELD || own(defs, field))
+  for (const id of Object.keys(world.places).sort()) {
+    const p = own(world.places, id);
+    if (!p)
       continue;
-    fields.push({ id: field, label: field.replace(/_/g, " "), type: typeof value === "number" ? "number" : typeof value === "boolean" ? "bool" : Array.isArray(value) ? "list" : "text", value, extra: true });
+    out.set(id, { id, name: p.name, path: pathOf(id), parent: p.parent !== undefined && own(world.places, p.parent) ? p.parent : null, visibility: p.visibility ?? "public" });
   }
-  const regard = optionalQuery(ctx, "regard");
-  const life = lifeStateOf(world, lifeOf(state2, id));
-  const awareness = lifeAwareness(reg, world, state2, id);
-  const named = (ids2) => ids2.map((p) => ({ id: p, name: own(state2.entities, p)?.name ?? p }));
-  return {
+  return out;
+}
+function knownPlaceRefs(world, known) {
+  const out = [];
+  for (const id of Object.keys(world.places).sort()) {
+    const p = own(world.places, id);
+    if (!p || !known(id))
+      continue;
+    const path = [];
+    let cur = p.parent;
+    for (let guard = 0;cur !== undefined && guard < 64; guard++) {
+      const up = own(world.places, cur);
+      if (!up || !known(cur))
+        break;
+      path.unshift(up.name);
+      cur = up.parent;
+    }
+    const parent = p.parent !== undefined && own(world.places, p.parent) && known(p.parent) ? p.parent : null;
+    out.push({ id, name: p.name, path, parent, visibility: "public" });
+  }
+  return out;
+}
+function placeOf4(bodies, id) {
+  let cur = id;
+  for (let guard = 0;cur !== undefined && guard < 32; guard++) {
+    const e = own(bodies, cur);
+    if (!e)
+      return null;
+    const p = e.fields.place;
+    if (typeof p === "string" && p !== "")
+      return p;
+    cur = e.relations.find((r) => r.type === "in")?.to;
+  }
+  return null;
+}
+function plainLabel(raw) {
+  const m = /^(.*?)\s*\(([^()]*)\)\s*$/.exec(raw);
+  return m && m[1] !== undefined && m[1].trim() !== "" && m[2] !== undefined ? { label: m[1].trim(), help: m[2].trim() } : { label: raw };
+}
+function words5(id) {
+  const text5 = id.replace(/[_-]+/g, " ").trim();
+  return text5 ? `${text5.charAt(0).toUpperCase()}${text5.slice(1)}` : id;
+}
+function buildCharacter(reg, world, id, state2) {
+  const bodies = state2 ? state2.entities : world.entities;
+  const e = own(bodies, id);
+  if (!e || !kindIs(reg, world, e.kind, "person"))
+    return null;
+  const refs = placeRefs(world);
+  const placeRef = (place) => typeof place === "string" ? refs.get(place) ?? null : null;
+  const gone = (thing) => state2 ? isGone(state2, thing) : false;
+  const thingRef = (thing) => {
+    if (typeof thing !== "string")
+      return null;
+    const t = own(bodies, thing);
+    return t ? { id: thing, name: t.name, kind: t.kind, place: placeRef(placeOf4(bodies, thing)) } : null;
+  };
+  const isItem = (thing) => kindIs(reg, world, thing.kind, "item");
+  const things = Object.keys(bodies).sort().flatMap((thing) => {
+    const t = own(bodies, thing);
+    const ref = t && isItem(t) && !gone(thing) ? thingRef(thing) : null;
+    return ref ? [ref] : [];
+  });
+  const home = placeRef(e.fields.home);
+  const bedValue = e.fields.bed;
+  const bed = typeof bedValue === "string" && own(world.places, bedValue) ? { kind: "place", place: placeRef(bedValue), item: null } : typeof bedValue === "string" && own(bodies, bedValue) ? { kind: "item", place: placeRef(placeOf4(bodies, bedValue)), item: thingRef(bedValue) } : { kind: "home", place: home, item: null };
+  const holder = e.relations.find((r) => r.type === "in")?.to;
+  const def = kindDef(reg, world, e.kind);
+  const pov = id === world.pov;
+  const lifeId = state2 ? lifeOf(state2, id) : own(world.entities, id)?.life ?? ALIVE;
+  const life = lifeId === ALIVE ? null : { state: lifeId, label: lifeStateOf(world, lifeId).label };
+  const visibility = own(world.entities, id)?.visibility ?? "public";
+  const read = state2 ?? startState(reg, world);
+  const character = {
     id,
     name: e.name,
-    kind: e.kind,
-    tier: e.tier,
-    agent: e.agent,
-    pov: id === world.pov,
-    person: kindIs(reg, world, e.kind, "person"),
-    gone: isGone(state2, id),
-    spawned: !own(world.entities, id),
-    ...isDiscoverable(world, state2, id) ? { visibility: "discoverable", found: knows(state2, world.pov, id) } : { visibility: entityVisibility(world, state2, id) },
-    place: placeOfEntity(state2, id),
-    holder: e.relations.find((r) => r.type === "in")?.to ?? null,
-    claimed: e.fields.claimed === true,
-    ...own(state2.accounts, id) !== undefined ? { balance: own(state2.accounts, id) } : {},
-    fields,
-    relations: e.relations.map((r) => ({
-      type: r.type,
-      to: r.to,
-      toName: own(state2.entities, r.to)?.name ?? r.to,
-      ...r.fields ? { fields: r.fields } : {},
-      ...r.until !== undefined ? { until: r.until } : {},
-      ...r.type === "regard" && regard && own(state2.entities, r.to) ? { value: Math.round(regard(ctx, id, r.to) * 10) / 10 } : {}
-    })),
-    levels: DOMAINS.map((domain) => ({ domain, level: ctx.levelOf(id, domain), override: e.levels[domain] ?? null })),
-    class: Object.fromEntries(Object.keys(world.classifications).flatMap((facet) => {
-      const values = classValues(world, state2, id, facet);
-      return values.length > 0 ? [[facet, [...values]]] : [];
-    })),
-    tags: [...tagsOf(world, state2, id)],
-    sheet: buildEntitySheet(ctx, id),
-    life: { state: lifeOf(state2, id), label: life.label, acts: life.acts, everyone: awareness.everyone, aware: named(awareness.aware), unaware: named(awareness.unaware) }
+    kind: { id: e.kind, label: def?.label ?? words5(e.kind) },
+    tier: { id: e.tier, label: own(world.tiers, e.tier)?.label ?? words5(e.tier) },
+    pov,
+    agent: state2 ? own(state2.entities, id)?.agent ?? false : own(world.entities, id)?.agent ?? false,
+    life,
+    visibility,
+    place: placeRef(state2 ? placeOf4(bodies, id) : e.fields.place),
+    inside: holder !== undefined ? thingRef(holder) : null,
+    home,
+    bed,
+    bedChoices: bedChoices(bodies, refs, typeof e.fields.home === "string" ? e.fields.home : null, isItem, gone),
+    schedules: read ? schedulesOf(reg, world, read, id) : [],
+    relations: relationsOf(reg, world, read ? reg.context(world, read) : null, id, e),
+    ...state2 ? { now: nowOf(world, state2, id) } : {},
+    sections: sectionsOf2(reg, world, e)
   };
+  return { character, places: [...refs.values()], things };
 }
-function buildGmWorld(reg, world, state2) {
-  const ctx = reg.context(world, state2);
-  const relationTypes = new Map;
-  for (const def of [...reg.relations.values(), ...Object.values(world.relations)]) {
-    relationTypes.set(def.id, { id: def.id, label: def.label, from: def.from, to: def.to, fields: Object.entries(isRecord(def.fields) ? def.fields : {}).map(([id, f]) => ({ id, label: f.label ?? id.replace(/_/g, " "), type: f.type, ...f.min !== undefined ? { min: f.min } : {}, ...f.max !== undefined ? { max: f.max } : {}, ...f.values ? { values: f.values } : {} })) });
+function startState(reg, world) {
+  try {
+    calendarOf(world);
+    return initialState(world, "character", reg);
+  } catch {
+    return null;
   }
-  for (const id of BUILTIN_RELATIONS)
-    if (!relationTypes.has(id))
-      relationTypes.set(id, { id, label: id.replace(/_/g, " "), from: "*", to: "*", fields: [] });
-  const kinds = new Map;
-  for (const k of reg.kinds.values())
-    kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
-  for (const k of Object.values(world.kinds))
-    kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
-  return {
-    entities: Object.keys(state2.entities).sort().flatMap((id) => entityOf(reg, ctx, id) ?? []),
-    kinds: [...kinds].map(([id, k]) => ({ id, label: k.label, extends: k.extends })).sort((a, b) => a.label.localeCompare(b.label)),
-    tiers: tiersInOrder(world).map(([id, t]) => ({ id, label: t.label })),
-    lifeStates: lifeStatesOf(world).map(([id, def]) => ({ id, label: def.label, acts: def.acts })),
-    domains: DOMAINS.map((id) => ({ id, label: reg.packs.find((p) => p.domain === id)?.label ?? id })),
-    classifications: world.classifications,
-    places: Object.values(world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null, pins: own(lorePinsOf(world).places, p.id)?.length ?? 0 })),
-    tracks: Object.values(world.tracks).map((t) => ({
-      id: t.id,
-      label: t.label,
-      kind: t.kind,
-      visibility: t.visibility,
-      owner: t.owner ? own(state2.entities, t.owner)?.name ?? t.owner : null,
-      stage: own(state2.tracks, t.id)?.stage ?? t.start,
-      stages: Object.entries(t.stages).map(([id, s]) => ({ id, label: s.label, ...s.truth ? { truth: s.truth } : {} }))
-    })),
-    relationTypes: [...relationTypes.values()].sort((a, b) => a.label.localeCompare(b.label)),
-    money: optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [],
-    encounter: optionalQuery(ctx, "combat.gm")?.(ctx) ?? null
-  };
 }
-
-// src/packs/minds/core/gm.ts
-var LEVEL_ORDER = { live: 0, near: 1, far: 2, background: 3 };
-function outOfPlay(id, why) {
-  return { entity: id, level: "background", score: 0, reasons: [{ label: why, points: 0 }], pin: { gm: null, author: null } };
-}
-function characterView(ctx, id, c, fidelity, memory2) {
-  const { world, state: state2 } = ctx;
+function daysWords(world, r) {
   const cal = calendarOf(world);
-  const clock = (at) => formatClock(cal, at);
-  const name = (who) => own(state2.entities, who)?.name ?? who;
-  const plans = [...c.plans].sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1) || a.when.from - b.when.from);
-  const mind2 = c.mind ? { ...c.mind, clock: clock(c.mind.at), plans: c.plans.filter((p) => c.mind?.plans.includes(p.id)) } : null;
+  if (r.every === "day")
+    return "Every day";
+  if (r.every === "year")
+    return "Every year";
+  if (r.every === "month")
+    return r.days && r.days.length > 0 ? `On the ${list(r.days.map(ordinal))} of the month` : "Every month";
+  const days = [...new Set(r.weekdays ?? [])].sort((a, b) => a - b);
+  const key = days.join(",");
+  if (days.length === 0 || days.length === 7)
+    return "Every day";
+  if (key === "1,2,3,4,5")
+    return "Weekdays";
+  if (key === "0,6")
+    return "Weekends";
+  return list(days.map((d) => weekdayName(cal, d).slice(0, 3)));
+}
+function ordinal(n) {
+  const tail = n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th";
+  return `${n}${tail}`;
+}
+function list(items) {
+  return items.length <= 1 ? items[0] ?? "" : `${items.slice(0, -1).join(", ")} and ${items.at(-1) ?? ""}`;
+}
+function slotValue(world, target, slot) {
+  const one = (v) => target === "place" && typeof v === "string" && own(world.places, v) ? own(world.places, v)?.name ?? v : typeof v === "string" ? v : v === undefined || v === null ? "nothing" : JSON.stringify(v);
+  if (slot.weighted && slot.weighted.length > 0) {
+    const options = [...new Set(slot.weighted.map((w) => one(w.value)))];
+    return options.length <= 1 ? options[0] ?? "nothing" : `${options.slice(0, -1).join(", ")} or ${options.at(-1) ?? ""}`;
+  }
+  return one(slot.value);
+}
+function scheduleSummary(world, s) {
+  const time = (hhmm2) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm2);
+    return m ? formatTimeOfDay(Number(m[1]) * 60 + Number(m[2])) : hhmm2;
+  };
+  const slots = s.slots.map((slot) => `${time(slot.start)}\u2013${time(slot.end)}: ${slotValue(world, s.target, slot)}`);
+  return `${daysWords(world, s.recurrence)} ${slots.join(", ")}`.trim();
+}
+function schedulesOf(reg, world, state2, id) {
+  return allSchedules(reg, world).filter((s) => s.owner !== undefined && scheduleOwners(reg, world, state2, s).includes(id)).map((s) => {
+    const summary = scheduleSummary(world, s);
+    const own_ = s.label;
+    return { id: s.id, label: typeof own_ === "string" && own_.trim() !== "" ? own_.trim() : summary, summary };
+  });
+}
+var RELATION_INTERNAL = new Set(["t"]);
+function relationsOf(reg, world, ctx, from, e) {
+  const types = new Map([...reg.relations.values(), ...Object.values(world.relations)].map((d) => [d.id, d]));
+  const band = ctx ? optionalQuery(ctx, "regard_band") : undefined;
+  return e.relations.filter((r) => r.type !== "in" && r.type !== PARTY_RELATION).map((r) => {
+    const def = types.get(r.type);
+    const fieldDefs = isRecord(def?.fields) ? def.fields : {};
+    const words_ = r.type === "regard" && band && ctx ? band(ctx, from, r.to) : Object.entries(r.fields ?? {}).filter(([k, v]) => !RELATION_INTERNAL.has(k) && v !== null && v !== "").map(([k, v]) => `${own(fieldDefs, k)?.label ?? words5(k)}: ${typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : JSON.stringify(v)}`).join(", ");
+    const to = (ctx ? own(ctx.state.entities, r.to) : undefined) ?? own(world.entities, r.to);
+    return { type: r.type, to: { id: r.to, name: to?.name ?? own(world.places, r.to)?.name ?? r.to }, words: words_ };
+  });
+}
+function bedChoices(bodies, refs, home, isItem, gone) {
+  const homeRef = home !== null ? refs.get(home) : undefined;
+  if (home === null || !homeRef)
+    return { places: [], items: [] };
+  const under = new Map([[home, { depth: 0, path: [] }]]);
+  for (let grew = true;grew; ) {
+    grew = false;
+    for (const ref of refs.values()) {
+      const parent = ref.parent !== null ? under.get(ref.parent) : undefined;
+      if (!parent || under.has(ref.id))
+        continue;
+      const parentName = refs.get(ref.parent ?? "")?.name ?? "";
+      under.set(ref.id, { depth: parent.depth + 1, path: [...parent.path, parentName] });
+      grew = true;
+    }
+  }
+  const places2 = [...under].filter(([id]) => id !== home).sort((a, b) => a[1].depth - b[1].depth || (refs.get(a[0])?.name ?? "").localeCompare(refs.get(b[0])?.name ?? "")).flatMap(([id, at]) => {
+    const ref = refs.get(id);
+    return ref ? [{ ...ref, path: at.path }] : [];
+  });
+  const bedlike = (b) => BEDLIKE.test(b.name) || typeof b.fields.catalog === "string" && BEDLIKE.test(b.fields.catalog.replace(/_/g, " "));
+  const items = Object.keys(bodies).flatMap((id) => {
+    const t = own(bodies, id);
+    const at = t && isItem(t) && !gone(id) && typeof t.fields.place === "string" ? t.fields.place : null;
+    if (!t || at === null || !under.has(at))
+      return [];
+    return [{ ref: { id, name: t.name, kind: t.kind, place: refs.get(at) ?? null }, likely: bedlike(t) }];
+  }).sort((a, b) => Number(b.likely) - Number(a.likely) || a.ref.name.localeCompare(b.ref.name) || (a.ref.id < b.ref.id ? -1 : 1)).map((x) => x.ref);
+  return { places: places2, items };
+}
+function nowOf(world, state2, id) {
+  const e = own(state2.entities, id);
+  const cal = calendarOf(world);
+  const where = typeof e?.fields.place === "string" ? e.fields.place : null;
+  const when2 = (t) => typeof t === "number" && t > state2.clock ? formatStamp(cal, t, placeOffset(world, t, where)) : null;
+  const activity = typeof e?.fields.activity === "string" ? e.fields.activity : "idle";
+  const holds = isRecord(e?.fields.holds) ? e.fields.holds : {};
   return {
-    entity: id,
-    name: name(id),
-    fidelity,
-    refreshQueued: c.refresh,
-    intent: c.intent ? { ...c.intent } : null,
-    mind: mind2,
-    plans: plans.map((p) => ({ ...p, fromText: clock(p.when.from), toText: clock(p.when.to) })),
-    notes: [...c.notes].reverse().map((n) => ({ ...n, now: Math.round(salienceNow(n, state2.clock, memory2) * 100) / 100, faded: faded(n, state2.clock, memory2), clock: clock(n.at) })),
-    commitments: [...c.commitments].sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1) || a.made - b.made).map((x) => ({ ...x, withNames: x.with.map(name), dueText: x.due === null ? null : clock(x.due) })),
-    witness: [...c.witness].reverse().map((w) => ({ ...w, clock: clock(w.at) })),
-    summary: c.summary
+    activity,
+    activityLabel: words5(activity),
+    until: when2(e?.fields.activity_until),
+    party: e?.relations.some((r) => r.type === PARTY_RELATION && r.to === world.pov) ?? false,
+    holds: Object.keys(holds).sort().flatMap((field) => {
+      const until = when2(holds[field]);
+      return until !== null ? [{ label: HOLD_WORDS[field] ?? words5(field), until }] : [];
+    })
   };
 }
-function buildMindsGm(ctx, texts2, enabled, memory2) {
-  const { registry: reg, world, state: state2 } = ctx;
-  const config3 = worldMindsOf(world);
-  const scores = new Map(fidelityOf(ctx, texts2, config3).map((s) => [s.entity, s]));
-  const people = Object.keys(state2.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person"));
-  const characters = people.map((id) => characterView(ctx, id, readCharacter(state2, id), scores.get(id) ?? outOfPlay(id, isGone(state2, id) ? "Removed" : "Doesn't act"), memory2));
-  characters.sort((a, b) => LEVEL_ORDER[a.fidelity.level] - LEVEL_ORDER[b.fidelity.level] || b.fidelity.score - a.fidelity.score || (a.entity < b.entity ? -1 : 1));
-  const secrecy = config3.secrecy;
-  return { enabled, secrecy, now: state2.clock, nowText: formatClock(calendarOf(world), state2.clock), characters };
+function sectionsOf2(reg, world, e) {
+  const defs = kindFields(reg, world, e.kind);
+  const authored2 = new Set;
+  const sheet = new Set;
+  for (let id = e.kind, guard = 0;id && guard < 32; guard++) {
+    const k = kindDef(reg, world, id);
+    if (k && own(world.kinds, id) && k.pack === undefined)
+      for (const f of Object.keys(k.fields))
+        authored2.add(f);
+    for (const [f, d] of Object.entries(k?.fields ?? {}))
+      if (d.domain === "sheets" && d.type === "number")
+        sheet.add(f);
+    id = k?.extends;
+  }
+  const sections = new Map(SECTION_ORDER.map((s) => [s, []]));
+  const ids2 = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])];
+  for (const field of ids2) {
+    const def = own(defs, field);
+    const section = def?.locked || def?.derived !== undefined ? "advanced" : SECTION_OF[field] ?? (sheet.has(field) ? "stats" : authored2.has(field) ? "identity" : "advanced");
+    sections.get(section)?.push(fieldOf(world, field, def, own(e.fields, field)));
+  }
+  return SECTION_ORDER.map((id) => ({ id, fields: sections.get(id) ?? [] }));
+}
+function stems(text5) {
+  return new Set(text5.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2).map((w) => w.replace(/(ies|es|s)$/, "")));
+}
+function fieldOf(world, id, def, stored) {
+  const plain3 = plainLabel(def?.label ?? words5(id));
+  const label = plain3.label;
+  const table = def?.table !== undefined ? own(world.tables, def.table) : undefined;
+  const tableWords = table ? stems(table.label) : new Set;
+  const labelWords = stems(label);
+  const tells = table !== undefined && ![...labelWords].every((w) => tableWords.has(w));
+  const said2 = plain3.help !== undefined && !/[{}[\]]/.test(plain3.help) ? plain3.help : undefined;
+  const help = [said2, tells && table ? `A row of ${table.label}` : undefined].filter((h) => h !== undefined && h !== "").join(" \xB7 ") || undefined;
+  const type = def?.type ?? (typeof stored === "number" ? "number" : typeof stored === "boolean" ? "bool" : Array.isArray(stored) ? "list" : "text");
+  const of = type === "list" ? def?.of ?? (Array.isArray(stored) && stored.length > 0 && stored.every((x) => typeof x === "string") ? "text" : undefined) : undefined;
+  return {
+    id,
+    label,
+    type,
+    value: stored ?? def?.default ?? null,
+    ...def?.values ? { values: [...def.values] } : {},
+    ...def?.min !== undefined ? { min: def.min } : {},
+    ...def?.max !== undefined ? { max: def.max } : {},
+    ...def?.ref !== undefined ? { ref: def.ref } : {},
+    ...of !== undefined ? { of } : {},
+    ...def?.locked || def?.derived !== undefined ? { locked: true } : {},
+    ...help !== undefined ? { help } : {}
+  };
 }
 
 // src/backend/view.ts
@@ -67869,8 +68039,9 @@ function hud(world, state2, panels, ctx) {
   if (ctx.levelOf(pov, "calendar") >= 1)
     fixes.time = { type: "time", value: formatStamp(cal, state2.clock, offset), ...calendarMonths(cal) };
   if (placeId) {
-    const options = Object.values(world.places).filter((p) => canSeePlace(ctx.registry, world, state2, pov, p.id));
-    fixes.place = { entity: pov, field: "place", type: "ref", value: shown3?.id ?? null, options: options.map((p) => ({ value: p.id, label: p.name })) };
+    const seen = (id) => canSeePlace(ctx.registry, world, state2, pov, id);
+    const options = Object.values(world.places).filter((p) => seen(p.id));
+    fixes.place = { entity: pov, field: "place", type: "ref", value: shown3?.id ?? null, options: options.map((p) => ({ value: p.id, label: p.name })), places: knownPlaceRefs(world, seen) };
   }
   const cashAccount2 = isRecord(economy) && Array.isArray(economy.accounts) && economy.accounts.some((a) => isRecord(a) && a.kind === "cash");
   if (money4 >= 2 && cents !== null && (typeof panelCash?.cents !== "number" || cashAccount2))
@@ -67920,8 +68091,8 @@ function paramLabel(action, name, world, registry) {
   const kind = def?.ref ? world.kinds[def.ref] ?? registry.kinds.get(def.ref) : undefined;
   if (kind?.label)
     return kind.label;
-  const words5 = name.replace(/_/g, " ");
-  return words5.charAt(0).toUpperCase() + words5.slice(1);
+  const words6 = name.replace(/_/g, " ");
+  return words6.charAt(0).toUpperCase() + words6.slice(1);
 }
 function palette(world, state2, registry) {
   const actions = new Map;
@@ -68084,6 +68255,9 @@ function clockFixLine(events3) {
 function fixLines(registry, world, state2, events3) {
   const clock = clockFixLine(events3);
   return [...clock ? [clock] : [], ...turnLines(registry, world, state2, events3)];
+}
+function fixChip(messageId, swipeId, seq) {
+  return `fix:${messageId}:${swipeId}:${seq}`;
 }
 var UNSEEN_NAMES = 3;
 function unseenFixLine(registry, world, state2, events3) {
@@ -68277,7 +68451,7 @@ function derivedChips(chain, fold, keepReport, core, registry, world) {
 `) } : {}, actions: [], expires: "next_send" });
     for (const fix of applied.fixes) {
       const fixed = fixLines(registry, world, state2, fix.events);
-      chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), detail: fixed.length > 0 ? fixed.join(" \xB7 ") : unseenFixLine(registry, world, state2, fix.events), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+      chips.push({ id: fixChip(m.id, m.swipeId, fix.seq), kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), detail: fixed.length > 0 ? fixed.join(" \xB7 ") : unseenFixLine(registry, world, state2, fix.events), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
     }
     chips.push(...overdueChips(m.id, ctx, state2, world));
   });
@@ -68399,6 +68573,147 @@ function povEntity(world) {
   return world.pov;
 }
 
+// src/engine/gm-view.ts
+function fieldOf2(reg, ctx, entity, id, def, stored) {
+  const numeric = def.type === "number" || def.type === "money" || def.type === "duration";
+  const derived = def.derived !== undefined;
+  const read = derived ? scopeEnv({ reg, ctx, bindings: { self: entity } }).lookup(["self", id]) : undefined;
+  return {
+    id,
+    label: def.label ?? id.replace(/_/g, " "),
+    type: def.type,
+    value: derived ? read ?? null : stored ?? def.default ?? null,
+    ...def.values ? { values: def.values } : {},
+    ...numeric ? fieldBounds(reg, ctx, entity, def) : {},
+    ...def.ref ? { ref: def.ref } : {},
+    ...derived ? { derived: true } : {},
+    ...def.locked ? { locked: true } : {}
+  };
+}
+function entityOf(reg, ctx, id) {
+  const { world, state: state2 } = ctx;
+  const e = own(state2.entities, id);
+  if (!e)
+    return null;
+  const defs = kindFields(reg, world, e.kind);
+  const fields = Object.entries(defs).map(([field, def]) => fieldOf2(reg, ctx, id, field, def, own(e.fields, field)));
+  for (const [field, value] of Object.entries(e.fields)) {
+    if (field === GONE_FIELD || own(defs, field))
+      continue;
+    fields.push({ id: field, label: field.replace(/_/g, " "), type: typeof value === "number" ? "number" : typeof value === "boolean" ? "bool" : Array.isArray(value) ? "list" : "text", value, extra: true });
+  }
+  const regard = optionalQuery(ctx, "regard");
+  const life = lifeStateOf(world, lifeOf(state2, id));
+  const awareness = lifeAwareness(reg, world, state2, id);
+  const named = (ids2) => ids2.map((p) => ({ id: p, name: own(state2.entities, p)?.name ?? p }));
+  return {
+    id,
+    name: e.name,
+    kind: e.kind,
+    tier: e.tier,
+    agent: e.agent,
+    pov: id === world.pov,
+    person: kindIs(reg, world, e.kind, "person"),
+    gone: isGone(state2, id),
+    spawned: !own(world.entities, id),
+    ...isDiscoverable(world, state2, id) ? { visibility: "discoverable", found: knows(state2, world.pov, id) } : { visibility: entityVisibility(world, state2, id) },
+    place: placeOfEntity(state2, id),
+    holder: e.relations.find((r) => r.type === "in")?.to ?? null,
+    claimed: e.fields.claimed === true,
+    ...own(state2.accounts, id) !== undefined ? { balance: own(state2.accounts, id) } : {},
+    fields,
+    relations: e.relations.map((r) => ({
+      type: r.type,
+      to: r.to,
+      toName: own(state2.entities, r.to)?.name ?? r.to,
+      ...r.fields ? { fields: r.fields } : {},
+      ...r.until !== undefined ? { until: r.until } : {},
+      ...r.type === "regard" && regard && own(state2.entities, r.to) ? { value: Math.round(regard(ctx, id, r.to) * 10) / 10 } : {}
+    })),
+    levels: DOMAINS.map((domain) => ({ domain, level: ctx.levelOf(id, domain), override: e.levels[domain] ?? null })),
+    class: Object.fromEntries(Object.keys(world.classifications).flatMap((facet) => {
+      const values = classValues(world, state2, id, facet);
+      return values.length > 0 ? [[facet, [...values]]] : [];
+    })),
+    tags: [...tagsOf(world, state2, id)],
+    sheet: buildEntitySheet(ctx, id),
+    life: { state: lifeOf(state2, id), label: life.label, acts: life.acts, everyone: awareness.everyone, aware: named(awareness.aware), unaware: named(awareness.unaware) }
+  };
+}
+function buildGmWorld(reg, world, state2) {
+  const ctx = reg.context(world, state2);
+  const relationTypes = new Map;
+  for (const def of [...reg.relations.values(), ...Object.values(world.relations)]) {
+    relationTypes.set(def.id, { id: def.id, label: def.label, from: def.from, to: def.to, fields: Object.entries(isRecord(def.fields) ? def.fields : {}).map(([id, f]) => ({ id, label: f.label ?? id.replace(/_/g, " "), type: f.type, ...f.min !== undefined ? { min: f.min } : {}, ...f.max !== undefined ? { max: f.max } : {}, ...f.values ? { values: f.values } : {} })) });
+  }
+  for (const id of BUILTIN_RELATIONS)
+    if (!relationTypes.has(id))
+      relationTypes.set(id, { id, label: id.replace(/_/g, " "), from: "*", to: "*", fields: [] });
+  const kinds = new Map;
+  for (const k of reg.kinds.values())
+    kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
+  for (const k of Object.values(world.kinds))
+    kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
+  return {
+    entities: Object.keys(state2.entities).sort().flatMap((id) => entityOf(reg, ctx, id) ?? []),
+    kinds: [...kinds].map(([id, k]) => ({ id, label: k.label, extends: k.extends })).sort((a, b) => a.label.localeCompare(b.label)),
+    tiers: tiersInOrder(world).map(([id, t]) => ({ id, label: t.label })),
+    lifeStates: lifeStatesOf(world).map(([id, def]) => ({ id, label: def.label, acts: def.acts })),
+    domains: DOMAINS.map((id) => ({ id, label: reg.packs.find((p) => p.domain === id)?.label ?? id })),
+    classifications: world.classifications,
+    places: Object.values(world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null, pins: own(lorePinsOf(world).places, p.id)?.length ?? 0 })),
+    tracks: Object.values(world.tracks).map((t) => ({
+      id: t.id,
+      label: t.label,
+      kind: t.kind,
+      visibility: t.visibility,
+      owner: t.owner ? own(state2.entities, t.owner)?.name ?? t.owner : null,
+      stage: own(state2.tracks, t.id)?.stage ?? t.start,
+      stages: Object.entries(t.stages).map(([id, s]) => ({ id, label: s.label, ...s.truth ? { truth: s.truth } : {} }))
+    })),
+    relationTypes: [...relationTypes.values()].sort((a, b) => a.label.localeCompare(b.label)),
+    money: optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [],
+    encounter: optionalQuery(ctx, "combat.gm")?.(ctx) ?? null
+  };
+}
+
+// src/packs/minds/core/gm.ts
+var LEVEL_ORDER = { live: 0, near: 1, far: 2, background: 3 };
+function outOfPlay(id, why) {
+  return { entity: id, level: "background", score: 0, reasons: [{ label: why, points: 0 }], pin: { gm: null, author: null } };
+}
+function characterView(ctx, id, c, fidelity, memory2) {
+  const { world, state: state2 } = ctx;
+  const cal = calendarOf(world);
+  const clock = (at) => formatClock(cal, at);
+  const name = (who) => own(state2.entities, who)?.name ?? who;
+  const plans = [...c.plans].sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1) || a.when.from - b.when.from);
+  const mind2 = c.mind ? { ...c.mind, clock: clock(c.mind.at), plans: c.plans.filter((p) => c.mind?.plans.includes(p.id)) } : null;
+  return {
+    entity: id,
+    name: name(id),
+    fidelity,
+    refreshQueued: c.refresh,
+    intent: c.intent ? { ...c.intent } : null,
+    mind: mind2,
+    plans: plans.map((p) => ({ ...p, fromText: clock(p.when.from), toText: clock(p.when.to) })),
+    notes: [...c.notes].reverse().map((n) => ({ ...n, now: Math.round(salienceNow(n, state2.clock, memory2) * 100) / 100, faded: faded(n, state2.clock, memory2), clock: clock(n.at) })),
+    commitments: [...c.commitments].sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1) || a.made - b.made).map((x) => ({ ...x, withNames: x.with.map(name), dueText: x.due === null ? null : clock(x.due) })),
+    witness: [...c.witness].reverse().map((w) => ({ ...w, clock: clock(w.at) })),
+    summary: c.summary
+  };
+}
+function buildMindsGm(ctx, texts2, enabled, memory2) {
+  const { registry: reg, world, state: state2 } = ctx;
+  const config3 = worldMindsOf(world);
+  const scores = new Map(fidelityOf(ctx, texts2, config3).map((s) => [s.entity, s]));
+  const people = Object.keys(state2.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person"));
+  const characters = people.map((id) => characterView(ctx, id, readCharacter(state2, id), scores.get(id) ?? outOfPlay(id, isGone(state2, id) ? "Removed" : "Doesn't act"), memory2));
+  characters.sort((a, b) => LEVEL_ORDER[a.fidelity.level] - LEVEL_ORDER[b.fidelity.level] || b.fidelity.score - a.fidelity.score || (a.entity < b.entity ? -1 : 1));
+  const secrecy = config3.secrecy;
+  return { enabled, secrecy, now: state2.clock, nowText: formatClock(calendarOf(world), state2.clock), characters };
+}
+
 // src/backend/gm.ts
 var GM_EDITS = 40;
 function buildGmView(core, observed, registry, minds) {
@@ -68416,7 +68731,7 @@ function buildGmView(core, observed, registry, minds) {
         return;
       for (const fix of appliedEvents(rec, fold, i).fixes) {
         const clock = clockFixLine(fix.events);
-        edits.push({ messageId: m.id, seq: fix.seq, lines: [...clock ? [clock] : [], ...authorLines(registry, render.world, render.state, fix.events, 12)], ...fix.by ? { by: fix.by.label } : {}, undo: i === head ? `fix:${m.id}:${m.swipeId}:${fix.seq}` : null });
+        edits.push({ messageId: m.id, seq: fix.seq, lines: [...clock ? [clock] : [], ...authorLines(registry, render.world, render.state, fix.events, 12)], ...fix.by ? { by: fix.by.label } : {}, undo: i === head ? fixChip(m.id, m.swipeId, fix.seq) : null });
       }
     });
     return {
@@ -68509,9 +68824,9 @@ function needsOf(action, nameOf7) {
     const shape = SHAPES.find((s) => s.shape.test(req));
     if (!shape)
       continue;
-    const words5 = shape.needs.replace("{p}", nameOf7(read[0] ?? "")).replace("{q}", nameOf7(read[1] ?? read[0] ?? ""));
-    if (!out.includes(words5))
-      out.push(words5);
+    const words6 = shape.needs.replace("{p}", nameOf7(read[0] ?? "")).replace("{q}", nameOf7(read[1] ?? read[0] ?? ""));
+    if (!out.includes(words6))
+      out.push(words6);
   }
   return out;
 }
@@ -68593,10 +68908,10 @@ function interpretCatalog(reg, world, state2, actions, mayKnow) {
     const params = [];
     const ids2 = new Set;
     for (const [name, def] of Object.entries(action.params)) {
-      const words5 = paramWords(ctx, action, name, def, mayKnow, places2, ids2);
-      if (words5 === null)
+      const words6 = paramWords(ctx, action, name, def, mayKnow, places2, ids2);
+      if (words6 === null)
         break;
-      params.push(words5);
+      params.push(words6);
     }
     if (params.length < Object.keys(action.params).length)
       continue;
@@ -68893,14 +69208,14 @@ function sceneLines2(scope, place) {
   if (place === null)
     return ["You aren't anywhere in particular."];
   const ctx = reg.context(world, state2);
-  const words5 = optionalQuery(ctx, "relationships.words");
+  const words6 = optionalQuery(ctx, "relationships.words");
   const here = Object.keys(state2.entities).sort().filter((id) => id !== who && placeOfEntity(state2, id) === place && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id) && canSeeEntity(reg, world, state2, who, id));
   const out = [`You are at ${nameOf7(scope, place)}.`];
   if (here.length === 0)
     out.push("No one else is here.");
   for (const id of here) {
     const label = id === world.pov ? povLabel(scope) : nameOf7(scope, id);
-    const regard = words5?.(ctx, who, id) ?? null;
+    const regard = words6?.(ctx, who, id) ?? null;
     out.push(`- ${label}${id === world.pov ? " (the player character)" : ""}${regard ? `: you feel ${regard}` : knows(state2, who, id) ? ": you know them" : ""}`);
   }
   return out;
@@ -69546,14 +69861,14 @@ ${rules.map((r) => `- ${r}`).join(`
       params[k] = JSON.parse(JSON.stringify(v ?? null));
   const confidence = typeof raw.confidence === "number" ? Math.min(1, Math.max(0, raw.confidence)) : 0.8;
   const then = isRecord(raw.then) ? JSON.parse(JSON.stringify(raw.then)) : undefined;
-  const words5 = (v) => {
+  const words6 = (v) => {
     const s = typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
     return s.length <= 120 ? s : "";
   };
   const queue = [];
   const rest = [];
   for (const entry of action && Array.isArray(raw.more) ? raw.more.slice(0, 16) : []) {
-    const said2 = isRecord(entry) ? words5(entry.text) : "";
+    const said2 = isRecord(entry) ? words6(entry.text) : "";
     const id = isRecord(entry) && typeof entry.action === "string" ? entry.action : null;
     if (rest.length === 0 && queue.length < ACTION_QUEUE_LIMIT - 1 && isRecord(entry) && id !== null && actions.some((a) => a.id === id)) {
       const own2 = {};
@@ -69565,7 +69880,7 @@ ${rules.map((r) => `- ${r}`).join(`
     } else if (said2 !== "")
       rest.push(said2);
   }
-  const next = [...rest, words5(raw.next)].filter((s) => s !== "");
+  const next = [...rest, words6(raw.next)].filter((s) => s !== "");
   const reason2 = !action && typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 200) : "";
   const thing = action ? THING_SORTS.find((s) => s === raw.thing) : undefined;
   const routine = (Array.isArray(raw.routine) ? raw.routine : []).flatMap((r) => {
@@ -69623,9 +69938,9 @@ ${usual.join(`
 `)}
 ` : ""}${message}Narration:
 ${narration}`, config3, userId, signal2, { lore, guidance, recent });
-  const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
+  const list2 = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals = [];
-  for (const p of list) {
+  for (const p of list2) {
     if (!isRecord(p) || typeof p.type !== "string" || channels.length > 0 && !channels.includes(p.type))
       continue;
     if (p.type === "time_advance") {
@@ -70261,9 +70576,9 @@ async function promptedEffects(steps, run2, vars, currency, userId, signal2, lor
   const money4 = `Money amounts are plain amounts in ${currency.code} as written (8 for ${currency.symbol}8).`;
   const raw = await steps.helperJson(run2.purpose, `${renderTemplate(run2.template.template, vars)}
 ${CONTRACT.effects} ${money4}`, dataBlock(vars), run2.config, userId, signal2, { lore, guidance: run2.guidance, recent: run2.recent });
-  const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : [];
+  const list2 = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : [];
   const out = [];
-  for (const p of list.slice(0, 15))
+  for (const p of list2.slice(0, 15))
     if (isRecord(p) && typeof p.type === "string")
       out.push(inMinorUnits(JSON.parse(JSON.stringify(p)), currency));
   return out;
@@ -70898,19 +71213,8 @@ class MindsRuns {
       return this.end(run2, "failed", `The minds weren't recorded: ${written.reason ?? "the edit was refused"}.`);
     this.rt.push.changed(chatId, userId);
     run2.view.pending = written.pending;
-    if (written.applied) {
-      const core = await this.rt.ledger.core(chatId, userId);
-      const observed = toChain(await this.rt.host.chats.messages(chatId, userId));
-      const same3 = JSON.stringify(events3);
-      for (const m of core ? [...core.chain(observed)].reverse() : []) {
-        const rec = m.isUser || !core ? null : activeRecord(m, core.journal.tombstones);
-        const entry = rec?.post.findLast((p) => p.kind === "fix" && JSON.stringify(p.events) === same3);
-        if (!entry)
-          continue;
-        run2.view.undo = `fix:${m.id}:${m.swipeId}:${entry.seq}`;
-        break;
-      }
-    }
+    if (written.posted)
+      run2.view.undo = fixChip(written.posted.messageId, written.posted.swipeId, written.posted.seq);
     const recorded = run2.view.entries.filter((e) => e.status === "recorded").length;
     this.end(run2, "done", written.pending ? `${recorded} recorded; it lands when the reply being written finishes.` : null);
   }
@@ -71610,16 +71914,16 @@ class LedgerFold {
         }
         applyEvent(types, ev, state2, ctx());
       };
-      const run2 = (list, refOf) => {
-        for (let i = 0;i < list.length; ) {
-          const group = list[i]?.group;
+      const run2 = (list2, refOf) => {
+        for (let i = 0;i < list2.length; ) {
+          const group = list2[i]?.group;
           let end = i + 1;
           if (group !== undefined)
-            while (end < list.length && list[end]?.group === group)
+            while (end < list2.length && list2[end]?.group === group)
               end++;
           const unit3 = [];
           for (let k = i;k < end; k++) {
-            const ev = list[k];
+            const ev = list2[k];
             const ref = refOf(k);
             if (ev && !record3.undone.some((u) => refEq(u, ref)))
               unit3.push({ ev, ref });
@@ -71789,9 +72093,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "bcfcd4db604f1cbc86095b78f008973f04fc721475cea793a3993740d8535705";
+  const sha256 = "2ee7fbe7f9f34abc491ba192fa0b4b854fd56623315c63f1e27bea964c88a10d";
   const tools = ["6b5406dec2baede9b01be7124d955827", "0e881c190ee5dba9818c25eacb17f81f"].filter((f) => f !== undefined);
-  return { id: "b87536d7", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "5eede3fe", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72264,11 +72568,11 @@ class ChipStore {
     if (known)
       return known;
     const raw = await readStoredJson(this.host, this.path(chatId), userId, "chips", Array.isArray);
-    const list = Array.isArray(raw) ? raw.filter(isStoredChip) : [];
-    this.chips.set(this.key(chatId, userId), list);
+    const list2 = Array.isArray(raw) ? raw.filter(isStoredChip) : [];
+    this.chips.set(this.key(chatId, userId), list2);
     if (this.chips.size > 256)
       this.chips.delete(this.chips.keys().next().value ?? "");
-    return list;
+    return list2;
   }
   async save(chatId, userId) {
     const path = this.path(chatId);
@@ -72278,36 +72582,36 @@ class ChipStore {
   async add(chatId, userId, chips) {
     if (chips.length === 0)
       return;
-    const list = await this.list(chatId, userId);
+    const list2 = await this.list(chatId, userId);
     for (const chip of chips) {
-      const at = list.findIndex((c) => c.id === chip.id);
+      const at = list2.findIndex((c) => c.id === chip.id);
       if (at >= 0)
-        list[at] = chip;
+        list2[at] = chip;
       else
-        list.push(chip);
+        list2.push(chip);
     }
     await this.save(chatId, userId);
   }
   async take(chatId, userId, id) {
-    const list = await this.list(chatId, userId);
-    const index = list.findIndex((c) => c.id === id);
+    const list2 = await this.list(chatId, userId);
+    const index = list2.findIndex((c) => c.id === id);
     if (index < 0)
       return null;
-    const [chip] = list.splice(index, 1);
+    const [chip] = list2.splice(index, 1);
     await this.save(chatId, userId);
     return chip ?? null;
   }
   async removeWhere(chatId, userId, drop2) {
-    const list = await this.list(chatId, userId);
-    const kept2 = list.filter((c) => !drop2(c));
-    if (kept2.length === list.length)
+    const list2 = await this.list(chatId, userId);
+    const kept2 = list2.filter((c) => !drop2(c));
+    if (kept2.length === list2.length)
       return;
     this.chips.set(this.key(chatId, userId), kept2);
     await this.save(chatId, userId);
   }
   async lapse(chatId, userId) {
-    const list = await this.list(chatId, userId);
-    const gone = list.filter((c) => c.expires === "next_send");
+    const list2 = await this.list(chatId, userId);
+    const gone = list2.filter((c) => c.expires === "next_send");
     if (gone.length === 0)
       return [];
     const key = this.key(chatId, userId);
@@ -72315,7 +72619,7 @@ class ChipStore {
     this.lapsed.set(key, gone);
     if (this.lapsed.size > 256)
       this.lapsed.delete(this.lapsed.keys().next().value ?? "");
-    this.chips.set(key, list.filter((c) => c.expires !== "next_send"));
+    this.chips.set(key, list2.filter((c) => c.expires !== "next_send"));
     await this.save(chatId, userId);
     return gone;
   }
@@ -72324,27 +72628,27 @@ class ChipStore {
     return stored ?? this.lapsed.get(this.key(chatId, userId))?.find((c) => c.id === id) ?? null;
   }
   async prune(chatId, userId, alive) {
-    const list = await this.list(chatId, userId);
-    const kept2 = list.filter((c) => alive.has(c.messageId));
-    if (kept2.length === list.length)
+    const list2 = await this.list(chatId, userId);
+    const kept2 = list2.filter((c) => alive.has(c.messageId));
+    if (kept2.length === list2.length)
       return;
     this.chips.set(this.key(chatId, userId), kept2);
     await this.save(chatId, userId);
   }
   async shiftSwipes(chatId, userId, messageId, deleted) {
-    const list = await this.list(chatId, userId);
+    const list2 = await this.list(chatId, userId);
     const dropped = new Set;
     let changed = false;
-    for (let i = list.length - 1;i >= 0; i--) {
-      const c = list[i];
+    for (let i = list2.length - 1;i >= 0; i--) {
+      const c = list2[i];
       if (!c || c.messageId !== messageId || c.swipeId === undefined || c.swipeId < deleted)
         continue;
       changed = true;
       if (c.swipeId === deleted) {
         dropped.add(c.id);
-        list.splice(i, 1);
+        list2.splice(i, 1);
       } else
-        list[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
+        list2[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
     }
     const key = this.key(chatId, userId);
     const lapsed = this.lapsed.get(key);
@@ -72382,10 +72686,10 @@ class MessageCache {
   reading = new Map;
   constructor(inner) {
     this.inner = inner;
-    inner.on("MESSAGE_SENT", (e) => this.change(e.chatId, (list) => sent(list, e.message)));
-    inner.on("MESSAGE_EDITED", (e) => this.change(e.chatId, (list) => replaced(list, e.message)));
-    inner.on("MESSAGE_SWIPED", (e) => this.change(e.chatId, (list) => replaced(list, e.message)));
-    inner.on("MESSAGE_DELETED", (e) => this.change(e.chatId, (list) => deleted(list, e.messageId)));
+    inner.on("MESSAGE_SENT", (e) => this.change(e.chatId, (list2) => sent(list2, e.message)));
+    inner.on("MESSAGE_EDITED", (e) => this.change(e.chatId, (list2) => replaced(list2, e.message)));
+    inner.on("MESSAGE_SWIPED", (e) => this.change(e.chatId, (list2) => replaced(list2, e.message)));
+    inner.on("MESSAGE_DELETED", (e) => this.change(e.chatId, (list2) => deleted(list2, e.messageId)));
     inner.on("GENERATION_ENDED", (e) => this.change(e.chatId, () => false));
     inner.on("GENERATION_STOPPED", (e) => this.change(e.chatId, () => e.content === ""));
     inner.on("CHAT_DELETED", (e) => this.change(e.chatId, () => false));
@@ -72487,26 +72791,26 @@ class MessageCache {
     return next;
   }
 }
-function sent(list, message) {
-  if (replaced(list, message))
+function sent(list2, message) {
+  if (replaced(list2, message))
     return true;
-  const last = list.at(-1);
+  const last = list2.at(-1);
   if (last && message.index <= last.index)
     return false;
-  list.push(message);
+  list2.push(message);
   return true;
 }
-function replaced(list, message) {
-  const at = list.findIndex((m) => m.id === message.id);
+function replaced(list2, message) {
+  const at = list2.findIndex((m) => m.id === message.id);
   if (at < 0)
     return false;
-  list[at] = message;
+  list2[at] = message;
   return true;
 }
-function deleted(list, messageId) {
-  const at = list.findIndex((m) => m.id === messageId);
+function deleted(list2, messageId) {
+  const at = list2.findIndex((m) => m.id === messageId);
   if (at >= 0)
-    list.splice(at, 1);
+    list2.splice(at, 1);
   return true;
 }
 
@@ -73245,9 +73549,9 @@ function typedName(value, said2) {
   const given = value.replace(/_+/g, " ").replace(/\s+/g, " ").trim();
   if (given === "" || given.length > 80)
     return null;
-  const words5 = new RegExp(`(?<![\\p{L}\\p{N}])${given.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu");
+  const words6 = new RegExp(`(?<![\\p{L}\\p{N}])${given.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu");
   for (const text6 of said2) {
-    const typed = words5.exec(text6)?.[0]?.replace(DETERMINER, "").trim();
+    const typed = words6.exec(text6)?.[0]?.replace(DETERMINER, "").trim();
     if (typed)
       return typed;
   }
@@ -73576,12 +73880,12 @@ function withoutMissing(lines, missing) {
 var SAID_BY_PLAYER = "player";
 function statedIn(text6, said2) {
   const all2 = text6.replace(/[^\S\n]+/g, " ").toLowerCase();
-  const words5 = said2.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?\u2026]+$/, "");
-  const at2 = words5 === "" ? -1 : all2.indexOf(words5);
+  const words6 = said2.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?\u2026]+$/, "");
+  const at2 = words6 === "" ? -1 : all2.indexOf(words6);
   if (at2 < 0)
     return false;
-  const end = all2.slice(at2 + words5.length).search(/[.!?\n]/);
-  return end < 0 || all2.charAt(at2 + words5.length + end) !== "?";
+  const end = all2.slice(at2 + words6.length).search(/[.!?\n]/);
+  return end < 0 || all2.charAt(at2 + words6.length + end) !== "?";
 }
 function str17(v) {
   return typeof v === "string" ? v.trim() : "";
@@ -73623,12 +73927,12 @@ function placesFor(registry, world, state2, said2) {
   const exact = known.filter((id) => id === said2 || own(world.places, id)?.name.toLowerCase() === said2.toLowerCase());
   if (exact.length > 0)
     return exact.slice(0, 1);
-  const words5 = wordsIn(said2);
-  if (words5.length === 0)
+  const words6 = wordsIn(said2);
+  if (words6.length === 0)
     return [];
   return known.filter((id) => {
     const name = wordsIn(own(world.places, id)?.name ?? "");
-    return words5.every((w) => name.some((n) => n.startsWith(w)));
+    return words6.every((w) => name.some((n) => n.startsWith(w)));
   });
 }
 function routineAsks(registry, world, state2, said2, text6, secrets, known) {
@@ -74432,8 +74736,8 @@ class StudioBridge {
       });
       this.host.rpc.handle(chatsChannel(userId), ["chats"], async (requester) => {
         guard(requester);
-        const list = { v: 1, chats: [...this.chats.get(userId)?.values() ?? []].reverse() };
-        return list;
+        const list2 = { v: 1, chats: [...this.chats.get(userId)?.values() ?? []].reverse() };
+        return list2;
       });
       for (const index of await this.worlds.list(userId))
         this.publishWorld(userId, index);
@@ -74658,7 +74962,7 @@ var CONTRAST = Object.fromEntries([
   ["small", "medium", "large", "big", "little", "tiny", "huge", "tall", "grande", "venti", "regular", "mini", "jumbo"],
   ["hot", "iced", "cold", "warm"],
   ["single", "double", "triple"]
-].flatMap((words5, cls) => words5.map((w) => [stem(w), cls])));
+].flatMap((words6, cls) => words6.map((w) => [stem(w), cls])));
 function povPays(p, world, state2) {
   const payer = typeof p.payer === "string" ? p.payer.trim() : "";
   return payer === "" || payer === world.pov || !hasOwn(state2.entities, payer) || heldBy(state2.entities, payer, world.pov);
@@ -74675,18 +74979,18 @@ function buysIn(pre) {
   }
   return out;
 }
-function forSomeone(words5, ctx) {
+function forSomeone(words6, ctx) {
   const { world, state: state2 } = ctx;
-  return words5.some((w) => FOR_SOMEONE[w] === true || Object.entries(state2.entities).some(([id, e]) => id !== world.pov && kindIs(ctx.registry, world, e.kind, "person") && e.name.toLowerCase().split(/[^a-z0-9]+/).some((part) => part.length > 1 && stem(part) === w)));
+  return words6.some((w) => FOR_SOMEONE[w] === true || Object.entries(state2.entities).some(([id, e]) => id !== world.pov && kindIs(ctx.registry, world, e.kind, "person") && e.name.toLowerCase().split(/[^a-z0-9]+/).some((part) => part.length > 1 && stem(part) === w)));
 }
 function toldAsAnother(narration, head, ctx) {
-  const words5 = narration.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
-  return words5.some((w, i) => {
+  const words6 = narration.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
+  return words6.some((w, i) => {
     if (stem(w) !== head)
       return false;
-    if (ANOTHER.test(words5.slice(Math.max(0, i - 3), i).join(" ")))
+    if (ANOTHER.test(words6.slice(Math.max(0, i - 3), i).join(" ")))
       return true;
-    return words5[i + 1] === "for" && forSomeone(words5.slice(i + 2, i + 4).map(stem), ctx);
+    return words6[i + 1] === "for" && forSomeone(words6.slice(i + 2, i + 4).map(stem), ctx);
   });
 }
 function rowAt(ctx, item, category) {
@@ -74720,11 +75024,11 @@ function boughtAlong(p, pre, ctx, typed = [], narration = "", items = []) {
     if (typeof p.qty === "number" && p.qty !== buy.qty)
       continue;
     const typedOwn = typedNames.filter((n) => n.head === bought.head);
-    const words5 = new Set([...bought.words, ...typedOwn.flatMap((n) => [...n.words])]);
-    const contrast = [...said2.words].some((w) => CONTRAST[w] !== undefined && !words5.has(w) && [...words5].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
+    const words6 = new Set([...bought.words, ...typedOwn.flatMap((n) => [...n.words])]);
+    const contrast = [...said2.words].some((w) => CONTRAST[w] !== undefined && !words6.has(w) && [...words6].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
     if (contrast)
       continue;
-    const holds = [...said2.words].every((w) => words5.has(w)) || [...bought.words].every((w) => said2.words.has(w)) || typedOwn.some((n) => [...n.words].every((w) => said2.words.has(w))) || rowDef !== undefined && rowDef.name === buy.name;
+    const holds = [...said2.words].every((w) => words6.has(w)) || [...bought.words].every((w) => said2.words.has(w)) || typedOwn.some((n) => [...n.words].every((w) => said2.words.has(w))) || rowDef !== undefined && rowDef.name === buy.name;
     const inBand = () => {
       const band = stated === null ? null : optionalQuery(ctx, "economy.bought_band")?.(ctx, buy.name, buy.qty, world.pov);
       return !!band && stated !== null && stated >= 0.75 * band.min && stated <= 1.25 * band.max;
@@ -74759,8 +75063,8 @@ function splitAlongBuy(p, pre, ctx, items = []) {
       if (!b || b.head !== n.head)
         return false;
       const typedOwn = typedNames.filter((t) => t.head === b.head);
-      const words5 = new Set([...b.words, ...typedOwn.flatMap((t) => [...t.words])]);
-      return [...n.words].every((w) => words5.has(w)) || [...b.words].every((w) => n.words.has(w)) || typedOwn.some((t) => [...t.words].every((w) => n.words.has(w))) || rowName === buy.name;
+      const words6 = new Set([...b.words, ...typedOwn.flatMap((t) => [...t.words])]);
+      return [...n.words].every((w) => words6.has(w)) || [...b.words].every((w) => n.words.has(w)) || typedOwn.some((t) => [...t.words].every((w) => n.words.has(w))) || rowName === buy.name;
     });
   };
   if (parts.length < 2 || !parts.some(isBuy))
@@ -74928,7 +75232,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "b87536d7" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "5eede3fe" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -75257,15 +75561,15 @@ class Runtime {
     });
   }
   addMindTraces(chatId, generationId, traces, replace = false) {
-    const list = [...replace ? [] : this.mindTraces.get(generationId) ?? [], ...traces];
-    if (list.length === 0)
+    const list2 = [...replace ? [] : this.mindTraces.get(generationId) ?? [], ...traces];
+    if (list2.length === 0)
       this.mindTraces.delete(generationId);
     else
-      lruSet(this.mindTraces, generationId, list, 64);
+      lruSet(this.mindTraces, generationId, list2, 64);
     const record3 = this.inspector.records(chatId)?.find((r) => r.id === generationId);
-    if (!record3 || list.length === 0)
+    if (!record3 || list2.length === 0)
       return;
-    record3.minds = structuredClone(list);
+    record3.minds = structuredClone(list2);
     this.inspector.save(chatId);
   }
   keepRunLines(turn, seed, plan2, world, prose, outline2) {
@@ -75399,20 +75703,20 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     const dropped = [];
     const steps = [];
     let rolls = false;
-    const take = (def, given, words5, thing, said2) => {
+    const take = (def, given, words6, thing, said2) => {
       const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state, mayKnow);
       if (!ref) {
-        steps.push({ action: def.id, params: given, text: words5 });
+        steps.push({ action: def.id, params: given, text: words6 });
         rolls ||= checkOf(render.world, def.check) !== null;
         return;
       }
       const verdict2 = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: given, unfit: ref, said: said2, thing, policy, mayKnow });
       if (verdict2?.kind === "known")
-        return take(def, verdict2.params, words5, undefined, said2);
+        return take(def, verdict2.params, words6, undefined, said2);
       if (verdict2?.kind === "real")
-        steps.push({ action: def.id, params: given, text: words5, claim: verdict2.claim });
+        steps.push({ action: def.id, params: given, text: words6, claim: verdict2.claim });
       else if (verdict2?.kind === "ask")
-        steps.push({ action: def.id, params: given, text: words5, claim: verdict2.claim, ask: { kind: "claim", question: verdict2.question, detail: verdict2.detail } });
+        steps.push({ action: def.id, params: given, text: words6, claim: verdict2.claim, ask: { kind: "claim", question: verdict2.question, detail: verdict2.detail } });
       else {
         this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
         dropped.push({ label: def.label, reason: verdict2?.kind === "hold" && verdict2.reason ? verdict2.reason : unfitReason(this.registry, render.world, render.state, ref, text6, secrets, mayKnow) });
@@ -75420,14 +75724,14 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       }
       rolls ||= checkOf(render.world, def.check) !== null;
     };
-    const takeTry = (given, words5) => {
+    const takeTry = (given, words6) => {
       const verdict2 = rolls ? { ok: false, why: "an action before it rolls its own check" } : inferredRead(this.registry, render.world, render.state, given);
       if (!verdict2.ok) {
         this.host.log("info", `[LumiRPEngine] interpret: Try something isn't a check here (${verdict2.why}); the message plays without it`, userId);
         return;
       }
       const asked = verdict2.policy.mode === "suggest" ? checkQuestion(verdict2, (id) => render.state.entities[id]?.name ?? id) : null;
-      steps.push({ action: TRY_ACTION, params: verdict2.params, text: words5, ...asked ? { ask: { kind: "check", ...asked } } : {} });
+      steps.push({ action: TRY_ACTION, params: verdict2.params, text: words6, ...asked ? { ask: { kind: "check", ...asked } } : {} });
     };
     if (chosen)
       take(chosen, params, "", result.thing, [text6]);
@@ -76516,10 +76820,10 @@ ${rules.join(`
       const [helpers, decisions2] = lists;
       const lookups = new Map;
       const checks = named.flatMap((n) => {
-        const list = n.decision ? decisions2 : helpers;
-        if (list === null)
+        const list2 = n.decision ? decisions2 : helpers;
+        if (list2 === null)
           return [];
-        const connection = list.find((c) => c.id === n.connectionId);
+        const connection = list2.find((c) => c.id === n.connectionId);
         if (!connection) {
           gone.push(n.label);
           return [];
@@ -76600,8 +76904,8 @@ ${rules.join(`
       const own2 = m.metadata[LEDGER_NAMESPACE];
       if (isRecord(own2) && typeof own2.action === "string")
         return;
-      const words5 = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
-      const intent2 = { action: staged.action, params: staged.params, source: staged.source, staged: true, ...words5 ? { described: true } : {} };
+      const words6 = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
+      const intent2 = { action: staged.action, params: staged.params, source: staged.source, staged: true, ...words6 ? { described: true } : {} };
       await this.host.chats.writeMetadata(chatId, messageId, { ...m.metadata, [LEDGER_NAMESPACE]: { ...isRecord(own2) ? own2 : {}, ...intent2 } }, userId);
       await this.staged.set(chatId, userId, null);
       this.push.changed(chatId, userId);
@@ -76672,8 +76976,8 @@ function interpretedTarget(params, world, state2, text6, reg) {
   const idx = cal.dayParts.findIndex((d) => d.id.toLowerCase() === until || d.label.toLowerCase() === until);
   const part = cal.dayParts[idx];
   if (part) {
-    const words5 = [until, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
-    if (next || /\btomorrow\b/i.test(text6) || new RegExp(`\\bnext\\s+(${words5.join("|")})\\b`, "i").test(text6))
+    const words6 = [until, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
+    if (next || /\btomorrow\b/i.test(text6) || new RegExp(`\\bnext\\s+(${words6.join("|")})\\b`, "i").test(text6))
       return nextDayPart(cal, now, idx);
     return { type: "day_part", dayPart: part.id };
   }
@@ -76721,9 +77025,9 @@ function restChipId(messageId, swipeId) {
 }
 var NO_VALUE = { "": true, none: true, null: true, nil: true, na: true, "n a": true, nothing: true, no: true, undefined: true, empty: true };
 function offeredNext(reg, world, state2, next, text6, secrets) {
-  const words5 = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/^(?:i|we)\s+/, "");
-  const said2 = words5(next);
-  if (hasOwn(NO_VALUE, said2) || words5(text6).startsWith(said2))
+  const words6 = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/^(?:i|we)\s+/, "");
+  const said2 = words6(next);
+  if (hasOwn(NO_VALUE, said2) || words6(text6).startsWith(said2))
     return null;
   return findLeaks(next, secrets).length > 0 || chipNamesHidden(reg, world, state2, next) ? null : next;
 }
@@ -77137,316 +77441,6 @@ function upgradePreview(reg, plan2, state2, after, inForce2) {
   return { from: plan2.from, to: plan2.to, entities: rows, tracks };
 }
 
-// src/engine/character.ts
-var SECTION_OF = {
-  birthday: "identity",
-  occupation: "identity",
-  region: "identity",
-  wealth: "identity",
-  place: "where",
-  home: "where",
-  bed: "where",
-  scene: "where",
-  activity: "day",
-  appointments: "day",
-  trips: "day",
-  chores: "day",
-  employer: "work",
-  pay_prefs: "work",
-  filing_status: "work",
-  local_tax: "work",
-  conditions: "stats"
-};
-var SECTION_ORDER = ["identity", "where", "day", "work", "stats", "advanced"];
-var HOLD_WORDS = { place: "Stays where they are", activity: "Keeps doing what they're doing" };
-var BEDLIKE = /\b(bed|beds|bunk|cot|futon|couch|sofa|hammock|sleeping[ _-]?bag)\b/i;
-function placeRefs(world) {
-  const out = new Map;
-  const pathOf = (id) => {
-    const names3 = [];
-    let cur = own(world.places, id)?.parent;
-    for (let guard2 = 0;cur !== undefined && guard2 < 64; guard2++) {
-      const p = own(world.places, cur);
-      if (!p)
-        break;
-      names3.unshift(p.name);
-      cur = p.parent;
-    }
-    return names3;
-  };
-  for (const id of Object.keys(world.places).sort()) {
-    const p = own(world.places, id);
-    if (!p)
-      continue;
-    out.set(id, { id, name: p.name, path: pathOf(id), parent: p.parent !== undefined && own(world.places, p.parent) ? p.parent : null, visibility: p.visibility ?? "public" });
-  }
-  return out;
-}
-function placeOf4(bodies, id) {
-  let cur = id;
-  for (let guard2 = 0;cur !== undefined && guard2 < 32; guard2++) {
-    const e = own(bodies, cur);
-    if (!e)
-      return null;
-    const p = e.fields.place;
-    if (typeof p === "string" && p !== "")
-      return p;
-    cur = e.relations.find((r) => r.type === "in")?.to;
-  }
-  return null;
-}
-function plainLabel(raw) {
-  const m = /^(.*?)\s*\(([^()]*)\)\s*$/.exec(raw);
-  return m && m[1] !== undefined && m[1].trim() !== "" && m[2] !== undefined ? { label: m[1].trim(), help: m[2].trim() } : { label: raw };
-}
-function words5(id) {
-  const text6 = id.replace(/[_-]+/g, " ").trim();
-  return text6 ? `${text6.charAt(0).toUpperCase()}${text6.slice(1)}` : id;
-}
-function buildCharacter(reg, world, id, state2) {
-  const bodies = state2 ? state2.entities : world.entities;
-  const e = own(bodies, id);
-  if (!e || !kindIs(reg, world, e.kind, "person"))
-    return null;
-  const refs = placeRefs(world);
-  const placeRef = (place) => typeof place === "string" ? refs.get(place) ?? null : null;
-  const gone = (thing) => state2 ? isGone(state2, thing) : false;
-  const thingRef = (thing) => {
-    if (typeof thing !== "string")
-      return null;
-    const t = own(bodies, thing);
-    return t ? { id: thing, name: t.name, kind: t.kind, place: placeRef(placeOf4(bodies, thing)) } : null;
-  };
-  const isItem = (thing) => kindIs(reg, world, thing.kind, "item");
-  const things = Object.keys(bodies).sort().flatMap((thing) => {
-    const t = own(bodies, thing);
-    const ref = t && isItem(t) && !gone(thing) ? thingRef(thing) : null;
-    return ref ? [ref] : [];
-  });
-  const home = placeRef(e.fields.home);
-  const bedValue = e.fields.bed;
-  const bed = typeof bedValue === "string" && own(world.places, bedValue) ? { kind: "place", place: placeRef(bedValue), item: null } : typeof bedValue === "string" && own(bodies, bedValue) ? { kind: "item", place: placeRef(placeOf4(bodies, bedValue)), item: thingRef(bedValue) } : { kind: "home", place: home, item: null };
-  const holder = e.relations.find((r) => r.type === "in")?.to;
-  const def = kindDef(reg, world, e.kind);
-  const pov = id === world.pov;
-  const lifeId = state2 ? lifeOf(state2, id) : own(world.entities, id)?.life ?? ALIVE;
-  const life = lifeId === ALIVE ? null : { state: lifeId, label: lifeStateOf(world, lifeId).label };
-  const visibility = own(world.entities, id)?.visibility ?? "public";
-  const read = state2 ?? initialState(world, "character", reg);
-  const character = {
-    id,
-    name: e.name,
-    kind: { id: e.kind, label: def?.label ?? words5(e.kind) },
-    tier: { id: e.tier, label: own(world.tiers, e.tier)?.label ?? words5(e.tier) },
-    pov,
-    agent: state2 ? own(state2.entities, id)?.agent ?? false : own(world.entities, id)?.agent ?? false,
-    life,
-    visibility,
-    place: placeRef(state2 ? placeOf4(bodies, id) : e.fields.place),
-    inside: holder !== undefined ? thingRef(holder) : null,
-    home,
-    bed,
-    bedChoices: bedChoices(bodies, refs, typeof e.fields.home === "string" ? e.fields.home : null, isItem, gone),
-    employer: employerOf(world, bodies, e.fields.employer, placeRef, thingRef),
-    schedules: schedulesOf(reg, world, read, id),
-    relations: relationsOf(reg, world, reg.context(world, read), id, e),
-    ...state2 ? { now: nowOf(world, state2, id) } : {},
-    sections: sectionsOf2(reg, world, e)
-  };
-  return { character, places: [...refs.values()], things };
-}
-function employerOf(world, bodies, value, placeRef, thingRef) {
-  if (typeof value !== "string")
-    return null;
-  const place = own(world.places, value) ? placeRef(value) : null;
-  if (place)
-    return { kind: "place", place };
-  const thing = own(bodies, value) ? thingRef(value) : null;
-  return thing ? { kind: "business", thing } : null;
-}
-function daysWords(world, r) {
-  const cal = calendarOf(world);
-  if (r.every === "day")
-    return "Every day";
-  if (r.every === "year")
-    return "Every year";
-  if (r.every === "month")
-    return r.days && r.days.length > 0 ? `On the ${list(r.days.map(ordinal))} of the month` : "Every month";
-  const days = [...new Set(r.weekdays ?? [])].sort((a, b) => a - b);
-  const key = days.join(",");
-  if (days.length === 0 || days.length === 7)
-    return "Every day";
-  if (key === "1,2,3,4,5")
-    return "Weekdays";
-  if (key === "0,6")
-    return "Weekends";
-  return list(days.map((d) => weekdayName(cal, d).slice(0, 3)));
-}
-function ordinal(n) {
-  const tail2 = n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th";
-  return `${n}${tail2}`;
-}
-function list(items) {
-  return items.length <= 1 ? items[0] ?? "" : `${items.slice(0, -1).join(", ")} and ${items.at(-1) ?? ""}`;
-}
-function slotValue(world, target, slot) {
-  const one = (v) => target === "place" && typeof v === "string" && own(world.places, v) ? own(world.places, v)?.name ?? v : typeof v === "string" ? v : v === undefined || v === null ? "nothing" : JSON.stringify(v);
-  if (slot.weighted && slot.weighted.length > 0) {
-    const options = [...new Set(slot.weighted.map((w) => one(w.value)))];
-    return options.length <= 1 ? options[0] ?? "nothing" : `${options.slice(0, -1).join(", ")} or ${options.at(-1) ?? ""}`;
-  }
-  return one(slot.value);
-}
-function scheduleSummary(world, s) {
-  const time = (hhmm2) => {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm2);
-    return m ? formatTimeOfDay(Number(m[1]) * 60 + Number(m[2])) : hhmm2;
-  };
-  const slots = s.slots.map((slot) => `${time(slot.start)}\u2013${time(slot.end)}: ${slotValue(world, s.target, slot)}`);
-  return `${daysWords(world, s.recurrence)} ${slots.join(", ")}`.trim();
-}
-function schedulesOf(reg, world, state2, id) {
-  return allSchedules(reg, world).filter((s) => s.owner !== undefined && scheduleOwners(reg, world, state2, s).includes(id)).map((s) => {
-    const summary = scheduleSummary(world, s);
-    const own_ = s.label;
-    return { id: s.id, label: typeof own_ === "string" && own_.trim() !== "" ? own_.trim() : summary, summary };
-  });
-}
-var RELATION_GROUP = {
-  parent_of: "family",
-  child_of: "family",
-  sibling_of: "family",
-  spouse_of: "family",
-  partner_of: "family",
-  kin_of: "family",
-  regard: "feelings",
-  drawn_to: "feelings",
-  hostile: "feelings",
-  member_of: "groups"
-};
-var RELATION_INTERNAL = new Set(["t"]);
-function relationsOf(reg, world, ctx, from, e) {
-  const types = new Map([...reg.relations.values(), ...Object.values(world.relations)].map((d) => [d.id, d]));
-  const band = optionalQuery(ctx, "regard_band");
-  return e.relations.filter((r) => r.type !== "in" && r.type !== PARTY_RELATION).map((r) => {
-    const def = types.get(r.type);
-    const fieldDefs = isRecord(def?.fields) ? def.fields : {};
-    const words_ = r.type === "regard" && band ? band(ctx, from, r.to) : Object.entries(r.fields ?? {}).filter(([k, v]) => !RELATION_INTERNAL.has(k) && v !== null && v !== "").map(([k, v]) => `${own(fieldDefs, k)?.label ?? words5(k)}: ${typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : JSON.stringify(v)}`).join(", ");
-    const to = own(ctx.state.entities, r.to) ?? own(world.entities, r.to);
-    return { type: r.type, typeLabel: def?.label ?? words5(r.type), group: RELATION_GROUP[r.type] ?? "other", to: { id: r.to, name: to?.name ?? own(world.places, r.to)?.name ?? r.to }, words: words_ };
-  });
-}
-function bedChoices(bodies, refs, home, isItem, gone) {
-  const homeRef = home !== null ? refs.get(home) : undefined;
-  if (home === null || !homeRef)
-    return { places: [], items: [] };
-  const under = new Map([[home, { depth: 0, path: [] }]]);
-  for (let grew = true;grew; ) {
-    grew = false;
-    for (const ref of refs.values()) {
-      const parent = ref.parent !== null ? under.get(ref.parent) : undefined;
-      if (!parent || under.has(ref.id))
-        continue;
-      const parentName = refs.get(ref.parent ?? "")?.name ?? "";
-      under.set(ref.id, { depth: parent.depth + 1, path: [...parent.path, parentName] });
-      grew = true;
-    }
-  }
-  const places2 = [...under].filter(([id]) => id !== home).sort((a, b) => a[1].depth - b[1].depth || (refs.get(a[0])?.name ?? "").localeCompare(refs.get(b[0])?.name ?? "")).flatMap(([id, at2]) => {
-    const ref = refs.get(id);
-    return ref ? [{ ...ref, path: at2.path }] : [];
-  });
-  const bedlike = (b) => BEDLIKE.test(b.name) || typeof b.fields.catalog === "string" && BEDLIKE.test(b.fields.catalog.replace(/_/g, " "));
-  const items = Object.keys(bodies).flatMap((id) => {
-    const t = own(bodies, id);
-    const at2 = t && isItem(t) && !gone(id) && typeof t.fields.place === "string" ? t.fields.place : null;
-    if (!t || at2 === null || !under.has(at2))
-      return [];
-    return [{ ref: { id, name: t.name, kind: t.kind, place: refs.get(at2) ?? null }, likely: bedlike(t) }];
-  }).sort((a, b) => Number(b.likely) - Number(a.likely) || a.ref.name.localeCompare(b.ref.name) || (a.ref.id < b.ref.id ? -1 : 1)).map((x) => x.ref);
-  return { places: places2, items };
-}
-function nowOf(world, state2, id) {
-  const e = own(state2.entities, id);
-  const cal = calendarOf(world);
-  const where = typeof e?.fields.place === "string" ? e.fields.place : null;
-  const when2 = (t) => typeof t === "number" && t > state2.clock ? formatStamp(cal, t, placeOffset(world, t, where)) : null;
-  const activity = typeof e?.fields.activity === "string" ? e.fields.activity : "idle";
-  const holds = isRecord(e?.fields.holds) ? e.fields.holds : {};
-  return {
-    activity,
-    activityLabel: words5(activity),
-    until: when2(e?.fields.activity_until),
-    party: e?.relations.some((r) => r.type === PARTY_RELATION && r.to === world.pov) ?? false,
-    holds: Object.keys(holds).sort().flatMap((field) => {
-      const until = when2(holds[field]);
-      return until !== null ? [{ label: HOLD_WORDS[field] ?? words5(field), until }] : [];
-    })
-  };
-}
-function sectionsOf2(reg, world, e) {
-  const defs = kindFields(reg, world, e.kind);
-  const authored2 = new Set;
-  const sheet = new Set;
-  for (let id = e.kind, guard2 = 0;id && guard2 < 32; guard2++) {
-    const k = kindDef(reg, world, id);
-    if (k && own(world.kinds, id) && k.pack === undefined)
-      for (const f of Object.keys(k.fields))
-        authored2.add(f);
-    for (const [f, d] of Object.entries(k?.fields ?? {}))
-      if (d.domain === "sheets" && d.type === "number")
-        sheet.add(f);
-    id = k?.extends;
-  }
-  const sections = new Map(SECTION_ORDER.map((s) => [s, []]));
-  const ids2 = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])];
-  for (const field of ids2) {
-    const def = own(defs, field);
-    const section = def?.locked || def?.derived !== undefined ? "advanced" : SECTION_OF[field] ?? (sheet.has(field) ? "stats" : authored2.has(field) ? "identity" : "advanced");
-    sections.get(section)?.push(fieldOf2(world, field, def, own(e.fields, field)));
-  }
-  return SECTION_ORDER.map((id) => ({ id, fields: sections.get(id) ?? [] }));
-}
-function stems(text6) {
-  return new Set(text6.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2).map((w) => w.replace(/(ies|es|s)$/, "")));
-}
-function rangeHint(def) {
-  if (def?.type !== "number" && def?.type !== "money")
-    return;
-  if (def.min !== undefined && def.max !== undefined)
-    return `${def.min}\u2013${def.max}`;
-  if (def.min !== undefined)
-    return `${def.min} or more`;
-  return def.max !== undefined ? `up to ${def.max}` : undefined;
-}
-function fieldOf2(world, id, def, stored) {
-  const plain3 = plainLabel(def?.label ?? words5(id));
-  const label = plain3.label;
-  const table = def?.table !== undefined ? own(world.tables, def.table) : undefined;
-  const tableWords = table ? stems(table.label) : new Set;
-  const labelWords = stems(label);
-  const tells = table !== undefined && ![...labelWords].every((w) => tableWords.has(w));
-  const said2 = plain3.help !== undefined && !/[{}[\]]/.test(plain3.help) ? plain3.help : undefined;
-  const help = [said2, tells && table ? `A row of ${table.label}` : undefined].filter((h) => h !== undefined && h !== "").join(" \xB7 ") || undefined;
-  const hint = rangeHint(def);
-  const type = def?.type ?? (typeof stored === "number" ? "number" : typeof stored === "boolean" ? "bool" : Array.isArray(stored) ? "list" : "text");
-  const of = type === "list" ? def?.of ?? (Array.isArray(stored) && stored.length > 0 && stored.every((x) => typeof x === "string") ? "text" : undefined) : undefined;
-  return {
-    id,
-    label,
-    type,
-    value: stored ?? def?.default ?? null,
-    ...def?.values ? { values: [...def.values] } : {},
-    ...def?.min !== undefined ? { min: def.min } : {},
-    ...def?.max !== undefined ? { max: def.max } : {},
-    ...def?.ref !== undefined ? { ref: def.ref } : {},
-    ...of !== undefined ? { of } : {},
-    ...def?.locked || def?.derived !== undefined ? { locked: true } : {},
-    ...help !== undefined ? { help } : {},
-    ...hint !== undefined ? { hint } : {}
-  };
-}
-
 // src/backend/dispatch.ts
 class RequestError extends Error {
   code;
@@ -77540,7 +77534,7 @@ class Dispatcher {
     if (!result.applied && !result.pending)
       throw new RequestError("bad_request", result.reason ?? "the write was refused");
     this.rt.push.changed(chatId, userId);
-    return { applied: result.applied, pending: result.pending };
+    return { applied: result.applied, pending: result.pending, ...result.posted ? { posted: result.posted } : {} };
   }
   async head(chatId, userId) {
     const core = await this.rt.ledger.core(chatId, userId);
@@ -77734,7 +77728,8 @@ class Dispatcher {
         if ("rejection" in edit)
           throw new RequestError("validation", edit.rejection.gm ?? edit.rejection.reason);
         const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", gm: true, events: edit.events } }) : { pending: false };
-        reply("lre.edit", { pending: result.pending });
+        const posted = "posted" in result ? result.posted : undefined;
+        reply("lre.edit", { pending: result.pending, undo: posted ? fixChip(posted.messageId, posted.swipeId, posted.seq) : null });
         return;
       }
       case "lre.gm": {

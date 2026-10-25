@@ -7423,7 +7423,7 @@ function DefInput(props) {
           options: tableChoices(table).map((c3) => ({ value: c3.key, label: c3.label })),
           optional: true,
           unmarked: props.words !== undefined,
-          hint: [`A row of ${table.label}`, help].filter((h3) => h3).join(" · "),
+          hint: (props.words ? [help] : [`A row of ${table.label}`, help]).filter((h3) => h3).join(" · ") || undefined,
           issues,
           onChange: props.onChange
         }, undefined, false, undefined, this);
@@ -15513,14 +15513,17 @@ async function sendInChunks(items, send) {
   }
   return { applied, of: all.length };
 }
-function mixOf(labels, max = 3) {
+function mixCounts(labels, max = 3) {
   const counts = new Map;
   for (const label of labels)
     counts.set(label, (counts.get(label) ?? 0) + 1);
-  const groups = [...counts].sort((a3, b3) => b3[1] - a3[1]);
-  const shown = groups.slice(0, max).map(([label, n2]) => `${n2} ${label}`);
-  const rest = groups.slice(max).reduce((sum, [, n2]) => sum + n2, 0);
-  return rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
+  const groups = [...counts].map(([label, count]) => ({ label, count })).sort((a3, b3) => b3.count - a3.count);
+  return { shown: groups.slice(0, max), rest: groups.slice(max).reduce((sum, g2) => sum + g2.count, 0) };
+}
+function mixOf(labels, max = 3) {
+  const { shown, rest } = mixCounts(labels, max);
+  const text = shown.map((g2) => `${g2.count} ${g2.label}`).join(", ");
+  return rest > 0 ? `${text} and ${rest} more` : text;
 }
 function forCharacters(kind) {
   return kind === "role" || kind === "pin" || kind === "intent";
@@ -20791,7 +20794,7 @@ function FixEditor(props) {
   const chatId = view?.chatId;
   if (!chatId)
     return null;
-  const title = `Fix ${props.label.toLowerCase()}`;
+  const title = props.title ?? `Fix ${props.label.toLowerCase()}`;
   const send = (request) => run(async () => {
     const result = await app.request(request);
     if (result) {
@@ -20817,6 +20820,14 @@ function FixEditor(props) {
       onKeyDown: cancelOnEscape
     }, undefined, false, undefined, this);
   const save = (value) => send(fixRequest(target, value, chatId));
+  if (target.places && target.places.length > 0)
+    return /* @__PURE__ */ u3(PlaceSheet, {
+      places: target.places,
+      value: typeof target.value === "string" ? target.value : null,
+      title,
+      onClose: props.onDone,
+      onPick: (place) => place ? save(place.id) : props.onDone()
+    }, undefined, false, undefined, this);
   if (target.options && target.options.length > 0) {
     const now = JSON.stringify(target.value);
     return /* @__PURE__ */ u3("div", {
@@ -26732,6 +26743,9 @@ function chatFeedOf(draft, picked, own) {
     to.include = [...picked];
   return to;
 }
+function sourcesMissing(draft, picked, own) {
+  return draft.enabled !== false && own.length > 0 && picked.length === 0;
+}
 var CAP_START = { maxLines: 12, maxTokens: 400 };
 function SectionFeedForm(props) {
   const app = useApp();
@@ -26749,7 +26763,7 @@ function SectionFeedForm(props) {
     if (result)
       props.onDone();
   });
-  const noneTaken = draft.enabled !== false && picked.length === 0;
+  const noneTaken = sourcesMissing(draft, picked, own);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-feed-form": props.row.id,
@@ -26807,13 +26821,19 @@ function SectionFeedForm(props) {
         children: /* @__PURE__ */ u3("div", {
           class: "lre-stack",
           "data-lre-feed-sources": true,
-          children: offered.map((s3) => /* @__PURE__ */ u3(CheckField, {
-            label: s3.label,
-            help: own.includes(s3.id) ? "Its own" : undefined,
-            checked: picked.includes(s3.id),
-            onChange: (on) => setPicked((p3) => on ? [...p3, s3.id] : p3.filter((id) => id !== s3.id))
-          }, s3.id, false, undefined, this))
-        }, undefined, false, undefined, this)
+          children: [
+            own.length === 0 ? /* @__PURE__ */ u3("span", {
+              class: "lre-small lre-muted",
+              children: "No source fills this section by itself (the turn writes Outline and Montage). A source you tick here adds its lines."
+            }, undefined, false, undefined, this) : null,
+            offered.map((s3) => /* @__PURE__ */ u3(CheckField, {
+              label: s3.label,
+              help: own.includes(s3.id) ? "Its own" : undefined,
+              checked: picked.includes(s3.id),
+              onChange: (on) => setPicked((p3) => on ? [...p3, s3.id] : p3.filter((id) => id !== s3.id))
+            }, s3.id, false, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
       noneTaken ? /* @__PURE__ */ u3("span", {
         class: "lre-small lre-muted",
@@ -30278,6 +30298,7 @@ function WorldDetails(props) {
   if (fixing && target)
     return /* @__PURE__ */ u3(FixEditor, {
       label: FIX_LABEL[fixing],
+      title: fixing === "place" ? "Where you are" : undefined,
       target,
       onDone: () => setFixing(null)
     }, undefined, false, undefined, this);
@@ -32670,6 +32691,7 @@ function PersonSheet(props) {
         onKeyDown: (event) => event.key === "Escape" && (event.stopPropagation(), setFixingWhere(false)),
         children: /* @__PURE__ */ u3(FixEditor, {
           label: "Where are they?",
+          title: `Where is ${person.name}?`,
           target: whereFix,
           onDone: () => setFixingWhere(false)
         }, undefined, false, undefined, this)
@@ -32762,12 +32784,24 @@ function PersonSheet(props) {
 }
 
 // src/frontend/gm/editor.ts
-function newEdits(before, after) {
-  const seen = new Set(before.map((e3) => `${e3.messageId}\x00${e3.seq}`));
-  return after.filter((e3) => !seen.has(`${e3.messageId}\x00${e3.seq}`));
+async function sendEdits(sendAll, request) {
+  const undo = [];
+  let count = 0;
+  let held = false;
+  const outcome = await sendAll(async (ops) => {
+    const result = await request(ops);
+    if (!result)
+      return false;
+    count += ops.length;
+    held ||= result.pending;
+    if (result.undo !== null)
+      undo.unshift(result.undo);
+    return true;
+  });
+  return { ...outcome, count, undo, held };
 }
-function editNotice(made, done) {
-  return { text: done ?? (made.flatMap((e3) => e3.lines).join(" · ") || "Saved"), undo: made.flatMap((e3) => e3.undo === null ? [] : [e3.undo]) };
+function editNotice(undo, edits, done) {
+  return { text: done ?? (edits.filter((e3) => e3.undo !== null && undo.includes(e3.undo)).flatMap((e3) => e3.lines).join(" · ") || "Saved"), undo: [...undo] };
 }
 function noticeStands(notice, gm) {
   return notice.undo.every((chip) => gm.edits.some((e3) => e3.undo === chip));
@@ -53745,8 +53779,6 @@ function GmPanel(props) {
   const [gm, setGm] = d2(null);
   const [notice, setNotice] = d2(null);
   const [busy, run] = useBusy();
-  const latest = T2(null);
-  latest.current = gm;
   const loads = T2(0);
   const load = async () => {
     const seq = ++loads.current;
@@ -53773,25 +53805,15 @@ function GmPanel(props) {
   const commit = (sendAll, done) => {
     const { promise, resolve } = Promise.withResolvers();
     run(async () => {
-      const before = latest.current?.edits ?? [];
-      let count = 0;
-      let held = false;
-      const outcome = await sendAll(async (ops) => {
-        const result = await app.request(editRequest(props.chatId, ops));
-        if (result)
-          count += ops.length;
-        if (result?.pending)
-          held = true;
-        return result !== null;
-      });
-      if (held)
+      const sent = await sendEdits(sendAll, (ops) => app.request(editRequest(props.chatId, ops)));
+      if (sent.held)
         app.toast("Saved — it applies when the reply finishes.", "info");
-      if (outcome.applied > 0) {
-        const made = newEdits(before, (await load())?.edits ?? before);
-        if (made.length > 0)
-          setNotice(editNotice(made, done?.(count)));
+      if (sent.applied > 0) {
+        const view = await load();
+        if (sent.undo.length > 0)
+          setNotice(editNotice(sent.undo, view?.edits ?? [], done?.(sent.count)));
       }
-      resolve(outcome);
+      resolve({ applied: sent.applied, of: sent.of });
     });
     return promise;
   };
@@ -54287,6 +54309,7 @@ function SceneCard(props) {
     },
     children: /* @__PURE__ */ u3(FixEditor, {
       label: FIX_LABEL2[fixing],
+      title: fixing === "place" ? "Where you are" : undefined,
       target,
       onDone: () => setFixing(null)
     }, undefined, false, undefined, this)
