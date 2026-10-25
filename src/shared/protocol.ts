@@ -763,7 +763,8 @@ export interface ResultBodies {
   "lre.chip": { applied: boolean; pending: boolean };
   "lre.view.open": { materialized: boolean; pending: boolean };
   "lre.fix": { pending: boolean };
-  "lre.edit": { pending: boolean };
+  /** `undo`: the chip that undoes the edit just written (the chat's GM edit chip for it), null while it waits for a reply in flight or when it changed nothing. */
+  "lre.edit": { pending: boolean; undo: string | null };
   "lre.gm": GmView;
   /** The chat's state view now, and its activity line (null when idle). */
   "lre.state.get": { view: StateView; activity: Activity | null };

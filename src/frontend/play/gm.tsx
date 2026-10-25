@@ -16,7 +16,7 @@ import { sendInChunks } from "../batch";
 import { Empty, useBusy } from "../components";
 import { Gate, TruthBar } from "../gm/curtain";
 import type { BulkEditor, EditNotice } from "../gm/editor";
-import { editNotice, newEdits, noticeStands } from "../gm/editor";
+import { editNotice, noticeStands, sendEdits } from "../gm/editor";
 import { hideTruth, revealTruth } from "../gm/gate";
 import { EditsLog, PlacesSection, StorySection } from "../gm/sections";
 import { EditNoticeBar } from "../gm/ui";
@@ -40,9 +40,6 @@ export function GmPanel(props: PanelProps) {
   const [gm, setGm] = useState<GmView | null>(null);
   const [notice, setNotice] = useState<EditNotice | null>(null);
   const [busy, run] = useBusy();
-  // The view as last loaded, for an edit sent from an earlier render to compare against.
-  const latest = useRef<GmView | null>(null);
-  latest.current = gm;
   // Only the latest load lands: one for another chat, or from before the gate closed, is dropped.
   // Each still resolves its view (null once the gate closed): one asked for after an edit applied
   // shows that edit, whichever load lands.
@@ -68,27 +65,20 @@ export function GmPanel(props: PanelProps) {
   if (!revealed) return <Gate onReveal={() => app.ui.update(revealTruth)} />;
   /**
    * Sends edits through `sendAll`, each one `lre.edit`, and once any applied, reloads and says what
-   * they did (`done`, from how many operations applied) with the Undo that takes all of them back.
+   * they did (`done`, from how many operations applied) with the Undo that takes back the edits
+   * this wrote, by the chips each said it wrote: nothing that landed meanwhile.
    */
   const commit = (sendAll: (send: (ops: EditOp[]) => Promise<boolean>) => Promise<{ applied: number; of: number }>, done?: (count: number) => string) => {
     const { promise, resolve } = Promise.withResolvers<{ applied: number; of: number }>();
     run(async () => {
-      const before = latest.current?.edits ?? [];
-      let count = 0;
-      let held = false;
-      const outcome = await sendAll(async (ops) => {
-        const result = await app.request(editRequest(props.chatId, ops));
-        if (result) count += ops.length;
-        if (result?.pending) held = true;
-        return result !== null;
-      });
+      const sent = await sendEdits(sendAll, (ops) => app.request(editRequest(props.chatId, ops)));
       // An edit made while a reply is being written lands when it finishes: there's no Undo to show yet.
-      if (held) app.toast("Saved — it applies when the reply finishes.", "info");
-      if (outcome.applied > 0) {
-        const made = newEdits(before, (await load())?.edits ?? before);
-        if (made.length > 0) setNotice(editNotice(made, done?.(count)));
+      if (sent.held) app.toast("Saved — it applies when the reply finishes.", "info");
+      if (sent.applied > 0) {
+        const view = await load();
+        if (sent.undo.length > 0) setNotice(editNotice(sent.undo, view?.edits ?? [], done?.(sent.count)));
       }
-      resolve(outcome);
+      resolve({ applied: sent.applied, of: sent.of });
     });
     return promise;
   };

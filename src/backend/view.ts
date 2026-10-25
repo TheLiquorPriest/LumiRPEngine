@@ -357,6 +357,11 @@ export function fixLines(registry: Registry, world: WorldDoc, state: Readonly<Wo
   return [...(clock ? [clock] : []), ...turnLines(registry, world, state, events)];
 }
 
+/** The chip of a ✎ fix or GM edit on a swipe's record, by its entry's seq: its Undo (`lre.chip`) finds the entry by it. */
+export function fixChip(messageId: string, swipeId: number, seq: number): string {
+  return `fix:${messageId}:${swipeId}:${seq}`;
+}
+
 /** How many people and things the line for an unseen fix names; past that it counts them. */
 const UNSEEN_NAMES = 3;
 
@@ -583,7 +588,7 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     for (const fix of applied.fixes) {
       const fixed = fixLines(registry, world, state, fix.events);
       // A mechanical action of the player's (DESIGN §11) is named as theirs, never as a correction.
-      chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), detail: fixed.length > 0 ? fixed.join(" · ") : unseenFixLine(registry, world, state, fix.events), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+      chips.push({ id: fixChip(m.id, m.swipeId, fix.seq), kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), detail: fixed.length > 0 ? fixed.join(" · ") : unseenFixLine(registry, world, state, fix.events), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
     }
     chips.push(...overdueChips(m.id, ctx, state, world));
   });

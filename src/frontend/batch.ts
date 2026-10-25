@@ -56,16 +56,21 @@ export async function sendInChunks<T>(items: readonly T[], send: (chunk: T[]) =>
 }
 
 /**
- * How a selection stands on one setting now, the most common first: "3 Leads, 2 Supporting"; past
- * `max` values, the rest counted together ("… and 4 more"). Shown on a bulk change before it applies.
+ * How a selection stands on one setting now: each value with how many have it, the most common
+ * first (a tie in the order first seen), at most `max` of them; the rest counted together.
  */
-export function mixOf(labels: readonly string[], max = 3): string {
+export function mixCounts(labels: readonly string[], max = 3): { shown: { label: string; count: number }[]; rest: number } {
   const counts = new Map<string, number>();
   for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
-  const groups = [...counts].sort((a, b) => b[1] - a[1]);
-  const shown = groups.slice(0, max).map(([label, n]) => `${n} ${label}`);
-  const rest = groups.slice(max).reduce((sum, [, n]) => sum + n, 0);
-  return rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
+  const groups = [...counts].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+  return { shown: groups.slice(0, max), rest: groups.slice(max).reduce((sum, g) => sum + g.count, 0) };
+}
+
+/** The mix as a bulk change shows it before it applies: "3 Leads, 2 Supporting", "… and 4 more". */
+export function mixOf(labels: readonly string[], max = 3): string {
+  const { shown, rest } = mixCounts(labels, max);
+  const text = shown.map((g) => `${g.count} ${g.label}`).join(", ");
+  return rest > 0 ? `${text} and ${rest} more` : text;
 }
 
 // ---------------------------------------------------------------- GM mode

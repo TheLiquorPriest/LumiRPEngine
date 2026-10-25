@@ -517,7 +517,7 @@ export class MockBackend {
         const chip = `fix:m4:0:${seq}`;
         this.gm.edits.unshift({ messageId: "m4", seq, lines, undo: chip });
         this.beforeEdit.set(chip, before);
-        this.result(reqId, "lre.edit", { pending: false });
+        this.result(reqId, "lre.edit", { pending: false, undo: chip });
         this.mutate((view) => {
           view.chips.push({ id: chip, kind: "fix", messageId: "m4", label: "GM edit", detail: lines.join(" · "), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
           view.journal.push({ kind: "fix", messageId: "m4", ref: { in: "post", seq, index: 0 }, text: lines.join(" · ") });

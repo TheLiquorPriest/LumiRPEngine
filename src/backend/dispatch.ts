@@ -53,7 +53,7 @@ import { ACTIVE_CONNECTION, declineNote, playerReason, readRun, Runtime } from "
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
-import { recentLines, TIMELAPSE_ACTION } from "./view";
+import { fixChip, recentLines, TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
 import { buildCharacter } from "../engine/character";
 import type { CharacterResult } from "../shared/character";
@@ -162,13 +162,13 @@ export class Dispatcher {
     if (!(await this.rt.runOf(chatId, userId)) || !(await this.rt.ledger.core(chatId, userId))) throw new RequestError("not_world_chat", "this chat is not attached to a world");
   }
 
-  private async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<{ applied: boolean; pending: boolean }> {
+  private async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<{ applied: boolean; pending: boolean; posted?: { messageId: string; swipeId: number; seq: number } }> {
     await this.requireWorldChat(chatId, userId);
     const result = await this.rt.ledger.write(chatId, userId, w);
     if (result.reason === "paused") throw new RequestError("paused", "an earlier message was edited: Keep or Discard first");
     if (!result.applied && !result.pending) throw new RequestError("bad_request", result.reason ?? "the write was refused");
     this.rt.push.changed(chatId, userId);
-    return { applied: result.applied, pending: result.pending };
+    return { applied: result.applied, pending: result.pending, ...(result.posted ? { posted: result.posted } : {}) };
   }
 
   private async head(chatId: ChatId, userId: UserId): Promise<{ state: Working["state"]; world: Working["world"] }> {
@@ -379,7 +379,9 @@ export class Dispatcher {
         const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: true, runSeed: this.runSeedOf(r.chatId) });
         if ("rejection" in edit) throw new RequestError("validation", edit.rejection.gm ?? edit.rejection.reason);
         const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", gm: true, events: edit.events } }) : { pending: false };
-        reply("lre.edit", { pending: result.pending });
+        // The chip of the entry this edit wrote, so the GM view's Undo takes back this edit and nothing that landed meanwhile.
+        const posted = "posted" in result ? result.posted : undefined;
+        reply("lre.edit", { pending: result.pending, undo: posted ? fixChip(posted.messageId, posted.swipeId, posted.seq) : null });
         return;
       }
       case "lre.gm": {

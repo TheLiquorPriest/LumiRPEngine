@@ -71,6 +71,8 @@ export interface WriteResult {
   applied: boolean;
   pending: boolean;
   reason?: string;
+  /** A post entry journaled now: the head swipe it went on and its seq, which is how its chip (`fix:<message>:<swipe>:<seq>`) names it. */
+  posted?: { messageId: MessageId; swipeId: number; seq: number };
 }
 
 export function emptyJournal(chatId: string): Journal {
@@ -1112,7 +1114,12 @@ export class LedgerCore {
     }
     const reason = this.apply(w, observed);
     this.snapshot(observed);
-    return reason ? { applied: false, pending: false, reason } : { applied: true, pending: false };
+    if (reason) return { applied: false, pending: false, reason };
+    if (w.kind !== "post") return { applied: true, pending: false };
+    // `apply` put the entry on the head swipe's record under the journal's latest seq.
+    const chain = this.chain(observed);
+    const head = chain[chain.map((m) => !m.isUser).lastIndexOf(true)];
+    return { applied: true, pending: false, ...(head ? { posted: { messageId: head.id, swipeId: head.swipeId, seq: this.journal.seq } } : {}) };
   }
 
   /** Journals one write now; returns a rejection reason or undefined. */

@@ -1,9 +1,10 @@
 // What GM mode's forms share once the truth is shown: the loaded GM view, the world's currency and
 // one way to send an edit (one `lre.edit`: checked against what it touches, all or none, one fix
-// with its own Undo chip), after which the GM view says what it did, with that Undo. Names stand in
-// for ids everywhere; the ids show only with Show ids.
+// with its own Undo chip), after which the GM view says what it did, with that Undo: the chips the
+// edits themselves wrote, never whatever else landed meanwhile. Names stand in for ids everywhere;
+// the ids show only with Show ids.
 
-import type { EditOp } from "../../shared/protocol";
+import type { EditOp, ResultBodies } from "../../shared/protocol";
 import type { GmEntity, GmView } from "../../shared/state-view";
 import type { WorldCurrency } from "../../shared/world";
 
@@ -36,15 +37,38 @@ export interface EditNotice {
   undo: string[];
 }
 
-/** The edits a reload brought that weren't there before (by message and sequence): what an edit just made. */
-export function newEdits(before: readonly Edit[], after: readonly Edit[]): Edit[] {
-  const seen = new Set(before.map((e) => `${e.messageId}\u0000${e.seq}`));
-  return after.filter((e) => !seen.has(`${e.messageId}\u0000${e.seq}`));
+/** What sending edits did: how many applied of how many sent, how many operations they held, the chips undoing those written now (newest first), and whether one waits for a reply in flight. */
+export interface EditsSent {
+  applied: number;
+  of: number;
+  count: number;
+  undo: string[];
+  held: boolean;
 }
 
-/** The notice for the edits just made: `done`, else their own lines; Undo takes back every one of them. */
-export function editNotice(made: readonly Edit[], done?: string): EditNotice {
-  return { text: done ?? (made.flatMap((e) => e.lines).join(" · ") || "Saved"), undo: made.flatMap((e) => (e.undo === null ? [] : [e.undo])) };
+/**
+ * Sends edits through `sendAll`, each one `lre.edit` through `request`, and keeps the chip each
+ * applied edit says it wrote: what lands in the meantime (a minds run finishing, a ✎ fix) is never
+ * taken for this edit, so the notice's Undo takes back these edits and nothing else.
+ */
+export async function sendEdits(sendAll: (send: (ops: EditOp[]) => Promise<boolean>) => Promise<{ applied: number; of: number }>, request: (ops: EditOp[]) => Promise<ResultBodies["lre.edit"] | null>): Promise<EditsSent> {
+  const undo: string[] = [];
+  let count = 0;
+  let held = false;
+  const outcome = await sendAll(async (ops) => {
+    const result = await request(ops);
+    if (!result) return false;
+    count += ops.length;
+    held ||= result.pending;
+    if (result.undo !== null) undo.unshift(result.undo);
+    return true;
+  });
+  return { ...outcome, count, undo, held };
+}
+
+/** The notice for the edits just made, by the chips they wrote: `done`, else their own lines in the GM view loaded after them; its Undo takes back those edits and nothing else. */
+export function editNotice(undo: readonly string[], edits: readonly Edit[], done?: string): EditNotice {
+  return { text: done ?? (edits.filter((e) => e.undo !== null && undo.includes(e.undo)).flatMap((e) => e.lines).join(" · ") || "Saved"), undo: [...undo] };
 }
 
 /** Whether a notice's Undo still reaches all it made: every chip is still an edit's on the latest reply. */
