@@ -161,11 +161,12 @@ export function needValue(ctx: ReadContext, who: EntityId, need: string, at = ct
 /**
  * The event that meets a need at `at` (DESIGN §8): it starts from the need as it stands then, so a
  * fold reads no day plan, and records nothing for a need already met then (or off). `at` may be ahead
- * of the clock, the end of what meets it: the need grows again only from that end.
+ * of the clock, the end of what meets it: the need grows again only from that end. `lived`: met by the
+ * ordinary time a turn passed rather than by anything done in it, which no player line tells.
  */
-function metAt(ctx: ReadContext, who: EntityId, need: NeedId, at: number): LedgerEvent[] {
+function metAt(ctx: ReadContext, who: EntityId, need: NeedId, at: number, lived = false): LedgerEvent[] {
   const v = needValue(ctx, who, need, at);
-  return v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at, from: v } }] : [];
+  return v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at, from: v, ...(lived ? { lived: true } : {}) } }] : [];
 }
 
 /** A meal's time: the stated length, else half an hour. */
@@ -937,6 +938,23 @@ function povLivedNeeds(ctx: ReadContext, slot: SlotInfo, at = slot.end): LedgerE
 }
 
 /**
+ * What the POV lived through an ordinary turn's own time (DESIGN §8; `ProcessDef.lived`), read as it
+ * ends: an activity whose span ended within it (a meal, a nap, a rest the turn passed) meets that
+ * activity's needs at that end, and someone it knows with it then meets its social need. A span still
+ * going on (a night just begun) waits for its end, in a later turn or a skip, so going to bed and
+ * getting up again still rests no one; one that ended before meets nothing. The story holds the POV in
+ * a turn, so its routine says nothing here, and no skip reads this time again (`passedFrom`).
+ */
+function povTurnNeeds(ctx: ReadContext, who: EntityId, span: { from: number; to: number }): LedgerEvent[] {
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4) return [];
+  const e = own(ctx.state.entities, who);
+  const until = e?.fields.activity_until;
+  const met: [NeedId, number][] = typeof until === "number" && until > span.from && until <= span.to ? needsMetBy(ctx, strOf(e?.fields.activity)).map((n) => [n, until]) : [];
+  if (!met.some(([n]) => n === "social") && needsOn(ctx.world).includes("social") && inCompany(ctx)) met.push(["social", span.to]);
+  return met.flatMap(([need, t]) => metAt(ctx, who, need, t, true));
+}
+
+/**
  * A moment that moves the POV off an activity it was living (its routine waking it, taking it from a
  * meal) meets what that activity met, then (DESIGN §8); a slot's step reads the rest (`povLivedNeeds`).
  * A moment the run only catches up through meets nothing.
@@ -1159,7 +1177,9 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     // One carrying the need it started from sets the need whole, whatever came before, so a skip's
     // record keeps only the last of each person's need; one without it reads the state it lands on.
     coarsen: { key: (e) => (typeof e.data.from === "number" ? `${strOf(e.data.entity)}:${strOf(e.data.need)}` : null), merge: (_earlier, later) => later },
-    describe: (e) => `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`,
+    // A need the turn's own time met (`lived`) is the turn's bookkeeping, as catch-up's is: Play → Me
+    // shows it, and no "what changed" line repeats it every turn spent with friends.
+    describe: (e) => (e.data.lived === true ? "" : `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`),
   },
   {
     type: "castlife.decision",
@@ -1692,7 +1712,7 @@ export const castlifePack: PackDef = {
     r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
-    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)) });
+    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)), lived: povTurnNeeds });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     // Whatever the level: a plan nothing lives is still settled.
     r.process({ id: "castlife.plans", domain: "castlife", minLevel: 0, step: (slot, ctx) => dropUnlived(slot, ctx) });

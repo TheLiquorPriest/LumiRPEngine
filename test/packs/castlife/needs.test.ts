@@ -13,7 +13,6 @@ import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
 import { planTurn, timelapseIntent, type EngineTurnPlan } from "../../../src/engine/turn";
 import { advance } from "../../../src/engine/simulate";
-import { placeOfEntity } from "../../../src/engine/scope";
 import { typedIntent } from "../../../src/engine/typed-intent";
 import { Working } from "../../../src/engine/working";
 import { destinations } from "../../../src/frontend/play/play";
@@ -26,7 +25,7 @@ import type { PanelProps } from "../../../src/frontend/registry";
 import { propsOf } from "../../support/tree";
 import type { StateView } from "../../../src/shared/state-view";
 import { modernUsWorld } from "../riverton";
-import { startState } from "../support";
+import { fold, startState } from "../support";
 
 const reg = createRegistry(ALL_PACKS);
 
@@ -249,16 +248,13 @@ function play(w: Working, seed: string, intent: { action: string; params: Record
 
 describe("what a skip meets (the replay review)", () => {
   test("a skip meets no need for time the player character spent in ordinary play", () => {
-    const w = setup((world) => {
-      world.entities.you!.fields.place = "apartment_hall";
-    });
-    // A day alone in ordinary play: everyone else at the apartment goes out, and the turns run it to 19:30.
-    w.applyAll(Object.keys(w.state.entities).filter((id) => id !== "you" && placeOfEntity(w.state, id) === "apartment_hall" && w.state.entities[id]?.kind !== "item").map((id): LedgerEvent => ({ type: "set", entity: id, field: "place", value: "cafe" })));
+    const w = setup();
+    // A day alone in ordinary play, at home in the apartment, until 19:30: no one they know comes by.
     advance(reg, w, todayAt(w, 19 * 60 + 30), { runSeed: "run", mode: "turn", cause: "tick" });
     const before = needValue(w.ctx, "you", "social");
     expect(before).toBeGreaterThan(30);
     // Rosa comes over, then half an hour passes: she was no company for the day before she came.
-    w.apply({ type: "set", entity: "rosa", field: "place", value: "apartment_hall" });
+    w.apply({ type: "set", entity: "rosa", field: "place", value: "apartment" });
     const skip = play(w, "skip", timelapseIntent({ type: "duration", minutes: 30 }));
     expect(skip.events.some((e) => e.type === "castlife.need" && "data" in e && e.data.need === "social")).toBe(false);
     expect(needValue(w.ctx, "you", "social")).toBeGreaterThan(before);
@@ -325,5 +321,84 @@ describe("what a skip meets (the replay review)", () => {
     to(w, w.state.clock + 6);
     expect(hunger()?.pressing).toBe(true);
     expect(povLine(w)).toContain("hungry");
+  });
+});
+
+describe("needs an ordinary turn lives", () => {
+  /** A world where the POV knows Rosa and is at the hall, and dinner is a world action with a span of its own and no effect on needs. */
+  function hall(patch: (w: WorldDoc) => void = () => undefined): Working {
+    const w = setup((world) => {
+      world.entities.you!.fields.place = "apartment_hall";
+      world.actions.dine = { id: "dine", label: "Have dinner", params: {}, requires: [], outcomes: { default: [] }, duration: "45", activity: { type: "dinner", until: "clock + 45" } };
+      patch(world);
+    });
+    w.apply({ type: "link", rel: "knows", from: "you", to: "rosa" });
+    return w;
+  }
+
+  /** An afternoon of three hour-long ordinary turns at the hall, Rosa there or gone out; the last turn's events with it. */
+  function afternoon(withRosa: boolean): { w: Working; last: readonly LedgerEvent[] } {
+    const w = hall((world) => {
+      world.needs = { social: { tell: 30 } };
+    });
+    if (!withRosa) w.apply({ type: "set", entity: "rosa", field: "place", value: "cafe" });
+    to(w, todayAt(w, 13 * 60));
+    let last: readonly LedgerEvent[] = [];
+    for (let i = 0; i < 3; i++) last = play(w, `turn${i}`, { action: "rest", params: { minutes: 60 }, probabilities: { rest: 1 } }, "I hang around for an hour.").events;
+    return { w, last };
+  }
+
+  test("three ordinary turns over an afternoon with someone they know keep social below the point it's told; alone, they don't", () => {
+    const tell = 30;
+    const company = afternoon(true);
+    const alone = afternoon(false);
+    expect(company.w.state.clock).toBe(alone.w.state.clock);
+    expect(needValue(company.w.ctx, "you", "social")).toBeLessThan(tell);
+    expect(povLine(company.w)).not.toContain("lonely");
+    expect(needValue(alone.w.ctx, "you", "social")).toBeGreaterThanOrEqual(tell);
+    expect(povLine(alone.w)).toContain("lonely");
+    // The company the turn's own time gave is bookkeeping: its "what changed" never says so turn after turn.
+    const social = company.last.filter((e) => e.type === "castlife.need" && "data" in e && e.data.need === "social");
+    expect(social.length).toBeGreaterThan(0);
+    expect(playerLines(reg, company.w.world, company.w.state, "you", social)).toEqual([]);
+  });
+
+  test("an activity a turn gives them that ends within it meets its needs at its end", () => {
+    const w = hall();
+    to(w, todayAt(w, 18 * 60));
+    expect(needValue(w.ctx, "you", "hunger")).toBeGreaterThan(30);
+    const end = w.state.clock + 45;
+    play(w, "dine", { action: "dine", params: {}, probabilities: { dine: 1 } }, "I have dinner.");
+    expect(w.state.clock).toBe(end);
+    expect(needValue(w.ctx, "you", "hunger")).toBe(0);
+    // Met as dinner ended, so it grows again from then.
+    expect(needValue(w.ctx, "you", "hunger", end + 60)).toBeCloseTo(4, 5);
+  });
+
+  test("a skip right after the turn meets nothing the turn met again", () => {
+    const w = hall();
+    to(w, todayAt(w, 18 * 60));
+    const turn = play(w, "dine", { action: "dine", params: {}, probabilities: { dine: 1 } }, "I have dinner.");
+    const end = w.state.clock;
+    const met = (events: readonly LedgerEvent[], need: string): number[] => events.flatMap((e) => (e.type === "castlife.need" && "data" in e && e.data.need === need && typeof e.data.at === "number" ? [e.data.at] : []));
+    expect(met(turn.events, "hunger")).toEqual([end]);
+    expect(met(turn.events, "social")).toEqual([end]);
+    const skip = play(w, "skip", timelapseIntent({ type: "duration", minutes: 120 }));
+    expect([...met(skip.events, "hunger"), ...met(skip.events, "social")].filter((at) => at <= end)).toEqual([]);
+  });
+
+  test("the turns' record folds to the state they played", () => {
+    const w = hall();
+    const start = structuredClone(w.state);
+    to(w, todayAt(w, 18 * 60));
+    const recorded: LedgerEvent[] = [{ type: "clock", minutes: w.state.clock - start.clock, cause: "advance" }];
+    for (const [seed, intent] of [
+      ["dine", { action: "dine", params: {}, probabilities: { dine: 1 } }],
+      ["rest", { action: "rest", params: { minutes: 60 }, probabilities: { rest: 1 } }],
+    ] as const) recorded.push(...play(w, seed, { ...intent, params: { ...intent.params } }).events);
+    expect(recorded.some((e) => e.type === "castlife.need" && "data" in e && e.data.need === "social")).toBe(true);
+    const folded = fold(reg, w.world, start, recorded);
+    expect(folded.clock).toBe(w.state.clock);
+    expect(folded.entities.you?.fields.needs).toEqual(w.state.entities.you?.fields.needs);
   });
 });
