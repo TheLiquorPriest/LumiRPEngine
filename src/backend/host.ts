@@ -178,12 +178,19 @@ export interface ContextHandlerInput {
 /** What a context handler tells the host: go on to the prompt, or stop the generation before it (`cancelGeneration`). */
 export type ContextVerdict = "go" | "cancel";
 
-/** A World Info entry as the interceptor sees it before activation (DESIGN §6.1): its book, whether it is off for this prompt so far, and its extension data. */
+/**
+ * A World Info entry as the interceptor sees it before activation (DESIGN §6.1): its book, whether it
+ * is off for this prompt so far, its extension data, and its comment and text, by which a copy of a
+ * secret is known whatever book holds it (one the host builds from a character's card for the
+ * prompt, which no book stores, included).
+ */
 export interface WorldInfoCandidate {
   id: string;
   bookId: string;
   disabled: boolean;
   extensions: JsonObject;
+  comment: string;
+  content: string;
 }
 
 /** What the interceptor is asked, in every prompt assembly: the entries the host scans for the chat's prompt, and the chat's metadata. */
@@ -449,9 +456,10 @@ export interface HostPort {
      * Every World Info book of the user's (`world_books.list`, paged through); `engine`: one the
      * engine made for a world; `character`: one a character brought (Lumiverse makes a book of its
      * own for each one a card it imports carries, so it may share a name with one the user imported);
-     * `added`: when it was made, in Unix seconds (null when the host doesn't say).
+     * `added`: when it was made, in Unix seconds (null when the host doesn't say); `updated`: when it
+     * or any of its entries last changed, in Unix seconds (null when the host doesn't say).
      */
-    list(userId: UserId): Promise<{ id: string; name: string; engine: boolean; character: boolean; added: number | null }[]>;
+    list(userId: UserId): Promise<{ id: string; name: string; engine: boolean; character: boolean; added: number | null; updated: number | null }[]>;
     entries(bookId: string, userId: UserId): Promise<HostBookEntry[]>;
     /** One entry by id (`world_books.entries.get`), or null when it is gone. */
     entry(entryId: string, userId: UserId): Promise<HostBookEntry | null>;

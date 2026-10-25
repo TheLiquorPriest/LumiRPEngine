@@ -776,19 +776,19 @@ export class FakeHost implements HostPort {
   assembledOutlets: Set<string> | null = null;
 
   /**
-   * The World Info a prompt gets, read from the chat's books and the global ones as they are now. The
-   * interceptor runs first, as Lumiverse's does: an off vote wins, `enabled` switches on an entry
-   * stored switched off, and a throw leaves the entries as stored. Then every enabled constant entry
-   * with text activates; an outlet-only one (position 8) reaches the prompt only where an assembled
-   * block holds its outlet.
+   * The World Info a prompt gets, read from the chat's books and the global ones as they are now, and
+   * the entries the host builds from a character's card (`cardEntries`). The interceptor runs first,
+   * as Lumiverse's does: an off vote wins, `enabled` switches on an entry stored switched off, and a
+   * throw leaves the entries as stored. Then every enabled constant entry with text activates; an
+   * outlet-only one (position 8) reaches the prompt only where an assembled block holds its outlet.
    */
   private async worldInfo(chatId: ChatId): Promise<{ activated: (HostBookEntry & { outlet: string | null })[]; placed: AssembledEntry[] }> {
     const ids = this.chat(chatId).metadata.chat_world_book_ids;
     const scanned = [...new Set([...(Array.isArray(ids) ? ids : []), ...this.globalBooks])].filter((id): id is string => typeof id === "string");
-    const candidates = scanned.flatMap((bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map((e) => structuredClone(e)));
+    const candidates = [...scanned.flatMap((bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])]), ...this.cardEntries].map((e) => structuredClone(e));
     if (this.worldInfoInterceptor) {
       try {
-        const verdict = await this.worldInfoInterceptor({ chatId, userId: this.userId, entries: candidates.map((e) => ({ id: e.id, bookId: e.bookId, disabled: e.disabled, extensions: structuredClone(e.extensions) })), chatMetadata: structuredClone(this.chat(chatId).metadata) });
+        const verdict = await this.worldInfoInterceptor({ chatId, userId: this.userId, entries: candidates.map((e) => ({ id: e.id, bookId: e.bookId, disabled: e.disabled, extensions: structuredClone(e.extensions), comment: e.comment, content: e.content })), chatMetadata: structuredClone(this.chat(chatId).metadata) });
         const off = new Set(verdict.disabled);
         const on = new Set(verdict.enabled);
         for (const e of candidates) e.disabled = off.has(e.id) || (e.disabled && !on.has(e.id));
@@ -826,14 +826,31 @@ export class FakeHost implements HostPort {
   /**
    * Books and their entries, each with the outlet the host keeps beside its extension data (reading
    * an entry back doesn't show it); `character` and `added` as `world_books` reports a book's origin
-   * and age (see `userBook`).
+   * and age (see `userBook`); `updated` as it reports the book's last change, which every change to
+   * the book or any of its entries bumps (a count here, where Lumiverse keeps Unix seconds).
    */
-  readonly bookStore = new Map<string, { name: string; character?: boolean; added?: number; entries: Map<string, HostBookEntry & { outlet: string | null }> }>();
+  readonly bookStore = new Map<string, { name: string; character?: boolean; added?: number; updated: number; entries: Map<string, HostBookEntry & { outlet: string | null }> }>();
+  private bookChanges = 0;
+
+  /** Entries whose writes the host refuses (`setExtensions` throws), as a write a host fails would. */
+  readonly refusedWrites = new Set<string>();
+
+  /**
+   * Entries the host builds for a prompt from a character's card, as Lumiverse does when the
+   * character's own book is empty (world-info-sources.service.ts:139-153): scanned with the chat's
+   * books, and stored in none.
+   */
+  cardEntries: (HostBookEntry & { outlet: string | null })[] = [];
+
+  private touched(bookId: string): void {
+    const book = this.bookStore.get(bookId);
+    if (book) book.updated = ++this.bookChanges;
+  }
 
   /** A book of the user's own, as Lumiverse keeps one: `character` when a character's card brought it, made at `added` (Unix seconds). */
   userBook(name: string, origin: { character?: boolean; added?: number } = {}): string {
     const id = this.newId("book");
-    this.bookStore.set(id, { name, ...origin, entries: new Map() });
+    this.bookStore.set(id, { name, ...origin, updated: ++this.bookChanges, entries: new Map() });
     return id;
   }
 
@@ -848,20 +865,40 @@ export class FakeHost implements HostPort {
 
   /** Edits an entry as the host's World Info UI would. */
   editEntry(entryId: string, patch: Partial<HostBookEntryInput>): void {
-    for (const book of this.bookStore.values()) {
+    for (const [bookId, book] of this.bookStore) {
       const e = book.entries.get(entryId);
-      if (e) book.entries.set(entryId, { ...e, ...structuredClone(patch) });
+      if (!e) continue;
+      book.entries.set(entryId, { ...e, ...structuredClone(patch) });
+      this.touched(bookId);
+    }
+  }
+
+  /** Renames a book, as the host's World Info UI would. */
+  renameBook(bookId: string, name: string): void {
+    const book = this.bookStore.get(bookId);
+    if (!book) return;
+    book.name = name;
+    this.touched(bookId);
+  }
+
+  /** Runs `change` on the stored entry, wherever it is, and marks its book changed. */
+  private changeEntry(entryId: string, change: (e: HostBookEntry & { outlet: string | null }) => HostBookEntry & { outlet: string | null }): void {
+    for (const [bookId, book] of this.bookStore) {
+      const e = book.entries.get(entryId);
+      if (!e) continue;
+      book.entries.set(entryId, change(e));
+      this.touched(bookId);
     }
   }
 
   books: HostPort["books"] = {
     create: async (name) => {
       const id = this.newId("book");
-      this.bookStore.set(id, { name, entries: new Map() });
+      this.bookStore.set(id, { name, updated: ++this.bookChanges, entries: new Map() });
       return id;
     },
     exists: async (bookId) => this.bookStore.has(bookId),
-    list: async () => [...this.bookStore.entries()].map(([id, book]) => ({ id, name: book.name, engine: book.name.startsWith("LumiRPEngine · "), character: book.character === true, added: book.added ?? null })),
+    list: async () => [...this.bookStore.entries()].map(([id, book]) => ({ id, name: book.name, engine: book.name.startsWith("LumiRPEngine · "), character: book.character === true, added: book.added ?? null, updated: book.updated })),
     global: async () => [...this.globalBooks],
     entries: async (bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map(({ outlet: _outlet, ...e }) => structuredClone(e)),
     entry: async (entryId) => {
@@ -875,30 +912,23 @@ export class FakeHost implements HostPort {
       if (!book) throw new Error(`no book ${bookId}`);
       const id = this.newId("entry");
       book.entries.set(id, { ...structuredClone(entry), outlet: entry.outlet ?? null, id, bookId });
+      this.touched(bookId);
       return id;
     },
     place: async (entryId, placement, extensions) => {
       this.placed.push(entryId);
-      for (const book of this.bookStore.values()) {
-        const e = book.entries.get(entryId);
-        if (e) book.entries.set(entryId, { ...e, ...structuredClone(placement), extensions: structuredClone(extensions) });
-      }
+      this.changeEntry(entryId, (e) => ({ ...e, ...structuredClone(placement), extensions: structuredClone(extensions) }));
     },
     fill: async (entryId, content) => {
       this.fills.push({ entryId, content });
-      for (const book of this.bookStore.values()) {
-        const e = book.entries.get(entryId);
-        if (e) book.entries.set(entryId, { ...e, content: content ?? "", disabled: content === null, constant: content !== null });
-      }
+      this.changeEntry(entryId, (e) => ({ ...e, content: content ?? "", disabled: content === null, constant: content !== null }));
     },
     setExtensions: async (entryId, extensions, disabled) => {
-      for (const book of this.bookStore.values()) {
-        const e = book.entries.get(entryId);
-        if (e) book.entries.set(entryId, { ...e, extensions: structuredClone(extensions), disabled: disabled ?? e.disabled });
-      }
+      if (this.refusedWrites.has(entryId)) throw new Error(`the host refused to write entry ${entryId}`);
+      this.changeEntry(entryId, (e) => ({ ...e, extensions: structuredClone(extensions), disabled: disabled ?? e.disabled }));
     },
     deleteEntry: async (entryId) => {
-      for (const book of this.bookStore.values()) book.entries.delete(entryId);
+      for (const [bookId, book] of this.bookStore) if (book.entries.delete(entryId)) this.touched(bookId);
     },
   };
 

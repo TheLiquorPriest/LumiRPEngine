@@ -1,18 +1,20 @@
 // The World Info interceptor (DESIGN §6.1). In a world chat's every prompt assembly, before the host
 // activates World Info, an entry LRE keeps secret stays off until its gate holds, then comes on for
 // the prompt; and an entry an engine section carried this turn (§6.11) goes off for the prompt, so the
-// narrator doesn't read its text twice. A secret's twin LRE keeps as its copy is secret as its
-// original is. It touches no other entry. It fails closed: when anything can't be read, every secret
-// stays off.
+// narrator doesn't read its text twice. An entry is as secret as its text is (`secrecyParts`): a
+// secret's twin in any book, one the host builds from a character's card for the prompt included,
+// stays off as the secret does. It touches no other entry, and nothing in a chat that plays no world.
+// It fails closed: when anything can't be read, every secret stays off, and while some book of the
+// user's was never read, every entry of the user's books does.
 
 import type { ChatId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
-import { bookLoreFieldsOf, loreIsSecret, loreSourceOf } from "../shared/lore";
-import type { LoreEntryDef, WorldDoc } from "../shared/world";
+import { bookLoreFieldsOf, engineWroteEntry, loreIsSecret } from "../shared/lore";
+import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { loreGateReader } from "../engine/visibility";
-import { secretCopyOf } from "./book-lore";
+import { bookSecrecy, secretCopyOf, secretTexts, type LoreIndex, type SecretTexts } from "./lore-secrets";
 import type { WorldInfoCandidate, WorldInfoInput, WorldInfoVerdict } from "./host";
 
 /** What the interceptor reads of the engine. */
@@ -24,19 +26,30 @@ export interface WorldInfoGate {
   head(chatId: ChatId, userId: UserId): Promise<{ world: WorldDoc; state: WorldState } | null>;
   /** The World Info entries the sections the guard wrote for this prompt carried, as `bookId/entryId`. */
   carried(chatId: ChatId): ReadonlySet<string>;
+  /** What LRE knows of the secrets in the user's books, read now (`loreIndex`). */
+  secrets(userId: UserId): Promise<LoreIndex>;
+  /** The same as last read, for a failure that can't wait for a read (`lastLoreIndex`). */
+  lastSecrets(userId: UserId): LoreIndex;
   log(message: string, userId: UserId): void;
 }
 
 const keyOf = (e: Pick<WorldInfoCandidate, "bookId" | "id">): string => `${e.bookId}/${e.id}`;
 
-/** The entries LRE's own fields keep secret, by id, with their gates: known without the world, so they stay off whatever fails. */
-function ownSecrets(entries: readonly WorldInfoCandidate[]): Map<string, string | undefined> {
-  const out = new Map<string, string | undefined>();
-  for (const e of entries) {
-    const fields = bookLoreFieldsOf(e.extensions);
-    if (fields !== null && loreIsSecret(fields)) out.set(e.id, fields.gate);
-  }
-  return out;
+/** The entries of the user's books among a prompt's: the engine's own sections are no secret's. */
+function usersOwn(entries: readonly WorldInfoCandidate[]): WorldInfoCandidate[] {
+  return entries.filter((e) => !engineWroteEntry(e.extensions));
+}
+
+/** The entries `texts` hold secret, by id: off for the prompt whatever their gates, when the gates can't be read. */
+function secretsOf(entries: readonly WorldInfoCandidate[], texts: SecretTexts): string[] {
+  return entries.filter((e) => loreIsSecret(bookSecrecy(e, texts) ?? {})).map((e) => e.id);
+}
+
+/** Whether LRE switched an entry off for its secrecy: a secret of its own, or a copy that was on before it was kept secret. One a secret's text alone holds back was switched off by its author, and stays so. */
+function switchedOffForSecrecy(e: WorldInfoCandidate): boolean {
+  const copy = secretCopyOf(e.extensions);
+  if (copy) return !copy.off;
+  return loreIsSecret(bookLoreFieldsOf(e.extensions) ?? {});
 }
 
 /** The entries to switch off and on for a world chat's prompt (see the header); nothing for any other chat. */
@@ -45,7 +58,9 @@ export async function worldInfoVerdict(gate: WorldInfoGate, input: WorldInfoInpu
     return await verdict(gate, input);
   } catch (error) {
     gate.log(`World Info: its secret entries stay off for this prompt (${error instanceof Error ? error.message : String(error)})`, input.userId);
-    return { disabled: [...ownSecrets(input.entries).keys()], enabled: [] };
+    // What is known without a read: the entries' own fields and the secrets as last read.
+    const entries = usersOwn(input.entries);
+    return { disabled: secretsOf(entries, secretTexts(gate.lastSecrets(input.userId), { entries })), enabled: [] };
   }
 }
 
@@ -53,29 +68,23 @@ async function verdict(gate: WorldInfoGate, input: WorldInfoInput): Promise<Worl
   if (!gate.playsWorld(input.chatMetadata)) return { disabled: [], enabled: [] };
   const carried = gate.carried(input.chatId);
   const disabled = input.entries.filter((e) => carried.has(keyOf(e))).map((e) => e.id);
-  const rest = input.entries.filter((e) => !carried.has(keyOf(e)));
-  const own = ownSecrets(rest);
-  const head = await gate.head(input.chatId, input.userId);
-  if (!head) return { disabled: [...disabled, ...own.keys()], enabled: [] };
-  // A secret world entry indexed from a book keeps that book entry secret too, under its gate.
-  const indexed = new Map<string, string | undefined>();
-  for (const entry of Object.values(head.world.lore)) {
-    const source = loreSourceOf(entry.source);
-    if (source.kind === "book" && loreIsSecret(entry)) indexed.set(`${source.bookId}/${source.entryId}`, typeof entry.gate === "string" ? entry.gate : undefined);
-  }
+  const rest = usersOwn(input.entries.filter((e) => !carried.has(keyOf(e))));
+  // A state that can't be read leaves every secret off; the books' secrets are read all the same.
+  const reading = gate.head(input.chatId, input.userId).catch((error: unknown) => {
+    gate.log(`World Info: the chat's state wasn't read, so its secret entries stay off for this prompt (${error instanceof Error ? error.message : String(error)})`, input.userId);
+    return null;
+  });
+  const [index, head] = await Promise.all([gate.secrets(input.userId), reading]);
+  const texts = secretTexts(index, { world: head?.world ?? null, entries: rest });
+  if (!head) return { disabled: [...disabled, ...secretsOf(rest, texts)], enabled: [] };
   const open = loreGateReader(gate.registry, head.world, head.state);
-  const holds = (key: string, gateText: string | undefined): boolean => open({ id: key, title: "", content: "", keys: [], links: [], secret: true, ...(gateText !== undefined ? { gate: gateText } : {}) });
   const enabled: string[] = [];
   for (const e of rest) {
-    const key = keyOf(e);
-    // A copy carries its original's own fields; the world entry indexed from its original binds it too.
-    const of = secretCopyOf(e.extensions)?.entry;
-    const world = indexed.has(key) ? key : of !== undefined && indexed.has(of) ? of : null;
-    if (!own.has(e.id) && world === null) continue;
-    // Secret on either side is secret: it opens only once every secret side's gate holds (DESIGN §4.2).
-    const gates = [...(own.has(e.id) ? [own.get(e.id)] : []), ...(world !== null ? [indexed.get(world)] : [])];
-    if (!gates.every((g) => holds(key, g))) disabled.push(e.id);
-    else if (e.disabled) enabled.push(e.id);
+    const secrecy = bookSecrecy(e, texts);
+    if (!secrecy || !loreIsSecret(secrecy)) continue;
+    // Secret on any side is secret: it opens only once every secret side's gate holds (DESIGN §4.2).
+    if (!open({ id: keyOf(e), title: "", content: "", keys: [], links: [], secret: true, gate: secrecy.gate ?? "" })) disabled.push(e.id);
+    else if (e.disabled && switchedOffForSecrecy(e)) enabled.push(e.id);
   }
   return { disabled, enabled };
 }
