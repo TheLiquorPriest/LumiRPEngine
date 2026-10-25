@@ -169,8 +169,8 @@ On the last turn reviewed:
 
 **As built:**
 
-- **Lore books:** Spindle doesn't say which books Lumiverse scans for a chat. The helpers and minds read the world's own list (**Build → Lore → Lore books**), the chat's books and your global books. A character's or persona's book is read only when it's on the list.
-- **Secrets:** an entry a secret world entry was indexed from is stored switched off in its book, so it stays out of every prompt until the gate holds, even if the hook fails.
+- **Lore books:** without the `characters` and `personas` permissions, which LumiRPEngine doesn't take, it can't see which books Lumiverse scans for a chat. The helpers and minds read the world's own list (**Build → Lore → Lore books**), the chat's books and your global books. A character's or persona's book is read only when it's on the list.
+- **Secrets:** an entry a secret world entry was indexed from is stored switched off in its book, so it stays out of every prompt until the gate holds, even if the hook fails. The entry stays off in that book's other chats too: make it public in **Build → Lore → World Info entries**, or remove the secret world entry, to undo it.
 - **Section order:** the Place and Property sections rank after Stance, so a tight token budget never squeezes out a section that was there before them.
 
 ## Characters as their own model (shipped October 2026)
@@ -210,6 +210,25 @@ A character is read and edited as one thing, over the existing entities, with no
 - **Steps:** every step's prompt says what it does next to its built-in text, and Step templates use the steps' names.
 - **Needs:** one name per need everywhere, and every number in words.
 - **Not built:** a per-section preview of what each section holds now. It needs its own request, its own timeout and a secrecy review of marked lines.
+
+## Follow-up fixes after the final review (October 2026)
+
+- **Secrets:**
+  - one rule for every lore reader, so pins, live lore, the Place section and the World Info hook all agree;
+  - a secret's twins are held back too: the same text in any of your books, card-built entries included;
+  - a twin's copy follows its original even after either text is edited;
+  - a book that can't be read keeps your World Info off in world chats, and Caveats says which.
+- **Needs:** each ordinary turn meets what it lives: company with someone your character knows meets social, and an activity that ends within the turn meets its needs.
+- **Spans:** what your character is doing decides whether a span goes on.
+  - Talking keeps a night going.
+  - Doing something else ends it.
+  - The new **Get up** action ends a sleep or a rest.
+- **Intent gate:** the chip says the action in words, and Edit opens the Actions palette with the read's picks.
+- **Property lines:** they say "yours" only for an owner or joint owner, and every holder comes with a role.
+- **GM:**
+  - nothing scrolls above the mode bar;
+  - the routine card shows its mix;
+  - a Sections save leaves a notice with Undo.
 
 ## Settings for long chats
 
