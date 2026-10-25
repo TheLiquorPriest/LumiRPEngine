@@ -2,21 +2,15 @@
 // a GM edit (`feed` op) with its own Undo. Settings only: what a section holds never shows here.
 
 import { useState } from "preact/hooks";
-import type { ControlsView } from "../../shared/state-view";
-import type { FeedScope, SectionFeed } from "../../shared/world";
-import { FEED_SCOPES } from "../../shared/world";
+import type { Chip, ControlsView } from "../../shared/state-view";
+import type { SectionFeed } from "../../shared/world";
+import { FEED_SCOPES, SCOPE_LABEL } from "../../shared/world";
 import { useApp } from "../app";
 import { CheckField } from "../build/form-kit";
 import { Button, Empty, HostSelect, HostSwitch, List, ListRow, NumberStepper, Section, useBusy } from "../components";
 import { editRequest } from "../requests";
-import { GmPage, usePages } from "./ui";
-
-/** The "Whose knowledge" choices; a row's summary says the scope in these same words. */
-export const SCOPE_LABEL: Record<FeedScope, string> = {
-  player: "What your character knows",
-  scene: "Also what the people with your character know",
-  gm: "Everything, with what your character doesn't know marked",
-};
+import type { EditNotice } from "./editor";
+import { EditNoticeBar, GmPage, usePages } from "./ui";
 
 type SectionRow = ControlsView["sections"][number];
 type SourceRow = ControlsView["sources"][number];
@@ -31,6 +25,23 @@ export function feedSummary(feed: SectionFeed): string {
   const parts = ["In the prompt", SCOPE_LABEL[feed.scope ?? "player"], caps.length > 0 ? `at most ${caps.join(", ")}` : "no cap"];
   if (feed.include) parts.push(`${feed.include.length} picked ${feed.include.length === 1 ? "source" : "sources"}`);
   return parts.join(" · ");
+}
+
+/**
+ * The notice a save leaves, as any GM edit's does: the section and what this chat now sets for it
+ * (only what differs from its plain delivery), or that it's back to the world's settings.
+ */
+export function feedNotice(label: string, to: SectionFeed | null): string {
+  if (to === null) return `${label}: the world's settings again, this chat`;
+  if (to.enabled === false) return `${label}: left out of the prompt, this chat`;
+  const caps = [to.maxLines !== undefined ? `${to.maxLines} lines` : null, to.maxTokens !== undefined ? `${to.maxTokens} tokens` : null].filter((c) => c !== null);
+  const parts = [to.scope !== undefined && to.scope !== "player" ? SCOPE_LABEL[to.scope].toLowerCase() : null, caps.length > 0 ? `at most ${caps.join(", ")}` : null, to.include ? `${to.include.length} picked ${to.include.length === 1 ? "source" : "sources"}` : null].filter((p) => p !== null);
+  return `${label}: ${parts.length > 0 ? parts.join(", ") : "in the prompt with no cap"}, this chat`;
+}
+
+/** Whether a notice's Undo still reaches its edit: its chip is still on the chat (the next send or an Undo retires it). */
+export function feedNoticeStands(notice: EditNotice, chips: readonly Pick<Chip, "id">[]): boolean {
+  return notice.undo.every((chip) => chips.some((c) => c.id === chip));
 }
 
 /** The sources a section takes by itself: every renderer filling its own slot. */
@@ -73,7 +84,7 @@ export function sourcesMissing(draft: SectionFeed, picked: readonly string[], ow
 const CAP_START = { maxLines: 12, maxTokens: 400 } as const;
 
 /** One section's settings in this chat, saved whole as one edit in place of the world's; "Use the world's" clears them. */
-function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: readonly SourceRow[]; onDone(): void }) {
+function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: readonly SourceRow[]; onDone(notice: EditNotice | null): void }) {
   const app = useApp();
   const [busy, run] = useBusy();
   // The settings in force: the chat's when it has its own, else the world's.
@@ -87,8 +98,9 @@ function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: read
   const send = (to: SectionFeed | null): void =>
     run(async () => {
       const result = await app.request(editRequest(props.chatId, [{ op: "feed", section: props.row.id, to }]));
+      // One made while a reply is being written lands when it finishes: there's no Undo to show yet.
       if (result?.pending) app.toast("Saved — it applies when the reply finishes.", "info");
-      if (result) props.onDone();
+      if (result) props.onDone(result.undo !== null ? { text: feedNotice(props.row.label, to), undo: [result.undo] } : null);
     });
   const noneTaken = sourcesMissing(draft, picked, own);
   return (
@@ -126,12 +138,27 @@ function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: read
   );
 }
 
-/** The chat's sections; each opens its settings as a page of its own, at its top. */
-export function FeedThisChat(props: { chatId: string; controls: ControlsView | null }) {
+/** The chat's sections; each opens its settings as a page of its own, at its top. A save leaves a notice with its Undo, as any GM edit does. */
+export function FeedThisChat(props: { chatId: string; controls: ControlsView | null; chips: readonly Chip[] }) {
+  const app = useApp();
   const pages = usePages<string>();
+  const [notice, setNotice] = useState<EditNotice | null>(null);
+  const [busy, run] = useBusy();
   const rows = props.controls?.sections ?? [];
   if (rows.length === 0) return <Empty icon="scroll">Section settings appear once the chat has started.</Empty>;
   const row = rows.find((r) => r.id === pages.page);
+  const shown = notice && feedNoticeStands(notice, props.chips) ? notice : null;
+  const undo = (chips: readonly string[]): void =>
+    run(async () => {
+      let all = true;
+      for (const chip of chips) {
+        if (await app.request({ type: "lre.chip", chatId: props.chatId, chip, choice: "undo" })) continue;
+        all = false;
+        break;
+      }
+      if (all) app.toast("Undone.", "info");
+      setNotice(null);
+    });
   return (
     <div ref={pages.host.ref} class="lre-gm-pages" onKeyDown={pages.host.onKeyDown} data-lre-gm-feed>
       <div class="lre-stack lre-gm-list" hidden={row !== undefined}>
@@ -146,9 +173,19 @@ export function FeedThisChat(props: { chatId: string; controls: ControlsView | n
       </div>
       {row ? (
         <GmPage name="section" title={row.label} subtitle="Section, this chat" backLabel="Sections" onBack={pages.back}>
-          <SectionFeedForm key={row.id} chatId={props.chatId} row={row} sources={props.controls?.sources ?? []} onDone={pages.back} />
+          <SectionFeedForm
+            key={row.id}
+            chatId={props.chatId}
+            row={row}
+            sources={props.controls?.sources ?? []}
+            onDone={(made) => {
+              setNotice(made);
+              pages.back();
+            }}
+          />
         </GmPage>
       ) : null}
+      {shown ? <EditNoticeBar notice={shown} busy={busy} onUndo={() => undo(shown.undo)} onDismiss={() => setNotice(null)} /> : null}
     </div>
   );
 }
