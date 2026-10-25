@@ -3,7 +3,7 @@
 // sheet, from a chat's head world and state (where they are now, and what they're doing). Both are
 // author or GM views, so every place and person is in it with its visibility; nothing is hidden.
 
-import type { CharacterBed, CharacterDTO, CharacterEmployer, CharacterField, CharacterNow, CharacterRelation, CharacterResult, CharacterSchedule, CharacterSection, PlaceRef, ThingRef, VisibilityValue } from "../shared/character";
+import type { CharacterBed, CharacterDTO, CharacterField, CharacterNow, CharacterRelation, CharacterResult, CharacterSchedule, CharacterSection, PlaceRef, ThingRef, VisibilityValue } from "../shared/character";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, PlaceId } from "../shared/ids";
@@ -166,8 +166,10 @@ export function buildCharacter(reg: Registry, world: WorldDoc, id: EntityId, sta
   const lifeId = state ? lifeOf(state, id) : (own(world.entities, id)?.life ?? ALIVE);
   const life = lifeId === ALIVE ? null : { state: lifeId, label: lifeStateOf(world, lifeId).label };
   const visibility: VisibilityValue = own(world.entities, id)?.visibility ?? "public";
-  // Build has no chat: its schedules and regard are read from the world as a chat would start.
-  const read = state ?? initialState(world, "character", reg);
+  // Build has no chat: its schedules and regard are read from the world as a chat would start. A
+  // draft is mid-edit, so a start or an epoch that doesn't parse yet leaves out only what reads the
+  // clock (schedules and regard), never the page.
+  const read = state ?? startState(reg, world);
   const character: CharacterDTO = {
     id,
     name: e.name,
@@ -182,22 +184,22 @@ export function buildCharacter(reg: Registry, world: WorldDoc, id: EntityId, sta
     home,
     bed,
     bedChoices: bedChoices(bodies, refs, typeof e.fields.home === "string" ? e.fields.home : null, isItem, gone),
-    employer: employerOf(world, bodies, e.fields.employer, placeRef, thingRef),
-    schedules: schedulesOf(reg, world, read, id),
-    relations: relationsOf(reg, world, reg.context(world, read), id, e),
+    schedules: read ? schedulesOf(reg, world, read, id) : [],
+    relations: relationsOf(reg, world, read ? reg.context(world, read) : null, id, e),
     ...(state ? { now: nowOf(world, state, id) } : {}),
     sections: sectionsOf(reg, world, e),
   };
   return { character, places: [...refs.values()], things };
 }
 
-/** Who they work for: a place the world has (a shop they run), else an entity (a business); else no one. */
-function employerOf(world: WorldDoc, bodies: Readonly<Record<EntityId, Body>>, value: unknown, placeRef: (p: unknown) => PlaceRef | null, thingRef: (t: unknown) => ThingRef | null): CharacterEmployer | null {
-  if (typeof value !== "string") return null;
-  const place = own(world.places, value) ? placeRef(value) : null;
-  if (place) return { kind: "place", place };
-  const thing = own(bodies, value) ? thingRef(value) : null;
-  return thing ? { kind: "business", thing } : null;
+/** The state a chat would start with, or none while the draft's clock (its start or epoch) doesn't parse. */
+function startState(reg: Registry, world: WorldDoc): WorldState | null {
+  try {
+    calendarOf(world);
+    return initialState(world, "character", reg);
+  } catch {
+    return null;
+  }
 }
 
 /** The days a recurrence runs, in words ("Weekdays", "Every day", "Mon, Wed and Fri", "On the 1st"). */
@@ -254,45 +256,32 @@ function schedulesOf(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
     });
 }
 
-/** Relation types by group: kinship is family, regard and its kin are feelings, membership is groups. */
-const RELATION_GROUP: Record<string, CharacterRelation["group"]> = {
-  parent_of: "family",
-  child_of: "family",
-  sibling_of: "family",
-  spouse_of: "family",
-  partner_of: "family",
-  kin_of: "family",
-  regard: "feelings",
-  drawn_to: "feelings",
-  hostile: "feelings",
-  member_of: "groups",
-};
-
 /** Relation fields that are bookkeeping, never words (regard's last-touched time). */
 const RELATION_INTERNAL = new Set(["t"]);
 
 /**
- * Their relations as words, each with its type's label and group and who it's to: regard in the
- * world's band words ("warm"), any other by its own fields ("Role: Owner, Rank: 1"). Containment
- * and the party are where they are and who they travel with, shown apart.
+ * Their relations as words, each with who it's to: regard in the world's band words ("warm"), any
+ * other by its own fields ("Role: Owner, Rank: 1"). Containment and the party are where they are
+ * and who they travel with, shown apart. Without a state (a draft whose clock doesn't parse) regard
+ * reads by its fields too.
  */
-function relationsOf(reg: Registry, world: WorldDoc, ctx: ReadContext, from: EntityId, e: Body): CharacterRelation[] {
+function relationsOf(reg: Registry, world: WorldDoc, ctx: ReadContext | null, from: EntityId, e: Body): CharacterRelation[] {
   const types = new Map<string, RelationTypeDef>([...reg.relations.values(), ...Object.values(world.relations)].map((d) => [d.id, d]));
-  const band = optionalQuery(ctx, "regard_band");
+  const band = ctx ? optionalQuery(ctx, "regard_band") : undefined;
   return e.relations
     .filter((r) => r.type !== "in" && r.type !== PARTY_RELATION)
     .map((r) => {
       const def = types.get(r.type);
       const fieldDefs = isRecord(def?.fields) ? def.fields : {};
       const words_ =
-        r.type === "regard" && band
+        r.type === "regard" && band && ctx
           ? band(ctx, from, r.to)
           : Object.entries(r.fields ?? {})
               .filter(([k, v]) => !RELATION_INTERNAL.has(k) && v !== null && v !== "")
               .map(([k, v]) => `${own(fieldDefs, k)?.label ?? words(k)}: ${typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : JSON.stringify(v)}`)
               .join(", ");
-      const to = own(ctx.state.entities, r.to) ?? own(world.entities, r.to);
-      return { type: r.type, typeLabel: def?.label ?? words(r.type), group: RELATION_GROUP[r.type] ?? "other", to: { id: r.to, name: to?.name ?? own(world.places, r.to)?.name ?? r.to }, words: words_ };
+      const to = (ctx ? own(ctx.state.entities, r.to) : undefined) ?? own(world.entities, r.to);
+      return { type: r.type, to: { id: r.to, name: to?.name ?? own(world.places, r.to)?.name ?? r.to }, words: words_ };
     });
 }
 
@@ -387,14 +376,6 @@ function stems(text: string): Set<string> {
   return new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2).map((w) => w.replace(/(ies|es|s)$/, "")));
 }
 
-/** A number's range in words: "3–18", "0 or more", "up to 100"; none without bounds. */
-function rangeHint(def: FieldDef | undefined): string | undefined {
-  if (def?.type !== "number" && def?.type !== "money") return undefined;
-  if (def.min !== undefined && def.max !== undefined) return `${def.min}–${def.max}`;
-  if (def.min !== undefined) return `${def.min} or more`;
-  return def.max !== undefined ? `up to ${def.max}` : undefined;
-}
-
 function fieldOf(world: WorldDoc, id: string, def: FieldDef | undefined, stored: JsonValue | undefined): CharacterField {
   const plain = plainLabel(def?.label ?? words(id));
   const label = plain.label;
@@ -408,7 +389,6 @@ function fieldOf(world: WorldDoc, id: string, def: FieldDef | undefined, stored:
   // for the pages, whose own editor reads the shape.
   const said = plain.help !== undefined && !/[{}[\]]/.test(plain.help) ? plain.help : undefined;
   const help = [said, tells && table ? `A row of ${table.label}` : undefined].filter((h): h is string => h !== undefined && h !== "").join(" · ") || undefined;
-  const hint = rangeHint(def);
   const type = def?.type ?? (typeof stored === "number" ? "number" : typeof stored === "boolean" ? "bool" : Array.isArray(stored) ? "list" : "text");
   // A list's items: the kind's type, else text when every stored item is text (traits a kind left
   // untyped), so a list of text is edited as its items, never as JSON; a list of shapes (pay_prefs)
@@ -426,6 +406,5 @@ function fieldOf(world: WorldDoc, id: string, def: FieldDef | undefined, stored:
     ...(of !== undefined ? { of } : {}),
     ...(def?.locked || def?.derived !== undefined ? { locked: true } : {}),
     ...(help !== undefined ? { help } : {}),
-    ...(hint !== undefined ? { hint } : {}),
   };
 }

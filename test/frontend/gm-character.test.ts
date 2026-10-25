@@ -73,7 +73,7 @@ describe("the GM character sheet", () => {
     const rosie = person("rosie", { relations: [knows, regard, party] });
     // The sheet: the model's words first, in its order; one it has no words for still listed after;
     // the party, shown as its switch, left out.
-    const sheet = relationRows(rosie, gm, [{ type: "regard", typeLabel: "Regard", group: "feelings", to: { id: "priya", name: "Priya" }, words: "warm" }]);
+    const sheet = relationRows(rosie, gm, [{ type: "regard", to: { id: "priya", name: "Priya" }, words: "warm" }]);
     expect(sheet.map((r) => r.relation)).toEqual([regard, knows]);
     expect(sheet[0]?.detail).toBe("warm");
     // An entity's page: every relation, its declared fields and value, never the bookkeeping `t`.

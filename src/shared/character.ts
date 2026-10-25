@@ -38,8 +38,8 @@ export interface CharacterBed {
 }
 
 /**
- * One field as a form shows it: a plain label, its value, `help` only when it tells something (a
- * hint the label carried, a table that isn't just the label again) and a number's range as `hint`.
+ * One field as a form shows it: a plain label, its value, and `help` only when it tells something
+ * (a hint the label carried, a table that isn't just the label again).
  */
 export interface CharacterField {
   id: string;
@@ -54,12 +54,7 @@ export interface CharacterField {
   of?: FieldType;
   locked?: boolean;
   help?: string;
-  /** A number's range in words ("3–18", "0 or more"). */
-  hint?: string;
 }
-
-/** Who they work for: a place (a shop they run in the world) or a business entity. */
-export type CharacterEmployer = { kind: "place"; place: PlaceRef } | { kind: "business"; thing: ThingRef };
 
 /** One of their schedules in words: its own label, else its summary; never its id. */
 export interface CharacterSchedule {
@@ -69,11 +64,9 @@ export interface CharacterSchedule {
   summary: string;
 }
 
-/** One of their relations as words: the relation's label and group, who it's to, and what it holds ("warm"; "Role: Owner"). */
+/** One of their relations as words: who it's to, and what it holds ("warm"; "Role: Owner"). */
 export interface CharacterRelation {
   type: string;
-  typeLabel: string;
-  group: "family" | "feelings" | "groups" | "other";
   to: { id: EntityId; name: string };
   words: string;
 }
@@ -109,7 +102,7 @@ export interface CharacterDTO {
   bed: CharacterBed;
   /** Where the bed picker looks first: places inside their home, and things lying there, the likeliest beds first. */
   bedChoices: { places: PlaceRef[]; items: ThingRef[] };
-  employer: CharacterEmployer | null;
+  /** Build: none while the draft's start or epoch doesn't parse, as no chat could start from it. */
   schedules: CharacterSchedule[];
   relations: CharacterRelation[];
   /** GM only. */
