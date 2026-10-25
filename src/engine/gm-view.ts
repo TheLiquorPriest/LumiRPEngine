@@ -2,8 +2,9 @@
 // shaped for the GM editor: every entity with its fields as their definitions type them, its
 // relations, levels, classes, tags and designed sheet, and whether the player claimed it into being;
 // places with their visibility; tracks with every stage and truth; the relation types the editor
-// can add; the world's facets, hidden ones too; and everyone's money. Read on request only, and it
-// records nothing (L34): unopened accounts show the opening balances they'll start from.
+// can add; the world's facets, hidden ones too; everyone's money; and the routine roles the chat set.
+// Read on request only, and it records nothing (L34): unopened accounts show the opening balances
+// they'll start from.
 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -130,5 +131,6 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
     money: optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [],
     // The fight under way, as only the GM sees it (the combat pack); its view model is plain JSON.
     encounter: (optionalQuery(ctx, "combat.gm")?.(ctx) ?? null) as unknown as JsonValue | null,
+    routineRoles: optionalQuery(ctx, "castlife.chat_roles")?.(ctx) ?? [],
   };
 }

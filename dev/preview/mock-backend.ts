@@ -29,7 +29,7 @@ import { macroReview, WORLD_COLLECTIONS } from "../../src/backend/worlds";
 import type { StudioCase } from "./fixtures";
 import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, studioOfferFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
-import { applyRoutineOp, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
+import { applyRoutineOp, chatRolesFixture, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
 import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
 import { isWorldDoc, lintWorld, migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -490,7 +490,7 @@ export class MockBackend {
         }, 900);
         return;
       case "lre.gm":
-        return this.result(reqId, "lre.gm", structuredClone(this.gm));
+        return this.result(reqId, "lre.gm", { ...structuredClone(this.gm), routineRoles: chatRolesFixture(this.routines) });
       case "lre.character": {
         // The real builder: Build's from the draft; GM's from the preview world as a chat starts it,
         // with each entity's place, holder and relations as the GM fixture has them now, so edits show.
