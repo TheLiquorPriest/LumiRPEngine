@@ -569,7 +569,13 @@ export interface LoreBookView {
   added: number | null;
 }
 
-/** One entry of a World Info book, for a pin picker and the lore editor (`lre.lore entries`); `disabled`: switched off in its book, which a pin still reads; `lore`: its LRE fields, when it has any. */
+/**
+ * One entry of a World Info book, for a pin picker and the lore editor (`lre.lore entries`);
+ * `disabled`: switched off in its book, which a pin still reads; `lore`: its LRE fields, when it has
+ * any. `twins`: the same entry in the user's other books of that name (DESIGN §4.2), which its
+ * secrecy keeps off with it. `copyOf`: the entry this one is kept secret with, as its twin's copy;
+ * `kept` while that one is secret, so this one follows it.
+ */
 export interface LoreBookEntryView {
   id: string;
   title: string;
@@ -577,6 +583,8 @@ export interface LoreBookEntryView {
   /** Its text's length, in characters. */
   chars: number;
   lore?: BookLoreFields;
+  twins?: { bookId: string; entryId: string }[];
+  copyOf?: { bookId: string; entryId: string; kept: boolean };
 }
 
 /**

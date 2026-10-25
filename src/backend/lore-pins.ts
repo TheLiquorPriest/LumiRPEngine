@@ -12,7 +12,7 @@ import type { LoreBookEntryView, LoreBookView, LorePinView, LorePinsView } from 
 import type { LorePin, WorldDoc } from "../shared/world";
 import { worldPinText, type PinRef, type PinnedText } from "../engine/lore-pins";
 import type { HostBookEntry, HostPort } from "./host";
-import { bookEntryTitle, bookLoreEntry } from "./book-lore";
+import { bookEntryTitle, bookLoreEntry, copyOriginal, namedAlikeEntries, ownSecret, secretCopyOf, twinned } from "./book-lore";
 
 /** An entry the engine wrote (`engineWroteEntry`: its own books' sections, the Minds section among them, which holds other minds): never read through a pin, whatever names it. */
 function engineWrote(e: HostBookEntry): boolean {
@@ -151,10 +151,19 @@ export async function pinBooks(host: Pick<HostPort, "books" | "chats">, chatId: 
     .sort((a, b) => Number(b.attached) - Number(a.attached) || a.name.localeCompare(b.name));
 }
 
-/** One book's entries, for a pin picker and the lore editor (`lre.lore entries`), in the book's order, each with its LRE fields when it has any. */
+/**
+ * One book's entries, for a pin picker and the lore editor (`lre.lore entries`), in the book's order,
+ * each with its LRE fields when it has any, its twins in the user's other books of that name (what
+ * its secrecy keeps off with it), and, for a twin kept secret as a copy, the entry it follows.
+ */
 export async function pinEntries(host: Pick<HostPort, "books">, bookId: string, userId: UserId): Promise<LoreBookEntryView[]> {
-  return (await host.books.entries(bookId, userId)).map((e) => {
+  const [entries, others] = await Promise.all([host.books.entries(bookId, userId), namedAlikeEntries(host, bookId, userId)]);
+  return entries.map((e) => {
     const lore = bookLoreFieldsOf(e.extensions);
-    return { id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length, ...(lore ? { lore } : {}) };
+    const twins = others.filter((o) => twinned(e, o) || secretCopyOf(o.extensions)?.entry === `${e.bookId}/${e.id}`).map((o) => ({ bookId: o.bookId, entryId: o.id }));
+    const copy = secretCopyOf(e.extensions);
+    const original = copy ? copyOriginal(copy) : null;
+    const kept = original !== null && others.some((o) => o.bookId === original.bookId && o.id === original.entryId && ownSecret(o) !== null);
+    return { id: e.id, title: bookEntryTitle(e), disabled: e.disabled, chars: e.content.length, ...(lore ? { lore } : {}), ...(twins.length > 0 ? { twins } : {}), ...(original ? { copyOf: { ...original, kept } } : {}) };
   });
 }

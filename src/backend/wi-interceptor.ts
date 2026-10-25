@@ -1,8 +1,9 @@
 // The World Info interceptor (DESIGN §6.1). In a world chat's every prompt assembly, before the host
 // activates World Info, an entry LRE keeps secret stays off until its gate holds, then comes on for
 // the prompt; and an entry an engine section carried this turn (§6.11) goes off for the prompt, so the
-// narrator doesn't read its text twice. It touches no other entry. It fails closed: when anything
-// can't be read, every secret stays off.
+// narrator doesn't read its text twice. A secret's twin LRE keeps as its copy is secret as its
+// original is. It touches no other entry. It fails closed: when anything can't be read, every secret
+// stays off.
 
 import type { ChatId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
@@ -11,6 +12,7 @@ import type { LoreEntryDef, WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { loreGateReader } from "../engine/visibility";
+import { secretCopyOf } from "./book-lore";
 import type { WorldInfoCandidate, WorldInfoInput, WorldInfoVerdict } from "./host";
 
 /** What the interceptor reads of the engine. */
@@ -66,9 +68,12 @@ async function verdict(gate: WorldInfoGate, input: WorldInfoInput): Promise<Worl
   const enabled: string[] = [];
   for (const e of rest) {
     const key = keyOf(e);
-    if (!own.has(e.id) && !indexed.has(key)) continue;
+    // A copy carries its original's own fields; the world entry indexed from its original binds it too.
+    const of = secretCopyOf(e.extensions)?.entry;
+    const world = indexed.has(key) ? key : of !== undefined && indexed.has(of) ? of : null;
+    if (!own.has(e.id) && world === null) continue;
     // Secret on either side is secret: it opens only once every secret side's gate holds (DESIGN §4.2).
-    const gates = [...(own.has(e.id) ? [own.get(e.id)] : []), ...(indexed.has(key) ? [indexed.get(key)] : [])];
+    const gates = [...(own.has(e.id) ? [own.get(e.id)] : []), ...(world !== null ? [indexed.get(world)] : [])];
     if (!gates.every((g) => holds(key, g))) disabled.push(e.id);
     else if (e.disabled) enabled.push(e.id);
   }

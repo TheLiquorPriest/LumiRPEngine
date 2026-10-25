@@ -381,6 +381,10 @@ export class WorldStore {
       return { draft: head, lint: lintWorld(head, this.registry), base: draft.head, stored: false, version: count };
     }
     if (request.base !== null && request.base !== draft.base) throw new WorldError("conflict", "the world changed; reload and retry");
+    // The lore as it stood: a collection write changes the draft's own objects in place, and the
+    // source securing below compares against this. Its entries are replaced, never changed, so a
+    // shallow copy keeps them.
+    const loreBefore = { ...draft.doc.lore };
     let doc = draft.doc;
     let base = draft.base;
     let lint: LintIssue[];
@@ -445,7 +449,7 @@ export class WorldStore {
     await this.writeJson(`${worldDir(worldId)}draft.json`, { base, doc, version }, userId);
     // A secret entry the save made or changed keeps the World Info entry it was indexed from off at
     // once; the draft before the save says which gate on that entry was the world entry's own.
-    await secureIndexedSecrets(this.host, doc, userId, (id) => !jsonEqual(doc.lore[id], draft.doc.lore[id]), draft.doc);
+    await secureIndexedSecrets(this.host, doc, userId, (id) => !jsonEqual(doc.lore[id], loreBefore[id]), { ...draft.doc, lore: loreBefore });
     changed?.(worldId, { version, stored: true, base });
     return { draft: doc, lint, base, stored: true, version };
   }
