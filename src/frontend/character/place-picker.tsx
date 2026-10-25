@@ -136,9 +136,10 @@ function BrowseLevel(props: { index: PlaceIndex; at: PlaceId | null; value: Plac
 
 /**
  * The picker's sheet alone, for an action rather than a field ("Move them…"): search, the caller's
- * suggestions, and the browse. Enter in the search picks its first result.
+ * suggestions, and the browse. Enter in the search picks its first result. `none` is what it says
+ * with no place now ("Not set" by default; Play's ✎ says the player character doesn't know).
  */
-export function PlaceSheet(props: { places: readonly PlaceRef[]; value: PlaceId | null; onPick(place: PlaceRef | null): void; onClose(): void; suggestions?: readonly PlaceSuggestion[]; title: string; clearLabel?: string }) {
+export function PlaceSheet(props: { places: readonly PlaceRef[]; value: PlaceId | null; onPick(place: PlaceRef | null): void; onClose(): void; suggestions?: readonly PlaceSuggestion[]; title: string; clearLabel?: string; none?: string }) {
   const index = useMemo(() => placeIndex(props.places), [props.places]);
   const current = props.value === null ? null : (index.byId.get(props.value) ?? null);
   const [query, setQuery] = useState("");
@@ -147,11 +148,11 @@ export function PlaceSheet(props: { places: readonly PlaceRef[]; value: PlaceId 
   const results = useMemo(() => searchPlaces(index, query), [index, query]);
   const searching = query.trim() !== "";
   return (
-    <FormSheet title={props.title} subtitle={current ? pathLabel(current) : "Not set"} onClose={props.onClose}>
+    <FormSheet title={props.title} subtitle={current ? pathLabel(current) : (props.none ?? "Not set")} onClose={props.onClose}>
       <div class="lre-cp-sheet" data-lre-place-sheet="">
         <div class="lre-cp-now">
           <span class="lre-cp-now-label">Now</span>
-          <PlacePath place={current} />
+          <PlacePath place={current} empty={props.none} />
         </div>
         <label class="lre-cp-search" for={searchId}>
           <Icon name="search" size={16} />

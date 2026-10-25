@@ -176,7 +176,7 @@ export function FixEditor(props: { label: string; title?: string; target: FixTar
   };
   if (target.type === "time") return <TimeFixForm title={title} target={target} busy={busy} formRef={form} onSave={(time) => send(timeFixRequest(time, chatId))} onCancel={props.onDone} onKeyDown={cancelOnEscape} />;
   const save = (value: JsonValue) => send(fixRequest(target, value, chatId));
-  if (target.places && target.places.length > 0) return <PlaceSheet places={target.places} value={typeof target.value === "string" ? target.value : null} title={title} onClose={props.onDone} onPick={(place) => (place ? save(place.id) : props.onDone())} />;
+  if (target.places && target.places.length > 0) return <PlaceSheet places={target.places} value={typeof target.value === "string" ? target.value : null} title={title} none="You don't know" onClose={props.onDone} onPick={(place) => (place ? save(place.id) : props.onDone())} />;
   if (target.options && target.options.length > 0) {
     const now = JSON.stringify(target.value);
     return (
