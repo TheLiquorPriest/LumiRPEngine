@@ -4,8 +4,9 @@
 // narrator doesn't read its text twice. An entry is as secret as its text is (`secrecyParts`): a
 // secret's twin in any book, one the host builds from a character's card for the prompt included,
 // stays off as the secret does. It touches no other entry, and nothing in a chat that plays no world.
-// It fails closed: when anything can't be read, every secret stays off, and while some book of the
-// user's was never read, every entry of the user's books does.
+// It fails closed: when anything can't be read, every secret stays off; while some book of the user's
+// was never read, every entry of the user's books does; and before LRE's first read of the user's
+// books has finished, which a prompt doesn't wait for within the host's time, so do they all.
 
 import type { ChatId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
@@ -26,8 +27,8 @@ export interface WorldInfoGate {
   head(chatId: ChatId, userId: UserId): Promise<{ world: WorldDoc; state: WorldState } | null>;
   /** The World Info entries the sections the guard wrote for this prompt carried, as `bookId/entryId`. */
   carried(chatId: ChatId): ReadonlySet<string>;
-  /** What LRE knows of the secrets in the user's books, read now (`loreIndex`). */
-  secrets(userId: UserId): Promise<LoreIndex>;
+  /** What LRE knows of the secrets in the user's books, read now; null before its first read of them has finished (`readyLoreIndex`). */
+  secrets(userId: UserId): Promise<LoreIndex | null>;
   /** The same as last read, for a failure that can't wait for a read (`lastLoreIndex`). */
   lastSecrets(userId: UserId): LoreIndex;
   log(message: string, userId: UserId): void;
@@ -75,6 +76,7 @@ async function verdict(gate: WorldInfoGate, input: WorldInfoInput): Promise<Worl
     return null;
   });
   const [index, head] = await Promise.all([gate.secrets(input.userId), reading]);
+  if (!index && rest.length > 0) gate.log("World Info: your books are still being read for the first time since the engine started, so your entries stay off for this prompt", input.userId);
   const texts = secretTexts(index, { world: head?.world ?? null, entries: rest });
   if (!head) return { disabled: [...disabled, ...secretsOf(rest, texts)], enabled: [] };
   const open = loreGateReader(gate.registry, head.world, head.state);

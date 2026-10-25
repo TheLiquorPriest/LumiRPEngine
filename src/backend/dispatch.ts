@@ -134,7 +134,9 @@ export class Dispatcher {
     const what = `${raw.type}${isRecord(raw) && typeof raw.op === "string" ? ` ${raw.op}` : ""}`;
     const t0 = performance.now();
     try {
-      // The Studio bridge serves each user from their first request on (DESIGN §15).
+      // The Studio bridge serves each user from their first request on (DESIGN §15), and the World
+      // Info secrets are read from then on too, so the first prompt that needs them finds them (§6.1).
+      this.rt.warmLore(userId);
       await this.rt.studio.serve(userId);
       await this.route(raw, userId, session, reply, noted);
     } catch (error) {

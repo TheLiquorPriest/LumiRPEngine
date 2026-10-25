@@ -147,6 +147,36 @@ describe("the World Info interceptor", () => {
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     expect(inPrompt(rig, SECRET)).toBe(false);
   });
+
+  test("before LRE's first read of the user's books has finished, a prompt doesn't wait for it: every entry of theirs is off, the engine's own left alone", async () => {
+    const registry = createRegistry(ALL_PACKS);
+    const world = blankWorld("w_cold", "Cold");
+    const verdict = await worldInfoVerdict(
+      { registry, playsWorld: () => true, head: async () => ({ world, state: startState(world, registry) }), carried: () => new Set(), secrets: async () => null, lastSecrets: (userId) => lastLoreIndex(new FakeHost(), userId), log: () => undefined },
+      { chatId: "c", userId: "u", chatMetadata: {}, entries: [candidate("plain", "b", false, {}, "PLAIN-MARK: the ferry is late."), candidate("section", "eb", false, { [LEDGER_NAMESPACE]: { slot: "place" } }, "[Place] The harbor.")] },
+    );
+    expect(verdict).toEqual({ disabled: ["plain"], enabled: [] });
+  });
+
+  test("a World Info book LRE can't read is named in a toast and in Settings → Caveats, and keeps the user's World Info off in world chats until it reads", async () => {
+    const { rig, chatId } = await bookChat([entry("The ferry", "FERRY-MARK: the ferry runs twice a day.")]);
+    const broken = await rig.host.books.create("Old notes", "", rig.host.userId);
+    const entries = rig.host.books.entries;
+    let damaged = true;
+    rig.host.books.entries = async (id, userId) => {
+      if (id === broken && damaged) throw new Error("the book is damaged");
+      return entries(id, userId);
+    };
+    const caveats = async (): Promise<string[]> => (rig.body(await rig.send({ type: "lre.settings.caveats" })).caveats as { message: string }[]).map((c) => c.message);
+    await rig.turn(chatId, "I wait.", "Gulls call.");
+    expect(inPrompt(rig, "FERRY-MARK")).toBe(false);
+    expect(rig.host.toasts.filter((t) => t.message.includes("Old notes"))).toHaveLength(1);
+    expect((await caveats()).some((m) => m.includes("Old notes") && m.includes("the book is damaged"))).toBe(true);
+    damaged = false;
+    await rig.turn(chatId, "I wait some more.", "Gulls call again.");
+    expect(inPrompt(rig, "FERRY-MARK")).toBe(true);
+    expect((await caveats()).some((m) => m.includes("Old notes"))).toBe(false);
+  });
 });
 
 describe("Build's World Info lore editor", () => {
@@ -341,6 +371,24 @@ describe("a secret World Info entry's twins", () => {
     expect(bookLoreFieldsOf(rig.host.storedEntry(twin)?.extensions)?.gate).toBe("false");
   });
 
+  test("a twin stays kept with its original after either one's text is edited, and Build and the server still say so", async () => {
+    const { rig, chatId, bookId, original, copyBook, twin } = await twinChat();
+    const entries = async (book: string) => rig.body(await rig.send({ type: "lre.lore", op: "entries", bookId: book })).entries as LoreBookEntryView[];
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId: original, fields: { secret: true, gate: GATE } }));
+    // A typo fixed in the original, in Lumiverse's own World Info editor: the twin holds the text as the card had it.
+    rig.host.editEntry(original, { content: `${SECRET}, as everyone suspected.` });
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(rig.host.storedEntry(twin)?.disabled).toBe(true);
+    expect(inPrompt(rig, SECRET)).toBe(false);
+    // Then the twin's own text, edited by hand.
+    rig.host.editEntry(twin, { content: `${SECRET}, or so the ferryman says.` });
+    await rig.turn(chatId, "I walk back to the ferry.", "The ferry horn sounds again.");
+    expect(rig.host.storedEntry(twin)?.disabled).toBe(true);
+    expect(inPrompt(rig, SECRET)).toBe(false);
+    expect((await entries(copyBook)).find((e) => e.id === twin)?.copyOf).toEqual({ bookId, entryId: original, kept: true });
+    expect((await rig.send({ type: "lre.lore", op: "fields", bookId: copyBook, entryId: twin, fields: null })).type).toBe("lre.error");
+  });
+
   test("a turn reads no book of the user's again when none changed since the last", async () => {
     const { rig, chatId } = await bookChat([entry("The ferry", "The ferry crosses to Gull Island twice a day.")]);
     const pair = [rig.host.userBook("TLS - Core"), rig.host.userBook("TLS - Core", { character: true })];
@@ -432,6 +480,63 @@ describe("World Info secrecy wherever the entry is read", () => {
     await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...(Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : []), bookId] }, rig.host.userId);
     return { bookId, entryId };
   }
+
+  /** A world chat on the test world, the player character at `here`: `setup` writes the draft's lore (and any books it reads) before the commit. */
+  async function loreChat(setup: (rig: Rig, worldId: string, here: string) => Promise<void>): Promise<{ rig: Rig; chatId: string }> {
+    const rig = new Rig();
+    for (const patch of [{ modelUse: { preset: "full" } }, { minds: { enabled: false } }]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
+    const worldId = await rig.newWorld("Harbor");
+    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc;
+    await setup(rig, worldId, draft.start.place);
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.host.quietReply = quiet;
+    return { rig, chatId };
+  }
+  const DEBT = "DEBT-MARK: the ferryman owes the harbor master money.";
+  /** A book holding `DEBT`, Known by whoever knows `links`; attached to `chatId` when given. */
+  async function debtBook(rig: Rig, links: string[], chatId?: string): Promise<{ bookId: string; entryId: string }> {
+    const bookId = await rig.host.books.create("Harbor notes", "", rig.host.userId);
+    const entryId = await rig.host.books.createEntry(bookId, entry("The debt", DEBT, { extensions: { [LEDGER_NAMESPACE]: { lore: { visibility: "known_by", links } } } }), rig.host.userId);
+    if (!chatId) return { bookId, entryId };
+    const meta = await rig.host.chats.chatMetadata(chatId, rig.host.userId);
+    await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...(Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : []), bookId] }, rig.host.userId);
+    return { bookId, entryId };
+  }
+
+  test("a world entry with a visibility no reader knows stays unread by every call, whatever its links", async () => {
+    const RUMOR = "RUMOR-MARK: the harbor master takes bribes.";
+    const { rig, chatId } = await loreChat(async (rig, worldId, here) => {
+      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "rumor", value: { id: "rumor", title: "Harbor rumor", content: RUMOR, keys: ["ferry"], links: [here], visibility: "secret" } }));
+    });
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
+    expect(carrying(rig, "RUMOR-MARK")).toEqual([]);
+    expect(inPrompt(rig, "RUMOR-MARK")).toBe(false);
+  });
+
+  test("a Known-by world entry that links nothing stays unread when a book entry of its text links what the player character knows", async () => {
+    let place = "";
+    const { rig, chatId } = await loreChat(async (rig, worldId, here) => {
+      place = here;
+      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "debt", value: { id: "debt", title: "The debt", content: DEBT, keys: ["ferry"], links: [], visibility: "known_by" } }));
+    });
+    await debtBook(rig, [place], chatId);
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
+    expect(carrying(rig, "DEBT-MARK")).toEqual([]);
+  });
+
+  test("a Known-by world entry that links nothing stays unread though the book entry it was indexed from links what the player character knows", async () => {
+    const { rig, chatId } = await loreChat(async (rig, worldId, here) => {
+      const { bookId, entryId } = await debtBook(rig, [here]);
+      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "debt", value: { id: "debt", title: "The debt", content: DEBT, keys: ["ferry"], links: [], visibility: "known_by", source: { kind: "book", bookId, entryId, hash: bookTextHash(DEBT) } } }));
+    });
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(rig.host.quietCalls.length).toBeGreaterThan(0);
+    expect(carrying(rig, "DEBT-MARK")).toEqual([]);
+  });
 
   /**
    * A world chat whose starting place has one book entry pinned, its book attached to no chat:

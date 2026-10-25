@@ -74,7 +74,7 @@ import { claimFor, outOfHand } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { pinReader } from "./lore-pins";
 import { liveLore, secureIndexedSecrets } from "./book-lore";
-import { lastLoreIndex, loreIndex } from "./lore-secrets";
+import { lastLoreIndex, readyLoreIndex, unreadBooks, untold, warmLoreIndex, type LoreIndex } from "./lore-secrets";
 import { worldInfoVerdict, type WorldInfoGate } from "./wi-interceptor";
 import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
 import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
@@ -2543,7 +2543,44 @@ export class Runtime implements TurnHooks {
    */
   async readLore(chatId: ChatId, userId: UserId, world: WorldDoc): Promise<WorldDoc> {
     await secureIndexedSecrets(this.host, world, userId);
-    return await liveLore(this.host, world, chatId, userId);
+    const live = await liveLore(this.host, world, chatId, userId);
+    this.tellUnread(lastLoreIndex(this.host, userId), userId);
+    return live;
+  }
+
+  /**
+   * Starts LRE's first read of the user's World Info books (DESIGN §6.1), so the first prompt that
+   * needs their secrets finds them read: from the user's first request on. It neither waits nor throws.
+   */
+  warmLore(userId: UserId): void {
+    warmLoreIndex(this.host, userId);
+  }
+
+  /**
+   * Tells the user, once each, of a World Info book LRE never managed to read, and of their books not
+   * being listed: while either lasts, all of their World Info is off in world chats (DESIGN §6.1).
+   * Settings → Caveats says what to do (`loreCaveats`).
+   */
+  private tellUnread(index: LoreIndex | null, userId: UserId): void {
+    if (!index) return;
+    const { unlisted, books } = untold(index);
+    if (unlisted) this.host.toast("World Info is off in your world chats: LumiRPEngine can't list your World Info books. Settings → Caveats says more.", userId);
+    for (const name of books) this.host.toast(`World Info is off in your world chats: LumiRPEngine can't read your World Info book “${name}”. Settings → Caveats says what to do.`, userId);
+  }
+
+  /**
+   * Settings → Caveats' World Info books LRE can't read (DESIGN §6.1): while one was never read, any
+   * entry could be the twin of a secret in it, so all of the user's World Info is off in world chats.
+   * Nothing while LRE's first read of them is still under way.
+   */
+  private async loreCaveats(userId: UserId): Promise<PresetCaveat[]> {
+    const index = await readyLoreIndex(this.host, userId);
+    if (!index) return [];
+    const { unlisted, books } = unreadBooks(index);
+    return [
+      ...(unlisted !== null ? [{ code: "lore_books_unlisted" as const, message: `LumiRPEngine can't list your World Info books (${unlisted.slice(0, 200)}), so it keeps all of your World Info off in world chats until it can: any entry could be the twin of a secret it hasn't read. It tries again at the next turn.` }] : []),
+      ...books.map((b) => ({ code: "lore_book_unread" as const, message: `LumiRPEngine can't read your World Info book “${b.name}” (${b.reason.slice(0, 200)}), so it keeps all of your World Info off in world chats until it can: any of your entries could be the twin of a secret in that book. Open the book in Lumiverse's World Info panel to check it, or delete it if you don't need it; LumiRPEngine reads it again at the next turn.` })),
+    ];
   }
 
   /** What the World Info interceptor reads of the engine (DESIGN §6.1). */
@@ -2553,7 +2590,11 @@ export class Runtime implements TurnHooks {
       playsWorld: (meta) => readRun(meta) !== null,
       head: (chatId, userId) => this.ledger.narratorState(chatId, userId),
       carried: (chatId) => this.carriedEntries.get(chatId) ?? new Set(),
-      secrets: (userId) => loreIndex(this.host, userId),
+      secrets: async (userId) => {
+        const index = await readyLoreIndex(this.host, userId);
+        this.tellUnread(index, userId);
+        return index;
+      },
       lastSecrets: (userId) => lastLoreIndex(this.host, userId),
       log: (message, userId) => this.host.log("warn", `[LumiRPEngine] ${message}`, userId),
     };
@@ -2718,8 +2759,9 @@ export class Runtime implements TurnHooks {
     const late = Promise.withResolvers<typeof LATE>();
     const timer = ms === null ? null : setTimeout(() => late.resolve(LATE), ms);
     try {
-      // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1).
-      const host: PresetCaveat[] = [...(this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop" as const, message: CANNOT_STOP }]), ...(await this.stepCaveats(userId, settings, late.promise))];
+      // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1),
+      // and World Info books LRE can't read, which keep all of the user's World Info off (§6.1).
+      const host: PresetCaveat[] = [...(this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop" as const, message: CANNOT_STOP }]), ...(await this.loreCaveats(userId)), ...(await this.stepCaveats(userId, settings, late.promise))];
       const open = await this.host.chats.active(userId).catch(() => null);
       const chatId = open && (await this.runOf(open, userId)) ? open : this.lastWorldChat.get(userId);
       if (!chatId) return host;
