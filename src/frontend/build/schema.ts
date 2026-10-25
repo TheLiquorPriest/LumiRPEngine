@@ -8,7 +8,7 @@ import { DOMAINS } from "../../shared/ids";
 import type { WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnTierOf } from "../../shared/tiers";
 import type { WorldDoc } from "../../shared/world";
-import { FEED_SCOPES } from "../../shared/world";
+import { FEED_SCOPES, SCOPE_LABEL } from "../../shared/world";
 import { STEP_LABEL, STEP_OUTPUT_LABEL } from "../../shared/steps";
 
 export type RefCollection = "kinds" | "relations" | "entities" | "places" | "grids" | "checks" | "tracks" | "tables" | "lore";
@@ -484,7 +484,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
     // The section's feed (DESIGN §6.11): the world's defaults, which the GM can set per chat.
     { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v) => v !== false },
-    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: { player: "What your character knows", scene: "Also what the people with your character know", gm: "Everything, with what your character doesn't know marked" }, optional: true, hint: "Unset, it's what your character knows. The wider choices also tell the narrator what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
+    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: SCOPE_LABEL, optional: true, hint: "Unset, it's what your character knows. The wider choices also tell the narrator what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
     { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
     { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
     { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" },

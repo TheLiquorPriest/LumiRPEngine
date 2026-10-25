@@ -760,6 +760,13 @@ export type SlotPosition =
 export type FeedScope = "player" | "scene" | "gm";
 export const FEED_SCOPES: readonly FeedScope[] = ["player", "scene", "gm"];
 
+/** Each scope in the GM's and the author's words: Build's Sections field and GM → This chat → Sections both say them. */
+export const SCOPE_LABEL: Record<FeedScope, string> = {
+  player: "What your character knows",
+  scene: "Also what the people with your character know",
+  gm: "Everything, with what your character doesn't know marked",
+};
+
 /**
  * What goes into a section (DESIGN §6.11): the world's defaults on its section, the GM's per chat
  * over them. Every part is optional; a section with none delivers as it always has.

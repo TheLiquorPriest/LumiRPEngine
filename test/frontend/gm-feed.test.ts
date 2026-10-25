@@ -3,7 +3,8 @@
 // ticked by what they tell; ticking just a section's own is no pick at all.
 
 import { describe, expect, test } from "bun:test";
-import { chatFeedOf, feedSummary, ownSources, SCOPE_LABEL, sourcesMissing, sourcesTaken } from "../../src/frontend/gm/feed";
+import { chatFeedOf, feedNotice, feedNoticeStands, feedSummary, ownSources, sourcesMissing, sourcesTaken } from "../../src/frontend/gm/feed";
+import { SCOPE_LABEL } from "../../src/shared/world";
 
 const SOURCES = [
   { id: "location", slot: "scene", label: "Where" },
@@ -49,5 +50,18 @@ describe("the GM's section settings form", () => {
     // Place has its own: nothing ticked blocks the save, unless the section is switched off.
     expect(sourcesMissing({}, [], ownSources(SOURCES, "place"))).toBe(true);
     expect(sourcesMissing({ enabled: false }, [], ownSources(SOURCES, "place"))).toBe(false);
+  });
+
+  test("a save leaves a notice naming the section and what this chat now sets, and its Undo stands while its chip does", () => {
+    const capped = feedNotice("Outline", { maxTokens: 400 });
+    expect(capped).toContain("Outline");
+    expect(capped).toContain("400");
+    // Going back to the world's, switching off and a wider scope each read differently.
+    const notices = [feedNotice("Outline", null), feedNotice("Outline", { enabled: false }), feedNotice("Outline", { scope: "gm" }), capped];
+    expect(new Set(notices).size).toBe(notices.length);
+    expect(feedNotice("People", { scope: "gm" }).toLowerCase()).toContain(SCOPE_LABEL.gm.toLowerCase());
+    const notice = { text: capped, undo: ["fix:m4:0:3"] };
+    expect(feedNoticeStands(notice, [{ id: "fix:m4:0:3" }, { id: "other" }])).toBe(true);
+    expect(feedNoticeStands(notice, [{ id: "other" }])).toBe(false);
   });
 });

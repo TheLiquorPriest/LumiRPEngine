@@ -103,7 +103,7 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
         </GmPage>
       ) : page === "sections" ? (
         <GmPage name="sections" title="Sections" subtitle="This chat" backLabel="This chat" onBack={pages.back}>
-          <FeedThisChat chatId={view.chatId} controls={controls} />
+          <FeedThisChat chatId={view.chatId} controls={controls} chips={view.chips} />
         </GmPage>
       ) : page === "pins" ? (
         <GmPage name="pins" title="Pins and upgrade" subtitle="This chat" backLabel="This chat" onBack={pages.back}>

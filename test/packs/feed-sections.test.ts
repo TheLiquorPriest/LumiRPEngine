@@ -12,6 +12,7 @@ import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "./riverton";
 import { startState } from "./support";
 import { factLines, slotVars } from "../../src/backend/turn-steps";
+import { ROLE_LABEL } from "../../src/packs/economy/core/feed";
 
 const reg = createRegistry(ALL_PACKS);
 
@@ -88,6 +89,29 @@ describe("the Property section", () => {
     const line = out.find((l) => l.text.includes("The Elm Street house"))?.text ?? "";
     expect(line).toContain("60%");
     expect(line).toContain("Maya Chen");
+  });
+
+  // The house as the Property section tells it, with these holders.
+  const houseLine = (owners: { party: string; role: string; share?: number }[], scope: FeedScope = "player"): string =>
+    lines((w) => {
+      w.entities.house = { id: "house", kind: "property", name: "The Elm Street house", tier: "background", fields: { place: "apartment_bldg", owners, value: 25000000 }, relations: [] };
+    }, "property", scope).find((l) => l.text.includes("The Elm Street house"))?.text ?? "";
+
+  test("a role that only uses, keeps or benefits is never told as his own, and the owner comes with their role", () => {
+    for (const role of ["authorized_user", "custodian", "beneficiary", "trustee"] as const) {
+      const line = houseLine([{ party: "maya", role: "owner", share: 100 }, { party: "you", role }]);
+      expect(line).not.toMatch(/\byours\b/);
+      expect(line).toContain(ROLE_LABEL[role]);
+      expect(line).toMatch(new RegExp(`Maya Chen \\(${ROLE_LABEL.owner}\\b`));
+    }
+    // Owning outright or jointly is his.
+    expect(houseLine([{ party: "you", role: "joint", share: 50 }, { party: "maya", role: "joint", share: 50 }])).toMatch(/\byours\b/);
+  });
+
+  test("every co-owner is told with their role", () => {
+    const line = houseLine([{ party: "you", role: "owner", share: 60 }, { party: "maya", role: "joint", share: 30 }, { party: "rosa", role: "authorized_user" }]);
+    expect(line).toMatch(new RegExp(`Maya Chen \\(${ROLE_LABEL.joint}`));
+    expect(line).toMatch(new RegExp(`\\(${ROLE_LABEL.authorized_user}`));
   });
 });
 
