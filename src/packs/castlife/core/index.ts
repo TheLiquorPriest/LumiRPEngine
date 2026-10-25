@@ -27,7 +27,7 @@ import type { EntityId, PlaceId, TierId } from "../../../shared/ids";
 import { facetsInOrder, facetTree } from "../../../shared/classes";
 import { MINDS_EVENTS } from "../../../shared/minds";
 import { tierLabel, tierOf, tiersInOrder } from "../../../shared/tiers";
-import type { FacetId, FacetValueId, FeedScope, ScheduleDef, WorldDoc } from "../../../shared/world";
+import { activitySpanEnd, type FacetId, type FacetValueId, type FeedScope, type ScheduleDef, type WorldDoc } from "../../../shared/world";
 import type { LintIssue } from "../../../shared/protocol";
 import { initialState, minutesBetween } from "../../../engine/world-state";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -189,16 +189,18 @@ function toBed(ctx: ReadContext, who: EntityId): LedgerEvent[] {
 }
 
 /**
- * A conversation the POV is in meets its social need as it ends (DESIGN §8): at the end of the chat's
- * span while the chat is its activity (`activity_until`: the length it was stated, else the chat's
- * own), else at once. Nothing for a conversation between others: only the POV's needs are recorded.
+ * A conversation the POV is in meets its social need (DESIGN §8): at once, unless it is the POV's own
+ * chat, whose span is still going on (`activitySpanEnd`, the length it was stated, else the chat's own):
+ * that is met as the span ends, by the action that began it (`povSpanEnded`, so "Not an action?" takes
+ * it back too) or by the skip that passes it. Nothing for a conversation between others: only the
+ * POV's needs are recorded.
  */
 function companyMet(ctx: ReadContext, pair: readonly EntityId[]): LedgerEvent[] {
   const pov = ctx.world.pov;
   const e = own(ctx.state.entities, pov);
   if (!e || !pair.includes(pov)) return [];
-  const until = e.fields.activity === "chat" && typeof e.fields.activity_until === "number" ? Math.max(ctx.state.clock, e.fields.activity_until) : ctx.state.clock;
-  return metAt(ctx, pov, "social", until);
+  const end = e.fields.activity === "chat" ? activitySpanEnd(e.fields) : null;
+  return end !== null && end > ctx.state.clock ? [] : metAt(ctx, pov, "social", ctx.state.clock);
 }
 
 /**
@@ -887,8 +889,9 @@ function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slo
 /**
  * Until when the POV lived `activity` in the span (`since`, `at`] (DESIGN §8): `at`, while its routine
  * runs and the block of its day holding then is that activity (it sleeps at night by routine); else
- * the end of the span the action that began it gave it (`activity_until`), when that reaches past
- * `since`. Null when nothing says it lived it then: an activity the story left behind long ago meets nothing.
+ * the end of the span the action that began it gave it (`activitySpanEnd`: only while that is still
+ * the activity, never an end another one left behind), when that reaches past `since`. Null when
+ * nothing says it lived it then: an activity the story left behind long ago meets nothing.
  */
 function livedUntil(ctx: ReadContext, activity: string, since: number, at: number, routine: boolean): number | null {
   if (activity === "") return null;
@@ -897,8 +900,9 @@ function livedUntil(ctx: ReadContext, activity: string, since: number, at: numbe
     const plan = dayPlan(ctx, pov, dateAt(calendarOf(ctx.world), at - 1).dayIndex);
     if (plan.blocks.some((b) => b.start < at && at <= b.end && blockActivity(b.activity) === activity)) return at;
   }
-  const until = own(ctx.state.entities, pov)?.fields.activity_until;
-  return typeof until === "number" && until > since ? Math.min(until, at) : null;
+  const fields = own(ctx.state.entities, pov)?.fields;
+  const until = fields?.activity === activity ? activitySpanEnd(fields) : null;
+  return until !== null && until > since ? Math.min(until, at) : null;
 }
 
 /** Whether someone the POV knows (seen and met, still acting) is with it now: time with them is company. */
@@ -939,19 +943,24 @@ function povLivedNeeds(ctx: ReadContext, slot: SlotInfo, at = slot.end): LedgerE
 
 /**
  * What the POV lived through an ordinary turn's own time (DESIGN §8; `ProcessDef.lived`), read as it
- * ends: an activity whose span ended within it (a meal, a nap, a rest the turn passed) meets that
- * activity's needs at that end, and someone it knows with it then meets its social need. A span still
- * going on (a night just begun) waits for its end, in a later turn or a skip, so going to bed and
- * getting up again still rests no one; one that ended before meets nothing. The story holds the POV in
- * a turn, so its routine says nothing here, and no skip reads this time again (`passedFrom`).
+ * ends: someone it knows with it then meets its social need. What an activity meets as its span ends
+ * is the turn's to read (`povSpanEnded`) or its Speed through's; the story holds the POV in a turn, so
+ * its routine says nothing here, and no skip reads this time again (`passedFrom`).
  */
 function povTurnNeeds(ctx: ReadContext, who: EntityId, span: { from: number; to: number }): LedgerEvent[] {
+  if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4 || !needsOn(ctx.world).includes("social") || !inCompany(ctx)) return [];
+  return metAt(ctx, who, "social", span.to, true);
+}
+
+/**
+ * What an activity met as its span ended within a turn's time (DESIGN §8; `ProcessDef.ended`): the
+ * needs that activity meets, at that end (a world's own dinner, a chat, the rest of a bath an earlier
+ * turn began). The turn makes the action's own span part of that action, so "Not an action?" takes
+ * it back with the activity; worded, unlike what a turn's own time met.
+ */
+function povSpanEnded(ctx: ReadContext, who: EntityId, activity: { type: string; until: number }): LedgerEvent[] {
   if (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4) return [];
-  const e = own(ctx.state.entities, who);
-  const until = e?.fields.activity_until;
-  const met: [NeedId, number][] = typeof until === "number" && until > span.from && until <= span.to ? needsMetBy(ctx, strOf(e?.fields.activity)).map((n) => [n, until]) : [];
-  if (!met.some(([n]) => n === "social") && needsOn(ctx.world).includes("social") && inCompany(ctx)) met.push(["social", span.to]);
-  return met.flatMap(([need, t]) => metAt(ctx, who, need, t, true));
+  return needsMetBy(ctx, activity.type).flatMap((n) => metAt(ctx, who, n, activity.until));
 }
 
 /**
@@ -972,7 +981,7 @@ const ACTIVITY_END = "needs:end";
 
 /**
  * The POV's moment in a slot where what it is doing stops being lived by this run (DESIGN §8): the end
- * of the span its action gave it (`activity_until`), or the run's own end when that comes first inside
+ * of the span its action gave it (`activitySpanEnd`), or the run's own end when that comes first inside
  * the slot, so a skip ending mid-slot (a speed-through to 07:00) meets the activity's needs then.
  * `povLivedNeeds` reads at that moment what it lived, so a span that ended before the run meets nothing.
  */
@@ -981,8 +990,8 @@ function activityEndMoment(ctx: ReadContext, slot: SlotInfo): AgentInstant[] {
   const e = own(ctx.state.entities, pov);
   if (ctx.levelOf(pov, "castlife") < 4 || needsMetBy(ctx, strOf(e?.fields.activity)).length === 0) return [];
   const from = passedFrom(slot);
-  const until = e?.fields.activity_until;
-  const ends = [...(typeof until === "number" && until > from ? [until] : []), ...(slot.run ? [slot.run.to] : [])];
+  const until = activitySpanEnd(e?.fields);
+  const ends = [...(until !== null && until > from ? [until] : []), ...(slot.run ? [slot.run.to] : [])];
   const at = ends.length > 0 ? Math.min(...ends) : null;
   return at !== null && at > from && at < slot.end ? [{ at, key: ACTIVITY_END }] : [];
 }
@@ -1715,7 +1724,7 @@ export const castlifePack: PackDef = {
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
     r.query("castlife.chat_roles", (ctx) => chatRoles(ctx.state));
-    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)), lived: povTurnNeeds });
+    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)), lived: povTurnNeeds, ended: povSpanEnded });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     // Whatever the level: a plan nothing lives is still settled.
     r.process({ id: "castlife.plans", domain: "castlife", minLevel: 0, step: (slot, ctx) => dropUnlived(slot, ctx) });

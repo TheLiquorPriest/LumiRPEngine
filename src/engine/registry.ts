@@ -239,10 +239,18 @@ export interface ProcessDef {
   atInstant?(ctx: ReadContext, agent: EntityId, instant: AgentInstant, slot: SlotInfo): LedgerEvent[];
   /**
    * What the POV lived through the ordinary time of a turn (`span`, a turn-mode advance; DESIGN §8),
-   * read as that time ends. No slot step reads it: a turn steps no one but the agents it catches up,
-   * never the POV, and a later skip passes over it (`SlotInfo.run`), so this is the only reading.
+   * read as that time ends: what the time itself gave, not what an action did. No slot step reads it:
+   * a turn steps no one but the agents it catches up, never the POV, and a later skip passes over it
+   * (`SlotInfo.run`), so this is the only reading.
    */
   lived?(ctx: ReadContext, agent: EntityId, span: { from: number; to: number }): LedgerEvent[];
+  /**
+   * What an activity met as its span ended within a turn's time (`activity`, ending at `until`;
+   * DESIGN §9.2), read for the player character at that end: the span the turn's own action gave it,
+   * as part of that action, so an Undo of it takes this too; or one an earlier turn began, short
+   * enough to pass in turns, that this turn's time saw out.
+   */
+  ended?(ctx: ReadContext, agent: EntityId, activity: { type: string; until: number }): LedgerEvent[];
 }
 
 /** A pack's default table and its column contract (ARCHITECTURE §6). */

@@ -13,7 +13,7 @@ import { DOMAINS } from "../shared/ids";
 import type { GmEntity, GmField, GmView } from "../shared/state-view";
 import { tiersInOrder } from "../shared/tiers";
 import type { FieldDef, FieldType, WorldDoc } from "../shared/world";
-import { BUILTIN_RELATIONS, lifeStateOf, lifeStatesOf } from "../shared/world";
+import { ACTIVITY_SPAN_OF, BUILTIN_RELATIONS, lifeStateOf, lifeStatesOf } from "../shared/world";
 import { fieldBounds } from "./effects";
 import { optionalQuery, own } from "./pack-kit";
 import type { ReadContext } from "./registry";
@@ -49,7 +49,8 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
   const defs = kindFields(reg, world, e.kind);
   const fields: GmField[] = Object.entries(defs).map(([field, def]) => fieldOf(reg, ctx, id, field, def, own(e.fields, field)));
   for (const [field, value] of Object.entries(e.fields)) {
-    if (field === GONE_FIELD || own(defs, field)) continue;
+    // The activity a span was given for is the engine's own record: the GM edits the activity and its end.
+    if (field === GONE_FIELD || field === ACTIVITY_SPAN_OF || own(defs, field)) continue;
     // A value the kind doesn't declare is edited as what it holds.
     fields.push({ id: field, label: field.replace(/_/g, " "), type: typeof value === "number" ? "number" : typeof value === "boolean" ? "bool" : Array.isArray(value) ? "list" : "text", value, extra: true });
   }

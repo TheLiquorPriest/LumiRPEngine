@@ -521,6 +521,25 @@ export interface ActivitySpec {
 }
 
 /**
+ * The activity an action's span (`activity_until`) was given for, written with it (DESIGN §9.2).
+ * Anything else that sets `activity` (a meal's `set`, a narrated move, a routine, a ✎ edit) leaves the
+ * old end behind, which isn't the new activity's: `activitySpanEnd` reads an end only for its own.
+ */
+export const ACTIVITY_SPAN_OF = "_activity_span";
+
+/**
+ * When someone's current activity ends, as the action that began it said: `activity_until` while the
+ * activity is still the one it was given for; null when there is none, or another activity has been
+ * set since. A state from before the span named its activity reads the end as it always did.
+ */
+export function activitySpanEnd(fields: Readonly<JsonObject> | undefined): number | null {
+  const until = fields?.activity_until;
+  if (typeof until !== "number") return null;
+  const of = fields?.[ACTIVITY_SPAN_OF];
+  return of === undefined || of === fields?.activity ? until : null;
+}
+
+/**
  * What makes an action a combat action (DESIGN §11): only worlds whose ruleset defines combat offer
  * it, and in a fight it is taken on its actor's turn, spending its cost from the actor's economy.
  */

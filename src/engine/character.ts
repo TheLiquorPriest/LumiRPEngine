@@ -8,7 +8,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { PARTY_RELATION } from "../shared/party";
-import { ALIVE, lifeStateOf, type FieldDef, type Recurrence, type RelationInstance, type RelationTypeDef, type ScheduleDef, type ScheduleSlot, type WorldDoc } from "../shared/world";
+import { ACTIVITY_SPAN_OF, activitySpanEnd, ALIVE, lifeStateOf, type FieldDef, type Recurrence, type RelationInstance, type RelationTypeDef, type ScheduleDef, type ScheduleSlot, type WorldDoc } from "../shared/world";
 import { calendarOf, formatStamp, formatTimeOfDay, placeOffset, weekdayName } from "./calendar";
 import { lifeOf } from "./life";
 import { optionalQuery, own } from "./pack-kit";
@@ -337,7 +337,7 @@ function nowOf(world: WorldDoc, state: Readonly<WorldState>, id: EntityId): Char
   return {
     activity,
     activityLabel: words(activity),
-    until: when(e?.fields.activity_until),
+    until: when(activitySpanEnd(e?.fields)),
     party: e?.relations.some((r) => r.type === PARTY_RELATION && r.to === world.pov) ?? false,
     holds: Object.keys(holds)
       .sort()
@@ -362,7 +362,8 @@ function sectionsOf(reg: Registry, world: WorldDoc, e: Body): CharacterSection[]
     id = k?.extends;
   }
   const sections = new Map<CharacterSection["id"], CharacterField[]>(SECTION_ORDER.map((s) => [s, []]));
-  const ids = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])];
+  // The activity a span was given for is the engine's own record, never a field of theirs.
+  const ids = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])].filter((field) => field !== ACTIVITY_SPAN_OF);
   for (const field of ids) {
     const def = own(defs, field);
     const section: CharacterSection["id"] = def?.locked || def?.derived !== undefined ? "advanced" : (SECTION_OF[field] ?? (sheet.has(field) ? "stats" : authored.has(field) ? "identity" : "advanced"));

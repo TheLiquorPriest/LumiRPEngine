@@ -27,7 +27,7 @@ export interface TimeChange {
   to: JsonValue;
 }
 
-/** Speed through's rows: the activities it always lists, then the world's own, each with its policy, or null when it has none (that activity passes within the turn). */
+/** Speed through's rows: the activities it always lists, then the world's own, each with its policy, or null when it has none (that activity is never sped through: its time passes in the player's turns). */
 export function speedRows(speedThrough: TimeValues["speedThrough"]): { activity: string; policy: TimeValues["speedThrough"][string] | null }[] {
   return [...new Set<string>([...SPEED_ACTIVITIES, ...Object.keys(speedThrough)])].map((activity) => ({ activity, policy: hasOwn(speedThrough, activity) ? (speedThrough[activity] ?? null) : null }));
 }
@@ -106,7 +106,7 @@ export function TimeControlsEditor(props: { values: TimeValues; onChange(change:
           <div key={activity} class="lre-gm-speed" role="group" aria-label={humanize(activity)}>
             <div class="lre-gm-subtitle">
               {humanize(activity)}
-              {policy ? null : <span class="lre-gm-subtitle-note"> · passes within the turn</span>}
+              {policy ? null : <span class="lre-gm-subtitle-note"> · never sped through: its time passes in your turns</span>}
             </div>
             <Seg<"offer" | "auto">
               label={`${humanize(activity)} mode`}

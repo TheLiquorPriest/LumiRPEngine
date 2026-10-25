@@ -16,7 +16,7 @@ import type { Limit, MindMoment, MindsCharacter, MindsMemoryConfig, MindsReads }
 import { limitOf, planWords } from "../shared/minds";
 import { loreIsSecret } from "../shared/lore";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
-import { formatMoney } from "../shared/world";
+import { ACTIVITY_SPAN_OF, activitySpanEnd, formatMoney } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock, formatHHMM, holidaysOn } from "../engine/calendar";
 import { cuesOf } from "../engine/cues";
 import { loreHeldBy, loreReadable, loreSearch, loreSnippet } from "../engine/lore";
@@ -82,7 +82,7 @@ export interface MindContextReport {
 }
 
 /** Fields a person's sheet holds that the context says elsewhere or that are the engine's own bookkeeping. */
-const SKIPPED_FIELDS: Readonly<Record<string, true>> = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true };
+const SKIPPED_FIELDS: Readonly<Record<string, true>> = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true, [ACTIVITY_SPAN_OF]: true };
 
 const STOP: Readonly<Record<string, true>> = Object.fromEntries("the and for with that this from into have has had was were are you your they them their there here what when where which who how why just very some more most other then than about would could should will been being does did not but all any can its it's i'm he's she's".split(" ").map((w) => [w, true] as const));
 
@@ -218,7 +218,12 @@ function occasion(scope: Pick<MindScope, "reg" | "world" | "state">, place: Plac
   return `It is ${formatClock(cal, state.clock)} (${dayPartAt(cal, state.clock).label.toLowerCase()})${holidays.length > 0 ? `, ${holidays.join(", ")}` : ""}${sky ? `; the weather: ${sky.replace(/_/g, " ")}` : ""}.`;
 }
 
-/** Their own fields, a list of words or ids (traits, likes) as a comma list; the engine's own records and other objects left out. */
+/**
+ * Their own fields, a list of words or ids (traits, likes) as a comma list; the engine's own records
+ * and other objects left out. When what they're doing ends is told as every other time here is, the
+ * world's day and time in words (a bare count of minutes means nothing to a model), and only while
+ * it is still ahead and still that activity's (`activitySpanEnd`): an end gone by tells nothing.
+ */
 function sheetLines(scope: MindScope): string[] {
   const { reg, world, state, who } = scope;
   const e = own(state.entities, who);
@@ -226,9 +231,14 @@ function sheetLines(scope: MindScope): string[] {
   const out: string[] = [];
   for (const [field, value] of Object.entries(e.fields).sort(([a], [b]) => a.localeCompare(b))) {
     if (SKIPPED_FIELDS[field] || value === null) continue;
+    const label = fieldDef(reg, world, e.kind, field)?.label ?? field.replace(/_/g, " ");
+    if (field === "activity_until") {
+      const end = activitySpanEnd(e.fields);
+      if (end !== null && end > state.clock) out.push(`- ${label}: ${formatClock(calendarOf(world), end)}`);
+      continue;
+    }
     const items = Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : typeof value === "object" ? [] : [value];
     if (items.length === 0) continue;
-    const label = fieldDef(reg, world, e.kind, field)?.label ?? field.replace(/_/g, " ");
     out.push(`- ${label}: ${items.map((v) => (typeof v === "string" && (own(state.entities, v) || own(world.places, v)) ? nameOf(scope, v) : String(v).replace(/_/g, " "))).join(", ")}`);
   }
   return out;

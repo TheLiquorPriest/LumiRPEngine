@@ -24,7 +24,7 @@ import { hasOwn, isRecord } from "../shared/json";
 import { neutralizeMacros } from "../shared/macros";
 import type { JobProposal, RoutineJobInput } from "../shared/protocol";
 import { blockShapeProblems, isOff, ROUTINE_BLOCK_KINDS, type RoutineBlock, type RoutineCompany, type RoutineDays, type RoutineDef, type RoutinePlace, type WorldRoutineSource } from "../shared/routines";
-import type { PlaceDef, Recurrence, ScheduleDef, WorldDoc } from "../shared/world";
+import { ACTIVITY_SPAN_OF, type PlaceDef, type Recurrence, type ScheduleDef, type WorldDoc } from "../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOfText, formatStamp, MINUTES_PER_DAY, parseHHMM, recursOn, weekdayName, type Calendar } from "../engine/calendar";
 import { acts } from "../engine/life";
 import { loreReadable, loreSearch } from "../engine/lore";
@@ -67,7 +67,7 @@ const CHECK_DAYS = 14;
 const FLAGGED_CONFIDENCE = 0.4;
 
 /** Fields that say where someone is or what they do now, not who they are: the engine's own state. */
-const STATE_FIELDS: Record<string, true> = { place: true, activity: true, x: true, y: true, needs: true, holds: true, known_places: true, visibility: true, knownBy: true };
+const STATE_FIELDS: Record<string, true> = { place: true, activity: true, x: true, y: true, needs: true, holds: true, known_places: true, visibility: true, knownBy: true, [ACTIVITY_SPAN_OF]: true };
 /** Relations that tie no one to anyone socially: placement, gear and enmity. Membership is told apart. */
 const NOT_TIES: Record<string, true> = { in: true, worn_by: true, equipped: true, hostile: true, member_of: true };
 /** The ids of the meals and sleep every day has (`BASIC_BLOCKS`): a block takes one only to replace it every day. */
