@@ -9,11 +9,13 @@ import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../shared/ids";
 import type { TimelapseTarget } from "../shared/ledger";
-import { parseMoneyInput } from "../shared/money";
+import type { JsonObject, JsonValue } from "../shared/json";
+import { formatMoneyInput, parseMoneyInput } from "../shared/money";
 import type { OutcomeOdds, PaletteEncounter, PaletteEntry, PaletteOption, PaletteView, StateView, TimelapseView } from "../shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney } from "../shared/world";
-import type { PaletteTab } from "./app";
+import type { PaletteEdit, PaletteTab } from "./app";
 import { useApp, useView } from "./app";
+import { sendChipChoice } from "./chips";
 import { Badge, Banner, Button, Disclosure, Empty, HostSwitch, IconButton, oddsSeries, Section, Seg, Tabs, tabPanel, useBusy } from "./components";
 import type { TabPanelProps } from "./components";
 import { formatCents, formatMinutes, formatOdds, humanize } from "./format";
@@ -35,13 +37,15 @@ export function paletteTabs(palette: PaletteView): { id: PaletteTab; label: stri
   return tabs;
 }
 
-export function PaletteSheet(props: { tab: PaletteTab; desk: boolean; onClose(): void }) {
+export function PaletteSheet(props: { tab: PaletteTab; edit?: PaletteEdit; desk: boolean; onClose(): void }) {
   const view = useView();
-  // Asked for the actions in a fight on the POV's turn, the palette opens on Combat.
-  const [tab, setTab] = useState<PaletteTab>(props.tab === "actions" && view?.palette?.encounter?.yours ? "combat" : props.tab);
-  const panelId = useId();
   const palette = view?.palette ?? null;
-  const tabs = palette ? paletteTabs(palette) : [];
+  // Opened from an intent gate's Edit (DESIGN §5.1): only the read action's entry, its picks made.
+  const editing = props.edit && palette ? palette.entries.find((entry) => entry.action === props.edit?.action) : undefined;
+  // Asked for the actions in a fight on the POV's turn, the palette opens on Combat.
+  const [tab, setTab] = useState<PaletteTab>(editing ? GROUP_TAB[editing.group] : props.tab === "actions" && view?.palette?.encounter?.yours ? "combat" : props.tab);
+  const panelId = useId();
+  const tabs = palette ? (editing ? paletteTabs(palette).filter((t) => t.id === GROUP_TAB[editing.group]) : paletteTabs(palette)) : [];
   const active = tabs.some((entry) => entry.id === tab) ? tab : tabs[0]?.id ?? tab;
   return (
     <div
@@ -58,7 +62,7 @@ export function PaletteSheet(props: { tab: PaletteTab; desk: boolean; onClose():
     >
       <header>
         <Icon name={active === "timelapse" ? "fast-forward" : "bolt"} />
-        <h2 class="title">{active === "timelapse" ? "Timelapse" : "Actions"}</h2>
+        <h2 class="title">{editing ? "Change the action" : active === "timelapse" ? "Timelapse" : "Actions"}</h2>
         <ClockToggle view={view} />
         <IconButton icon="close" label="Close actions" onClick={props.onClose} />
       </header>
@@ -76,17 +80,20 @@ export function PaletteSheet(props: { tab: PaletteTab; desk: boolean; onClose():
         </div>
       ) : (
         <>
-          <div class="lre-chat-tabs">
-            <Tabs<PaletteTab> label="Action groups" panelId={panelId} value={active} tabs={tabs} onChange={(id) => setTab(id)} />
-          </div>
-          {active === "timelapse" && palette.timelapse ? (
+          {editing ? null : (
+            <div class="lre-chat-tabs">
+              <Tabs<PaletteTab> label="Action groups" panelId={panelId} value={active} tabs={tabs} onChange={(id) => setTab(id)} />
+            </div>
+          )}
+          {active === "timelapse" && palette.timelapse && !editing ? (
             <TimelapsePanel view={view} timelapse={palette.timelapse} panel={tabPanel(panelId, active)} onSent={props.onClose} />
           ) : (
             <ActionList
               key={active}
               view={view}
-              head={active === "combat" && palette.encounter ? <EncounterHead encounter={palette.encounter} /> : null}
-              entries={palette.entries.filter((entry) => GROUP_TAB[entry.group] === active)}
+              head={editing ? <p class="lre-chat-hint" data-lre-palette-edit>Change what your message plays. It plays this instead of what was read.</p> : active === "combat" && palette.encounter ? <EncounterHead encounter={palette.encounter} /> : null}
+              entries={editing ? [editing] : palette.entries.filter((entry) => GROUP_TAB[entry.group] === active)}
+              edit={editing && props.edit ? { gate: props.edit, entry: editing } : undefined}
               panel={tabPanel(panelId, active)}
               onSent={props.onClose}
             />
@@ -220,6 +227,20 @@ function samePick(a: PaletteOption | undefined, b: PaletteOption | undefined): b
   return a !== undefined && b !== undefined && JSON.stringify(a.params) === JSON.stringify(b.params);
 }
 
+/** The picks an entry offers that `params` already holds, step by step: the option at each step whose own params all match (an intent gate's Edit opens with the read's picks made). */
+export function picksFor(entry: PaletteEntry, params: JsonObject): PaletteOption[] {
+  const matches = (option: PaletteOption): boolean => Object.entries(option.params).every(([key, value]) => JSON.stringify(params[key]) === JSON.stringify(value));
+  const picks: PaletteOption[] = [];
+  let options: readonly PaletteOption[] = entry.options;
+  for (;;) {
+    const hit = options.find(matches);
+    if (!hit) return picks;
+    picks.push(hit);
+    if (!hit.next) return picks;
+    options = hit.next.options;
+  }
+}
+
 /** One `next` step under the pick it follows; scrolls itself into view when it opens. */
 function NextStep(props: { after: PaletteOption; step: NextStepView; chosen: PaletteOption | undefined; onPick(option: PaletteOption): void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -246,17 +267,29 @@ function NextStep(props: { after: PaletteOption; step: NextStepView; chosen: Pal
   );
 }
 
-function ActionList(props: { view: StateView; head: ComponentChildren; entries: PaletteEntry[]; panel: TabPanelProps; onSent(): void }) {
+function ActionList(props: { view: StateView; head: ComponentChildren; entries: PaletteEntry[]; edit?: { gate: PaletteEdit; entry: PaletteEntry }; panel: TabPanelProps; onSent(): void }) {
   const app = useApp();
-  const [selected, setSelected] = useState<Selection | null>(null);
-  const [amount, setAmount] = useState("");
-  // The entry's required number (Lend's days); null shows and sends its default.
-  const [count, setCount] = useState<string | null>(null);
-  // Who comes along (Go's With), ticked for the selected entry; cleared when the action changes.
-  const [people, setPeople] = useState<string[]>([]);
-  const [busy, run] = useBusy();
   // Amounts are typed in the world's currency, with its own decimals (5 is 5 bits, or $5.00).
   const currency = props.view.currency ?? DEFAULT_CURRENCY;
+  // An intent gate's Edit opens with the read's picks, amount, number and company already made.
+  const read = props.edit?.gate.params;
+  const readValue = (param: string | undefined): JsonValue | undefined => (read && param ? read[param] : undefined);
+  const [selected, setSelected] = useState<Selection | null>(() => (props.edit && read ? { entry: props.edit.entry, picks: picksFor(props.edit.entry, read) } : null));
+  const [amount, setAmount] = useState(() => {
+    const cents = readValue(props.edit?.entry.amount?.param);
+    return typeof cents === "number" ? formatMoneyInput(cents, currency) : "";
+  });
+  // The entry's required number (Lend's days); null shows and sends its default.
+  const [count, setCount] = useState<string | null>(() => {
+    const n = readValue(props.edit?.entry.number?.param);
+    return typeof n === "number" ? String(n) : null;
+  });
+  // Who comes along (Go's With), ticked for the selected entry; cleared when the action changes.
+  const [people, setPeople] = useState<string[]>(() => {
+    const along = readValue(props.edit?.entry.people?.param);
+    return Array.isArray(along) ? along.filter((id): id is string => typeof id === "string") : [];
+  });
+  const [busy, run] = useBusy();
   const amountCents = parseMoneyInput(amount, currency);
   const range = selected?.entry.amount;
   const amountOk = !range || (amountCents !== null && amountCents >= range.min && (range.max === null || amountCents <= range.max));
@@ -279,12 +312,16 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
   const go = () => {
     if (!selected || pending || !amountOk || !countOk) return;
     run(async () => {
-      const result = await app.request(paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people));
-      if (result) props.onSent();
+      const request = paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people);
+      // From an intent gate's Edit, the action as picked plays through the chip, in place of the read (DESIGN §5.1).
+      const edit = props.edit?.gate;
+      const sent = edit ? await sendChipChoice(app, edit.chip, "edit", edit.chatId, { params: request.params }) : (await app.request(request)) !== null;
+      if (sent) props.onSent();
     });
   };
   const chain = selected ? selected.picks.map((p) => p.label).filter((part) => part !== selected.entry.label) : [];
-  const label = !selected ? "Choose an action" : pending ? `Choose ${pending.label.toLowerCase()}` : chain.length > 0 ? `${selected.entry.label}: ${chain.join(" → ")}` : selected.entry.label;
+  const what = !selected ? "Choose an action" : pending ? `Choose ${pending.label.toLowerCase()}` : chain.length > 0 ? `${selected.entry.label}: ${chain.join(" → ")}` : selected.entry.label;
+  const label = props.edit && selected && !pending ? `Play ${what}` : what;
   const span = range ? `${formatMoney(range.min, currency)}${range.max !== null ? `–${formatMoney(range.max, currency)}` : " or more"}` : "";
   return (
     <>

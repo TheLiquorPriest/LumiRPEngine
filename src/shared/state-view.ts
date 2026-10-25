@@ -168,9 +168,10 @@ export type ChipKind =
 /**
  * A value a chip action asks for before it's sent, in its `lre.chip` payload: an amount in the
  * world's currency (`{cents}`, minor units; `value` is the amount it starts at), one of `options`
- * (`{value}`), or text the player edits (`{text}`; `value` is the text it starts with).
+ * (`{value}`), text the player edits (`{text}`; `value` is the text it starts with), or an action
+ * picked again in the Actions palette, opened at `action` with `params` already picked (`{params}`).
  */
-export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string };
+export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string } | { type: "action"; label: string; action: string; params: JsonObject };
 
 export interface ChipAction {
   id: string;

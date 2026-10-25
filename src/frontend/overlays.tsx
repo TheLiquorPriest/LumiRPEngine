@@ -5,7 +5,7 @@
 
 import { render } from "preact";
 import type { SpindleFloatWidgetHandle } from "lumiverse-spindle-types";
-import type { App, PaletteTab, UiState } from "./app";
+import type { App, PaletteEdit, PaletteTab, UiState } from "./app";
 import { AppContext, playAt, useApp, useView } from "./app";
 import { watchChatHeads } from "./chat-heads";
 import { Empty, IconButton, Toasts } from "./components";
@@ -130,13 +130,15 @@ class WidgetSurface implements FloatSurface {
 }
 
 export interface OverlaySet {
-  open(kind: OverlayKind, tab?: PaletteTab): Promise<void>;
+  open(kind: OverlayKind, tab?: PaletteTab, edit?: PaletteEdit): Promise<void>;
   close(kind: OverlayKind): void;
   destroy(): void;
 }
 
 export function createOverlays(app: App, host: Host): OverlaySet {
   let paletteTab: PaletteTab = "actions";
+  // An intent gate's Edit the palette is open for, until it opens plainly again.
+  let paletteEdit: PaletteEdit | undefined;
   /** The World sheet's height as its content last measured it; a first guess until then. */
   let worldHeight = 0;
   const setOverlay = (kind: OverlayKind, visible: boolean) => app.ui.update((ui) => ({ ...ui, overlay: visible ? kind : ui.overlay === kind ? null : ui.overlay }));
@@ -200,7 +202,7 @@ export function createOverlays(app: App, host: Host): OverlaySet {
       render(
         <AppContext.Provider value={app}>
           <div class="lre lre-overlay-root" data-lre-overlay="palette">
-            <PaletteSheet key={`${paletteTab}:${Date.now()}`} tab={paletteTab} desk={!isMobile(host.viewport.get())} onClose={() => paletteControl.close()} />
+            <PaletteSheet key={`${paletteTab}:${Date.now()}`} tab={paletteTab} edit={paletteEdit} desk={!isMobile(host.viewport.get())} onClose={() => paletteControl.close()} />
             <Toasts surface="palette" />
           </div>
         </AppContext.Provider>,
@@ -269,9 +271,12 @@ export function createOverlays(app: App, host: Host): OverlaySet {
   const controls: Record<OverlayKind, OverlayController> = { map: mapControl, palette: paletteControl, world: worldControl };
 
   return {
-    async open(kind, tab) {
+    async open(kind, tab, edit) {
       for (const other of ["map", "palette", "world"] as const) if (other !== kind) surfaces[other].hide();
-      if (kind === "palette") paletteTab = tab ?? "actions";
+      if (kind === "palette") {
+        paletteTab = tab ?? "actions";
+        paletteEdit = edit;
+      }
       await controls[kind].open();
     },
     close(kind) {

@@ -132,7 +132,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     overlays: {
       openMap: () => overlays?.open("map") ?? Promise.resolve(),
       closeMap: () => overlays?.close("map"),
-      openPalette: (tab) => overlays?.open("palette", tab) ?? Promise.resolve(),
+      openPalette: (tab, edit) => overlays?.open("palette", tab, edit) ?? Promise.resolve(),
       closePalette: () => overlays?.close("palette"),
       openWorld: () => overlays?.open("world") ?? Promise.resolve(),
       closeWorld: () => overlays?.close("world"),

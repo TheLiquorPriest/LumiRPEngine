@@ -54,7 +54,9 @@ describe("the intent gate", () => {
     expect(rig.host.assembled).toEqual([]);
     const gate = await chipOf(rig, chatId, "intent_gate");
     expect(gate?.actions.map((a) => a.id)).toEqual(["play", "edit", "cancel"]);
-    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "edit", payload: { text: JSON.stringify({ to: "alder_market" }) } })).applied).toBe(true);
+    // Edit is the Actions palette at the read action, with its picks made, never a box of JSON.
+    expect(gate?.actions.find((a) => a.id === "edit")?.input).toMatchObject({ type: "action", action: "go", params: { to: "bluebird_coffee" } });
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "edit", payload: { params: { to: "alder_market" } } })).applied).toBe(true);
     const reply = await rig.host.start(chatId, { type: "regenerate" });
     expect(reply.halted).toBeUndefined();
     await rig.host.finish(reply, "You head to the market instead.");
@@ -63,6 +65,18 @@ describe("the intent gate", () => {
     expect(reads).toBe(1);
     expect(await chipOf(rig, chatId, "intent_gate")).toBeUndefined();
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("the chip says the read action in words: the place by its name, never its id", async () => {
+    const { rig, chatId } = await alder([{ gates: { intent: true } }]);
+    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify({ action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9 }) : "{}");
+    rig.host.sendUser(chatId, "I walk to Bluebird Coffee.");
+    await rig.host.settle();
+    await rig.host.start(chatId, { type: "normal" });
+    const gate = await chipOf(rig, chatId, "intent_gate");
+    expect(gate?.detail).toContain("Bluebird Coffee");
+    expect(`${gate?.label} ${gate?.detail}`).not.toContain("bluebird_coffee");
+    expect(`${gate?.label} ${gate?.detail}`).not.toMatch(/[{}"]/);
   });
 });
 
@@ -105,10 +119,23 @@ describe("no request plays a place the player character can't know of", () => {
     await rig.host.settle();
     await rig.host.start(chatId, { type: "normal" });
     const gate = await chipOf(rig, chatId, "intent_gate");
-    const answer = await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "edit", payload: { text: JSON.stringify({ to: "hidden_vault" }) } });
+    const answer = await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "edit", payload: { params: { to: "hidden_vault" } } });
     expect(answer.type).toBe("lre.error");
     expect(await chipOf(rig, chatId, "intent_gate")).toBeDefined();
     expect(await where(rig, chatId)).not.toBe("hidden_vault");
+  });
+
+  test("the intent gate's Edit bringing along someone the palette doesn't offer is refused, and the chip stays", async () => {
+    const { rig, chatId } = await alder([{ gates: { intent: true } }]);
+    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify({ action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9 }) : "{}");
+    rig.host.sendUser(chatId, "I walk to Bluebird Coffee.");
+    await rig.host.settle();
+    await rig.host.start(chatId, { type: "normal" });
+    const gate = await chipOf(rig, chatId, "intent_gate");
+    // Marcus is across town: Go's "Who comes along" offers only the people here.
+    const answer = await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "edit", payload: { params: { to: "bluebird_coffee", with: ["marcus_delgado"] } } });
+    expect(answer.type).toBe("lre.error");
+    expect(await chipOf(rig, chatId, "intent_gate")).toBeDefined();
   });
 
   test("an lre.action to a secret place is refused, and the player character stays put", async () => {

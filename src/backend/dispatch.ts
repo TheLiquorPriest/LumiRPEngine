@@ -1114,20 +1114,24 @@ export class Dispatcher {
         if (choice === "cancel") return { applied: true, pending: false };
         if (choice !== "play" && choice !== "edit") throw new RequestError("bad_request", `unknown choice ${choice}`);
         const text = typeof chip.payload.text === "string" ? chip.payload.text : "";
-        const edited = choice === "edit" ? (typeof payload?.text === "string" ? payload.text : null) : undefined;
-        if (edited === null) throw new RequestError("bad_request", "Edit needs the edited text");
         if (chip.kind === "intent_gate") {
-          if (edited === undefined) return { applied: this.rt.passIntent(chatId, text), pending: false };
-          // Edited details get the read's own check: a ref to something the player character can't
-          // know of is refused as one naming nothing, and the chip stays for another try.
-          const params = paramsOf(edited);
+          if (choice === "play") return { applied: this.rt.passIntent(chatId, text), pending: false };
+          // Edit plays the action as picked again in the Actions palette: only the action's own
+          // details count, and each must be one the palette offers the player character, so a
+          // hand-made request can't aim it at someone or somewhere the palette never would.
+          if (!isRecord(payload?.params)) throw new RequestError("bad_request", "Edit needs the action's details");
           const read = this.rt.bridgeOf(chatId)?.intentOf(text);
           const { world, state } = await this.head(chatId, userId);
           const action = read?.action ? ((hasOwn(world.actions, read.action) ? world.actions[read.action] : undefined) ?? this.rt.registry.actions.get(read.action)) : undefined;
-          const refused = action ? this.rt.requestRefusal(world, state, action, params, "read", read?.claim?.param) : null;
+          if (!read || !action) throw new RequestError("not_found", "the read has lapsed");
+          const sent = payload.params as JsonObject;
+          const params = Object.fromEntries(Object.entries(sent).filter(([key]) => hasOwn(action.params, key)));
+          const refused = this.rt.editRefusal(world, state, action, params, read.params, read.claim?.param);
           if (refused) throw new RequestError("validation", refused);
           return { applied: this.rt.passIntent(chatId, text, params), pending: false };
         }
+        const edited = choice === "edit" ? (typeof payload?.text === "string" ? payload.text : null) : undefined;
+        if (edited === null) throw new RequestError("bad_request", "Edit needs the edited text");
         const shown = Array.isArray(chip.payload.lines) ? chip.payload.lines.filter((l): l is string => typeof l === "string") : [];
         const held = Array.isArray(chip.payload.held) ? chip.payload.held.filter((l): l is string => typeof l === "string") : [];
         // Lines the player wrote are words for the narrator, never macros the prompt would run.
@@ -1276,20 +1280,8 @@ function chipValue(chip: StoredChip, choice: string, payload: JsonObject | undef
   const input = chip.actions.find((a) => a.id === choice)?.input;
   if (!input || !payload) return null;
   if (input.type === "money") return typeof payload.cents === "number" && Number.isSafeInteger(payload.cents) && payload.cents > 0 ? payload.cents : null;
-  if (input.type === "text") return null;
+  if (input.type === "text" || input.type === "action") return null;
   return typeof payload.value === "string" && input.options.some((o) => o.value === payload.value) ? payload.value : null;
-}
-
-/** An action's details as the intent gate's Edit sends them: a JSON object, or the request is refused. */
-function paramsOf(text: string): JsonObject {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new RequestError("bad_request", "the details aren't JSON");
-  }
-  if (!isRecord(parsed)) throw new RequestError("bad_request", "the details must be a JSON object");
-  return parsed as JsonObject;
 }
 
 function targetLabel(t: TimelapseTarget): string {

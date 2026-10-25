@@ -15,7 +15,7 @@ import type { KeepLine } from "../shared/ledger";
 import { formatMoneyInput, parseMoneyInput } from "../shared/money";
 import type { Chip, ChipAction, ChipInput, ChipKind } from "../shared/state-view";
 import { DEFAULT_CURRENCY, type WorldCurrency } from "../shared/world";
-import { useApp, useView } from "./app";
+import { type App, useApp, useView } from "./app";
 import { chipRole, chipTone } from "./chip-roles";
 import { Badge, Button, Field, useBusy } from "./components";
 import { openDiagnostics } from "./diagnostics";
@@ -163,6 +163,24 @@ function Receipt(props: { chips: readonly Chip[]; show(chip: Chip): ComponentChi
   );
 }
 
+/**
+ * Sends a chip's choice as the player made it (with any payload), then Regenerates when the choice
+ * is finished by a new swipe. False when the engine refused it, which the player is told.
+ */
+export async function sendChipChoice(app: App, chip: Chip, choice: string, chatId: ChatId, payload?: JsonObject): Promise<boolean> {
+  const intent = chipIntent(chip, choice, chatId, payload);
+  if (intent.request) {
+    const message = await app.send(intent.request);
+    if (message.type === "lre.error") {
+      app.toast(message.message, "error");
+      return false;
+    }
+    if (message.request === "lre.chip" && message.body.pending && !intent.regenerate) app.toast("Saved — it applies when the reply finishes.", "info");
+  }
+  if (intent.regenerate && !(await app.host.generate("regenerate"))) app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
+  return true;
+}
+
 function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, payload?: JsonObject) => void] {
   const app = useApp();
   const [busy, run] = useBusy();
@@ -172,16 +190,7 @@ function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, p
       run(async () => {
         // A failed engine run's way to what failed (DESIGN §5.1): the drawer at Settings → Diagnostics.
         if (choice === "diagnostics") return openDiagnostics();
-        const intent = chipIntent(chip, choice, chatId, payload);
-        if (intent.request) {
-          const message = await app.send(intent.request);
-          if (message.type === "lre.error") {
-            app.toast(message.message, "error");
-            return;
-          }
-          if (message.request === "lre.chip" && message.body.pending && !intent.regenerate) app.toast("Saved — it applies when the reply finishes.", "info");
-        }
-        if (intent.regenerate && !(await app.host.generate("regenerate"))) app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
+        await sendChipChoice(app, chip, choice, chatId, payload);
       }),
   ];
 }
@@ -195,17 +204,28 @@ interface ChipControls {
   form: ComponentChildren;
 }
 
-/** A chip's actions as the player presses them: one that asks for a value opens its form first, any other sends at once. */
+/**
+ * A chip's actions as the player presses them: one that asks for a value opens its form first, one
+ * that picks an action again opens the Actions palette at it (the intent gate's Edit), and any
+ * other sends at once.
+ */
 function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
+  const app = useApp();
   const view = useView();
   const [busy, choose] = useChipAction(chip, chatId);
   const [asking, setAsking] = useState<string | null>(null);
   const open = chip.actions.find((action) => action.id === asking);
+  const press = (action: ChipAction): void => {
+    const input = action.input;
+    if (input?.type === "action") void app.overlays.openPalette("actions", { chatId, chip, action: input.action, params: input.params });
+    else if (input) setAsking(asking === action.id ? null : action.id);
+    else choose(action.id);
+  };
   return {
     busy,
     asking,
-    press: (action) => (action.input ? setAsking(asking === action.id ? null : action.id) : choose(action.id)),
-    form: open?.input ? <ChipInputForm key={open.id} action={open} input={open.input} currency={view?.currency ?? DEFAULT_CURRENCY} busy={busy} onSend={(payload) => choose(open.id, payload)} onCancel={() => setAsking(null)} /> : null,
+    press,
+    form: open?.input && open.input.type !== "action" ? <ChipInputForm key={open.id} action={open} input={open.input} currency={view?.currency ?? DEFAULT_CURRENCY} busy={busy} onSend={(payload) => choose(open.id, payload)} onCancel={() => setAsking(null)} /> : null,
   };
 }
 
@@ -215,7 +235,7 @@ function ActionButton(props: { action: ChipAction; controls: ChipControls; pill?
   const icon = ACTION_ICON[action.id];
   const style = action.style === "primary" ? " primary" : action.style === "danger" ? " danger" : "";
   return (
-    <button type="button" class={props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`} disabled={controls.busy} aria-expanded={action.input ? controls.asking === action.id : undefined} onClick={() => controls.press(action)}>
+    <button type="button" class={props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`} disabled={controls.busy} aria-expanded={action.input && action.input.type !== "action" ? controls.asking === action.id : undefined} onClick={() => controls.press(action)}>
       {icon ? <Icon name={icon} size={16} /> : null}
       {action.label}
     </button>
@@ -223,7 +243,7 @@ function ActionButton(props: { action: ChipAction; controls: ChipControls; pill?
 }
 
 /** The small form an action with an input opens: an amount in the world's currency, one of its options, or text to edit; Apply sends it as the chip's payload. */
-function ChipInputForm(props: { action: ChipAction; input: ChipInput; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
+function ChipInputForm(props: { action: ChipAction; input: Exclude<ChipInput, { type: "action" }>; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
   const { input } = props;
   const [text, setText] = useState(() => (input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : input.type === "text" ? input.value : ""));
   const [picked, setPicked] = useState(() => (input.type === "choice" ? (input.options[0]?.value ?? "") : ""));
