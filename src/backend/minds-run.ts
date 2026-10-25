@@ -12,7 +12,7 @@ import type { LedgerEvent } from "../shared/ledger";
 import type { Fidelity, MindMoment, MindsRunEntry, MindsRunView } from "../shared/minds";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import { own } from "../engine/pack-kit";
-import { activeRecord } from "../engine/ledger/path";
+import { fixChip } from "./view";
 import { fidelityOf } from "../packs/minds/core/fidelity";
 import { latestTexts } from "./gm";
 import { toChain } from "./ledger-io";
@@ -125,25 +125,14 @@ export class MindsRuns {
     run.view.message = message;
   }
 
-  /** Writes the minds as one GM edit on the head, and finds the GM edit chip that undoes it. */
+  /** Writes the minds as one GM edit on the head; the entry it wrote names the GM edit chip that undoes it. */
   private async record(chatId: ChatId, userId: UserId, run: Run, events: LedgerEvent[]): Promise<void> {
     const written = await this.rt.ledger.write(chatId, userId, { kind: "post", id: `${run.view.runId}w`, target: "head", entry: { kind: "fix", gm: true, events } });
     if (written.reason === "paused") return this.end(run, "failed", "An earlier message was edited: Keep or Discard it first, then run the minds again.");
     if (!written.applied && !written.pending) return this.end(run, "failed", `The minds weren't recorded: ${written.reason ?? "the edit was refused"}.`);
     this.rt.push.changed(chatId, userId);
     run.view.pending = written.pending;
-    if (written.applied) {
-      const core = await this.rt.ledger.core(chatId, userId);
-      const observed = toChain(await this.rt.host.chats.messages(chatId, userId));
-      const same = JSON.stringify(events);
-      for (const m of core ? [...core.chain(observed)].reverse() : []) {
-        const rec = m.isUser || !core ? null : activeRecord(m, core.journal.tombstones);
-        const entry = rec?.post.findLast((p) => p.kind === "fix" && JSON.stringify(p.events) === same);
-        if (!entry) continue;
-        run.view.undo = `fix:${m.id}:${m.swipeId}:${entry.seq}`;
-        break;
-      }
-    }
+    if (written.posted) run.view.undo = fixChip(written.posted.messageId, written.posted.swipeId, written.posted.seq);
     const recorded = run.view.entries.filter((e) => e.status === "recorded").length;
     this.end(run, "done", written.pending ? `${recorded} recorded; it lands when the reply being written finishes.` : null);
   }

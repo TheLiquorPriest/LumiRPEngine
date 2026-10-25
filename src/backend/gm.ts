@@ -14,7 +14,7 @@ import { activeRecord } from "../engine/ledger/path";
 import { authorLines } from "../engine/player-events";
 import { readPass } from "../engine/read-pass";
 import type { Registry } from "../engine/registry-impl";
-import { appliedEvents, clockFixLine } from "./view";
+import { appliedEvents, clockFixLine, fixChip } from "./view";
 
 /** How many edits the GM view lists, newest first. */
 const GM_EDITS = 40;
@@ -35,7 +35,7 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
       // A fix of the time leads with how it moved the clock, which no event line words.
       for (const fix of appliedEvents(rec, fold, i).fixes) {
         const clock = clockFixLine(fix.events);
-        edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)], ...(fix.by ? { by: fix.by.label } : {}), undo: i === head ? `fix:${m.id}:${m.swipeId}:${fix.seq}` : null });
+        edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)], ...(fix.by ? { by: fix.by.label } : {}), undo: i === head ? fixChip(m.id, m.swipeId, fix.seq) : null });
       }
     });
     return {

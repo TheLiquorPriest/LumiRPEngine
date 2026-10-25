@@ -4,17 +4,17 @@
 // starts on Choose…, so nothing applies by default. Each goes to a real backend and reads back.
 
 import { describe, expect, test } from "bun:test";
-import { bulkOps, chunks, draftPatch, fidelityGroups, mixOf, sendInChunks, tierGroups } from "../../src/frontend/batch";
+import { bulkOps, chunks, draftPatch, fidelityGroups, mixCounts, sendInChunks, tierGroups } from "../../src/frontend/batch";
 import { draftTargets } from "../../src/frontend/build/batch-sheet";
 import { Button } from "../../src/frontend/components";
 import { BLANK_CHOICES, batchChanges, bulkTargets, ChangeCard } from "../../src/frontend/gm/batch";
-import { editNotice, newEdits, noticeStands } from "../../src/frontend/gm/editor";
+import { editNotice, noticeStands, sendEdits } from "../../src/frontend/gm/editor";
 import { GroupPicks, SelectBar, type Selection } from "../../src/frontend/multi-select";
 import { editRequest } from "../../src/frontend/requests";
 import { FIDELITY_LABEL } from "../../src/packs/minds/ui/ops";
 import { lorePinsOf } from "../../src/shared/lore";
 import { MIND_TEXT_CAPS } from "../../src/shared/minds";
-import type { EditOp, JsonPatchOp } from "../../src/shared/protocol";
+import type { EditOp, JsonPatchOp, ResultBodies } from "../../src/shared/protocol";
 import { EDIT_OPS_MAX } from "../../src/shared/protocol";
 import type { GmView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
@@ -40,6 +40,16 @@ function editor(rig: Rig, chatId: string, sent: EditOp[][]): (ops: EditOp[]) => 
     sent.push(ops);
     const m = await rig.send(editRequest(chatId, ops) as unknown as Record<string, unknown>);
     return m.type === "lre.result";
+  };
+}
+
+/** `lre.edit` as the GM view's editor asks it: the result's body, with the chip of the entry it wrote; null when refused. */
+function request(rig: Rig, chatId: string): (ops: EditOp[]) => Promise<ResultBodies["lre.edit"] | null> {
+  return async (ops) => {
+    const m = await rig.send(editRequest(chatId, ops) as unknown as Record<string, unknown>);
+    if (m.type !== "lre.result") return null;
+    const body = rig.body(m);
+    return { pending: body.pending === true, undo: typeof body.undo === "string" ? body.undo : null };
   };
 }
 
@@ -98,9 +108,10 @@ describe("GM batch edits", () => {
     expect(ids.length).toBe(70);
     const ops = bulkOps(ids, { kind: "tier", tier: "supporting" });
     if (!ops) throw new Error("no ops");
-    expect(await sendInChunks(ops, editor(rig, chatId, []))).toEqual({ applied: 2, of: 2 });
+    const sent = await sendEdits((send) => sendInChunks(ops, send), request(rig, chatId));
+    expect([sent.applied, sent.of, sent.count]).toEqual([2, 2, 70]);
     const after = await gmView(rig, chatId);
-    const notice = editNotice(newEdits(before.edits, after.edits));
+    const notice = editNotice(sent.undo, after.edits);
     expect(notice.undo.length).toBe(2);
     expect(noticeStands(notice, after)).toBe(true);
     for (const chip of notice.undo) rig.body(await rig.send({ type: "lre.chip", chatId, chip, choice: "undo" }));
@@ -109,6 +120,24 @@ describe("GM batch edits", () => {
     // Taken back, the edits are no longer in force, and the notice gives way.
     expect(noticeStands(notice, undone)).toBe(false);
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("an edit that lands between an edit and the view loaded after it is never in the notice's Undo", async () => {
+    const { rig, chatId } = await chat();
+    const gm = await gmView(rig, chatId);
+    const [mine, other] = gm.minds.characters.slice(0, 2).map((c) => c.entity);
+    if (!mine || !other) throw new Error("no characters");
+    const pinOf = (view: GmView, who: string) => view.minds.characters.find((c) => c.entity === who)?.fidelity.pin.gm;
+    const sent = await sendEdits(async (send) => ({ applied: (await send([{ op: "mind_pin", entity: mine, level: "near" }])) ? 1 : 0, of: 1 }), request(rig, chatId));
+    // Something else lands before the GM view is loaded again (a minds run finishing in the background, a ✎ fix).
+    rig.body(await rig.send(editRequest(chatId, [{ op: "mind_pin", entity: other, level: "far" }]) as unknown as Record<string, unknown>));
+    const after = await gmView(rig, chatId);
+    const notice = editNotice(sent.undo, after.edits);
+    expect(notice.undo.length).toBe(1);
+    for (const chip of notice.undo) rig.body(await rig.send({ type: "lre.chip", chatId, chip, choice: "undo" }));
+    const now = await gmView(rig, chatId);
+    // The notice's Undo took back the GM's own edit; the one that landed meanwhile stands.
+    expect([pinOf(now, mine), pinOf(now, other)]).toEqual([null, "far"]);
   });
 
   test("an edit on an earlier reply has no Undo in the GM view, as in the chat", async () => {
@@ -163,8 +192,11 @@ describe("GM batch edits", () => {
   });
 
   test("a selection's mix counts each value, the most common first, the rest summed past the ones it names", () => {
-    expect(mixOf(["Leads", "Supporting", "Leads"])).toBe("2 Leads, 1 Supporting");
-    expect(mixOf(["a", "b", "b", "c", "d", "d", "d", "e"], 2)).toBe("3 d, 2 b and 3 more");
+    expect(mixCounts(["Leads", "Supporting", "Leads"])).toEqual({ shown: [{ label: "Leads", count: 2 }, { label: "Supporting", count: 1 }], rest: 0 });
+    const capped = mixCounts(["a", "b", "b", "c", "d", "d", "d", "e"], 2);
+    expect(capped.shown).toEqual([{ label: "d", count: 3 }, { label: "b", count: 2 }]);
+    // Past the cap, the other values' people are counted together: a, c and e, one each.
+    expect(capped.rest).toBe(3);
   });
 
   test("a chunk refused stops the batch: the chunks before it stay applied, the rest are never sent", async () => {

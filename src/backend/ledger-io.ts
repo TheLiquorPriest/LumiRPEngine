@@ -17,7 +17,7 @@ import type { Limit } from "../shared/minds";
 import { HOST_LIMITS, hostBound } from "../shared/timeouts";
 import { validMarkerBody } from "../engine/events";
 import type { ChainMessage, FoldSnapshot, SnapshotStore } from "../engine/ledger/chain";
-import { emptyJournal, LedgerCore, type LedgerEnv } from "../engine/ledger/journal";
+import { emptyJournal, LedgerCore, type LedgerEnv, type WriteResult } from "../engine/ledger/journal";
 import type { WorldState } from "../engine/state";
 import type { WorldDoc } from "../shared/world";
 import type { LedgerFold } from "../engine/ledger/fold";
@@ -1269,13 +1269,13 @@ export class LedgerService {
   }
 
   /** A user write from the frontend (chip confirm, ✎ fix, materialization, marker, Keep/Discard, Re-read); a turn the engine prepared before it is stale. */
-  async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<{ applied: boolean; pending: boolean; reason?: string }> {
+  async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<WriteResult> {
     const gate = this.gates.get(chatId);
     if (gate) {
       gate.epoch++;
       this.dropIfStale(chatId);
     }
-    let result: { applied: boolean; pending: boolean; reason?: string } = { applied: false, pending: false, reason: "not a world chat" };
+    let result: WriteResult = { applied: false, pending: false, reason: "not a world chat" };
     await this.run(
       chatId,
       userId,
