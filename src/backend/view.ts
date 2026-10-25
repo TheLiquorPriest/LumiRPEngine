@@ -5,7 +5,8 @@
 
 import type { ChatId, EntityId, PackId, PanelId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
-import { isRecord } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
+import { formatMoney } from "../shared/world";
 import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
@@ -23,7 +24,7 @@ import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
 import { optionalQuery, own } from "../engine/pack-kit";
-import { knownSubjects, playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
+import { knownSubjects, playerDrop, playerLines, povMayKnow, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
 import { readPass } from "../engine/read-pass";
 import { claimsOf, presetOf } from "../engine/realism";
@@ -34,7 +35,7 @@ import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import { povLife } from "../engine/life";
 import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
-import { canSeeEntity, canSeePlace, findLeaks, povPlace, unrevealedTruths } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, povPlace, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
 import { knownPlaceRefs } from "../engine/character";
 import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import type { StoredChip } from "./chips";
@@ -172,7 +173,44 @@ function paramLabel(action: ActionDef, name: string, world: WorldDoc, registry: 
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-function palette(world: WorldDoc, state: WorldState, registry: Registry): PaletteView {
+/**
+ * An action's picks in words, as the palette names them ("Bluebird Coffee, with Danny Okafor"):
+ * each place or person by name, a list of people after "with", an amount in the world's currency,
+ * a number with its label, and a text pick as written. Never an id: a pick the player character may
+ * not know of (a hidden place, someone it hasn't met) is left out, as is text naming a secret.
+ */
+export function actionWords(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject): string {
+  const secrets = unrevealedSecrets(registry, world, state);
+  const nameOf = (value: JsonValue | undefined): string | null => {
+    if (typeof value !== "string" || value === "") return null;
+    const entity = own(state.entities, value);
+    if (entity) return povMayKnow(registry, world, state, value) ? entity.name : null;
+    const place = own(world.places, value);
+    if (place) return canSeePlace(registry, world, state, world.pov, value) ? place.name : null;
+    return null;
+  };
+  const parts: string[] = [];
+  for (const [name, def] of Object.entries(action.params)) {
+    const value = params[name];
+    if (value === undefined || value === null || value === "") continue;
+    if (def.type === "ref") {
+      const named = nameOf(value);
+      if (named) parts.push(named);
+    } else if (def.type === "list" && def.ref !== undefined) {
+      const names = (Array.isArray(value) ? value : []).map(nameOf).filter((n): n is string => n !== null);
+      if (names.length > 0) parts.push(`with ${names.join(" and ")}`);
+    } else if (def.type === "money" && typeof value === "number") parts.push(formatMoney(value, world.currency));
+    else if (def.type === "number" && typeof value === "number") parts.push(`${value} ${paramLabel(action, name, world, registry).toLowerCase()}`);
+    else if (typeof value === "string") {
+      // Text that is an id reads as what it names, or not at all; other text is the player's words.
+      const text = hasOwn(state.entities, value) || hasOwn(world.places, value) ? nameOf(value) : value;
+      if (text && findLeaks(text, secrets).length === 0) parts.push(text);
+    }
+  }
+  return parts.join(", ");
+}
+
+export function palette(world: WorldDoc, state: WorldState, registry: Registry): PaletteView {
   const actions = new Map<string, ActionDef>();
   for (const [id, a] of registry.actions) actions.set(id, a);
   for (const [id, a] of Object.entries(world.actions)) actions.set(id, a);

@@ -12,8 +12,8 @@ import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, StepConfig, UserSettings } from "../shared/settings";
 import { EXTRACTION_TYPES, helperCallOf, recentOf, stepConfigOf, stepLoreOf } from "../shared/settings";
-import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
-import type { ActionDef, AdjudicationDef, LoreEntryDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
+import type { ChipAction, ChipInput, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
+import type { ActionDef, AdjudicationDef, LoreEntryDef, ParamDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
 import { LORE_AUDIENCE } from "../shared/lore";
 import { isMindPurpose, MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEventData } from "../shared/minds";
@@ -45,7 +45,7 @@ import { readPass } from "../engine/read-pass";
 import { claimsOf } from "../engine/realism";
 import { kindIs, placeOfEntity, placeWithin } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import { actionOdds, findAction, type Resolution } from "../engine/resolve";
+import { actionOdds, companionCandidates, findAction, paramCandidates, type Resolution } from "../engine/resolve";
 import { allowedSkills, inferredOf, inferredRead, rolledByTry, skillSources, TRY_ACTION, tryJudged } from "../engine/inferred";
 import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
@@ -90,7 +90,7 @@ import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBin
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
 import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, slotVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
-import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
+import { actionWords, buildView, clockMinutes, compactSpan, notWorldView, palette, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { StudioBridge } from "./studio";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
@@ -921,10 +921,13 @@ export class Runtime implements TurnHooks {
     // turn with the read kept. A palette or chip tap is the action the player picked, so it plays.
     const read = bridge.intentOf(text);
     if (settings.gates.intent && typed && lastUser && read?.action && !shown && !bridge.intentPassed(text)) {
-      const label = (render.world.actions[read.action] ?? this.registry.actions.get(read.action))?.label ?? read.action;
-      const params = JSON.stringify(read.params, null, 2);
-      const actions: ChipAction[] = [{ id: "play", label: "Play", style: "primary" }, { id: "edit", label: "Edit", input: { type: "text", label: `${label}: its details (JSON)`, value: params } }, { id: "cancel", label: "Cancel" }];
-      await this.chips.add(input.chatId, input.userId, [{ id: `intent_gate:${lastUser.id}`, kind: "intent_gate", messageId: lastUser.id, label: `Play ${label}?`, ...(Object.keys(read.params).length > 0 ? { detail: JSON.stringify(read.params) } : {}), actions, expires: "next_send", payload: { text } }]);
+      const def = render.world.actions[read.action] ?? this.registry.actions.get(read.action);
+      const label = def?.label ?? read.action;
+      // The read in words, as the palette names its picks: never an id, and only what the player character may know of.
+      const words = def ? actionWords(this.registry, render.world, render.state, def, read.params) : "";
+      const edit = def ? this.intentEdit(render.world, render.state, def, read.params) : null;
+      const actions: ChipAction[] = [{ id: "play", label: "Play", style: "primary" }, ...(edit ? [{ id: "edit", label: "Edit", input: edit }] : []), { id: "cancel", label: "Cancel" }];
+      await this.chips.add(input.chatId, input.userId, [{ id: `intent_gate:${lastUser.id}`, kind: "intent_gate", messageId: lastUser.id, label: `Play ${label}?`, ...(words !== "" ? { detail: words } : {}), actions, expires: "next_send", payload: { text } }]);
       this.push.changed(input.chatId, input.userId);
       return { waiting: `waiting for you to play the read action: ${label}` };
     }
@@ -2111,6 +2114,52 @@ export class Runtime implements TurnHooks {
     const mayKnow = (id: EntityId): boolean => (know === "read" ? povMayKnow(this.registry, world, state, id) : id === world.pov || canSeeEntity(this.registry, world, state, world.pov, id));
     const unfit = unfitRef(this.registry, action, params, world, state, mayKnow, skip);
     return unfit ? `${action.label}: ${unfitReason(this.registry, world, state, unfit, "", unrevealedSecrets(this.registry, world, state), mayKnow)}` : null;
+  }
+
+  /**
+   * Why the intent gate's Edit can't play the action as picked again (DESIGN §5.1): the read's own
+   * check (`requestRefusal`), then every person or place the edit changed must be one the Actions
+   * palette offers the player character for it (`paramCandidates`, and `companionCandidates` for who
+   * comes along), so a hand-made request can't aim it where the palette never would. A pick the read
+   * made itself stands, and `skip` is a claim's param, which the claim makes real.
+   */
+  editRefusal(world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, read: JsonObject, skip?: string): string | null {
+    const refused = this.requestRefusal(world, state, action, params, "read", skip);
+    if (refused) return refused;
+    const mayKnow = (id: EntityId): boolean => povMayKnow(this.registry, world, state, id);
+    const why = (param: string, def: ParamDef, value: JsonValue): string => `${action.label}: ${unfitReason(this.registry, world, state, { param, def, value }, "", unrevealedSecrets(this.registry, world, state), mayKnow)}`;
+    for (const [name, def] of Object.entries(action.params)) {
+      const value = params[name];
+      if (name === skip || value === undefined || value === null || value === "" || JSON.stringify(value) === JSON.stringify(read[name] ?? null)) continue;
+      if (def.type === "ref" && !(typeof value === "string" && paramCandidates(this.registry, world, state, action, name).includes(value))) return why(name, def, value);
+      if (def.type === "list" && def.ref !== undefined) {
+        const along = companionCandidates(this.registry, world, state, action, name);
+        const stray = Array.isArray(value) ? value.find((id) => typeof id !== "string" || !along.includes(id)) : value;
+        if (stray !== undefined) return why(name, def, stray ?? null);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The intent gate's Edit (DESIGN §5.1): the Actions palette opened at the read action with its picks
+   * already made, when the palette offers that action here; only the picks it could offer travel to
+   * the page. Null when the palette has no such action, so Edit isn't offered.
+   */
+  private intentEdit(world: WorldDoc, state: WorldState, action: ActionDef, params: JsonObject): ChipInput | null {
+    if (!palette(world, state, this.registry).entries.some((e) => e.action === action.id)) return null;
+    const picks: JsonObject = {};
+    for (const [name, def] of Object.entries(action.params)) {
+      const value = params[name];
+      if (value === undefined || value === null) continue;
+      if (def.type === "ref") {
+        if (typeof value === "string" && paramCandidates(this.registry, world, state, action, name).includes(value)) picks[name] = value;
+      } else if (def.type === "list" && def.ref !== undefined) {
+        const along = companionCandidates(this.registry, world, state, action, name);
+        if (Array.isArray(value)) picks[name] = value.filter((id): id is string => typeof id === "string" && along.includes(id));
+      } else picks[name] = value;
+    }
+    return { type: "action", label: `Change ${action.label}`, action: action.id, params: picks };
   }
 
   /** Play or Edit on the outline gate (DESIGN §5.1 preview gates): the Regenerate that follows plays the plan the player was shown, told `lines`. */

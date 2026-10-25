@@ -86,6 +86,8 @@ export function stateFixture(chatId: string): StateView {
       { id: "c-undo", kind: "undo", messageId: "m4", label: "Paid Dev $20", actions: [{ id: "undo", label: "Undo" }], expires: "next_send" },
       { id: "c-tl", kind: "timelapse_offer", messageId: "m4", label: "Sleep until 07:00?", detail: "8 h 20 min", actions: [{ id: "start", label: "Timelapse", style: "primary" }], expires: "next_send" },
       { id: "c-notaction", kind: "not_action", messageId: "m3", label: "Read as: Ask Rosie for a raise", actions: [{ id: "not_action", label: "Not an action?" }], expires: "next_send" },
+      // The intent gate (DESIGN §5.1): the read in words; Edit opens the palette at Persuade with Dev picked.
+      { id: "c-intent-gate", kind: "intent_gate", messageId: "m3", label: "Play Persuade?", detail: "Dev Patel", actions: [{ id: "play", label: "Play", style: "primary" }, { id: "edit", label: "Edit", input: { type: "action", label: "Change Persuade", action: "sheets.persuade", params: { target: "npc_dev" } } }, { id: "cancel", label: "Cancel" }], expires: "next_send" },
       { id: "c-overdue", kind: "overdue", messageId: "m4", label: "Dev still has your drill", detail: "due yesterday 18:00", actions: [{ id: "retrieve", label: "Ask for it" }], expires: "never" },
     ],
     journal: [

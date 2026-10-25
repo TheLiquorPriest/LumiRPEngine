@@ -9,7 +9,8 @@ import type { SpindleComponentsHelper } from "lumiverse-spindle-types";
 import type { AgentsView } from "../shared/agents";
 import type { ChatId, MessageId, PanelId, RevisionId, WorldId } from "../shared/ids";
 import type { JobKind, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
-import type { StateView } from "../shared/state-view";
+import type { JsonObject } from "../shared/json";
+import type { Chip, StateView } from "../shared/state-view";
 import type { KindDef, RelationTypeDef, WorldDoc } from "../shared/world";
 import type { Viewport } from "./layout";
 import type { ProtocolClient, SyncState } from "./protocol-client";
@@ -170,10 +171,19 @@ export interface Draft {
   functions: string[];
 }
 
+/** An intent gate's Edit (DESIGN §5.1): the chip whose read action the palette changes, and that action with the read's picks. */
+export interface PaletteEdit {
+  chatId: ChatId;
+  chip: Chip;
+  action: string;
+  params: JsonObject;
+}
+
 export interface Overlays {
   openMap(): Promise<void>;
   closeMap(): void;
-  openPalette(tab?: PaletteTab): Promise<void>;
+  /** `edit`: the palette opens to change an intent gate's read action (DESIGN §5.1), its picks made, and plays it through the chip. */
+  openPalette(tab?: PaletteTab, edit?: PaletteEdit): Promise<void>;
   closePalette(): void;
   /** The World sheet: time, place, scene, weather and cash with ✎ fixes, the call meter, the clock toggle, Map and Actions. */
   openWorld(): Promise<void>;
