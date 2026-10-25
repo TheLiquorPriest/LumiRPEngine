@@ -12,7 +12,6 @@ import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "./riverton";
 import { startState } from "./support";
 import { factLines, slotVars } from "../../src/backend/turn-steps";
-import { ROLE_LABEL } from "../../src/packs/economy/core/feed";
 
 const reg = createRegistry(ALL_PACKS);
 
@@ -91,27 +90,48 @@ describe("the Property section", () => {
     expect(line).toContain("Maya Chen");
   });
 
-  // The house as the Property section tells it, with these holders.
-  const houseLine = (owners: { party: string; role: string; share?: number }[], scope: FeedScope = "player"): string =>
+  // The house as the Property section's player line tells it, with these holders; Vex Morrow is a
+  // person the player character doesn't know of.
+  const houseLine = (owners: { party: string; role: string; share?: number }[]): string =>
     lines((w) => {
+      w.entities.vex = { id: "vex", kind: "person", name: "Vex Morrow", tier: "supporting", fields: { place: "park" }, relations: [], visibility: "secret" };
       w.entities.house = { id: "house", kind: "property", name: "The Elm Street house", tier: "background", fields: { place: "apartment_bldg", owners, value: 25000000 }, relations: [] };
-    }, "property", scope).find((l) => l.text.includes("The Elm Street house"))?.text ?? "";
+    }, "property").find((l) => l.text.includes("The Elm Street house"))?.text ?? "";
+  const sharedStart = (a: string, b: string): string => {
+    let i = 0;
+    while (i < a.length && a[i] === b[i]) i++;
+    return a.slice(0, i);
+  };
 
-  test("a role that only uses, keeps or benefits is never told as his own, and the owner comes with their role", () => {
-    for (const role of ["authorized_user", "custodian", "beneficiary", "trustee"] as const) {
+  test("a role that only uses, keeps or benefits is never told as his own", () => {
+    // How a line claims the house is his: what it opens with whenever he owns it, alone or jointly.
+    const claim = sharedStart(houseLine([{ party: "you", role: "owner" }]), houseLine([{ party: "you", role: "joint", share: 50 }, { party: "maya", role: "joint", share: 50 }]));
+    expect(claim.length).toBeGreaterThan(0);
+    for (const role of ["authorized_user", "custodian", "beneficiary", "trustee"]) {
       const line = houseLine([{ party: "maya", role: "owner", share: 100 }, { party: "you", role }]);
-      expect(line).not.toMatch(/\byours\b/);
-      expect(line).toContain(ROLE_LABEL[role]);
-      expect(line).toMatch(new RegExp(`Maya Chen \\(${ROLE_LABEL.owner}\\b`));
+      expect(line).toContain("Maya Chen");
+      expect(line.startsWith(claim)).toBe(false);
     }
-    // Owning outright or jointly is his.
-    expect(houseLine([{ party: "you", role: "joint", share: 50 }, { party: "maya", role: "joint", share: 50 }])).toMatch(/\byours\b/);
   });
 
-  test("every co-owner is told with their role", () => {
-    const line = houseLine([{ party: "you", role: "owner", share: 60 }, { party: "maya", role: "joint", share: 30 }, { party: "rosa", role: "authorized_user" }]);
-    expect(line).toMatch(new RegExp(`Maya Chen \\(${ROLE_LABEL.joint}`));
-    expect(line).toMatch(new RegExp(`\\(${ROLE_LABEL.authorized_user}`));
+  test("every co-owner's role is told: changing only one holder's role changes the line", () => {
+    const base = [{ party: "you", role: "owner", share: 60 }, { party: "maya", role: "joint" }, { party: "rosa", role: "authorized_user" }];
+    const line = houseLine(base);
+    expect(line).toContain("Maya Chen");
+    expect(line).toContain("Rosa Delgado");
+    expect(houseLine([base[0]!, { party: "maya", role: "trustee" }, base[2]!])).not.toBe(line);
+    expect(houseLine([base[0]!, base[1]!, { party: "rosa", role: "beneficiary" }])).not.toBe(line);
+  });
+
+  test("a holder he doesn't know of is never named, yet their role is still told", () => {
+    for (const [mine, theirs] of [
+      [{ party: "you", role: "owner", share: 60 }, "joint"],
+      [{ party: "you", role: "authorized_user" }, "owner"],
+    ] as const) {
+      const line = houseLine([mine, { party: "vex", role: theirs }]);
+      expect(line).not.toContain("Vex Morrow");
+      expect(houseLine([mine, { party: "vex", role: "trustee" }])).not.toBe(line);
+    }
   });
 });
 

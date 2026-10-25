@@ -21,7 +21,7 @@ import { propertyIds } from "./property";
 const OTHERS_CAP = 10;
 
 /** A holder's role as a property line says it. */
-export const ROLE_LABEL: Record<OwnerRole, string> = { owner: "owner", joint: "joint owner", custodian: "custodian", beneficiary: "beneficiary", trustee: "trustee", authorized_user: "authorized user" };
+const ROLE_LABEL: Record<OwnerRole, string> = { owner: "owner", joint: "joint owner", custodian: "custodian", beneficiary: "beneficiary", trustee: "trustee", authorized_user: "authorized user" };
 
 /** The roles that make a property the holder's own; the rest only keep it, benefit from it or use it. */
 const OWNING: Record<OwnerRole, boolean> = { owner: true, joint: true, custodian: false, beneficiary: false, trustee: false, authorized_user: false };
