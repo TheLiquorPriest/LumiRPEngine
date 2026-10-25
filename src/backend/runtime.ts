@@ -2473,14 +2473,16 @@ export class Runtime implements TurnHooks {
   /**
    * `world` with the lore its World Info books hold now (DESIGN §4.2, `liveLore`), read once per
    * engine run, under its turn id, so its phases, its sections, its time skip and its checks read the
-   * same entries; each caller keeps its own world, with that lore. The same first read also keeps the
-   * World Info entries the world's secrets were indexed from switched off, a revision committed before
-   * that was done included.
+   * same entries; each caller keeps its own world, with that lore. The same first read keeps the World
+   * Info entries the world's secrets were indexed from switched off, a revision committed before that
+   * was done included, and every secret's twins with them, before the books are read: a twin that
+   * appeared since is then read as the secret it is.
    */
   private async liveWorld(key: string, chatId: ChatId, userId: UserId, world: WorldDoc): Promise<WorldDoc> {
     const kept = this.liveLores.get(key);
     if (kept) return kept === world.lore ? world : { ...world, lore: kept };
-    const [live] = await Promise.all([liveLore(this.host, world, chatId, userId), secureIndexedSecrets(this.host, world, userId)]);
+    await secureIndexedSecrets(this.host, world, userId);
+    const live = await liveLore(this.host, world, chatId, userId);
     lruSet(this.liveLores, key, live.lore, 64);
     return live;
   }

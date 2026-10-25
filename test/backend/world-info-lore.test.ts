@@ -12,7 +12,7 @@ import { calendarOf, clockAt, dateAt } from "../../src/engine/calendar";
 import { worldInfoVerdict } from "../../src/backend/wi-interceptor";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
-import type { LoreBookView } from "../../src/shared/protocol";
+import type { LoreBookEntryView, LoreBookView } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
 import { bookTextHash } from "../../src/shared/lore";
 import { blankWorld } from "../../src/engine/authoring";
@@ -178,6 +178,80 @@ describe("Build's World Info lore editor", () => {
     // Told apart by where each came from, not by an id the user never sees.
     for (const id of [own, copy]) expect(labels[id]?.startsWith("TLS - Core") && !labels[id]?.includes(id)).toBe(true);
     expect(labels[other]).toBe("Harbor lore");
+  });
+});
+
+describe("a secret World Info entry's twins", () => {
+  const ALIKE = "WRECK-ALIKE: the wreck is only a wreck.";
+
+  /**
+   * A chat that scans only a book a character's card brought, named like the book holding the entry
+   * to make secret (as Lumiverse scans a character's own copy): in it the entry's twin, its title and
+   * text spaced otherwise, and an entry with the same title but other text.
+   */
+  async function twinChat(): Promise<{ rig: Rig; chatId: string; bookId: string; original: string; copyBook: string; twin: string; alike: string; pov: string }> {
+    const { rig, chatId, bookId, ids, pov } = await bookChat([entry("The wreck", `${SECRET}.`)]);
+    const copyBook = rig.host.userBook("harbor  NOTES", { character: true });
+    const twin = await rig.host.books.createEntry(copyBook, entry("  The wreck ", `${SECRET}.\n`), rig.host.userId);
+    const alike = await rig.host.books.createEntry(copyBook, entry("The wreck", ALIKE), rig.host.userId);
+    await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [copyBook] }, rig.host.userId);
+    return { rig, chatId, bookId, original: ids[0] ?? "", copyBook, twin, alike, pov };
+  }
+
+  test("is kept off with it: stored switched off, and out of the prompt until the gate holds, then in it; an entry only titled alike is untouched", async () => {
+    const { rig, chatId, bookId, original, twin, alike, pov } = await twinChat();
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId: original, fields: { secret: true, gate: GATE } }));
+    expect(rig.host.storedEntry(twin)?.disabled).toBe(true);
+    expect(rig.host.storedEntry(alike)).toMatchObject({ disabled: false, extensions: {} });
+    await rig.turn(chatId, "I look at the harbor.", "Gulls call.");
+    expect(inPrompt(rig, SECRET)).toBe(false);
+    expect(inPrompt(rig, "WRECK-ALIKE")).toBe(true);
+    await rich(rig, chatId, pov);
+    await rig.turn(chatId, "I look again.", "The tide turns.");
+    expect(inPrompt(rig, SECRET)).toBe(true);
+  });
+
+  test("making the entry public again puts it and its twin back on, the twin as it stood", async () => {
+    const { rig, bookId, original, twin, alike } = await twinChat();
+    const stood = rig.host.storedEntry(twin);
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId: original, fields: { secret: true, gate: GATE } }));
+    expect([rig.host.storedEntry(original)?.disabled, rig.host.storedEntry(twin)?.disabled]).toEqual([true, true]);
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId: original, fields: null }));
+    expect(rig.host.storedEntry(original)?.disabled).toBe(false);
+    expect(rig.host.storedEntry(twin)).toEqual(stood);
+    expect(rig.host.storedEntry(alike)).toMatchObject({ disabled: false, extensions: {} });
+  });
+
+  test("Build names each twin a secret keeps off, and a twin's own secrecy changes only with its original's", async () => {
+    const { rig, bookId, original, copyBook, twin, alike } = await twinChat();
+    const entries = async (book: string) => rig.body(await rig.send({ type: "lre.lore", op: "entries", bookId: book })).entries as LoreBookEntryView[];
+    expect((await entries(bookId)).find((e) => e.id === original)?.twins).toEqual([{ bookId: copyBook, entryId: twin }]);
+    expect((await entries(copyBook)).find((e) => e.id === alike)?.twins).toBeUndefined();
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId: original, fields: { secret: true, gate: GATE } }));
+    expect((await entries(copyBook)).find((e) => e.id === twin)?.copyOf).toEqual({ bookId, entryId: original, kept: true });
+    const refused = await rig.send({ type: "lre.lore", op: "fields", bookId: copyBook, entryId: twin, fields: null });
+    expect(refused.type).toBe("lre.error");
+    expect(rig.host.storedEntry(twin)?.disabled).toBe(true);
+  });
+
+  test("a secret world entry's source keeps its twins off too, from the draft save that makes it secret", async () => {
+    const { rig, chatId, bookId, original, twin } = await twinChat();
+    const worldId = (await rig.rt.runOf(chatId, rig.host.userId))?.worldId ?? "";
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "wreck", value: { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: [], links: [], secret: true, gate: GATE, source: { kind: "book", bookId, entryId: original, hash: bookTextHash(`${SECRET}.`) } } }));
+    expect(rig.host.storedEntry(original)?.disabled).toBe(true);
+    expect(rig.host.storedEntry(twin)?.disabled).toBe(true);
+  });
+
+  test("a twin kept as the copy of a secret world entry's source opens only once the world entry's gate holds too", async () => {
+    const registry = createRegistry(ALL_PACKS);
+    const world = blankWorld("w_twin", "Twin");
+    world.lore.wreck = { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: [], links: [], secret: true, gate: "false", source: { kind: "book", bookId: "b", entryId: "e", hash: bookTextHash(`${SECRET}.`) } };
+    const copy = { [LEDGER_NAMESPACE]: { lore: { secret: true, gate: "true" }, secretCopyOf: { entry: "b/e", off: false, fields: null } } };
+    const verdict = await worldInfoVerdict(
+      { registry, playsWorld: () => true, head: async () => ({ world, state: startState(world, registry) }), carried: () => new Set(), log: () => undefined },
+      { chatId: "c", userId: "u", chatMetadata: {}, entries: [{ id: "t", bookId: "b2", disabled: true, extensions: copy }] },
+    );
+    expect(verdict).toEqual({ disabled: ["t"], enabled: [] });
   });
 });
 
