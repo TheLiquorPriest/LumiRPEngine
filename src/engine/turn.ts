@@ -17,7 +17,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hashParts } from "../shared/hash";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent, TimelapseTarget } from "../shared/ledger";
-import type { WorldDoc } from "../shared/world";
+import { activitySpanEnd, type WorldDoc } from "../shared/world";
 import type { Judgement } from "./adjudication";
 import { outline } from "./beats";
 import { ENGINE_EVENTS, signalOf } from "./engine-pack";
@@ -92,6 +92,29 @@ function statedSpan(reg: Registry, world: WorldDoc, step: TurnStep | null): bool
   });
 }
 
+/** The player character's activity span while it is still the current activity's (`activitySpanEnd`). */
+function povSpan(w: Working): { type: string; until: number } | null {
+  const fields = own(w.state.entities, w.world.pov)?.fields;
+  const until = activitySpanEnd(fields);
+  return until !== null && typeof fields?.activity === "string" ? { type: fields.activity, until } : null;
+}
+
+/**
+ * An activity span an earlier turn left running, still long enough for its Speed through, ends
+ * unmet as this turn begins (DESIGN §9.2): the offer its turn made goes at the next send, so the
+ * next turn is the decline. Only its own Speed through, the chip's Timelapse to its end or that
+ * Timelapse's Continue, carries it on: no later turn or skip meets a nap the player got up from. A
+ * span short enough to pass in turns (under its threshold, or with no policy) goes on, and is met
+ * when a turn's time sees it out. Nothing is recorded when no span is cut.
+ */
+function lapsedSpan(w: Working, intent: InterpretOutput | null): LedgerEvent[] {
+  const span = povSpan(w);
+  if (span === null || span.until <= w.state.clock || speedThrough(w.state, span.type, span.until - w.state.clock) === "elapse") return [];
+  const target = intent?.action === TIMELAPSE_ACTION ? parseTarget(intent.params.target) : null;
+  if (target?.type === "at" && target.at === span.until) return [];
+  return [{ type: "set", entity: w.world.pov, field: "activity_until", value: w.state.clock }];
+}
+
 /**
  * Whether the action queue stops after an action (DESIGN §11), and why: a failure (it couldn't run,
  * or part of it was refused), a check (resolved, then the player sees how it fell), or an
@@ -155,6 +178,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   const rng = createRng(input.seed);
   const chips: TurnChip[] = [];
   turnStart(reg, w, input.runSeed);
+  w.applyAll(lapsedSpan(w, input.intent));
   const from = w.state.clock;
   const intent = input.intent;
   const resolutions: Resolution[] = [];
@@ -229,6 +253,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
       // takes its own time, so durations add up; the scene tick stands in only when none ran.
       const fighting = fightHoldsClock(w.ctx);
       const elapsed = (inFight && fighting) || (i > 0 && !resolution?.ok) ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
+      const began = w.state.clock;
       if (elapsed && elapsed.minutes > 0) advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
       const act = resolution?.activity;
       let speeding = false;
@@ -254,6 +279,22 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
           // Under its threshold, or with no policy, the rest passes within the turn (DESIGN §9.2):
           // "sleep for 20 minutes" is a 20-minute turn though going to bed takes five.
           advance(reg, w, Math.min(act.until, w.state.clock + TIME_LIMITS.timelapseMinutes), { runSeed: input.runSeed, mode: "turn", cause: "action" });
+        }
+      }
+      // The player character's activity span that ended within this step's time meets its needs at
+      // its end (`ProcessDef.ended`): the action's own is part of the action, so "Not an action?"
+      // takes it back with the rest (DESIGN §9.2); one an earlier turn began is this turn's time's.
+      // One its Speed through runs is met by that Timelapse; a long one turned down ended as the
+      // turn began (`lapsedSpan`).
+      const span = speeding ? null : povSpan(w);
+      if (span && span.until > began && span.until <= w.state.clock) {
+        const met: LedgerEvent[] = [];
+        for (const def of reg.processes) {
+          if (def.scope === "agent" && def.ended && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel) met.push(...w.applyAll(def.ended(w.ctx, w.world.pov, span)));
+        }
+        if (resolution && met.length > 0 && act?.type === span.type && act.until === span.until) {
+          resolution = { ...resolution, events: [...resolution.events, ...met] };
+          resolutions[resolutions.length - 1] = resolution;
         }
       }
       const left = steps.length - 1 - i;

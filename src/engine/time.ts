@@ -9,7 +9,7 @@ import type { EntityId, InterruptClass, InterruptPolicy, SceneTypeId } from "../
 import { heldBy } from "../shared/finance";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { LedgerEvent, TimelapseEvent, TimelapseTarget } from "../shared/ledger";
-import type { WorldDoc } from "../shared/world";
+import { activitySpanEnd, type WorldDoc } from "../shared/world";
 import { calendarOf, clockAt, clockOfStamp, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, placeOffset, shortestSlot, slotIndexAt, slotStart, type Calendar } from "./calendar";
 import { ENGINE_EVENTS, readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { ReadContext, Rejection } from "./registry";
@@ -209,8 +209,8 @@ export function resolveTarget(reg: Registry, world: WorldDoc, state: Readonly<Wo
       break;
     }
     case "arrival": {
-      const until = own(state.entities, world.pov)?.fields.activity_until;
-      if (typeof until !== "number" || until <= now) return { code: "no_trip", reason: "no active trip" };
+      const until = activitySpanEnd(own(state.entities, world.pov)?.fields);
+      if (until === null || until <= now) return { code: "no_trip", reason: "no active trip" };
       to = until;
       label = "arrival";
       break;
