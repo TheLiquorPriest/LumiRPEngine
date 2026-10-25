@@ -2559,23 +2559,23 @@ export class Runtime implements TurnHooks {
   /**
    * Tells the user, once each, of a World Info book LRE never managed to read, and of their books not
    * being listed: while either lasts, all of their World Info is off in world chats (DESIGN §6.1).
-   * Settings → Caveats says what to do (`loreCaveats`).
+   * Settings → Caveats says what to do (`loreCaveats`). Read from the index as it stands, a first read
+   * that never got its list included.
    */
-  private tellUnread(index: LoreIndex | null, userId: UserId): void {
-    if (!index) return;
+  private tellUnread(index: LoreIndex, userId: UserId): void {
     const { unlisted, books } = untold(index);
     if (unlisted) this.host.toast("World Info is off in your world chats: LumiRPEngine can't list your World Info books. Settings → Caveats says more.", userId);
     for (const name of books) this.host.toast(`World Info is off in your world chats: LumiRPEngine can't read your World Info book “${name}”. Settings → Caveats says what to do.`, userId);
   }
 
   /**
-   * Settings → Caveats' World Info books LRE can't read (DESIGN §6.1): while one was never read, any
-   * entry could be the twin of a secret in it, so all of the user's World Info is off in world chats.
-   * Nothing while LRE's first read of them is still under way.
+   * Settings → Caveats' World Info books LRE can't read (DESIGN §6.1): while one was never read, or the
+   * books were never listed, any entry could be the twin of a secret LRE hasn't read, so all of the
+   * user's World Info is off in world chats. Read now when LRE's first read has finished, else as its
+   * reads so far left the index, a list that failed among them.
    */
   private async loreCaveats(userId: UserId): Promise<PresetCaveat[]> {
-    const index = await readyLoreIndex(this.host, userId);
-    if (!index) return [];
+    const index = (await readyLoreIndex(this.host, userId)) ?? lastLoreIndex(this.host, userId);
     const { unlisted, books } = unreadBooks(index);
     return [
       ...(unlisted !== null ? [{ code: "lore_books_unlisted" as const, message: `LumiRPEngine can't list your World Info books (${unlisted.slice(0, 200)}), so it keeps all of your World Info off in world chats until it can: any entry could be the twin of a secret it hasn't read. It tries again at the next turn.` }] : []),
@@ -2592,7 +2592,7 @@ export class Runtime implements TurnHooks {
       carried: (chatId) => this.carriedEntries.get(chatId) ?? new Set(),
       secrets: async (userId) => {
         const index = await readyLoreIndex(this.host, userId);
-        this.tellUnread(index, userId);
+        this.tellUnread(index ?? lastLoreIndex(this.host, userId), userId);
         return index;
       },
       lastSecrets: (userId) => lastLoreIndex(this.host, userId),

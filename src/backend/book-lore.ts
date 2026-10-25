@@ -170,10 +170,16 @@ export async function loreBookIds(host: Pick<HostPort, "books" | "chats">, world
  * the two), whether or not the chat reads its book, then every lore entry of the books the chat
  * reads, live. Each is held back as its text is (`secrecyParts`), a secret's twin in whatever book as
  * that secret; a text read already, a world entry's or a twin's, is read once, where it first comes.
- * A book that can't be read gives nothing, and the log says so; a listed book that is gone is named too.
+ * A book that can't be read gives nothing, and the log says so; a listed book that is gone is named
+ * too. When the chat's books can't be told (the books not listed, say), none is read and the run goes
+ * on: what the index can't vouch for stays held back (`secrecyParts`).
  */
 export async function liveLore(host: Pick<HostPort, "books" | "chats" | "log">, world: WorldDoc, chatId: ChatId | null, userId: UserId): Promise<WorldDoc> {
-  const [books, index] = await Promise.all([loreBookIds(host, world, chatId, userId), loreIndex(host, userId)]);
+  const which = loreBookIds(host, world, chatId, userId).catch((error: unknown): { read: string[]; gone: string[] } => {
+    host.log("warn", `[LumiRPEngine] the World Info books this chat reads weren't told, so none is read as lore this run: ${error instanceof Error ? error.message : String(error)}`, userId);
+    return { read: [], gone: [] };
+  });
+  const [books, index] = await Promise.all([which, loreIndex(host, userId)]);
   for (const id of books.gone) host.log("warn", `[LumiRPEngine] lore book ${id} the world lists is gone: no call reads it (Build → Lore → Lore books)`, userId);
   // The books entries of the world were indexed from, read for those entries alone.
   const sources = [...new Set(Object.values(world.lore).flatMap((entry) => {
