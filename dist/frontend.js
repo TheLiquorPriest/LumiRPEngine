@@ -16319,7 +16319,7 @@ function PlaceSheet(props) {
   const searching = query.trim() !== "";
   return /* @__PURE__ */ u3(FormSheet, {
     title: props.title,
-    subtitle: current2 ? pathLabel(current2) : "Not set",
+    subtitle: current2 ? pathLabel(current2) : props.none ?? "Not set",
     onClose: props.onClose,
     children: /* @__PURE__ */ u3("div", {
       class: "lre-cp-sheet",
@@ -16333,7 +16333,8 @@ function PlaceSheet(props) {
               children: "Now"
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(PlacePath, {
-              place: current2
+              place: current2,
+              empty: props.none
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this),
@@ -20825,6 +20826,7 @@ function FixEditor(props) {
       places: target.places,
       value: typeof target.value === "string" ? target.value : null,
       title,
+      none: "You don't know",
       onClose: props.onDone,
       onPick: (place) => place ? save(place.id) : props.onDone()
     }, undefined, false, undefined, this);
