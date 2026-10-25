@@ -433,8 +433,10 @@ export function resolveEdit(reg: Registry, world: WorldDoc, state: Readonly<Worl
   }
   // What a GM sets them doing, and until when, is that activity's span (DESIGN §9.2), stamped as the
   // whole edit leaves them, where they are: Activity and Activity ends read together whether set in
-  // one edit or one after the other, in either order. A player's ✎ of the activity takes no old end.
-  const spans = w.events.flatMap((e) => (e.type === "set" && (e.field === "activity_until" || (opts.gm && e.field === "activity")) ? [e.entity] : []));
+  // one edit or one after the other, in either order. Only the edit's own fields count, never what its
+  // effects set: a Move brings the party along as idle, which takes no end of theirs. A player's ✎ of
+  // the activity takes no old end either.
+  const spans = ops.flatMap((op) => (op.op === "set" && (op.field === "activity_until" || (opts.gm && op.field === "activity")) ? [op.entity] : []));
   for (const entity of new Set(spans)) {
     const fields = own(w.state.entities, entity)?.fields;
     if (typeof fields?.activity_until !== "number") continue;

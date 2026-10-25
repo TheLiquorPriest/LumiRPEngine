@@ -9,6 +9,7 @@ import { toChain } from "../../src/backend/ledger-io";
 import { optionalQuery } from "../../src/engine/pack-kit";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { JsonObject } from "../../src/shared/json";
+import { activitySpanEnd } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 
 const INTERPRET_MARK = "You map a player's typed input";
@@ -135,5 +136,32 @@ describe("Not an action? on a queued message", () => {
     await notAnAction(rig, chatId, rig.host.head(chatId)?.id ?? "");
     // The gift taken back with the rest; what the turn's hours did to regard on their own stays.
     expect(await warmthOf(rig, chatId)).toBeCloseTo(before, 0);
+  });
+});
+
+describe("getting up before an out-of-character skip", () => {
+  // The read interpret's rules ask for (its prompt and the time-skip catalog entry): the move out of
+  // bed is the action and the hour its `then`. What a model makes of the rules isn't testable without
+  // one; this holds the turn to what the read says.
+  test("Get up plays, ending the night, and the hour is offered after it rather than slept through", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const BED = "I go back to bed.";
+    const UP = "I get out of bed and make coffee. (OOC: skip an hour.)";
+    rig.host.quietReply = (req: QuietRequest) => {
+      if (!(req.messages[0]?.content ?? "").includes(INTERPRET_MARK)) return "{}";
+      const text = req.messages[1]?.content ?? "";
+      return JSON.stringify(text === BED ? { action: "sleep", params: {}, confidence: 0.9 } : text === UP ? { action: "get_up", params: {}, confidence: 0.9, then: { span: "an hour", minutes: 60 } } : { action: null, params: {}, confidence: 0.9 });
+    };
+    await rig.turn(chatId, BED, "You crawl back under the covers.");
+    await rig.turn(chatId, UP, "You get up and put the kettle on.");
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const pov = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state.entities.pov;
+    expect(pov?.fields.activity).toBe("idle");
+    expect(activitySpanEnd(pov?.fields)).toBeNull();
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
+    expect(chips.some((c) => c.kind === "timelapse_offer" && c.messageId === rig.host.head(chatId)?.id)).toBe(true);
   });
 });
