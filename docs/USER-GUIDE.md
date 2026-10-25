@@ -630,7 +630,8 @@ What meets a need meets it when it's done, so the need grows again from then:
 
 - **Eating** meets hunger at the end of the meal (half an hour, or as long as you say: "I eat for an hour").
 - **Resting** meets fun at the end of the rest (half an hour, or as long as you say: "I rest for an hour" takes an hour; a longer rest goes to [Speed through](#speed-through-and-timelapse-offers)).
-- **Chatting** with someone meets your social need at the end of the chat (a quarter of an hour, or "I talk to Rosa for two hours").
+- **Company**: every turn you spend with someone you know (anyone you've met, there with you as the turn ends) meets your social need, so a day spent with friends keeps you from getting lonely. **Chatting** with someone meets it at the end of the chat (a quarter of an hour, or "I talk to Rosa for two hours").
+- **An activity a turn gives you** (a world's own "Have dinner", a short nap or rest) meets its need when it ends within that turn or a later one.
 - **Sleep** meets fatigue as you sleep through it: **Go to bed** sleeps until 07:00, then the Speed through or Timelapse offer rests you when the night ends; so does any time skip your routine sleeps through. A nap you give a length ("I sleep for 20 minutes") lasts that long and rests you as it ends: a short one within the turn, a long one through its Timelapse. Going to bed and getting straight up again, or turning down the Timelapse, rests no one.
 - **Through a time skip**, what you live during the skip meets your needs: your meals and sleep, time out, and time with someone you know. The time you played before it counts only as you played it.
 

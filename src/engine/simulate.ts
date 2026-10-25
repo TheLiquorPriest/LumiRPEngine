@@ -425,6 +425,14 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       result.open = open;
     }
   }
+  // An ordinary turn steps no slot of the POV's: its agent processes read what it lived through the
+  // turn's own time as it ends (`ProcessDef.lived`), which no skip reads again (DESIGN §8).
+  if (!timelapse && w.state.clock > from && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov)) {
+    const span = { from, to: w.state.clock };
+    for (const def of reg.processes) {
+      if (def.scope === "agent" && def.lived && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel) e.emit(def.lived(w.ctx, w.world.pov, span));
+    }
+  }
   for (const [agent, slot] of cursors) settle(agent, slot);
   result.to = w.state.clock;
   result.events = Math.max(0, w.events.length - startEvents);

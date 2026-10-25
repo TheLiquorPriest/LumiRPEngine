@@ -237,6 +237,12 @@ export interface ProcessDef {
   instants?(ctx: ReadContext, agent: EntityId, slot: SlotInfo): AgentInstant[];
   /** What the process does at one of its instants, at that instant's clock, in the slot it falls in (`slot.povRoutine`: whether the story holds the POV). */
   atInstant?(ctx: ReadContext, agent: EntityId, instant: AgentInstant, slot: SlotInfo): LedgerEvent[];
+  /**
+   * What the POV lived through the ordinary time of a turn (`span`, a turn-mode advance; DESIGN §8),
+   * read as that time ends. No slot step reads it: a turn steps no one but the agents it catches up,
+   * never the POV, and a later skip passes over it (`SlotInfo.run`), so this is the only reading.
+   */
+  lived?(ctx: ReadContext, agent: EntityId, span: { from: number; to: number }): LedgerEvent[];
 }
 
 /** A pack's default table and its column contract (ARCHITECTURE §6). */
