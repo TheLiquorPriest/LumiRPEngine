@@ -35,7 +35,7 @@ import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, formatTimeOfDay, 
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sliceOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
-import { speedThrough } from "../../../engine/time";
+import { clockPaused, fightHoldsClock, speedThrough } from "../../../engine/time";
 import type { AgentInstant, EventTypeDef, FeedLine, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { PlayerBlock, RoutineEditOp, RoutineRole, RoutineSociability, SkipBlock } from "../../../shared/routines";
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
@@ -192,15 +192,17 @@ function toBed(ctx: ReadContext, who: EntityId): LedgerEvent[] {
  * A conversation the POV is in meets its social need (DESIGN §8): at once, unless it is the POV's own
  * chat, whose span is still going on (`activitySpanEnd`, the length it was stated, else the chat's own):
  * that is met as the span ends, by the action that began it (`povSpanEnded`, so "Not an action?" takes
- * it back too) or by the skip that passes it. Nothing for a conversation between others: only the
- * POV's needs are recorded.
+ * it back too) or by the skip that passes it. While the clock is paused or a fight holds it no turn
+ * reaches that end, so it is met at once then too. Nothing for a conversation between others: only
+ * the POV's needs are recorded.
  */
 function companyMet(ctx: ReadContext, pair: readonly EntityId[]): LedgerEvent[] {
   const pov = ctx.world.pov;
   const e = own(ctx.state.entities, pov);
   if (!e || !pair.includes(pov)) return [];
   const end = e.fields.activity === "chat" ? activitySpanEnd(e.fields) : null;
-  return end !== null && end > ctx.state.clock ? [] : metAt(ctx, pov, "social", ctx.state.clock);
+  const held = clockPaused(ctx.world, ctx.state) || fightHoldsClock(ctx);
+  return end !== null && end > ctx.state.clock && !held ? [] : metAt(ctx, pov, "social", ctx.state.clock);
 }
 
 /**

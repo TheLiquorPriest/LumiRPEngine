@@ -19,7 +19,7 @@ import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
 import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../shared/routines";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, FieldType, WorldDoc } from "../shared/world";
-import { BUILTIN_RELATIONS, formatMoney, readSectionFeed } from "../shared/world";
+import { ACTIVITY_SPAN_OF, BUILTIN_RELATIONS, formatMoney, readSectionFeed } from "../shared/world";
 import { FEED_EVENT } from "./feed";
 import { calendarOf, slotIndexAt } from "./calendar";
 import { parseDice } from "./dice";
@@ -429,6 +429,15 @@ export function resolveEdit(reg: Registry, world: WorldDoc, state: Readonly<Worl
   const rng = createRng(hashParts("lre.edit", opts.runSeed, JSON.stringify(ops)));
   for (const [i, op] of ops.entries()) {
     const rejection = applyOp(reg, w, op, opts, rng.fork(`op:${i}`));
+    if (rejection) return { rejection };
+  }
+  // An end the edit gave someone's activity is that activity's span (DESIGN §9.2), stamped with the
+  // activity as the whole edit leaves it, so Activity and Activity ends set together read together in
+  // either order; an Activity edited alone still takes no old end.
+  for (const entity of new Set(w.events.flatMap((e) => (e.type === "set" && e.field === "activity_until" ? [e.entity] : [])))) {
+    const fields = own(w.state.entities, entity)?.fields;
+    if (typeof fields?.activity !== "string" || fields[ACTIVITY_SPAN_OF] === fields.activity) continue;
+    const rejection = w.apply({ type: "set", entity, field: ACTIVITY_SPAN_OF, value: fields.activity });
     if (rejection) return { rejection };
   }
   // One submit is one unit: a rebased view keeps or drops it whole, as it does a purchase.

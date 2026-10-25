@@ -107,7 +107,7 @@ describe("time skips", () => {
     const run = readRun(await rig.host.chats.chatMetadata(chatId, rig.host.userId));
     if (!run) throw new Error("no run");
     const whole = new Working(rig.rt.registry, start.world, start.state);
-    turnStart(rig.rt.registry, whole, run.runSeed);
+    turnStart(rig.rt.registry, whole, run.runSeed, timelapseIntent({ type: "duration", minutes: 3 * 1440 }));
     const plain = runTimelapse(rig.rt.registry, whole, { type: "duration", minutes: 3 * 1440 }, { runSeed: run.runSeed });
     if ("code" in plain) throw new Error(plain.reason);
     expect(whole.events.some((e) => e.type === "castlife.invitation")).toBe(false);
@@ -208,7 +208,7 @@ describe("time skips", () => {
     const run = readRun(await rig.host.chats.chatMetadata(chatId, rig.host.userId));
     if (!run) throw new Error("no run");
     const whole = new Working(rig.rt.registry, start.world, start.state);
-    turnStart(rig.rt.registry, whole, run.runSeed);
+    turnStart(rig.rt.registry, whole, run.runSeed, timelapseIntent({ type: "duration", minutes: 3 * 1440 }, { invitation: "note" }));
     const plain = runTimelapse(rig.rt.registry, whole, { type: "duration", minutes: 3 * 1440 }, { runSeed: run.runSeed, overrides: { invitation: "note" } });
     if ("code" in plain) throw new Error(plain.reason);
     await skipDays(rig, chatId, 3);
@@ -297,7 +297,7 @@ describe("time skips", () => {
     expect(asked).toEqual([]);
     // The plan replays it there, and offers the rest.
     const w = new Working(rig.rt.registry, world, state);
-    turnStart(rig.rt.registry, w, "seed");
+    turnStart(rig.rt.registry, w, "seed", timelapseIntent(target, { invitation: "note" }));
     const out = replaySkip(rig.rt.registry, w, target, skip.record, { runSeed: "seed", overrides: { invitation: "note" } });
     if ("code" in out) throw new Error(out.reason);
     expect(out.summary.to).toBe(beats[1] ?? NaN);
@@ -379,7 +379,7 @@ describe("time skips", () => {
     // Under the world's own interrupts, where an arrival stops a skip.
     const lapse = (povRoutine: boolean): { w: Working; stoppedBy: string | null } => {
       const w = new Working(rig.rt.registry, world, state);
-      turnStart(rig.rt.registry, w, "seed");
+      turnStart(rig.rt.registry, w, "seed", timelapseIntent({ type: "duration", minutes: 4 * 60 }, undefined, 1, povRoutine));
       const out = runTimelapse(rig.rt.registry, w, { type: "duration", minutes: 4 * 60 }, { runSeed: "seed", ...(povRoutine ? {} : { povRoutine: false }) });
       if ("code" in out) throw new Error(out.reason);
       return { w, stoppedBy: out.summary.stoppedBy };

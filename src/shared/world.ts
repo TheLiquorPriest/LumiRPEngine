@@ -521,11 +521,22 @@ export interface ActivitySpec {
 }
 
 /**
- * The activity an action's span (`activity_until`) was given for, written with it (DESIGN §9.2).
- * Anything else that sets `activity` (a meal's `set`, a narrated move, a routine, a ✎ edit) leaves the
- * old end behind, which isn't the new activity's: `activitySpanEnd` reads an end only for its own.
+ * The activity an action's span (`activity_until`) was given for, written with it, and by a GM edit
+ * of the end (DESIGN §9.2). Anything else that sets `activity` (a meal's `set`, a narrated move, a
+ * routine, a ✎ edit) leaves the old end behind, which isn't the new activity's: `activitySpanEnd`
+ * reads an end only for its own.
  */
 export const ACTIVITY_SPAN_OF = "_activity_span";
+
+/**
+ * The end of the span a turn offered a Speed through to (or ran one toward and stopped short of),
+ * DESIGN §9.2: only such a span is turned down by the next turn that lets no time pass. A span no
+ * turn offered (short enough to pass in turns, or begun while the clock was held) never is.
+ */
+export const ACTIVITY_OFFERED = "_activity_offered";
+
+/** The engine's own records on an entity, which no view, mind or prompt lists. */
+export const ENGINE_FIELDS: Readonly<Record<string, true>> = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_OFFERED]: true };
 
 /**
  * When someone's current activity ends, as the action that began it said: `activity_until` while the
