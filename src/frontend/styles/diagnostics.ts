@@ -13,8 +13,8 @@ export const DIAGNOSTICS_CSS = `
 .lre .lre-chat-status>.lre-activity.failed{flex:none}
 .lre .lre-chat-status-line>.lre-activity{flex:none;max-width:62%}
 
-/* The drawer's bar under the mode bar, sticky with it */
-.lre-activity-bar{position:sticky;top:var(--lre-modebar-h,0px);z-index:5;display:flex;align-items:center;gap:var(--lre-s2);min-height:36px;margin:0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l));background:var(--lre-accent-soft);border-bottom:1px solid var(--lre-hairline);font-size:var(--lre-fs-sm);color:var(--lre-fg)}
+/* The drawer's bar under the mode bar, sticky with it; its tint laid over the bar's own background, so nothing shows through */
+.lre-activity-bar{position:sticky;top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px));z-index:5;display:flex;align-items:center;gap:var(--lre-s2);min-height:36px;margin:0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l));background:linear-gradient(var(--lre-accent-soft),var(--lre-accent-soft)),var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);font-size:var(--lre-fs-sm);color:var(--lre-fg)}
 .lre-activity-bar>.lre-activity-label{flex:1}
 .lre-activity-banner{margin-top:var(--lre-s3)}
 

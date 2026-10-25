@@ -1,9 +1,12 @@
 // The drawer tab "LumiRPEngine": a sticky mode bar (Play · GM · Build · Settings)
 // over the chosen mode. GM mode wears the GM frame (`data-lre-mode="gm"`: a rule at the top and a
 // faint tint). Content keeps clear of the host's chat heads only while they overlap the drawer, by as
-// much as they do. The drawer publishes two measures for the modes' sticky parts:
-// `--lre-modebar-h`, the mode bar's height (bars that stick under it), and `--lre-fill-h`, the height
-// the host's scrolling panel shows (the drawer fills it, so a bottom bar sits at the drawer's bottom).
+// much as they do. The drawer publishes three measures for the modes' sticky parts:
+// `--lre-modebar-h`, the mode bar's height (bars that stick under it); `--lre-stick-top`, the top that
+// keeps a sticky bar at the very top of the host's scrolling panel (a sticky top keeps clear of the
+// panel's padding, and what scrolls through that padding would show above the bar); and
+// `--lre-fill-h`, the height the panel shows (the drawer fills it, so a bottom bar sits at the
+// drawer's bottom).
 
 import { useEffect, useId, useRef } from "preact/hooks";
 import type { Mode } from "./app";
@@ -60,7 +63,9 @@ export function Drawer(props: { measure(el: Element): Rect }) {
       }
       if (scroller) {
         const style = getComputedStyle(scroller);
-        const fill = scroller.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
+        const top = parseFloat(style.paddingTop) || 0;
+        const fill = scroller.clientHeight - top - (parseFloat(style.paddingBottom) || 0);
+        el.style.setProperty("--lre-stick-top", `${-top}px`);
         el.style.setProperty("--lre-fill-h", `${Math.max(0, Math.floor(fill))}px`);
       }
     };

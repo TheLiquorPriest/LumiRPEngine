@@ -8,7 +8,7 @@ export const BUILD_CSS = `
 .lre-build,.lre-build-page{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
 .lre-character-page .lre-field:not([data-lre-derived]) .lre-form-optional{display:none}
 .lre-character-page .lre-section-body>*+*{margin-top:var(--lre-s3)}
-.lre-build-bar{position:sticky;top:var(--lre-modebar-h,0px);z-index:5;display:flex;flex-direction:column;margin:calc(-1 * var(--lre-s3)) calc(-1 * (var(--lre-s3) + var(--lre-gutter-r,0px))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l,0px)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r,0px)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l,0px));background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline)}
+.lre-build-bar{position:sticky;top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px));z-index:5;display:flex;flex-direction:column;margin:calc(-1 * var(--lre-s3)) calc(-1 * (var(--lre-s3) + var(--lre-gutter-r,0px))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l,0px)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r,0px)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l,0px));background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline)}
 .lre-build-bar-row{display:flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap-lg);min-width:0}
 .lre-build-bar-row>.lre-iconbtn:first-child{margin-left:calc(-1 * var(--lre-s2))}
 .lre-build-bar-row>.lre-btn{flex:none}
