@@ -16,6 +16,8 @@ import { buildGmWorld } from "../../../src/engine/gm-view";
 import { calendarOf, clockAt, dateAt, formatClock } from "../../../src/engine/calendar";
 import { playerLines } from "../../../src/engine/player-events";
 import { createRegistry } from "../../../src/engine/registry-impl";
+import { placeOfEntity } from "../../../src/engine/scope";
+import { PARTY_RELATION } from "../../../src/shared/party";
 import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { applyTimeAdvance, runTimelapse } from "../../../src/engine/time";
@@ -574,6 +576,21 @@ describe("needs an ordinary turn lives", () => {
       expect(metAtOf(w.events.slice(mark), "fatigue")).toEqual([]);
       expect(told(w, "fatigue")).toBe(true);
     }
+  });
+
+  test("a GM's Move of the player character brings the party along idle, with no end of theirs", () => {
+    const w = hall();
+    to(w, todayAt(w, 13 * 60));
+    // Rosa travels with them, and rests on her own (waiting, until 13:30).
+    w.apply({ type: "link", rel: PARTY_RELATION, from: "rosa", to: "you" });
+    expect(resolveAction(reg, w, { actor: "rosa", action: "rest", params: {} }, createRng("rosa")).ok).toBe(true);
+    to(w, w.state.clock + 5);
+    const moved = resolveEdit(reg, w.world, w.state, [{ op: "move", entity: "you", to: "cafe" }], { gm: true, runSeed: "run" });
+    if ("rejection" in moved) throw new Error(moved.rejection.reason);
+    w.applyAll(moved.events);
+    expect(placeOfEntity(w.state, "rosa")).toBe("cafe");
+    expect(w.state.entities.rosa?.fields.activity).toBe("idle");
+    expect(buildCharacter(reg, w.world, "rosa", w.state)?.character.now?.until ?? null).toBeNull();
   });
 
   test("moving ends the night too: no skip after rests them where they went", () => {
