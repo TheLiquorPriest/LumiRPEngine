@@ -37,7 +37,7 @@ import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sl
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
 import { speedThrough } from "../../../engine/time";
 import type { AgentInstant, EventTypeDef, FeedLine, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
-import type { PlayerBlock, RoutineEditOp, RoutineSociability, SkipBlock } from "../../../shared/routines";
+import type { PlayerBlock, RoutineEditOp, RoutineRole, RoutineSociability, SkipBlock } from "../../../shared/routines";
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
 import type { NeedId, NeedTuning } from "../../../shared/needs";
 import { CONVERSATION, isNeedId, NEED_DEFAULTS, NEED_IDS, NEED_WORDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
@@ -59,7 +59,7 @@ import { commitments, isPlayed, laidPlans, livesPlans, planTier, plansOf, type C
 import { cueIssues, cuesFor } from "./cues";
 import { birthdayOf, FOND, occasionOf } from "./occasions";
 import { bedPlace, homeOf, placeOfType } from "./places";
-import { activeBlocks, blockOnDay, blockPlace, chatScheduleDefs, followOf, ROUTINE_OPTION, routineDay, routineLived, routineRole, routinesLint, routineYields, scheduleOff, schedulesLint, skipLifeOf, skipPlanOf, withPov, worldRoutines } from "./routines";
+import { activeBlocks, blockOnDay, blockPlace, chatRoles, chatScheduleDefs, followOf, ROUTINE_OPTION, routineDay, routineLived, routineRole, routinesLint, routineYields, scheduleOff, schedulesLint, skipLifeOf, skipPlanOf, withPov, worldRoutines } from "./routines";
 import { ROUTINE_EFFECT, routineChannel, storyEvents } from "./story";
 import { usualRoutineHints } from "./usual";
 
@@ -1697,6 +1697,8 @@ declare module "../../../engine/registry" {
     "castlife.schedule_off": (ctx: ReadContext, who: EntityId, schedule: string, at: number) => boolean;
     /** The chat's own versions of schedules, each owned by the one person it's for. */
     "castlife.chat_schedules": (ctx: ReadContext) => ScheduleDef[];
+    /** Everyone the chat set a routine role for (`routine_follow`), with it: the GM view's. */
+    "castlife.chat_roles": (ctx: ReadContext) => { entity: EntityId; role: RoutineRole }[];
   }
 }
 
@@ -1712,6 +1714,7 @@ export const castlifePack: PackDef = {
     r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
+    r.query("castlife.chat_roles", (ctx) => chatRoles(ctx.state));
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: (ctx, who, moment, slot) => povActivityEnds(ctx, who, moment.at, slot, atPlanMoment(ctx, who, moment, slot)), lived: povTurnNeeds });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     // Whatever the level: a plan nothing lives is still settled.

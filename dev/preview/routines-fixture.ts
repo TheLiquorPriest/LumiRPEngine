@@ -7,7 +7,7 @@
 
 import { calendarOf, formatClock } from "../../src/engine/calendar";
 import type { EntityId, ScheduleId } from "../../src/shared/ids";
-import type { ChatRoutineSource, ChatScheduleChange, EffectiveBlock, EffectiveSchedule, InvitationView, LaidBlock, OwnerRef, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineEditOp, RoutineEntry, RoutineFollow, RoutineGmView, SourceView, StoryHoldView } from "../../src/shared/routines";
+import type { ChatRoutineSource, ChatScheduleChange, EffectiveBlock, EffectiveSchedule, InvitationView, LaidBlock, OwnerRef, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineEditOp, RoutineEntry, RoutineFollow, RoutineGmView, RoutineRole, SourceView, StoryHoldView } from "../../src/shared/routines";
 import { BASIC_BLOCKS, DEFAULT_ROUTINE_SETTINGS, isOff, ROUTINE_MODE_LABEL } from "../../src/shared/routines";
 import type { GmView } from "../../src/shared/state-view";
 import { worldFixture } from "./fixtures";
@@ -199,6 +199,13 @@ export function routineChangedFixture(routines: PreviewRoutines, gm: GmView): Ro
       schedules: Object.entries(routines.schedules[entity] ?? {}).map(([schedule, c]) => ({ schedule, source: c.source, off: "off" in c.value })),
     }))
     .filter((s) => s.follow !== null || s.blocks.length > 0 || s.schedules.length > 0);
+}
+
+/** Everyone this chat set a routine role for, with it, as the castlife pack's `castlife.chat_roles` reads its slice: what the GM view carries. */
+export function chatRolesFixture(routines: PreviewRoutines): { entity: EntityId; role: RoutineRole }[] {
+  return Object.entries(routines.follow)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .flatMap(([entity, follow]) => (follow.role === null ? [] : [{ entity, role: follow.role }]));
 }
 
 /** Applies one of the GM's routine edits to this chat's changes, as the castlife slice folds it, and words it for the Journal. */

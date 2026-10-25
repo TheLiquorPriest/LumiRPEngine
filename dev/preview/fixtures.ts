@@ -1031,6 +1031,8 @@ export function gmFixture(): GmView {
       gmMoney("npc_mara", "Mara Lopez", 2, false, "mara_checking", "Mara's checking", 1235000, [], []),
     ],
     encounter: null,
+    // The mock serves the roles from its routines' follow settings (`chatRolesFixture`), so edits show.
+    routineRoles: [],
     edits: [
       { messageId: "m4", seq: 12, lines: ["Rosie Alvarez's mood: tense"], undo: null },
       { messageId: "m2", seq: 7, lines: ["Vic Moreau is gone"], undo: null },

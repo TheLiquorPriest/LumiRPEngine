@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { bulkOps, chunks, draftPatch, fidelityGroups, mixCounts, sendInChunks, tierGroups } from "../../src/frontend/batch";
 import { draftTargets } from "../../src/frontend/build/batch-sheet";
 import { Button } from "../../src/frontend/components";
-import { BLANK_CHOICES, batchChanges, bulkTargets, ChangeCard } from "../../src/frontend/gm/batch";
+import { BLANK_CHOICES, batchChanges, bulkTargets, ChangeCard, routineStanding } from "../../src/frontend/gm/batch";
 import { editNotice, noticeStands, sendEdits } from "../../src/frontend/gm/editor";
 import { GroupPicks, SelectBar, type Selection } from "../../src/frontend/multi-select";
 import { editRequest } from "../../src/frontend/requests";
@@ -197,6 +197,28 @@ describe("GM batch edits", () => {
     expect(capped.shown).toEqual([{ label: "d", count: 3 }, { label: "b", count: 2 }]);
     // Past the cap, the other values' people are counted together: a, c and e, one each.
     expect(capped.rest).toBe(3);
+  });
+
+  test("the routine card's mix reads each character's role in this chat from the GM view: the world's until this chat sets one, and the world's again once handed back", async () => {
+    const { rig, chatId } = await chat();
+    const before = await gmView(rig, chatId);
+    const chars = bulkTargets({ gm: before }, before.minds.characters.map((c) => c.entity), "role").slice(0, 3);
+    const [one, two] = chars;
+    if (chars.length < 3 || !one || !two) throw new Error("the starter has too few characters");
+    const mix = (gm: GmView) => mixCounts(chars.map((id) => routineStanding(gm, id)));
+    const send = request(rig, chatId);
+    expect(before.routineRoles).toEqual([]);
+    expect(mix(before)).toEqual({ shown: [{ label: "world", count: 3 }], rest: 0 });
+
+    expect(await send(bulkOps([one, two], { kind: "role", role: "enforced" }) ?? [])).not.toBeNull();
+    const set = await gmView(rig, chatId);
+    expect(set.routineRoles).toEqual([one, two].sort().map((entity) => ({ entity, role: "enforced" })));
+    expect(mix(set)).toEqual({ shown: [{ label: "enforced", count: 2 }, { label: "world", count: 1 }], rest: 0 });
+
+    expect(await send(bulkOps([one], { kind: "role", role: null }) ?? [])).not.toBeNull();
+    const back = await gmView(rig, chatId);
+    expect(back.routineRoles).toEqual([{ entity: two, role: "enforced" }]);
+    expect(mix(back)).toEqual({ shown: [{ label: "world", count: 2 }, { label: "enforced", count: 1 }], rest: 0 });
   });
 
   test("a chunk refused stops the batch: the chunks before it stay applied, the rest are never sent", async () => {

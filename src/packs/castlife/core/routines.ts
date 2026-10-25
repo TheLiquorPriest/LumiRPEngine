@@ -90,6 +90,16 @@ export function chatFollow(state: Readonly<WorldState>, who: EntityId): RoutineF
   return mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips };
 }
 
+/** Everyone a chat set a routine role for (`routine_follow`), with it, by entity id: what the GM view carries (DESIGN §7). One following their level's role has none. */
+export function chatRoles(state: Readonly<WorldState>): { entity: EntityId; role: RoutineRole }[] {
+  return Object.keys(objOf(sliceOf(state, "castlife").follow))
+    .sort()
+    .flatMap((entity) => {
+      const role = chatFollow(state, entity)?.role ?? null;
+      return role === null ? [] : [{ entity, role }];
+    });
+}
+
 /** The blocks a chat changed for someone (`castlife.routine`), by block id. */
 export function chatBlocks(state: Readonly<WorldState>, who: EntityId): Record<RoutineBlockId, ChatBlock> {
   const out: Record<RoutineBlockId, ChatBlock> = {};

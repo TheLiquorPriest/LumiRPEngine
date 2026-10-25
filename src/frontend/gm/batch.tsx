@@ -81,6 +81,11 @@ export function pickedSummary(gm: Pick<GmView, "entities">, ids: readonly Entity
   return [who, things === 0 ? null : things === 1 ? "1 thing" : `${things} things`].filter((part) => part !== null).join(" and ");
 }
 
+/** How a character's routine stands in this chat, in the routine card's own values: the role this chat set for them, else "world" (their level's, as the world sets it). */
+export function routineStanding(gm: Pick<GmView, "routineRoles">, entity: EntityId): RoutineRole | "world" {
+  return gm.routineRoles.find((r) => r.entity === entity)?.role ?? "world";
+}
+
 /** What a change did, for the notice it leaves: "Pinned 3 to Near", "Moved 2 to The Rusty Anchor". */
 export function bulkDone(gm: Pick<GmView, "tiers" | "domains" | "places">, change: BulkChange, count: number): string {
   switch (change.kind) {
@@ -140,6 +145,10 @@ export function BatchPage(props: { editor: BulkEditor; ids: readonly EntityId[];
   const levelOf = (e: (typeof leveled)[number]): string => {
     const level = LEVELS.find((n) => n === e.levels.find((l) => l.domain === choices.domain)?.override);
     return level === undefined ? "from the tier" : `set to ${level} · ${LEVEL_LABEL[level]}`;
+  };
+  const routineOf = (id: EntityId): string => {
+    const standing = routineStanding(gm, id);
+    return standing === "world" ? "as the world has it" : `set to ${ROUTINE_ROLE_LABEL[standing]}`;
   };
   const apply = (card: Card, change: BulkChange) => {
     const ops = bulkOps(reach(card), change);
@@ -201,7 +210,13 @@ export function BatchPage(props: { editor: BulkEditor; ids: readonly EntityId[];
           </Field>
           {widen("levelAll")}
         </ChangeCard>
-        <ChangeCard title="Their routine" note={`How much their usual day steers them in this chat. “As the world has it” undoes this chat's choice. ${charactersOnly}`} reach={chars.length} now={null} {...card("role")}>
+        <ChangeCard
+          title="Their routine"
+          note={`How much their usual day steers them in this chat. “As the world has it” undoes this chat's choice. ${charactersOnly}`}
+          reach={chars.length}
+          now={chars.length > 0 ? mixOf(chars.map((c) => routineOf(c.entity))) : null}
+          {...card("role")}
+        >
           <Field label="Routine role" for={field.role}>
             <select id={field.role} class="lre-input" value={choices.role ?? ""} onChange={(event) => choose({ role: event.currentTarget.value === "world" ? "world" : (ROUTINE_ROLES.find((r) => r === event.currentTarget.value) ?? null) })}>
               <option value="">Choose…</option>

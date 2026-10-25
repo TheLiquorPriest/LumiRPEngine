@@ -28,6 +28,7 @@ import type {
 } from "./ids";
 import type { FinanceView } from "./finance";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
+import type { RoutineRole } from "./routines";
 import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, SectionFeed, StepPurpose, WorldCurrency } from "./world";
 import type { LorePolicy } from "./settings";
 import type { PlaceRef } from "./character";
@@ -450,6 +451,8 @@ export interface GmView {
   money: FinanceView[];
   /** The fight under way as the GM sees it, everyone named and HP exact (the combat pack's `combat.gm`); null without one. Its shape is the Encounter card's. */
   encounter: JsonValue | null;
+  /** Everyone this chat set a routine role for (`routine_follow`, DESIGN §8), with it, by entity id; one following their level's role, as the world sets it, isn't listed. Empty without the castlife pack. */
+  routineRoles: { entity: EntityId; role: RoutineRole }[];
   /**
    * The ✎ fixes and GM edits in force on this chat's path, newest first, worded in full; `by`: a mechanical action of the player's, by how it reads,
    * rather than a correction (DESIGN §11); `undo`: the chat's chip that undoes it, for one on the latest reply (Undo covers the latest reply), else null.
