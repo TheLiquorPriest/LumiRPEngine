@@ -177,6 +177,38 @@ describe("the World Info interceptor", () => {
     expect(inPrompt(rig, "FERRY-MARK")).toBe(true);
     expect((await caveats()).some((m) => m.includes("Old notes"))).toBe(false);
   });
+
+  test("when LRE has never managed to list the user's books, the turn goes on with all of their World Info off, and a toast and Settings → Caveats say so", async () => {
+    const rig = new Rig();
+    // The books can't be listed from the engine's start.
+    const listing = rig.host.books.list;
+    let down = true;
+    rig.host.books.list = async (userId) => {
+      if (down) throw new Error("the books service is down");
+      return listing(userId);
+    };
+    for (const patch of [{ modelUse: { preset: "full" } }, { minds: { enabled: false } }]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
+    const worldId = await rig.newWorld("Harbor");
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const bookId = await rig.host.books.create("Harbor notes", "", rig.host.userId);
+    await rig.host.books.createEntry(bookId, entry("The ferry", "FERRY-MARK: the ferry runs twice a day."), rig.host.userId);
+    const meta = await rig.host.chats.chatMetadata(chatId, rig.host.userId);
+    await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...(Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : []), bookId] }, rig.host.userId);
+    rig.host.quietReply = quiet;
+    const unlisted = async (): Promise<boolean> => (rig.body(await rig.send({ type: "lre.settings.caveats" })).caveats as { code: string }[]).some((c) => c.code === "lore_books_unlisted");
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    // The turn went on, its reply in the chat, with none of the user's World Info in its prompt.
+    expect(rig.host.chat(chatId).messages.at(-1)?.isUser).toBe(false);
+    expect(inPrompt(rig, "FERRY-MARK")).toBe(false);
+    expect(rig.host.toasts.filter((t) => t.message.includes("can't list your World Info books"))).toHaveLength(1);
+    expect(await unlisted()).toBe(true);
+    down = false;
+    await rig.turn(chatId, "I walk back to the ferry.", "The ferry horn sounds again.");
+    expect(inPrompt(rig, "FERRY-MARK")).toBe(true);
+    expect(await unlisted()).toBe(false);
+  });
 });
 
 describe("Build's World Info lore editor", () => {
@@ -387,6 +419,21 @@ describe("a secret World Info entry's twins", () => {
     expect(inPrompt(rig, SECRET)).toBe(false);
     expect((await entries(copyBook)).find((e) => e.id === twin)?.copyOf).toEqual({ bookId, entryId: original, kept: true });
     expect((await rig.send({ type: "lre.lore", op: "fields", bookId: copyBook, entryId: twin, fields: null })).type).toBe("lre.error");
+  });
+
+  test("a copy whose text drifted from its original's is held to the original's gate as it is now, while its own rewrite fails", async () => {
+    const { rig, chatId, bookId, original, twin, pov } = await twinChat();
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId: original, fields: { secret: true, gate: "true" } }));
+    rig.host.editEntry(original, { content: `${SECRET}, as everyone suspected.` });
+    // The gate is tightened in Build, and the host won't write the copy's new fields.
+    rig.host.refusedWrites.add(twin);
+    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId: original, fields: { secret: true, gate: GATE } }));
+    expect(bookLoreFieldsOf(rig.host.storedEntry(twin)?.extensions)?.gate).toBe("true");
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(inPrompt(rig, SECRET)).toBe(false);
+    await rich(rig, chatId, pov);
+    await rig.turn(chatId, "I walk back to the ferry.", "The ferry horn sounds again.");
+    expect(inPrompt(rig, SECRET)).toBe(true);
   });
 
   test("a turn reads no book of the user's again when none changed since the last", async () => {

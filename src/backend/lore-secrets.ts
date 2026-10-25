@@ -372,6 +372,8 @@ export interface SecretTexts {
   texts: Map<string, BookLoreFields[]>;
   /** The fields of the world's secret and Known-by entries, by the book entry each was indexed from (`bookId/entryId`). */
   sources: Map<string, BookLoreFields[]>;
+  /** The stored fields of every secret entry the index holds, by its id: what a copy's original holds it to now, whatever the copy last had written. */
+  originals: Map<string, BookLoreFields>;
 }
 
 /** Whether an indexed entry's stored fields are secret: its own, or a secret's it holds as a copy. */
@@ -382,8 +384,9 @@ function secretFields(e: Indexed): boolean {
 /**
  * The fields an indexed entry holds its text to: its own, when they keep it from some reader; a
  * copy's own as it stood (its Known by, say); and a copy's secret while it is kept, its original
- * secret (read by id, whatever its text is now) or gone, since nothing says its text may be read now.
- * A copy whose original is public adds none of it: it is put back as it stood.
+ * secret (read by id, whatever its text is now) or gone, since nothing says its text may be read now:
+ * both the fields written onto it and its original's as they are now, a gate tightened since a
+ * rewrite failed included. A copy whose original is public adds none of it: it is put back as it stood.
  */
 function heldBy(e: Indexed, byId: ReadonlyMap<string, Indexed>, whole: boolean): BookLoreFields[] {
   const out: BookLoreFields[] = [];
@@ -393,26 +396,32 @@ function heldBy(e: Indexed, byId: ReadonlyMap<string, Indexed>, whole: boolean):
   }
   if (e.copy.fields && restricts(e.copy.fields)) out.push(e.copy.fields);
   const named = byId.get(copyOriginal(e.copy).entryId);
-  if ((named ? secretFields(named) : whole) && e.fields && restricts(e.fields)) out.push(e.fields);
+  if (!(named ? secretFields(named) : whole)) return out;
+  if (e.fields && restricts(e.fields)) out.push(e.fields);
+  if (named?.fields) out.push(named.fields);
   return out;
 }
 
 /**
  * What a reader holds a book entry to (`secrecyParts`): the secret and Known-by texts of the user's
- * books as the index has them, and the sources every world's last pass found; then `world`'s own
- * secret and Known-by entries; then those of `entries` the reader was given with their fields (a
- * prompt's, as the host scans them). With no index, nothing of the books is known.
+ * books as the index has them, every secret entry's stored fields by id (what a copy's original holds
+ * it to now), and the sources every world's last pass found; then `world`'s own secret and Known-by
+ * entries; then those of `entries` the reader was given with their fields (a prompt's, as the host
+ * scans them). With no index, nothing of the books is known.
  */
 export function secretTexts(index: LoreIndex | null, also: { world?: WorldDoc | null; entries?: readonly Pick<HostBookEntry, "content" | "extensions">[] } = {}): SecretTexts {
   const whole = index !== null && complete(index);
-  const out: SecretTexts = { known: whole, texts: new Map(), sources: new Map() };
+  const out: SecretTexts = { known: whole, texts: new Map(), sources: new Map(), originals: new Map() };
   const byId = index ? entriesById(index) : null;
   const merge = (from: WorldSources): void => {
     for (const [key, list] of from.sources) for (const fields of list) add(out.sources, key, fields);
     for (const [key, list] of from.texts) for (const fields of list) add(out.texts, key, fields);
   };
   if (index && byId) {
-    for (const e of byId.values()) for (const fields of heldBy(e, byId, whole)) add(out.texts, e.text, fields);
+    for (const e of byId.values()) {
+      for (const fields of heldBy(e, byId, whole)) add(out.texts, e.text, fields);
+      if (e.fields && secretFields(e)) out.originals.set(e.id, e.fields);
+    }
     for (const w of index.worlds.values()) merge(w);
   }
   if (also.world) merge(worldSources(also.world, byId, false));
@@ -463,9 +472,10 @@ const UNREAD: BookLoreFields = { secret: true, gate: "" };
 
 /**
  * What holds a World Info entry back from a reader (DESIGN §4.2, §6.1), the same for the interceptor,
- * the helpers' live lore and the pins: its own LRE fields; a copy's own as it stood; the fields of the
- * world's entries indexed from it, or from the original it is a copy of; those of every secret or
- * Known-by text it holds, in whatever book; and, while some book of the user's was never read, a
+ * the helpers' live lore and the pins: its own LRE fields; a copy's own as it stood, and the fields of
+ * the original it names as they are now (its gate tightened since the copy's rewrite failed, say);
+ * the fields of the world's entries indexed from it, or from that original; those of every secret
+ * or Known-by text it holds, in whatever book; and, while some book of the user's was never read, a
  * secret no gate opens. None: it reads as it is.
  */
 export function secrecyParts(e: Pick<HostBookEntry, "id" | "bookId" | "content" | "extensions">, texts: SecretTexts): BookLoreFields[] {
@@ -475,6 +485,9 @@ export function secrecyParts(e: Pick<HostBookEntry, "id" | "bookId" | "content" 
   if (own) out.push(own);
   const copy = secretCopyOf(e.extensions);
   if (copy?.fields) out.push(copy.fields);
+  const named = copy ? copyOriginal(copy).entryId : null;
+  const original = named !== null && named !== e.id ? texts.originals.get(named) : undefined;
+  if (original) out.push(original);
   out.push(...(texts.sources.get(keyOf(e)) ?? []));
   if (copy && copy.entry !== keyOf(e)) out.push(...(texts.sources.get(copy.entry) ?? []));
   out.push(...textParts(texts, e.content, true));
