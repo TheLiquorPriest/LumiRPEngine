@@ -58,6 +58,9 @@ var WORLD_FORMAT = "lre-world-v1";
 var EXPORT_FORMAT = "lre-world-export-v1";
 var ENGINE_VERSION = "0.1.0";
 var EFFECT_ONLY_FUNCTIONS = ["roll"];
+function overlayKind(pack, mine) {
+  return { ...pack, ...mine, fields: { ...pack.fields, ...mine.fields } };
+}
 var BUILTIN_RELATIONS = ["in", "owns", "uses", "worn_by", "equipped", "knows", "member_of", "regard", "route"];
 var ACTIVITY_SPAN_OF = "_activity_span";
 var ACTIVITY_PLACE = "_activity_place";
@@ -190,6 +193,18 @@ function runDir(chatId) {
   return `runs/${chatId}/`;
 }
 var DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"];
+var DOMAIN_LABEL = {
+  money: "Money",
+  gear: "Gear",
+  vehicles: "Vehicles",
+  castlife: "Cast life",
+  relationships: "Relationships",
+  space: "Space & travel",
+  calendar: "Calendar & time",
+  weather: "Weather",
+  sheets: "Sheets & checks"
+};
+var LEVEL_LABEL = { 0: "Off", 1: "Narrative", 2: "Simple", 3: "Detailed", 4: "Simulation" };
 var BANDS = ["principal", "supporting", "background"];
 var INTERRUPT_CLASSES = ["invitation", "bill", "decline", "incident", "quest", "rule", "arrival", "overdue", "needs", "weather"];
 
@@ -250,6 +265,43 @@ function bandTiers(world) {
   for (const [, t] of tiersInOrder(world))
     out[t.band].push(t.label);
   return out;
+}
+
+// src/shared/words.ts
+function listWords(words) {
+  return words.length <= 1 ? words[0] ?? "" : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1] ?? ""}`;
+}
+function possessive(name) {
+  return name === "You" ? "Your" : name === "you" ? "your" : `${name}'s`;
+}
+var LABEL_UNITS = { g: true, kg: true, l: true, mi: true, km: true, h: true, min: true, days: true, months: true, years: true };
+function fieldNoun(label, field) {
+  const plain = field.replace(/_/g, " ");
+  const text = (label ?? plain).trim();
+  const bracket = /^(.*?)\s*\(([^()]*)\)$/.exec(text);
+  const base = (bracket?.[1] ?? text).trim() || plain;
+  const percent = base.endsWith(" %");
+  const noun = percent ? base.slice(0, -2) : base;
+  const unit = percent ? "%" : bracket && LABEL_UNITS[bracket[2] ?? ""] ? ` ${bracket[2] ?? ""}` : "";
+  return { noun: /^[A-Z]{2}/.test(noun) ? noun : noun.charAt(0).toLowerCase() + noun.slice(1), unit };
+}
+var SCOPE_TELLS = {
+  player: "tells what your character knows",
+  scene: "also tells what the people with your character know",
+  gm: "tells everything, with what your character doesn't know marked"
+};
+function feedSentence(label, to) {
+  if (to === null)
+    return `The ${label} section follows the world's settings again in this chat`;
+  if (to.enabled === false)
+    return `The ${label} section is left out of the prompt in this chat`;
+  const caps = [to.maxLines !== undefined ? `${to.maxLines} ${to.maxLines === 1 ? "line" : "lines"}` : null, to.maxTokens !== undefined ? `${to.maxTokens} tokens` : null].filter((c) => c !== null);
+  const parts = [
+    SCOPE_TELLS[to.scope ?? "player"],
+    caps.length > 0 ? `cut to at most ${listWords(caps)}` : "with no cap",
+    to.include ? `from ${to.include.length === 1 ? "the 1 source" : `the ${to.include.length} sources`} picked for it` : null
+  ].filter((p) => p !== null);
+  return `In this chat, the ${label} section ${parts.join(", ")}`;
 }
 
 // src/engine/pack-kit.ts
@@ -909,60 +961,75 @@ class Work {
     }
   }
 }
-function convolve(a, b, work) {
-  work.spend(a.p.length * b.p.length);
-  const p = new Float64Array(a.p.length + b.p.length - 1);
-  for (let i = 0;i < a.p.length; i++) {
-    const ai = a.p[i];
-    if (ai === 0)
-      continue;
-    for (let j = 0;j < b.p.length; j++)
-      p[i + j] += ai * b.p[j];
+var MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+function share(num, den) {
+  if (num === 0n)
+    return 0;
+  const negative = num < 0n;
+  const n = negative ? -num : num;
+  let q;
+  if (n <= MAX_SAFE && den <= MAX_SAFE)
+    q = Number(n) / Number(den);
+  else {
+    const shift = Math.max(0, 64 + den.toString(2).length - n.toString(2).length);
+    q = Number((n << BigInt(shift)) / den);
+    for (let left = shift;left > 0; left -= 1000)
+      q *= 2 ** -Math.min(left, 1000);
   }
-  return { lo: a.lo + b.lo, p };
+  return negative ? -q : q;
+}
+function convolve(a, b, work) {
+  work.spend(a.w.length * b.w.length);
+  const w = new Array(a.w.length + b.w.length - 1).fill(0n);
+  for (let i = 0;i < a.w.length; i++) {
+    const ai = a.w[i];
+    if (ai === 0n)
+      continue;
+    for (let j = 0;j < b.w.length; j++)
+      w[i + j] += ai * b.w[j];
+  }
+  return { lo: a.lo + b.lo, w };
 }
 function dieDist(sides, explode) {
   if (!explode)
-    return { lo: 1, p: new Float64Array(sides).fill(1 / sides) };
-  const maxValue = (DICE_LIMITS.maxExplodeExtra + 1) * sides;
-  const p = new Float64Array(maxValue);
-  for (let m = 0;m <= DICE_LIMITS.maxExplodeExtra; m++) {
-    const pm = (1 / sides) ** m / sides;
+    return { lo: 1, w: new Array(sides).fill(1n) };
+  const rolls = DICE_LIMITS.maxExplodeExtra + 1;
+  const s = BigInt(sides);
+  const w = new Array(rolls * sides).fill(0n);
+  for (let m = 0;m < rolls; m++) {
+    const sequences = s ** BigInt(rolls - 1 - m);
     for (let f = 1;f < sides; f++)
-      p[m * sides + f - 1] = pm;
+      w[m * sides + f - 1] = sequences;
   }
-  p[maxValue - 1] = (1 / sides) ** (DICE_LIMITS.maxExplodeExtra + 1);
-  return { lo: 1, p };
+  w[rolls * sides - 1] = 1n;
+  return { lo: 1, w };
 }
-var DIRECT_SUM_WORK = 3000000;
 function plainSumDist(count, sides, work) {
-  let cur = { lo: 0, p: Float64Array.of(1) };
-  if (count * (count + 1) / 2 * sides * sides <= DIRECT_SUM_WORK) {
-    const die = dieDist(sides, false);
-    for (let d = 0;d < count; d++)
-      cur = convolve(cur, die, work);
-    return cur;
-  }
+  let cur = { lo: 0, w: [1n] };
   for (let d = 0;d < count; d++) {
-    const len = cur.p.length;
+    const len = cur.w.length;
+    const size = len + sides - 1;
     work.spend(len + sides);
-    const next = new Float64Array(len + sides - 1);
-    let window = 0;
-    for (let k = 0;k < next.length; k++) {
+    const next = new Array(size);
+    const half = Math.ceil(size / 2);
+    let window = 0n;
+    for (let k = 0;k < half; k++) {
       if (k < len)
-        window += cur.p[k];
+        window += cur.w[k];
       if (k >= sides)
-        window -= cur.p[k - sides];
-      next[k] = Math.max(0, window) / sides;
+        window -= cur.w[k - sides];
+      next[k] = window;
     }
-    cur = { lo: cur.lo + 1, p: next };
+    for (let k = half;k < size; k++)
+      next[k] = next[size - 1 - k];
+    cur = { lo: cur.lo + 1, w: next };
   }
   return cur;
 }
 function keepSumDist(die, count, keep, mode, work) {
   const values = [];
-  for (let i = 0;i < die.p.length; i++)
-    if (die.p[i] > 0)
+  for (let i = 0;i < die.w.length; i++)
+    if (die.w[i] > 0n)
       values.push(die.lo + i);
   if (mode === "kh")
     values.reverse();
@@ -973,20 +1040,20 @@ function keepSumDist(die, count, keep, mode, work) {
   for (let n = 0;n <= count; n++) {
     binom[n] = [];
     for (let k = 0;k <= n; k++)
-      binom[n][k] = k === 0 || k === n ? 1 : binom[n - 1][k - 1] + binom[n - 1][k];
+      binom[n][k] = k === 0 || k === n ? 1n : binom[n - 1][k - 1] + binom[n - 1][k];
   }
-  let cur = new Float64Array((count + 1) * width);
-  cur[0] = 1;
+  let cur = new Array((count + 1) * width).fill(0n);
+  cur[0] = 1n;
   for (const v of values) {
-    const q = die.p[v - die.lo];
-    const pw = [1];
+    const q = die.w[v - die.lo];
+    const pw = [1n];
     for (let c = 1;c <= count; c++)
       pw[c] = pw[c - 1] * q;
-    const next = new Float64Array(cur.length);
+    const next = new Array(cur.length).fill(0n);
     for (let j = 0;j <= count; j++) {
       for (let s = 0;s < width; s++) {
         const w = cur[j * width + s];
-        if (w === 0)
+        if (w === 0n)
           continue;
         const room = Math.max(0, keep - j);
         for (let c = 0;c <= count - j; c++) {
@@ -997,11 +1064,10 @@ function keepSumDist(die, count, keep, mode, work) {
     }
     cur = next;
   }
-  const p = cur.slice(count * width, (count + 1) * width);
-  return { lo: 0, p };
+  return { lo: 0, w: cur.slice(count * width, (count + 1) * width) };
 }
 function negate(d) {
-  return { lo: -(d.lo + d.p.length - 1), p: Float64Array.from(d.p).reverse() };
+  return { lo: -(d.lo + d.w.length - 1), w: [...d.w].reverse() };
 }
 function groupDist(g, work) {
   const die = dieDist(g.sides, g.explode === true);
@@ -1011,35 +1077,42 @@ function groupDist(g, work) {
   } else if (!g.explode) {
     dist = plainSumDist(g.count, g.sides, work);
   } else {
-    dist = { lo: 0, p: Float64Array.of(1) };
+    dist = { lo: 0, w: [1n] };
     for (let i = 0;i < g.count; i++)
       dist = convolve(dist, die, work);
   }
   return g.sign === -1 ? negate(dist) : dist;
 }
+function totalOf(min, counts) {
+  let total = 0n;
+  for (let i = 0;i < counts.length; i++)
+    total += counts[i] * BigInt(min + i);
+  return total;
+}
 function finish(dist) {
   let first = 0;
-  let last = dist.p.length - 1;
-  while (first < last && dist.p[first] <= 0)
+  let last = dist.w.length - 1;
+  while (first < last && dist.w[first] === 0n)
     first++;
-  while (last > first && dist.p[last] <= 0)
+  while (last > first && dist.w[last] === 0n)
     last--;
-  const probs = Array.from(dist.p.subarray(first, last + 1), (x) => Math.max(0, x));
-  const sum = probs.reduce((a, b) => a + b, 0);
-  let mean = 0;
-  for (let i = 0;i < probs.length; i++) {
-    probs[i] /= sum;
-    mean += probs[i] * (dist.lo + first + i);
-  }
-  return { min: dist.lo + first, max: dist.lo + last, probs, mean };
+  const counts = dist.w.slice(first, last + 1);
+  const min = dist.lo + first;
+  const outcomes = counts.reduce((a, b) => a + b, 0n);
+  return { min, max: dist.lo + last, counts, outcomes, probs: counts.map((c) => share(c, outcomes)), mean: share(totalOf(min, counts), outcomes) };
 }
 function diceDistribution(notation) {
   const parsed = parseDice(notation);
   const work = new Work;
-  let dist = { lo: parsed.flat, p: Float64Array.of(1) };
+  let dist = { lo: parsed.flat, w: [1n] };
   for (const g of parsed.groups)
     dist = convolve(dist, groupDist(g, work), work);
   return finish(dist);
+}
+function meanFloor(d) {
+  const total = totalOf(d.min, d.counts);
+  const q = total / d.outcomes;
+  return Number(total < 0n && q * d.outcomes !== total ? q - 1n : q);
 }
 function naturalDie(parsed) {
   const g = parsed.groups[0];
@@ -1087,7 +1160,7 @@ function naturalSplit(notation) {
   if (!die)
     return null;
   const work = new Work;
-  let rest = { lo: parsed.flat, p: Float64Array.of(1) };
+  let rest = { lo: parsed.flat, w: [1n] };
   for (const g of parsed.groups.slice(1))
     rest = convolve(rest, groupDist(g, work), work);
   return { sign: die.sign, natural: finish(groupDist({ ...die, sign: 1 }, work)), rest: finish(rest) };
@@ -1659,25 +1732,29 @@ var ENGINE_SLICE = "engine";
 function kindDef(reg, world, kind) {
   return own(world.kinds, kind) ?? reg.kinds.get(kind);
 }
+function kindParent(reg, world, kind) {
+  return own(world.kinds, kind)?.extends ?? reg.kinds.get(kind)?.extends;
+}
 function kindIs(reg, world, kind, ancestor) {
   let id = kind;
   for (let guard = 0;id && guard < 32; guard++) {
     if (id === ancestor)
       return true;
-    id = kindDef(reg, world, id)?.extends;
+    id = kindParent(reg, world, id);
   }
   return false;
 }
 function fieldDef(reg, world, kind, field) {
   let id = kind;
   for (let guard = 0;id && guard < 32; guard++) {
-    const def = kindDef(reg, world, id);
-    if (!def)
+    const mine = own(world.kinds, id);
+    const pack = reg.kinds.get(id);
+    if (!mine && !pack)
       return;
-    const f = own(def.fields, field);
+    const f = (mine && own(mine.fields, field)) ?? (pack && own(pack.fields, field));
     if (f)
       return f;
-    id = def.extends;
+    id = mine?.extends ?? pack?.extends;
   }
   return;
 }
@@ -1685,15 +1762,14 @@ function kindFields(reg, world, kind) {
   const chain = [];
   let id = kind;
   for (let guard = 0;id && guard < 32; guard++) {
-    const def = kindDef(reg, world, id);
-    if (!def)
+    if (!own(world.kinds, id) && !reg.kinds.has(id))
       break;
-    chain.unshift(def);
-    id = def.extends;
+    chain.unshift(id);
+    id = kindParent(reg, world, id);
   }
   const out = {};
-  for (const def of chain)
-    Object.assign(out, def.fields);
+  for (const step of chain)
+    Object.assign(out, reg.kinds.get(step)?.fields, own(world.kinds, step)?.fields);
   return out;
 }
 function bandOf(bands, value) {
@@ -2676,6 +2752,34 @@ function mapSettingsOf(world) {
     travelSimulation: raw.travelSimulation === true
   };
 }
+var DEFAULT_TRAVEL = Object.freeze({ speeds: {}, vehicleSpeeds: {}, startMinutes: 1, parkMinutes: 1, fetchMinutes: 30 });
+var TRAVEL_MODES = ["walk", "road", "offroad", "water"];
+function travelTuningOf(world) {
+  const raw = isRecord(world.mapSettings) && isRecord(world.mapSettings.travel) ? world.mapSettings.travel : {};
+  const speed = (v) => typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+  const minutes = (v, fallback) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
+  const speeds = {};
+  const rawSpeeds = isRecord(raw.speeds) ? raw.speeds : {};
+  for (const mode of TRAVEL_MODES) {
+    const s = speed(hasOwn(rawSpeeds, mode) ? rawSpeeds[mode] : undefined);
+    if (s !== null)
+      speeds[mode] = s;
+  }
+  const vehicleSpeeds = {};
+  const rawVehicles = isRecord(raw.vehicleSpeeds) ? raw.vehicleSpeeds : {};
+  for (const [cls, v] of Object.entries(rawVehicles)) {
+    const s = speed(v);
+    if (s !== null && safeKey(cls))
+      vehicleSpeeds[cls] = s;
+  }
+  return {
+    speeds,
+    vehicleSpeeds,
+    startMinutes: minutes(raw.startMinutes, DEFAULT_TRAVEL.startMinutes),
+    parkMinutes: minutes(raw.parkMinutes, DEFAULT_TRAVEL.parkMinutes),
+    fetchMinutes: minutes(raw.fetchMinutes, DEFAULT_TRAVEL.fetchMinutes)
+  };
+}
 function compileGrid(key, map, mine, places, grids) {
   const scope = places[map.scope];
   if (!scope || scope.grid !== undefined || hasOwn(grids, key))
@@ -3426,8 +3530,8 @@ function ownersIn(fields) {
       const party = raw.party;
       if (typeof party !== "string" || party === "")
         continue;
-      const share = raw.share;
-      out.push({ party, role: isOwnerRole(raw.role) ? raw.role : "owner", ...typeof share === "number" && Number.isFinite(share) ? { share } : {} });
+      const share2 = raw.share;
+      out.push({ party, role: isOwnerRole(raw.role) ? raw.role : "owner", ...typeof share2 === "number" && Number.isFinite(share2) ? { share: share2 } : {} });
     }
     return out;
   }
@@ -3876,9 +3980,26 @@ var STEP_VARS = {
   skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] }
 };
 var PROSE_PROMPTS = {
-  brief: "You brief a roleplay narrator before their next reply. In two or three sentences, say what matters right now in {{world}}: where {{pov}} is, who is present, what the player just did and how it turned out, and anything pressing. Use only the facts given; invent nothing.",
-  outline: "You outline a roleplay narrator's next reply. Expand the engine's beats into two to four short beats, in order, consistent with the facts and the outcome. Don't decide anything the facts don't settle, and don't add events.",
-  choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts. Each under twelve words, first person, as the player would type it."
+  brief: [
+    "You brief a roleplay narrator before their next reply in {{world}}, so they can write it without guessing at anything. From the facts given only, in one paragraph, say:",
+    "where and when the scene is (the place, the time of day) and what it is like now; who is present and what each of them is doing; what the player just did and exactly how it turned out, with the results, rolls and amounts as the Outcome gives them; anything that changed hands, moved or was spent, and between whom; how much time passes; and what is pressing or about to happen.",
+    "Name people and places as the facts do. State only what the facts establish: invent nothing, decide nothing they leave open, and never say what {{pov}} doesn't know."
+  ].join(`
+`),
+  outline: [
+    "You outline a roleplay narrator's next reply in {{world}}, beat by beat, so the narrator can write it without inferring anything. Expand the engine's beats into a complete outline, in order, consistent with the facts and the Outcome. Account for everything the reply must cover:",
+    "- every beat, in the order it happens;",
+    "- who does and says what, in substance (no dialogue lines);",
+    "- what is decided and why, as the Outcome states it;",
+    "- every result with its numbers: rolls, amounts, prices;",
+    "- each item that changes hands, from whom to whom;",
+    "- each place reached and each move, by name;",
+    "- how much time passes;",
+    "- what each person knows or doesn't. Where the facts leave something unknown to {{pov}}, or someone keeps a thing to themselves, add a beat saying it stays unsaid.",
+    `Write each beat as one full sentence that names its people and places (never a bare "he" or "there"). Decide nothing the facts don't settle and add no events of your own; point only at the sections the narrator has this turn.`
+  ].join(`
+`),
+  choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts: each something the scene as written makes possible right now, with the people present and the things {{pov}} has. Each under twelve words, first person, as the player would type it, naming who or what it involves."
 };
 var DECISION_PROMPTS = {
   "npc.choose": "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.",
@@ -4176,6 +4297,54 @@ function povPlace(reg, world, state) {
 function trackKnown(reg, world, state, pov, t) {
   return t.owner === pov || t.owner !== undefined && knows(state, pov, t.owner) || granted(reg, world, state, pov, t.knownBy);
 }
+function trackShown(reg, world, state, pov, id) {
+  const t = own(world.tracks, id);
+  if (!t)
+    return false;
+  const visibility = visibilityOf(t.visibility);
+  if (visibility === "public")
+    return true;
+  if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0)
+    return true;
+  return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
+}
+function trackKeepsSecret(reg, world, state, pov, id) {
+  const t = own(world.tracks, id);
+  if (!t)
+    return false;
+  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
+}
+function ownersCue(reg, world, state, pov, id) {
+  const t = own(world.tracks, id);
+  if (t?.owner === undefined || t.owner === pov)
+    return false;
+  const owner = own(state.entities, t.owner);
+  return owner !== undefined && kindIs(reg, world, owner.kind, "person") && trackKeepsSecret(reg, world, state, pov, id);
+}
+function currentStageOf(world, state, id) {
+  const t = own(world.tracks, id);
+  if (!t)
+    return null;
+  const stageId = own(state.tracks, id)?.stage ?? t.start;
+  const def = own(t.stages, stageId);
+  return def ? { id: stageId, def } : null;
+}
+function hintsEarned(world, state, id) {
+  const stage = currentStageOf(world, state, id);
+  if (!stage)
+    return [];
+  const hints = stage.def.hints ?? [];
+  if (stage.def.answer === undefined)
+    return [...hints];
+  return hints.slice(0, own(own(readEngineSlice(state).missed, id) ?? {}, stage.id) ?? 0);
+}
+function hintsOpened(world, state, id) {
+  const stage = currentStageOf(world, state, id);
+  if (!stage)
+    return 0;
+  return Math.min(own(own(readEngineSlice(state).hints, id) ?? {}, stage.id) ?? 0, hintsEarned(world, state, id).length);
+}
 function signalVisible(reg, world, state, pov, s) {
   if (s.visibility === "secret")
     return false;
@@ -4255,11 +4424,12 @@ function playerTrack(reg, world, state, pov, id) {
   const truths = revealed.map((s) => own(t.stages, s)?.truth).filter((x) => typeof x === "string");
   const secret = visibility === "secret";
   const dormant = stageId === t.start && (stage.objectives ?? []).length === 0 && stage.answer === undefined;
-  if (!stage.cue && truths.length === 0 && (secret || dormant))
+  const cue = !stage.cue || ownersCue(reg, world, state, pov, id) ? null : stage.cue;
+  if (cue === null && truths.length === 0 && (secret || dormant))
     return null;
   const env = scopeEnv({ reg, ctx: reg.context(world, state), bindings: t.owner ? { self: t.owner } : {} });
   const objectives = secret ? [] : (stage.objectives ?? []).map((o) => ({ label: objectiveLabel(o), done: truthy2(evalExpr(objectiveWhen(o), env, false)) }));
-  const attempts = own(readEngineSlice(state).attempts, id) ?? 0;
+  const hints = hintsEarned(world, state, id);
   const failed = Object.values(t.stages).some((s) => s.fail?.to === stageId);
   const terminal = stage.next.length === 0 && !stage.fail;
   return {
@@ -4267,12 +4437,42 @@ function playerTrack(reg, world, state, pov, id) {
     kind: t.kind,
     label: secret && truths.length === 0 ? "Something is going on" : t.label,
     stage: secret && truths.length === 0 ? "" : stage.label,
-    cue: stage.cue ?? null,
+    cue,
     truths,
     objectives,
-    hints: (stage.hints ?? []).slice(0, attempts),
+    hints,
+    opened: hintsOpened(world, state, id),
     status: terminal ? failed ? "failed" : "done" : "active"
   };
+}
+var STORY_CALLS = { stage: true, since: true, flag: true };
+function readsStory(expr) {
+  const visit2 = (n) => {
+    switch (n.k) {
+      case "id":
+        return n.path.length === 2 && n.path[0] === "stage";
+      case "call":
+        return hasOwn(STORY_CALLS, n.name) || n.args.some(visit2);
+      case "un":
+        return visit2(n.a);
+      case "bin":
+        return visit2(n.a) || visit2(n.b);
+      case "tern":
+        return visit2(n.c) || visit2(n.a) || visit2(n.b);
+      default:
+        return false;
+    }
+  };
+  try {
+    return visit2(compile(expr).root);
+  } catch (e) {
+    if (e instanceof ExprError)
+      return false;
+    throw e;
+  }
+}
+function storyLocked(env, action) {
+  return action.requires.some((req) => readsStory(req) && identifiers(req).every((name) => !hasOwn(action.params, name)) && !truthy2(evalExpr(req, env, false)));
 }
 function unrevealedTruths(world, state) {
   const out = [];
@@ -4671,6 +4871,7 @@ function bookkeeping(type) {
     [ENGINE_EVENTS.cursor]: true,
     [ENGINE_EVENTS.choice]: true,
     [ENGINE_EVENTS.attempt]: true,
+    [ENGINE_EVENTS.hint]: true,
     [ENGINE_EVENTS.pause]: true,
     [ENGINE_EVENTS.beat]: true,
     [ENGINE_EVENTS.observed]: true,
@@ -4703,8 +4904,8 @@ function bookkeeping(type) {
   };
   return hasOwn3(bookkeepingTypes, type);
 }
-function postLine(world, state, pov, memo, lines) {
-  const mine = lines.filter((l) => heldBy(state.entities, l.account, pov));
+function postLine(world, state, pov, memo, lines, player) {
+  const mine = lines.filter((l) => player ? heldBy(state.entities, l.account, pov) : hasOwn3(state.entities, l.account));
   const label = memo !== "" ? memo : "Money moved";
   if (mine.length === 0)
     return memo !== "" ? memo : null;
@@ -4718,7 +4919,7 @@ function postLine(world, state, pov, memo, lines) {
     return `${label}: ${money(to.amount)} from ${name(from.account)} to ${name(to.account)}`;
   const only = mine[0];
   if (mine.length === 1 && only)
-    return `${label}: ${only.amount < 0 ? "\u2212" : "+"}${money(only.amount)} (${name(only.account)})`;
+    return `${label}: ${money(only.amount)} ${only.amount < 0 ? "out of" : "into"} ${name(only.account)}`;
   const net = mine.reduce((a, l) => a + l.amount, 0);
   return net === 0 ? label : `${label}: ${net < 0 ? "\u2212" : "+"}${money(net)}`;
 }
@@ -4776,24 +4977,6 @@ function povMayKnow(reg, world, state, id) {
     return true;
   const here = placeOfEntity(state, pov);
   return here === undefined || placeOfEntity(state, id) === here;
-}
-function trackShown(reg, world, state, pov, id) {
-  const t = own(world.tracks, id);
-  if (!t)
-    return false;
-  const visibility = visibilityOf(t.visibility);
-  if (visibility === "public")
-    return true;
-  if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0)
-    return true;
-  return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
-}
-function trackKeepsSecret(reg, world, state, pov, id) {
-  const t = own(world.tracks, id);
-  if (!t)
-    return false;
-  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
-  return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
 }
 function refsOf(world, state, e) {
   const out = [];
@@ -4878,14 +5061,47 @@ function nameOf(world, state, pov, id, you = "You") {
 function humanize(field) {
   return field.replace(/_/g, " ");
 }
-function valueText(reg, world, state, pov, kind, field, v, you) {
-  if (v === null)
-    return "cleared";
-  if (typeof v === "boolean")
-    return v ? "yes" : "no";
+function plural(name) {
+  return name === "You" || name === "you";
+}
+function wordsFor(reg, world, state, pov, player, you) {
+  const name = (id) => nameOf(world, state, pov, id, you);
+  const object = (id) => id === pov && you === "You" ? "you" : name(id);
+  const placeShown = (id) => !player || canSeePlace(reg, world, state, pov, id);
+  const place = (id) => {
+    const p = own(world.places, id);
+    if (!p)
+      return object(id);
+    const around = [];
+    for (let cur = p.parent, guard = 0;cur !== undefined && guard < HOLD_DEPTH * 4; guard++) {
+      const up = own(world.places, cur);
+      if (!up)
+        break;
+      if (placeShown(cur))
+        around.unshift(up.name);
+      cur = up.parent;
+    }
+    return around.length > 0 ? `${p.name} (${around.join(" \u203A ")})` : p.name;
+  };
+  const isPerson2 = (id) => id === pov || kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person");
+  const thing = (id) => {
+    const e = own(state.entities, id);
+    if (!e || isPerson2(id))
+      return object(id);
+    const holder = e.relations.find((r) => r.type === "in")?.to;
+    if (holder !== undefined && hasOwn3(state.entities, holder) && (!player || playerKnows(reg, world, state, pov, holder)))
+      return `${e.name} (${isPerson2(holder) ? "carried by" : "in"} ${object(holder)})`;
+    const at = typeof e.fields.place === "string" ? e.fields.place : null;
+    return at !== null && hasOwn3(world.places, at) && placeShown(at) ? `${e.name} (at ${own(world.places, at)?.name ?? at})` : e.name;
+  };
+  return { name, object, place, thing, isPerson: isPerson2 };
+}
+function valueText(reg, world, state, words, kind, field, v) {
   if (typeof v === "string") {
-    if (hasOwn3(state.entities, v) || hasOwn3(world.places, v))
-      return nameOf(world, state, pov, v, you);
+    if (hasOwn3(world.places, v))
+      return words.place(v);
+    if (hasOwn3(state.entities, v))
+      return words.thing(v);
     if (fieldDef(reg, world, kind, field)?.type === "enum" || /^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(v))
       return humanize(v);
     return v.length > 80 ? `${v.slice(0, 79)}\u2026` : v;
@@ -4895,22 +5111,87 @@ function valueText(reg, world, state, pov, kind, field, v, you) {
     if (def?.type === "money")
       return formatMoney(v, world.currency);
     const band = def?.bands ? bandOf(def.bands, v) : null;
-    return band ? band.label : String(Math.round(v * 100) / 100);
+    return band ? band.label : `${Math.round(v * 100) / 100}${fieldNoun(def?.label, field).unit}`;
   }
   return null;
 }
-function relationLine(rel, from, to, linked) {
+function setLine(reg, world, state, words, entity, field, value) {
+  const who = words.name(entity);
+  const many = plural(who);
+  const ref = (v2) => hasOwn3(world.places, v2) ? words.place(v2) : words.thing(v2);
+  const target = typeof value === "string" && (hasOwn3(world.places, value) || hasOwn3(state.entities, value)) ? value : null;
+  switch (field) {
+    case "place":
+      if (target !== null)
+        return `${who} ${many ? "are" : "is"} now at ${words.place(target)}`;
+      break;
+    case "bed": {
+      if (value === null)
+        return `${who} now ${many ? "sleep" : "sleeps"} at home`;
+      if (target === null)
+        break;
+      const bedKind = own(state.entities, target)?.kind ?? "";
+      const at = hasOwn3(world.places, target) ? "at" : kindIs(reg, world, bedKind, "container") || kindIs(reg, world, bedKind, "vehicle") ? "in" : "on";
+      return `${who} now ${many ? "sleep" : "sleeps"} ${at} ${ref(target)}`;
+    }
+    case "home":
+      if (value === null)
+        return `${who} no longer ${many ? "have" : "has"} a home`;
+      if (target !== null)
+        return `${who} now ${many ? "live" : "lives"} ${hasOwn3(world.places, target) ? "at" : "in"} ${ref(target)}`;
+      break;
+    case "owner":
+      if (value === null)
+        return `${who} no longer ${many ? "belong" : "belongs"} to anyone`;
+      if (target !== null)
+        return `${who} now ${many ? "belong" : "belongs"} to ${words.object(target)}`;
+      break;
+  }
+  const kind = own(state.entities, entity)?.kind ?? "";
+  const def = fieldDef(reg, world, kind, field);
+  const { noun } = fieldNoun(def?.label, field);
+  const whose = possessive(who);
+  if (value === null)
+    return `${whose} ${noun} is no longer set`;
+  if (typeof value === "boolean")
+    return `${who} ${many ? "are" : "is"} ${value ? "now" : "no longer"} marked \u201C${noun}\u201D`;
+  if (Array.isArray(value)) {
+    const items = value.map((x) => typeof x === "string" ? hasOwn3(world.places, x) || hasOwn3(state.entities, x) ? ref(x) : humanize(x) : typeof x === "number" ? String(x) : null);
+    if (items.some((x) => x === null))
+      return `${whose} ${noun} changed`;
+    const shown = items.filter((x) => x !== null);
+    return shown.length === 0 ? `${whose} ${noun} are now none` : `${whose} ${noun} are now ${listWords(shown)}`;
+  }
+  const v = field === "temp_c" && typeof value === "number" ? formatTemperature(value) : valueText(reg, world, state, words, kind, field, value);
+  return v === null ? null : `${whose} ${noun} is now ${v}`;
+}
+function relationLine(reg, world, words, rel, fromId, toId, linked) {
+  const from = words.name(fromId);
+  const to = hasOwn3(world.places, toId) ? words.place(toId) : words.object(toId);
+  const many = plural(from);
+  const is = many ? "are" : "is";
+  const now = linked ? "now" : "no longer";
   switch (rel) {
     case "knows":
-      return linked ? `${from} now know ${to}` : `${from} no longer know ${to}`;
+      return `${from} ${now} ${many ? "know" : "knows"} ${to}`;
     case "in":
-      return linked ? `${from} \u2192 ${to}` : `${from} out of ${to}`;
+      return words.isPerson(toId) ? `${from} ${is} ${now} carried by ${to}` : `${from} ${is} ${now} in ${to}`;
     case "uses":
-      return linked ? `${from} borrows ${to}` : `${from} gives back ${to}`;
+      return linked ? `${from} now ${many ? "borrow" : "borrows"} ${to}` : `${from} gave back ${to}`;
     case "owns":
-      return linked ? `${from} owns ${to}` : `${from} no longer owns ${to}`;
-    default:
-      return linked ? `${from} ${humanize(rel)} ${to}` : `${from} no longer ${humanize(rel)} ${to}`;
+      return `${from} ${now} ${many ? "own" : "owns"} ${to}`;
+    case "worn_by":
+      return `${from} ${is} ${now} worn by ${to}`;
+    case "equipped":
+      return `${from} ${is} ${now} equipped by ${to}`;
+    case "member_of":
+      return `${from} ${is} ${now} a member of ${to}`;
+    case "regard":
+      return linked ? `${possessive(from)} regard for ${to} changed` : `${from} no longer ${many ? "hold" : "holds"} any regard for ${to}`;
+    default: {
+      const label = (own(world.relations, rel) ?? reg.relations.get(rel))?.label ?? humanize(rel);
+      return `${from} ${linked ? "now" : "no longer"} ${many ? "have" : "has"} a \u201C${fieldNoun(label, rel).noun}\u201D link to ${to}`;
+    }
   }
 }
 function relabel(line, refs, world, state, pov, you) {
@@ -4958,47 +5239,37 @@ function namesHidden(reg, world, state, text) {
   return hiddenNameCheck(reg, world, state, world.pov)(text);
 }
 function rawLine(reg, world, state, pov, e, player, you) {
-  const name = (id) => nameOf(world, state, pov, id, you);
+  const words = wordsFor(reg, world, state, pov, player, you);
   switch (e.type) {
     case "set": {
       if (INTERNAL_FIELD.test(e.field))
         return null;
       if (e.field === GONE_FIELD)
-        return `${name(e.entity)} ${e.value === true ? "is gone" : "is back"}`;
-      const kind = own(state.entities, e.entity)?.kind ?? "";
-      if (e.field === "place" && typeof e.value === "string")
-        return `${name(e.entity)} \u2192 ${name(e.value)}`;
-      if (e.field === "temp_c" && typeof e.value === "number")
-        return `${name(e.entity)}: Temperature ${formatTemperature(e.value)}`;
+        return `${words.name(e.entity)} ${e.value === true ? "is gone" : "is back"}`;
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
-      const v = valueText(reg, world, state, pov, kind, e.field, value, you);
-      if (v === null)
-        return null;
-      if (e.field === "activity")
-        return `${name(e.entity)}: ${v}`;
-      return `${name(e.entity)}: ${fieldDef(reg, world, kind, e.field)?.label ?? humanize(e.field)} ${v}`;
+      return setLine(reg, world, state, words, e.entity, e.field, value);
     }
     case "add": {
       if (INTERNAL_FIELD.test(e.field))
         return null;
-      const kind = own(state.entities, e.entity)?.kind ?? "";
-      const def = fieldDef(reg, world, kind, e.field);
-      const amount = def?.type === "money" ? formatMoney(Math.abs(e.delta), world.currency) : String(Math.round(Math.abs(e.delta) * 100) / 100);
-      return `${name(e.entity)}: ${def?.label ?? humanize(e.field)} ${e.delta < 0 ? "\u2212" : "+"}${amount}`;
+      const def = fieldDef(reg, world, own(state.entities, e.entity)?.kind ?? "", e.field);
+      const { noun, unit } = fieldNoun(def?.label, e.field);
+      const amount = def?.type === "money" ? formatMoney(Math.abs(e.delta), world.currency) : `${Math.round(Math.abs(e.delta) * 100) / 100}${unit}`;
+      return `${possessive(words.name(e.entity))} ${noun} went ${e.delta < 0 ? "down" : "up"} by ${amount}`;
     }
     case "link":
     case "unlink":
-      return relationLine(e.rel, name(e.from), name(e.to), e.type === "link");
+      return relationLine(reg, world, words, e.rel, e.from, e.to, e.type === "link");
     case "spawn":
       return `${e.entity.name} appears`;
     case "stage": {
       const t = own(world.tracks, e.track);
-      return t ? `${t.label}: ${own(t.stages, e.to)?.label ?? e.to}` : null;
+      return t ? `${t.label} is now at \u201C${own(t.stages, e.to)?.label ?? e.to}\u201D` : null;
     }
     case "post":
-      return postLine(world, state, pov, e.memo, e.lines);
+      return postLine(world, state, pov, e.memo, e.lines, player);
     default: {
       const def = reg.get(e.type);
       if (!def)
@@ -5117,6 +5388,367 @@ function playerDrop(reg, world, state, pov, event, reason) {
   return line ? { text: line, visible: true, gm: reason } : { text: UNSEEN_DROP, visible: false, gm: reason };
 }
 
+// src/engine/cues.ts
+var SECRET_KINDS = ["lore", "track", "flag"];
+function readCue(raw) {
+  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
+    return null;
+  const keyed = SECRET_KINDS.filter((kind2) => raw[kind2] !== undefined);
+  const kind = keyed[0];
+  const id = kind === undefined ? undefined : raw[kind];
+  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
+}
+function cuesOf(world, who) {
+  const cues = own(world.entities, who)?.cues;
+  return (Array.isArray(cues) ? cues : []).flatMap((raw) => readCue(raw) ?? []);
+}
+
+// src/engine/lore.ts
+var MIN_TERM = 3;
+var MIN_WORDS = 4;
+var WORD_CAP = 3;
+var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
+function plain(text) {
+  const words = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return words === "" ? "" : ` ${words} `;
+}
+function wordsOf(text) {
+  return plain(text).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+}
+var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+function loreHeldBy(world, entry, who) {
+  return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
+}
+function loreReadable(reg, world, state, entry, purpose, effects = false, open = loreGateReader(reg, world, state), as) {
+  if (purpose === "gm")
+    return true;
+  const source = loreSourceOf(entry.source);
+  if (source.kind === "ai" && source.status === "pending")
+    return false;
+  if (as !== undefined && loreIsSecret(entry))
+    return loreHeldBy(world, entry, as);
+  if (loreIsSecret(entry) && !open(entry))
+    return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
+  const v = entry.visibility;
+  if (v === undefined || v === "public")
+    return true;
+  if (v !== "known_by")
+    return false;
+  const reader = as ?? world.pov;
+  const links = listOf(entry.links);
+  return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
+}
+function readableLore(reg, world, state, purpose, effects = false) {
+  const open = loreGateReader(reg, world, state);
+  return Object.keys(world.lore).filter((id) => {
+    const entry = world.lore[id];
+    return entry !== undefined && hasOwn(world.lore, id) && loreReadable(reg, world, state, entry, purpose, effects, open);
+  }).sort();
+}
+function readsSecrets(reg, world, state, purpose, effects = false) {
+  const open = loreGateReader(reg, world, state);
+  return Object.values(world.lore).some((entry) => loreIsSecret(entry) && !open(entry) && loreReadable(reg, world, state, entry, purpose, effects, open));
+}
+function secretLoreNames(reg, world, state) {
+  const open = loreGateReader(reg, world, state);
+  const secret = Object.entries(world.lore).filter(([, entry]) => loreIsSecret(entry) && !open(entry));
+  const ids = new Set(secret.map(([id]) => id));
+  const names = new Set;
+  const add = (name) => {
+    if (typeof name === "string" && name.trim().length >= MIN_TERM)
+      names.add(name.trim());
+  };
+  for (const [id, entry] of secret)
+    for (const name of [id, entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), ...listOf(entry.topics)])
+      add(name);
+  for (const [term, leads] of Object.entries(world.loreIndex.terms))
+    if (listOf(leads).some((id) => ids.has(id)))
+      add(term);
+  for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
+    if (!isRecord(topic) || !listOf(topic.entries).some((entry) => ids.has(entry)))
+      continue;
+    add(id);
+    add(topic.label);
+  }
+  return [...names];
+}
+function loreSnippet(tokens, entry, budget, keep = "start") {
+  const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
+  const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
+  const whole = title === "" ? body : `${title}: ${body}`;
+  const cost = tokens(whole);
+  if (cost <= budget)
+    return { text: whole, tokens: cost, cut: false };
+  if (keep === "end") {
+    const words2 = body === "" ? [] : body.split(" ");
+    const lead = title === "" ? "\u2026" : `${title}: \u2026`;
+    const kept2 = (n) => `${lead}${words2.slice(words2.length - n).join(" ")}`;
+    let lo2 = MIN_WORDS;
+    if (lo2 >= words2.length || tokens(kept2(lo2)) > budget)
+      return null;
+    let hi2 = words2.length - 1;
+    while (lo2 < hi2) {
+      const mid = Math.ceil((lo2 + hi2) / 2);
+      if (tokens(kept2(mid)) <= budget)
+        lo2 = mid;
+      else
+        hi2 = mid - 1;
+    }
+    const text2 = kept2(lo2);
+    return { text: text2, tokens: tokens(text2), cut: true };
+  }
+  const head = title === "" ? 0 : title.split(" ").length;
+  const words = whole.split(" ");
+  const fits = (n) => tokens(`${words.slice(0, n).join(" ")}\u2026`) <= budget;
+  let lo = head + MIN_WORDS;
+  if (lo >= words.length || !fits(lo))
+    return null;
+  let hi = words.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(mid))
+      lo = mid;
+    else
+      hi = mid - 1;
+  }
+  const text = `${words.slice(0, lo).join(" ")}\u2026`;
+  return { text, tokens: tokens(text), cut: true };
+}
+function topicMembers(world, topic) {
+  const filed = hasOwn(world.loreIndex.topics, topic) ? listOf(world.loreIndex.topics[topic]?.entries) : [];
+  const named = Object.keys(world.lore).filter((id) => listOf(world.lore[id]?.topics).some((label) => topicIdOf(label) === topic)).sort();
+  return [...new Set([...filed, ...named])].filter((id) => hasOwn(world.lore, id));
+}
+function loreSearch(r, q) {
+  const { reg, world, state } = r;
+  const open = loreGateReader(reg, world, state);
+  const text = plain(q.query ?? "");
+  const exact = new Set((q.terms ?? []).map(plain).filter((t) => t.trim().length >= MIN_TERM));
+  const said = (name) => {
+    if (typeof name !== "string")
+      return null;
+    const p = plain(name);
+    return p.trim().length >= MIN_TERM && (exact.has(p) || text !== "" && text.includes(p)) ? p.trim() : null;
+  };
+  const tableTerms = new Map;
+  for (const [term, ids] of Object.entries(world.loreIndex.terms)) {
+    const hit = said(term);
+    if (hit)
+      for (const id of listOf(ids))
+        tableTerms.set(id, [...tableTerms.get(id) ?? [], hit]);
+  }
+  const topics = new Set((q.topics ?? []).map(topicIdOf).filter((t) => t !== ""));
+  if (!q.exact) {
+    for (const [id, topic] of Object.entries(world.loreIndex.topics))
+      if (isRecord(topic) && said(topic.label))
+        topics.add(id);
+    for (const entry of Object.values(world.lore))
+      for (const label of listOf(entry.topics))
+        if (said(label))
+          topics.add(topicIdOf(label));
+  }
+  const members = new Map([...topics].map((t) => [t, new Set(topicMembers(world, t))]));
+  const links = new Set(q.exact ? [] : q.links ?? []);
+  const words = q.exact ? [] : [...new Set(wordsOf(q.query ?? ""))];
+  const ranked = [];
+  for (const [id, entry] of Object.entries(world.lore)) {
+    if (!loreReadable(reg, world, state, entry, q.purpose, q.effects === true, open, q.as))
+      continue;
+    const terms = new Set(tableTerms.get(id) ?? []);
+    for (const name of [entry.title, ...listOf(entry.aliases), ...listOf(entry.keys)]) {
+      const hit = said(name);
+      if (hit)
+        terms.add(hit);
+    }
+    const linked = listOf(entry.links).filter((l) => links.has(l));
+    const inTopics = [...topics].filter((t) => members.get(t)?.has(id) === true).sort();
+    let tf = 0;
+    if (words.length > 0) {
+      const counts = new Map;
+      for (const w of wordsOf([entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), entry.content].join(" ")))
+        counts.set(w, (counts.get(w) ?? 0) + 1);
+      for (const w of words)
+        tf += Math.min(WORD_CAP, counts.get(w) ?? 0);
+    }
+    if (q.exact ? terms.size === 0 : terms.size + linked.length + inTopics.length + tf === 0)
+      continue;
+    const priority = typeof entry.priority === "number" && Number.isFinite(entry.priority) ? entry.priority : 0;
+    const why = [...[...terms].sort().map((t) => `term:${t}`), ...linked.map((l) => `link:${l}`), ...inTopics.map((t) => `topic:${t}`), ...tf > 0 ? ["words"] : []];
+    ranked.push({ id, entry, key: [terms.size, linked.length, inTopics.length, tf, priority], why });
+  }
+  ranked.sort((a, b) => {
+    for (let i = 0;i < a.key.length; i++) {
+      const d = (b.key[i] ?? 0) - (a.key[i] ?? 0);
+      if (d !== 0)
+        return d;
+    }
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  const groups = new Set;
+  const best = ranked.filter(({ entry }) => {
+    const g = typeof entry.group === "string" ? entry.group.trim() : "";
+    if (g === "")
+      return true;
+    if (groups.has(g))
+      return false;
+    groups.add(g);
+    return true;
+  });
+  const hits = [];
+  let left = Math.max(0, Math.floor(q.tokenBudget));
+  for (const { id, entry, why } of best) {
+    if (q.limit !== undefined && hits.length >= q.limit)
+      break;
+    if (q.skip?.has(id))
+      continue;
+    const snippet = loreSnippet((text2) => r.tokens(text2), entry, left);
+    if (!snippet)
+      break;
+    left -= snippet.tokens;
+    hits.push({ id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why });
+  }
+  return { hits, matched: best.length, secret: best.filter(({ entry }) => loreIsSecret(entry) && !open(entry)).length };
+}
+function loreGet(r, id, purpose, tokenBudget, effects = false) {
+  const entry = hasOwn(r.world.lore, id) ? r.world.lore[id] : undefined;
+  const open = loreGateReader(r.reg, r.world, r.state);
+  if (!entry || !loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open))
+    return null;
+  const snippet = loreSnippet((text) => r.tokens(text), entry, Math.max(0, Math.floor(tokenBudget)));
+  if (!snippet)
+    return null;
+  return { id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why: [] };
+}
+function loreList(r, topic, purpose, effects = false) {
+  const open = loreGateReader(r.reg, r.world, r.state);
+  const out = [];
+  for (const id of topicMembers(r.world, topicIdOf(topic))) {
+    const entry = r.world.lore[id];
+    if (entry && loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open))
+      out.push({ id, title: typeof entry.title === "string" ? entry.title : id });
+  }
+  return out;
+}
+
+// src/engine/lore-pins.ts
+var CHAIN_MAX = 16;
+function placeChain(world, place) {
+  const out = [];
+  for (let at = place ?? undefined;at !== undefined && hasOwn(world.places, at) && !out.includes(at) && out.length < CHAIN_MAX; at = world.places[at]?.parent)
+    out.push(at);
+  return out;
+}
+function pinsFor(world, place, who, steps = []) {
+  const pins = lorePinsOf(world);
+  const out = [];
+  const seen = new Set;
+  const add = (list, on) => {
+    for (const pin of list ?? []) {
+      const key = lorePinKey(pin);
+      if (seen.has(key))
+        continue;
+      seen.add(key);
+      out.push({ key, pin, on });
+    }
+  };
+  if (who !== undefined)
+    add(own(pins.characters, who), { character: who });
+  for (const step of steps)
+    add(pins.steps[step], { step });
+  for (const at of placeChain(world, place))
+    add(own(pins.places, at), { place: at });
+  return out;
+}
+function worldPinText(world, ref) {
+  if (!("lore" in ref.pin))
+    return null;
+  const entry = own(world.lore, ref.pin.lore);
+  return entry ? { key: ref.key, on: ref.on, title: typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : ref.pin.lore, content: typeof entry.content === "string" ? entry.content : "", entry, keep: ref.pin.keep ?? "start" } : null;
+}
+function fitPins(r, texts, budget, readable) {
+  const open = loreGateReader(r.reg, r.world, r.state);
+  const out = [];
+  let left = Math.max(0, Math.floor(budget));
+  for (const t of texts) {
+    if (t.entry !== null && !readable(t.entry))
+      continue;
+    const secret = t.entry !== null && loreIsSecret(t.entry) && !open(t.entry);
+    const snippet = loreSnippet((text) => r.tokens(text), { title: t.title, content: t.content }, left, t.keep);
+    if (!snippet) {
+      out.push({ key: t.key, title: t.title, entry: t.entry, snippet: null, tokens: 0, cut: false, secret });
+      continue;
+    }
+    left -= snippet.tokens;
+    out.push({ key: t.key, title: t.title, entry: t.entry, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret });
+  }
+  return out;
+}
+
+// src/engine/place-names.ts
+var PLACE_MENU_MAX = 60;
+function words(text) {
+  return text.toLowerCase().replace(/['\u2019`]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+function placeKey(name) {
+  return words(name).replace(/^(?:the|a|an) /, "");
+}
+function placeDistance(world, a, b) {
+  const up = placeChain(world, a);
+  const down = placeChain(world, b);
+  for (const [i, id] of up.entries()) {
+    const j = down.indexOf(id);
+    if (j >= 0)
+      return i + j;
+  }
+  return up.length + down.length;
+}
+function namedPlaces(reg, world, state) {
+  return Object.keys(world.places).filter((id) => (own(world.places, id)?.name.trim() ?? "") !== "" && canSeePlace(reg, world, state, world.pov, id));
+}
+function placeMenu(reg, world, state, texts, also = []) {
+  const here = placeOfEntity(state, world.pov);
+  const seen = namedPlaces(reg, world, state);
+  const distance = new Map(seen.map((id) => [id, here === null ? 0 : placeDistance(world, here, id)]));
+  const near = [...seen].sort((a, b) => (distance.get(a) ?? 0) - (distance.get(b) ?? 0));
+  const said = texts.map((t) => ` ${words(t)} `);
+  const named = near.filter((id) => {
+    const key = placeKey(own(world.places, id)?.name ?? "");
+    return key !== "" && said.some((t) => t.includes(` ${key} `));
+  });
+  const visible = new Set(seen);
+  const out = [];
+  const added = new Set;
+  for (const id of [...named, ...placeChain(world, here), ...also, ...near]) {
+    if (out.length >= PLACE_MENU_MAX)
+      break;
+    if (!visible.has(id) || added.has(id))
+      continue;
+    added.add(id);
+    out.push({ id, name: own(world.places, id)?.name.trim() ?? id });
+  }
+  return out;
+}
+function placeSaid(reg, world, state, said) {
+  const t = said.trim();
+  if (t === "")
+    return null;
+  if (hasOwn(world.places, t))
+    return t;
+  if (hasOwn(world.places, t.toLowerCase()))
+    return t.toLowerCase();
+  const key = placeKey(t);
+  if (key === "")
+    return null;
+  const matches = namedPlaces(reg, world, state).filter((id) => placeKey(own(world.places, id)?.name ?? "") === key);
+  if (matches.length <= 1)
+    return matches[0] ?? null;
+  const here = placeOfEntity(state, world.pov);
+  if (here === null)
+    return null;
+  const [first, second] = matches.map((id) => ({ id, d: placeDistance(world, here, id) })).sort((a, b) => a.d - b.d);
+  return first && second && first.d < second.d ? first.id : null;
+}
+
 // src/engine/narration-channels.ts
 var SPAWNED_BY_NARRATION = "narration";
 var NAME_MAX = 60;
@@ -5142,8 +5774,8 @@ function placeKept(ctx, id) {
   return !isPublic(v) && v !== "known_by" && v !== "discoverable" && !canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
 }
 function placeNamed(ctx, fact) {
-  const lower = fact.toLowerCase();
-  const ids = Object.keys(ctx.world.places).filter((id) => own(ctx.world.places, id)?.name.trim().toLowerCase() === lower && !placeKept(ctx, id));
+  const key = placeKey(fact);
+  const ids = key === "" ? [] : Object.keys(ctx.world.places).filter((id) => placeKey(own(ctx.world.places, id)?.name ?? "") === key && !placeKept(ctx, id));
   return ids.length === 1 ? ids[0] ?? null : null;
 }
 function factOf(ctx, fact) {
@@ -5838,6 +6470,8 @@ function helperCallOf(config, helper) {
     params: { ...helper.params, ...route?.params }
   };
 }
+var UNREASONED_STEPS = ["memory", "consolidate", "skip"];
+var UNREASONED_ROUTE = Object.freeze({ provider: "helper", connectionId: null, model: null, effort: "off" });
 var LORE_POLICIES = ["none", "prefetch", "lookup", "prefetch+lookup"];
 var LORE_TRANSPORTS = ["auto", "tools", "need"];
 var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
@@ -5847,7 +6481,7 @@ function stepLoreOf(config) {
 function stepConfigOf(steps, purpose) {
   const saved = steps[purpose];
   if (isMindPurpose(purpose))
-    return saved ?? { enabled: purpose !== "skip", signals: [] };
+    return saved ?? { enabled: purpose !== "skip", signals: [], ...UNREASONED_STEPS.includes(purpose) ? { route: { ...UNREASONED_ROUTE } } : {} };
   if (purpose !== "puzzle.answer")
     return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
@@ -5889,7 +6523,7 @@ var EXTRACTION_LEARNING = Object.freeze({
   window: 30,
   demoteUndoRate: 0.1
 });
-var SETTINGS_DEFAULTS_REV = 2;
+var SETTINGS_DEFAULTS_REV = 3;
 var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 function jobSettingsOf(raw, base = JOB_SETTINGS_DEFAULTS) {
   const j = isRecord(raw) ? raw : {};
@@ -6088,10 +6722,17 @@ var feedEvent = {
       delete current[section];
     s[FEED_KEY] = current;
   },
-  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `the ${typeof e.data.section === "string" ? e.data.section : "?"} section's settings in this chat`
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const section = typeof e.data.section === "string" ? e.data.section : "";
+    const label = own(ctx.world.sections, section)?.label ?? `${section.charAt(0).toUpperCase()}${section.slice(1).replace(/_/g, " ")}`;
+    return feedSentence(label, e.data.to === null ? null : readSectionFeed(e.data.to));
+  }
 };
 
 // src/engine/engine-pack.ts
+var LEVELS = [0, 1, 2, 3, 4];
 var ENGINE_PACK = "engine";
 var ENGINE_EVENTS = {
   fired: "engine.fired",
@@ -6103,6 +6744,7 @@ var ENGINE_EVENTS = {
   choice: "engine.choice",
   attempt: "engine.attempt",
   revealed: "engine.revealed",
+  hint: "engine.hint",
   pause: "engine.pause",
   check: "engine.check",
   entity: "engine.entity",
@@ -6132,6 +6774,17 @@ function readEngineSlice(state) {
   for (const [k, v] of Object.entries(rec(s.revealed)))
     if (Array.isArray(v))
       revealed[k] = v.filter((x) => typeof x === "string");
+  const byStage = (v) => {
+    const out = {};
+    for (const [track, row] of Object.entries(rec(v))) {
+      const counts = {};
+      for (const [stage, n] of Object.entries(rec(row)))
+        if (typeof n === "number")
+          counts[stage] = n;
+      out[track] = counts;
+    }
+    return out;
+  };
   const agents = {};
   for (const [k, v] of Object.entries(rec(s.agents)))
     if (typeof v === "number")
@@ -6144,8 +6797,10 @@ function readEngineSlice(state) {
   return {
     fired,
     attempts,
+    missed: byStage(s.missed),
     solved,
     revealed,
+    hints: byStage(s.hints),
     agents,
     rr: typeof s.rr === "number" ? s.rr : 0,
     pauseScene: typeof s.pauseScene === "string" ? s.pauseScene : null,
@@ -6171,6 +6826,14 @@ function sub(state, key) {
   const fresh = {};
   s[key] = fresh;
   return fresh;
+}
+function bumpStage(state, key, track, stage) {
+  if (!safeKey(track) || !safeKey(stage))
+    return;
+  const all = sub(state, key);
+  const row = isRecord(all[track]) ? all[track] : {};
+  const n = row[stage];
+  all[track] = { ...row, [stage]: (typeof n === "number" ? n : 0) + 1 };
 }
 function str2(e, key) {
   const v = e.data[key];
@@ -6262,9 +6925,22 @@ var events = [
         const attempts = sub(state, "attempts");
         const n = own(attempts, track);
         attempts[track] = (typeof n === "number" ? n : 0) + 1;
+        bumpStage(state, "missed", track, str2(e, "stage"));
       }
     },
     describe: (e) => `attempt on ${str2(e, "track")}`
+  },
+  {
+    type: ENGINE_EVENTS.hint,
+    validate: (e, ctx) => {
+      const missing = need(e, "track", "stage");
+      if (missing)
+        return missing;
+      const t = own(ctx.world.tracks, str2(e, "track"));
+      return t && own(t.stages, str2(e, "stage")) ? null : { code: "missing_track", reason: `no stage ${str2(e, "stage")} of track ${str2(e, "track")}` };
+    },
+    apply: (e, state) => bumpStage(state, "hints", str2(e, "track"), str2(e, "stage")),
+    describe: (e) => `hint opened on ${str2(e, "track")}`
   },
   {
     type: ENGINE_EVENTS.revealed,
@@ -6355,16 +7031,20 @@ var events = [
       return ["tier", "agent", "levels"].filter((aspect) => e.data[aspect] !== undefined).map((aspect) => ({ entity, aspect }));
     },
     describe: (e, ctx) => {
-      const parts = [];
+      const clauses = [];
       if (typeof e.data.tier === "string")
-        parts.push(tierLabel(ctx.world, e.data.tier));
+        clauses.push(`is now in the ${tierLabel(ctx.world, e.data.tier)} tier`);
       if (typeof e.data.agent === "boolean")
-        parts.push(e.data.agent ? "lives off-screen" : "no longer lives off-screen");
+        clauses.push(e.data.agent ? "now lives their own life off-screen" : "no longer lives their own life off-screen");
       const levels = e.data.levels;
       if (isRecord(levels))
-        for (const [d, v] of Object.entries(levels))
-          parts.push(`${d} level ${v === null ? "from the tier" : String(v)}`);
-      return `${own(ctx.state.entities, str2(e, "entity"))?.name ?? str2(e, "entity")}: ${parts.join(", ")}`;
+        for (const [d, v] of Object.entries(levels)) {
+          const domain = DOMAINS.find((x) => x === d);
+          const area = domain ? DOMAIN_LABEL[domain] : d;
+          const level = LEVELS.find((n) => n === v);
+          clauses.push(v === null ? `has ${area} detail from their tier again` : `now has ${area} detail at level ${String(v)}${level !== undefined ? ` (${LEVEL_LABEL[level]})` : ""}`);
+        }
+      return `${own(ctx.state.entities, str2(e, "entity"))?.name ?? str2(e, "entity")} ${listWords(clauses)}`;
     }
   },
   {
@@ -6394,23 +7074,24 @@ var events = [
     describe: (e, ctx, viewer) => {
       const classes = classOf(e.data.class) ?? {};
       const name = own(ctx.state.entities, str2(e, "entity"))?.name ?? str2(e, "entity");
-      const valuesOf = (f, values) => values.length > 0 ? values.map((v) => own(f.values, v)?.label ?? v).join(", ") : "none";
+      const valuesOf = (f, values) => values.length > 0 ? listWords(values.map((v) => own(f.values, v)?.label ?? v)) : "none";
+      const facetLine = (f, values) => `${possessive(name)} ${fieldNoun(f.label, "").noun} is now ${valuesOf(f, values)}`;
       if (viewer !== undefined) {
         const was = classOf(e.data.was);
         if (!was)
           return "";
         const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
-        const changed = facetsInOrder(ctx.world).filter(([id, f]) => f.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? [])).map(([id, f]) => `${f.label} ${valuesOf(f, own(classes, id) ?? [])}`);
-        return changed.length > 0 ? `${name}: ${changed.join("; ")}` : "";
+        const changed = facetsInOrder(ctx.world).filter(([id, f]) => f.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? [])).map(([id, f]) => facetLine(f, own(classes, id) ?? []));
+        return changed.join("; ");
       }
       const parts = facetsInOrder(ctx.world).flatMap(([id, f]) => {
         const values = own(classes, id) ?? [];
-        return values.length > 0 ? [`${f.label} ${valuesOf(f, values)}`] : [];
+        return values.length > 0 ? [facetLine(f, values)] : [];
       });
       const tags = tagList(e.data.tags) ?? [];
       if (tags.length > 0)
-        parts.push(`tags ${tags.join(", ")}`);
-      return parts.length > 0 ? `${name}: ${parts.join("; ")}` : `${name}: no classification or tags`;
+        parts.push(`${possessive(name)} tags are now ${listWords(tags)}`);
+      return parts.length > 0 ? parts.join("; ") : `${name} now has no classes and no tags`;
     }
   },
   {
@@ -6450,10 +7131,11 @@ var events = [
       const id = str2(e, "entity");
       const def = lifeStateOf(ctx.world, str2(e, "to"));
       const name = own(ctx.state.entities, id)?.name ?? id;
+      const state = def.label.toLowerCase();
       if (viewer === undefined)
-        return `${name}: ${def.label}`;
+        return `${name} is now ${state}`;
       if (id === viewer)
-        return `You: ${def.label}`;
+        return `You are now ${state}`;
       return witnessesOf2(e)?.includes(viewer) === true ? `${name} ${def.reads}` : "";
     }
   },
@@ -6471,7 +7153,7 @@ var events = [
       const name = own(ctx.state.entities, id)?.name ?? id;
       const who = Array.isArray(e.data.who) ? e.data.who.filter((x) => typeof x === "string") : [];
       if (viewer === undefined)
-        return `${who.map((w) => own(ctx.state.entities, w)?.name ?? w).join(", ")} learn: ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
+        return `${listWords(who.map((w) => own(ctx.state.entities, w)?.name ?? w))} now ${who.length === 1 ? "knows" : "know"} that ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
       return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
     }
   }
@@ -6626,302 +7308,6 @@ function createRng(seed) {
 
 // src/shared/party.ts
 var PARTY_RELATION = "travels_with";
-
-// src/engine/cues.ts
-var SECRET_KINDS = ["lore", "track", "flag"];
-function readCue(raw) {
-  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
-    return null;
-  const keyed = SECRET_KINDS.filter((kind2) => raw[kind2] !== undefined);
-  const kind = keyed[0];
-  const id = kind === undefined ? undefined : raw[kind];
-  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
-}
-function cuesOf(world, who) {
-  const cues = own(world.entities, who)?.cues;
-  return (Array.isArray(cues) ? cues : []).flatMap((raw) => readCue(raw) ?? []);
-}
-
-// src/engine/lore.ts
-var MIN_TERM = 3;
-var MIN_WORDS = 4;
-var WORD_CAP = 3;
-var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
-function plain(text2) {
-  const words = text2.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-  return words === "" ? "" : ` ${words} `;
-}
-function wordsOf(text2) {
-  return plain(text2).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
-}
-var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-function loreHeldBy(world, entry, who) {
-  return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
-}
-function loreReadable(reg, world, state, entry, purpose, effects = false, open = loreGateReader(reg, world, state), as) {
-  if (purpose === "gm")
-    return true;
-  const source = loreSourceOf(entry.source);
-  if (source.kind === "ai" && source.status === "pending")
-    return false;
-  if (as !== undefined && loreIsSecret(entry))
-    return loreHeldBy(world, entry, as);
-  if (loreIsSecret(entry) && !open(entry))
-    return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
-  const v = entry.visibility;
-  if (v === undefined || v === "public")
-    return true;
-  if (v !== "known_by")
-    return false;
-  const reader = as ?? world.pov;
-  const links = listOf(entry.links);
-  return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
-}
-function readableLore(reg, world, state, purpose, effects = false) {
-  const open = loreGateReader(reg, world, state);
-  return Object.keys(world.lore).filter((id) => {
-    const entry = world.lore[id];
-    return entry !== undefined && hasOwn(world.lore, id) && loreReadable(reg, world, state, entry, purpose, effects, open);
-  }).sort();
-}
-function readsSecrets(reg, world, state, purpose, effects = false) {
-  const open = loreGateReader(reg, world, state);
-  return Object.values(world.lore).some((entry) => loreIsSecret(entry) && !open(entry) && loreReadable(reg, world, state, entry, purpose, effects, open));
-}
-function secretLoreNames(reg, world, state) {
-  const open = loreGateReader(reg, world, state);
-  const secret = Object.entries(world.lore).filter(([, entry]) => loreIsSecret(entry) && !open(entry));
-  const ids = new Set(secret.map(([id]) => id));
-  const names = new Set;
-  const add = (name) => {
-    if (typeof name === "string" && name.trim().length >= MIN_TERM)
-      names.add(name.trim());
-  };
-  for (const [id, entry] of secret)
-    for (const name of [id, entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), ...listOf(entry.topics)])
-      add(name);
-  for (const [term, leads] of Object.entries(world.loreIndex.terms))
-    if (listOf(leads).some((id) => ids.has(id)))
-      add(term);
-  for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
-    if (!isRecord(topic) || !listOf(topic.entries).some((entry) => ids.has(entry)))
-      continue;
-    add(id);
-    add(topic.label);
-  }
-  return [...names];
-}
-function loreSnippet(tokens, entry, budget, keep = "start") {
-  const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
-  const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
-  const whole2 = title === "" ? body : `${title}: ${body}`;
-  const cost = tokens(whole2);
-  if (cost <= budget)
-    return { text: whole2, tokens: cost, cut: false };
-  if (keep === "end") {
-    const words2 = body === "" ? [] : body.split(" ");
-    const lead = title === "" ? "\u2026" : `${title}: \u2026`;
-    const kept2 = (n) => `${lead}${words2.slice(words2.length - n).join(" ")}`;
-    let lo2 = MIN_WORDS;
-    if (lo2 >= words2.length || tokens(kept2(lo2)) > budget)
-      return null;
-    let hi2 = words2.length - 1;
-    while (lo2 < hi2) {
-      const mid = Math.ceil((lo2 + hi2) / 2);
-      if (tokens(kept2(mid)) <= budget)
-        lo2 = mid;
-      else
-        hi2 = mid - 1;
-    }
-    const text3 = kept2(lo2);
-    return { text: text3, tokens: tokens(text3), cut: true };
-  }
-  const head = title === "" ? 0 : title.split(" ").length;
-  const words = whole2.split(" ");
-  const fits = (n) => tokens(`${words.slice(0, n).join(" ")}\u2026`) <= budget;
-  let lo = head + MIN_WORDS;
-  if (lo >= words.length || !fits(lo))
-    return null;
-  let hi = words.length - 1;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    if (fits(mid))
-      lo = mid;
-    else
-      hi = mid - 1;
-  }
-  const text2 = `${words.slice(0, lo).join(" ")}\u2026`;
-  return { text: text2, tokens: tokens(text2), cut: true };
-}
-function topicMembers(world, topic) {
-  const filed = hasOwn(world.loreIndex.topics, topic) ? listOf(world.loreIndex.topics[topic]?.entries) : [];
-  const named = Object.keys(world.lore).filter((id) => listOf(world.lore[id]?.topics).some((label) => topicIdOf(label) === topic)).sort();
-  return [...new Set([...filed, ...named])].filter((id) => hasOwn(world.lore, id));
-}
-function loreSearch(r, q) {
-  const { reg, world, state } = r;
-  const open = loreGateReader(reg, world, state);
-  const text2 = plain(q.query ?? "");
-  const exact = new Set((q.terms ?? []).map(plain).filter((t) => t.trim().length >= MIN_TERM));
-  const said = (name) => {
-    if (typeof name !== "string")
-      return null;
-    const p = plain(name);
-    return p.trim().length >= MIN_TERM && (exact.has(p) || text2 !== "" && text2.includes(p)) ? p.trim() : null;
-  };
-  const tableTerms = new Map;
-  for (const [term, ids] of Object.entries(world.loreIndex.terms)) {
-    const hit = said(term);
-    if (hit)
-      for (const id of listOf(ids))
-        tableTerms.set(id, [...tableTerms.get(id) ?? [], hit]);
-  }
-  const topics = new Set((q.topics ?? []).map(topicIdOf).filter((t) => t !== ""));
-  if (!q.exact) {
-    for (const [id, topic] of Object.entries(world.loreIndex.topics))
-      if (isRecord(topic) && said(topic.label))
-        topics.add(id);
-    for (const entry of Object.values(world.lore))
-      for (const label of listOf(entry.topics))
-        if (said(label))
-          topics.add(topicIdOf(label));
-  }
-  const members = new Map([...topics].map((t) => [t, new Set(topicMembers(world, t))]));
-  const links = new Set(q.exact ? [] : q.links ?? []);
-  const words = q.exact ? [] : [...new Set(wordsOf(q.query ?? ""))];
-  const ranked = [];
-  for (const [id, entry] of Object.entries(world.lore)) {
-    if (!loreReadable(reg, world, state, entry, q.purpose, q.effects === true, open, q.as))
-      continue;
-    const terms = new Set(tableTerms.get(id) ?? []);
-    for (const name of [entry.title, ...listOf(entry.aliases), ...listOf(entry.keys)]) {
-      const hit = said(name);
-      if (hit)
-        terms.add(hit);
-    }
-    const linked = listOf(entry.links).filter((l) => links.has(l));
-    const inTopics = [...topics].filter((t) => members.get(t)?.has(id) === true).sort();
-    let tf = 0;
-    if (words.length > 0) {
-      const counts = new Map;
-      for (const w of wordsOf([entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), entry.content].join(" ")))
-        counts.set(w, (counts.get(w) ?? 0) + 1);
-      for (const w of words)
-        tf += Math.min(WORD_CAP, counts.get(w) ?? 0);
-    }
-    if (q.exact ? terms.size === 0 : terms.size + linked.length + inTopics.length + tf === 0)
-      continue;
-    const priority = typeof entry.priority === "number" && Number.isFinite(entry.priority) ? entry.priority : 0;
-    const why = [...[...terms].sort().map((t) => `term:${t}`), ...linked.map((l) => `link:${l}`), ...inTopics.map((t) => `topic:${t}`), ...tf > 0 ? ["words"] : []];
-    ranked.push({ id, entry, key: [terms.size, linked.length, inTopics.length, tf, priority], why });
-  }
-  ranked.sort((a, b) => {
-    for (let i = 0;i < a.key.length; i++) {
-      const d = (b.key[i] ?? 0) - (a.key[i] ?? 0);
-      if (d !== 0)
-        return d;
-    }
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
-  const groups = new Set;
-  const best = ranked.filter(({ entry }) => {
-    const g = typeof entry.group === "string" ? entry.group.trim() : "";
-    if (g === "")
-      return true;
-    if (groups.has(g))
-      return false;
-    groups.add(g);
-    return true;
-  });
-  const hits = [];
-  let left = Math.max(0, Math.floor(q.tokenBudget));
-  for (const { id, entry, why } of best) {
-    if (q.limit !== undefined && hits.length >= q.limit)
-      break;
-    if (q.skip?.has(id))
-      continue;
-    const snippet = loreSnippet((text3) => r.tokens(text3), entry, left);
-    if (!snippet)
-      break;
-    left -= snippet.tokens;
-    hits.push({ id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why });
-  }
-  return { hits, matched: best.length, secret: best.filter(({ entry }) => loreIsSecret(entry) && !open(entry)).length };
-}
-function loreGet(r, id, purpose, tokenBudget, effects = false) {
-  const entry = hasOwn(r.world.lore, id) ? r.world.lore[id] : undefined;
-  const open = loreGateReader(r.reg, r.world, r.state);
-  if (!entry || !loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open))
-    return null;
-  const snippet = loreSnippet((text2) => r.tokens(text2), entry, Math.max(0, Math.floor(tokenBudget)));
-  if (!snippet)
-    return null;
-  return { id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why: [] };
-}
-function loreList(r, topic, purpose, effects = false) {
-  const open = loreGateReader(r.reg, r.world, r.state);
-  const out = [];
-  for (const id of topicMembers(r.world, topicIdOf(topic))) {
-    const entry = r.world.lore[id];
-    if (entry && loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open))
-      out.push({ id, title: typeof entry.title === "string" ? entry.title : id });
-  }
-  return out;
-}
-
-// src/engine/lore-pins.ts
-var CHAIN_MAX = 16;
-function placeChain(world, place) {
-  const out = [];
-  for (let at = place ?? undefined;at !== undefined && hasOwn(world.places, at) && !out.includes(at) && out.length < CHAIN_MAX; at = world.places[at]?.parent)
-    out.push(at);
-  return out;
-}
-function pinsFor(world, place, who, steps = []) {
-  const pins = lorePinsOf(world);
-  const out = [];
-  const seen = new Set;
-  const add = (list, on) => {
-    for (const pin of list ?? []) {
-      const key = lorePinKey(pin);
-      if (seen.has(key))
-        continue;
-      seen.add(key);
-      out.push({ key, pin, on });
-    }
-  };
-  if (who !== undefined)
-    add(own(pins.characters, who), { character: who });
-  for (const step of steps)
-    add(pins.steps[step], { step });
-  for (const at of placeChain(world, place))
-    add(own(pins.places, at), { place: at });
-  return out;
-}
-function worldPinText(world, ref) {
-  if (!("lore" in ref.pin))
-    return null;
-  const entry = own(world.lore, ref.pin.lore);
-  return entry ? { key: ref.key, on: ref.on, title: typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : ref.pin.lore, content: typeof entry.content === "string" ? entry.content : "", entry, keep: ref.pin.keep ?? "start" } : null;
-}
-function fitPins(r, texts, budget, readable) {
-  const open = loreGateReader(r.reg, r.world, r.state);
-  const out = [];
-  let left = Math.max(0, Math.floor(budget));
-  for (const t of texts) {
-    if (t.entry !== null && !readable(t.entry))
-      continue;
-    const secret = t.entry !== null && loreIsSecret(t.entry) && !open(t.entry);
-    const snippet = loreSnippet((text2) => r.tokens(text2), { title: t.title, content: t.content }, left, t.keep);
-    if (!snippet) {
-      out.push({ key: t.key, title: t.title, entry: t.entry, snippet: null, tokens: 0, cut: false, secret });
-      continue;
-    }
-    left -= snippet.tokens;
-    out.push({ key: t.key, title: t.title, entry: t.entry, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret });
-  }
-  return out;
-}
 
 // src/engine/presence.ts
 var LEVELS_APART = 2;
@@ -7424,6 +7810,7 @@ function scheduleOverlaps(reg, world) {
 
 // src/shared/adjudication.ts
 var ADJUDICATION_PRESET_IDS = ["narrative", "balanced", "crunchy", "custom"];
+var ADJUDICATION_PRESET_LABEL = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 var CHECK_TIMINGS = ["every", "risky", "marked", "never"];
 var DESCRIPTION_WEIGHTS = ["none", "bonus", "advantage", "dc"];
 var CHECK_AUTHORITIES = ["mechanics", "hybrid", "narrative"];
@@ -7489,19 +7876,20 @@ function whole2(v, [lo, hi], fallback) {
 function oneOf(v, values, fallback) {
   return values.find((x) => x === v) ?? fallback;
 }
+function samePlay(a, b) {
+  return a.checks === b.checks && a.riskyAt === b.riskyAt && a.trivialAt === b.trivialAt && a.impossibleAt === b.impossibleAt && a.description.weight === b.description.weight && a.description.max === b.description.max && a.description.advantageAt === b.description.advantageAt && a.authority === b.authority && a.closeBy === b.closeBy && a.retry === b.retry && a.retryAfter === b.retryAfter;
+}
 function readAdjudication(raw) {
   if (!isRecord(raw))
     return null;
   const preset = ADJUDICATION_PRESET_IDS.find((p) => p === raw.preset);
   if (!preset)
     return null;
-  if (preset !== "custom")
-    return presetAdjudication(preset);
-  const base = ADJUDICATION_PRESETS.crunchy;
+  const base = ADJUDICATION_PRESETS[preset === "custom" ? "crunchy" : preset];
   const d = isRecord(raw.description) ? raw.description : {};
   const max = whole2(d.max, ADJUDICATION_BOUNDS.descriptionMax, base.description.max);
-  return {
-    preset,
+  const read = {
+    preset: "custom",
     checks: oneOf(raw.checks, CHECK_TIMINGS, base.checks),
     riskyAt: threshold(raw.riskyAt, base.riskyAt) ?? base.riskyAt,
     trivialAt: threshold(raw.trivialAt, base.trivialAt),
@@ -7512,6 +7900,7 @@ function readAdjudication(raw) {
     retry: oneOf(raw.retry, RETRY_RULES, base.retry),
     retryAfter: whole2(raw.retryAfter, ADJUDICATION_BOUNDS.retryAfter, base.retryAfter)
   };
+  return preset !== "custom" && samePlay(read, base) ? presetAdjudication(preset) : read;
 }
 
 // src/shared/claims.ts
@@ -8891,33 +9280,42 @@ function readingOf(ready, natural, sum) {
   const total = sum + ready.modifier;
   return { natural, total, margin: ready.dc === null ? null : total - ready.dc };
 }
-function checkOdds(ready) {
-  const out = {};
+function checkCounts(ready) {
+  const counts = {};
   for (const b of ready.bands)
-    out[b.outcome] = 0;
-  const add = (x, p) => {
+    counts[b.outcome] = 0n;
+  const add = (x, n) => {
     const outcome = bandOutcome(ready.bands, x) ?? NO_BAND;
-    out[outcome] = (out[outcome] ?? 0) + p;
+    counts[outcome] = (counts[outcome] ?? 0n) + n;
   };
   const split = ready.bands.some((b) => b.natural) ? naturalSplit(ready.notation) : null;
   if (split) {
-    split.natural.probs.forEach((pn, i) => {
-      if (pn === 0)
+    split.natural.counts.forEach((cn, i) => {
+      if (cn === 0n)
         return;
       const n = split.natural.min + i;
-      split.rest.probs.forEach((pr, j) => {
-        if (pr > 0)
-          add(readingOf(ready, n, split.sign * n + split.rest.min + j), pn * pr);
+      split.rest.counts.forEach((cr, j) => {
+        if (cr > 0n)
+          add(readingOf(ready, n, split.sign * n + split.rest.min + j), cn * cr);
       });
     });
-    return out;
+    return { counts, outcomes: split.natural.outcomes * split.rest.outcomes };
   }
   const dist = diceDistribution(ready.notation);
-  dist.probs.forEach((p, i) => {
-    if (p > 0)
-      add(readingOf(ready, null, dist.min + i), p);
+  dist.counts.forEach((n, i) => {
+    if (n > 0n)
+      add(readingOf(ready, null, dist.min + i), n);
   });
+  return { counts, outcomes: dist.outcomes };
+}
+function oddsOf(counted) {
+  const out = {};
+  for (const [outcome, n] of Object.entries(counted.counts))
+    out[outcome] = share(n, counted.outcomes);
   return out;
+}
+function checkOdds(ready) {
+  return oddsOf(checkCounts(ready));
 }
 function rollCheck(ready, rng) {
   const roll = rollDice(ready.notation, rng);
@@ -8934,6 +9332,12 @@ function progressionApplies(reg, world, prog, kind) {
   if (prog.kind !== undefined)
     return kindIs(reg, world, kind, prog.kind);
   return fieldDef(reg, world, kind, prog.xpField) !== undefined && fieldDef(reg, world, kind, prog.levelField) !== undefined;
+}
+function levelProgression(reg, world, kind, field) {
+  for (const prog of Object.values(world.ruleset?.progression ?? {}))
+    if (prog.levelField === field && progressionApplies(reg, world, prog, kind))
+      return prog;
+  return null;
 }
 function thresholdsOf(world, prog) {
   const t = prog.thresholds;
@@ -8977,7 +9381,7 @@ function progressOf(reg, ctx, entity, prog) {
   const top = prog.maxLevel !== undefined ? Math.min(thresholds.length, prog.maxLevel) : thresholds.length;
   return { level, xp, from: thresholds[level - 1] ?? 0, next: level < top ? thresholds[level] ?? null : null, reached: levelFor(thresholds, xp, prog.maxLevel) };
 }
-function words(id) {
+function words2(id) {
   const s = id.replace(/_/g, " ");
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
@@ -9031,7 +9435,7 @@ function rowOf2(reg, ctx, entity, row, fixes) {
     const max = poolMax(reg, ctx, entity, def2.pool);
     const min = def2.pool.min ?? 0;
     const fix2 = fixes ? fixOf(entity, row.pool, def2, own(e.fields, row.pool) ?? current, { min, ...max !== null ? { max } : {} }) : undefined;
-    return { label: row.label ?? def2.label ?? words(row.pool), value: `${shown(current)} / ${max === null ? "\u2014" : shown(max)}`, pool: { current, min, max }, ...fix2 ? { fix: fix2 } : {} };
+    return { label: row.label ?? def2.label ?? words2(row.pool), value: `${shown(current)} / ${max === null ? "\u2014" : shown(max)}`, pool: { current, min, max }, ...fix2 ? { fix: fix2 } : {} };
   }
   if ("progression" in row) {
     const prog = own(ctx.world.ruleset?.progression ?? {}, row.progression);
@@ -9056,8 +9460,8 @@ function rowOf2(reg, ctx, entity, row, fixes) {
   if (!def && stored === undefined)
     return null;
   const value = def?.derived === undefined && stored !== undefined ? stored : env.lookup(["self", row.field]);
-  const fix = fixes && def ? fixOf(entity, row.field, def, stored, { min: def.min, max: def.max }) : undefined;
-  return { label: row.label ?? def?.label ?? words(row.field), ...display(ctx, def, value), ...fix ? { fix } : {} };
+  const fix = fixes && def && !levelProgression(reg, ctx.world, e.kind, row.field) ? fixOf(entity, row.field, def, stored, { min: def.min, max: def.max }) : undefined;
+  return { label: row.label ?? def?.label ?? words2(row.field), ...display(ctx, def, value), ...fix ? { fix } : {} };
 }
 function buildEntitySheet(ctx, entity, opts = {}) {
   const layout = ctx.world.ruleset?.sheet;
@@ -9140,6 +9544,13 @@ function fieldBounds(reg, ctx, entity, def) {
   const max = Math.min(def.max ?? Infinity, top ?? Infinity);
   return { ...Number.isFinite(min) ? { min } : {}, ...Number.isFinite(max) ? { max } : {} };
 }
+function followsXp(reg, world, kind, field) {
+  const prog = levelProgression(reg, world, kind, field);
+  if (!prog)
+    return null;
+  const label = (id) => fieldDef(reg, world, kind, id)?.label ?? id.replace(/_/g, " ");
+  return reject4("follows_xp", `${label(prog.levelField)} follows ${label(prog.xpField)}: change ${label(prog.xpField)} instead`);
+}
 function change(reg, w, entity, field, delta) {
   const e = own(w.state.entities, entity);
   if (!e)
@@ -9147,6 +9558,9 @@ function change(reg, w, entity, field, delta) {
   const def = fieldDef(reg, w.world, e.kind, field);
   if (def?.derived !== undefined)
     return reject4("derived", `${field} is derived`);
+  const follows = followsXp(reg, w.world, e.kind, field);
+  if (follows)
+    return follows;
   const stored = own(e.fields, field);
   const cur = stored ?? def?.default ?? (def?.pool ? poolMax(reg, w.ctx, entity, def.pool) ?? 0 : 0);
   if (typeof cur !== "number")
@@ -9173,6 +9587,9 @@ function coreEffect(reg, w, type, args, rng) {
       let value = args.value ?? null;
       if (def?.derived !== undefined)
         return reject4("derived", `${field} is derived`);
+      const follows = followsXp(reg, world, e.kind, field);
+      if (follows)
+        return follows;
       if (def && (def.type === "number" || def.type === "money" || def.type === "duration") && typeof value === "number") {
         const b = fieldBounds(reg, w.ctx, entity, def);
         value = clampNumber(value, b.min, b.max);
@@ -9259,6 +9676,11 @@ function coreEffect(reg, w, type, args, rng) {
       const id = text2(args.id) || `${kind}:${hashParts(rng.seed, "spawn", kind, text2(args.name)).slice(0, 10)}`;
       const tier = tierOf(world, text2(args.tier)) ? text2(args.tier) : spawnTierOf(world);
       const fields = isRecord(args.fields) ? { ...args.fields } : {};
+      for (const field of Object.keys(fields)) {
+        const follows = followsXp(reg, world, kind, field);
+        if (follows)
+          return follows;
+      }
       if (typeof args.place === "string")
         fields.place = args.place;
       const relations = objects(args.relations).map((r) => ({ type: text2(r.type), to: text2(r.to) }));
@@ -9376,48 +9798,59 @@ function applyCheck(reg, w, spec, scope) {
   out.rejected.push(...result.rejected);
   return out;
 }
-function levelUp(reg, w, entity, id, prog, scope) {
+function followXp(reg, w, entity, id, prog, scope, spawned) {
   const out = { applied: [], rejected: [] };
-  const p = progressOf(reg, w.ctx, entity, prog);
-  if (!p || p.reached <= p.level)
+  const e = own(w.state.entities, entity);
+  const p = e ? progressOf(reg, w.ctx, entity, prog) : null;
+  if (!e || !p)
     return out;
+  const bounds = fieldBounds(reg, w.ctx, entity, fieldDef(reg, w.world, e.kind, prog.levelField));
+  const to = clampNumber(p.reached, bounds.min, bounds.max);
   const from = p.level;
-  const depth2 = scope.depth ?? 0;
-  for (let level = from + 1;level <= p.reached; level++) {
-    const set = { type: "set", entity, field: prog.levelField, value: level };
-    if (w.apply(set))
-      return out;
-    out.applied.push(set);
-    if (!prog.onLevel || prog.onLevel.length === 0 || depth2 + 1 >= NESTING_CAP)
-      continue;
-    const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth2 + 1 });
-    out.applied.push(...r.applied);
-    out.rejected.push(...r.rejected);
-  }
-  const who = entity === w.world.pov ? "You" : own(w.state.entities, entity)?.name ?? entity;
-  const note = {
-    type: ENGINE_EVENTS.note,
-    data: { text: `${who} reached ${prog.label} ${p.reached}${p.reached - from > 1 ? ` (from ${from})` : ""}.`, entity, ...entity === w.world.pov ? {} : { visibility: "secret" } }
+  if (to === from)
+    return out;
+  const applied = (ev) => {
+    if (w.apply(ev))
+      return false;
+    out.applied.push(ev);
+    return true;
   };
-  if (!w.apply(note))
-    out.applied.push(note);
+  if (spawned || to < from) {
+    if (!applied({ type: "set", entity, field: prog.levelField, value: to }) || spawned)
+      return out;
+  } else {
+    const depth2 = scope.depth ?? 0;
+    for (let level = from + 1;level <= to; level++) {
+      if (!applied({ type: "set", entity, field: prog.levelField, value: level }))
+        return out;
+      if (!prog.onLevel || prog.onLevel.length === 0 || depth2 + 1 >= NESTING_CAP)
+        continue;
+      const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth2 + 1 });
+      out.applied.push(...r.applied);
+      out.rejected.push(...r.rejected);
+    }
+  }
+  const who = entity === w.world.pov ? "You" : e.name;
+  const text3 = to > from ? `${who} reached ${prog.label} ${to}${to - from > 1 ? ` (from ${from})` : ""}.` : `${who} dropped to ${prog.label} ${to} (from ${from}).`;
+  applied({ type: ENGINE_EVENTS.note, data: { text: text3, entity, ...entity === w.world.pov ? {} : { visibility: "secret" } } });
   return out;
 }
-function levelUps(reg, w, events2, scope) {
+function levelsFollowXp(reg, w, events2, scope) {
   const out = { applied: [], rejected: [] };
   const progressions = Object.entries(w.world.ruleset?.progression ?? {});
   if (progressions.length === 0)
     return out;
   const done = new Set;
   for (const ev of events2) {
-    if (ev.type !== "set" && ev.type !== "add")
+    const moved = ev.type === "set" || ev.type === "add" ? { entity: ev.entity, field: ev.field } : ev.type === "spawn" ? { entity: ev.entity.id, field: null } : null;
+    if (!moved)
       continue;
     for (const [id, prog] of progressions) {
-      const key = `${ev.entity}\x00${id}`;
-      if (prog.xpField !== ev.field || done.has(key))
+      const key = `${moved.entity}\x00${id}`;
+      if (moved.field !== null && moved.field !== prog.xpField || done.has(key))
         continue;
       done.add(key);
-      const step = levelUp(reg, w, ev.entity, id, prog, scope);
+      const step = followXp(reg, w, moved.entity, id, prog, scope, moved.field === null);
       out.applied.push(...step.applied);
       out.rejected.push(...step.rejected);
     }
@@ -9456,7 +9889,7 @@ function applyEffects(reg, w, specs, scope) {
       }
     }
     out.applied.push(...events2);
-    const ups = levelUps(reg, w, events2, { ...scope, rng });
+    const ups = levelsFollowXp(reg, w, events2, { ...scope, rng });
     out.applied.push(...ups.applied);
     out.rejected.push(...ups.rejected);
   });
@@ -9666,10 +10099,13 @@ function enter(reg, w, trackId, track, from, to, via, seed) {
   const entering = own(track.stages, to);
   if (entering?.effects && entering.effects.length > 0)
     applyEffects(reg, w, entering.effects, { bindings, rng: rng.fork("effects") });
+  if (entering?.rewards && entering.rewards.length > 0 && isTerminal(track, to))
+    applyEffects(reg, w, entering.rewards, { bindings, rng: rng.fork("end rewards") });
   if (entering?.truth)
     w.apply({ type: ENGINE_EVENTS.revealed, data: { track: trackId, stage: to } });
   if (track.kind === "quest") {
-    const text3 = entering?.cue ?? `${track.label}: ${entering?.label ?? to}`;
+    const cue = entering?.cue && !ownersCue(reg, w.world, w.state, w.world.pov, trackId) ? entering.cue : null;
+    const text3 = cue ?? `${track.label}: ${entering?.label ?? to}`;
     w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text: text3, visibility: track.visibility } });
   }
   return { track: trackId, from, to, via, events: w.events.slice(start) };
@@ -9714,6 +10150,35 @@ function stepTracks(reg, w, seed) {
     }
   }
   return changes;
+}
+function stagesAfter(track, stage) {
+  const reached = new Set;
+  const queue = [stage];
+  for (let s = queue.shift();s !== undefined; s = queue.shift()) {
+    const def = own(track.stages, s);
+    for (const to of [...(def?.next ?? []).map((n) => n.to), ...def?.fail ? [def.fail.to] : []]) {
+      if (reached.has(to))
+        continue;
+      reached.add(to);
+      queue.push(to);
+    }
+  }
+  return reached;
+}
+function moveTrack(reg, w, trackId, to, seed) {
+  const track = own(w.world.tracks, trackId);
+  if (!track)
+    return { code: "missing_track", reason: `no track ${trackId}` };
+  if (!own(track.stages, to))
+    return { code: "missing_stage", reason: `${track.label} has no stage ${to}` };
+  const from = own(w.state.tracks, trackId)?.stage ?? track.start;
+  if (from === to)
+    return null;
+  if (!stagesAfter(track, from).has(to))
+    return w.apply({ type: "stage", track: trackId, to });
+  const leaving = own(track.stages, from);
+  const fails = leaving !== undefined && leaving.fail?.to === to && !leaving.next.some((n) => n.to === to);
+  return enter(reg, w, trackId, track, from, to, fails ? "fail" : "gm", seed) ? null : { code: "bad_stage", reason: `${track.label} can't move to ${to}` };
 }
 function normalizeAnswer(text3) {
   return text3.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().replace(/^(the|a|an) /, "");
@@ -10462,7 +10927,7 @@ function nextDayPart(cal, now, index) {
 }
 var SPAN_COUNTS = { a: 1, an: 1, one: 1, next: 1, "a couple of": 2, "couple of": 2, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty five": 45, ninety: 90 };
 var SPAN_UNITS = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
-var longestFirst = (words2) => [...words2].sort((a, b) => b.length - a.length).join("|");
+var longestFirst = (words3) => [...words3].sort((a, b) => b.length - a.length).join("|");
 var plain2 = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 var SPAN_TERM = new RegExp(` (${longestFirst(Object.keys(SPAN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?(?= )`, "g");
 var SPAN_NOT_BEFORE = / (?:last|past|previous|every|per|each|\d+(?:\.\d+)?)$/;
@@ -10476,8 +10941,8 @@ var VAGUE_SPAN = new RegExp(` (${longestFirst(Object.keys(VAGUE_SPANS))})(?= )`,
 var ANCHOR_WORDS = { breakfast: "breakfast", lunch: "lunch", dinner: "dinner", supper: "dinner", bedtime: "bedtime", morning: "morning" };
 var ANCHOR_PARTS = { breakfast: ["morning"], lunch: ["midday", "afternoon"], dinner: ["evening"], bedtime: ["night"], morning: ["morning"] };
 var ANCHOR_SPAN = new RegExp(` (?:until|till|til|to|by)(?: the| my| our)? (${longestFirst(Object.keys(ANCHOR_WORDS))})(?= )`, "g");
-function typedSpan(cal, now, words2, anchorAt) {
-  const t = ` ${words2.toLowerCase().replace(/([ap])\.\s?m\.?/g, "$1m").replace(/(?<!\d)[.,;!?]|[.,;!?](?!\d)/g, " | ").replace(/[^a-z0-9.:|]+/g, " ").replace(/\s+/g, " ").trim()} `.replace(/ (?:a |an )?half (?:an? )?hour(?= )/g, " 30 minutes").replace(/ (?:a |an )?quarter (?:of )?(?:an? )?hour(?= )/g, " 15 minutes");
+function typedSpan(cal, now, words3, anchorAt) {
+  const t = ` ${words3.toLowerCase().replace(/([ap])\.\s?m\.?/g, "$1m").replace(/(?<!\d)[.,;!?]|[.,;!?](?!\d)/g, " | ").replace(/[^a-z0-9.:|]+/g, " ").replace(/\s+/g, " ").trim()} `.replace(/ (?:a |an )?half (?:an? )?hour(?= )/g, " 30 minutes").replace(/ (?:a |an )?quarter (?:of )?(?:an? )?hour(?= )/g, " 15 minutes");
   const weekdays = cal.system.weekdayNames.map(plain2).filter((n) => n.length > 3);
   const months = cal.system.monthNames.map(plain2).filter((n) => n !== "");
   if (STATED_TIME.test(t) || weekdays.some((d) => t.includes(` ${d} `)) || months.some((m) => new RegExp(` (?:${m} \\d|\\d+ (?:of )?${m} )`).test(t)))
@@ -10803,7 +11268,7 @@ function buildMontage(reg, world, before, after, events2, granularity) {
       const from = bandOf(def.bands, typeof old === "number" ? old : 0)?.label ?? "";
       const to = bandOf(def.bands, v)?.label ?? "";
       if (from !== to)
-        bands.push({ entity: id, field, label: `${e.name} ${def.label ?? field}`, from, to });
+        bands.push({ entity: id, field, label: `${possessive(e.name)} ${fieldNoun(def.label, field).noun}`, from, to });
     }
   }
   return {
@@ -10812,7 +11277,7 @@ function buildMontage(reg, world, before, after, events2, granularity) {
     money: [...money].sort(([a], [b]) => a.localeCompare(b)).map(([account, m]) => ({ account, label: own(after.entities, account)?.name ?? account, in: m.in, out: m.out })),
     changes: [...changes.values()].filter((c) => c.delta !== 0).flatMap((c) => {
       const def = fieldDef(reg, world, own(after.entities, c.entity)?.kind ?? "", c.field);
-      return def?.bands ? [] : [{ ...c, label: `${own(after.entities, c.entity)?.name ?? c.entity} ${def?.label ?? c.field.replace(/_/g, " ")}`, money: def?.type === "money" }];
+      return def?.bands ? [] : [{ ...c, label: `${possessive(own(after.entities, c.entity)?.name ?? c.entity)} ${fieldNoun(def?.label, c.field).noun}`, money: def?.type === "money" }];
     }),
     bands
   };
@@ -11581,53 +12046,70 @@ function buildEdges(world, mode, closed) {
   }
   return out;
 }
+function legCost(costing, mode, leg) {
+  const speed = costing.speed(mode);
+  const base = speed !== undefined && (leg.distanceKm ?? 0) > 0 ? (leg.distanceKm ?? 0) / speed * 60 : leg.minutes;
+  return base * (costing.terrain ? own(TERRAIN_FACTORS, leg.terrain ?? "") ?? 1 : 1) * costing.factor(mode);
+}
+function grow(graphs, starts, costing, stop = () => false) {
+  const dist = new Map(starts.map((s) => [s, 0]));
+  const prev = new Map;
+  const done = new Set;
+  const frontier = new Frontier;
+  for (const s of starts)
+    frontier.push(0, s);
+  for (let taken = 0;taken < 1e4; ) {
+    const next = frontier.pop();
+    if (!next)
+      break;
+    const best = next.place;
+    if (done.has(best) || next.minutes !== dist.get(best))
+      continue;
+    taken++;
+    if (stop(best))
+      break;
+    done.add(best);
+    for (const { mode, graph } of graphs) {
+      for (const e of graph.get(best) ?? []) {
+        const nd = next.minutes + legCost(costing, mode, e.leg);
+        if (nd < (dist.get(e.to) ?? Infinity)) {
+          dist.set(e.to, nd);
+          prev.set(e.to, { from: best, leg: e.leg, mode });
+          frontier.push(nd, e.to);
+        }
+      }
+    }
+  }
+  return { dist, prev };
+}
+var plain3 = (node) => node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node;
+function legsTo(tree, costing, from, end) {
+  const legs = [];
+  for (let cur = end;cur !== from; ) {
+    const p = tree.prev.get(cur);
+    if (!p)
+      return null;
+    legs.unshift({ leg: { from: plain3(p.from), to: plain3(cur), minutes: Math.round(legCost(costing, p.mode, p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null }, mode: p.mode });
+    cur = p.from;
+  }
+  return legs;
+}
+function planOf(mode, legs) {
+  return { mode, legs, minutes: legs.reduce((a, l) => a + l.minutes, 0), distanceKm: legs.reduce((a, l) => a + l.distanceKm, 0) };
+}
 function findRoute(world, from, to, mode, opts = {}) {
   if (from === to)
     return { mode, legs: [], minutes: 0, distanceKm: 0 };
   if (!own(world.places, from) || !own(world.places, to))
     return null;
-  const graph = edges(world, mode, opts.closed ?? new Set);
-  const factor = opts.factor ?? 1;
-  const cost = (leg) => leg.minutes * (opts.terrain ? own(TERRAIN_FACTORS, leg.terrain ?? "") ?? 1 : 1) * factor;
-  const dist = new Map([[from, 0]]);
-  const prev = new Map;
-  const done = new Set;
-  const frontier = new Frontier;
-  frontier.push(0, from);
-  for (let taken = 0;taken < 1e4; ) {
-    const next = frontier.pop();
-    if (!next)
-      return null;
-    const best = next.place;
-    if (done.has(best) || next.minutes !== dist.get(best))
-      continue;
-    taken++;
-    if (best === to || best === `${to}${EXIT}`)
-      break;
-    done.add(best);
-    for (const e of graph.get(best) ?? []) {
-      const nd = next.minutes + cost(e.leg);
-      if (nd < (dist.get(e.to) ?? Infinity)) {
-        dist.set(e.to, nd);
-        prev.set(e.to, { from: best, leg: e.leg });
-        frontier.push(nd, e.to);
-      }
-    }
-  }
-  const ends = [to, `${to}${EXIT}`].filter((n) => prev.has(n)).sort((a, b) => (dist.get(a) ?? Infinity) - (dist.get(b) ?? Infinity));
+  const costing = { speed: () => opts.speed, terrain: opts.terrain === true, factor: () => opts.factor ?? 1 };
+  const tree = grow([{ mode, graph: edges(world, mode, opts.closed ?? new Set) }], [from], costing, (node) => node === to || node === `${to}${EXIT}`);
+  const ends = [to, `${to}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity));
   const end = ends[0] ?? null;
   if (end === null)
     return null;
-  const plain3 = (node) => node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node;
-  const legs = [];
-  for (let cur = end;cur !== from; ) {
-    const p = prev.get(cur);
-    if (!p)
-      return null;
-    legs.unshift({ from: plain3(p.from), to: plain3(cur), minutes: Math.round(cost(p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null });
-    cur = p.from;
-  }
-  return { mode, legs, minutes: legs.reduce((a, l) => a + l.minutes, 0), distanceKm: legs.reduce((a, l) => a + l.distanceKm, 0) };
+  const legs = legsTo(tree, costing, from, end);
+  return legs ? planOf(mode, legs.map((l) => l.leg)) : null;
 }
 
 class Frontier {
@@ -11697,7 +12179,8 @@ function routeAt(ctx, from, to, mode) {
   if (closes && (closes(ctx, from).includes(mode) || closes(ctx, to).includes(mode)))
     return null;
   const factor = weather ? Math.max(weather(ctx, from, mode), weather(ctx, to, mode)) : 1;
-  return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx) });
+  const speed = travelTuningOf(ctx.world).speeds[mode];
+  return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx), ...speed !== undefined ? { speed } : {} });
 }
 function nominalRoute(ctx, from, to, mode) {
   if (!own(ctx.world.places, to))
@@ -11717,6 +12200,103 @@ function goMinutes(ctx, from, to) {
     return null;
   const times = GO_MODES.flatMap((m) => routeAt(ctx, from, to, m)?.minutes ?? []);
   return times.length > 0 ? Math.min(...times) : NOMINAL_MOVE_MINUTES;
+}
+function reverseEdges(world, closed) {
+  return passMemo([world], `space.redges\x00${[...closed].sort().join("\x00")}`, () => {
+    const out = new Map;
+    for (const [from, list] of edges(world, "walk", closed)) {
+      for (const e of list) {
+        const back = out.get(e.to) ?? [];
+        back.push({ to: from, leg: e.leg });
+        out.set(e.to, back);
+      }
+    }
+    return out;
+  });
+}
+function aroundOf(world, place) {
+  const out = [];
+  let cur = own(world.places, place)?.parent;
+  for (let guard = 0;cur && guard < 64; guard++) {
+    out.push(cur);
+    cur = own(world.places, cur)?.parent;
+  }
+  return out;
+}
+function vehicleTrips(ctx, ask, targets) {
+  const out = new Map;
+  const level = ctx.levelOf(ctx.world.pov, "space");
+  const first = ask.modes[0];
+  if (level <= 1 || first === undefined) {
+    if (ask.at !== ask.from || first === undefined)
+      return out;
+    for (const to of targets) {
+      const drive = nominalRoute(ctx, ask.at, to, first);
+      if (drive)
+        out.set(to, { fetch: null, startMinutes: 0, drive, park: to, parkMinutes: 0, walk: null, minutes: drive.minutes });
+    }
+    return out;
+  }
+  const tuning = travelTuningOf(ctx.world);
+  const fetch = ask.at === ask.from ? null : routeAt(ctx, ask.from, ask.at, "walk");
+  if (ask.at !== ask.from && (!fetch || fetch.minutes > tuning.fetchMinutes))
+    return out;
+  const weather = level >= 4 ? optionalQuery(ctx, "weather.travel_factor") : null;
+  const closes = level >= 4 ? optionalQuery(ctx, "weather.closed_modes") : null;
+  const closed = closedRoutes(ctx);
+  const startMinutes = Math.round(tuning.startMinutes);
+  const parkMinutes = Math.round(tuning.parkMinutes);
+  const searches = new Map;
+  for (const to of targets) {
+    if (to === ask.from || !own(ctx.world.places, to))
+      continue;
+    const modes = ask.modes.filter((m) => !(closes && (closes(ctx, ask.at).includes(m) || closes(ctx, to).includes(m))));
+    if (modes.length === 0)
+      continue;
+    const factors = new Map(modes.map((m) => [m, weather ? Math.max(weather(ctx, ask.at, m), weather(ctx, to, m)) : 1]));
+    const key = modes.map((m) => `${m}:${factors.get(m)}`).join(",");
+    let search = searches.get(key);
+    if (!search) {
+      const costing2 = { speed: (m) => ask.speed ?? tuning.speeds[m], terrain: level >= 4, factor: (m) => factors.get(m) ?? 1 };
+      search = { costing: costing2, tree: grow(modes.map((mode) => ({ mode, graph: edges(ctx.world, mode, closed) })), [ask.at], costing2) };
+      searches.set(key, search);
+    }
+    const { tree, costing } = search;
+    const walkClosed = closes ? closes(ctx, to).includes("walk") : false;
+    const back = walkClosed ? null : grow([{ mode: "walk", graph: reverseEdges(ctx.world, closed) }], [to, `${to}${EXIT}`], { speed: (m) => tuning.speeds[m], terrain: level >= 4, factor: () => 1 });
+    const arrive = (p) => {
+      const nodes = [p, `${p}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity));
+      const node = nodes[0];
+      return node === undefined ? null : { node, minutes: tree.dist.get(node) ?? Infinity };
+    };
+    let best = null;
+    const around = new Set([...aroundOf(ctx.world, ask.at), ...aroundOf(ctx.world, to)]);
+    for (const p of [to, ...Object.keys(ctx.world.places).sort()]) {
+      if (p === ask.at || p !== to && (!ask.canPark(p) || around.has(p)))
+        continue;
+      const there = arrive(p);
+      if (!there)
+        continue;
+      const walkWeather = weather ? Math.max(weather(ctx, p, "walk"), weather(ctx, to, "walk")) : 1;
+      const rest = p === to ? 0 : (back?.dist.get(p) ?? Infinity) * walkWeather;
+      const minutes = there.minutes + rest;
+      if (Number.isFinite(minutes) && (best === null || minutes < best.minutes))
+        best = { park: p, node: there.node, minutes };
+    }
+    if (!best)
+      continue;
+    const legs = legsTo(tree, costing, ask.at, best.node);
+    const walk2 = best.park === to ? null : routeAt(ctx, best.park, to, "walk");
+    if (!legs || best.park !== to && !walk2)
+      continue;
+    const byMode = new Map;
+    for (const l of legs)
+      byMode.set(l.mode, (byMode.get(l.mode) ?? 0) + l.leg.minutes);
+    const main = [...byMode].sort(([a, x], [b, y]) => y - x || modes.indexOf(a) - modes.indexOf(b))[0]?.[0] ?? first;
+    const drive = planOf(main, legs.map((l) => l.leg));
+    out.set(to, { fetch, startMinutes, drive, park: best.park, parkMinutes, walk: walk2, minutes: (fetch?.minutes ?? 0) + startMinutes + drive.minutes + parkMinutes + (walk2?.minutes ?? 0) });
+  }
+  return out;
 }
 
 // src/packs/space/core/view.ts
@@ -11973,7 +12553,7 @@ function placeLines(ctx, scope) {
     const e = own(ctx.state.entities, id);
     if (!e || isGone(ctx.state, id) || e.fields.place !== here || e.relations.some((r) => r.type === "in"))
       return false;
-    return !["person", "vehicle", "account", "property"].some((k) => kindIs(ctx.registry, ctx.world, e.kind, k));
+    return kindIs(ctx.registry, ctx.world, e.kind, "item") && !kindIs(ctx.registry, ctx.world, e.kind, "vehicle");
   });
   const seen = things.filter((id) => seeThing(pov, id));
   const whose = (id) => {
@@ -11985,22 +12565,22 @@ function placeLines(ctx, scope) {
     return owner ? ` (${nameOf3(ctx, owner)}'s)` : "";
   };
   if (seen.length > 0)
-    lines.push({ text: `Here: ${seen.slice(0, THINGS_CAP).map((id) => `${nameOf3(ctx, id)}${whose(id)}`).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
+    lines.push({ text: `Lying here: ${seen.slice(0, THINGS_CAP).map((id) => `${nameOf3(ctx, id)}${whose(id)}`).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
   for (const id of things.filter((t) => !seeThing(pov, t))) {
-    const line2 = beyond(ctx, scope, `Here: ${nameOf3(ctx, id)}.`, (who) => seeThing(who, id));
+    const line2 = beyond(ctx, scope, `Lying here: ${nameOf3(ctx, id)}.`, (who) => seeThing(who, id));
     if (line2)
       lines.push(line2);
   }
   const inside = Object.values(ctx.world.places).filter((p) => p.parent === here).map((p) => p.id).sort();
   const insideSeen = inside.filter((id) => seePlace(pov, id));
   if (insideSeen.length > 0)
-    lines.push({ text: `Inside: ${insideSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
+    lines.push({ text: `Places inside it: ${insideSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
   const ways = waysOut(ctx, here);
   const waysSeen = ways.filter((id) => seePlace(pov, id));
   if (waysSeen.length > 0)
-    lines.push({ text: `Ways out: ${waysSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
+    lines.push({ text: `Ways out from here, to: ${waysSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
   for (const id of [...inside, ...ways].filter((p) => !seePlace(pov, p))) {
-    const line2 = beyond(ctx, scope, `Leads to: ${placeName(ctx, id)}.`, (who) => seePlace(who, id));
+    const line2 = beyond(ctx, scope, `A way from here leads to ${placeName(ctx, id)}.`, (who) => seePlace(who, id));
     if (line2)
       lines.push(line2);
   }
@@ -12011,7 +12591,7 @@ function placeLines(ctx, scope) {
         return !!e && p !== pov && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, p) && placeOfEntity(ctx.state, p) === id;
       });
       if (there.length > 0)
-        lines.push({ text: `In ${placeName(ctx, id)}: ${there.map((p) => nameOf3(ctx, p)).join(", ")}.`, known: "gm" });
+        lines.push({ text: `${inside.includes(id) ? `In ${placeName(ctx, id)}, inside this place` : `At ${placeName(ctx, id)}, one of the ways out`}: ${there.map((p) => nameOf3(ctx, p)).join(", ")}.`, known: "gm" });
     }
   }
   return lines;
@@ -12094,6 +12674,32 @@ function gridLint(world) {
       err("mapSettings.grid.sightRadius", `The sight radius is a whole number of cells from 0 to ${SIGHT_MAX}.`);
     if (raw.travelSimulation !== undefined && typeof raw.travelSimulation !== "boolean")
       err("mapSettings.travelSimulation", "The travel simulation is on (true) or off (false).");
+    const travel = raw.travel;
+    if (travel !== undefined && !isRecord(travel))
+      err("mapSettings.travel", "Travel times are an object: speeds, vehicleSpeeds, startMinutes, parkMinutes and fetchMinutes.");
+    else if (isRecord(travel)) {
+      const speed = (path, v) => {
+        if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0))
+          err(path, "A speed is km/h, above 0.");
+      };
+      for (const [key, v] of Object.entries(isRecord(travel.speeds) ? travel.speeds : {})) {
+        if (!MODES.includes(key))
+          err(`mapSettings.travel.speeds.${key}`, `"${key}" isn't a way of travel: walk, road, offroad or water.`);
+        else
+          speed(`mapSettings.travel.speeds.${key}`, v);
+      }
+      if (travel.speeds !== undefined && !isRecord(travel.speeds))
+        err("mapSettings.travel.speeds", "Speeds are km/h by way of travel: walk, road, offroad, water.");
+      if (travel.vehicleSpeeds !== undefined && !isRecord(travel.vehicleSpeeds))
+        err("mapSettings.travel.vehicleSpeeds", "Vehicle speeds are km/h by vehicle class.");
+      for (const [cls, v] of Object.entries(isRecord(travel.vehicleSpeeds) ? travel.vehicleSpeeds : {}))
+        speed(`mapSettings.travel.vehicleSpeeds.${cls}`, v);
+      for (const key of ["startMinutes", "parkMinutes", "fetchMinutes"]) {
+        const v = travel[key];
+        if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v < 0))
+          err(`mapSettings.travel.${key}`, "Minutes are a number, 0 or more.");
+      }
+    }
   }
   const movement = mapSettingsOf(world).grid.movement;
   if (movement && world.realism.levels.space < GRID_SPACE_FLOOR)
@@ -12202,6 +12808,7 @@ var spacePack = {
     r.service("space.arrival", arrivalEvents);
     r.service("space.lay", layEvents);
     r.query("space.route", routeAt);
+    r.query("space.vehicle_trips", vehicleTrips);
     r.query("space.reachable", reachable);
     r.query("space.entered", entered);
     r.event({
@@ -12303,12 +12910,16 @@ var spacePack = {
     r.renderer({ slot: "place", label: "The place: what it's like, what lies here, the way around", render: (ctx) => placeLines(ctx, "player").map((l) => l.text), feed: placeLines });
     r.renderer({ slot: "place", source: "place_lore", label: "Lore about the place", render: (ctx) => placeLoreLines(ctx, "player").map((l) => l.text), feed: placeLoreLines });
     r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay) });
+    const placeOf2 = (p, ctx) => {
+      const said = typeof p.place === "string" ? p.place : "";
+      return placeSaid(ctx.registry, ctx.world, ctx.state, said) ?? said;
+    };
     r.proposal({
       type: "location",
       boundField: "ref",
       validate(p, ctx) {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
-        const place = typeof p.place === "string" ? p.place : "";
+        const place = placeOf2(p, ctx);
         if (!own(ctx.state.entities, entity))
           return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
         if (!own(ctx.world.places, place))
@@ -12327,7 +12938,7 @@ var spacePack = {
       },
       toEffects: (p, ctx) => {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
-        const to = typeof p.place === "string" ? p.place : "";
+        const to = placeOf2(p, ctx);
         const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : null;
         return [{ type: "move", args: { entity, to, told: true, ...activity !== null ? { activity } : {} } }];
       }
@@ -12390,9 +13001,9 @@ function parseMoneyInput(text3, currency, unit = "major") {
     t = t.slice(1).trim();
   if (unit === "major") {
     const { prefix, suffix } = moneyAffixes(currency);
-    const words2 = [...new Set([currency.symbol, currency.code, prefix, suffix].map((w) => w.trim().toLowerCase()).filter((w) => w !== ""))].sort((a, b) => b.length - a.length);
+    const words3 = [...new Set([currency.symbol, currency.code, prefix, suffix].map((w) => w.trim().toLowerCase()).filter((w) => w !== ""))].sort((a, b) => b.length - a.length);
     const lower = t.toLowerCase();
-    const word = words2.find((w) => lower.startsWith(w) || lower.endsWith(w));
+    const word = words3.find((w) => lower.startsWith(w) || lower.endsWith(w));
     if (word)
       t = (lower.startsWith(word) ? t.slice(word.length) : t.slice(0, t.length - word.length)).trim();
   }
@@ -13657,10 +14268,10 @@ function holdingsWorth(api, ctx, party) {
   const lines = [];
   let assets = 0;
   for (const id of holdingIds(ctx.state)) {
-    const share = holdingShare(api, ctx.state, id, party);
-    if (share <= 0)
+    const share2 = holdingShare(api, ctx.state, id, party);
+    if (share2 <= 0)
       continue;
-    const cents = Math.round(holdingValue(ctx, id) * share / 100);
+    const cents = Math.round(holdingValue(ctx, id) * share2 / 100);
     if (cents === 0)
       continue;
     assets += cents;
@@ -13943,11 +14554,11 @@ function seenIn(books, viewer, id) {
     return viewer === null || canSeePlace(books.registry, books.world, books.state, viewer, id);
   return own(books.world.tracks, id) ? false : undefined;
 }
-function wordsFor(books, viewer, words2, unseen) {
-  const id = words2.trim().replace(/ +/g, "_");
+function wordsFor2(books, viewer, words3, unseen) {
+  const id = words3.trim().replace(/ +/g, "_");
   const seen = seenIn(books, viewer, id);
   if (seen === undefined)
-    return words2.replace(/_/g, " ").trim();
+    return words3.replace(/_/g, " ").trim();
   const entity = own(books.state.entities, id);
   if (!seen)
     return entity ? "someone" : unseen;
@@ -13970,9 +14581,9 @@ function outsideName(books, raw, viewer) {
   }
   const named = own(NAMED_OUTSIDE, head);
   if (named !== undefined)
-    return tail === "" || tail === head ? named : wordsFor(books, viewer, tail, named);
+    return tail === "" || tail === head ? named : wordsFor2(books, viewer, tail, named);
   const kind = tail === "" ? undefined : own(OUTSIDE_KINDS, head);
-  return kind ?? wordsFor(books, viewer, bare, "someone");
+  return kind ?? wordsFor2(books, viewer, bare, "someone");
 }
 function outsideHidden(books, raw, viewer) {
   if (viewer === null)
@@ -14538,6 +15149,15 @@ function isCreditAccount(ctx, account) {
   const c = classOf2(ctx, account);
   return c !== null && isCredit(c);
 }
+var STAGE_WORDS = { current: "up to date", late: "late", "30": "30 days past due", "60": "60 days past due", "90": "90 days past due", "120": "120 days past due", collections: "in collections", charged_off: "charged off" };
+var STATUS_WORDS = { open: "open", frozen: "frozen", collections: "in collections", charged_off: "charged off", closed: "closed", paid_off: "paid off", matured: "matured" };
+var CREDIT_WORDS = { inquiry: "a credit inquiry", opened: "a new account", on_time: "a payment on time", late: "a late payment", collections: "an account in collections", charged_off: "an account charged off", closed: "a closed account", paid_off: "an account paid off", declined: "a declined application" };
+function whoseFor(ctx, viewer, person) {
+  return viewer === person ? "Your" : `${own(ctx.state.entities, person)?.name ?? person}'s`;
+}
+function wordsOf2(words3, id) {
+  return own(words3, id) ?? id.replace(/_/g, " ");
+}
 var EVENTS2 = [
   {
     type: FINANCE_EVENTS.anchor,
@@ -14617,7 +15237,7 @@ var EVENTS2 = [
       cycles[account] = cycle;
       sliceRecord(state, "economy", "adb")[account] = { from: at, at, sum: 0, spent: 0 };
     },
-    describe: (e, ctx) => `Statement: ${formatMoney(numOf(e.data.closing), ctx.world.currency)}, minimum ${formatMoney(numOf(e.data.minimum), ctx.world.currency)}`
+    describe: (e, ctx) => `The statement closed at ${formatMoney(numOf(e.data.closing), ctx.world.currency)}, with at least ${formatMoney(numOf(e.data.minimum), ctx.world.currency)} due`
   },
   {
     type: FINANCE_EVENTS.cardPaid,
@@ -14629,7 +15249,7 @@ var EVENTS2 = [
       if (Object.keys(cur).length > 0)
         cycles[account] = { ...cur, paid: numOf(cur.paid) + numOf(e.data.cents) };
     },
-    describe: (e, ctx) => `Payment ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`
+    describe: (e, ctx) => `A card payment of ${formatMoney(numOf(e.data.cents), ctx.world.currency)} was made`
   },
   {
     type: FINANCE_EVENTS.delinquency,
@@ -14644,7 +15264,7 @@ var EVENTS2 = [
           next[k] = e.data[k];
       cycles[account] = next;
     },
-    describe: (e) => `Payment status: ${str7(e, "stage")}`,
+    describe: (e, ctx) => `${own(ctx.state.entities, str7(e, "account"))?.name ?? str7(e, "account")}'s payments are now ${wordsOf2(STAGE_WORDS, str7(e, "stage"))}`,
     coarsen: { key: (e) => str7(e, "account"), merge: (_a, b) => b }
   },
   {
@@ -14728,7 +15348,7 @@ var EVENTS2 = [
       const { person: _person, ...entry } = e.data;
       credit[person] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
     },
-    describe: (e, _ctx, viewer) => viewer !== undefined && viewer !== str7(e, "person") ? "" : `Credit report: ${str7(e, "kind")}`
+    describe: (e, ctx, viewer) => viewer !== undefined && viewer !== str7(e, "person") ? "" : `${whoseFor(ctx, viewer, str7(e, "person"))} credit report now shows ${wordsOf2(CREDIT_WORDS, str7(e, "kind"))}`
   },
   {
     type: FINANCE_EVENTS.score,
@@ -14740,7 +15360,7 @@ var EVENTS2 = [
       const at = typeof e.data.at === "number" ? e.data.at : state.clock;
       credit[person] = { ...cur, score: numOf(e.data.score), factors: objOf(e.data.factors), at, history: pushCapped(cur.history, { at, score: numOf(e.data.score) }, SCORES_KEPT) };
     },
-    describe: (e, _ctx, viewer) => viewer !== undefined && viewer !== str7(e, "person") ? "" : `Credit score ${numOf(e.data.score)}`
+    describe: (e, ctx, viewer) => viewer !== undefined && viewer !== str7(e, "person") ? "" : `${whoseFor(ctx, viewer, str7(e, "person"))} credit score is now ${numOf(e.data.score)}`
   },
   {
     type: FINANCE_EVENTS.spend,
@@ -14778,7 +15398,7 @@ var EVENTS2 = [
     apply: (e, state) => {
       sliceRecord(state, "economy", "status")[str7(e, "account")] = str7(e, "status");
     },
-    describe: (e, ctx) => `${own(ctx.state.entities, str7(e, "account"))?.name ?? str7(e, "account")}: ${str7(e, "status").replace(/_/g, " ")}`,
+    describe: (e, ctx) => `${own(ctx.state.entities, str7(e, "account"))?.name ?? str7(e, "account")} is now ${wordsOf2(STATUS_WORDS, str7(e, "status"))}`,
     coarsen: { key: (e) => str7(e, "account"), merge: (_a, b) => b }
   },
   {
@@ -14792,7 +15412,7 @@ var EVENTS2 = [
   },
   { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => {
     return;
-  }, describe: (e) => `Declined: ${str7(e, "memo")}` }
+  }, describe: (e) => `${str7(e, "memo")} was declined` }
 ];
 
 // src/packs/economy/core/property.ts
@@ -15206,8 +15826,8 @@ function sellProperty(api, ctx, x) {
     return reject5("level", "property isn't followed at this money level");
   const owners = api.ownersOf(ctx.state, x.property);
   const mine = owners.find((o) => o.party === x.party);
-  const share = api.shareOf(ctx.state, x.property, x.party);
-  if (!mine || share <= 0)
+  const share2 = api.shareOf(ctx.state, x.property, x.party);
+  if (!mine || share2 <= 0)
     return reject5("not_yours", `${e.name} isn't ${labelOf(ctx, x.party)}'s to sell`);
   const price = Math.round(x.price);
   if (!(price > 0))
@@ -15226,7 +15846,7 @@ function sellProperty(api, ctx, x) {
   const value = propertyValue(ctx.state, x.property);
   if (x.buyer === undefined && price > value)
     return reject5("declined", `no buyer outside the world pays more than ${money(value)} for ${e.name}`);
-  const memo = `Sold ${share < 100 ? `a ${Math.round(share)}% share of ` : ""}${e.name} for ${money(price)}`;
+  const memo = `Sold ${share2 < 100 ? `a ${Math.round(share2)}% share of ` : ""}${e.name} for ${money(price)}`;
   const loans = securedLoans(api, ctx.state, x.property).filter((l) => api.ownersOf(ctx.state, l.loan).some((o) => o.party === x.party) && l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
   const events2 = [];
@@ -15255,10 +15875,10 @@ function sellProperty(api, ctx, x) {
   for (const o of owners) {
     if (o.party === x.party)
       continue;
-    written.push({ party: o.party, role: o.role, share: Math.round(((shares[o.party] ?? 0) + (o.party === x.buyer ? share : 0)) * 1e4) / 1e4 });
+    written.push({ party: o.party, role: o.role, share: Math.round(((shares[o.party] ?? 0) + (o.party === x.buyer ? share2 : 0)) * 1e4) / 1e4 });
   }
   if (x.buyer && !written.some((o) => o.party === x.buyer))
-    written.push({ party: x.buyer, role: mine.role === "owner" || mine.role === "joint" ? mine.role : "owner", share: Math.round(share * 1e4) / 1e4 });
+    written.push({ party: x.buyer, role: mine.role === "owner" || mine.role === "joint" ? mine.role : "owner", share: Math.round(share2 * 1e4) / 1e4 });
   const others = owners.filter((o) => o.party !== x.party);
   const sold = written.length === 0 || others.length === 0 && x.buyer !== undefined;
   return unit([
@@ -15385,10 +16005,10 @@ function propertyWorth(api, ctx, party) {
   const lines = [];
   let assets = 0;
   for (const id of propertyIds(ctx.state)) {
-    const share = api.shareOf(ctx.state, id, party);
-    if (share <= 0)
+    const share2 = api.shareOf(ctx.state, id, party);
+    if (share2 <= 0)
       continue;
-    const cents = Math.round(propertyValue(ctx.state, id) * share / 100);
+    const cents = Math.round(propertyValue(ctx.state, id) * share2 / 100);
     if (cents === 0)
       continue;
     assets += cents;
@@ -15399,12 +16019,12 @@ function propertyWorth(api, ctx, party) {
 function monthlyRent(api, ctx, party) {
   let total = 0;
   for (const id of propertyIds(ctx.state)) {
-    const share = api.shareOf(ctx.state, id, party);
-    if (share <= 0)
+    const share2 = api.shareOf(ctx.state, id, party);
+    if (share2 <= 0)
       continue;
     const authored = authoredLeases(ctx, id).filter((l) => inForce(l, ctx.state.clock)).reduce((a, l) => a + l.rent, 0);
     const managed = managedLeases(ctx, id).filter((l) => monthStart(ctx.world, l.from) <= ctx.state.clock && ctx.state.clock < monthStart(ctx.world, l.to)).reduce((a, l) => a + l.rent, 0);
-    total += Math.round((authored + managed) * share / 100);
+    total += Math.round((authored + managed) * share2 / 100);
   }
   return total;
 }
@@ -15574,7 +16194,10 @@ function propertyLines(ctx, scope) {
     const place = placeOfEntity(ctx.state, id);
     if (!place)
       return "";
-    return viewer === null || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place) ? ` at ${own(ctx.world.places, place)?.name ?? place}` : " somewhere";
+    if (viewer !== null && !canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place))
+      return " somewhere";
+    const at = own(ctx.world.places, place)?.name ?? place;
+    return at === name(id) ? "" : ` at ${at}`;
   };
   const roleOf = (o) => `${ROLE_LABEL[o.role]}${o.worth > 0 ? `, ${Math.round(o.worth)}%` : ""}`;
   const lines = [];
@@ -15916,11 +16539,11 @@ function passThroughOwners(ctx, api) {
       if (structure === "c_corp")
         continue;
       for (const person of holdersOf(ctx.state, id)) {
-        const share = api.shareOf(ctx.state, id, person);
-        if (share <= 0)
+        const share2 = api.shareOf(ctx.state, id, person);
+        if (share2 <= 0)
           continue;
         const held2 = out.get(person);
-        const one = { business: id, share, selfEmployed: selfEmployedProfit(structure) };
+        const one = { business: id, share: share2, selfEmployed: selfEmployedProfit(structure) };
         if (held2)
           held2.push(one);
         else
@@ -16455,8 +17078,8 @@ function workIn(ctx, job, from, to) {
   const cal = calendarOf(ctx.world);
   if (source === "contract") {
     const days = daysIn(ctx, job, from, to);
-    const share = job.season ? 1 : job.weeksPerYear / 52;
-    return { minutes: Math.round(job.hoursPerWeek * 60 * days / 7 * share), shifts: Math.round(job.shiftsPerWeek * days / 7 * share * 100) / 100, source };
+    const share2 = job.season ? 1 : job.weeksPerYear / 52;
+    return { minutes: Math.round(job.hoursPerWeek * 60 * days / 7 * share2), shifts: Math.round(job.shiftsPerWeek * days / 7 * share2 * 100) / 100, source };
   }
   const count = (list, extraDays = []) => ({ minutes: list.reduce((a, b) => a + (b.end - b.start), 0), shifts: new Set([...list.map((b) => dateAt(cal, b.start).dayIndex), ...extraDays]).size, source });
   if (source !== "attended" || job.worker !== ctx.world.pov)
@@ -17773,14 +18396,14 @@ function stakeWorth(api, ctx, party) {
   for (const id of businessIds2(api, ctx)) {
     if (id === party)
       continue;
-    const share = api.shareOf(ctx.state, id, party);
-    if (share <= 0)
+    const share2 = api.shareOf(ctx.state, id, party);
+    if (share2 <= 0)
       continue;
-    const cents = Math.round(businessValue(api, ctx, id) * share / 100);
+    const cents = Math.round(businessValue(api, ctx, id) * share2 / 100);
     if (cents === 0)
       continue;
     assets += cents;
-    lines.push({ label: `${labelOf(ctx, id)} (${Math.round(share * 100) / 100}%)`, cents });
+    lines.push({ label: `${labelOf(ctx, id)} (${Math.round(share2 * 100) / 100}%)`, cents });
   }
   return { assets, lines };
 }
@@ -17830,8 +18453,8 @@ function sellStake(api, ctx, x) {
   const held2 = shares[x.party] ?? 0;
   if (held2 <= 0)
     return reject5("not_yours", `${labelOf(ctx, x.party)} owns no part of ${labelOf(ctx, x.business)}`);
-  const share = Math.min(held2, x.share);
-  if (!(share > 0))
+  const share2 = Math.min(held2, x.share);
+  if (!(share2 > 0))
     return reject5("bad_amount", "say what share to sell");
   if (x.share > held2 + 0.000000001)
     return reject5("declined", `${labelOf(ctx, x.party)} owns ${Math.round(held2 * 100) / 100}% of ${labelOf(ctx, x.business)}, not ${x.share}%`);
@@ -17840,7 +18463,7 @@ function sellStake(api, ctx, x) {
     return reject5("bad_amount", "a price is a whole amount");
   if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party || x.buyer === x.business))
     return reject5("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
-  const whole4 = Math.abs(share - held2) < 0.000000001;
+  const whole4 = Math.abs(share2 - held2) < 0.000000001;
   if (x.buyer === undefined && !(whole4 && held2 >= 100 - 0.000000001))
     return reject5("needs_buyer", `selling part of ${labelOf(ctx, x.business)} needs a buyer in the world`);
   const worth = businessValue(api, ctx, x.business);
@@ -17852,7 +18475,7 @@ function sellStake(api, ctx, x) {
   const unusable = api.mayUse(ctx, x.party, to, "into");
   if (unusable)
     return unusable;
-  const memo = `Sold ${Math.round(share * 100) / 100}% of ${labelOf(ctx, x.business)} for ${formatMoney(price, ctx.world.currency)}`;
+  const memo = `Sold ${Math.round(share2 * 100) / 100}% of ${labelOf(ctx, x.business)} for ${formatMoney(price, ctx.world.currency)}`;
   const events2 = [];
   if (price > 0) {
     const paid = x.buyer ? api.pay(ctx, { from: x.buyer, to: x.party, cents: price, memo, deposit: to, kind: "purchase", category: "investment" }) : api.post(ctx, [{ account: api.outside(`buyer:${x.business}`), amount: -price }, { account: to, amount: price }], { memo, kind: "sale", category: "investment" });
@@ -17862,16 +18485,16 @@ function sellStake(api, ctx, x) {
   }
   const next = [];
   for (const o of owners) {
-    const pct2 = (shares[o.party] ?? 0) - (o.party === x.party ? share : 0) + (o.party === x.buyer ? share : 0);
+    const pct2 = (shares[o.party] ?? 0) - (o.party === x.party ? share2 : 0) + (o.party === x.buyer ? share2 : 0);
     if (o.party === x.party && pct2 <= 0.000000001)
       continue;
     next.push({ party: o.party, role: o.role, share: Math.round(pct2 * 1e4) / 1e4 });
   }
   if (x.buyer && !next.some((o) => o.party === x.buyer))
-    next.push({ party: x.buyer, role: "owner", share: Math.round(share * 1e4) / 1e4 });
+    next.push({ party: x.buyer, role: "owner", share: Math.round(share2 * 1e4) / 1e4 });
   return unit([
     ...events2,
-    disposal(x.business, x.party, share / held2 * 100, price, memo),
+    disposal(x.business, x.party, share2 / held2 * 100, price, memo),
     { type: "set", entity: x.business, field: "owners", value: next },
     ...x.buyer ? [acquisition(x.business, x.buyer, price)] : []
   ]);
@@ -17982,21 +18605,21 @@ function summaryLines(api, ctx, who) {
   if (invested > 0)
     out.push(`Has about ${about(ctx, invested)} invested.`);
   for (const id of propertyIds(ctx.state)) {
-    const share = api.shareOf(ctx.state, id, who);
-    if (share <= 0)
+    const share2 = api.shareOf(ctx.state, id, who);
+    if (share2 <= 0)
       continue;
     const owed = securedLoans(api, ctx.state, id).reduce((a, l) => a + l.owed, 0);
-    const part = share < 100 ? `a ${Math.round(share)}% share of ` : "";
+    const part = share2 < 100 ? `a ${Math.round(share2)}% share of ` : "";
     out.push(`Owns ${part}${labelOf(ctx, id)} (worth ${about(ctx, propertyValue(ctx.state, id))}${owed > 0 ? `; ${about(ctx, owed)} left on the mortgage` : ""}).`);
   }
   const rent = monthlyRent(api, ctx, who);
   if (rent > 0)
     out.push(`Collects about ${about(ctx, rent)} a month in rent.`);
   for (const id of businessIds2(api, ctx)) {
-    const share = api.shareOf(ctx.state, id, who);
-    if (share <= 0 || id === who)
+    const share2 = api.shareOf(ctx.state, id, who);
+    if (share2 <= 0 || id === who)
       continue;
-    out.push(`Owns ${share < 100 ? `${Math.round(share)}% of ` : ""}${labelOf(ctx, id)} (worth about ${about(ctx, Math.round(businessValue(api, ctx, id) * share / 100))}).`);
+    out.push(`Owns ${share2 < 100 ? `${Math.round(share2)}% of ` : ""}${labelOf(ctx, id)} (worth about ${about(ctx, Math.round(businessValue(api, ctx, id) * share2 / 100))}).`);
   }
   return out;
 }
@@ -19662,8 +20285,8 @@ function sharedAttempt(hooks, ctx, flow, cents, at, overdraft) {
     left -= part;
     if (part <= 0)
       continue;
-    const share = { ...flow, from: s.from ?? s.party, label: flow.label };
-    const paid = payFrom(hooks, trial.ctx, share, s.from ?? s.party, part, at, overdraft);
+    const share2 = { ...flow, from: s.from ?? s.party, label: flow.label };
+    const paid = payFrom(hooks, trial.ctx, share2, s.from ?? s.party, part, at, overdraft);
     if ("code" in paid)
       return reject6("declined", `${labelOf(ctx, s.party)}'s share: ${paid.reason}`);
     if (trial.emit(asUnit(paid.events)).length === 0)
@@ -20463,7 +21086,7 @@ function stem(word) {
 function tokens(text3) {
   return text3.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
 }
-function wordsOf2(list) {
+function wordsOf3(list) {
   const out = [];
   for (const t of list) {
     if (FILLER[t])
@@ -20487,8 +21110,8 @@ function itemName(text3) {
   const head = noun.findLast((t) => /[a-z]/.test(t));
   if (head === undefined)
     return null;
-  const trailing = at < 0 ? null : { word: base[at] ?? "", words: wordsOf2(base.slice(at + 1)) };
-  return { head: stem(head), words: new Set([...wordsOf2(noun), ...wordsOf2(qualifier)]), trailing };
+  const trailing = at < 0 ? null : { word: base[at] ?? "", words: wordsOf3(base.slice(at + 1)) };
+  return { head: stem(head), words: new Set([...wordsOf3(noun), ...wordsOf3(qualifier)]), trailing };
 }
 function catalogName(id, name) {
   const lower = name.toLowerCase();
@@ -20514,9 +21137,9 @@ function catalogName(id, name) {
     if (word.includes("-"))
       heads.add(stem(word.split("-").at(-1) ?? word));
   }
-  const words2 = new Set([...wordsOf2(tokens(lower)), ...wordsOf2(id.split("_"))]);
+  const words3 = new Set([...wordsOf3(tokens(lower)), ...wordsOf3(id.split("_"))]);
   const qualifiers = new Set(named.flat().filter((w) => !/^\d/.test(w)).map((w) => stem(w)).filter((w) => !heads.has(w)));
-  return { heads, main: stem(last.at(-1) ?? ""), qualifiers, words: words2 };
+  return { heads, main: stem(last.at(-1) ?? ""), qualifiers, words: words3 };
 }
 
 // src/packs/economy/core/cycle.ts
@@ -21226,7 +21849,7 @@ function shownAvailable(ctx, account) {
   return availableOf(ctx, account) + shown2(ctx, account) - balance(ctx.state, account);
 }
 function journalLine(ctx, viewer, party, j) {
-  const worth = Object.entries(worthShares(ownersOf(ctx.state, j.account))).filter(([, share]) => share > 0);
+  const worth = Object.entries(worthShares(ownersOf(ctx.state, j.account))).filter(([, share2]) => share2 > 0);
   const whose = worth.length === 1 ? worth[0]?.[0] ?? j.account : j.account;
   const counterparty = j.counterparty && j.counterparty !== party && j.counterparty !== whose ? counterpartyName(ctx, viewer, j.counterparty) : null;
   return { id: j.id, at: when(ctx, j.at), memo: says(viewer, j.memo), cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
@@ -22591,7 +23214,7 @@ function registerRest(r, hooks) {
       return [];
     const lines = [];
     if (level === 1 || !hasLedger(ctx, pov))
-      lines.push({ text: `Money: ${wealthOf(hooks, ctx, pov)}.`, known: "pov" });
+      lines.push({ text: `How well off you are: ${wealthOf(hooks, ctx, pov)}.`, known: "pov" });
     else {
       const mine = accountsOf(ctx, pov);
       const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
@@ -22602,7 +23225,7 @@ function registerRest(r, hooks) {
         return traitsOf(ctx, id)?.liability ? `${name} owes ${formatMoney(-b, ctx.world.currency)}` : `${name} ${formatMoney(b, ctx.world.currency)}`;
       });
       if (parts.length > 0)
-        lines.push({ text: `Money: ${parts.join("; ")}.`, known: "pov" });
+        lines.push({ text: `Balances now: ${parts.join("; ")}.`, known: "pov" });
     }
     if (scope === "player")
       return lines;
@@ -22943,6 +23566,18 @@ var economyPack = {
 };
 var core_default3 = economyPack;
 
+// src/shared/items-build.ts
+function fixedReason(isVehicle, fields, tables) {
+  if (isVehicle)
+    return "vehicle";
+  if (fields.fixed === true)
+    return "fixed";
+  const catalog = fields.catalog;
+  const rows = hasOwn(tables, "gear.containers") ? tables["gear.containers"]?.rows : undefined;
+  const row = rows && typeof catalog === "string" && hasOwn(rows, catalog) ? rows[catalog] : undefined;
+  return row?.location === "vehicle_fixed" ? "part" : null;
+}
+
 // src/packs/gear/core/model.ts
 function holderOf(state, id) {
   return own(state.entities, id)?.relations.find((r) => r.type === "in")?.to ?? null;
@@ -23001,6 +23636,49 @@ function fitProblem(state, item, container) {
     return "doesn't fit";
   if (load.maxKg !== null && load.usedKg + weightOf(state, item) / 1000 > load.maxKg + 0.000000001)
     return "too heavy for it";
+  return null;
+}
+function fixedOf(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  return e ? fixedReason(kindIs(ctx.registry, ctx.world, e.kind, "vehicle"), e.fields, ctx.world.tables) : null;
+}
+function holdsAs(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  if (!e)
+    return null;
+  if (kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    return "person";
+  if (kindIs(ctx.registry, ctx.world, e.kind, "vehicle"))
+    return "vehicle";
+  return kindIs(ctx.registry, ctx.world, e.kind, "container") ? "container" : null;
+}
+function goesIn(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  if (!e)
+    return "nowhere";
+  if (kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    return "vehicle";
+  const fixed = fixedOf(ctx, id);
+  if (fixed === "vehicle")
+    return "vehicle";
+  if (fixed !== null)
+    return "nowhere";
+  return kindIs(ctx.registry, ctx.world, e.kind, "item") || e.kind === "account" ? "any" : "nowhere";
+}
+function holdProblem(ctx, thing, holder) {
+  const e = own(ctx.state.entities, thing);
+  const h = own(ctx.state.entities, holder);
+  if (!e || !h)
+    return null;
+  const as = holdsAs(ctx, holder);
+  if (as === null)
+    return `${h.name} can't hold anything`;
+  const goes = goesIn(ctx, thing);
+  const fixed = fixedOf(ctx, thing);
+  if (goes === "nowhere")
+    return fixed === "part" ? `${e.name} is built into what holds it` : fixed === "fixed" ? `${e.name} is fixed in place` : `${e.name} isn't a thing that goes inside anything`;
+  if (goes === "vehicle" && as !== "vehicle")
+    return fixed === "vehicle" ? `${e.name} is a vehicle: it can only be carried on another vehicle` : `${e.name} can only ride in a vehicle`;
   return null;
 }
 function kitTemplate(ctx, kit) {
@@ -23063,12 +23741,12 @@ function findPiece(ctx, kit, name) {
     return null;
   let best = null;
   for (const piece of template.pieces) {
-    const words2 = new Set(pieceWords(piece.name));
-    const hit = said2.filter((w) => words2.has(w));
+    const words3 = new Set(pieceWords(piece.name));
+    const hit = said2.filter((w) => words3.has(w));
     if (hit.length * 2 < said2.length || !hit.some((w) => /[a-z]/.test(w)))
       continue;
-    if (!best || hit.length > best.hits || hit.length === best.hits && words2.size < best.size)
-      best = { piece, hits: hit.length, size: words2.size };
+    if (!best || hit.length > best.hits || hit.length === best.hits && words3.size < best.size)
+      best = { piece, hits: hit.length, size: words3.size };
   }
   return best?.piece ?? null;
 }
@@ -23398,11 +24076,17 @@ function gearLabel(ctx, id, level) {
     return id;
   const qty = numOf(e.fields.qty, 1);
   const kit = level >= 3 ? kitStatus(ctx, id) : null;
-  return `${e.name}${qty > 1 ? ` \xD7${qty}` : ""}${kit ? ` (${kit.present}/${kit.total})` : ""}`;
+  return `${e.name}${qty > 1 ? ` \xD7${qty}` : ""}${kit ? ` (${kit.present} of its ${kit.total} pieces)` : ""}`;
 }
 function wornBy(ctx, who) {
   return Object.keys(ctx.state.entities).sort().filter((id) => own(ctx.state.entities, id)?.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who));
 }
+function wornAs(ctx, id, who) {
+  const r = own(ctx.state.entities, id)?.relations.find((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who);
+  const slot = typeof r?.fields?.slot === "string" ? r.fields.slot : "";
+  return slot === "pocket" || slot === "pocket_or_bag" ? "pockets" : r?.type === "equipped" || slot === "hand_held" ? "hand" : "worn";
+}
+var WORN_LEAD = { pockets: "In your pockets", hand: "In your hands", worn: "Wearing" };
 function gearLines(ctx, scope) {
   const pov = ctx.world.pov;
   const level = ctx.levelOf(pov, "gear");
@@ -23410,22 +24094,23 @@ function gearLines(ctx, scope) {
     return [];
   const see = (id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
   const carried = carriedBy(ctx.state, pov).filter((id) => own(ctx.state.entities, id)?.kind !== "account");
-  const shown3 = carried.filter((id) => see(id) && (level >= 2 || own(ctx.state.entities, id)?.fields.notable === true));
+  const worn = level >= 3 ? wornBy(ctx, pov).filter(see) : [];
+  const shown3 = carried.filter((id) => see(id) && !worn.includes(id) && (level >= 2 || own(ctx.state.entities, id)?.fields.notable === true));
   const lines = [];
-  if (shown3.length > 0)
-    lines.push({ text: `Carrying: ${shown3.slice(0, 12).map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
-  if (level >= 3) {
-    const worn = wornBy(ctx, pov).filter(see);
-    if (worn.length > 0)
-      lines.push({ text: `Wearing: ${worn.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+  for (const as of ["worn", "pockets", "hand"]) {
+    const here = worn.filter((id) => wornAs(ctx, id, pov) === as);
+    if (here.length > 0)
+      lines.push({ text: `${WORN_LEAD[as]}: ${here.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
   }
+  if (shown3.length > 0)
+    lines.push({ text: `${worn.length > 0 ? "Also carrying" : "Carrying"}: ${shown3.slice(0, 12).map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
   for (const g of grants(ctx.state)) {
     if (!see(g.thing))
       continue;
     if (g.owner === pov)
-      lines.push({ text: `Lent: ${own(ctx.state.entities, g.thing)?.name ?? g.thing} to ${see(g.borrower) ? own(ctx.state.entities, g.borrower)?.name ?? g.borrower : "someone"}${g.overdue ? " (overdue)" : ""}.`, known: "pov" });
+      lines.push({ text: `You lent ${own(ctx.state.entities, g.thing)?.name ?? g.thing} to ${see(g.borrower) ? own(ctx.state.entities, g.borrower)?.name ?? g.borrower : "someone"}${g.overdue ? " (overdue: it should have come back by now)" : ""}.`, known: "pov" });
     else if (g.borrower === pov)
-      lines.push({ text: `Borrowed: ${own(ctx.state.entities, g.thing)?.name ?? g.thing}${g.overdue ? " (overdue \u2014 should go back)" : ""}.`, known: "pov" });
+      lines.push({ text: `You borrowed ${own(ctx.state.entities, g.thing)?.name ?? g.thing}${g.overdue ? " (overdue: it should go back)" : ""}.`, known: "pov" });
   }
   if (scope === "gm") {
     const unknown = [...carried, ...wornBy(ctx, pov)].filter((id) => !see(id));
@@ -23490,7 +24175,8 @@ var ITEM = {
     uses: { type: "number", label: "Uses left", min: 0, domain: "gear", level: 4 },
     overdue: { type: "bool", label: "Overdue", locked: true },
     piece: { type: "text", label: "Kit piece", locked: true },
-    from_kit: { type: "ref", label: "From kit", locked: true }
+    from_kit: { type: "ref", label: "From kit", locked: true },
+    fixed: { type: "bool", label: "Fixed in place (can't be picked up)", locked: true }
   }
 };
 var CONTAINER = {
@@ -23568,6 +24254,9 @@ var transfer2 = (ctx, item, to) => {
     return [];
   if (item === to || isInside(ctx.state, to, item))
     return reject9("cycle", "can't put something inside itself");
+  const cannot = holdProblem(ctx, item, to);
+  if (cannot)
+    return reject9(fixedOf(ctx, item) === null ? "cant_hold" : "fixed", cannot);
   const target = own(ctx.state.entities, to);
   if (level >= 2 && target && !kindIs(ctx.registry, ctx.world, target.kind, "person")) {
     const problem = fitProblem(ctx.state, item, to);
@@ -23877,8 +24566,11 @@ var gearPack = {
     r.query("has_item", hasItem);
     r.query("gear.kit_status", kitStatus);
     r.query("gear.overdue", (ctx, owner) => overdueFor(ctx.state, owner));
+    r.query("gear.hold_problem", holdProblem);
+    r.query("gear.containment", (ctx, id) => ({ holds: holdsAs(ctx, id), goes: goesIn(ctx, id) }));
     r.formula("has_item", (ctx, holder, what) => hasItem(ctx, String(holder ?? ""), String(what ?? "")));
     r.formula("carries", (ctx, holder, item) => isInside(ctx.state, String(item ?? ""), String(holder ?? "")));
+    r.formula("movable", (ctx, thing) => fixedOf(ctx, String(thing ?? "")) === null);
     r.formula("carried_kg", (ctx, holder) => carriedBy(ctx.state, String(holder ?? "")).filter((id) => holderOf(ctx.state, id) === holder).reduce((a, id) => a + weightOf(ctx.state, id), 0) / 1000);
     r.formula("kit_present", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.present ?? 0);
     r.formula("kit_complete", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.complete ?? false);
@@ -23939,7 +24631,7 @@ var gearPack = {
         return out;
       }
     });
-    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "here" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
+    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "here" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)", "movable(item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
     r.effect({
       type: "gear.lose",
       args: ["item", "thief?"],
@@ -23973,7 +24665,7 @@ var gearPack = {
     r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
     r.action({ id: "lend", label: "Lend", description: "Lend something of yours to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
-    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
+    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3", "movable(item)"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
     r.action({ id: "remove", label: "Take off", description: "Take off something you wear or have equipped.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
     r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
     r.action({ id: "take_piece", label: "Take from a kit", description: "Take one piece, such as a tool or a part, out of a kit.", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
@@ -24077,6 +24769,9 @@ var gearPack = {
           return reject9("already_held", `${labelOf(ctx, who)} already has ${found.e.name}`);
         if (placeOfEntity(ctx.state, found.id) !== placeOfEntity(ctx.state, who) || heldByPerson(ctx, found.id))
           return reject9("not_here", `${found.e.name} isn't lying where ${labelOf(ctx, who)} is`);
+        const cannot = holdProblem(ctx, found.id, who);
+        if (cannot)
+          return reject9("fixed", cannot);
         return null;
       },
       toEffects: (p, ctx) => {
@@ -24425,7 +25120,7 @@ function vehicleLines(ctx, scope) {
       parts.push(whose);
       if (burnsFuel(ctx, v)) {
         const range = rangeLeft(ctx, v);
-        parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? ` (~${Math.round(range.value)} ${range.unit})` : ""}`);
+        parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? `, about ${Math.round(range.value)} ${range.unit} left` : ""}`);
       }
       if (e.fields.status !== "ok" && e.fields.status !== undefined)
         parts.push(String(e.fields.status).replace(/_/g, " "));
@@ -24435,7 +25130,7 @@ function vehicleLines(ctx, scope) {
   const elsewhere = [...away].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
   const total = elsewhere.reduce((sum, [, n]) => sum + n, 0);
   if (total > 0)
-    lines.push({ text: `Elsewhere: ${total} (${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}).`, known: "pov" });
+    lines.push({ text: `${total} more ${total === 1 ? "vehicle" : "vehicles"} you may use, away from here: ${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}.`, known: "pov" });
   const seen = others.filter((o) => see(pov, o.v));
   for (const o of seen.slice(0, OTHERS_CAP2))
     lines.push({ text: `${own(ctx.state.entities, o.v)?.name ?? o.v}: ${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}.`, known: "pov" });
@@ -24552,14 +25247,24 @@ var consume = (ctx, vehicle, leg, rng) => {
   }
   return out;
 };
-function legFor(ctx, vehicle, from, to) {
-  const route = optionalQuery(ctx, "space.route");
-  for (const mode of modesOf(ctx, vehicle)) {
-    const plan2 = route ? route(ctx, from, to, mode) : null;
-    if (plan2)
-      return { minutes: plan2.minutes, distanceKm: plan2.distanceKm, terrain: plan2.legs.find((l) => l.terrain)?.terrain ?? null, mode };
-  }
-  return null;
+function tripsFor(ctx, vehicle, from, targets) {
+  const plan2 = optionalQuery(ctx, "space.vehicle_trips");
+  const at = placeOfEntity(ctx.state, vehicle);
+  if (!plan2 || !at)
+    return new Map;
+  const cls = strOf(own(ctx.state.entities, vehicle)?.fields.class);
+  const speed = cls === "" ? undefined : own(travelTuningOf(ctx.world).vehicleSpeeds, cls);
+  const pov = ctx.world.pov;
+  return plan2(ctx, { from, at, modes: modesOf(ctx, vehicle), ...speed !== undefined ? { speed } : {}, canPark: (p) => canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p) }, targets);
+}
+function tripFor(ctx, vehicle, from, to) {
+  return tripsFor(ctx, vehicle, from, [to]).get(to) ?? null;
+}
+function legOf(trip) {
+  return { minutes: trip.drive.minutes, distanceKm: trip.drive.distanceKm, terrain: trip.drive.legs.find((l) => l.terrain)?.terrain ?? null, mode: trip.drive.mode };
+}
+function startOf(ctx, vehicle, from) {
+  return typeof from === "string" && from !== "" ? from : placeOfEntity(ctx.state, vehicle);
 }
 var fuelOk = (ctx, vehicle, leg) => {
   if (ownerLevel(ctx, vehicle) < 2)
@@ -24615,36 +25320,52 @@ var vehiclesPack = {
     r.query("vehicles.travel_options", (ctx, from) => {
       const out = [];
       const pov = ctx.world.pov;
+      const walk2 = optionalQuery(ctx, "space.route");
+      const targets = Object.keys(ctx.world.places).sort().filter((to) => to !== from);
+      const placeName2 = (p) => own(ctx.world.places, p)?.name ?? p;
+      const home = own(ctx.state.entities, pov)?.fields.home;
       for (const v of Object.keys(ctx.state.entities).sort()) {
         const e = own(ctx.state.entities, v);
-        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle"))
+        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v))
           continue;
         const mine = e.fields.owner === pov || own(ctx.state.entities, pov)?.relations.some((x) => x.type === "uses" && x.to === v);
-        if (!mine || placeOfEntity(ctx.state, v) !== from)
+        const at = placeOfEntity(ctx.state, v);
+        if (!mine || !at || at !== from && !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at))
           continue;
-        for (const to of Object.keys(ctx.world.places).sort()) {
-          if (to === from)
+        const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : `the ${e.name}`;
+        for (const [to, trip] of tripsFor(ctx, v, from, targets)) {
+          const direct = walk2 ? walk2(ctx, from, to, "walk") : null;
+          if (trip.park !== to && direct && trip.minutes >= direct.minutes)
             continue;
-          const leg = legFor(ctx, v, from, to);
-          if (!leg || leg.mode === "walk")
-            continue;
+          const leg = legOf(trip);
           const why = e.fields.status === "broken" ? "broken down" : !fuelOk(ctx, v, leg) ? "not enough fuel" : undefined;
-          const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : `the ${e.name}`;
-          out.push({ to, label: `${leg.mode === "water" ? "Sail" : "Drive"} ${named} to ${own(ctx.world.places, to)?.name ?? to}`, mode: leg.mode, minutes: leg.minutes, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...why ? { disabled: why } : {} });
+          const sail = trip.drive.mode === "water";
+          const parts = [];
+          if (trip.fetch)
+            parts.push({ kind: "fetch", minutes: trip.fetch.minutes, words: `to reach it ${at === home ? "at home" : `at ${placeName2(at)}`}` });
+          if (trip.startMinutes > 0)
+            parts.push({ kind: "start", minutes: trip.startMinutes, words: "to get going" });
+          if (trip.drive.minutes > 0)
+            parts.push({ kind: "drive", minutes: trip.drive.minutes, words: sail ? "sailing" : "driving" });
+          if (trip.parkMinutes > 0)
+            parts.push({ kind: "park", minutes: trip.parkMinutes, words: sail ? "to tie up" : "to park" });
+          if (trip.walk && trip.walk.minutes > 0)
+            parts.push({ kind: "walk", minutes: trip.walk.minutes, words: `on foot from ${placeName2(trip.park)}` });
+          out.push({ to, label: `${sail ? "Sail" : "Drive"} ${named} to ${placeName2(to)}`, mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...why ? { disabled: why } : {} });
         }
       }
       return out;
     });
-    r.formula("fuel_ok", (ctx, vehicle, to) => {
+    r.formula("fuel_ok", (ctx, vehicle, to, from) => {
       const v = String(vehicle ?? "");
-      const from = placeOfEntity(ctx.state, v);
-      const leg = from ? legFor(ctx, v, from, String(to ?? "")) : null;
-      return leg !== null && fuelOk(ctx, v, leg);
+      const start = startOf(ctx, v, from);
+      const trip = start ? tripFor(ctx, v, start, String(to ?? "")) : null;
+      return trip !== null && fuelOk(ctx, v, legOf(trip));
     });
-    r.formula("drive_minutes", (ctx, vehicle, to) => {
+    r.formula("drive_minutes", (ctx, vehicle, to, from) => {
       const v = String(vehicle ?? "");
-      const from = placeOfEntity(ctx.state, v);
-      return (from ? legFor(ctx, v, from, String(to ?? "")) : null)?.minutes ?? 0;
+      const start = startOf(ctx, v, from);
+      return (start ? tripFor(ctx, v, start, String(to ?? "")) : null)?.minutes ?? 0;
     });
     r.formula("fuel_pct", (ctx, vehicle) => numOf(own(ctx.state.entities, String(vehicle ?? ""))?.fields.fuel_pct, 100));
     r.effect({
@@ -24659,19 +25380,22 @@ var vehiclesPack = {
           return reject10("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (e.fields.status === "broken")
           return reject10("broken", `${e.name} has broken down`);
-        const from = placeOfEntity(ctx.state, v);
-        const leg = from ? legFor(ctx, v, from, to) : null;
-        if (!leg)
+        const driverAt = placeOfEntity(ctx.state, driver);
+        const vehicleAt = placeOfEntity(ctx.state, v);
+        const trip = (driverAt ? tripFor(ctx, v, driverAt, to) : null) ?? (vehicleAt && vehicleAt !== driverAt ? tripFor(ctx, v, vehicleAt, to) : null);
+        if (!trip)
           return reject10("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
+        const leg = legOf(trip);
         if (!fuelOk(ctx, v, leg))
           return reject10("no_fuel", `${e.name} doesn't have the fuel`);
-        const out = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: to }];
+        const out = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: trip.park }];
+        const leftShort = trip.park !== to;
         const named = Array.isArray(args.riders) ? args.riders.filter((x) => typeof x === "string") : [];
         const riders = driver === ctx.world.pov ? [...named, ...partyAt(ctx, placeOfEntity(ctx.state, driver))] : named;
         const moved = new Set;
         for (const p of [driver, ...riders]) {
           const pe = own(ctx.state.entities, p);
-          if (!pe || moved.has(p) || pe.relations.some((x) => x.type === "in" && x.to === v))
+          if (!pe || moved.has(p) || !leftShort && pe.relations.some((x) => x.type === "in" && x.to === v))
             continue;
           moved.add(p);
           const events2 = relocate(ctx, p, to, p === driver ? {} : { along: true });
@@ -24735,10 +25459,10 @@ var vehiclesPack = {
       description: "Drive, ride or sail a vehicle you own or may use to another place.",
       pack: "vehicles",
       params: { vehicle: { type: "ref", ref: "vehicle" }, to: { type: "ref", ref: "place", label: "Destination" } },
-      requires: ["place(vehicle) == here", "vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "drive_minutes(vehicle, to) > 0", "fuel_ok(vehicle, to)"],
+      requires: ["vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "drive_minutes(vehicle, to, here) > 0", "fuel_ok(vehicle, to, here)"],
       outcomes: { default: [{ type: "vehicles.drive", args: { vehicle: "vehicle", to: "=to", driver: "self" } }] },
-      duration: "drive_minutes(vehicle, to)",
-      activity: { type: "travel", until: "clock + drive_minutes(vehicle, to)" },
+      duration: "drive_minutes(vehicle, to, here)",
+      activity: { type: "travel", until: "clock + drive_minutes(vehicle, to, here)" },
       lexicon: ["drive to", "drive over to", "take the truck", "take the car", "sail to", "ride to"],
       observable: "drives off"
     });
@@ -25362,9 +26086,13 @@ var regardEvent = {
   describe: (e, ctx) => {
     const pov = ctx.world.pov;
     const name = (id, subject) => id === pov ? subject ? "You" : "you" : own(ctx.state.entities, id)?.name ?? id;
-    const head = `${name(strOf(e.data.from), true)} \u2192 ${name(strOf(e.data.to), false)}`;
-    const parts = Object.entries(objOf(e.data.deltas)).filter((entry) => typeof entry[1] === "number" && entry[1] !== 0).map(([axis, d]) => `${(axesOf(ctx).find((a) => a.id === axis)?.label ?? axis.replace(/_/g, " ")).toLowerCase()} ${d > 0 ? "+" : "\u2212"}${Math.round(Math.abs(d) * 10) / 10}`);
-    return parts.length > 0 ? `${head}: ${parts.join(", ")}` : `${head}: regard settles`;
+    const from = name(strOf(e.data.from), true);
+    const to = name(strOf(e.data.to), false);
+    const parts = Object.entries(objOf(e.data.deltas)).filter((entry) => typeof entry[1] === "number" && entry[1] !== 0).map(([axis, d]) => ({ axis: (axesOf(ctx).find((a) => a.id === axis)?.label ?? axis.replace(/_/g, " ")).toLowerCase(), moved: `${d > 0 ? "rose" : "fell"} by ${Math.round(Math.abs(d) * 10) / 10}` }));
+    const [only] = parts;
+    if (parts.length === 1 && only)
+      return `${possessive(from)} ${only.axis} toward ${to} ${only.moved}`;
+    return parts.length > 0 ? `${possessive(from)} regard for ${to} changed: ${listWords(parts.map((p) => `${p.axis} ${p.moved}`))}` : `${possessive(from)} regard for ${to} settles`;
   }
 };
 var GROUP = { id: GROUP_KIND, label: "Group", extends: "thing", pack: "relationships", fields: {} };
@@ -25393,17 +26121,10 @@ function reject12(code, reason) {
   return { code, reason };
 }
 function voiceLine(ctx, who) {
-  const pov = ctx.world.pov;
-  const level = ctx.levelOf(who, "relationships");
-  if (level === 0 || !relationOf(ctx.state, who, pov))
+  const words3 = regardWords(ctx, who, ctx.world.pov);
+  if (words3 === null)
     return null;
-  const name = own(ctx.state.entities, who)?.name ?? who;
-  const band = regardBand(ctx, who, pov);
-  if (level <= 2)
-    return `${name} is ${band} toward you.`;
-  const axes = regardAxes(ctx, who, pov);
-  const detail = axesOf(ctx).map((a) => `${a.label.toLowerCase()} ${Math.round(axes[a.id] ?? 0)}`).join(", ");
-  return `${name} is ${band} toward you (${detail}).`;
+  return `${own(ctx.state.entities, who)?.name ?? who} is ${words3} toward you.`;
 }
 function regardWords(ctx, from, to) {
   const level = ctx.levelOf(from, "relationships");
@@ -25508,6 +26229,41 @@ function regardView(ctx, from, to) {
   const axes = regardAxes(ctx, from, to);
   const bands = bandsOf(ctx);
   return axesOf(ctx).map((a) => ({ axis: a.label, band: bandOf(bands, axes[a.id] ?? 0)?.label ?? "neutral", value: axes[a.id] ?? 0 }));
+}
+
+// src/shared/activity.ts
+var KIND_PHRASE = {
+  work: (at) => at ? `working at ${at}` : "at work",
+  sleep: () => "asleep",
+  breakfast: (at) => `having breakfast${at ? ` at ${at}` : ""}`,
+  lunch: (at) => `having lunch${at ? ` at ${at}` : ""}`,
+  dinner: (at) => `having dinner${at ? ` at ${at}` : ""}`,
+  socialize: (at) => `spending time with people${at ? ` at ${at}` : ""}`,
+  leisure: (at) => `taking some free time${at ? ` at ${at}` : ""}`,
+  rest: () => "resting",
+  waiting: () => "waiting",
+  travel: () => "on the way somewhere",
+  trip: () => "away on a trip",
+  errand: () => "running an errand",
+  chores: () => "doing chores",
+  appointment: (at) => `at an appointment${at ? ` at ${at}` : ""}`,
+  visiting: (at) => at ? `visiting ${at}` : "visiting someone",
+  agenda: () => "about their own business",
+  busy: () => "busy"
+};
+var LEADS = new Set(["at", "in", "on", "out", "away", "among", "with", "off", "up", "down", "back", "home", "inside", "outside", "asleep", "awake", "busy", "about", "by", "near", "under", "over", "behind"]);
+var NOT_GERUND = new Set(["morning", "evening", "wedding", "building", "spring", "king", "thing", "something", "nothing", "anything", "everything", "ring", "string", "wing", "clothing", "pudding", "ceiling", "sibling", "darling", "outing"]);
+function activityPhrase(activity, at = null) {
+  const words3 = activity.replace(/_/g, " ").trim();
+  if (words3 === "" || words3 === "idle")
+    return null;
+  const kind = KIND_PHRASE[words3.toLowerCase()];
+  if (kind)
+    return kind(at);
+  const first = words3.split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (/^[a-z]+ing$/.test(first) && !NOT_GERUND.has(first) || LEADS.has(first))
+    return words3;
+  return `busy with ${words3}`;
 }
 
 // src/engine/plan-day.ts
@@ -26605,7 +27361,7 @@ function cuesFor(ctx, who, safe) {
       continue;
     const stage = currentStage(world, state2, id);
     const cue = stage === null ? undefined : own(t.stages, stage)?.cue;
-    if (typeof cue === "string" && cue.trim() !== "" && trackKeepsSecret(reg, world, state2, pov, id))
+    if (typeof cue === "string" && cue.trim() !== "" && ownersCue(reg, world, state2, pov, id))
       add(cue.trim());
   }
   return out;
@@ -26737,7 +27493,7 @@ function text3(v) {
 function cleanLabel(v) {
   return text3(v).replace(/[^\p{L}\p{N} .,'\u2019&()/:-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, LABEL_MAX).trim();
 }
-function wordsOf3(s) {
+function wordsOf4(s) {
   return (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3 && !FILLER2[w]);
 }
 function sameWords(a, b) {
@@ -26869,7 +27625,7 @@ function startBlock(ctx, who, p) {
   const said2 = text3(p.activity).toLowerCase().replace(/[^a-z0-9 _-]/g, "").slice(0, ACTIVITY_MAX).trim();
   const activity = said2 !== "" ? said2 : /\b(job|shift|work|works|working)\b/i.test(label) ? "work" : /\b(school|class|classes|course)\b/i.test(label) ? "school" : label.toLowerCase().slice(0, ACTIVITY_MAX);
   const basic = BASIC_BLOCKS.find((b) => b.activity === activity);
-  const id = basic?.id ?? `story_${wordsOf3(label).join("_").slice(0, ACTIVITY_MAX) || "block"}`;
+  const id = basic?.id ?? `story_${wordsOf4(label).join("_").slice(0, ACTIVITY_MAX) || "block"}`;
   const start = text3(p.start).toLowerCase();
   const end = text3(p.end);
   const hm = HHMM3.exec(start);
@@ -26914,11 +27670,11 @@ function already(ctx, who, block, days) {
   if (held2 && JSON.stringify(held2.value) === JSON.stringify(block))
     return true;
   const mine = blockSpans(ctx, block, days);
-  const words2 = wordsOf3(block.label);
+  const words3 = wordsOf4(block.label);
   for (const { block: b, from } of activeBlocks(ctx, who, days[0])) {
     if (b.id === block.id || from.level === "builtin")
       continue;
-    if (!sameWords(words2, wordsOf3(b.label)) || !days.every((d) => blockOnDay(ctx, who, b, d)))
+    if (!sameWords(words3, wordsOf4(b.label)) || !days.every((d) => blockOnDay(ctx, who, b, d)))
       continue;
     if (mine.length === 0 || b.kind !== "fixed" || overlaps(mine, blockSpans(ctx, b, days)))
       return true;
@@ -26957,11 +27713,11 @@ function startChange(ctx, who, p) {
 }
 function stopChange(ctx, who, p) {
   const cal = calendarOf(ctx.world);
-  const words2 = wordsOf3(cleanLabel(p.label));
+  const words3 = wordsOf4(cleanLabel(p.label));
   const where = placeOf2(ctx, p.place);
   if (where === null && text3(p.place) !== "")
     return refuse("there's no such place");
-  if (words2.length === 0 && where === null)
+  if (words3.length === 0 && where === null)
     return refuse("the reply doesn't say what they gave up");
   const stated = p.days === undefined || p.days === null ? {} : daysOf(ctx, p.days);
   if (!stated)
@@ -26977,7 +27733,7 @@ function stopChange(ctx, who, p) {
     if (!top || isOff(top.entry) || top.entry.private === true)
       continue;
     const b = top.entry;
-    const named = where !== null && blockPlace(ctx, who, b) === where || words2.length > 0 && sameWords(words2, wordsOf3(b.label));
+    const named = where !== null && blockPlace(ctx, who, b) === where || words3.length > 0 && sameWords(words3, wordsOf4(b.label));
     if (!named || !within3(weekOf(ctx, who, b, from)))
       continue;
     blocks.push({ block: id, value: list.every((a) => a.level === "chat") ? null : { id, off: true } });
@@ -27054,8 +27810,8 @@ function storyEvents(args, ctx) {
 }
 
 // src/packs/castlife/core/usual.ts
-function joined2(words2) {
-  return words2.length <= 1 ? words2[0] ?? "" : `${words2.slice(0, -1).join(", ")} and ${words2[words2.length - 1] ?? ""}`;
+function joined2(words3) {
+  return words3.length <= 1 ? words3[0] ?? "" : `${words3.slice(0, -1).join(", ")} and ${words3[words3.length - 1] ?? ""}`;
 }
 function weekdaysPhrase(cal, days) {
   const set = [...new Set(days)].sort((a, b) => a - b);
@@ -27328,8 +28084,8 @@ function buildNeedsView(ctx) {
   return {
     needs: on.map((need2) => {
       const raw = needValue(ctx, pov, need2);
-      const words2 = NEED_WORDS[need2];
-      return { need: need2, name: words2.name, label: words2.word, value: Math.round(raw), pressing: raw >= tuning[need2].tell, tell: tuning[need2].tell, metBy: words2.metBy };
+      const words3 = NEED_WORDS[need2];
+      return { need: need2, name: words3.name, label: words3.word, value: Math.round(raw), pressing: raw >= tuning[need2].tell, tell: tuning[need2].tell, metBy: words3.metBy };
     })
   };
 }
@@ -27708,7 +28464,7 @@ function livedAtMinute(ctx, who, slot) {
   const home = homeOf(ctx, pov) ?? here;
   const cal = calendarOf(ctx.world);
   const plans = new Map;
-  const planOf = (day2) => {
+  const planOf2 = (day2) => {
     const plan2 = plans.get(day2) ?? dayPlan(ctx, pov, day2);
     plans.set(day2, plan2);
     return plan2;
@@ -27721,7 +28477,7 @@ function livedAtMinute(ctx, who, slot) {
       return out;
     }
     for (let day2 = dateAt(cal, from).dayIndex;day2 <= dateAt(cal, to - 1).dayIndex; day2++) {
-      const blocks = planOf(day2).blocks;
+      const blocks = planOf2(day2).blocks;
       blocks.forEach((b, i) => {
         if (b.end <= from || b.start >= to)
           return;
@@ -28011,7 +28767,33 @@ function isScheduleChange(v) {
   return Array.isArray(o.slots) && o.slots.length > 0 && o.slots.every((s) => typeof objOf(s).start === "string" && time.test(strOf(objOf(s).start)) && time.test(strOf(objOf(s).end))) && (o.recurrence === undefined || typeof objOf(o.recurrence).every === "string");
 }
 function changeLine(ctx, e, viewer, what) {
-  return viewer !== undefined ? "" : `${own(ctx.state.entities, strOf(e.data.entity))?.name ?? strOf(e.data.entity)}: ${what} (${objOf(e.data.source).type === "story" ? "the story" : "GM"})`;
+  if (viewer !== undefined)
+    return "";
+  const name = own(ctx.state.entities, strOf(e.data.entity))?.name ?? strOf(e.data.entity);
+  return `${what(name)} in this chat (${objOf(e.data.source).type === "story" ? "from the story" : "set by the GM"})`;
+}
+var FOLLOW_WORDS = {
+  mode: { follows: "follows their routine", no_invitations: "follows their routine but makes and accepts no invitations", off: "has no routine" },
+  awareness: { story_first: "puts the story before their routine", balanced: "weighs the story and their routine alike", routine_first: "puts their routine before the story" },
+  role: { informative: "takes their routine as context only", enforced: "lives their routine as written", off: "ignores their routine" },
+  skips: { stay: "stays put in a time skip", routine: "follows their routine in a time skip", model: "lives a time skip as the model plans it" }
+};
+function followWords(follow) {
+  const mode = ROUTINE_MODES.find((m) => m === follow.mode);
+  const awareness = ROUTINE_AWARENESS.find((a) => a === follow.awareness);
+  const role = ROUTINE_ROLES.find((r) => r === follow.role);
+  const skips = SKIP_LIVES.find((s) => s === follow.skips);
+  return [mode ? FOLLOW_WORDS.mode[mode] : null, awareness ? FOLLOW_WORDS.awareness[awareness] : null, role ? FOLLOW_WORDS.role[role] : null, skips ? FOLLOW_WORDS.skips[skips] : null].filter((w) => w !== null);
+}
+function blockLabel(ctx, block, value) {
+  const label = objOf(value).label;
+  if (typeof label === "string" && label !== "")
+    return label;
+  for (const r of worldRoutines(ctx.world))
+    for (const b of r.blocks)
+      if (b.id === block && "label" in b && typeof b.label === "string")
+        return b.label;
+  return BASIC_BLOCKS.find((b) => b.id === block)?.label ?? block.replace(/_/g, " ");
 }
 var EVENTS3 = [
   {
@@ -28029,7 +28811,13 @@ var EVENTS3 = [
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
     coarsen: { key: (e) => typeof e.data.from === "number" ? `${strOf(e.data.entity)}:${strOf(e.data.need)}` : null, merge: (_earlier, later) => later },
-    describe: (e) => e.data.lived === true ? "" : `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`
+    describe: (e, ctx, viewer) => {
+      if (e.data.lived === true)
+        return "";
+      const who = strOf(e.data.entity);
+      const whose = viewer !== undefined && who === viewer ? "Your" : `${own(ctx.state.entities, who)?.name ?? who}'s`;
+      return `${whose} ${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`;
+    }
   },
   {
     type: "castlife.decision",
@@ -28075,7 +28863,10 @@ var EVENTS3 = [
       else
         follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null, ...f.role !== undefined ? { role: f.role } : {}, ...f.skips !== undefined ? { skips: f.skips } : {} };
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness, objOf(e.data.follow).role, objOf(e.data.follow).skips].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`)
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, (name) => {
+      const words3 = e.data.follow === null ? [] : followWords(objOf(e.data.follow));
+      return words3.length === 0 ? `${name} follows their routine as the world sets it again` : `${name} ${listWords(words3)}`;
+    })
   },
   {
     type: ROUTINE_EVENTS.skipPlan,
@@ -28121,7 +28912,7 @@ var EVENTS3 = [
       else
         routines[who] = mine;
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `routine block ${strOf(e.data.block)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`)
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, (name) => `${name}'s \u201C${blockLabel(ctx, strOf(e.data.block), e.data.value)}\u201D ${e.data.value === null ? "is back to the world's" : objOf(e.data.value).off === true ? "is off" : "changed"}`)
   },
   {
     type: ROUTINE_EVENTS.schedule,
@@ -28145,7 +28936,12 @@ var EVENTS3 = [
       else
         schedules[who] = mine;
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `schedule ${strOf(e.data.schedule)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`)
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, (name) => {
+      const target = allSchedules(ctx.registry, ctx.world).find((s) => s.id === strOf(e.data.schedule))?.target;
+      const sets = target === "place" ? "where they are" : target === "activity" ? "what they're doing" : target ? `their ${target.replace(/_/g, " ")}` : null;
+      const label = `\u201C${strOf(e.data.schedule).replace(/_/g, " ")}\u201D schedule${sets ? ` (it sets ${sets})` : ""}`;
+      return e.data.value === null ? `${name} keeps the world's ${label} again` : objOf(e.data.value).off === true ? `${name} is off their ${label}` : `${name} has their own ${label}`;
+    })
   }
 ];
 function routineEdit(ctx, op) {
@@ -28349,12 +29145,12 @@ function stanceLines(ctx) {
     if (!e)
       continue;
     const known = knows(state2, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
-    const words2 = regard?.(ctx, id, pov) ?? null;
-    const parts = [`${e.name} ${known ? "knows" : "doesn't know"} you${words2 ? `; regard: ${words2}` : ""}.`];
+    const words3 = regard?.(ctx, id, pov) ?? null;
+    const parts = [`${e.name} ${known ? "knows" : "doesn't know"} you${words3 ? ` and feels ${words3} toward you` : ""}.`];
     const activity = canSeeField(reg, world, state2, pov, id, "activity") ? e.fields.activity : undefined;
-    const doing = typeof activity === "string" && activity !== "idle" ? shownActivity(ctx, id, activity).replace(/_/g, " ") : "";
-    if (doing !== "" && safe(doing))
-      parts.push(listed("Doing", [doing]));
+    const doing = typeof activity === "string" ? activityPhrase(shownActivity(ctx, id, activity)) : null;
+    if (doing !== null && safe(doing))
+      parts.push(`Right now they are ${doing}.`);
     const agenda = agendaFor(world, state2, id).filter((a) => publicTrack(world, a.track)).map((a) => {
       const track = own(world.tracks, a.track);
       const cue = track ? own(track.stages, a.stage)?.cue?.trim() : undefined;
@@ -28415,16 +29211,18 @@ function peopleLines(ctx, scope) {
       if (scope === "player")
         continue;
       const knowers = present2.filter((k) => k !== id && see(pov, k) && see(k, id)).map((k) => own(ctx.state.entities, k)?.name ?? k);
-      const act2 = typeof e.fields.activity === "string" && e.fields.activity !== "idle" ? ` (${e.fields.activity.replace(/_/g, " ")})` : "";
+      const act2 = typeof e.fields.activity === "string" ? activityPhrase(e.fields.activity) : null;
+      const text4 = `${e.name} is here${act2 ? `, ${act2}` : ""}.`;
       if (knowers.length > 0)
-        lines.push({ text: `${e.name}${act2} is here.`, known: "scene", who: knowers.join(", ") });
+        lines.push({ text: text4, known: "scene", who: knowers.join(", ") });
       else if (scope === "gm")
-        lines.push({ text: `${e.name}${act2} is here.`, known: "gm" });
+        lines.push({ text: text4, known: "gm" });
       continue;
     }
     const life = povLife(ctx.world, ctx.state, id);
     const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
-    lines.push({ text: life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`, known: "pov" });
+    const doing = typeof act === "string" ? activityPhrase(shownActivity(ctx, id, act)) : null;
+    lines.push({ text: life ? `${e.name} ${life.reads}.` : `${e.name} is here${doing ? `, ${doing}` : ""}.`, known: "pov" });
     const regard = life && !life.acts ? null : voice?.(ctx, id) ?? null;
     if (regard)
       lines.push({ text: regard, known: "pov" });
@@ -28853,24 +29651,24 @@ function tryKey(actor2, action, params) {
 function oddsSignature(ready) {
   return `${ready.notation}|${ready.modifier}|${ready.dc ?? ""}`;
 }
-function mostLikely(odds, among) {
+function mostLikely(counts, among) {
   let best = null;
   for (const o of among)
-    if (o !== NO_BAND && (best === null || (odds[o] ?? 0) > (odds[best] ?? 0)))
+    if (o !== NO_BAND && (best === null || (own(counts, o) ?? 0n) > (own(counts, best) ?? 0n)))
       best = o;
   return best;
 }
-function passOutcome(action, ready, odds, pass) {
+function passOutcome(action, ready, counted, pass) {
   if (own(action.outcomes, "success") || ready.bands.some((b) => b.outcome === "success"))
     return "success";
   if (typeof ready.check.auto === "string" && ready.check.auto !== "")
     return ready.check.auto;
-  return mostLikely(odds, pass) ?? NO_BAND;
+  return mostLikely(counted.counts, pass) ?? NO_BAND;
 }
-function failOutcome(action, ready, odds, pass) {
+function failOutcome(action, ready, counted, pass) {
   if (own(action.outcomes, "failure") || ready.bands.some((b) => b.outcome === "failure"))
     return "failure";
-  return mostLikely(odds, Object.keys(odds).filter((o) => !pass.includes(o))) ?? NO_BAND;
+  return mostLikely(counted.counts, Object.keys(counted.counts).filter((o) => !pass.includes(o))) ?? NO_BAND;
 }
 function markedFor(registry, world, state2, action, actor2) {
   if (action.adjudicate === true)
@@ -28910,26 +29708,38 @@ function changedSince(policy, registry, world, state2, actor2, ready, prior) {
     return true;
   return state2.clock - prior.at >= policy.retryAfter || oddsSignature(ready) !== prior.odds;
 }
+function againstLine(made, outcomes, line2) {
+  const [mantissa = "0", exponent = "0"] = String(Math.abs(line2)).split("e");
+  const [whole4 = "0", fraction = ""] = mantissa.split(".");
+  const scale = Number(exponent) - fraction.length;
+  const digits = BigInt(whole4 + fraction) * (line2 < 0 ? -1n : 1n);
+  const left = scale < 0 ? made * 10n ** BigInt(-scale) : made;
+  const right = (scale > 0 ? digits * 10n ** BigInt(scale) : digits) * outcomes;
+  return left < right ? -1 : left > right ? 1 : 0;
+}
 function verdictOf(policy, input) {
-  const { registry, world, state: state2, action, actor: actor2, ready, odds } = input;
+  const { registry, world, state: state2, action, actor: actor2, ready, counts } = input;
   const pass = passOutcomes(ready.check, ready.bands);
-  const chance = pass.length > 0 ? pass.reduce((sum, o) => sum + (odds[o] ?? 0), 0) : null;
-  const unrolled = (why, outcome, prior = null) => ({ roll: false, why, outcome, chance, pass, prior });
-  if (policy.retry !== "free" && pass.length > 0) {
+  const named = pass.length > 0;
+  const made = pass.reduce((sum, o) => sum + (own(counts.counts, o) ?? 0n), 0n);
+  const chance = named ? share(made, counts.outcomes) : null;
+  const risky = named ? againstLine(made, counts.outcomes, policy.riskyAt) < 0 : null;
+  const unrolled = (why, outcome, prior = null) => ({ roll: false, why, outcome, chance, risky, pass, prior });
+  if (policy.retry !== "free" && named) {
     const prior = own(readEngineSlice(state2).tries, tryKey(actor2, action.id, input.params));
     if (prior?.failed && !changedSince(policy, registry, world, state2, actor2, ready, prior))
       return unrolled("retry", prior.outcome, prior);
   }
-  if (chance !== null && policy.impossibleAt !== null && chance <= policy.impossibleAt)
-    return unrolled("impossible", failOutcome(action, ready, odds, pass));
-  if (chance !== null && policy.trivialAt !== null && chance >= policy.trivialAt)
-    return unrolled("trivial", passOutcome(action, ready, odds, pass));
-  const asked = pass.length === 0 || policy.checks === "every" || policy.checks === "risky" && (chance === null || chance < policy.riskyAt) || policy.checks === "marked" && markedFor(registry, world, state2, action, actor2);
+  if (named && policy.impossibleAt !== null && againstLine(made, counts.outcomes, policy.impossibleAt) <= 0)
+    return unrolled("impossible", failOutcome(action, ready, counts, pass));
+  if (named && policy.trivialAt !== null && againstLine(made, counts.outcomes, policy.trivialAt) >= 0)
+    return unrolled("trivial", passOutcome(action, ready, counts, pass));
+  const asked = !named || policy.checks === "every" || policy.checks === "risky" && risky !== false || policy.checks === "marked" && markedFor(registry, world, state2, action, actor2);
   if (!asked)
-    return unrolled(policy.checks === "never" ? "never" : policy.checks === "risky" ? "safe" : "unmarked", passOutcome(action, ready, odds, pass));
+    return unrolled(policy.checks === "never" ? "never" : policy.checks === "risky" ? "safe" : "unmarked", passOutcome(action, ready, counts, pass));
   if (policy.authority === "narrative")
     return unrolled("story", null);
-  return { roll: true, why: null, outcome: null, chance, pass, prior: null };
+  return { roll: true, why: null, outcome: null, chance, risky, pass, prior: null };
 }
 function needsJudge(policy, verdict) {
   return verdict.roll && policy.description.weight !== "none" || verdict.why === "story";
@@ -28983,16 +29793,21 @@ function lintAdjudication(world) {
   const policy = readAdjudication(raw);
   if (!policy)
     return [{ severity: "error", path: `${at}.preset`, code: "adjudication", message: `"${String(raw.preset)}" isn't a preset: use narrative, balanced, crunchy or custom.` }];
-  if (policy.preset === "custom") {
-    const description = isRecord(raw.description) ? raw.description : {};
-    const read = [
-      ...["checks", "riskyAt", "trivialAt", "impossibleAt", "authority", "closeBy", "retry", "retryAfter"].map((k) => [k, raw[k], policy[k]]),
-      ...["weight", "max", "advantageAt"].map((k) => [`description.${k}`, description[k], policy.description[k]])
-    ];
-    for (const [key, given, plays] of read) {
-      if (given !== undefined && given !== plays)
-        issues.push({ severity: "warning", path: `${at}.${key}`, code: "adjudication_value", message: `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(plays)}.` });
-    }
+  const values = ["checks", "riskyAt", "trivialAt", "impossibleAt", "authority", "closeBy", "retry", "retryAfter"];
+  const described = ["weight", "max", "advantageAt"];
+  const description = isRecord(raw.description) ? raw.description : {};
+  const read = [...values.map((k) => [k, raw[k], policy[k]]), ...described.map((k) => [`description.${k}`, description[k], policy.description[k]])];
+  for (const [key, given, plays] of read) {
+    if (given !== undefined && given !== plays)
+      issues.push({ severity: "warning", path: `${at}.${key}`, code: "adjudication_value", message: `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(plays)}.` });
+  }
+  const named = ADJUDICATION_PRESET_IDS.find((p) => p === raw.preset && p !== "custom");
+  if (named && policy.preset === "custom") {
+    const preset = presetAdjudication(named);
+    const changed = [...values.filter((k) => policy[k] !== preset[k]), ...described.filter((k) => policy.description[k] !== preset.description[k]).map((k) => `description.${k}`)];
+    const listed2 = changed.length > 1 ? `${changed.slice(0, -1).join(", ")} and ${changed.at(-1) ?? ""}` : changed[0] ?? "";
+    const label = ADJUDICATION_PRESET_LABEL[named];
+    issues.push({ severity: "warning", path: `${at}.preset`, code: "adjudication_preset", message: `This names the ${label} preset but sets ${listed2} its own way, so it plays as Custom with them. Name it custom to say so, or drop them to play ${label}.` });
   }
   if (policy.trivialAt !== null && policy.impossibleAt !== null && policy.trivialAt <= policy.impossibleAt) {
     issues.push({ severity: "error", path: `${at}.trivialAt`, code: "adjudication", message: "A sure thing must start above too hard to try, or no check would ever roll." });
@@ -29221,7 +30036,8 @@ function actionOdds(reg, world, state2, req) {
   const def = checkOf(world, p.action.check);
   const ready = def ? readyCheck(reg, ctx, def, p.bindings, p.vars) : null;
   const usable = ready && !("code" in ready) ? ready : null;
-  const odds = usable ? checkOdds(usable) : null;
+  const counts = usable ? checkCounts(usable) : null;
+  const odds = counts ? oddsOf(counts) : null;
   const spend = combatSpend(ctx, p.actor, p.action);
   const refused = Array.isArray(spend) ? null : spend;
   return {
@@ -29231,7 +30047,7 @@ function actionOdds(reg, world, state2, req) {
     modifier: usable?.modifier ?? 0,
     check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
-    verdict: usable && odds ? verdictOf(policyFor(world, state2, p.action, p.actor), { registry: reg, world, state: state2, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null
+    verdict: usable && counts ? verdictOf(policyFor(world, state2, p.action, p.actor), { registry: reg, world, state: state2, action: p.action, actor: p.actor, params: p.params, ready: usable, counts }) : null
   };
 }
 function resolveAction(reg, w, req, rng, opts = {}) {
@@ -29282,9 +30098,10 @@ function resolveAction(reg, w, req, rng, opts = {}) {
   let vars = p.vars;
   let adjudged = null;
   if (checkDef && ready) {
-    const odds = checkOdds(ready);
+    const counts = checkCounts(ready);
+    const odds = oddsOf(counts);
     const policy = policyFor(w.world, w.state, p.action, p.actor);
-    const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });
+    const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, counts });
     const judgement = opts.judgement ?? null;
     const place = placeOfEntity(w.state, p.actor);
     let close = null;
@@ -29302,7 +30119,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
       if (policy.authority === "hybrid")
         close = closeCall(rolling, rolled, rolled.outcome, policy.closeBy);
     } else {
-      outcome = story ?? verdict.outcome ?? passOutcome(p.action, ready, odds, verdict.pass);
+      outcome = story ?? verdict.outcome ?? passOutcome(p.action, ready, counts, verdict.pass);
       vars = { ...p.vars, roll: { natural: null, total: null, modifier: ready.modifier, dc: ready.dc, margin: null, outcome } };
     }
     if (!plainRolling(policy)) {
@@ -29572,8 +30389,7 @@ function readyFor(reg, w, skill, who, dc) {
   return readyCheck(reg, w.ctx, check, { self: who, actor: who }, { [skill.param]: skill.id, difficulty: dc, params: { [skill.param]: skill.id, difficulty: dc } });
 }
 function passiveScore(ready) {
-  const dist = diceDistribution(ready.notation);
-  return Math.floor(dist.probs.reduce((sum, p, i) => sum + p * (dist.min + i), 0)) + ready.modifier;
+  return meanFloor(diceDistribution(ready.notation)) + ready.modifier;
 }
 function tryRequest(world, skill, band, against, dc) {
   const check = checkOf(world, skill.action.check);
@@ -29612,9 +30428,9 @@ function inferredRead(reg, world, state2, params) {
   const companions2 = policy.who === "pov" ? [] : read.with.filter((id) => involvable(reg, world, state2, id));
   const against = read.against.filter((a) => !companions2.includes(a.who) && involvable(reg, world, state2, a.who)).map((a) => ({ who: a.who, skill: skillNamed(sources, a.skill)?.id ?? skill.id }));
   if (policy.when === "risky") {
-    const chance = actionOdds(reg, world, state2, tryRequest(world, skill, band, against, band.dc)).verdict?.chance ?? null;
-    if (chance !== null && chance >= policyOf(world, state2).riskyAt)
-      return { ok: false, why: `it isn't risky (${Math.round(chance * 100)}% to succeed at ${band.label.toLowerCase()})` };
+    const verdict = actionOdds(reg, world, state2, tryRequest(world, skill, band, against, band.dc)).verdict;
+    if (verdict?.risky === false && verdict.chance !== null)
+      return { ok: false, why: `it isn't risky (${Math.round(verdict.chance * 100)}% to succeed at ${band.label.toLowerCase()})` };
   }
   const kept2 = { attempt: read.attempt, skill: skill.id, difficulty: band.id, with: companions2, against: against.map((a) => ({ who: a.who, skill: a.skill })), ...read.tried ? { tried: true } : {} };
   return { ok: true, params: kept2, read: { ...read, skill: skill.id, with: companions2, against }, skill, band, policy };
@@ -29678,7 +30494,7 @@ function resolveTry(reg, w, params, rng, opts = {}) {
   const res = resolveAction(reg, w, tryRequest(world, skill, band, against, dc), rng, opts);
   const neutral = readyFor(reg, w, skill, pov, NEUTRAL_DC);
   const fixed = readyFor(reg, w, skill, pov, dc);
-  const share = "code" in neutral || "code" in fixed ? 0 : fixed.modifier - neutral.modifier;
+  const share2 = "code" in neutral || "code" in fixed ? 0 : fixed.modifier - neutral.modifier;
   const pass = passOutcomes(ownCheck.check, "code" in fixed ? ownCheck.bands : fixed.bands);
   const rolled = [];
   for (const id of res.ok ? companions2 : []) {
@@ -29690,7 +30506,7 @@ function resolveTry(reg, w, params, rng, opts = {}) {
     w.apply({ type: ENGINE_EVENTS.check, data: { check: ready.check.id ?? "", skill: skill.id, actor: id, notation: ready.notation, natural: roll.natural, total: roll.total, dc: ready.dc, outcome: roll.outcome, npc: true } });
     rolled.push({ who: id, name: nameOf4(id), outcome: roll.outcome, pass: pass.includes(roll.outcome), notation: ready.notation, modifier: base.modifier, total: roll.roll.total + base.modifier });
   }
-  const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: read.attempt, pov: nameOf4(pov), band, dc, against, companions: rolled, share, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
+  const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: read.attempt, pov: nameOf4(pov), band, dc, against, companions: rolled, share: share2, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
   return { ...res, events: w.events.slice(start), inferred };
 }
 
@@ -30142,6 +30958,24 @@ function lintRuleset(world, reg) {
         err(`${at}.maxLevel`, "progression", "The top level is a whole number of at least 1.");
       if (p.onLevel !== undefined && !Array.isArray(p.onLevel))
         err(`${at}.onLevel`, "progression", "onLevel is a list of effects.");
+      const name = typeof p.label === "string" && p.label.trim() !== "" ? p.label : "Level";
+      for (const [eid, e] of Object.entries(world.entities)) {
+        if (!progressionApplies(reg, world, p, e.kind))
+          continue;
+        const numberOf = (field) => {
+          const v = own(e.fields, field) ?? fieldDef(reg, world, e.kind, field)?.default;
+          return typeof v === "number" ? v : null;
+        };
+        const levelDef = fieldDef(reg, world, e.kind, p.levelField);
+        const xp = numberOf(p.xpField) ?? 0;
+        const level = numberOf(p.levelField) ?? levelFor(list, 0, p.maxLevel);
+        const reached = Math.min(Math.max(levelFor(list, xp, p.maxLevel), levelDef?.min ?? -Infinity), levelDef?.max ?? Infinity);
+        if (level === reached)
+          continue;
+        const xpLabel = fieldDef(reg, world, e.kind, p.xpField)?.label ?? p.xpField;
+        const needs = list[level - 1];
+        warn(`entities.${eid}.fields.${p.levelField}`, "progression_level", `${e.name} is at ${name} ${level}, but ${xp} ${xpLabel} reaches ${name} ${reached}. The level follows ${xpLabel}, so it becomes ${name} ${reached} when their ${xpLabel} next changes: ${needs !== undefined ? `give them ${needs} ${xpLabel} for ${name} ${level}, or ` : ""}set the level to ${reached}.`);
+      }
     }
   }
   const sheet = rs.sheet;
@@ -30202,11 +31036,11 @@ function questLines(ctx, scope) {
     lines.push({ text: `${t.label}: ${t.cue ?? t.stage}`, known: "pov" });
     for (const o of t.objectives)
       if (!o.done)
-        lines.push({ text: `- ${o.label}`, known: "pov" });
-    for (const h of t.hints)
-      lines.push({ text: `Hint: ${h}`, known: "pov" });
+        lines.push({ text: `${t.label}, still to do: ${o.label.replace(/[.!?]\s*$/, "")}.`, known: "pov" });
+    for (const h of t.hints.slice(0, t.opened))
+      lines.push({ text: `${t.label}, a hint your character has: ${h}`, known: "pov" });
     for (const truth of t.truths)
-      lines.push({ text: `Known: ${truth}`, known: "pov" });
+      lines.push({ text: `${t.label}, known to be true: ${truth}`, known: "pov" });
   }
   if (scope === "player")
     return lines;
@@ -30327,16 +31161,16 @@ function leakyIds(world, registry) {
   for (const e of Object.values(world.entities)) {
     if (e.visibility === "secret")
       continue;
-    const words2 = idWords(e.id);
+    const words3 = idWords(e.id);
     const spelt = new Set;
     const gives = [];
     for (const s of secrets) {
       const at = [];
-      for (let i = 0;s.id.length > 0 && i + s.id.length <= words2.length; i++)
-        if (s.id.every((w, j) => words2[i + j] === w))
+      for (let i = 0;s.id.length > 0 && i + s.id.length <= words3.length; i++)
+        if (s.id.every((w, j) => words3[i + j] === w))
           for (let j = 0;j < s.id.length; j++)
             at.push(i + j);
-      words2.forEach((w, i) => {
+      words3.forEach((w, i) => {
         if (s.words.some((n) => w === n || w === `${n}s`))
           at.push(i);
       });
@@ -30348,7 +31182,33 @@ function leakyIds(world, registry) {
     }
     if (gives.length === 0)
       continue;
-    out.push({ path: `entities.${e.id}.id`, id: e.id, secrets: gives, neutral: unused(words2.filter((_, i) => !spelt.has(i)).join("_") || e.kind) });
+    out.push({ path: `entities.${e.id}.id`, id: e.id, secrets: gives, neutral: unused(words3.filter((_, i) => !spelt.has(i)).join("_") || e.kind) });
+  }
+  return out;
+}
+function unsetFlags(world) {
+  const set = new Set;
+  for (const { effects } of effectLists(world)) {
+    for (const spec of effects) {
+      const name = spec.type === "story.flag" ? spec.args.name : undefined;
+      if (typeof name !== "string")
+        continue;
+      if (name.startsWith("="))
+        return [];
+      set.add(name);
+    }
+  }
+  const missing = (exprs) => [...new Set(exprs.flatMap((x) => callsIn(x).flatMap((c) => c.name === "flag" && typeof c.args[0] === "string" ? [c.args[0]] : [])).filter((f) => !set.has(f)))].sort();
+  const out = [];
+  for (const [id, t] of Object.entries(world.tracks)) {
+    const flags = missing(Object.values(t.stages).flatMap((s) => [...s.next.map((n) => n.when), s.fail?.when, s.gate, ...(s.objectives ?? []).map(objectiveWhen)]));
+    if (flags.length > 0)
+      out.push({ path: `tracks.${id}`, what: t.label, kind: "track", flags });
+  }
+  for (const [id, entry] of Object.entries(world.lore)) {
+    const flags = missing([entry.gate]);
+    if (flags.length > 0)
+      out.push({ path: `lore.${id}.gate`, what: entry.title, kind: "lore", flags });
   }
   return out;
 }
@@ -30406,8 +31266,8 @@ function askedFor(ctx, ref) {
   const shown3 = id === undefined ? null : playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
   if (shown3)
     return shown3.label;
-  const words2 = ref.trim();
-  return idShaped(words2) || hasOwn(ctx.world.tracks, words2) || hasOwn(ctx.world.tracks, ref) ? null : words2;
+  const words3 = ref.trim();
+  return idShaped(words3) || hasOwn(ctx.world.tracks, words3) || hasOwn(ctx.world.tracks, ref) ? null : words3;
 }
 function askedForGm(ctx, ref) {
   if (ref.trim() === "")
@@ -30505,6 +31365,23 @@ var storyPack = {
           return [];
         return [{ severity: "warning", code: "story.answer_track", message: `This answer's track is a formula (${track}), but track takes a puzzle's own id as written, such as "p_safe": the puzzle the formula gives is answered even when the player can't see it. To let the player say which puzzle, pass their words as puzzle instead.`, path: `${path}.${i}.args.track` }];
       }))
+    });
+    r.lint({
+      code: "story.unset_flag",
+      check: (world) => unsetFlags(world).map((u) => {
+        const many = u.flags.length > 1;
+        const names = u.flags.map((f) => `"${f}"`);
+        const list = many ? `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}` : names[0] ?? "";
+        const it = many ? "them" : "it";
+        const reads = u.kind === "track" ? `"${u.what}" waits on` : `The gate of "${u.what}" reads`;
+        const so = u.kind === "track" ? `what reads ${it} in this track never changes, and only the GM's Stage moves the track past ${it}` : "the gate never opens or closes";
+        return {
+          severity: "warning",
+          code: "story.unset_flag",
+          message: `${reads} the story flag${many ? "s" : ""} ${list}, but nothing in this world sets ${it}: no rule, action or stage effect does, and the GM view has no flag control. ${many ? "They keep their" : "It keeps its"} starting value for good, so ${so}. Set ${it} with a story.flag effect where the story makes ${it} true.`,
+          path: u.path
+        };
+      })
     });
   }
 };
@@ -30778,7 +31655,7 @@ function hpLine(ctx, e) {
   if (e.type === "add")
     return `${who} ${e.delta < 0 ? "takes damage" : "recovers"}`;
   const band = typeof e.value === "number" ? woundOf(rules, e.value, hpMaxOf(ctx, rules, e.entity)) : "";
-  return band !== "" ? `${who}: ${band}` : null;
+  return band !== "" ? `${who} is now ${band}` : null;
 }
 function hpName(ctx, rules) {
   const kind = own(ctx.state.entities, ctx.world.pov)?.kind ?? "";
@@ -31148,10 +32025,11 @@ function fightOffers(world, state2, action) {
 function combatEntries(ctx) {
   const found = encounterOf(ctx.state);
   const enc = found && !povLeft(ctx.state, ctx.world, found) ? found : null;
+  const env = scopeEnv({ reg: ctx.registry, ctx, bindings: { self: ctx.world.pov, actor: ctx.world.pov } });
   const entries2 = [];
   for (const action of combatActions(ctx.registry, ctx.world)) {
     const param = targetParam(action);
-    if (!fightOffers(ctx.world, ctx.state, action) || param === undefined)
+    if (!fightOffers(ctx.world, ctx.state, action) || param === undefined || storyLocked(env, action))
       continue;
     const targets = param === null ? [null] : enc ? enc.order.filter((f) => f.id !== ctx.world.pov && standing(ctx, enc, f) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, f.id)).map((f) => f.id) : paramCandidates(ctx.registry, ctx.world, ctx.state, action, param).slice(0, 24);
     const options = targets.map((t) => optionOf(ctx, action, param !== null && t !== null ? { [param]: t } : {}, t !== null ? labelOf(ctx, t) : action.label));
@@ -31734,7 +32612,7 @@ function isNote(v) {
 function isCommitment(v) {
   return isRecord(v) && str13(v.id) && v.id !== "" && typeof v.kind === "string" && COMMITMENT_KINDS.includes(v.kind) && ids(v.with) && str13(v.text) && (v.due === null || finite2(v.due)) && typeof v.status === "string" && COMMITMENT_STATUSES.includes(v.status) && finite2(v.made) && (v.closed === null || finite2(v.closed));
 }
-function planOf(v) {
+function planOf2(v) {
   return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason, ...v.cents !== undefined ? { cents: v.cents } : {}, ...v.shared === true ? { shared: true } : {}, ...v.by !== undefined ? { by: v.by } : {} };
 }
 function noteOf(v) {
@@ -31745,6 +32623,10 @@ function commitmentOf(v) {
 }
 function person(ctx, data) {
   return str13(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: "a minds event names someone who isn't in the world" };
+}
+function fidelityWords(level) {
+  const id = typeof level === "string" ? level : "";
+  return `${id.charAt(0).toUpperCase()}${id.slice(1)}`;
 }
 function nameOf5(ctx, id) {
   return own(ctx.state.entities, id)?.name ?? id;
@@ -31767,7 +32649,7 @@ var round = {
       if (isRecord(v) && isFidelity(v.level))
         writeCharacter(state2, id).passed = { at, round: s.round, level: v.level, place: str13(v.place) ? v.place : null };
   },
-  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : e.data.on === true ? "Minds round" : "Minds switched off"
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : e.data.on === true ? "A round of character minds ran" : "Character minds are switched off"
 };
 function validMind(data) {
   const { at, place, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
@@ -31788,7 +32670,7 @@ var mind = {
       return;
     const s = writeSlice(state2);
     const c = writeCharacter(state2, d.entity);
-    const plans = Array.isArray(d.plans) ? d.plans.filter((p) => isPlan(p)).map(planOf) : [];
+    const plans = Array.isArray(d.plans) ? d.plans.filter((p) => isPlan(p)).map(planOf2) : [];
     const record3 = {
       at: finite2(d.at) ? d.at : state2.clock,
       round: s.round,
@@ -31810,7 +32692,7 @@ var mind = {
     for (const p of plans)
       putPlan(c, p);
   },
-  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s mind (${String(e.data.level)}): ${str13(e.data.intent) && e.data.intent !== "" ? e.data.intent : "no intent"}`
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s mind, at ${fidelityWords(e.data.level)} fidelity, ${str13(e.data.intent) && e.data.intent !== "" ? `means to: ${e.data.intent}` : "has no intent"}`
 };
 function validMemory(data) {
   const { at, notes, commitments: commitments2, resolved, plans, told, summary } = data;
@@ -31847,7 +32729,7 @@ var memory = {
     }
     for (const p of Array.isArray(d.plans) ? d.plans : [])
       if (isPlan(p))
-        sharePlan(state2, ctx.world.pov, who, planOf(p));
+        sharePlan(state2, ctx.world.pov, who, planOf2(p));
     if (str13(d.summary))
       c.summary = d.summary;
     for (const t of Array.isArray(d.told) ? d.told : []) {
@@ -31863,7 +32745,7 @@ var memory = {
       return "";
     const n = Array.isArray(e.data.notes) ? e.data.notes.length : 0;
     const c = Array.isArray(e.data.commitments) ? e.data.commitments.length : 0;
-    return `${nameOf5(ctx, String(e.data.entity))} remembers the turn: ${n} note${n === 1 ? "" : "s"}, ${c} new commitment${c === 1 ? "" : "s"}`;
+    return `${nameOf5(ctx, String(e.data.entity))} remembers the turn in ${n} note${n === 1 ? "" : "s"} and ${c} new commitment${c === 1 ? "" : "s"}`;
   }
 };
 var presence = {
@@ -31886,7 +32768,12 @@ var presence = {
         addWitness(c, { at, what, how: "saw", by: null, place });
     }
   },
-  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `Present: ${ids(e.data.who) && e.data.who.length > 0 ? e.data.who.map((id) => nameOf5(ctx, id)).join(", ") : "no one"}`
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const who = ids(e.data.who) ? e.data.who.map((id) => nameOf5(ctx, id)) : [];
+    return who.length === 0 ? "No one was present for the minds" : `${listWords(who)} ${who.length === 1 ? "was" : "were"} present for the minds`;
+  }
 };
 var planStatus = {
   type: MINDS_EVENTS.plan,
@@ -31912,7 +32799,7 @@ var planStatus = {
     if (viewer !== undefined)
       return "";
     const plan2 = readCharacter(ctx.state, String(e.data.entity)).plans.find((p) => p.id === e.data.plan);
-    return `${nameOf5(ctx, String(e.data.entity))}'s plan ${plan2 ? `"${plan2.what}"` : String(e.data.plan)}: ${String(e.data.status)}`;
+    return `${nameOf5(ctx, String(e.data.entity))}'s plan ${plan2 ? `\u201C${plan2.what}\u201D` : "that's gone"} is now ${String(e.data.status)}`;
   }
 };
 function editDef(type, key, valid, list, put, remove) {
@@ -31938,12 +32825,12 @@ function editDef(type, key, valid, list, put, remove) {
       else if (d.value !== undefined && valid(d.value))
         put(state2, who, d.value, ctx);
     },
-    describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s ${key} ${e.data.value === null ? "deleted" : "edited"}`
+    describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s ${key} was ${e.data.value === null ? "deleted" : "edited"}`
   };
 }
 var planEdit = editDef(MINDS_EVENTS.planEdit, "plan", isPlan, (c) => c.plans, (state2, who, v, ctx) => {
   if (isPlan(v))
-    sharePlan(state2, ctx.world.pov, who, planOf(v));
+    sharePlan(state2, ctx.world.pov, who, planOf2(v));
 }, dropPlan);
 var noteEdit = editDef(MINDS_EVENTS.noteEdit, "note", isNote, (c) => c.notes, (state2, who, v) => {
   if (isNote(v))
@@ -31979,7 +32866,7 @@ var commitmentStatus = {
     const status = d.status;
     putCommitment(c, { ...x, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state2.clock });
   },
-  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s commitment: ${String(e.data.status)}`
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s commitment is now ${String(e.data.status)}`
 };
 var consolidated = {
   type: MINDS_EVENTS.consolidated,
@@ -32001,7 +32888,7 @@ var pin = {
   apply: (e, state2) => {
     writeCharacter(state2, String(e.data.entity)).pin = isFidelity(e.data.level) ? e.data.level : null;
   },
-  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}: fidelity ${e.data.level === null ? "unpinned" : `pinned at ${String(e.data.level)}`}`
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : e.data.level === null ? `${nameOf5(ctx, String(e.data.entity))}'s mind goes by their score again` : `${nameOf5(ctx, String(e.data.entity))}'s mind is now pinned at ${fidelityWords(e.data.level)} fidelity`
 };
 var refresh = {
   type: MINDS_EVENTS.refresh,
@@ -32009,7 +32896,7 @@ var refresh = {
   apply: (e, state2) => {
     writeCharacter(state2, String(e.data.entity)).refresh = true;
   },
-  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}: a fresh mind next turn`
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))} gets a fresh mind next turn`
 };
 function isIntent(v) {
   if (!isRecord(v) || !str13(v.text))
@@ -32028,7 +32915,16 @@ var intent = {
     else
       delete c.intent;
   },
-  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}: intent ${e.data.intent === null ? "cleared" : "set"}`
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const name = nameOf5(ctx, String(e.data.entity));
+    const v = e.data.intent;
+    if (!isIntent(v))
+      return `${name} no longer has your intent`;
+    const how = v.approach === null ? "" : `${v.text !== "" ? ", " : " "}${v.approach}ly`;
+    return v.text !== "" ? `${name} now means to \u201C${v.text}\u201D${how}` : `${name} now goes about things${how}`;
+  }
 };
 var skip = {
   type: MINDS_EVENTS.skip,
@@ -32036,7 +32932,7 @@ var skip = {
   apply: () => {
     return;
   },
-  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `Time skip beats: ${Array.isArray(e.data.beats) ? e.data.beats.length : 0}`
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `The time skip stopped at ${Array.isArray(e.data.beats) ? e.data.beats.length : 0} beats for the minds`
 };
 var MINDS_EVENT_DEFS = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, intent, skip];
 function mindsOn(ctx) {
@@ -32200,11 +33096,11 @@ function mindCandidates(ctx) {
   return Object.keys(state2.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id) && acts(world, state2, id));
 }
 var NAME_FILLER = { mr: true, mrs: true, ms: true, miss: true, dr: true, sir: true, lady: true, lord: true, dame: true, the: true, of: true, de: true, van: true, von: true, la: true, le: true, old: true, young: true, captain: true, constable: true, father: true, mother: true, sister: true, brother: true, aunt: true, uncle: true };
-function words2(text5) {
+function words3(text5) {
   return text5.toLowerCase().replace(/['\u2019]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 function namedIn(name, said2) {
-  const own2 = words2(name);
+  const own2 = words3(name);
   if (own2.length === 0 || said2.length === 0)
     return false;
   const whole4 = own2.join(" ");
@@ -32215,7 +33111,7 @@ function namedIn(name, said2) {
   return own2.some((w) => w.length >= 3 && !NAME_FILLER[w] && present2.has(w));
 }
 function namedInText(name, text5) {
-  return namedIn(name, words2(text5));
+  return namedIn(name, words3(text5));
 }
 function namesIn(value, ids2, out) {
   if (typeof value === "string") {
@@ -32325,7 +33221,7 @@ function fidelityOf(ctx, texts2, config3 = worldMindsOf(ctx.world)) {
   const pov = world.pov;
   const w = config3.weights;
   const here = placeOfEntity(state2, pov);
-  const said2 = words2(`${texts2.user}
+  const said2 = words3(`${texts2.user}
 ${texts2.reply}`);
   const refs = worldRefs(world);
   const tracks = liveTracks(world, state2);
@@ -32398,7 +33294,7 @@ function pickMinds(ctx, scores, texts2, settings) {
   const { world, state: state2 } = ctx;
   const slice2 = readSlice(state2);
   const here = placeOfEntity(state2, world.pov);
-  const said2 = words2(`${texts2.user}
+  const said2 = words3(`${texts2.user}
 ${texts2.reply}`);
   const live = [];
   const refreshes = [];
@@ -58344,6 +59240,146 @@ var STARTER_INFO = [
 // src/packs/index.ts
 var ALL_PACKS = [enginePack, core_default, core_default2, core_default3, core_default4, core_default5, core_default6, core_default7, core_default8, core_default9, core_default10, core_default11, core_default12];
 
+// src/engine/action-words.ts
+function spanText(minutes2) {
+  if (minutes2 >= 1440)
+    return `${Math.round(minutes2 / 1440 * 10) / 10} ${minutes2 === 1440 ? "day" : "days"}`;
+  if (minutes2 >= 60)
+    return `${Math.round(minutes2 / 60 * 10) / 10} ${minutes2 === 60 ? "hour" : "hours"}`;
+  return `${minutes2} min`;
+}
+function compactSpan(minutes2) {
+  const total = Math.max(0, Math.round(minutes2));
+  if (total < 60)
+    return `${total} min`;
+  const days = Math.floor(total / 1440);
+  const hours = Math.floor(total % 1440 / 60);
+  const rest = total % 60;
+  if (days > 0)
+    return hours > 0 ? `${days} d ${hours} h` : `${days} d`;
+  return rest > 0 ? `${hours} h ${rest} min` : `${hours} h`;
+}
+var COUNT_PARAM = "qty";
+function paramLabel(action, name, world, registry) {
+  const def = action.params[name];
+  if (def?.label)
+    return def.label;
+  const kind = def?.ref ? world.kinds[def.ref] ?? registry.kinds.get(def.ref) : undefined;
+  if (kind?.label)
+    return kind.label;
+  if (name === COUNT_PARAM)
+    return "How many";
+  const words4 = name.replace(/_/g, " ");
+  return words4.charAt(0).toUpperCase() + words4.slice(1);
+}
+function actionWords(registry, world, state2, action, params, typed = "") {
+  const said2 = typed.toLowerCase();
+  const secrets = unrevealedSecrets(registry, world, state2).filter((s) => !said2.includes(s.toLowerCase()));
+  const nameOf6 = (value) => {
+    if (typeof value !== "string" || value === "")
+      return null;
+    const entity = own(state2.entities, value);
+    if (entity)
+      return povMayKnow(registry, world, state2, value) ? entity.name : null;
+    const place = own(world.places, value);
+    if (place)
+      return canSeePlace(registry, world, state2, world.pov, value) ? place.name : null;
+    return null;
+  };
+  const asTyped = (value) => {
+    if (said2 === "" || hasOwn(state2.entities, value) || hasOwn(world.places, value))
+      return null;
+    const [plainValue = "", typedPlain = ""] = [value, typed].map((s) => s.toLowerCase().replace(/[_~]/g, " "));
+    const wanted = plainValue.trim();
+    const at = wanted === "" ? -1 : typedPlain.indexOf(wanted);
+    if (at < 0)
+      return null;
+    const words4 = typedPlain.length === typed.length ? typed.slice(at, at + wanted.length) : value;
+    return findLeaks(words4, secrets).length === 0 ? words4 : null;
+  };
+  const labelOf2 = (table, value) => {
+    if (table !== undefined)
+      return tableChoices(own(world.tables, table)).find((row) => row.key === value)?.label ?? null;
+    const ctx = registry.context(world, state2);
+    const stat = (optionalQuery(ctx, "sheets.stats")?.(ctx) ?? []).find((s) => s.id === value);
+    if (stat)
+      return stat.label;
+    for (const id of Object.keys(world.tracks)) {
+      const shown3 = playerTrack(registry, world, state2, world.pov, id);
+      if (shown3?.id === value)
+        return shown3.label;
+    }
+    if (hasOwn(state2.entities, value) || hasOwn(world.places, value))
+      return nameOf6(value);
+    return /^\S+$/.test(value) && /[_~]/.test(value) ? null : value;
+  };
+  const count = action.params[COUNT_PARAM]?.type === "number" && typeof params[COUNT_PARAM] === "number" ? params[COUNT_PARAM] : null;
+  const counted = count === null ? undefined : Object.keys(action.params).find((name) => name !== COUNT_PARAM && (action.params[name]?.type === "ref" || action.params[name]?.type === "text"));
+  const parts = [];
+  let counts2 = false;
+  for (const [name, def] of Object.entries(action.params)) {
+    const value = params[name];
+    if (value === undefined || value === null || value === "" || name === COUNT_PARAM && counted !== undefined)
+      continue;
+    let word = null;
+    if (def.type === "ref")
+      word = nameOf6(value) ?? (typeof value === "string" ? asTyped(value) : null);
+    else if (def.type === "list" && def.ref !== undefined) {
+      const names = (Array.isArray(value) ? value : []).map(nameOf6).filter((n) => n !== null);
+      if (names.length > 0)
+        word = `with ${names.join(" and ")}`;
+    } else if (def.type === "money" && typeof value === "number")
+      word = formatMoney(value, world.currency);
+    else if (def.type === "number" && typeof value === "number")
+      word = `${value} ${paramLabel(action, name, world, registry).toLowerCase()}`;
+    else if (def.type === "duration" && typeof value === "number" && value > 0)
+      word = compactSpan(value);
+    else if (typeof value === "string") {
+      const text5 = labelOf2(def.table, value) ?? asTyped(value);
+      if (text5 && findLeaks(text5, secrets).length === 0)
+        word = text5;
+    }
+    if (word === null)
+      continue;
+    if (name === counted && count !== null && count !== 1) {
+      word = def.type === "text" && def.table === undefined && /^[\w\s'-]+$/.test(word) ? `${count} ${plural2(word)}` : `${word} \xD7 ${count}`;
+      counts2 = true;
+    }
+    parts.push(word);
+  }
+  if (count !== null && count !== 1 && counted !== undefined && !counts2)
+    parts.push(`\xD7 ${count}`);
+  return parts.join(", ");
+}
+function plural2(text5) {
+  const of = text5.search(/\s+of\s+/i);
+  const head = of >= 0 ? text5.slice(0, of) : text5;
+  const rest = of >= 0 ? text5.slice(of) : "";
+  const m = /([A-Za-z]+)$/.exec(head);
+  if (!m)
+    return text5;
+  const word = m[1] ?? "";
+  const many = /[^s]s$/i.test(word) ? word : /(?:s|x|z|ch|sh)$/i.test(word) ? `${word}es` : /[^aeiou]y$/i.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`;
+  return `${head.slice(0, head.length - word.length)}${many}${rest}`;
+}
+var TOLD_CHANGES = 6;
+function toldAction(registry, world, state2, res, before) {
+  const label = res.inferred?.label ?? findAction(registry, world, res.action)?.label ?? res.action;
+  const parts = before.picks === "" ? [] : [before.picks];
+  const moved = res.events.findLast((e) => e.type === "set" && e.entity === res.actor && e.field === "place");
+  const from = before.from;
+  const fromPlace = from ? own(world.places, from) : undefined;
+  if (moved && from && fromPlace && moved.type === "set" && moved.value !== from && canSeePlace(registry, world, state2, world.pov, from))
+    parts.push(`from ${fromPlace.name}`);
+  const last = new Map;
+  for (const e of res.events)
+    if (e.type === "set" && e.entity === res.actor)
+      last.set(e.field, e.value);
+  const unchanged = new Set([...last].filter(([field, value]) => JSON.stringify(value) === JSON.stringify(before.fields[field] ?? null)).map(([field]) => field));
+  const events3 = res.events.filter((e) => !(e.type === "set" && e.entity === res.actor && unchanged.has(e.field)));
+  return { what: parts.length > 0 ? `${label} (${parts.join(", ")})` : label, changes: playerLines(registry, world, state2, world.pov, events3, TOLD_CHANGES), minutes: res.duration };
+}
+
 // src/engine/beats.ts
 var MAX_BEATS = 6;
 function storylets(events3) {
@@ -58371,13 +59407,15 @@ function outline(reg, world, state2, input, rng, max = MAX_BEATS) {
   const pov = world.pov;
   const lines = [];
   for (const r of input.resolutions ?? []) {
-    const label = r.inferred?.label ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
+    const what = r.told?.what ?? r.inferred?.label ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
+    const took = r.told && r.told.minutes > 0 ? `, taking ${spanText(r.told.minutes)}` : "";
+    const changed = r.told && r.told.changes.length > 0 ? ` What changed: ${r.told.changes.join("; ")}.` : "";
     if (!r.ok)
-      lines.push(`${label} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
+      lines.push(`${what} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
     else if (r.check || r.adjudged)
-      lines.push(`${label}: the result is decided \u2014 ${r.outcome}.`);
+      lines.push(`${what}: the result is decided \u2014 ${r.outcome}${took}.${changed}`);
     else
-      lines.push(`${label} happens.`);
+      lines.push(`${what} happens${took}.${changed}`);
   }
   const tl = input.timelapse;
   if (tl) {
@@ -58414,23 +59452,29 @@ function outline(reg, world, state2, input, rng, max = MAX_BEATS) {
       const act2 = canSeeField(reg, world, state2, pov, id, "activity") ? e.fields.activity : undefined;
       if (life)
         lines.push(`${e.name} ${life.reads}.`);
-      else if (typeof act2 === "string" && act2 !== "" && act2 !== "idle")
-        lines.push(`${e.name} is ${(shownActivity2 ? shownActivity2(ctx, id, act2) : act2).replace(/_/g, " ")}.`);
+      else if (typeof act2 === "string") {
+        const doing = activityPhrase(shownActivity2 ? shownActivity2(ctx, id, act2) : act2);
+        if (doing)
+          lines.push(`${e.name} is ${doing}.`);
+      }
     }
   }
   const cal = calendarOf(world);
+  const shown3 = optionalQuery(ctx, "castlife.activity");
   for (const s of allSchedules(reg, world)) {
     if (s.target !== "activity" || !scheduleOwners(reg, world, state2, s).includes(pov))
       continue;
     const n = nextStartFor(reg, ctx, s, pov, state2.clock, 1);
     const v = n?.slot.value;
-    if (n && typeof v === "string" && n.at - state2.clock <= 60) {
-      lines.push(`${v.replace(/_/g, " ")} starts at ${formatHHMM(dateAt(cal, n.at).minuteOfDay)}.`);
+    const doing = typeof v === "string" ? activityPhrase(shown3 ? shown3(ctx, pov, v) : v) : null;
+    if (n && doing && n.at > state2.clock && n.at - state2.clock <= SOON) {
+      lines.push(`You are due to be ${doing} from ${formatHHMM(dateAt(cal, n.at + placeOffset(world, n.at, here)).minuteOfDay)} (in ${spanText(n.at - state2.clock)}).`);
       break;
     }
   }
   return [...new Set(lines)].slice(0, max);
 }
+var SOON = 60;
 
 // src/engine/turn.ts
 var TIMELAPSE_ACTION = "timelapse";
@@ -58454,6 +59498,7 @@ function povSpan(w) {
   const until = activitySpanEnd(fields);
   return until !== null && typeof fields?.activity === "string" ? { type: fields.activity, until } : null;
 }
+var ENDS_ON_ARRIVAL = { travel: true };
 function spanOwner(resolutions, pov, span) {
   for (let k = resolutions.length - 1;k >= 0; k--) {
     const a = resolutions[k]?.activity;
@@ -58506,6 +59551,7 @@ function planTurn(input) {
   const from = w.state.clock;
   const intent2 = input.intent;
   const resolutions = [];
+  const played = [];
   let stopped = null;
   let timelapse = null;
   const combat = [];
@@ -58529,11 +59575,14 @@ function planTurn(input) {
       let scene = sceneKey(w.world, w.state);
       let made = null;
       let ruled = mark2;
+      const before = { picks: "", from: placeOfEntity(w.state, w.world.pov), fields: { ...own(w.state.entities, w.world.pov)?.fields } };
       if (step) {
         const claimed = step.claim ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
         if (claimed && step.claim)
           made = { entity: claimed.entity, name: step.claim.name, events: claimed.events };
         const params = claimed && step.claim ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
+        const def = findAction(reg, w.world, step.action);
+        before.picks = def ? actionWords(reg, w.world, w.state, def, params) : "";
         resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
         scene = sceneKey(w.world, w.state);
         const done = w.events.slice(mark2, mark2 + (made?.events ?? 0) + resolution.events.length);
@@ -58552,6 +59601,7 @@ function planTurn(input) {
         }
         resolution = { ...resolution, events: w.events.slice(mark2, end), ...made && made.events > 0 ? { claimed: { entity: made.entity, name: made.name, events: w.events.slice(mark2, ruled) } } : {} };
         resolutions.push(resolution);
+        played.push(before);
       }
       const fighting = fightHoldsClock(w.ctx);
       const elapsed = inFight && fighting || i > 0 && !resolution?.ok ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
@@ -58588,6 +59638,8 @@ function planTurn(input) {
           if (def.scope === "agent" && def.ended && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel)
             met.push(...w.applyAll(def.ended(w.ctx, w.world.pov, span)));
         }
+        if (ENDS_ON_ARRIVAL[span.type] && own(w.state.entities, w.world.pov)?.fields.activity === span.type)
+          met.push(...w.applyAll([{ type: "set", entity: w.world.pov, field: "activity", value: IDLE_OPTION }]));
         const owner = spanOwner(resolutions, w.world.pov, span);
         const starter2 = owner >= 0 ? resolutions[owner] : undefined;
         if (starter2 && met.length > 0) {
@@ -58599,6 +59651,7 @@ function planTurn(input) {
         if (met.length > 0)
           runRulesOnEvents(reg, w, met, { seed: hashParts(seed, "ended") });
       }
+      stepTracks(reg, w, hashParts(seed, "tracks"));
       const left = steps.length - 1 - i;
       const cause = resolution && left > 0 ? queueStop(w, resolution, mark2, scene, speeding) : null;
       if (cause) {
@@ -58615,15 +59668,16 @@ function planTurn(input) {
   const montage = timelapse ? buildMontage(reg, w.world, input.state, w.state, events3, w.state.time.montage) : null;
   if (timelapse && montage)
     timelapse = { ...timelapse, montage };
+  const told = resolutions.map((r, k) => ({ ...r, told: toldAction(reg, w.world, w.state, r, played[k] ?? { picks: "", from: null, fields: {} }) }));
   return {
     events: events3,
     elapsedMinutes: w.state.clock - from,
-    resolutions,
+    resolutions: told,
     stopped,
     timelapse,
     montage,
     chips,
-    outline: outline(reg, w.world, w.state, { resolutions, timelapse, events: w.events }, rng.fork("beats")),
+    outline: outline(reg, w.world, w.state, { resolutions: told, timelapse, events: w.events }, rng.fork("beats")),
     combat
   };
 }
@@ -58915,6 +59969,19 @@ function lintStructure(world, reg) {
   for (const [id, k] of Object.entries(world.kinds)) {
     if (k.extends && !own(world.kinds, k.extends) && !reg.kinds.has(k.extends))
       err(`kinds.${id}.extends`, "refs", `Kind ${id} extends an unknown kind "${k.extends}".`);
+    const pack = reg.kinds.get(id);
+    if (!pack)
+      continue;
+    const packFields = new Map;
+    for (let cur = pack, guard = 0;cur && guard < 32; cur = cur.extends ? reg.kinds.get(cur.extends) : undefined, guard++) {
+      for (const [field, def] of Object.entries(cur.fields))
+        if (!packFields.has(field))
+          packFields.set(field, def);
+    }
+    const kept2 = kindFields(reg, world, id);
+    const lost = [...packFields].filter(([field]) => !hasOwn(kept2, field)).map(([field, def]) => def.label ?? field);
+    if (lost.length > 0)
+      warn(`kinds.${id}`, "kind_shadow", `Kind ${k.label} (${id}) lies over the ${pack.pack ?? "engine"} pack's ${pack.label} but builds on ${k.extends ?? "nothing"} instead of ${pack.extends ?? "nothing"}, so it and every kind built on it lose ${lost.length} of that kind's fields (${lost.slice(0, 6).join(", ")}${lost.length > 6 ? ", \u2026" : ""}): forms show those values as untyped text and the levels that gate them no longer apply. Set its Extends back to ${pack.extends ?? "nothing"}, or give the kind its own id.`);
   }
   for (const [id, f] of Object.entries(isRecord(world.classifications) ? world.classifications : {})) {
     if (f.id !== id)
@@ -59866,6 +60933,9 @@ function putOp(reg, w, entity, into, rng) {
   }
   if (holders.some((r) => r.to === into))
     return reject17("already_inside", `${e.name} is already in ${container.name}`);
+  const cannot = optionalQuery(w.ctx, "gear.hold_problem")?.(w.ctx, entity, into) ?? null;
+  if (cannot)
+    return reject17("cant_hold", cannot);
   if (typeof e.fields.place === "string")
     specs.push({ type: "set", args: { entity, field: "place", value: null } });
   specs.push({ type: "link", args: { rel: "in", from: entity, to: into } });
@@ -60032,7 +61102,7 @@ function applyOp(reg, w, op, opts, rng) {
     case "adjust":
       return adjustOp(reg, w, op.account, op.cents, rng);
     case "stage":
-      return run(reg, w, [{ type: "stage", args: { track: op.track, to: op.to } }], rng);
+      return moveTrack(reg, w, op.track, op.to, hashParts("lre.edit.stage", opts.runSeed, op.track, op.to));
     case "entity":
       return entityOp(w, op);
     case "classify":
@@ -60389,12 +61459,6 @@ var HOST_LIMITS = {
     noneMs: 0,
     source: "src/spindle/worker-host-process-api.ts:769 (the clamp), 273-286 (the watchdog; 0 checks nothing)",
     effect: "Lumiverse terminates the process (\u201CBackend process heartbeat timed out\u201D); its job fails."
-  },
-  sharedRpc: {
-    what: "Another extension's read of LumiRPEngine's shared endpoint (LumiRPEngine Studio)",
-    maxMs: 1e4,
-    source: "src/spindle/worker-host.ts:971, 1715-1719",
-    effect: "The reader's request fails as timed out."
   },
   socketIdle: {
     what: "An idle event socket (the command line and MCP server)",
@@ -61921,7 +62985,8 @@ var STEP_LABEL2 = {
   contradiction: "Checking the reply\u2026",
   choices: "Writing choices\u2026",
   memory: "Updating memory\u2026",
-  consolidate: "Updating memory\u2026"
+  consolidate: "Updating memory\u2026",
+  minds: "Updating the characters' memories\u2026"
 };
 function callLabel(purpose, count) {
   if (purpose === "mind")
@@ -61954,12 +63019,12 @@ function suggestFix(reason2, call) {
 // src/backend/diagnostics.ts
 var FORMAT = 1;
 var STATUSES = ["ok", "skipped", "failed"];
-var LEVELS = ["debug", "info", "warn", "error"];
+var LEVELS2 = ["debug", "info", "warn", "error"];
 var KINDS = ["step", "error", "sections", "slow", "turn"];
 function isDiagRecord(raw) {
   if (!isRecord(raw))
     return false;
-  return typeof raw.seq === "number" && KINDS.some((k) => k === raw.kind) && LEVELS.some((l) => l === raw.level) && STATUSES.some((s) => s === raw.status) && (raw.turn === null || typeof raw.turn === "string") && (raw.phase === null || DIAG_PHASES.some((p) => p === raw.phase)) && typeof raw.step === "string" && typeof raw.start === "number" && typeof raw.end === "number" && typeof raw.ms === "number";
+  return typeof raw.seq === "number" && KINDS.some((k) => k === raw.kind) && LEVELS2.some((l) => l === raw.level) && STATUSES.some((s) => s === raw.status) && (raw.turn === null || typeof raw.turn === "string") && (raw.phase === null || DIAG_PHASES.some((p) => p === raw.phase)) && typeof raw.step === "string" && typeof raw.start === "number" && typeof raw.end === "number" && typeof raw.ms === "number";
 }
 function messageOf(error) {
   return error instanceof Error ? error.message : String(error);
@@ -62087,8 +63152,8 @@ class Diagnostics {
       this.activities.delete(at.chatId);
     this.send(at.chatId, at.userId);
   }
-  async step(at, phase, step, fn, judge) {
-    const open = { at, phase, step, start: this.now(), calls: [], label: STEP_LABEL2[step] ?? STEP_LABEL2[phase] ?? "Working\u2026" };
+  async step(at, phase, step, fn, judge, purposes) {
+    const open = { at, phase, step, start: this.now(), calls: [], label: STEP_LABEL2[step] ?? STEP_LABEL2[phase] ?? "Working\u2026", ...purposes ? { purposes: new Set(purposes) } : {} };
     const stack = this.open.get(at.userId) ?? [];
     stack.push(open);
     this.open.set(at.userId, stack);
@@ -62152,7 +63217,8 @@ class Diagnostics {
       list.splice(i, 1);
     if (list?.length === 0)
       this.inflight.delete(userId);
-    const open = this.open.get(userId)?.at(-1);
+    const stack = this.open.get(userId) ?? [];
+    const open = stack.findLast((s) => s.purposes?.has(call.purpose) === true) ?? stack.findLast((s) => s.purposes === undefined);
     if (open) {
       open.calls.push(call);
       this.publishUser(userId);
@@ -62362,7 +63428,7 @@ function toChain(messages, damaged) {
   return messages.map((m) => ({ id: m.id, isUser: m.isUser, swipeId: m.swipeId, swipes: [...m.swipes], ledger: decodeLedger(m.metadata, damaged && ((swipe) => damaged(m.id, swipe))) }));
 }
 var REASSERTS_PER_LEDGER = 3;
-var OPEN_CHATS_CAP = 128;
+var OPEN_CHATS_CAP = 16;
 var SNAPSHOTS_PER_CHAT = 6;
 function snapshotsPath(chatId) {
   return `${runDir(chatId)}snapshots.json`;
@@ -62589,9 +63655,13 @@ class LedgerService {
       this.onMessage(e.chatId, userId, e.message.id, "sent");
     }), h.on("MESSAGE_EDITED", (e, userId) => {
       this.mirror(e.chatId, e.message);
+      if (this.lateReply(e.chatId, userId, e.message))
+        return;
       this.onMessage(e.chatId, userId, e.message.id, "edited");
     }), h.on("MESSAGE_SWIPED", (e, userId) => {
       this.mirror(e.chatId, e.message);
+      if (e.action === "updated" && e.swipeId === e.message.swipeId && this.lateReply(e.chatId, userId, e.message))
+        return;
       this.onSwiped(e.chatId, userId, e.message.id, e.action, e.swipeId);
     }), h.on("MESSAGE_DELETED", (e, userId) => {
       this.unmirror(e.chatId, e.messageId);
@@ -62612,6 +63682,7 @@ class LedgerService {
       this.release(e.chatId, e.generationId);
     }), h.on("GENERATION_ENDED", (e, userId) => {
       this.generationOver(e.chatId, e.generationId);
+      const failed = this.afterReply(e.chatId, e.generationId, e);
       const at = userId ? { chatId: e.chatId, userId, turn: e.generationId } : null;
       const halt = this.haltOf(e.chatId, e.generationId);
       if (halt && userId)
@@ -62625,39 +63696,17 @@ class LedgerService {
             this.diag?.end(at, { status: "failed", reason: `the reply's generation failed: ${e.error.slice(0, 300)}` });
           return;
         }
-        const p = core.journal.pending[e.generationId];
-        const swipeId = p?.swipeId ?? observed.find((m) => m.id === e.messageId)?.swipeId ?? 0;
-        const flight = this.flight(e.chatId);
-        const turn = p && e.messageId && userId ? { chatId: e.chatId, userId, core, observed, generationId: e.generationId, messageId: e.messageId, swipeId, kind: p.kind, signal: flight.signal } : null;
-        const diag = at && turn ? this.diag : null;
-        if (at && diag)
-          diag.begin(at, STEP_LABEL2.read);
-        try {
-          if (this.hooks && turn && p && p.kind !== "impersonate") {
-            const hooks = this.hooks;
-            const text5 = p.kind === "continue" ? p.captured && e.content.length >= p.captured.len ? e.content.slice(p.captured.len) : "" : e.content;
-            if (text5 !== "")
-              await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text5 })) : hooks.beforeCommit({ ...turn, content: text5 }));
-            else if (at && diag)
-              diag.skipped(at, "read", "read", "the reply had no new text to read");
-          }
-          if (flight.signal.aborted)
-            core.stopped({ generationId: e.generationId, content: e.content }, observed);
-          else {
-            core.ended({ generationId: e.generationId, ...e.messageId ? { messageId: e.messageId } : {}, content: e.content }, observed);
-            if (this.hooks && turn) {
-              const hooks = this.hooks;
-              await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: e.content })) : hooks.afterCommit({ ...turn, content: e.content }));
-            }
-          }
-        } finally {
-          this.landed(e.chatId, flight);
+        if (failed === "empty") {
+          core.stopped({ generationId: e.generationId, content: "" }, observed);
+          if (at)
+            this.diag?.end(at, { status: "failed", reason: "the narrator returned an empty reply" });
+          return;
         }
-        if (at && diag)
-          diag.end(at, flight.signal.aborted ? { status: "skipped", reason: "you cancelled reading the reply; Retry read reads it again" } : undefined);
+        await this.commitReply(core, observed, e.chatId, userId, e.generationId, e.messageId, e.content);
       });
     }), h.on("GENERATION_STOPPED", (e, userId) => {
       this.generationOver(e.chatId, e.generationId);
+      this.afterReply(e.chatId, e.generationId, null);
       const halt = this.haltOf(e.chatId, e.generationId);
       if (userId && !halt)
         this.diag?.end({ chatId: e.chatId, userId, turn: e.generationId }, { status: "skipped", reason: "the reply was stopped" });
@@ -62749,8 +63798,98 @@ class LedgerService {
     if (!gate || !p || changed === null)
       return;
     gate.prepared = null;
-    this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
+    if (p.kept === null)
+      this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
+    else
+      this.hooks?.changed(chatId, gate.userId);
     this.drop(chatId, gate.userId, p);
+  }
+  afterReply(chatId, generationId, ended) {
+    const gate = this.gates.get(chatId);
+    const p = gate?.taken;
+    if (!gate || !p || p.generationId !== generationId)
+      return null;
+    gate.taken = null;
+    const failed = !ended ? null : ended.error ? "error" : p.type !== "continue" && ended.content.trim() === "" ? "empty" : null;
+    if (failed === null || gate.prepared !== null || gate.halt !== null)
+      return failed;
+    const started = this.started.get(chatId);
+    const message = started?.generationId === generationId ? started.targetMessageId : null;
+    const left = p.type === "normal" && message !== null && gate.mirror?.some((m) => m.id === message) === true;
+    gate.prepared = { ...p, id: generationId, generationId: null, writing: null, holder: null, kept: failed, ...left ? { type: "regenerate", target: message } : {} };
+    this.dropIfStale(chatId);
+    return failed;
+  }
+  lateReply(chatId, userId, message) {
+    const gate = this.gates.get(chatId);
+    const p = gate?.prepared;
+    const text5 = message.swipes[message.swipeId] ?? message.content;
+    if (!gate || !p || !userId || gate.userId !== userId || p.kept !== "empty" || p.generationId !== null || p.target !== message.id || message.isUser || text5.trim() === "")
+      return false;
+    if (gate.mirror?.at(-1)?.id !== message.id || this.changedSince(chatId, gate, p) !== null)
+      return false;
+    const generationId = `late-${crypto.randomUUID()}`;
+    p.generationId = generationId;
+    gate.prepared = null;
+    const at = { chatId, userId, turn: generationId };
+    this.run(chatId, userId, async (core, observed) => {
+      const saved = observed.find((m) => m.id === message.id);
+      this.diag?.begin(at, STEP_LABEL2.read);
+      core.started({ generationId, kind: p.turn?.kind ?? KIND[p.type], targetMessageId: message.id, targetSwipeId: saved?.swipeId ?? message.swipeId }, observed);
+      if (p.turn && !core.adopt(generationId, p.turn))
+        this.diag?.failed(at, "plan", "plan", "the reply's text couldn't take the prepared plan, so this turn commits without it");
+      core.saved(generationId);
+      core.sync(observed);
+      await this.hooks?.adopted(chatId, userId, p.id, generationId);
+      await this.commitReply(core, observed, chatId, userId, generationId, message.id, saved ? saved.swipes[saved.swipeId] ?? text5 : text5);
+    });
+    return true;
+  }
+  async commitReply(core, observed, chatId, userId, generationId, messageId, content) {
+    const at = userId ? { chatId, userId, turn: generationId } : null;
+    const p = core.journal.pending[generationId];
+    const swipeId = p?.swipeId ?? observed.find((m) => m.id === messageId)?.swipeId ?? 0;
+    const flight = this.flight(chatId);
+    const turn = p && messageId && userId ? { chatId, userId, core, observed, generationId, messageId, swipeId, kind: p.kind, signal: flight.signal } : null;
+    const diag = at && turn ? this.diag : null;
+    if (at && diag)
+      diag.begin(at, STEP_LABEL2.read);
+    try {
+      if (this.hooks && turn && p && p.kind !== "impersonate") {
+        const hooks = this.hooks;
+        const text5 = p.kind === "continue" ? p.captured && content.length >= p.captured.len ? content.slice(p.captured.len) : "" : content;
+        if (text5 !== "")
+          await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text5 })) : hooks.beforeCommit({ ...turn, content: text5 }));
+        else if (at && diag)
+          diag.skipped(at, "read", "read", "the reply had no new text to read");
+      }
+      if (flight.signal.aborted)
+        core.stopped({ generationId, content }, observed);
+      else {
+        core.ended({ generationId, ...messageId ? { messageId } : {}, content }, observed);
+        if (this.hooks && turn) {
+          const hooks = this.hooks;
+          await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content })) : hooks.afterCommit({ ...turn, content }));
+        }
+      }
+    } finally {
+      this.landed(chatId, flight);
+    }
+    if (at && diag)
+      diag.end(at, flight.signal.aborted ? { status: "skipped", reason: "you cancelled reading the reply; Retry read reads it again" } : undefined);
+  }
+  keptOf(chatId) {
+    const p = this.gates.get(chatId)?.prepared;
+    return p && p.kept !== null && p.generationId === null ? { turn: p.id, failed: p.kept } : null;
+  }
+  discardKept(chatId, turn) {
+    const gate = this.gates.get(chatId);
+    const p = gate?.prepared;
+    if (!gate || !p || p.kept === null || p.generationId !== null || turn !== undefined && p.id !== turn)
+      return false;
+    gate.prepared = null;
+    this.drop(chatId, gate.userId, p);
+    return true;
   }
   notStarted(chatId, userId, p, why) {
     const at = { chatId, userId, turn: p.id };
@@ -62798,7 +63937,7 @@ class LedgerService {
   askAgain(chatId, userId, session) {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
-    if (!gate || gate.userId !== userId || !p || p.generationId !== null)
+    if (!gate || gate.userId !== userId || !p || p.generationId !== null || p.kept !== null)
       return;
     if (session === undefined || !this.host.capabilities.sessions) {
       this.host.frontend.send(restartPush(chatId, p), userId);
@@ -62815,7 +63954,7 @@ class LedgerService {
   claimRestart(chatId, userId, session, turn) {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
-    if (!gate || gate.userId !== userId || !p || p.id !== turn || p.generationId !== null)
+    if (!gate || gate.userId !== userId || !p || p.id !== turn || p.generationId !== null || p.kept !== null)
       return false;
     return !this.host.capabilities.sessions || session === undefined || p.holder === session;
   }
@@ -62840,12 +63979,12 @@ class LedgerService {
     const raced = this.gates.get(chatId);
     if (raced)
       return raced.userId === userId ? raced : null;
-    const gate = { userId, worldId, mirror: null, epoch: 0, halt: null, prepared: null };
+    const gate = { userId, worldId, mirror: null, epoch: 0, halt: null, prepared: null, taken: null };
     this.gates.set(chatId, gate);
     for (const [id, g] of this.gates) {
       if (this.gates.size <= OPEN_CHATS_CAP * 8)
         break;
-      if (id !== chatId && !g.prepared && !g.halt)
+      if (id !== chatId && !g.prepared && !g.halt && !g.taken)
         this.gates.delete(id);
     }
     return gate;
@@ -62895,10 +64034,13 @@ class LedgerService {
   }
   adopt(chatId, userId, p, generationId) {
     return this.run(chatId, userId, async (core) => {
+      if (p.kept !== null)
+        this.diag?.begin({ chatId, userId, turn: generationId }, STEP_LABEL2.reply ?? "Waiting for the reply\u2026");
       if (p.turn && !core.adopt(generationId, p.turn))
-        this.diag?.failed({ chatId, userId, turn: p.id }, "plan", "plan", "the reply's generation couldn't take the prepared plan, so this turn commits without it");
+        this.diag?.failed({ chatId, userId, turn: p.kept === null ? p.id : generationId }, "plan", "plan", "the reply's generation couldn't take the prepared plan, so this turn commits without it");
       await this.hooks?.adopted(chatId, userId, p.id, generationId);
-      this.diag?.rename(chatId, p.id, generationId);
+      if (p.kept === null)
+        this.diag?.rename(chatId, p.id, generationId);
       this.diag?.rest({ chatId, userId }, STEP_LABEL2.reply ?? "Waiting for the reply\u2026");
     });
   }
@@ -62915,6 +64057,7 @@ class LedgerService {
     if (!gate || !p || p.generationId !== generationId)
       return;
     gate.prepared = null;
+    gate.taken = p;
     this.drop(chatId, gate.userId, p);
   }
   giveBack(generationId) {
@@ -63086,7 +64229,7 @@ class LedgerService {
       const as = restartAs(halt.type, observed);
       const viewer = this.viewerOf(chatId, userId);
       const holder = halt.session !== undefined && (this.reports(halt.session, chatId) || viewer === null && this.shows(halt.session, chatId)) ? halt.session : viewer;
-      const prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, writing: null, as, holder, generationId: null };
+      const prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, writing: null, as, holder, generationId: null, kept: null };
       gate.prepared = prepared;
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared)
@@ -63285,7 +64428,8 @@ class LedgerService {
       for (const [id, s] of this.chats) {
         if (this.chats.size <= OPEN_CHATS_CAP)
           break;
-        if (id !== chatId && s.ops === 0 && !s.core.inFlight)
+        const gate = this.gates.get(id);
+        if (id !== chatId && s.ops === 0 && !s.core.inFlight && !gate?.prepared && !gate?.halt)
           this.chats.delete(id);
       }
       return slot;
@@ -63389,7 +64533,7 @@ var PROPOSALS_PER_CALL = 15;
 var PROPOSALS_MAX = 120;
 var PROPOSAL_MAX_TOKENS = 16384;
 var COLLECTIONS2 = { entities: "entities", places: "places", routes: "routes" };
-var TRAVEL_MODES = ["walk", "road", "offroad", "water"];
+var TRAVEL_MODES2 = ["walk", "road", "offroad", "water"];
 var PROPOSAL_STRICT_RULES = [
   "Propose only what the text states. Never invent numbers, prices, balances, distances or times; leave a field out instead.",
   "Use only the kinds and fields listed below; any other field is dropped.",
@@ -63400,7 +64544,9 @@ var PROPOSAL_STRICT_RULES = [
 ].join(`
 - `);
 function kindOf(world, registry, id) {
-  return (hasOwn(world.kinds, id) ? world.kinds[id] : undefined) ?? registry.kinds.get(id);
+  const mine = hasOwn(world.kinds, id) ? world.kinds[id] : undefined;
+  const pack = registry.kinds.get(id);
+  return mine && pack ? overlayKind(pack, mine) : mine ?? pack;
 }
 function fieldsOf2(world, registry, kindId) {
   const chain = [];
@@ -63479,27 +64625,30 @@ ${e.content.slice(0, ENTRY_MAX_CHARS)}`).join(`
 
 `);
 }
-function words3(text5) {
+function words4(text5) {
   return text5.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3).map((w) => w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
 }
-function matchRow(table, text5) {
-  const wanted = new Set(words3(text5));
+function matchRowIn(tables, text5) {
+  const wanted = new Set(words4(text5));
   if (wanted.size === 0)
     return null;
   let best = null;
   let score = 0;
-  for (const id of Object.keys(table.rows).sort()) {
-    const row = table.rows[id] ?? {};
-    const label = [row.title, row.name, row.label].find((v) => typeof v === "string") ?? "";
-    const have = new Set([...words3(id.replace(/_/g, " ")), ...words3(label)]);
-    const shared = [...wanted].filter((w) => have.has(w)).length;
-    if (shared > score) {
-      best = id;
-      score = shared;
+  for (const table of tables) {
+    for (const id of Object.keys(table.rows).sort()) {
+      const row = table.rows[id] ?? {};
+      const label = [row.title, row.name, row.label].find((v) => typeof v === "string") ?? "";
+      const have = new Set([...words4(id.replace(/_/g, " ")), ...words4(label)]);
+      const shared = [...wanted].filter((w) => have.has(w)).length;
+      if (shared > score) {
+        best = id;
+        score = shared;
+      }
     }
   }
   return best;
 }
+var THING_TABLES = ["gear.items", "gear.containers", "gear.kits"];
 function readProposals(raw, source) {
   const list = isProposalReply(raw) ? raw.proposals.slice(0, PROPOSALS_PER_CALL) : [];
   const out = [];
@@ -63649,10 +64798,11 @@ function checkProposals(world, registry, raw, mode, sources, drops = new Map) {
         const table = def.table && hasOwn(world.tables, def.table) ? world.tables[def.table] : undefined;
         if (!table || def.type !== "text" || def.derived)
           continue;
+        const from = def.table === "economy.catalog" ? [...THING_TABLES.flatMap((t) => hasOwn(world.tables, t) && world.tables[t] ? [world.tables[t]] : []), table] : [table];
         const given = fields[f];
-        if (typeof given === "string" && hasOwn(table.rows, given))
+        if (typeof given === "string" && from.some((t) => hasOwn(t.rows, given)))
           continue;
-        const row = matchRow(table, typeof given === "string" && given.trim() !== "" ? given : name);
+        const row = matchRowIn(from, typeof given === "string" && given.trim() !== "" ? given : name);
         if (!row) {
           if (given !== undefined)
             notes.push(`${f} "${String(given)}" matches no ${table.label} row`);
@@ -63691,7 +64841,7 @@ function checkProposals(world, registry, raw, mode, sources, drops = new Map) {
       }
       const modes = {};
       const rawModes = isRecord(v.modes) ? v.modes : {};
-      for (const m of TRAVEL_MODES) {
+      for (const m of TRAVEL_MODES2) {
         const leg = rawModes[m];
         if (isRecord(leg) && typeof leg.minutes === "number" && leg.minutes > 0)
           modes[m] = { minutes: Math.round(leg.minutes), ...typeof leg.distanceKm === "number" ? { distanceKm: leg.distanceKm } : {} };
@@ -64126,20 +65276,31 @@ class PresetBinding {
 
 // src/backend/book.ts
 var DEFAULT_SECTIONS = {
-  outcome: { id: "outcome", label: "Outcome", rank: 0, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  montage: { id: "montage", label: "Montage", rank: 1, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  scene: { id: "scene", label: "Scene", rank: 2, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  people: { id: "people", label: "People", rank: 3, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  money: { id: "money", label: "Money", rank: 4, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  gear: { id: "gear", label: "Gear", rank: 5, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  quest: { id: "quest", label: "Quest", rank: 7, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
-  outline: { id: "outline", label: "Outline", rank: 8, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  outcome: { id: "outcome", label: "Outcome", rank: 0, template: `What the player character's actions did this turn, in the order they played, as the engine settled them. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences ("you" is the player character). These have already happened, and their results, rolls and amounts are final: narrate exactly them, never as still to come, and never change, soften or reroll them.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  montage: { id: "montage", label: "Montage", rank: 1, template: `What happened while time passed, in order, as the engine played it out. Narrate the interval as a summary of these lines, keeping their facts and their order; add no events.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  scene: { id: "scene", label: "Scene", rank: 2, template: `Where the player character is now, when, and what they can perceive there. Describe the scene from these facts and never contradict them.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  people: { id: "people", label: "People", rank: 3, template: `The people with the player character, as the player character knows them, and what each is doing. Only these people are here; call them by these names.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  money: { id: "money", label: "Money", rank: 4, template: `The player character's money as it stands now. Use these amounts; never invent a price, a balance or a payment.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  gear: { id: "gear", label: "Gear", rank: 5, template: `What the player character carries, wears and has to hand. Only these things are at hand; invent no others.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: `The player character's vehicles, where they are and their state. Use these facts whenever a vehicle comes up.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  quest: { id: "quest", label: "Quest", rank: 7, template: `The player character's quests and goals, as far as they know them. Let the reply follow from these; never reveal a step they haven't reached.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  outline: { id: "outline", label: "Outline", rank: 8, template: `The turn as the engine planned it, beat by beat. Write the reply from these beats in this order and cover each one; what a beat leaves open is yours to describe, never to decide. Add no events of your own.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
   stance: { id: "stance", label: "Stance", rank: 9, template: `The narrator knows only what the player character knows. These lines say how the people here behave; never state what a cue only hints at.
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: MINDS_SECTION_TEMPLATE, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  place: { id: "place", label: "Place", rank: 11, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  property: { id: "property", label: "Property", rank: 12, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } }
+  place: { id: "place", label: "Place", rank: 11, template: `The place the player character is in: what it is like, what is here and where it leads. Describe it from these lines.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  property: { id: "property", label: "Property", rank: 12, template: `Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says "yours"; otherwise they only use, keep or benefit from it. Use these facts whenever it comes up.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } }
 };
 function sectionsOf(world) {
   const own2 = Object.values(world.sections);
@@ -65938,8 +67099,8 @@ function bookEntryTitle(e) {
   const comment = e.comment.replace(/\s+/g, " ").trim();
   if (comment !== "")
     return comment;
-  const words4 = e.content.replace(/\s+/g, " ").trim().split(" ").filter((w) => w !== "");
-  return words4.length === 0 ? "Untitled entry" : words4.length > TITLE_WORDS ? `${words4.slice(0, TITLE_WORDS).join(" ")}\u2026` : words4.join(" ");
+  const words5 = e.content.replace(/\s+/g, " ").trim().split(" ").filter((w) => w !== "");
+  return words5.length === 0 ? "Untitled entry" : words5.length > TITLE_WORDS ? `${words5.slice(0, TITLE_WORDS).join(" ")}\u2026` : words5.join(" ");
 }
 function bookLoreId(bookId, entryId) {
   return `book:${bookId}/${entryId}`;
@@ -66472,7 +67633,7 @@ for (const s of SAVES2)
 var MODERN = {
   id: "modern",
   label: "Modern",
-  summary: "Present-day adventure on a d20: six abilities, a Defense score, a modern skill list with ranks, points to spend pushing a skill, HP, and levels from XP.",
+  summary: "Present-day adventure on a d20: six abilities, a Defense score, a modern skill list with ranks, points to spend pushing a skill that a night's rest refills, HP, and levels from XP.",
   fields: {
     ...abilityFields(),
     ...levelFields(20),
@@ -66510,7 +67671,7 @@ var MODERN = {
     save_check: saveAction("modern.saves"),
     attack: attackAction("roll(self.damage) + self.str_mod", "roll(self.damage) + roll(self.damage) + self.str_mod"),
     total_defense: stanceAction("total_defense", "Total defense", "defend"),
-    long_rest: restAction("Rest for the night")
+    long_rest: restAction("Rest for the night", [{ type: "recover", args: { entity: "self", field: "action_points", full: true } }])
   },
   tables: {
     "modern.levels": profileTable("modern.levels", "Modern levels", { xp: { type: "int", doc: "XP the level needs" }, attack: { type: "int", doc: "Base attack bonus" }, defense: { type: "int", doc: "Defense bonus" }, save: { type: "int", doc: "Base save bonus" } }, levelRows((level) => ({ xp: triangularXp(level), attack: Math.floor(level * 3 / 4), defense: 1 + Math.floor(level / 2), save: 1 + Math.floor(level / 3) }))),
@@ -66526,7 +67687,7 @@ var MODERN = {
         {
           id: "vitals",
           label: "Vitals",
-          rows: [{ pool: "hp" }, { pool: "action_points" }, { progression: "level" }, { formula: "self.defense", label: "Defense" }, { formula: signed("self.attack_bonus"), label: "Attack" }, { formula: signed("self.dex_mod"), label: "Initiative" }, { field: "reputation" }]
+          rows: [{ pool: "hp" }, { pool: "action_points", label: "Action Points (a night's rest or a new level refills them)" }, { progression: "level" }, { formula: "self.defense", label: "Defense" }, { formula: signed("self.attack_bonus"), label: "Attack" }, { formula: signed("self.dex_mod"), label: "Initiative" }, { field: "reputation" }]
         },
         { id: "abilities", label: "Abilities", rows: abilityRows() },
         { id: "saves", label: "Saves", rows: SAVES2.map((s) => ({ formula: signed(`self.${s.id}`), label: s.label })) },
@@ -66571,7 +67732,7 @@ function upChain(world, packKinds, kind, visit2) {
   }
   return;
 }
-function words4(id) {
+function words5(id) {
   const text5 = id.replace(/[._]/g, " ");
   return text5.charAt(0).toUpperCase() + text5.slice(1);
 }
@@ -66589,7 +67750,7 @@ function slotsOf(world, profile, packKinds) {
   const kindId = pov?.kind ?? "person";
   const ownKind = hasOwn(world.kinds, kindId) ? world.kinds[kindId] : undefined;
   const packKind = hasOwn(packKinds, kindId) ? packKinds[kindId] : undefined;
-  const label = ownKind?.label ?? packKind?.label ?? words4(kindId);
+  const label = ownKind?.label ?? packKind?.label ?? words5(kindId);
   const kindIn = (doc) => {
     const existing = hasOwn(doc.kinds, kindId) ? doc.kinds[kindId] : undefined;
     if (existing)
@@ -66600,10 +67761,10 @@ function slotsOf(world, profile, packKinds) {
   };
   const slots = [];
   for (const [id, def] of Object.entries(profile.fields)) {
-    slots.push({ path: `kinds.${kindId}.fields.${id}`, group: "fields", label: def.label ?? words4(id), mine: upChain(world, packKinds, kindId, (_k, k) => hasOwn(k.fields, id) ? k.fields[id] : undefined), theirs: def, field: { id, def }, write: (doc) => void (kindIn(doc).fields[id] = structuredClone(def)) });
+    slots.push({ path: `kinds.${kindId}.fields.${id}`, group: "fields", label: def.label ?? words5(id), mine: upChain(world, packKinds, kindId, (_k, k) => hasOwn(k.fields, id) ? k.fields[id] : undefined), theirs: def, field: { id, def }, write: (doc) => void (kindIn(doc).fields[id] = structuredClone(def)) });
   }
   for (const [id, def] of Object.entries(profile.checks)) {
-    slots.push({ path: `checks.${id}`, group: "checks", label: words4(id), mine: hasOwn(world.checks, id) ? world.checks[id] : undefined, theirs: def, write: (doc) => void (doc.checks[id] = structuredClone(def)) });
+    slots.push({ path: `checks.${id}`, group: "checks", label: words5(id), mine: hasOwn(world.checks, id) ? world.checks[id] : undefined, theirs: def, write: (doc) => void (doc.checks[id] = structuredClone(def)) });
   }
   for (const [id, def] of Object.entries(profile.actions)) {
     slots.push({ path: `actions.${id}`, group: "actions", label: def.label, mine: hasOwn(world.actions, id) ? world.actions[id] : undefined, theirs: def, write: (doc) => void (doc.actions[id] = structuredClone(def)) });
@@ -66632,7 +67793,7 @@ function slotsOf(world, profile, packKinds) {
     slots.push({
       path: `ruleset.minLevels.${domain}`,
       group: "ruleset",
-      label: `Level floor: ${words4(domain)} ${String(level)}`,
+      label: `Level floor: ${words5(domain)} ${String(level)}`,
       mine: floors && hasOwn(floors, domain) ? floors[domain] : undefined,
       theirs: level,
       write: (doc) => {
@@ -66641,7 +67802,7 @@ function slotsOf(world, profile, packKinds) {
       }
     });
   }
-  slots.push({ path: "ruleset.adjudication", group: "ruleset", label: `How checks are decided: ${words4(rs.adjudication.preset)}`, mine: rulesetPart(world, "adjudication"), theirs: rs.adjudication, write: (doc) => void (rulesetIn(doc).adjudication = structuredClone(rs.adjudication)) });
+  slots.push({ path: "ruleset.adjudication", group: "ruleset", label: `How checks are decided: ${words5(rs.adjudication.preset)}`, mine: rulesetPart(world, "adjudication"), theirs: rs.adjudication, write: (doc) => void (rulesetIn(doc).adjudication = structuredClone(rs.adjudication)) });
   slots.push({ path: "ruleset.combat", group: "ruleset", label: "Combat rules", mine: rulesetPart(world, "combat"), theirs: rs.combat, write: (doc) => void (rulesetIn(doc).combat = structuredClone(rs.combat)) });
   return { kind: { id: kindId, label, copied: !ownKind }, slots };
 }
@@ -66671,7 +67832,7 @@ function fitted(def, v) {
       return typeof v === "string" ? undefined : null;
   }
 }
-function planOf2(world, profile, packKinds, choices) {
+function planOf3(world, profile, packKinds, choices) {
   const { kind, slots } = slotsOf(world, profile, packKinds);
   const items = slots.map((slot) => ({ path: slot.path, group: slot.group, label: slot.label, status: statusOf2(slot) }));
   const write = slots.filter((slot, i) => {
@@ -66704,7 +67865,7 @@ function planOf2(world, profile, packKinds, choices) {
   return { plan: { profile: profile.id, kind, items, people, values }, write };
 }
 function applyProfile(world, profile, packKinds, choices = {}) {
-  const { plan: plan2, write } = planOf2(world, profile, packKinds, choices);
+  const { plan: plan2, write } = planOf3(world, profile, packKinds, choices);
   const doc = structuredClone(world);
   for (const slot of write)
     slot.write(doc);
@@ -66722,7 +67883,7 @@ function applyProfile(world, profile, packKinds, choices = {}) {
 }
 
 // src/backend/worlds.ts
-var HEAD_SOURCES = { create: true, build: true, agent: true, import: true, studio: true };
+var HEAD_SOURCES = { create: true, build: true, agent: true, import: true };
 var PATCH_OPS_CAP = 500;
 var PATCH_SIZE_CAP = 4 * 1024 * 1024;
 var DOC_DEPTH_CAP = 64;
@@ -66771,13 +67932,12 @@ var WORLD_COLLECTIONS = {
   classifications: true,
   routines: true
 };
-var REVISION_CACHE_CAP = 128;
+var REVISION_CACHE_CAP = 8;
 
 class WorldStore {
   host;
   registry;
   revisions = new Map;
-  onChange = null;
   writes = new Map;
   constructor(host, registry) {
     this.host = host;
@@ -66810,25 +67970,37 @@ class WorldStore {
   static key(userId, worldId, revision) {
     return `${userId}\x00${worldId}\x00${revision}`;
   }
+  alive = new Map;
+  gone = new FinalizationRegistry((key) => {
+    if (this.alive.get(key)?.deref() === undefined)
+      this.alive.delete(key);
+  });
   remember(key, doc) {
     if (this.revisions.has(key))
       return;
     this.revisions.set(key, doc);
     while (this.revisions.size > REVISION_CACHE_CAP) {
-      const oldest = this.revisions.keys().next();
+      const oldest = this.revisions.entries().next();
       if (oldest.done)
         break;
-      this.revisions.delete(oldest.value);
+      const [evicted, held3] = oldest.value;
+      this.revisions.delete(evicted);
+      this.alive.set(evicted, new WeakRef(held3));
+      this.gone.register(held3, evicted);
     }
   }
   cached(userId, worldId, revision) {
     const key = WorldStore.key(userId, worldId, revision);
-    const doc = this.revisions.get(key);
+    const doc = this.revisions.get(key) ?? this.alive.get(key)?.deref();
     if (doc) {
       this.revisions.delete(key);
-      this.revisions.set(key, doc);
+      this.alive.delete(key);
+      this.remember(key, doc);
     }
     return doc;
+  }
+  loaded() {
+    return { kept: this.revisions.size, held: [...this.alive.values()].filter((ref) => ref.deref() !== undefined).length };
   }
   async index(worldId, userId) {
     const raw = await this.readJson(`${worldDir(worldId)}index.json`, userId);
@@ -66910,7 +68082,6 @@ class WorldStore {
       const note = { revision: rev, at: Date.now(), source: made.source, ...made.note !== undefined ? { note: made.note } : {} };
       await this.writeJson(`${worldDir(doc.id)}history.json`, { v: 1, notes: [...await this.history(doc.id, userId), note] }, userId);
     }
-    await this.onChange?.(doc.id, userId);
     return { revision: rev, lint: issues, count, moved };
   }
   async create(name, template, userId, source = "create") {
@@ -66931,7 +68102,6 @@ class WorldStore {
     await this.serial(userId, worldId, async () => {
       for (const path of await this.host.storage.list(worldDir(worldId), userId))
         await this.host.storage.remove(path, userId);
-      await this.onChange?.(worldId, userId);
     });
   }
   async storedDraft(index, userId) {
@@ -67186,24 +68356,6 @@ class WorldStore {
       throw new WorldError("bad_request", `not a ${WORLD_FORMAT} document`);
     const created = await this.create(doc.name, migrateWorld(doc), userId, "import");
     return { ...created, lint: macroReview(created.world) };
-  }
-  async commitRevision(worldId, doc, userId, changed) {
-    return this.serial(userId, worldId, async () => {
-      const index = await this.index(worldId, userId);
-      if (!index)
-        throw new WorldError("not_found", `world ${worldId} not found`);
-      if (await this.storedDraft(index, userId))
-        throw new WorldError("conflict", `Build has unsaved changes to \u201C${index.name}\u201D: commit or discard them first`);
-      const world = migrateWorld({ ...structuredClone(doc), id: worldId });
-      const made = await this.commitDoc(world, userId, null, { source: "studio" });
-      if (made.moved)
-        changed?.(worldId, { version: made.count, stored: false, base: made.revision });
-      return { world, revision: made.revision, lint: macroReview(world) };
-    });
-  }
-  async hasDraft(worldId, userId) {
-    const index = await this.index(worldId, userId);
-    return index !== null && await this.storedDraft(index, userId) !== null;
   }
   async exportFile(worldId, userId, revision) {
     const { world } = await this.get(worldId, userId, revision);
@@ -68170,15 +69322,15 @@ async function bookDrift(host, world, userId, only) {
 }
 function savedTitle(text5) {
   const first = neutralizeMacros(text5.replace(/[*_"\u201C\u201D]/g, " ")).trim().split(/(?<=[.!?\u2026])\s/)[0]?.trim().replace(/[.!?\u2026]+$/, "");
-  const words5 = (first ?? "").split(/\s+/).filter((w) => w !== "");
-  return words5.length === 0 ? "Saved from a chat" : words5.length > 8 ? `${words5.slice(0, 8).join(" ")}\u2026` : words5.join(" ");
+  const words6 = (first ?? "").split(/\s+/).filter((w) => w !== "");
+  return words6.length === 0 ? "Saved from a chat" : words6.length > 8 ? `${words6.slice(0, 8).join(" ")}\u2026` : words6.join(" ");
 }
 async function saveFromChat(host, worlds, chatId, worldId, userId, hiding, excerpt, changed) {
   const messages = await host.chats.messages(chatId, userId);
   const reply = messages.filter((m) => !m.isUser && m.content.trim() !== "").at(-1);
-  const plain3 = (s) => s.replace(/\s+/g, " ").trim().toLowerCase();
-  const wanted = excerpt === undefined ? "" : plain3(excerpt);
-  const from = wanted === "" ? reply : messages.filter((m) => plain3(m.content).includes(wanted)).at(-1) ?? reply;
+  const plain4 = (s) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const wanted = excerpt === undefined ? "" : plain4(excerpt);
+  const from = wanted === "" ? reply : messages.filter((m) => plain4(m.content).includes(wanted)).at(-1) ?? reply;
   if (!from)
     throw new WorldError("not_found", "the chat has no reply to save yet");
   const content = (wanted === "" ? readableReply(from.content, hiding) : excerpt ?? "").trim().slice(0, SAVED_MAX_CHARS);
@@ -68387,7 +69539,7 @@ function plainLabel(raw) {
   const m = /^(.*?)\s*\(([^()]*)\)\s*$/.exec(raw);
   return m && m[1] !== undefined && m[1].trim() !== "" && m[2] !== undefined ? { label: m[1].trim(), help: m[2].trim() } : { label: raw };
 }
-function words5(id) {
+function words6(id) {
   const text5 = id.replace(/[_-]+/g, " ").trim();
   return text5 ? `${text5.charAt(0).toUpperCase()}${text5.slice(1)}` : id;
 }
@@ -68405,7 +69557,7 @@ function buildCharacter(reg, world, id, state2) {
     const t = own(bodies, thing);
     return t ? { id: thing, name: t.name, kind: t.kind, place: placeRef(placeOf4(bodies, thing)) } : null;
   };
-  const isItem = (thing) => kindIs(reg, world, thing.kind, "item");
+  const isItem = (thing) => kindIs(reg, world, thing.kind, "item") && fixedReason(kindIs(reg, world, thing.kind, "vehicle"), thing.fields, world.tables) !== "part";
   const things = Object.keys(bodies).sort().flatMap((thing) => {
     const t = own(bodies, thing);
     const ref = t && isItem(t) && !gone(thing) ? thingRef(thing) : null;
@@ -68424,8 +69576,8 @@ function buildCharacter(reg, world, id, state2) {
   const character = {
     id,
     name: e.name,
-    kind: { id: e.kind, label: def?.label ?? words5(e.kind) },
-    tier: { id: e.tier, label: own(world.tiers, e.tier)?.label ?? words5(e.tier) },
+    kind: { id: e.kind, label: def?.label ?? words6(e.kind) },
+    tier: { id: e.tier, label: own(world.tiers, e.tier)?.label ?? words6(e.tier) },
     pov,
     agent: state2 ? own(state2.entities, id)?.agent ?? false : own(world.entities, id)?.agent ?? false,
     life,
@@ -68505,7 +69657,7 @@ function relationsOf(reg, world, ctx, from, e) {
   return e.relations.filter((r) => r.type !== "in" && r.type !== PARTY_RELATION).map((r) => {
     const def = types.get(r.type);
     const fieldDefs = isRecord(def?.fields) ? def.fields : {};
-    const words_ = r.type === "regard" && band && ctx ? band(ctx, from, r.to) : Object.entries(r.fields ?? {}).filter(([k, v]) => !RELATION_INTERNAL.has(k) && v !== null && v !== "").map(([k, v]) => `${own(fieldDefs, k)?.label ?? words5(k)}: ${typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : JSON.stringify(v)}`).join(", ");
+    const words_ = r.type === "regard" && band && ctx ? band(ctx, from, r.to) : Object.entries(r.fields ?? {}).filter(([k, v]) => !RELATION_INTERNAL.has(k) && v !== null && v !== "").map(([k, v]) => `${own(fieldDefs, k)?.label ?? words6(k)}: ${typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : JSON.stringify(v)}`).join(", ");
     const to = (ctx ? own(ctx.state.entities, r.to) : undefined) ?? own(world.entities, r.to);
     return { type: r.type, to: { id: r.to, name: to?.name ?? own(world.places, r.to)?.name ?? r.to }, words: words_ };
   });
@@ -68549,12 +69701,12 @@ function nowOf(world, state2, id) {
   const holds = isRecord(e?.fields.holds) ? e.fields.holds : {};
   return {
     activity,
-    activityLabel: words5(activity),
+    activityLabel: words6(activity),
     until: when2(activitySpanEnd(e?.fields)),
     party: e?.relations.some((r) => r.type === PARTY_RELATION && r.to === world.pov) ?? false,
     holds: Object.keys(holds).sort().flatMap((field) => {
       const until = when2(holds[field]);
-      return until !== null ? [{ label: HOLD_WORDS[field] ?? words5(field), until }] : [];
+      return until !== null ? [{ label: HOLD_WORDS[field] ?? words6(field), until }] : [];
     })
   };
 }
@@ -68563,14 +69715,15 @@ function sectionsOf2(reg, world, e) {
   const authored2 = new Set;
   const sheet = new Set;
   for (let id = e.kind, guard = 0;id && guard < 32; guard++) {
-    const k = kindDef(reg, world, id);
-    if (k && own(world.kinds, id) && k.pack === undefined)
-      for (const f of Object.keys(k.fields))
+    const mine = own(world.kinds, id);
+    if (mine && mine.pack === undefined)
+      for (const f of Object.keys(mine.fields))
         authored2.add(f);
-    for (const [f, d] of Object.entries(k?.fields ?? {}))
-      if (d.domain === "sheets" && d.type === "number")
-        sheet.add(f);
-    id = k?.extends;
+    for (const level of [reg.kinds.get(id), mine])
+      for (const [f, d] of Object.entries(level?.fields ?? {}))
+        if (d.domain === "sheets" && d.type === "number")
+          sheet.add(f);
+    id = kindParent(reg, world, id);
   }
   const sections = new Map(SECTION_ORDER.map((s) => [s, []]));
   const ids2 = [...new Set([...Object.keys(defs), ...Object.keys(e.fields)])].filter((field) => !hasOwn(ENGINE_FIELDS, field));
@@ -68585,13 +69738,13 @@ function stems(text5) {
   return new Set(text5.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2).map((w) => w.replace(/(ies|es|s)$/, "")));
 }
 function fieldOf(world, id, def, stored) {
-  const plain3 = plainLabel(def?.label ?? words5(id));
-  const label = plain3.label;
+  const plain4 = plainLabel(def?.label ?? words6(id));
+  const label = plain4.label;
   const table = def?.table !== undefined ? own(world.tables, def.table) : undefined;
   const tableWords = table ? stems(table.label) : new Set;
   const labelWords = stems(label);
   const tells = table !== undefined && ![...labelWords].every((w) => tableWords.has(w));
-  const said2 = plain3.help !== undefined && !/[{}[\]]/.test(plain3.help) ? plain3.help : undefined;
+  const said2 = plain4.help !== undefined && !/[{}[\]]/.test(plain4.help) ? plain4.help : undefined;
   const help = [said2, tells && table ? `A row of ${table.label}` : undefined].filter((h) => h !== undefined && h !== "").join(" \xB7 ") || undefined;
   const type = def?.type ?? (typeof stored === "number" ? "number" : typeof stored === "boolean" ? "bool" : Array.isArray(stored) ? "list" : "text");
   const of = type === "list" ? def?.of ?? (Array.isArray(stored) && stored.length > 0 && stored.every((x) => typeof x === "string") ? "text" : undefined) : undefined;
@@ -68629,17 +69782,6 @@ function clockMinutes(events3) {
     if (e.type === "clock")
       m += e.minutes;
   return m;
-}
-function compactSpan(minutes2) {
-  const total = Math.max(0, Math.round(minutes2));
-  if (total < 60)
-    return `${total} min`;
-  const days = Math.floor(total / 1440);
-  const hours = Math.floor(total % 1440 / 60);
-  const rest = total % 60;
-  if (days > 0)
-    return hours > 0 ? `${days} d ${hours} h` : `${days} d`;
-  return rest > 0 ? `${hours} h ${rest} min` : `${hours} h`;
 }
 function knownSceneTypes(registry, world, state2) {
   return new Set([...ENGINE_SCENE_TYPES, ...Object.values(world.places).flatMap((p) => p.sceneType && canSeePlace(registry, world, state2, world.pov, p.id) ? [p.sceneType] : [])]);
@@ -68706,70 +69848,6 @@ function unavailable(failed) {
     return "Not available";
   return failed.code === "requirement" ? "Not possible here and now" : failed.reason;
 }
-function paramLabel(action, name, world, registry) {
-  const def = action.params[name];
-  if (def?.label)
-    return def.label;
-  const kind = def?.ref ? world.kinds[def.ref] ?? registry.kinds.get(def.ref) : undefined;
-  if (kind?.label)
-    return kind.label;
-  const words6 = name.replace(/_/g, " ");
-  return words6.charAt(0).toUpperCase() + words6.slice(1);
-}
-function actionWords(registry, world, state2, action, params) {
-  const secrets = unrevealedSecrets(registry, world, state2);
-  const nameOf7 = (value) => {
-    if (typeof value !== "string" || value === "")
-      return null;
-    const entity = own(state2.entities, value);
-    if (entity)
-      return povMayKnow(registry, world, state2, value) ? entity.name : null;
-    const place = own(world.places, value);
-    if (place)
-      return canSeePlace(registry, world, state2, world.pov, value) ? place.name : null;
-    return null;
-  };
-  const labelOf2 = (table, value) => {
-    if (table !== undefined)
-      return tableChoices(own(world.tables, table)).find((row) => row.key === value)?.label ?? null;
-    const ctx = registry.context(world, state2);
-    const stat = (optionalQuery(ctx, "sheets.stats")?.(ctx) ?? []).find((s) => s.id === value);
-    if (stat)
-      return stat.label;
-    for (const id of Object.keys(world.tracks)) {
-      const shown3 = playerTrack(registry, world, state2, world.pov, id);
-      if (shown3?.id === value)
-        return shown3.label;
-    }
-    if (hasOwn(state2.entities, value) || hasOwn(world.places, value))
-      return nameOf7(value);
-    return /^\S+$/.test(value) && /[_~]/.test(value) ? null : value;
-  };
-  const parts = [];
-  for (const [name, def] of Object.entries(action.params)) {
-    const value = params[name];
-    if (value === undefined || value === null || value === "")
-      continue;
-    if (def.type === "ref") {
-      const named = nameOf7(value);
-      if (named)
-        parts.push(named);
-    } else if (def.type === "list" && def.ref !== undefined) {
-      const names2 = (Array.isArray(value) ? value : []).map(nameOf7).filter((n) => n !== null);
-      if (names2.length > 0)
-        parts.push(`with ${names2.join(" and ")}`);
-    } else if (def.type === "money" && typeof value === "number")
-      parts.push(formatMoney(value, world.currency));
-    else if (def.type === "number" && typeof value === "number")
-      parts.push(`${value} ${paramLabel(action, name, world, registry).toLowerCase()}`);
-    else if (typeof value === "string") {
-      const text5 = labelOf2(def.table, value);
-      if (text5 && findLeaks(text5, secrets).length === 0)
-        parts.push(text5);
-    }
-  }
-  return parts.join(", ");
-}
 function palette(world, state2, registry) {
   const actions = new Map;
   for (const [id, a] of registry.actions)
@@ -68778,9 +69856,12 @@ function palette(world, state2, registry) {
     actions.set(id, a);
   const entries2 = [];
   const ctx = registry.context(world, state2);
+  const env = scopeEnv({ reg: registry, ctx, bindings: { self: world.pov, actor: world.pov } });
   const retry = policyOf(world, state2).retry;
   for (const action of actions.values()) {
     if (action.id === TIMELAPSE_ACTION2 || action.combat)
+      continue;
+    if (storyLocked(env, action))
       continue;
     const refParam = Object.entries(action.params).find(([, p]) => p.type === "ref" && !p.optional)?.[0];
     const amountParam = Object.entries(action.params).find(([, p]) => p.type === "money")?.[0];
@@ -68994,13 +70075,6 @@ function recentLines(core, observed, index, registry) {
     return [];
   return turnNotes(core.chain(prefix), fold, core, registry, world, fold.state).slice(-RECENT_TURNS).map((n) => n.text);
 }
-function spanText(minutes2) {
-  if (minutes2 >= 1440)
-    return `${Math.round(minutes2 / 1440 * 10) / 10} ${minutes2 === 1440 ? "day" : "days"}`;
-  if (minutes2 >= 60)
-    return `${Math.round(minutes2 / 60 * 10) / 10} ${minutes2 === 60 ? "hour" : "hours"}`;
-  return `${minutes2} min`;
-}
 function overdueChips(messageId, ctx, state2, world) {
   const overdue = optionalQuery(ctx, "gear.overdue");
   if (!overdue)
@@ -69091,6 +70165,22 @@ function playerDrops(registry, world, state2, recordOf, notes, keep) {
   };
 }
 var REFUSED_WHAT = { marker: "A settings change", keep: "Keep", discard: "Discard", reread: "A re-read", retry_read: "A re-read", undo: "An undo" };
+function replyFailedChip(turn, failed, messageId) {
+  const why = failed === "error" ? " Diagnostics says why it failed." : "";
+  return {
+    id: `reply_failed:${turn}`,
+    kind: "reply_failed",
+    messageId,
+    label: failed === "error" ? "The reply failed" : "The reply came back empty",
+    detail: `The engine's work for this turn is kept. Retry the reply writes it again from that same turn: the same reading, plan, minds and sections, with no engine calls first. Re-run the engine runs the turn again, then the reply.${why}`,
+    actions: [
+      { id: "regenerate", label: "Retry the reply", style: "primary" },
+      { id: "rerun", label: "Re-run the engine" },
+      { id: "diagnostics", label: "Diagnostics" }
+    ],
+    expires: "next_send"
+  };
+}
 function derivedChips(chain, fold, keepReport, core, registry, world) {
   const chips = [];
   const headIndex = chain.findLastIndex((m) => !m.isUser);
@@ -69127,7 +70217,8 @@ function derivedChips(chain, fold, keepReport, core, registry, world) {
 `) } : {}, actions: [], expires: "next_send" });
     for (const fix of applied.fixes) {
       const fixed = fixLines(registry, world, state2, fix.events);
-      chips.push({ id: fixChip(m.id, m.swipeId, fix.seq), kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), detail: fixed.length > 0 ? fixed.join(" \xB7 ") : unseenFixLine(registry, world, state2, fix.events), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+      const detail = fixed.length > 0 ? fixed.join(" \xB7 ") : fix.by ? null : unseenFixLine(registry, world, state2, fix.events);
+      chips.push({ id: fixChip(m.id, m.swipeId, fix.seq), kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), ...detail !== null ? { detail } : {}, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
     }
     chips.push(...overdueChips(m.id, ctx, state2, world));
   });
@@ -69250,10 +70341,11 @@ function povEntity(world) {
 }
 
 // src/engine/gm-view.ts
-function fieldOf2(reg, ctx, entity, id, def, stored) {
+function fieldOf2(reg, ctx, entity, kind, id, def, stored) {
   const numeric = def.type === "number" || def.type === "money" || def.type === "duration";
   const derived = def.derived !== undefined;
   const read = derived ? scopeEnv({ reg, ctx, bindings: { self: entity } }).lookup(["self", id]) : undefined;
+  const prog = levelProgression(reg, ctx.world, kind, id);
   return {
     id,
     label: def.label ?? id.replace(/_/g, " "),
@@ -69263,7 +70355,8 @@ function fieldOf2(reg, ctx, entity, id, def, stored) {
     ...numeric ? fieldBounds(reg, ctx, entity, def) : {},
     ...def.ref ? { ref: def.ref } : {},
     ...derived ? { derived: true } : {},
-    ...def.locked ? { locked: true } : {}
+    ...def.locked ? { locked: true } : {},
+    ...prog ? { follows: fieldDef(reg, ctx.world, kind, prog.xpField)?.label ?? prog.xpField.replace(/_/g, " ") } : {}
   };
 }
 function entityOf(reg, ctx, id) {
@@ -69272,7 +70365,7 @@ function entityOf(reg, ctx, id) {
   if (!e)
     return null;
   const defs = kindFields(reg, world, e.kind);
-  const fields = Object.entries(defs).map(([field, def]) => fieldOf2(reg, ctx, id, field, def, own(e.fields, field)));
+  const fields = Object.entries(defs).map(([field, def]) => fieldOf2(reg, ctx, id, e.kind, field, def, own(e.fields, field)));
   for (const [field, value] of Object.entries(e.fields)) {
     if (field === GONE_FIELD || hasOwn(ENGINE_FIELDS, field) || own(defs, field))
       continue;
@@ -69282,6 +70375,7 @@ function entityOf(reg, ctx, id) {
   const life = lifeStateOf(world, lifeOf(state2, id));
   const awareness = lifeAwareness(reg, world, state2, id);
   const named = (ids2) => ids2.map((p) => ({ id: p, name: own(state2.entities, p)?.name ?? p }));
+  const containment = optionalQuery(ctx, "gear.containment")?.(ctx, id);
   return {
     id,
     name: e.name,
@@ -69295,6 +70389,8 @@ function entityOf(reg, ctx, id) {
     ...isDiscoverable(world, state2, id) ? { visibility: "discoverable", found: knows(state2, world.pov, id) } : { visibility: entityVisibility(world, state2, id) },
     place: placeOfEntity(state2, id),
     holder: e.relations.find((r) => r.type === "in")?.to ?? null,
+    ...containment?.holds ? { holds: containment.holds } : {},
+    ...containment && containment.goes !== "any" ? { goes: containment.goes } : {},
     claimed: e.fields.claimed === true,
     ...own(state2.accounts, id) !== undefined ? { balance: own(state2.accounts, id) } : {},
     fields,
@@ -69329,7 +70425,7 @@ function buildGmWorld(reg, world, state2) {
   for (const k of reg.kinds.values())
     kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
   for (const k of Object.values(world.kinds))
-    kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
+    kinds.set(k.id, { label: k.label, extends: kindParent(reg, world, k.id) ?? null });
   return {
     entities: Object.keys(state2.entities).sort().flatMap((id) => entityOf(reg, ctx, id) ?? []),
     kinds: [...kinds].map(([id, k]) => ({ id, label: k.label, extends: k.extends })).sort((a, b) => a.label.localeCompare(b.label)),
@@ -69472,6 +70568,7 @@ var SHAPES = [
   { shape: /\binvited\(/, needs: "{p} invited you" },
   { shape: /\bcan_fight\(/, needs: "{p} is someone you can fight" },
   { shape: /\breach\(self/, needs: "{p} is within your reach" },
+  { shape: /\bmovable\(/, needs: "{p} can be picked up", fails: "it can't be picked up: it's a vehicle, built in or fixed in place" },
   { shape: /\bdrive_minutes\(/, needs: "a road there from here" },
   { shape: /\bfuel_ok\(/, needs: "enough fuel to get there" },
   { shape: /\bfuel_pct\([^)]*\)\s*<\s*100\b/, needs: "{p} isn't full" },
@@ -69501,9 +70598,9 @@ function needsOf(action, nameOf7) {
     const shape = SHAPES.find((s) => s.shape.test(req));
     if (!shape)
       continue;
-    const words6 = shape.needs.replace("{p}", nameOf7(read[0] ?? "")).replace("{q}", nameOf7(read[1] ?? read[0] ?? ""));
-    if (!out.includes(words6))
-      out.push(words6);
+    const words7 = shape.needs.replace("{p}", nameOf7(read[0] ?? "")).replace("{q}", nameOf7(read[1] ?? read[0] ?? ""));
+    if (!out.includes(words7))
+      out.push(words7);
   }
   return out;
 }
@@ -69580,15 +70677,15 @@ function interpretCatalog(reg, world, state2, actions, mayKnow) {
   const named = new Set;
   const entries2 = [];
   for (const action of actions) {
-    if (!fightOffers(world, state2, action) || gatesOf(action).some((req) => !truthy2(evalExpr(req, env, false))))
+    if (!fightOffers(world, state2, action) || gatesOf(action).some((req) => !truthy2(evalExpr(req, env, false))) || storyLocked(env, action))
       continue;
     const params = [];
     const ids2 = new Set;
     for (const [name, def] of Object.entries(action.params)) {
-      const words6 = paramWords(ctx, action, name, def, mayKnow, places2, ids2);
-      if (words6 === null)
+      const words7 = paramWords(ctx, action, name, def, mayKnow, places2, ids2);
+      if (words7 === null)
         break;
-      params.push(words6);
+      params.push(words7);
     }
     if (params.length < Object.keys(action.params).length)
       continue;
@@ -69709,7 +70806,7 @@ function recentMessages(messages, recent, hideJson) {
 // src/backend/minds-context.ts
 var SKIPPED_FIELDS = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true, ...ENGINE_FIELDS };
 var STOP2 = Object.fromEntries("the and for with that this from into have has had was were are you your they them their there here what when where which who how why just very some more most other then than about would could should will been being does did not but all any can its it's i'm he's she's".split(" ").map((w) => [w, true]));
-function wordsOf4(text5) {
+function wordsOf5(text5) {
   return (text5.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []).filter((w) => w.length >= 4 && !STOP2[w]);
 }
 function tidy(text5) {
@@ -69786,8 +70883,8 @@ function recallFor(scope, about2) {
   }
   const recent = turns.slice(Math.max(0, turns.length - memory2.recall.recent));
   const rest = turns.slice(0, Math.max(0, turns.length - memory2.recall.recent));
-  const wanted = new Set(wordsOf4(about2));
-  const scored = rest.map((t, i) => ({ t, i, hits: wordsOf4(t.text).filter((w) => wanted.has(w)).length })).filter((x) => x.hits > 0).sort((a, b) => b.hits - a.hits || b.i - a.i).slice(0, memory2.recall.relevant);
+  const wanted = new Set(wordsOf5(about2));
+  const scored = rest.map((t, i) => ({ t, i, hits: wordsOf5(t.text).filter((w) => wanted.has(w)).length })).filter((x) => x.hits > 0).sort((a, b) => b.hits - a.hits || b.i - a.i).slice(0, memory2.recall.relevant);
   const chosen = [...scored.map((x) => x.t), ...recent].sort((a, b) => turns.indexOf(a) - turns.indexOf(b));
   const out = [];
   let left = limitOf(memory2.recall.tokens);
@@ -69891,14 +70988,14 @@ function sceneLines2(scope, place) {
   if (place === null)
     return ["You aren't anywhere in particular."];
   const ctx = reg.context(world, state2);
-  const words6 = optionalQuery(ctx, "relationships.words");
+  const words7 = optionalQuery(ctx, "relationships.words");
   const here = Object.keys(state2.entities).sort().filter((id) => id !== who && placeOfEntity(state2, id) === place && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id) && canSeeEntity(reg, world, state2, who, id));
   const out = [`You are at ${nameOf7(scope, place)}.`];
   if (here.length === 0)
     out.push("No one else is here.");
   for (const id of here) {
     const label = id === world.pov ? povLabel(scope) : nameOf7(scope, id);
-    const regard = words6?.(ctx, who, id) ?? null;
+    const regard = words7?.(ctx, who, id) ?? null;
     out.push(`- ${label}${id === world.pov ? " (the player character)" : ""}${regard ? `: you feel ${regard}` : knows(state2, who, id) ? ": you know them" : ""}`);
   }
   return out;
@@ -70051,59 +71148,6 @@ function consolidateContext(scope, notes) {
 `);
 }
 
-// src/engine/decide.ts
-class DecideError extends Error {
-  constructor(message2) {
-    super(message2);
-    this.name = "DecideError";
-  }
-}
-var hasOwn5 = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-function orderedKeys(p, keys) {
-  const ks = keys ? [...keys] : Object.keys(p).sort();
-  if (ks.length === 0)
-    throw new DecideError("No options to choose from");
-  if (new Set(ks).size !== ks.length)
-    throw new DecideError("Duplicate option keys");
-  return ks;
-}
-function weightsOf(p, ks) {
-  return ks.map((k) => {
-    const v = hasOwn5(p, k) ? p[k] : undefined;
-    if (v === undefined)
-      return 0;
-    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
-      throw new DecideError(`Probability for "${k}" must be a finite number \u2265 0, got ${String(v)}`);
-    }
-    return v;
-  });
-}
-function normalized(p, keys) {
-  const ks = orderedKeys(p, keys);
-  const w = weightsOf(p, ks);
-  const top = Math.max(...w);
-  if (top === 0)
-    throw new DecideError("Probabilities have no mass (all zero)");
-  const scaled = w.map((x) => x / top);
-  const sum = scaled.reduce((a, b) => a + b, 0);
-  return { ks, probs: scaled.map((x) => x / sum) };
-}
-function sample2(p, rng, keys) {
-  const { ks, probs } = normalized(p, keys);
-  const u = rng.next();
-  let cum = 0;
-  let last = 0;
-  for (let i = 0;i < ks.length; i++) {
-    if (probs[i] === 0)
-      continue;
-    last = i;
-    cum += probs[i];
-    if (u < cum)
-      return ks[i];
-  }
-  return ks[last];
-}
-
 // src/engine/steps.ts
 var ACTION_QUEUE_LIMIT = 5;
 
@@ -70242,6 +71286,13 @@ function pause(ms, signal2) {
   signal2.addEventListener("abort", done, { once: true });
   return promise;
 }
+
+class NotNeeded extends Error {
+  constructor(why) {
+    super(why);
+    this.name = "NotNeeded";
+  }
+}
 function questionLines(questions) {
   return Object.entries(questions).map(([key, q]) => {
     if (q.type === "choice")
@@ -70285,9 +71336,11 @@ class Steps {
       this.meter.record({ purpose, via: "helper", ok: false, ms, tokens: 0, ...lookup }, userId);
       const why = error instanceof Error ? error.message : String(error);
       const fired = firedTimeout(signal2);
+      const unneeded = signal2.reason instanceof NotNeeded ? signal2.reason : null;
       const again = attempt < TRANSIENT_RETRIES && !signal2.aborted && transientFailure(error);
-      this.onCall?.(userId, { ...route, model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: fired ? `${fired.message} (${why})` : signal2.aborted ? `aborted: the step's time ran out (${why})` : why, ...tried, ...again ? { retried: true } : {} });
-      this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking again" : ""}: ${why}`, userId);
+      this.onCall?.(userId, { ...route, ...unneeded ? { spared: true } : {}, model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: unneeded ? `not needed: ${unneeded.message}` : fired ? `${fired.message} (${why})` : signal2.aborted ? `aborted: the step's time ran out (${why})` : why, ...tried, ...again ? { retried: true } : {} });
+      if (!unneeded)
+        this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking again" : ""}: ${why}`, userId);
       if (!again)
         return error instanceof Error ? error : new Error(why);
       await pause(RETRY_PAUSE_MS * 2 ** attempt, signal2);
@@ -70350,7 +71403,7 @@ ${end}` }];
       return null;
     };
     if (reply instanceof Error)
-      return failed(signal2.aborted ? "the time ran out before it answered" : `the call failed: ${reply.message.replace(/\s+/g, " ").trim().slice(0, 160)}`);
+      return failed(signal2.reason instanceof NotNeeded ? `not needed: ${signal2.reason.message}` : signal2.aborted ? "the time ran out before it answered" : `the call failed: ${reply.message.replace(/\s+/g, " ").trim().slice(0, 160)}`);
     const first = reply.content;
     if (first.trim() === "")
       return failed(reply.finishReason === "length" ? `the answer was cut off at ${base.maxTokens} tokens before it said anything` : "the answer was empty");
@@ -70466,11 +71519,11 @@ ${questionLines(questions).join(`
     return { answers, via: "helper" };
   }
 }
-function worldBrief(world, extra) {
+function worldBrief(world, places2) {
   const pov = world.entities[world.pov];
   const people = Object.values(world.entities).filter((e) => e.id !== world.pov).slice(0, 40).map((e) => `${e.id} (${e.name}, ${e.kind})`).join(", ");
-  const places2 = Object.values(world.places).slice(0, 40).map((p) => `${p.id} (${p.name})`).join(", ");
-  return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places: ${places2 || "none"}. ${extra}`;
+  const listed2 = places2.map((p) => `${p.id} (${p.name})`).join(", ");
+  return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places, those the reply names and the nearest first: ${listed2 || "none"}.`;
 }
 var THING_SORTS = ["food", "drink", "weapon", "key", "document", "money", "other"];
 var SAID_ROUTINES_MAX = 3;
@@ -70493,14 +71546,14 @@ async function interpret(steps, text5, context, actions, config3, userId, signal
     `Only the player character's own deliberate actions count, whether said in the first person ("I", "we"), as a stage direction ("[${pov.name} heads to the roof]") or as narration about ${pov.name} in the third person. "I'll \u2026" about what the player character does now is an action.`,
     `No action ("action": null) for speech alone, out-of-character text ("OOC:", "((\u2026))") that doesn't say time passes, questions, requests to others, what someone else does, hypotheticals, plans for another time, recaps or feelings.`,
     ...actions.some((a) => a.id === TIMELAPSE_ACTION) ? [
-      `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then". The one exception is in-character input that, before the out-of-character instruction, gets the player character out of bed or up from a rest with a catalog action ("I get out of bed and make coffee. (OOC: skip an hour.)"): read that action, and any actions after it, as usual, and the time as their "then". What the out-of-character instruction itself says happens ("OOC: skip to morning, I get up", "OOC: over the next two hours, I walk to the gym") still fills the time.`
+      `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. Its "text" is what the input says happens in that time, in the input's own words ("I sort the stock"), left out when it says nothing happens. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then". The one exception is in-character input that, before the out-of-character instruction, gets the player character out of bed or up from a rest with a catalog action ("I get out of bed and make coffee. (OOC: skip an hour.)"): read that action, and any actions after it, as usual, and the time as their "then". What the out-of-character instruction itself says happens ("OOC: skip to morning, I get up", "OOC: over the next two hours, I walk to the gym") still fills the time.`
     ] : [],
     `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null. An incidental action that fits none, or names someone or somewhere nothing lists, is left out: it never hides the actions after it.`,
     `An action on a thing the player says they have that nothing lists ("I pour Theresa a coffee" with no coffee listed) is still read, in order with the rest: its param holds the thing in the input's own words ("coffee"), and "thing" says what sort of thing it is: "food", "drink", "weapon", "key", "document", "money" or "other".`,
     `When the input and its context still leave it unclear which action or which target is meant, give "action": null and a short "reason"; never guess.`,
     `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
-    `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
-    `If the input lets time pass after its last action, in character ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM") or out of character after getting up or going somewhere, add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
+    `Read every action in the input, in order, not only the first. Return the first as "action" with its "params" and its "text": that action written as the player would type it, with whatever and whoever it involves ("I take the envelope from the clerk"). If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
+    `If the input lets time pass after its last action, in character ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM") or out of character after the input gets the player character out of bed or up from a rest, add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
     `If the input itself plainly states, as settled fact, a lasting change to someone's week (the player character's own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he's started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input's words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: any place the input names for it, as a place id, or in the input's own words when nothing lists it ("the community pool"); left out only when the input names none (for "move", the new home), "with"?: people's ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input's own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone's thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".`
   ];
   if (actions.some((a) => a.id === TRY_ACTION)) {
@@ -70531,7 +71584,7 @@ ${rules.map((r) => `- ${r}`).join(`
 `)}`,
     presumed.map((r) => `- ${r}`).join(`
 `),
-    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}]}.`
+    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "text"?: string, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}]}.`
   ].filter((part) => part !== "").join(`
 `);
   const raw = await steps.helperJson("interpret", system, text5, config3, userId, signal2, { lore, guidance });
@@ -70544,14 +71597,14 @@ ${rules.map((r) => `- ${r}`).join(`
       params[k] = JSON.parse(JSON.stringify(v ?? null));
   const confidence = typeof raw.confidence === "number" ? Math.min(1, Math.max(0, raw.confidence)) : 0.8;
   const then = isRecord(raw.then) ? JSON.parse(JSON.stringify(raw.then)) : undefined;
-  const words6 = (v) => {
+  const words7 = (v) => {
     const s = typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
     return s.length <= 120 ? s : "";
   };
   const queue = [];
   const rest = [];
   for (const entry of action && Array.isArray(raw.more) ? raw.more.slice(0, 16) : []) {
-    const said2 = isRecord(entry) ? words6(entry.text) : "";
+    const said2 = isRecord(entry) ? words7(entry.text) : "";
     const id = isRecord(entry) && typeof entry.action === "string" ? entry.action : null;
     if (rest.length === 0 && queue.length < ACTION_QUEUE_LIMIT - 1 && isRecord(entry) && id !== null && actions.some((a) => a.id === id)) {
       const own2 = {};
@@ -70563,16 +71616,17 @@ ${rules.map((r) => `- ${r}`).join(`
     } else if (said2 !== "")
       rest.push(said2);
   }
-  const next = [...rest, words6(raw.next)].filter((s) => s !== "");
+  const next = [...rest, words7(raw.next)].filter((s) => s !== "");
   const reason2 = !action && typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 200) : "";
   const thing = action ? THING_SORTS.find((s) => s === raw.thing) : undefined;
+  const lead = action ? words7(raw.text) : "";
   const routine = (Array.isArray(raw.routine) ? raw.routine : []).flatMap((r) => {
     if (!isRecord(r) || typeof r.said !== "string" || r.said.trim() === "")
       return [];
     const copy = JSON.parse(JSON.stringify(r));
     return [{ ...copy, said: r.said.replace(/\s+/g, " ").trim() }];
   }).slice(0, SAID_ROUTINES_MAX);
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...thing ? { thing } : {}, ...then ? { then } : {}, ...queue.length > 0 ? { queue } : {}, ...next.length > 0 ? { next } : {}, ...reason2 !== "" ? { reason: reason2 } : {}, ...routine.length > 0 ? { routine } : {} };
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...lead !== "" ? { text: lead } : {}, ...thing ? { thing } : {}, ...then ? { then } : {}, ...queue.length > 0 ? { queue } : {}, ...next.length > 0 ? { next } : {}, ...reason2 !== "" ? { reason: reason2 } : {}, ...routine.length > 0 ? { routine } : {} };
 }
 var SAID_METHOD = /\b(?:with|on|using|use|used|by|from|in)\s+(?:(?:my|the|his|her|their|our|a)\s+)?(credit card|debit card|cash|savings)\b(?![ -](?:holder|register|machine|drawer|box|reader|terminal|slot|case|sleeve|wallet))/gi;
 var NEGATED = /(?:\bnot|\bno|\bnever|n't|\binstead of|\brather than|\bthan)(?:\s+(?:pay|paying|paid))?\s*$/i;
@@ -70582,7 +71636,7 @@ function saidPayMethod(text5) {
 }
 var EXTRACT_STRICT_RULES = [
   `time_advance only for an explicit jump or stated duration ("an hour later", "the next morning", "for twenty minutes"), as all the time the reply says passes from the player's message to its end, never less for what the turn already took; never estimate how long described activity took.`,
-  "knows only when the player character newly learns a public fact from what is said or shown in this reply; not facts already known, not what others learn.",
+  "knows only when the player character newly learns of a public person, thing or place from what is said or shown in this reply: fact is its id, or a place's name as the prose gives it; never a sentence or what they learned about it, never one already known, never what others learn.",
   "regard only when the prose states a clear change in how one character feels about another.",
   "give only for an explicit handover between two characters; a seller handing over what was bought is part of the purchase; picking something up is not a give.",
   "A purchase already covers its payment: do not add a transfer for it.",
@@ -70593,14 +71647,14 @@ var EXTRACT_STRICT_RULES = [
   "Never duplicate a change. When unsure, leave it out."
 ];
 var EXTRACT_ITEM_TYPES = "take{entity,item} \xB7 drop{entity,item} \xB7 use_up{entity,item,qty?} (qty: how many, 1 when not said) \xB7 wear{entity,item,off?} \xB7 lose{entity,item,by?} (by: who stole it) \xB7 item_condition{entity?,item,delta} (delta -25..25: damage negative, mending positive)";
-var EXTRACT_WHERE = `Beside "proposals", give "where": the id of the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given; null when it doesn't say.`;
+var EXTRACT_WHERE = `Beside "proposals", give "where": the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given, as its id from Places (or its name as Places lists it); null when it doesn't say.`;
 var EXTRACT_USUAL = `Usual routines are given below the state, only to tell where a move the reply describes is going: someone who heads out to their usual spot ("his usual lunch place", "off to her regular bar") moves to that place; give its id from their usual routine, or place "usual" when the reply doesn't say which. A usual routine is never a move by itself: no location for someone the reply doesn't describe leaving or arriving.`;
-async function extract(steps, narration, world, prefix, appliedMinutes, channels, config3, userId, signal2, instructions, lore = null, guidance = "", usual = [], recent = [], said2 = "") {
-  const types = `time_advance{minutes} \xB7 location{entity,place} \xB7 purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) \xB7 transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) \xB7 give{item,from,to,amount?} (amount: for cash or money handed over, the amount) \xB7 quantity{entity,item,delta} \xB7 condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) \xB7 regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) \xB7 knows{who,fact} (public facts only) \xB7 spawn{kind,name,place?,role?} \xB7 life{entity,state} (state: ${lifeStatesOf(world).map(([id]) => id).join("|")}) \xB7 routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
+async function extract(steps, narration, world, prefix, appliedMinutes, channels, config3, userId, signal2, instructions, lore = null, guidance = "", usual = [], recent = [], said2 = "", places2 = [], personKinds = []) {
+  const types = `time_advance{minutes} \xB7 location{entity,place} (place: its id from Places, or its name as Places lists it) \xB7 purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) \xB7 transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) \xB7 give{item,from,to,amount?} (amount: for cash or money handed over, the amount) \xB7 quantity{entity,item,delta} \xB7 condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) \xB7 regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) \xB7 knows{who,fact} (fact: the id of a person, thing or place the player character newly learns of, or the name of a place they first hear of; never a sentence) \xB7 spawn{kind,name,place?,role?} (a new character the reply introduces by name${personKinds.length > 0 ? `; kind: ${personKinds.join("|")}` : ""}; never a thing) \xB7 life{entity,state} (state: ${lifeStatesOf(world).map(([id]) => id).join("|")}) \xB7 routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
   const system = `${instructions ? `${instructions}
 ` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.
-${worldBrief(world, "")}
+${worldBrief(world, places2)}
 Proposal types: ${types} \xB7 ${EXTRACT_ITEM_TYPES}. ${allowed}
 Rules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).
 Strict rules:
@@ -70667,6 +71721,59 @@ function dedupeProposals(proposals, pov) {
     out.push(q);
   }
   return out;
+}
+
+// src/engine/decide.ts
+class DecideError extends Error {
+  constructor(message2) {
+    super(message2);
+    this.name = "DecideError";
+  }
+}
+var hasOwn6 = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+function orderedKeys(p, keys) {
+  const ks = keys ? [...keys] : Object.keys(p).sort();
+  if (ks.length === 0)
+    throw new DecideError("No options to choose from");
+  if (new Set(ks).size !== ks.length)
+    throw new DecideError("Duplicate option keys");
+  return ks;
+}
+function weightsOf(p, ks) {
+  return ks.map((k) => {
+    const v = hasOwn6(p, k) ? p[k] : undefined;
+    if (v === undefined)
+      return 0;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+      throw new DecideError(`Probability for "${k}" must be a finite number \u2265 0, got ${String(v)}`);
+    }
+    return v;
+  });
+}
+function normalized(p, keys) {
+  const ks = orderedKeys(p, keys);
+  const w = weightsOf(p, ks);
+  const top = Math.max(...w);
+  if (top === 0)
+    throw new DecideError("Probabilities have no mass (all zero)");
+  const scaled = w.map((x) => x / top);
+  const sum = scaled.reduce((a, b) => a + b, 0);
+  return { ks, probs: scaled.map((x) => x / sum) };
+}
+function sample2(p, rng, keys) {
+  const { ks, probs } = normalized(p, keys);
+  const u = rng.next();
+  let cum = 0;
+  let last = 0;
+  for (let i = 0;i < ks.length; i++) {
+    if (probs[i] === 0)
+      continue;
+    last = i;
+    cum += probs[i];
+    if (u < cum)
+      return ks[i];
+  }
+  return ks[last];
 }
 
 // src/backend/lore-steps.ts
@@ -71214,9 +72321,12 @@ function safeVars(vars, secrets) {
 `);
   return out;
 }
+var OUTLINE_BEATS_MAX = 12;
+var BEAT_CHARS = 400;
+var BRIEF_CHARS = 1200;
 var CONTRACT = {
   brief: 'Output JSON only: {"text": string}.',
-  outline: 'Output JSON only: {"beats": string[]}.',
+  outline: `Output JSON only: {"beats": string[]}, at most ${OUTLINE_BEATS_MAX} beats, in order.`,
   choices: 'Output JSON only: {"choices": string[]}.',
   effects: 'Propose only concrete state changes the facts or the reply establish. Types: time_advance{minutes} \xB7 location{entity,place} \xB7 purchase{item,category,payer?,qty?,price?} \xB7 transfer{from,to,amount} \xB7 give{item,from,to} \xB7 quantity{entity,item,delta} \xB7 condition{who,condition,minutes?,clear?} \xB7 regard{from,to,axis,delta} \xB7 knows{who,fact} \xB7 spawn{kind,name,place?,role?}. Use world ids. Output JSON only: {"proposals": [{"type": ...}]}.'
 };
@@ -71251,7 +72361,7 @@ async function promptedText(steps, run2, kind, vars, secrets, userId, signal2, l
 ${CONTRACT[kind]}`, dataBlock(vars), run2.config, userId, signal2, { lore, guidance: run2.guidance, recent: run2.recent });
   if (!isRecord(raw))
     return null;
-  return kind === "brief" ? proseLines(raw.text, 1, secrets, 600) : kind === "outline" ? proseLines(raw.beats, 4, secrets) : proseLines(raw.choices, 4, secrets, 120, "drop");
+  return kind === "brief" ? proseLines(raw.text, 1, secrets, BRIEF_CHARS) : kind === "outline" ? proseLines(raw.beats, OUTLINE_BEATS_MAX, secrets, BEAT_CHARS) : proseLines(raw.choices, 4, secrets, 120, "drop");
 }
 async function promptedEffects(steps, run2, vars, currency, userId, signal2, lore = null) {
   if (!run2.template)
@@ -71554,7 +72664,7 @@ async function runMinds(deps, input) {
     const usage2 = { tokens: 0 };
     const failure = { reason: "" };
     const t0 = performance.now();
-    const raw = await deps.steps.helperJson("mind", prompt.text, mindContext(scope, report), config3, userId, input.signal, { guidance, usage: usage2, failure });
+    const raw = await deps.steps.helperJson("mind", prompt.text, mindContext(scope, report), config3, userId, input.signal, { guidance, usage: usage2, failure, spared: input.spared === true });
     const ms = Math.round(performance.now() - t0);
     const data = raw === null ? null : mindData(reg, world, state2, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
     const given = shownLore(report.pinned);
@@ -71571,7 +72681,7 @@ async function runMinds(deps, input) {
     const plans = report.plans?.given ?? 0;
     const trace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage2.tokens, prompt: prompt.source, ...given.length > 0 ? { pinned: given } : {}, ...activated.length > 0 ? { activated } : {}, ...routine > 0 ? { routine } : {}, ...plans > 0 ? { plans } : {}, ...report.history ? { history: report.history } : {}, ...notes.length > 0 ? { notes } : {} };
     const why = data !== null ? null : raw !== null ? "the answer said nothing: no thoughts, intent or depiction" : failure.reason !== "" ? failure.reason : "the call failed";
-    if (why !== null)
+    if (why !== null && !(input.signal.reason instanceof NotNeeded))
       deps.host.log("warn", `[LumiRPEngine] mind for ${who}: ${why}`, userId);
     const entry = {
       entity: who,
@@ -71628,7 +72738,9 @@ async function preMinds(deps, input) {
   w.apply(round2);
   const ctx = deps.registry.context(input.world, w.state);
   const texts2 = { user: input.user, reply: input.reply };
-  const picks = pickMinds(ctx, fidelityOf(ctx, texts2), texts2, settings.minds);
+  const section = sectionsOf(input.world).find((s) => s.id === MINDS_SLOT);
+  const read = settings.minds.reads.thoughts.on || section !== undefined && feedOf(section, input.state).enabled !== false;
+  const picks = pickMinds(ctx, fidelityOf(ctx, texts2), texts2, settings.minds).map((p) => read || p.reason === "gm" ? p : { ...p, call: false });
   const calls = picks.filter((p) => p.call);
   const passed = picks.filter((p) => !p.call);
   const opened = passed.length === 0 ? round2 : { type: MINDS_EVENTS.round, data: { at: input.state.clock, on: true, levels: Object.fromEntries(passed.map((p) => [p.entity, { level: p.level, place: placeOfEntity(w.state, p.entity) }])) } };
@@ -71642,7 +72754,7 @@ async function preMinds(deps, input) {
     reasons[p.entity] = p.reason;
   }
   const moment = { kind: "turn", at: thinking.state.clock, reason: "", user: input.user, reply: input.reply };
-  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...input.guidance !== undefined ? { guidance: input.guidance } : {}, ...input.kept ? { kept: input.kept } : {}, phase: "pre" });
+  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...input.guidance !== undefined ? { guidance: input.guidance } : {}, ...input.kept ? { kept: input.kept } : {}, phase: "pre", spared: true });
   return { events: [opened, ...ran.events], traces: ran.traces, ...ran.report ? { report: ran.report } : {} };
 }
 function presentWith(reg, world, state2) {
@@ -71741,53 +72853,79 @@ async function postMinds(deps, input) {
   const moment = { kind: "turn", at: state2.clock, reason: "after the reply", user: input.user, reply: input.reply };
   const history = reads.history.on && remembering.length > 0 ? chatBefore(messages, true) : undefined;
   const memoryPins = remembering.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["memory"]), userId) : [];
-  const remembered = await Promise.all(remembering.map(async (id) => {
-    const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
-    const scope = { reg, world, state: w.state, who: id, memory: memory2, messages, hideJson: settings.hideJsonBlocks, reads, moment, pinned: memoryPins, ...history ? { history } : {} };
+  const remembered = new Map(remembering.map((id) => {
+    const task = (async () => {
+      const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
+      const scope = { reg, world, state: w.state, who: id, memory: memory2, messages, hideJson: settings.hideJsonBlocks, reads, moment, pinned: memoryPins, ...history ? { history } : {} };
+      const usage2 = { tokens: 0 };
+      const t0 = performance.now();
+      const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage: usage2 });
+      const listeners2 = left.includes(id) ? said2.who : [...said2.who, ...met?.who ?? []];
+      const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners2);
+      if (traced(reg, world, state2, id))
+        traces.push({ purpose: "memory", phase: "post", who: own(state2.entities, id)?.name ?? id, level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage2.tokens, prompt: prompt.source });
+      return data;
+    })();
+    return [id, task];
+  }));
+  const consolidateConfig = memory2.consolidate.enabled ? mindsStepConfig(settings.modelUse, "consolidate") : null;
+  const folding = consolidateConfig !== null && (memoryConfig !== null && settings.minds.memoryLevels.length > 0 || reads.summary.on || reads.memory.on);
+  const now = w.state.clock;
+  const foldOf2 = (at, id) => {
+    const c = readCharacter(at, id);
+    const last = c.consolidated ?? null;
+    if (last !== null && now - last < memory2.consolidate.periodDays * 1440)
+      return [];
+    const ranked = [...c.notes].sort((a, b) => salienceNow(a, now, memory2) - salienceNow(b, now, memory2) || a.at - b.at);
+    const surplus = Math.max(0, c.notes.length - memory2.notes.keep);
+    return ranked.filter((n, i) => i < surplus || faded(n, now, memory2));
+  };
+  const due = folding ? Object.keys(readSlice(w.state).chars).sort().flatMap((id) => {
+    const fold = foldOf2(w.state, id);
+    return fold.length > 0 ? [{ id, fold }] : [];
+  }).slice(0, CONSOLIDATIONS_PER_TURN) : [];
+  const consolidatePins = due.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["consolidate"]), userId) : [];
+  const before = reads.history.on && due.length > 0 ? history ?? chatBefore(await chatMessages(deps, input.chatId, userId), true) : undefined;
+  const consolidate = async (id, fold, at, signal2) => {
+    const prompt = mindPrompt("consolidate", world, settings.minds, varsFor(world, at, id));
+    const asked = consolidateContext({ reg, state: at, world, who: id, reads, pinned: consolidatePins, hideJson: settings.hideJsonBlocks, ...before ? { history: before } : {} }, fold);
     const usage2 = { tokens: 0 };
     const t0 = performance.now();
-    const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage: usage2 });
-    const listeners2 = left.includes(id) ? said2.who : [...said2.who, ...met?.who ?? []];
-    const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners2);
-    if (traced(reg, world, state2, id))
-      traces.push({ purpose: "memory", phase: "post", who: own(state2.entities, id)?.name ?? id, level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage2.tokens, prompt: prompt.source });
-    return data;
-  }));
-  for (const data of remembered) {
+    const raw = signal2.aborted ? null : await deps.steps.helperJson("consolidate", prompt.text, asked, consolidateConfig, userId, signal2, { guidance: input.guidance?.consolidate ?? deps.presets.last(userId).guidance.consolidate ?? "", usage: usage2 });
+    const summary = isRecord(raw) ? capText(str16(raw.summary), MIND_TEXT_CAPS.summary) : "";
+    const trace = traced(reg, world, state2, id) ? { purpose: "consolidate", phase: "post", who: own(state2.entities, id)?.name ?? id, level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage2.tokens, prompt: prompt.source } : null;
+    return { event: summary === "" ? null : { type: MINDS_EVENTS.consolidated, data: { entity: id, at: now, notes: fold.map((n) => n.id), summary } }, trace };
+  };
+  const consolidations = due.map(({ id, fold }) => {
+    const stop = new AbortController;
+    const asked = consolidate(id, fold, w.state, AbortSignal.any([input.signal, stop.signal]));
+    const rewritten = (remembered.get(id) ?? Promise.resolve(null)).then((data) => {
+      if (!data?.summary)
+        return false;
+      stop.abort(new NotNeeded("their memory rewrote their summary this turn, so the notes fold into that"));
+      return true;
+    });
+    return { id, asked, rewritten };
+  });
+  for (const data of await Promise.all(remembered.values())) {
     if (!data)
       continue;
     const event = { type: MINDS_EVENTS.memory, data: { ...data, plans: unheldPlans(w.state, data.entity, data.plans) } };
     if (!w.apply(event))
       events3.push(event);
   }
-  const consolidateConfig = memory2.consolidate.enabled ? mindsStepConfig(settings.modelUse, "consolidate") : null;
-  if (consolidateConfig) {
-    const now = w.state.clock;
-    const due = Object.keys(readSlice(w.state).chars).sort().flatMap((id) => {
-      const c = readCharacter(w.state, id);
-      const last = c.consolidated ?? null;
-      if (last !== null && now - last < memory2.consolidate.periodDays * 1440)
-        return [];
-      const ranked = [...c.notes].sort((a, b) => salienceNow(a, now, memory2) - salienceNow(b, now, memory2) || a.at - b.at);
-      const surplus = Math.max(0, c.notes.length - memory2.notes.keep);
-      const fold = ranked.filter((n, i) => i < surplus || faded(n, now, memory2));
-      return fold.length > 0 ? [{ id, fold }] : [];
-    }).slice(0, CONSOLIDATIONS_PER_TURN);
-    const consolidatePins = due.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["consolidate"]), userId) : [];
-    const before = reads.history.on && due.length > 0 ? history ?? chatBefore(await chatMessages(deps, input.chatId, userId), true) : undefined;
-    const folded = await Promise.all(due.map(async ({ id, fold }) => {
-      const prompt = mindPrompt("consolidate", world, settings.minds, varsFor(world, w.state, id));
-      const usage2 = { tokens: 0 };
-      const t0 = performance.now();
-      const raw = input.signal.aborted ? null : await deps.steps.helperJson("consolidate", prompt.text, consolidateContext({ reg, state: w.state, world, who: id, reads, pinned: consolidatePins, hideJson: settings.hideJsonBlocks, ...before ? { history: before } : {} }, fold), consolidateConfig, userId, input.signal, { guidance: input.guidance?.consolidate ?? deps.presets.last(userId).guidance.consolidate ?? "", usage: usage2 });
-      const summary = isRecord(raw) ? capText(str16(raw.summary), MIND_TEXT_CAPS.summary) : "";
-      if (traced(reg, world, state2, id))
-        traces.push({ purpose: "consolidate", phase: "post", who: own(state2.entities, id)?.name ?? id, level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage2.tokens, prompt: prompt.source });
-      return summary === "" ? null : { type: MINDS_EVENTS.consolidated, data: { entity: id, at: now, notes: fold.map((n) => n.id), summary } };
-    }));
-    for (const event of folded)
-      if (event && !w.apply(event))
-        events3.push(event);
+  const folded = await Promise.all(consolidations.map(async ({ id, asked, rewritten }) => {
+    if (!await rewritten)
+      return asked;
+    await asked;
+    const fold = foldOf2(w.state, id);
+    return fold.length > 0 ? consolidate(id, fold, w.state, input.signal) : null;
+  }));
+  for (const done of folded) {
+    if (done?.trace)
+      traces.push(done.trace);
+    if (done?.event && !w.apply(done.event))
+      events3.push(done.event);
   }
   return { events: events3, traces };
 }
@@ -72155,7 +73293,7 @@ function skipPlanBrief(ctx, people, from, to) {
 function skipPlanText(ctx, brief, reply, journal) {
   const cal = calendarOf(ctx.world);
   const person2 = (p) => [
-    `- ${p.name} (id ${p.id}): ${p.place ? `at ${p.place.name} (${p.place.id})` : "somewhere of their own"}${p.activity ? `, ${p.activity.replace(/_/g, " ")}` : ""}.`,
+    `- ${p.name} (id ${p.id}): ${p.place ? `at ${p.place.name} (${p.place.id})` : "somewhere of their own"}${p.activity && activityPhrase(p.activity) ? `, ${activityPhrase(p.activity)}` : ""}.`,
     p.usual.length > 0 ? `  Usually: ${p.usual.join("; ")}.` : "",
     p.story.length > 0 ? `  Already set by the story: ${p.story.join("; ")}.` : ""
   ].filter((s) => s !== "").join(`
@@ -72235,6 +73373,7 @@ ${SKIP_PLAN_ANSWER}`;
   return `${renderTemplate(mine, vars)}
 ${SKIP_PLAN_ANSWER}`;
 }
+var STEP_OFF_NOTE = `The skip plan wasn't made: the ${STEP_LABEL.skip} step is off (Settings \u2192 Steps and connections), so everyone it would have planned keeps to their basic needs.`;
 async function planSkip(deps, input) {
   const { target, opts } = timelapseOptions(input.intent, input.runSeed);
   const run2 = target ? TimelapseRun.start(deps.registry, new Working(deps.registry, input.world, input.state), target, opts) : null;
@@ -72248,6 +73387,8 @@ async function planSkip(deps, input) {
   const people = Object.keys(input.state.entities).sort().filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && livesPlans(ctx, id) && skipLifeOf(ctx, id) === "model");
   if (people.length === 0)
     return null;
+  if (!input.config)
+    return { type: ROUTINE_EVENTS.skipPlan, data: { from, to, plans: [], note: STEP_OFF_NOTE } };
   const safe = povSafe(ctx);
   const reply = input.reply.slice(-REPLY_CAP);
   const told = safe(reply) ? reply : "";
@@ -72777,9 +73918,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "8541b3d9906b34026dfa48953da4d12ad62a07882c3656bfd1084fc36f5c50c0";
-  const tools = ["3363864e19637152d71e37196938c410", "21566d9a8cef394277c636eb45e09b64"].filter((f) => f !== undefined);
-  return { id: "96375fe8", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  const sha256 = "3f914940f48c309ed5f1c682186a4d6cc7e98b7e7277c0136ccd1d684cc412c5";
+  const tools = ["d7ea5d8f68714fbde356a1b99c522de6", "3a95a1966944ca155e67ff625d472024"].filter((f) => f !== undefined);
+  return { id: "ecbfad11", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -73520,11 +74661,13 @@ function diff(from, to, path = [], out = []) {
 function asJson(view) {
   return JSON.parse(JSON.stringify(view));
 }
+var VIEWS_KEPT = 32;
 
 class StatePush {
   host;
   build;
   channels = new Map;
+  revs = 0;
   constructor(host, build) {
     this.host = host;
     this.build = build;
@@ -73538,13 +74681,34 @@ class StatePush {
     }
     return c;
   }
+  pushed(chatId, userId, c, view) {
+    c.rev = ++this.revs;
+    c.last = view;
+    const key = `${userId}\x00${chatId}`;
+    this.channels.delete(key);
+    this.channels.set(key, c);
+    for (const [other, o] of this.channels) {
+      if (this.channels.size <= VIEWS_KEPT)
+        break;
+      if (other !== key && o.timer === null && !o.queued)
+        this.channels.delete(other);
+    }
+  }
+  kept() {
+    return this.channels.size;
+  }
   async snapshot(chatId, userId, frontendSessionId) {
     const c = this.channel(chatId, userId);
-    await giveWay();
-    const view = await this.build(chatId, userId);
-    c.rev++;
-    c.last = asJson(view);
-    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.snapshot", chatId, rev: c.rev, view }, userId, frontendSessionId);
+    if (c.last === null) {
+      await giveWay();
+      const view = asJson(await this.build(chatId, userId));
+      if (c.last === null)
+        this.pushed(chatId, userId, c, view);
+      else
+        this.changed(chatId, userId);
+    } else
+      this.changed(chatId, userId);
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.snapshot", chatId, rev: c.rev, view: c.last }, userId, frontendSessionId);
   }
   changed(chatId, userId) {
     const c = this.channel(chatId, userId);
@@ -73588,8 +74752,7 @@ class StatePush {
     if (ops.length === 0)
       return;
     const base = c.rev;
-    c.rev++;
-    c.last = next;
+    this.pushed(chatId, userId, c, next);
     this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.delta", chatId, base, rev: c.rev, ops }, userId);
   }
 }
@@ -73642,9 +74805,9 @@ var MODEL_USE_PRESETS = {
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 1600)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 1600)),
       mind: step(true, ["always"], HELPER),
-      memory: step(true, ["reply"], HELPER),
-      skip: step(false, ["timelapse"], HELPER),
-      consolidate: step(true, ["reply"], HELPER)
+      memory: step(true, ["reply"], UNREASONED_ROUTE),
+      skip: step(false, ["timelapse"], UNREASONED_ROUTE),
+      consolidate: step(true, ["reply"], UNREASONED_ROUTE)
     },
     budgets: { pre: { calls: 2, lookup: { calls: 4 } }, post: { calls: 2, lookup: { calls: 3 } } },
     tokens: { sections: 4000 }
@@ -73659,9 +74822,9 @@ var MODEL_USE_PRESETS = {
       "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 2400)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 2400)),
       mind: step(true, ["always"], HELPER),
-      memory: step(true, ["reply"], HELPER),
-      skip: step(false, ["timelapse"], HELPER),
-      consolidate: step(true, ["reply"], HELPER)
+      memory: step(true, ["reply"], UNREASONED_ROUTE),
+      skip: step(false, ["timelapse"], UNREASONED_ROUTE),
+      consolidate: step(true, ["reply"], UNREASONED_ROUTE)
     },
     budgets: { pre: { calls: 8, lookup: { calls: 6 } }, post: { calls: 4, lookup: { calls: 4 } } },
     tokens: { sections: 8000 }
@@ -73698,33 +74861,45 @@ var LIFTED = {
 };
 function lifted(raw) {
   const out = JSON.parse(JSON.stringify(raw));
-  if (out.defaults === SETTINGS_DEFAULTS_REV)
+  const rev = typeof out.defaults === "number" ? out.defaults : 0;
+  if (rev >= SETTINGS_DEFAULTS_REV)
     return out;
-  const lift = (map, n) => map.get(n) ?? n;
   const mu = isRecord(out.modelUse) ? out.modelUse : null;
-  if (mu && isRecord(mu.steps)) {
-    for (const s of Object.values(mu.steps)) {
-      if (!isRecord(s))
-        continue;
-      if (s.maxTokens === LIFTED.maxTokens)
-        delete s.maxTokens;
-      if (isRecord(s.lore) && typeof s.lore.tokens === "number")
-        s.lore.tokens = lift(LIFTED.loreTokens, s.lore.tokens);
+  if (rev < 2) {
+    const lift = (map, n) => map.get(n) ?? n;
+    if (mu && isRecord(mu.steps)) {
+      for (const s of Object.values(mu.steps)) {
+        if (!isRecord(s))
+          continue;
+        if (s.maxTokens === LIFTED.maxTokens)
+          delete s.maxTokens;
+        if (isRecord(s.lore) && typeof s.lore.tokens === "number")
+          s.lore.tokens = lift(LIFTED.loreTokens, s.lore.tokens);
+      }
+    }
+    if (mu && isRecord(mu.budgets)) {
+      for (const phase of ["pre", "post"]) {
+        const b = mu.budgets[phase];
+        const l = isRecord(b) && isRecord(b.lookup) ? b.lookup : null;
+        const old = l ? LIFTED.lookups[phase].find((x) => x.was === `${String(l.calls)}|${String(l.ms)}`) : undefined;
+        if (l && old)
+          l.calls = MODEL_USE_PRESETS[old.preset].budgets[phase].lookup?.calls ?? l.calls;
+      }
+    }
+    if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number")
+      mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
+    if (isRecord(out.minds) && typeof out.minds.tokens === "number")
+      out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
+  }
+  const helperEffort = isRecord(out.helper) ? out.helper.effort : undefined;
+  if (rev < 3 && mu && isRecord(mu.steps) && (helperEffort === undefined || helperEffort === DEFAULT_HELPER.effort)) {
+    for (const purpose of UNREASONED_STEPS) {
+      const s = mu.steps[purpose];
+      const route = isRecord(s) ? s.route : undefined;
+      if (isRecord(route) && route.provider === "helper" && !hasOwn(route, "effort"))
+        route.effort = "off";
     }
   }
-  if (mu && isRecord(mu.budgets)) {
-    for (const phase of ["pre", "post"]) {
-      const b = mu.budgets[phase];
-      const l = isRecord(b) && isRecord(b.lookup) ? b.lookup : null;
-      const old = l ? LIFTED.lookups[phase].find((x) => x.was === `${String(l.calls)}|${String(l.ms)}`) : undefined;
-      if (l && old)
-        l.calls = MODEL_USE_PRESETS[old.preset].budgets[phase].lookup?.calls ?? l.calls;
-    }
-  }
-  if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number")
-    mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
-  if (isRecord(out.minds) && typeof out.minds.tokens === "number")
-    out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
   out.defaults = SETTINGS_DEFAULTS_REV;
   return out;
 }
@@ -73783,7 +74958,18 @@ function normalize(raw) {
   const realism = isRecord(raw.realism) ? raw.realism.preset : undefined;
   if (realism === "grounded" || realism === "simulation")
     fill.realism.claims = { ...CLAIM_PRESETS[realism] };
-  const merged2 = mergePatch(JSON.parse(JSON.stringify(fill)), migrateTimeouts(migrateMindReads(lifted(raw))));
+  const own2 = migrateTimeouts(migrateMindReads(lifted(raw)));
+  const merged2 = mergePatch(JSON.parse(JSON.stringify(fill)), own2);
+  const ownSteps = isRecord(own2.modelUse) && isRecord(own2.modelUse.steps) ? own2.modelUse.steps : null;
+  const mergedSteps = isRecord(merged2) && isRecord(merged2.modelUse) && isRecord(merged2.modelUse.steps) ? merged2.modelUse.steps : null;
+  if (ownSteps && mergedSteps) {
+    for (const purpose of STEP_PURPOSES) {
+      const s = ownSteps[purpose];
+      const step2 = mergedSteps[purpose];
+      if (isRecord(s) && isRecord(s.route) && isRecord(step2))
+        step2.route = s.route;
+    }
+  }
   return isRecord(merged2) && merged2.v === 1 ? conform(merged2, fill) : defaultSettings();
 }
 var STEP_PURPOSES = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"];
@@ -73795,8 +74981,8 @@ function askBeyondOf(v) {
   return minutes2 === undefined ? undefined : Math.min(TIMELAPSE_REACH_MINUTES, Math.round(minutes2));
 }
 var oneOf3 = (v, values) => values.find((x) => x === v);
-var LEVELS2 = [0, 1, 2, 3, 4];
-var level = (v) => LEVELS2.find((l) => l === v);
+var LEVELS3 = [0, 1, 2, 3, 4];
+var level = (v) => LEVELS3.find((l) => l === v);
 function speedOf(x) {
   if (!isRecord(x))
     return;
@@ -73978,6 +75164,9 @@ function gatesOf2(value, d) {
 }
 function expandPresets(settings, patch) {
   const out = structuredClone(settings);
+  const adjudication = isRecord(patch.adjudication) && patch.adjudication.preset !== "custom" ? readAdjudication(patch.adjudication) : null;
+  if (adjudication)
+    out.adjudication = adjudication;
   const realism = isRecord(patch.realism) ? patch.realism.preset : undefined;
   if (realism === "story" || realism === "grounded" || realism === "simulation")
     out.realism = { preset: realism, ...structuredClone(REALISM_PRESETS2[realism]) };
@@ -74153,13 +75342,13 @@ class SettingsStore {
 }
 
 // src/backend/start-markers.ts
-var LEVELS3 = [0, 1, 2, 3, 4];
+var LEVELS4 = [0, 1, 2, 3, 4];
 function at(map, key) {
   return isRecord(map) && hasOwn(map, key) ? map[key] : undefined;
 }
 function levelAt(map, key) {
   const v = at(map, key);
-  return LEVELS3.find((l) => l === v);
+  return LEVELS4.find((l) => l === v);
 }
 function worldFirstTime(user, world) {
   const w = world.time;
@@ -74233,9 +75422,9 @@ function typedName(value, said2) {
   const given = value.replace(/_+/g, " ").replace(/\s+/g, " ").trim();
   if (given === "" || given.length > 80)
     return null;
-  const words6 = new RegExp(`(?<![\\p{L}\\p{N}])${given.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu");
+  const words7 = new RegExp(`(?<![\\p{L}\\p{N}])${given.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu");
   for (const text6 of said2) {
-    const typed = words6.exec(text6)?.[0]?.replace(DETERMINER, "").trim();
+    const typed = words7.exec(text6)?.[0]?.replace(DETERMINER, "").trim();
     if (typed)
       return typed;
   }
@@ -74562,16 +75751,188 @@ function withoutMissing(lines, missing) {
   return out;
 }
 
+// src/backend/sections-build.ts
+function buildSections(input) {
+  const { registry, world, state: state2, secrets } = input;
+  const record3 = [];
+  const outcomes = new Map;
+  const fills = [];
+  const recorded = [];
+  const sources = [];
+  let budget = input.budget;
+  const mindsBudget = input.mindsBudget;
+  const fullMinds = worldMindsOf(world).secrecy === "full";
+  const hinted = [];
+  const outcome = (section, feed, status, more = {}) => {
+    outcomes.set(section.id, { slot: section.id, label: section.label, rank: section.rank, feed, status, content: null, tokens: null, cut: 0, marked: 0, hints: 0, ...more });
+  };
+  readPass(() => {
+    const mindsSection = sectionsOf(world).find((s) => s.id === MINDS_SLOT);
+    const mindsFeed = mindsSection ? feedOf(mindsSection, state2) : null;
+    const mindsOn3 = mindsSection !== undefined && mindsFeed?.enabled !== false && input.hasEntry(mindsSection);
+    const read = registry.context(world, state2);
+    const allMinds = mindsOn3 ? mindLines(read).filter((l) => fullMinds || findLeaks(l.line, secrets).length === 0) : [];
+    const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: input.said, reply: "" }) ?? []).map((s) => s.entity);
+    const mindsCap = Math.min(mindsBudget, mindsFeed?.maxTokens ?? Number.POSITIVE_INFINITY);
+    const mindsFit = mindsSection && mindsOn3 ? fitMindLines(allMinds, ladder, mindsCap, (kept2) => input.cost(renderSection(mindsSection.label, mindsSection.template, kept2.map((l) => l.line)))).slice(0, mindsFeed?.maxLines ?? Number.POSITIVE_INFINITY) : [];
+    const ctx = registry.context(world, state2, { "minds.minded": () => mindsFit.map((l) => l.entity) });
+    const filled = new Set;
+    for (const section of sectionsOf(world)) {
+      const feed = feedOf(section, state2);
+      if (feed.enabled === false) {
+        outcome(section, feed, "off");
+        continue;
+      }
+      if (!input.hasEntry(section)) {
+        outcome(section, feed, "unplaced");
+        continue;
+      }
+      const minds = section.id === MINDS_SLOT;
+      const scope = feed.scope ?? "player";
+      const lines = minds ? mindsFit.map((l) => l.line) : [];
+      const lineSources = lines.map(() => {
+        return;
+      });
+      const hints = [];
+      const marked = [];
+      for (const r of renderersOf(registry.renderers, section, feed)) {
+        if (minds)
+          continue;
+        try {
+          if (r.hint) {
+            hints.push(...r.render(ctx));
+            continue;
+          }
+          for (const l of linesOf(r, ctx, scope)) {
+            if (l.known === "pov") {
+              lines.push(l.text);
+              lineSources.push(l.source);
+              continue;
+            }
+            if (scope === "player" || l.known === "gm" && scope !== "gm")
+              continue;
+            if (scope !== "gm" && findLeaks(l.text, secrets).length > 0)
+              continue;
+            marked.push({ text: markedText(l), ...l.source ? { source: l.source } : {} });
+          }
+        } catch (error) {
+          input.warn(`section ${section.id}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (section.id === "outline")
+        lines.push(...withoutMissing(input.outline, missingSections(sectionsOf(world), section.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && input.hasEntry(mindsSection))));
+      if (section.id === "scene" && input.elapsed !== null)
+        lines.push(input.elapsed > 0 ? `This turn took ${spanText(input.elapsed)}.` : "No time passes this turn.");
+      if (section.id === "outcome") {
+        lines.unshift(...input.planned.outcome);
+        lineSources.unshift(...input.planned.outcome.map(() => {
+          return;
+        }));
+      }
+      if (section.id === "montage")
+        lines.push(...input.planned.montage);
+      while (lineSources.length < lines.length)
+        lineSources.push(undefined);
+      const screened = lines.map((text6, i) => ({ text: text6, source: lineSources[i] })).filter((l) => minds || findLeaks(l.text, secrets).length === 0);
+      const capped = feed.maxLines !== undefined ? screened.slice(0, feed.maxLines) : [...screened];
+      const markedRoom = feed.maxLines !== undefined ? Math.max(0, feed.maxLines - capped.length) : marked.length;
+      if (feed.maxTokens !== undefined)
+        while (capped.length > 0 && input.cost(renderSection(section.label, section.template, capped.map((l) => l.text))) > feed.maxTokens)
+          capped.pop();
+      const safe = capped.map((l) => l.text);
+      const facts = marked.slice(0, markedRoom);
+      const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
+      const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - capped.length);
+      if (safe.length === 0) {
+        if (minds && allMinds.length > 0) {
+          record3.push({ slot: section.id, label: section.label, tokens: input.cost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
+          outcome(section, feed, "clipped", { cut: allMinds.length });
+        } else
+          outcome(section, feed, "empty", { cut });
+        if (facts.length > 0)
+          hinted.push({ fill: null, slot: section.id, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
+        continue;
+      }
+      const content = renderSection(section.label, section.template, safe);
+      input.seen(content);
+      const cost = input.cost(content);
+      const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
+      record3.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...cut > 0 ? { cut } : {}, delivery: "unchecked" });
+      if (clipped) {
+        outcome(section, feed, "clipped", { tokens: cost, cut });
+        continue;
+      }
+      if (!minds)
+        budget -= cost;
+      const fill = { slot: section.id, content };
+      fills.push(fill);
+      filled.add(section.id);
+      recorded.push(section.id);
+      sources.push(...capped.flatMap((l) => l.source ? [l.source] : []));
+      outcome(section, feed, "sent", { content, tokens: cost, cut });
+      if (safeHints.length > 0 || facts.length > 0)
+        hinted.push({ fill, slot: section.id, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
+    }
+  });
+  const used = input.budget - budget;
+  let markedSent = false;
+  for (const h of hinted) {
+    const fits2 = (extra, total) => extra <= budget && (h.maxTokens === undefined || total <= h.maxTokens);
+    const costOf3 = (body2) => {
+      const content2 = renderSection(h.label, h.template, body2);
+      input.seen(content2);
+      return input.cost(content2);
+    };
+    const body = [...h.lines];
+    let cost = h.cost;
+    const carried = [];
+    let facts = 0;
+    for (const m of h.marked) {
+      const next = costOf3([...body, m.text]);
+      if (!fits2(next - cost, next))
+        break;
+      budget -= next - cost;
+      cost = next;
+      body.push(m.text);
+      if (m.source)
+        carried.push(m.source);
+      markedSent = true;
+      facts++;
+    }
+    let hints = 0;
+    if (h.hints.length > 0 && (h.maxLines === undefined || body.length + h.hints.length <= h.maxLines)) {
+      const next = costOf3([...body, ...h.hints]);
+      if (fits2(Math.max(0, next - cost), next)) {
+        budget -= Math.max(0, next - cost);
+        body.push(...h.hints);
+        hints = h.hints.length;
+      }
+    }
+    if (body.length === h.lines.length)
+      continue;
+    const content = renderSection(h.label, h.template, body);
+    if (h.fill)
+      h.fill.content = content;
+    else
+      fills.push({ slot: h.slot, content });
+    sources.push(...carried);
+    const was = outcomes.get(h.slot);
+    if (was)
+      outcomes.set(h.slot, { ...was, status: "sent", content, tokens: input.cost(content), marked: facts, hints });
+  }
+  return { sections: sectionsOf(world).flatMap((s) => outcomes.get(s.id) ?? []), record: record3, fills, recorded, sources, markedSent, used };
+}
+
 // src/backend/routine-ask.ts
 var SAID_BY_PLAYER = "player";
 function statedIn(text6, said2) {
   const all2 = text6.replace(/[^\S\n]+/g, " ").toLowerCase();
-  const words6 = said2.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?\u2026]+$/, "");
-  const at2 = words6 === "" ? -1 : all2.indexOf(words6);
+  const words7 = said2.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?\u2026]+$/, "");
+  const at2 = words7 === "" ? -1 : all2.indexOf(words7);
   if (at2 < 0)
     return false;
-  const end = all2.slice(at2 + words6.length).search(/[.!?\n]/);
-  return end < 0 || all2.charAt(at2 + words6.length + end) !== "?";
+  const end = all2.slice(at2 + words7.length).search(/[.!?\n]/);
+  return end < 0 || all2.charAt(at2 + words7.length + end) !== "?";
 }
 function str17(v) {
   return typeof v === "string" ? v.trim() : "";
@@ -74613,12 +75974,12 @@ function placesFor(registry, world, state2, said2) {
   const exact = known.filter((id) => id === said2 || own(world.places, id)?.name.toLowerCase() === said2.toLowerCase());
   if (exact.length > 0)
     return exact.slice(0, 1);
-  const words6 = wordsIn(said2);
-  if (words6.length === 0)
+  const words7 = wordsIn(said2);
+  if (words7.length === 0)
     return [];
   return known.filter((id) => {
     const name = wordsIn(own(world.places, id)?.name ?? "");
-    return words6.every((w) => name.some((n) => n.startsWith(w)));
+    return words7.every((w) => name.some((n) => n.startsWith(w)));
   });
 }
 function routineAsks(registry, world, state2, said2, text6, secrets, known) {
@@ -75037,13 +76398,17 @@ class TurnBridge {
   begin(userText, at2) {
     if (this.readAt.get(userText) === at2)
       return;
+    this.forget(userText);
+    this.readAt.set(userText, at2);
+    trim(this.readAt);
+  }
+  forget(userText) {
     for (const kept2 of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.ownPlans, this.outlines])
       kept2.delete(userText);
     this.interpreted.delete(userText);
     this.intentsPassed.delete(userText);
     this.unread.delete(userText);
-    this.readAt.set(userText, at2);
-    trim(this.readAt);
+    this.readAt.delete(userText);
   }
   setIntent(userText, intent2, interpreted = false) {
     this.intents.set(userText, intent2);
@@ -75096,7 +76461,7 @@ class TurnBridge {
     const [first, ...queue] = read.steps.map(({ ask: _ask, ...step2 }) => step2);
     const confidence = read.lead ? read.probabilities[read.lead] ?? 1 : 1;
     const probabilities = !first || first.action === read.lead ? read.probabilities : { [first.action]: confidence, none: 1 - confidence };
-    const intent2 = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...first?.claim ? { claim: first.claim } : {}, ...read.then ? { then: read.then } : {}, ...queue.length > 0 ? { queue } : {} };
+    const intent2 = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...first?.text ? { text: first.text } : {}, ...first?.claim ? { claim: first.claim } : {}, ...read.then ? { then: read.then } : {}, ...queue.length > 0 ? { queue } : {} };
     if (read.dropped.length > 0)
       this.setUnfit(userText, read.dropped, intent2);
     else
@@ -75313,243 +76678,14 @@ function trim(map, cap = 64) {
   }
 }
 
-// src/shared/studio-bridge.ts
-var STUDIO_EXTENSION = "lumi_rp_engine_studio";
-var STUDIO_INBOUND = ["file", `rpc:${STUDIO_EXTENSION}.offer`];
-var CHAT_SUMMARY_CAP = 24;
-var REVISIONS_LISTED = 32;
-var PRESENT_CAP = 24;
-var QUEST_CAP = 24;
-var encoder = new TextEncoder;
-function channelId(id) {
-  let out = "";
-  for (const byte of encoder.encode(id))
-    out += byte.toString(16).padStart(2, "0");
-  return out;
-}
-function worldsChannel(userId) {
-  return `studio-worlds.${channelId(userId)}`;
-}
-function chatsChannel(userId) {
-  return `studio-chats.${channelId(userId)}`;
-}
-function worldChannel(userId, worldId, revision) {
-  return `studio-world.${channelId(userId)}.${channelId(worldId)}${revision === undefined ? "" : `.${revision}`}`;
-}
-function offerEndpoint(userId) {
-  return `${STUDIO_EXTENSION}.offer.${channelId(userId)}`;
-}
-function readOffer(value) {
-  if (!isRecord(value) || typeof value.offerId !== "string" || value.offerId === "" || !isRecord(value.doc))
-    return null;
-  if (value.mode !== "new" && value.mode !== "revision")
-    return null;
-  if (value.mode === "revision" && (typeof value.worldId !== "string" || value.worldId === ""))
-    return null;
-  if (value.attachChatId !== undefined && (typeof value.attachChatId !== "string" || value.attachChatId === ""))
-    return null;
-  const createdAt = typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? value.createdAt : 0;
-  return {
-    offerId: value.offerId,
-    doc: value.doc,
-    mode: value.mode,
-    ...value.mode === "revision" ? { worldId: value.worldId } : {},
-    ...typeof value.attachChatId === "string" ? { attachChatId: value.attachChatId } : {},
-    ...value.mode === "revision" && typeof value.baseRevision === "string" && value.baseRevision !== "" ? { baseRevision: value.baseRevision } : {},
-    createdAt
-  };
-}
-function chatSummary(view, at2) {
-  if (view.status === "not_world" || view.worldId === null || view.revision === null)
-    return null;
-  const hud2 = view.hud;
-  const cash = hud2?.cash ? "band" in hud2.cash ? hud2.cash.band : view.currency ? formatMoney(hud2.cash.cents, view.currency) : String(hud2.cash.cents) : null;
-  return {
-    chatId: view.chatId,
-    worldId: view.worldId,
-    revision: view.revision,
-    ...view.definitionsFrom ? { definitionsFrom: view.definitionsFrom } : {},
-    status: view.status,
-    place: hud2?.place ? { id: hud2.place.id, name: hud2.place.name } : null,
-    clock: hud2 ? { minutes: hud2.clock.minutes, label: hud2.clock.label, dayPart: hud2.clock.dayPart } : null,
-    cash,
-    present: (view.scene?.present ?? []).slice(0, PRESENT_CAP).map((p) => ({ id: p.id, name: p.name, label: p.label, ...p.life ? { life: p.life } : {} })),
-    quests: openQuests(view.panels["story.quests"]),
-    at: at2
-  };
-}
-function openQuests(panel) {
-  if (!isRecord(panel) || !Array.isArray(panel.active))
-    return [];
-  const out = [];
-  for (const t of panel.active) {
-    if (out.length >= QUEST_CAP)
-      break;
-    if (!isRecord(t) || typeof t.id !== "string" || typeof t.label !== "string")
-      continue;
-    out.push({ id: t.id, kind: typeof t.kind === "string" ? t.kind : "quest", label: t.label, stage: typeof t.stage === "string" ? t.stage : "", cue: typeof t.cue === "string" ? t.cue : null });
-  }
-  return out;
-}
-
-// src/backend/studio.ts
-var INSTALLED_FILE = "studio/installed.json";
-var INSTALLED_CAP = 32;
-var REVISION_ID = /^[0-9a-f]{32}$/;
-function guard(requester) {
-  if (requester !== STUDIO_EXTENSION)
-    throw new Error(`only ${STUDIO_EXTENSION} may read this endpoint`);
-}
-function isInstalled(v) {
-  return isRecord(v) && typeof v.offerId === "string" && typeof v.worldId === "string" && typeof v.revision === "string";
-}
-
-class StudioBridge {
-  host;
-  worlds;
-  served = new Set;
-  worldChannels = new Map;
-  chats = new Map;
-  constructor(host, worlds) {
-    this.host = host;
-    this.worlds = worlds;
-  }
-  async serve(userId) {
-    if (this.served.has(userId))
-      return;
-    this.served.add(userId);
-    try {
-      this.host.rpc.handle(worldsChannel(userId), [], async (requester) => {
-        guard(requester);
-        return this.worldList(userId);
-      });
-      this.host.rpc.handle(chatsChannel(userId), ["chats"], async (requester) => {
-        guard(requester);
-        const list2 = { v: 1, chats: [...this.chats.get(userId)?.values() ?? []].reverse() };
-        return list2;
-      });
-      for (const index of await this.worlds.list(userId))
-        this.publishWorld(userId, index);
-    } catch (error) {
-      this.host.log("warn", `[LumiRPEngine] the Studio bridge couldn't publish your worlds: ${error instanceof Error ? error.message : String(error)}`, userId);
-    }
-  }
-  async worldChanged(worldId, userId) {
-    try {
-      if (!this.served.has(userId))
-        return await this.serve(userId);
-      const index = await this.worlds.index(worldId, userId);
-      if (index)
-        this.publishWorld(userId, index);
-      else
-        this.withdrawWorld(userId, worldId);
-    } catch (error) {
-      this.host.log("warn", `[LumiRPEngine] the Studio bridge couldn't publish world ${worldId}: ${error instanceof Error ? error.message : String(error)}`, userId);
-    }
-  }
-  seen(userId, view) {
-    const summary = chatSummary(view, Date.now());
-    let chats = this.chats.get(userId);
-    if (!summary) {
-      chats?.delete(view.chatId);
-      return;
-    }
-    if (!chats) {
-      chats = new Map;
-      this.chats.set(userId, chats);
-    }
-    chats.delete(view.chatId);
-    chats.set(view.chatId, summary);
-    while (chats.size > CHAT_SUMMARY_CAP) {
-      const oldest = chats.keys().next();
-      if (oldest.done)
-        break;
-      chats.delete(oldest.value);
-    }
-  }
-  async offer(userId) {
-    let raw;
-    try {
-      raw = await this.host.rpc.read(offerEndpoint(userId));
-    } catch {
-      return { offer: null, reason: "LumiRPEngine Studio has no world waiting for you, or isn't running." };
-    }
-    if (raw === null || raw === undefined)
-      return { offer: null, reason: "LumiRPEngine Studio has no world waiting for you." };
-    const offer = readOffer(raw);
-    return offer ? { offer, hash: hashJson(offer) } : { offer: null, reason: "LumiRPEngine Studio sent an offer this engine can't read." };
-  }
-  async installedAs(userId, offerId) {
-    return (await this.installed(userId)).find((i) => i.offerId === offerId) ?? null;
-  }
-  async markInstalled(userId, entry) {
-    const kept2 = [...(await this.installed(userId)).filter((i) => i.offerId !== entry.offerId), entry].slice(-INSTALLED_CAP);
-    await this.host.storage.write(`${INSTALLED_FILE}.tmp`, JSON.stringify({ v: 1, offers: kept2 }), userId);
-    await this.host.storage.move(`${INSTALLED_FILE}.tmp`, INSTALLED_FILE, userId);
-  }
-  installs = new Map;
-  async installing(userId, work) {
-    const run2 = (this.installs.get(userId) ?? Promise.resolve()).then(work);
-    const settled = run2.then(() => {
-      return;
-    }, () => {
-      return;
-    });
-    this.installs.set(userId, settled);
-    try {
-      return await run2;
-    } finally {
-      if (this.installs.get(userId) === settled)
-        this.installs.delete(userId);
-    }
-  }
-  async installed(userId) {
-    const raw = await readStoredJson(this.host, INSTALLED_FILE, userId, "Studio installs", (v) => isRecord(v) && Array.isArray(v.offers));
-    return isRecord(raw) && Array.isArray(raw.offers) ? raw.offers.filter(isInstalled) : [];
-  }
-  async worldList(userId) {
-    const worlds = (await this.worlds.list(userId)).map((index) => ({ id: index.id, name: index.name, head: index.head, revisions: index.revisions.slice(-REVISIONS_LISTED), revisionCount: index.revisions.length }));
-    return { v: 1, worlds };
-  }
-  publishWorld(userId, index) {
-    const key = `${userId}\x00${index.id}`;
-    let have = this.worldChannels.get(key);
-    if (!have) {
-      have = new Set;
-      this.worldChannels.set(key, have);
-    }
-    for (const revision of [undefined, ...index.revisions]) {
-      if (revision !== undefined && !REVISION_ID.test(revision))
-        continue;
-      const channel = worldChannel(userId, index.id, revision);
-      if (have.has(channel))
-        continue;
-      have.add(channel);
-      this.host.rpc.handle(channel, [], async (requester) => {
-        guard(requester);
-        return this.readWorld(userId, index.id, revision);
-      });
-    }
-  }
-  withdrawWorld(userId, worldId) {
-    const key = `${userId}\x00${worldId}`;
-    for (const channel of this.worldChannels.get(key) ?? [])
-      this.host.rpc.unregister(channel);
-    this.worldChannels.delete(key);
-  }
-  async readWorld(userId, worldId, revision) {
-    const index = await this.worlds.index(worldId, userId);
-    if (!index)
-      throw new Error(`world ${worldId} not found`);
-    const read = await this.worlds.get(worldId, userId, revision);
-    return { v: 1, worldId, name: index.name, head: index.head, revision: read.revision, world: read.world };
-  }
-}
-
 // src/backend/runtime.ts
 var ACTIVE_CONNECTION = "active";
-var READ_CHIP_KINDS = new Set(["undo", "confirm", "decline", "choice", "contradiction"]);
+var READ_CHIP_KINDS = new Set(["undo", "confirm", "decline", "untracked", "choice", "contradiction"]);
+var MINDS_POST_CALLS = ["memory", "consolidate"];
+var RULED_OUT = new Set(["declined", "unpriced", "bound", "over_bound", "no_room", "not_moved", "no_route", "in_fight", "regard_spent"]);
+var ALREADY_SO = new Set(["already_known", "already"]);
 var TOKEN_COUNT_CAP = 4;
+var LIVE_LORES_KEPT = 8;
 var LATE = Symbol("late");
 function readRun(meta) {
   const raw = meta[LEDGER_NAMESPACE];
@@ -75564,18 +76700,19 @@ function povWorld(reg, world, state2) {
     places: Object.fromEntries(Object.entries(world.places).filter(([id]) => canSeePlace(reg, world, state2, world.pov, id)))
   };
 }
-function prefixSummary(reg, world, state2) {
-  const pov = state2.entities[world.pov];
+function prefixEntities(reg, world, state2) {
   const here = placeOfEntity(state2, world.pov);
   const rank = (id, kind) => kind === "account" ? 2 : here !== null && placeOfEntity(state2, id) === here ? 0 : 1;
-  const known = Object.entries(state2.entities).filter(([id]) => povMayKnow(reg, world, state2, id)).map(([id, e], i) => ({ id, e, i, rank: rank(id, e.kind) })).sort((a, b) => a.rank - b.rank || a.i - b.i).slice(0, 30);
+  return Object.entries(state2.entities).filter(([id]) => povMayKnow(reg, world, state2, id)).map(([id, e], i) => ({ id, e, i, rank: rank(id, e.kind) })).sort((a, b) => a.rank - b.rank || a.i - b.i).slice(0, 30);
+}
+function prefixSummary(reg, world, state2) {
+  const pov = state2.entities[world.pov];
   const people = {};
-  for (const { id, e } of known) {
+  for (const { id, e } of prefixEntities(reg, world, state2)) {
     const holder = holderOf(state2, id);
     people[id] = { name: e.name, kind: e.kind, place: typeof e.fields.place === "string" ? e.fields.place : null, ...holder !== null && povMayKnow(reg, world, state2, holder) ? { holder } : {} };
   }
-  const places2 = Object.keys(world.places).filter((p) => canSeePlace(reg, world, state2, world.pov, p)).slice(0, 40);
-  return { clock: state2.clock, pov: world.pov, povName: pov?.name ?? world.pov, cents: state2.accounts[world.pov] ?? null, entities: people, places: places2 };
+  return { clock: state2.clock, pov: world.pov, povName: pov?.name ?? world.pov, cents: state2.accounts[world.pov] ?? null, entities: people };
 }
 function inRecordOrder(record3, events3) {
   const at2 = new Map;
@@ -75626,7 +76763,7 @@ function lentAlong(p, pre, state2) {
     return false;
   const inside = (outer) => {
     let cur = state2.entities[item]?.relations.find((r) => r.type === "in")?.to;
-    for (let guard2 = 0;cur && guard2 < 64; guard2++) {
+    for (let guard = 0;cur && guard < 64; guard++) {
       if (cur === outer)
         return true;
       cur = state2.entities[cur]?.relations.find((r) => r.type === "in")?.to;
@@ -75660,7 +76797,7 @@ var CONTRAST = Object.fromEntries([
   ["small", "medium", "large", "big", "little", "tiny", "huge", "tall", "grande", "venti", "regular", "mini", "jumbo"],
   ["hot", "iced", "cold", "warm"],
   ["single", "double", "triple"]
-].flatMap((words6, cls) => words6.map((w) => [stem(w), cls])));
+].flatMap((words7, cls) => words7.map((w) => [stem(w), cls])));
 function povPays(p, world, state2) {
   const payer = typeof p.payer === "string" ? p.payer.trim() : "";
   return payer === "" || payer === world.pov || !hasOwn(state2.entities, payer) || heldBy(state2.entities, payer, world.pov);
@@ -75677,18 +76814,18 @@ function buysIn(pre) {
   }
   return out;
 }
-function forSomeone(words6, ctx) {
+function forSomeone(words7, ctx) {
   const { world, state: state2 } = ctx;
-  return words6.some((w) => FOR_SOMEONE[w] === true || Object.entries(state2.entities).some(([id, e]) => id !== world.pov && kindIs(ctx.registry, world, e.kind, "person") && e.name.toLowerCase().split(/[^a-z0-9]+/).some((part) => part.length > 1 && stem(part) === w)));
+  return words7.some((w) => FOR_SOMEONE[w] === true || Object.entries(state2.entities).some(([id, e]) => id !== world.pov && kindIs(ctx.registry, world, e.kind, "person") && e.name.toLowerCase().split(/[^a-z0-9]+/).some((part) => part.length > 1 && stem(part) === w)));
 }
 function toldAsAnother(narration, head, ctx) {
-  const words6 = narration.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
-  return words6.some((w, i) => {
+  const words7 = narration.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
+  return words7.some((w, i) => {
     if (stem(w) !== head)
       return false;
-    if (ANOTHER.test(words6.slice(Math.max(0, i - 3), i).join(" ")))
+    if (ANOTHER.test(words7.slice(Math.max(0, i - 3), i).join(" ")))
       return true;
-    return words6[i + 1] === "for" && forSomeone(words6.slice(i + 2, i + 4).map(stem), ctx);
+    return words7[i + 1] === "for" && forSomeone(words7.slice(i + 2, i + 4).map(stem), ctx);
   });
 }
 function rowAt(ctx, item, category) {
@@ -75722,11 +76859,11 @@ function boughtAlong(p, pre, ctx, typed = [], narration = "", items = []) {
     if (typeof p.qty === "number" && p.qty !== buy.qty)
       continue;
     const typedOwn = typedNames.filter((n) => n.head === bought.head);
-    const words6 = new Set([...bought.words, ...typedOwn.flatMap((n) => [...n.words])]);
-    const contrast = [...said2.words].some((w) => CONTRAST[w] !== undefined && !words6.has(w) && [...words6].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
+    const words7 = new Set([...bought.words, ...typedOwn.flatMap((n) => [...n.words])]);
+    const contrast = [...said2.words].some((w) => CONTRAST[w] !== undefined && !words7.has(w) && [...words7].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
     if (contrast)
       continue;
-    const holds = [...said2.words].every((w) => words6.has(w)) || [...bought.words].every((w) => said2.words.has(w)) || typedOwn.some((n) => [...n.words].every((w) => said2.words.has(w))) || rowDef !== undefined && rowDef.name === buy.name;
+    const holds = [...said2.words].every((w) => words7.has(w)) || [...bought.words].every((w) => said2.words.has(w)) || typedOwn.some((n) => [...n.words].every((w) => said2.words.has(w))) || rowDef !== undefined && rowDef.name === buy.name;
     const inBand = () => {
       const band = stated === null ? null : optionalQuery(ctx, "economy.bought_band")?.(ctx, buy.name, buy.qty, world.pov);
       return !!band && stated !== null && stated >= 0.75 * band.min && stated <= 1.25 * band.max;
@@ -75761,8 +76898,8 @@ function splitAlongBuy(p, pre, ctx, items = []) {
       if (!b || b.head !== n.head)
         return false;
       const typedOwn = typedNames.filter((t) => t.head === b.head);
-      const words6 = new Set([...b.words, ...typedOwn.flatMap((t) => [...t.words])]);
-      return [...n.words].every((w) => words6.has(w)) || [...b.words].every((w) => n.words.has(w)) || typedOwn.some((t) => [...t.words].every((w) => n.words.has(w))) || rowName === buy.name;
+      const words7 = new Set([...b.words, ...typedOwn.flatMap((t) => [...t.words])]);
+      return [...n.words].every((w) => words7.has(w)) || [...b.words].every((w) => n.words.has(w)) || typedOwn.some((t) => [...t.words].every((w) => n.words.has(w))) || rowName === buy.name;
     });
   };
   if (parts.length < 2 || !parts.some(isBuy))
@@ -75770,12 +76907,11 @@ function splitAlongBuy(p, pre, ctx, items = []) {
   const { price: _price, qty: _qty, name: _name, ...rest } = p;
   return parts.filter((part) => !isBuy(part)).map((item) => ({ ...rest, item }));
 }
-function replyPlace(where, narrated, context) {
+function replyPlace(reg, where, narrated, context) {
   const { world, state: state2 } = context;
   const here = placeOfEntity(state2, world.pov);
-  const said2 = where ?? "";
-  const to = hasOwn(world.places, said2) ? said2 : said2.toLowerCase();
-  if (here === null || !hasOwn(world.places, to) || placeWithin(world, here, to) || placeOfEntity(context.start, world.pov) !== here)
+  const to = placeSaid(reg, world, state2, where ?? "");
+  if (here === null || to === null || placeWithin(world, here, to) || placeOfEntity(context.start, world.pov) !== here)
     return [];
   if (narrated.some((p) => p.type === "location" && (typeof p.entity !== "string" || p.entity.trim() === world.pov)))
     return [];
@@ -75874,7 +77010,6 @@ class Runtime {
   presets;
   push;
   diag;
-  studio;
   agents;
   templates;
   templateInfo;
@@ -75930,15 +77065,9 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "96375fe8" }), (chatId) => messages.forget(chatId));
-    this.studio = new StudioBridge(this.host, this.worlds);
-    this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "ecbfad11" }), (chatId) => messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
-    this.push = new StatePush(this.host, async (chatId, userId) => {
-      const view = await this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId));
-      this.studio.seen(userId, view);
-      return view;
-    });
+    this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }
   start() {
     this.ledger.hooks = this;
@@ -75999,7 +77128,7 @@ class Runtime {
       return null;
     const pinned = new Map;
     const missing = new Set;
-    lruSet(this.pins, `${userId}\x00${chatId}`, pinned, 256);
+    lruSet(this.pins, `${userId}\x00${chatId}`, pinned, OPEN_CHATS_CAP);
     let world;
     try {
       world = (await this.worlds.get(run2.worldId, userId, run2.revision)).world;
@@ -76083,6 +77212,19 @@ class Runtime {
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION2,
       earlier: { messages: earlier, hideJson: settings.hideJsonBlocks }
     };
+    const shown4 = bridge.outlineOf(text6) !== undefined;
+    const lastReply = before.findLast((m) => !m.isUser);
+    const runAt = { chatId: input.chatId, userId: input.userId, turn: p.generationId };
+    const mindsKey = [input.runKey, render.state.revision, text6, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\x00");
+    const kept2 = this.keptMinds.get(input.chatId);
+    this.keptMinds.delete(input.chatId);
+    if (kept2 && kept2.key !== mindsKey)
+      kept2.stop?.abort(new NotNeeded("the turn they were thinking for changed"));
+    const same3 = kept2?.key === mindsKey ? kept2 : undefined;
+    const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text6, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", guidance: preset.guidance.mind ?? "" };
+    const readTimelapse = () => bridge.intentOf(text6)?.action === TIMELAPSE_ACTION2;
+    const known = text6.trim() === "" || bridge.hasIntent(text6) || bridge.isHeld(text6);
+    let thinking = shown4 ? null : this.thinkMinds(asking, known ? readTimelapse() : facts.timelapse, budget.signal, same3);
     const at2 = await this.lorePhase("pre", p.generationId, input.chatId, input.userId, render.world, render.state, budget, text6, preset.guidance);
     const left = text6.trim() === "" ? "" : await this.leftUnplayed(input.chatId, input.userId, earlier, text6);
     const intentTask = text6.trim() === "" || bridge.hasIntent(text6) || bridge.isHeld(text6) ? Promise.resolve() : this.readIntent(bridge, text6, recorded, render, all2, earlier, settings, facts, budget, at2, left);
@@ -76090,9 +77232,12 @@ class Runtime {
     const judging = described && runsOf(settings.modelUse, render.world, "judge", facts, { guidance: at2.guidance }).length > 0 && (bridge.hasIntent(text6) ? this.judgeTarget(bridge.intentOf(text6), render) !== null : policy.description.weight !== "none" || policy.authority === "narrative");
     const npcRun = runsOf(settings.modelUse, render.world, "npc.choose", facts, { guidance: at2.guidance })[0];
     const choose = npcRun && ties.present.length > 0 ? () => npcChoose(this.steps, npcRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal, this.stepLore(npcRun, at2, this.tieInputs(ties.present, render.world, render.state))) : null;
-    const shown4 = bridge.outlineOf(text6) !== undefined;
     const gating = shown4 || settings.gates.intent && typed && !bridge.intentPassed(text6);
     const [, early] = await Promise.all([intentTask, choose && !gating && budget.take(judging ? 1 : 0) ? choose() : null]);
+    if (thinking && thinking.timelapse !== readTimelapse()) {
+      thinking.stop.abort(new NotNeeded(readTimelapse() ? "the message plays a timelapse, whose minds think at its beats" : "the message plays no timelapse"));
+      thinking = this.thinkMinds(asking, readTimelapse(), budget.signal, same3);
+    }
     const routine = lastUser ? bridge.takeRoutineAsks(text6) : [];
     if (lastUser && routine.length > 0) {
       const turnOf = (proposal) => ({ ...proposal, turn: lastUser.id });
@@ -76104,35 +77249,28 @@ class Runtime {
       const actions = asked.kind === "check" ? [{ id: "roll", label: "Roll", style: "primary" }, { id: "drop", label: "No roll" }] : [{ id: "add", label: "Add", style: "primary" }, { id: "drop", label: "Not an action" }];
       await this.chips.add(input.chatId, input.userId, [{ id: `${asked.kind}:${lastUser.id}`, kind: asked.kind, messageId: lastUser.id, label: asked.question, detail: asked.detail, actions, expires: "next_send", payload: { text: text6, index: asked.index } }]);
       this.push.changed(input.chatId, input.userId);
+      this.keepMinds(input.chatId, mindsKey, thinking);
       return { waiting: `waiting for the player's answer: ${asked.question}` };
     }
     const read = bridge.intentOf(text6);
     if (settings.gates.intent && typed && lastUser && read?.action && !shown4 && !bridge.intentPassed(text6)) {
-      const def = render.world.actions[read.action] ?? this.registry.actions.get(read.action);
-      const label = def?.label ?? read.action;
-      const words6 = def ? actionWords(this.registry, render.world, render.state, def, read.params) : "";
-      const edit = def ? this.intentEdit(render.world, render.state, def, read.params) : null;
-      const actions = [{ id: "play", label: "Play", style: "primary" }, ...edit ? [{ id: "edit", label: "Edit", input: edit }] : [], { id: "cancel", label: "Cancel" }];
-      await this.chips.add(input.chatId, input.userId, [{ id: `intent_gate:${lastUser.id}`, kind: "intent_gate", messageId: lastUser.id, label: `Play ${label}?`, ...words6 !== "" ? { detail: words6 } : {}, actions, expires: "next_send", payload: { text: text6 } }]);
+      const card = this.intentCard(bridge, text6, read, render.world, render.state, settings);
+      const actions = [{ id: "play", label: "Play", style: "primary" }, ...card.edit ? [{ id: "edit", label: "Edit", input: card.edit }] : [], { id: "cancel", label: "Cancel" }];
+      await this.chips.add(input.chatId, input.userId, [{ id: `intent_gate:${lastUser.id}`, kind: "intent_gate", messageId: lastUser.id, label: card.label, ...card.detail !== "" ? { detail: card.detail } : {}, actions, expires: "next_send", payload: { text: text6 } }]);
       this.push.changed(input.chatId, input.userId);
-      return { waiting: `waiting for you to play the read action: ${label}` };
+      this.keepMinds(input.chatId, mindsKey, thinking);
+      return { waiting: `waiting for you to play the read action: ${card.what}` };
     }
     this.prePhase.set(p.generationId, { facts, text: text6, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
     trimMap(this.prePhase);
-    if (shown4)
+    if (!thinking)
       return;
-    const lastReply = before.findLast((m) => !m.isUser);
-    const runAt = { chatId: input.chatId, userId: input.userId, turn: p.generationId };
-    const mindsKey = [input.runKey, render.state.revision, text6, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\x00");
-    const kept2 = this.keptMinds.get(input.chatId);
-    this.keptMinds.delete(input.chatId);
-    const mindsTask = preMinds(this.minds, { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text6, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", timelapse: bridge.intentOf(text6)?.action === TIMELAPSE_ACTION2, signal: budget.signal, guidance: preset.guidance.mind ?? "", ...kept2?.key === mindsKey ? { kept: kept2.minds } : {} });
     await this.judgeAnswer(bridge, text6, render, settings, facts, budget, at2);
     if (described)
       await this.judgeApproach(bridge, text6, render, settings, facts, budget, at2);
     const decisions2 = early ?? (choose && budget.take() ? await choose() : []);
     bridge.setDecisions(text6, decisions2);
-    const minds = await mindsTask;
+    const minds = await thinking.task;
     bridge.setMinds(text6, minds.events);
     this.addMindTraces(input.chatId, p.generationId, minds.traces, true);
     lruSet(this.answeredMinds, p.generationId, { key: mindsKey, minds: mindsAnswered(minds.events) }, 64);
@@ -76147,7 +77285,7 @@ class Runtime {
         start.applyAll(bridge.prePlan(text6));
         const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
         const log = (message2) => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message2}`, input.userId);
-        bridge.setSkipPlan(text6, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: await this.liveWorld(p.generationId, input.chatId, input.userId, from.world), state: start.state, intent: intent2, runSeed: bridge.runSeed, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: stepConfigOf(settings.modelUse.steps, "skip"), guidance: preset.guidance.skip ?? "" }));
+        bridge.setSkipPlan(text6, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: await this.liveWorld(p.generationId, input.chatId, input.userId, from.world), state: start.state, intent: intent2, runSeed: bridge.runSeed, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: mindsStepConfig(settings.modelUse, "skip"), guidance: preset.guidance.skip ?? "" }));
       }
     }
     const base = intent2?.action === TIMELAPSE_ACTION2 && mindsOn2(settings) ? input.core.planState(p.generationId, input.observed) : null;
@@ -76180,6 +77318,22 @@ class Runtime {
     const known = new Set(ran.traces.filter((t) => t.outcome === "failed").map((t) => t.who));
     const line2 = (e) => known.has(e.name) ? `${e.name}'s mind: ${e.reason ?? "it didn't answer"}` : `a mind: ${e.reason?.startsWith("it didn't fit") ? "its answer didn't fit the world as it is now" : e.reason ?? "it didn't answer"}`;
     this.diag.failed(at2, phase, "mind", missed.map(line2).join("; "));
+  }
+  thinkMinds(asking, timelapse, signal2, kept2) {
+    const stop = new AbortController;
+    if (timelapse)
+      kept2?.stop?.abort(new NotNeeded("the message plays a timelapse, whose minds think at its beats"));
+    const task = (async () => preMinds(this.minds, { ...asking, timelapse, signal: AbortSignal.any([signal2, stop.signal]), ...kept2 && !timelapse ? { kept: await kept2.minds } : {} }))();
+    return { timelapse, task, stop };
+  }
+  keepMinds(chatId, key, thinking) {
+    if (!thinking || thinking.timelapse)
+      return;
+    lruSet(this.keptMinds, chatId, { key, minds: thinking.task.then((ran) => mindsAnswered(ran.events), () => new Map), stop: thinking.stop }, 256);
+  }
+  dropMinds(chatId) {
+    this.keptMinds.get(chatId)?.stop?.abort(new NotNeeded("you cancelled the turn"));
+    this.keptMinds.delete(chatId);
   }
   async afterPlan(input) {
     try {
@@ -76365,7 +77519,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       return;
     }
     if (staged) {
-      const { thing: _thing, ...read } = result;
+      const { thing: _thing, text: _words, ...read } = result;
       const then2 = result.then ?? (result.action === TIMELAPSE_ACTION2 ? result.params : undefined);
       const own2 = result.action && result.action !== TIMELAPSE_ACTION2 && result.action !== staged.action ? [{ action: result.action, params: result.params, text: "", ...result.thing ? { thing: result.thing } : {} }] : [];
       result = { ...read, action: staged.action, params: staged.params, probabilities: { [staged.action]: 1 }, ...then2 ? { then: then2 } : {}, queue: [...own2, ...result.queue ?? []] };
@@ -76387,6 +77541,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     }
     const chipText = (piece) => offeredNext(this.registry, render.world, render.state, piece, text6, secrets) ?? "";
     let next = (result.next ?? []).map(chipText);
+    const lead = cardWords(this.registry, render.world, render.state, result.text ?? "", secrets) ?? "";
     if (result.action === TIMELAPSE_ACTION2 || !result.action && result.then !== undefined) {
       bridge.setNext(text6, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
       const target = (result.action === TIMELAPSE_ACTION2 ? interpretedTarget(result.params, render.world, render.state, text6, this.registry) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text6, this.registry) : null) ?? interpretedTarget({ span: text6 }, render.world, render.state, text6, this.registry);
@@ -76394,7 +77549,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
         this.host.log("info", `[LumiRPEngine] interpret: lets time pass but states no span it can read; the turn plays as roleplay`, userId);
       const over = target?.type === "duration" && target.minutes > settings.time.askBeyondMinutes;
       bridge.setOffer(text6, over ? target : null);
-      bridge.setIntent(text6, target && !over ? timelapseIntent(target, undefined, 1, target.type !== "duration") : null, target !== null && !over);
+      bridge.setIntent(text6, target && !over ? { ...timelapseIntent(target, undefined, 1, target.type !== "duration"), ...lead !== "" ? { text: lead } : {} } : null, target !== null && !over);
       return;
     }
     const chosen = result.action ? all2.find((a) => a.id === result.action) : undefined;
@@ -76403,20 +77558,20 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     const dropped = [];
     const steps = [];
     let rolls = false;
-    const take = (def, given, words6, thing, said2) => {
+    const take = (def, given, words7, thing, said2) => {
       const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state, mayKnow);
       if (!ref) {
-        steps.push({ action: def.id, params: given, text: words6 });
+        steps.push({ action: def.id, params: given, text: words7 });
         rolls ||= checkOf(render.world, def.check) !== null;
         return;
       }
       const verdict2 = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: given, unfit: ref, said: said2, thing, policy, mayKnow });
       if (verdict2?.kind === "known")
-        return take(def, verdict2.params, words6, undefined, said2);
+        return take(def, verdict2.params, words7, undefined, said2);
       if (verdict2?.kind === "real")
-        steps.push({ action: def.id, params: given, text: words6, claim: verdict2.claim });
+        steps.push({ action: def.id, params: given, text: words7, claim: verdict2.claim });
       else if (verdict2?.kind === "ask")
-        steps.push({ action: def.id, params: given, text: words6, claim: verdict2.claim, ask: { kind: "claim", question: verdict2.question, detail: verdict2.detail } });
+        steps.push({ action: def.id, params: given, text: words7, claim: verdict2.claim, ask: { kind: "claim", question: verdict2.question, detail: verdict2.detail } });
       else {
         this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
         dropped.push({ label: def.label, reason: verdict2?.kind === "hold" && verdict2.reason ? verdict2.reason : unfitReason(this.registry, render.world, render.state, ref, text6, secrets, mayKnow) });
@@ -76424,19 +77579,19 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       }
       rolls ||= checkOf(render.world, def.check) !== null;
     };
-    const takeTry = (given, words6) => {
+    const takeTry = (given, words7) => {
       const verdict2 = rolls ? { ok: false, why: "an action before it rolls its own check" } : inferredRead(this.registry, render.world, render.state, given);
       if (!verdict2.ok) {
         this.host.log("info", `[LumiRPEngine] interpret: Try something isn't a check here (${verdict2.why}); the message plays without it`, userId);
         return;
       }
       const asked = verdict2.policy.mode === "suggest" ? checkQuestion(verdict2, (id) => render.state.entities[id]?.name ?? id) : null;
-      steps.push({ action: TRY_ACTION, params: verdict2.params, text: words6, ...asked ? { ask: { kind: "check", ...asked } } : {} });
+      steps.push({ action: TRY_ACTION, params: verdict2.params, text: words7, ...asked ? { ask: { kind: "check", ...asked } } : {} });
     };
     if (chosen)
-      take(chosen, params, "", result.thing, [text6]);
+      take(chosen, params, lead, result.thing, [text6]);
     else if (result.action === TRY_ACTION)
-      takeTry(result.params, "");
+      takeTry(result.params, lead);
     let then = result.then;
     const further = result.queue ?? [];
     for (const [k, q] of further.entries()) {
@@ -76687,7 +77842,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const lore2 = (r, effects2 = false) => this.stepLore(r, at2, read, effects2);
     const extractRun = runsOf(modelUse, context.world, "extract", facts, { guidance }).find((r) => r.template === null || r.template.output !== "effects");
     const skipped = facts.timelapse || !!plan2?.timelapse;
-    const extractTask = extractRun && budget.take() ? extract(this.steps, text6, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" ? !skipped : this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore2(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "") : Promise.resolve({ proposals: [], where: null });
+    const places2 = extractRun ? placeMenu(this.registry, context.world, context.state, [text6, pre?.text ?? ""], prefixEntities(this.registry, context.world, context.state).flatMap(({ e }) => typeof e.fields.place === "string" ? [e.fields.place] : [])) : [];
+    const personKinds = [...new Set([...Object.keys(context.world.kinds), ...this.registry.kinds.keys()])].filter((k) => kindIs(this.registry, context.world, k, "person"));
+    const extractTask = extractRun && budget.take() ? extract(this.steps, text6, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" ? !skipped : this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore2(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "", places2, personKinds) : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = ["extract", "contradiction", "choices"].flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore2(r, true)) : Promise.resolve([]));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
     const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal, this.stepLore(npcRun, at2, this.tieInputs(ties.offscreen, context.world, context.state))) : Promise.resolve([]);
@@ -76696,7 +77853,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const contradictionTask = contradictionRun && post && budget.take() ? contradiction(this.steps, contradictionRun, told, text6, userId, budget.signal, lore2(contradictionRun)) : Promise.resolve(null);
     const choiceRuns = runsOf(modelUse, context.world, "choices", facts, { output: "text", guidance });
     const choiceTasks = choiceRuns.map((r) => post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore2(r)).then((lines2) => lines2 ?? []) : Promise.resolve([]));
-    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: live, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text6, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
+    const mindsTask = post ? this.diag.step({ chatId, userId, turn: key }, "memory", "minds", () => postMinds(this.minds, { chatId, userId, world: live, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text6, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }), undefined, MINDS_POST_CALLS) : Promise.resolve({ events: [], traces: [] });
     const [extracted, effects, decisions2, contradicted, choices, minded2] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks), mindsTask]);
     this.timeLimits({ chatId, userId, turn: key }, "read", budget);
     this.addMindTraces(chatId, key, minded2.traces);
@@ -76712,7 +77869,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const typedItems = buyActions.flatMap((a) => typeof a.params.item === "string" ? [a.params.item] : []);
     const unsure = new Set;
     const narrated = [...resolveUsualMoves(ctx, extracted.proposals), ...effects.flat()];
-    const guessed = new Set(replyPlace(extracted.where, narrated, context));
+    const guessed = new Set(replyPlace(this.registry, extracted.where, narrated, context));
     const deduped = dedupeProposals([...narrated, ...guessed].flatMap((p) => splitAlongBuy(p, context.pre, ctx, typedItems)), context.world.pov).filter((p) => {
       if (lentAlong(p, context.pre, context.state) || movedAlong(p, context.pre, context.state))
         return false;
@@ -76784,12 +77941,12 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const w = new Working(this.registry, context.world, context.state);
     const outcomes = applyProposals(this.registry, w, auto.filter((p) => p.type !== "time_advance"), `${context.seed}:preview`, bridge.runSeed);
     const stored = [];
-    const declines = [...spent.map((proposal) => ({ proposal, reason: REGARD_SPENT, payment: false, unpriced: false })), ...held3.map((proposal) => ({ proposal, reason: IN_FIGHT, payment: false, unpriced: false }))];
+    const declines = [...spent.map((proposal) => ({ proposal, reason: REGARD_SPENT, code: "regard_spent", payment: false, unpriced: false })), ...held3.map((proposal) => ({ proposal, reason: IN_FIGHT, code: "in_fight", payment: false, unpriced: false }))];
     outcomes.forEach((o, i) => {
       if (o.rejection) {
         if (o.rejection.code !== "declined")
           this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: ${describeProposal(o.proposal)} didn't apply (${o.rejection.code}: ${o.rejection.reason})`, input.userId);
-        declines.push({ proposal: o.proposal, reason: o.rejection.reason, payment: o.rejection.code === "declined", unpriced: o.rejection.code === "unpriced" });
+        declines.push({ proposal: o.proposal, reason: o.rejection.reason, code: o.rejection.code, payment: o.rejection.code === "declined", unpriced: o.rejection.code === "unpriced" });
         return;
       }
       if (o.events.length === 0) {
@@ -76842,11 +77999,11 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         return;
       }
       if (check?.rejection && proposal.type === "location") {
-        declines.push({ proposal, reason: check.rejection.reason, payment: false, unpriced: false });
+        declines.push({ proposal, reason: check.rejection.reason, code: check.rejection.code, payment: false, unpriced: false });
         return;
       }
       if (check?.rejection?.code === "declined" && !also) {
-        declines.push({ proposal, reason: check.rejection.reason, payment: true, unpriced: false });
+        declines.push({ proposal, reason: check.rejection.reason, code: check.rejection.code, payment: true, unpriced: false });
         return;
       }
       if (check?.rejection?.code === "unpriced") {
@@ -76864,7 +78021,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         return;
       }
       if (check?.rejection && !(also && check.rejection.code === "declined")) {
-        declines.push({ proposal, reason: check.rejection.reason, payment: false, unpriced: false });
+        declines.push({ proposal, reason: check.rejection.reason, code: check.rejection.code, payment: false, unpriced: false });
         return;
       }
       if (!check || check.rejection || check.events.length === 0) {
@@ -76888,6 +78045,24 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     });
     const notes = (await this.outcomeNotes.list(chatId, userId)).filter((n) => n.messageId !== messageId || isUnfitId(n.id, messageId, swipeId));
     declines.forEach((d, i) => {
+      if (ALREADY_SO.has(d.code)) {
+        this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(d.proposal)} (${d.code}: ${d.reason})`, input.userId);
+        return;
+      }
+      if (d.proposal.type !== "purchase" && d.proposal.type !== "transfer" && !RULED_OUT.has(d.code)) {
+        stored.push({
+          id: `untracked:${input.messageId}:${input.generationId}:${i}`,
+          kind: "untracked",
+          messageId: input.messageId,
+          swipeId,
+          label: `Not tracked: ${describeProposal(d.proposal, context.world, context.state)}`,
+          detail: `${d.code === "unknown_fact" ? "The engine keeps whom and what you know of, not facts told in words" : d.reason.replace(/[.\s]+$/, "")}. The story stands as told, and the next reply isn't told otherwise.`,
+          actions: [],
+          expires: "next_send",
+          payload: { type: String(d.proposal.type), proposal: d.proposal, reason: d.reason }
+        });
+        return;
+      }
       const id = `decline:${input.messageId}:${input.generationId}:${i}`;
       notes.push({ id, messageId, text: declineNote(d.proposal, d.reason, "accept", context.state, context.world) });
       stored.push({
@@ -76984,16 +78159,25 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const headState = input.core.fold(input.observed).state;
     const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
     const hold = bridge.intentOf(userText)?.params.povRoutine === false || plan2?.timelapse?.povRoutine === false ? { povRoutine: false } : {};
-    for (const [i, chip] of (plan2?.chips ?? []).entries()) {
+    const asked = input.kind === "continue" || plan2?.stopped ? undefined : bridge.offerFor(userText);
+    const told = rec ? clockMinutes(rec.events.slice(rec.pre)) : 0;
+    const pending = asked || (plan2?.chips ?? []).some((chip) => chip.kind === "timelapse_offer") ? narratedPending((await this.chips.list(input.chatId, input.userId)).filter((c) => c.messageId === input.messageId && c.swipeId === input.swipeId), bridge.chipsFor(input.content)) : 0;
+    const offers = (plan2?.chips ?? []).filter((chip) => !(told + pending > 0 && chip.kind === "timelapse_offer" && chip.target.type === "at" && chip.target.at <= headState.clock + pending));
+    for (const [i, chip] of offers.entries()) {
       const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(chipWorld, headState, chip.target.at)}` : "";
-      const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(chip.remaining)})?` : `Continue timelapse (${compactSpan(chip.remaining)} left)`;
+      const remaining = told > 0 && chip.target.type === "at" ? chip.target.at - headState.clock : chip.remaining;
+      const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(remaining)})?` : `Continue timelapse (${compactSpan(remaining)} left)`;
       stored.push({ id: `tl:${at2}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)), ...chip.povRoutine === false ? { povRoutine: false } : chip.kind === "continue_timelapse" ? hold : {} } });
     }
-    const offer = input.kind === "continue" || plan2?.stopped ? undefined : bridge.offerFor(userText);
+    const offeredTo = offers.reduce((m, chip) => chip.kind === "timelapse_offer" && chip.target.type === "at" ? Math.max(m ?? chip.target.at, chip.target.at) : m, null);
+    const offer = asked && chipWorld ? offerLeft(this.registry, chipWorld, headState, asked, told, pending, offeredTo) : asked;
+    if (asked && !offer)
+      this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId}: the reply told the time the message asked for (${told} min, ${pending} min waiting), so no Timelapse is offered`, input.userId);
     if (offer) {
       const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
       const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(chipWorld, headState, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
-      const detail = offer.type === "duration" && offer.minutes > (await this.settings.get(input.userId)).time.askBeyondMinutes ? "That's longer than a skip runs without asking. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
+      const covered = asked?.type === "duration" && offer.type === "duration" ? asked.minutes - offer.minutes : 0;
+      const detail = asked?.type === "duration" && offer.type === "duration" && covered > 0 ? `The reply already told ${compactSpan(covered)} of the ${compactSpan(asked.minutes)} you asked for. Run the other ${compactSpan(offer.minutes)} as a timelapse?` : offer.type === "duration" && offer.minutes > (await this.settings.get(input.userId)).time.askBeyondMinutes ? "That's longer than a skip runs without asking. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at2}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) } });
     }
     const left = plan2?.stopped ? (bridge.intentOf(userText)?.queue ?? []).slice(-plan2.stopped.left).map((q) => q.text) : [];
@@ -77038,6 +78222,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
   swipeChoice = new Map;
   setSwipeChoice(chatId, mode) {
     lruSet(this.swipeChoice, chatId, mode, 256);
+    if (mode === "rerun")
+      this.ledger.discardKept(chatId);
   }
   answerAsk(chatId, text6, index, keep) {
     return this.bridges.get(chatId)?.answerAsk(text6, index, keep) ?? false;
@@ -77091,6 +78277,63 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         picks[name] = value;
     }
     return { type: "action", label: `Change ${action.label}`, action: action.id, params: picks };
+  }
+  intentCard(bridge, text6, read, world, state2, settings) {
+    const rest = bridge.nextOf(text6);
+    if (read.action === TIMELAPSE_ACTION2) {
+      const target = parseTarget(read.params.target);
+      const span2 = target ? skipWords(this.registry, world, state2, target, true) : "time passes";
+      const held3 = read.params.povRoutine === false;
+      const lines3 = [
+        ...read.text ? [`Filled with: \u201C${read.text}\u201D`] : [],
+        `Play runs the clock on in one go${mindsOn2(settings) ? ", the minds of the people it involves thinking at the moments that matter in it" : ""}; you ${held3 ? "stay where the story has you" : "follow your routine through it"}, and the reply tells it.`,
+        ...rest ? [`Left for after it: \u201C${rest}\u201D`] : []
+      ];
+      const edit = target && palette(world, state2, this.registry).timelapse?.blocked === null ? { type: "action", label: "Change the timelapse", action: TIMELAPSE_ACTION2, params: { target: JSON.parse(JSON.stringify(target)), followRoutine: !held3 } } : null;
+      return { label: `Play Timelapse: ${span2}?`, detail: lines3.join(`
+`), edit, what: `Timelapse ${span2}` };
+    }
+    const action = read.action ?? "";
+    const head = this.stepWords(world, state2, action, read.params, text6);
+    const queue = read.queue ?? [];
+    const offer = bridge.offerFor(text6);
+    const asks = offer?.type === "duration" && offer.minutes > settings.time.askBeyondMinutes;
+    const lines2 = [
+      ...read.text ? [`\u201C${read.text}\u201D`] : [],
+      ...queue.map((q) => `Then ${this.stepWords(world, state2, q.action, q.params, text6)}${q.text ? ` \u2014 \u201C${q.text}\u201D` : ""}`),
+      ...offer ? [`Then time passes: ${skipWords(this.registry, world, state2, offer, false)}. ${asks ? "That's longer than a skip runs without asking, so it's offered once these have played." : "The reply tells it after these."}`] : [],
+      ...bridge.unfitOf(text6).map((u) => `Left out: ${u.label}, ${u.reason}.`),
+      ...rest ? [`Not read as an action: \u201C${rest}\u201D`] : []
+    ];
+    const def = (hasOwn(world.actions, action) ? world.actions[action] : undefined) ?? this.registry.actions.get(action);
+    return { label: `Play ${head}${queue.length > 0 ? `, then ${queue.length} more` : ""}?`, detail: lines2.join(`
+`), edit: def ? this.intentEdit(world, state2, def, read.params) : null, what: head };
+  }
+  stepWords(world, state2, action, params, typed) {
+    if (action === TRY_ACTION) {
+      const verdict2 = inferredRead(this.registry, world, state2, params);
+      if (!verdict2.ok)
+        return "Try something";
+      const against = verdict2.read.against.flatMap((a) => povMayKnow(this.registry, world, state2, a.who) ? [own(state2.entities, a.who)?.name ?? ""] : []).filter((n) => n !== "");
+      return `${verdict2.skill.label} check${verdict2.read.attempt !== "" ? `: \u201C${verdict2.read.attempt}\u201D` : ""}${against.length > 0 ? `, against ${against.join(" and ")}` : ""}, looking ${verdict2.band.label.toLowerCase()}`;
+    }
+    const def = (hasOwn(world.actions, action) ? world.actions[action] : undefined) ?? this.registry.actions.get(action);
+    if (!def)
+      return "an action";
+    const picks = actionWords(this.registry, world, state2, def, params, typed);
+    return picks !== "" ? `${def.label}: ${picks}` : def.label;
+  }
+  thenLine(chatId, said2, seed, world, state2, settings, secrets) {
+    const bridge = this.bridges.get(chatId);
+    const intent2 = said2 === "" ? null : bridge?.intentOf(said2);
+    const offer = said2 === "" ? undefined : bridge?.offerFor(said2);
+    const turn = bridge?.planFor(seed);
+    if (!intent2?.action || intent2.action === TIMELAPSE_ACTION2 || !offer || !turn || turn.stopped)
+      return null;
+    if (offer.type === "duration" && offer.minutes > settings.time.askBeyondMinutes)
+      return null;
+    const words7 = typeof intent2.then?.span === "string" ? cardWords(this.registry, world, state2, intent2.then.span, secrets) : null;
+    return `After those actions, the player's message lets time pass: ${skipWords(this.registry, world, state2, offer, false)}${words7 ? ` (\u201C${words7}\u201D)` : ""}. Tell that time in this reply, after them.`;
   }
   passOutline(chatId, text6, lines2) {
     return this.bridges.get(chatId)?.passOutline(text6, lines2) ?? false;
@@ -77166,6 +78409,38 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     lruSet(this.turnSettings, userId, { revision, key }, 256);
     return key;
   }
+  sectionCost(userId, content) {
+    return this.tokenCounts.get(hashParts("lre.tokens", userId, content)) ?? sectionTokens(content);
+  }
+  async previewSections(chatId, userId, core, observed) {
+    const render = core.renderState(observed);
+    if (!render)
+      throw new Error("the chat's world revision isn't loaded");
+    const world = await this.readLore(chatId, userId, render.world);
+    const { state: state2 } = render;
+    const settings = await this.settings.get(userId);
+    const told = (await this.outcomeNotes.list(chatId, userId)).filter((n) => n.toldTo === undefined).map((n) => n.text);
+    const built = buildSections({
+      registry: this.registry,
+      world,
+      state: state2,
+      secrets: unrevealedSecrets(this.registry, world, state2),
+      budget: settings.modelUse.tokens.sections,
+      mindsBudget: settings.minds.tokens,
+      said: "",
+      planned: { outcome: told, montage: [] },
+      outline: [],
+      elapsed: null,
+      hasEntry: () => true,
+      cost: (content) => this.sectionCost(userId, content),
+      seen: () => {},
+      warn: (message2) => this.host.log("warn", `[LumiRPEngine] preview ${message2}`, userId)
+    });
+    return {
+      sections: built.sections.map((s) => ({ slot: s.slot, label: s.label, status: s.status, scope: s.feed.scope ?? "player", content: s.content, tokens: s.tokens, cut: s.cut, marked: s.marked, hints: s.hints })),
+      budget: { sections: settings.modelUse.tokens.sections, used: built.used, minds: settings.minds.tokens }
+    };
+  }
   async deliver(input) {
     const started = Date.now();
     const run2 = await this.runOf(input.chatId, input.userId);
@@ -77199,6 +78474,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     for (const n of await this.outcomeNotes.list(input.chatId, input.userId))
       if (n.messageId !== target && (n.toldTo === undefined || n.toldTo === target))
         planned.outcome.unshift(n.text);
+    const after = plan2 ? this.thenLine(input.chatId, this.prePhase.get(input.generationId)?.text ?? "", plan2.seed, world, state2, settings, secrets) : null;
+    if (after)
+      planned.outcome.push(after);
     const record3 = { id: input.generationId, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [], entries: {} };
     const traces = this.loreTraces.get(input.generationId);
     if (traces)
@@ -77206,161 +78484,48 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const minded2 = this.mindTraces.get(input.generationId);
     if (minded2)
       record3.minds = structuredClone(minded2);
-    let budget = settings.modelUse.tokens.sections;
-    const mindsBudget = settings.minds.tokens;
-    const fullMinds = worldMindsOf(world).secrecy === "full";
     const uncounted = [];
-    const fills = [];
-    const hinted = [];
-    const sources = [];
     const entryOf3 = (section) => {
       const twin = entries3.twins.get(section.id);
       return twin !== undefined && preset.outlets.has(outletOf(section.id)) ? twin : entries3.slots.get(section.id) ?? null;
     };
-    const sectionCost = (content) => this.tokenCounts.get(hashParts("lre.tokens", input.userId, content)) ?? sectionTokens(content);
-    readPass(() => {
-      const mindsSection = sectionsOf(world).find((s) => s.id === MINDS_SLOT);
-      const read = this.registry.context(world, state2);
-      const allMinds = mindsSection && entryOf3(mindsSection) ? mindLines(read).filter((l) => fullMinds || findLeaks(l.line, secrets).length === 0) : [];
-      const said2 = this.prePhase.get(input.generationId)?.text ?? "";
-      const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: said2, reply: "" }) ?? []).map((s) => s.entity);
-      const mindsFit = mindsSection ? fitMindLines(allMinds, ladder, mindsBudget, (kept3) => sectionCost(renderSection(mindsSection.label, mindsSection.template, kept3.map((l) => l.line)))) : [];
-      const ctx = this.registry.context(world, state2, { "minds.minded": () => mindsFit.map((l) => l.entity) });
-      const filled = new Set;
-      for (const section of sectionsOf(world)) {
-        const feed = feedOf(section, state2);
-        if (feed.enabled === false)
-          continue;
-        const entryId = entryOf3(section);
-        if (!entryId)
-          continue;
-        const minds = section.id === MINDS_SLOT;
-        const scope = feed.scope ?? "player";
-        const lines2 = minds ? mindsFit.map((l) => l.line) : [];
-        const lineSources = lines2.map(() => {
-          return;
-        });
-        const hints = [];
-        const marked = [];
-        for (const r of renderersOf(this.registry.renderers, section, feed)) {
-          if (minds)
-            continue;
-          try {
-            if (r.hint) {
-              hints.push(...r.render(ctx));
-              continue;
-            }
-            for (const l of linesOf(r, ctx, scope)) {
-              if (l.known === "pov") {
-                lines2.push(l.text);
-                lineSources.push(l.source);
-                continue;
-              }
-              if (scope === "player" || l.known === "gm" && scope !== "gm")
-                continue;
-              if (scope !== "gm" && findLeaks(l.text, secrets).length > 0)
-                continue;
-              marked.push({ text: markedText(l), ...l.source ? { source: l.source } : {} });
-            }
-          } catch (error) {
-            this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
-          }
-        }
-        if (section.id === "outline")
-          lines2.push(...withoutMissing(outline2, missingSections(sectionsOf(world), section.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && entryOf3(mindsSection) !== null)));
-        if (section.id === "scene" && plan2) {
-          const minutes2 = clockMinutes(plan2.events);
-          lines2.push(minutes2 > 0 ? `This turn took ${spanText(minutes2)}.` : "No time passes this turn.");
-        }
-        if (section.id === "outcome") {
-          lines2.unshift(...planned.outcome);
-          lineSources.unshift(...planned.outcome.map(() => {
-            return;
-          }));
-        }
-        if (section.id === "montage")
-          lines2.push(...planned.montage);
-        while (lineSources.length < lines2.length)
-          lineSources.push(undefined);
-        const screened = lines2.map((text6, i) => ({ text: text6, source: lineSources[i] })).filter((l) => minds || findLeaks(l.text, secrets).length === 0);
-        const capped = feed.maxLines !== undefined ? screened.slice(0, feed.maxLines) : [...screened];
-        const markedRoom = feed.maxLines !== undefined ? Math.max(0, feed.maxLines - capped.length) : marked.length;
-        if (feed.maxTokens !== undefined)
-          while (capped.length > 0 && sectionCost(renderSection(section.label, section.template, capped.map((l) => l.text))) > feed.maxTokens)
-            capped.pop();
-        const safe = capped.map((l) => l.text);
-        const facts = marked.slice(0, markedRoom);
-        const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
-        if (safe.length === 0) {
-          if (minds && allMinds.length > 0)
-            record3.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
-          if (facts.length > 0)
-            hinted.push({ fill: null, entryId, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
-          continue;
-        }
-        const content = renderSection(section.label, section.template, safe);
-        const key = hashParts("lre.tokens", input.userId, content);
-        const counted = this.tokenCounts.get(key);
-        if (counted === undefined)
+    const built = buildSections({
+      registry: this.registry,
+      world,
+      state: state2,
+      secrets,
+      budget: settings.modelUse.tokens.sections,
+      mindsBudget: settings.minds.tokens,
+      said: this.prePhase.get(input.generationId)?.text ?? "",
+      planned,
+      outline: outline2,
+      elapsed: plan2 ? clockMinutes(plan2.events) : null,
+      hasEntry: (section) => entryOf3(section) !== null,
+      cost: (content) => this.sectionCost(input.userId, content),
+      seen: (content) => {
+        if (!this.tokenCounts.has(hashParts("lre.tokens", input.userId, content)))
           uncounted.push(content);
-        const cost = counted ?? sectionTokens(content);
-        const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
-        const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - capped.length);
-        record3.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...cut > 0 ? { cut } : {}, delivery: "unchecked" });
-        if (clipped)
-          continue;
-        if (!minds)
-          budget -= cost;
-        const fill = { id: entryId, content };
-        fills.push(fill);
-        filled.add(section.id);
-        (record3.entries ??= {})[section.id] = entryId;
-        sources.push(...capped.flatMap((l) => l.source ? [l.source] : []));
-        if (safeHints.length > 0 || facts.length > 0)
-          hinted.push({ fill, entryId, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
-      }
+      },
+      warn: (message2) => this.host.log("warn", `[LumiRPEngine] ${message2}`, input.userId)
     });
-    record3.budget.used = settings.modelUse.tokens.sections - budget;
-    let markedSent = false;
-    for (const h of hinted) {
-      const fits2 = (extra, total) => extra <= budget && (h.maxTokens === undefined || total <= h.maxTokens);
-      const costOf3 = (body2) => {
-        const content2 = renderSection(h.label, h.template, body2);
-        const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content2));
-        if (counted === undefined)
-          uncounted.push(content2);
-        return counted ?? sectionTokens(content2);
-      };
-      const body = [...h.lines];
-      let cost = h.cost;
-      const carried = [];
-      for (const m of h.marked) {
-        const next = costOf3([...body, m.text]);
-        if (!fits2(next - cost, next))
-          break;
-        budget -= next - cost;
-        cost = next;
-        body.push(m.text);
-        if (m.source)
-          carried.push(m.source);
-        markedSent = true;
-      }
-      if (h.hints.length > 0 && (h.maxLines === undefined || body.length + h.hints.length <= h.maxLines)) {
-        const next = costOf3([...body, ...h.hints]);
-        if (fits2(Math.max(0, next - cost), next)) {
-          budget -= Math.max(0, next - cost);
-          body.push(...h.hints);
-        }
-      }
-      if (body.length === h.lines.length)
-        continue;
-      const content = renderSection(h.label, h.template, body);
-      if (h.fill)
-        h.fill.content = content;
-      else
-        fills.push({ id: h.entryId, content });
-      sources.push(...carried);
+    record3.sections = built.record;
+    record3.budget.used = built.used;
+    const slots = new Map(sectionsOf(world).map((s) => [s.id, s]));
+    const entryAt = (slot) => {
+      const section = slots.get(slot);
+      return section ? entryOf3(section) : null;
+    };
+    const fills = built.fills.flatMap((f) => {
+      const id = entryAt(f.slot);
+      return id ? [{ id, content: f.content }] : [];
+    });
+    for (const slot of built.recorded) {
+      const id = entryAt(slot);
+      if (id)
+        (record3.entries ??= {})[slot] = id;
     }
+    const sources = built.sources;
+    const markedSent = built.markedSent;
     const rules = [markedSent ? MARKED_FACTS_RULE : null, preset.guidance.narrator ?? null].filter((r) => r !== null && r !== "");
     const rulesAt = entries3.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries3.narratorOutlet : entries3.narrator;
     if (rules.length > 0 && rulesAt)
@@ -77402,7 +78567,7 @@ ${rules.join(`
     if (kept2)
       return kept2 === world.lore ? world : { ...world, lore: kept2 };
     const live = await this.readLore(chatId, userId, world);
-    lruSet(this.liveLores, key, live.lore, 64);
+    lruSet(this.liveLores, key, live.lore, LIVE_LORES_KEPT);
     return live;
   }
   async readLore(chatId, userId, world) {
@@ -77470,7 +78635,7 @@ ${rules.join(`
     const answered = this.answeredMinds.get(input.turn);
     this.answeredMinds.delete(input.turn);
     if (answered && answered.minds.size > 0)
-      lruSet(this.keptMinds, input.chatId, answered, 256);
+      lruSet(this.keptMinds, input.chatId, { key: answered.key, minds: Promise.resolve(answered.minds) }, 256);
     const last = (await this.host.chats.messages(input.chatId, input.userId)).at(-1);
     if (!last)
       return;
@@ -77657,6 +78822,10 @@ ${rules.join(`
     await this.meter.ready(userId);
     const view = buildView({ chatId, run: run2, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId) });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
+    const kept2 = this.ledger.keptOf(chatId);
+    const last = observed.at(-1);
+    if (kept2 && last)
+      view.chips.push(replyFailedChip(kept2.turn, kept2.failed, last.id));
     const staged = await this.staged.get(chatId, userId);
     view.staged = staged ? { action: staged.action, params: staged.request, source: staged.source, label: staged.label } : null;
     return view;
@@ -77676,8 +78845,8 @@ ${rules.join(`
       const own2 = m.metadata[LEDGER_NAMESPACE];
       if (isRecord(own2) && typeof own2.action === "string")
         return;
-      const words6 = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
-      const intent2 = { action: staged.action, params: staged.params, source: staged.source, staged: true, ...words6 ? { described: true } : {} };
+      const words7 = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
+      const intent2 = { action: staged.action, params: staged.params, source: staged.source, staged: true, ...words7 ? { described: true } : {} };
       await this.host.chats.writeMetadata(chatId, messageId, { ...m.metadata, [LEDGER_NAMESPACE]: { ...isRecord(own2) ? own2 : {}, ...intent2 } }, userId);
       await this.staged.set(chatId, userId, null);
       this.push.changed(chatId, userId);
@@ -77748,8 +78917,8 @@ function interpretedTarget(params, world, state2, text6, reg) {
   const idx = cal.dayParts.findIndex((d) => d.id.toLowerCase() === until || d.label.toLowerCase() === until);
   const part = cal.dayParts[idx];
   if (part) {
-    const words6 = [until, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
-    if (next || /\btomorrow\b/i.test(text6) || new RegExp(`\\bnext\\s+(${words6.join("|")})\\b`, "i").test(text6))
+    const words7 = [until, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
+    if (next || /\btomorrow\b/i.test(text6) || new RegExp(`\\bnext\\s+(${words7.join("|")})\\b`, "i").test(text6))
       return nextDayPart(cal, now, idx);
     return { type: "day_part", dayPart: part.id };
   }
@@ -77797,11 +78966,53 @@ function restChipId(messageId, swipeId) {
 }
 var NO_VALUE = { "": true, none: true, null: true, nil: true, na: true, "n a": true, nothing: true, no: true, undefined: true, empty: true };
 function offeredNext(reg, world, state2, next, text6, secrets) {
-  const words6 = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/^(?:i|we)\s+/, "");
-  const said2 = words6(next);
-  if (hasOwn(NO_VALUE, said2) || words6(text6).startsWith(said2))
+  const words7 = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/^(?:i|we)\s+/, "");
+  const said2 = words7(next);
+  if (hasOwn(NO_VALUE, said2) || words7(text6).startsWith(said2))
     return null;
   return findLeaks(next, secrets).length > 0 || chipNamesHidden(reg, world, state2, next) ? null : next;
+}
+function cardWords(reg, world, state2, piece, secrets) {
+  const said2 = piece.replace(/\s+/g, " ").trim();
+  if (hasOwn(NO_VALUE, said2.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()))
+    return null;
+  return findLeaks(said2, secrets).length > 0 || chipNamesHidden(reg, world, state2, said2) ? null : said2;
+}
+function skipWords(reg, world, state2, target, clocked) {
+  const part = target.type === "day_part" ? world.calendar.dayParts.find((d) => d.id === target.dayPart)?.label.toLowerCase() : undefined;
+  const what = target.type === "duration" ? compactSpan(target.minutes) : target.type === "at" ? `to ${shortClock(world, state2, target.at)}` : target.type === "day_part" ? `until ${part ?? "that part of the day"}` : target.type === "shift" ? "until your next shift" : target.type === "commitment" ? "until your next commitment" : target.type === "arrival" ? "until you arrive" : target.type === "stage" ? "until the story moves on" : "until something happens";
+  const reached = clocked ? resolveTarget(reg, world, state2, target) : null;
+  if (!reached || "code" in reached)
+    return what;
+  const range = `${shortClock(world, state2, state2.clock)} to ${shortClock(world, state2, reached.to)}`;
+  return target.type === "duration" ? `${what}, ${range}` : `${what}: ${compactSpan(reached.to - state2.clock)}, ${range}`;
+}
+function offerLeft(reg, world, state2, asked, told, pending, offeredTo) {
+  if (told <= 0 && pending <= 0 && offeredTo === null)
+    return asked;
+  const from = state2.clock - told;
+  const reached = asked.type === "duration" ? { to: from + asked.minutes } : resolveTarget(reg, world, { ...state2, clock: from }, asked);
+  if ("code" in reached)
+    return asked;
+  const runs = state2.clock + pending;
+  if (reached.to <= runs || offeredTo !== null && reached.to <= offeredTo)
+    return null;
+  return asked.type === "duration" ? { type: "duration", minutes: reached.to - runs } : asked;
+}
+function narratedPending(stored, read) {
+  let minutes2 = 0;
+  for (const chip of stored) {
+    const proposal = chip.kind === "confirm" && chip.payload.type === "time_advance" && isRecord(chip.payload.proposal) ? chip.payload.proposal : null;
+    if (proposal && typeof proposal.minutes === "number" && proposal.minutes > 0)
+      minutes2 += proposal.minutes;
+    const target = chip.kind === "timelapse_offer" && chip.id.startsWith("adv:") ? parseTarget(chip.payload.target) : null;
+    if (target?.type === "duration")
+      minutes2 += target.minutes;
+  }
+  for (const chip of read)
+    if (chip.target.type === "duration")
+      minutes2 += chip.target.minutes;
+  return minutes2;
 }
 function joinActions(pieces) {
   const said2 = pieces.map((p) => p.trim()).filter((p) => p !== "");
@@ -77865,18 +79076,20 @@ function planOutline(plan2, prose) {
 function planLines2(plan2, world, registry) {
   const outcome = [];
   for (const res of plan2.resolutions) {
-    const label = res.inferred?.label ?? (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
+    const label = res.told?.what ?? res.inferred?.label ?? (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
+    const took = res.told && res.told.minutes > 0 ? `, taking ${spanText(res.told.minutes)}` : "";
+    const changed = res.told && res.told.changes.length > 0 ? ` What changed: ${res.told.changes.join("; ")}.` : "";
     const reasons = res.rejected.slice(0, 3).map((r) => r.rejection.reason);
     if (!res.ok)
       outcome.push(`${label}: it didn't happen (${res.failed ? playerReason(res.failed).replace(/\.$/, "") : "not possible"}). Narrate the attempt failing.`);
     else if (res.check || res.adjudged) {
-      outcome.push(res.inferred ? inferredOutcome(res, res.inferred) : checkLine(label, res));
+      outcome.push(`${res.inferred ? inferredOutcome(res, res.inferred) : checkLine(label, res)}${changed}`);
       for (const r of reasons)
         outcome.push(`Not possible: ${r}.`);
     } else if (reasons.length > 0)
       outcome.push(`${label}: it didn't go through (${reasons.join("; ")}). Narrate it failing; nothing changed hands.`);
     else
-      outcome.push(`${label}: done.`);
+      outcome.push(`${label}: done${took}. Narrate it as done.${changed}`);
   }
   outcome.push(...plan2.combat);
   const summary = plan2.timelapse?.summary;
@@ -77894,11 +79107,11 @@ function planLines2(plan2, world, registry) {
     for (const g of m.groups.slice(0, 7))
       montage.push(`${g.label}: ${g.lines.slice(0, 6).join("; ")}`);
     for (const a of m.money.slice(0, 4))
-      montage.push(`${a.label}: in ${formatMoney(a.in, world.currency)}, out ${formatMoney(a.out, world.currency)}`);
+      montage.push(`${a.label} took in ${formatMoney(a.in, world.currency)} and paid out ${formatMoney(a.out, world.currency)}`);
     for (const b of m.bands.slice(0, 6))
-      montage.push(`${b.label}: ${b.from ? `${b.from} \u2192 ` : "now "}${b.to}`);
+      montage.push(b.from ? `${b.label} went from ${b.from} to ${b.to}` : `${b.label} is now ${b.to}`);
     for (const c of m.changes.slice(0, 4))
-      montage.push(`${c.label}: ${c.delta > 0 ? "+" : "\u2212"}${c.money ? formatMoney(Math.abs(c.delta), world.currency) : String(Math.round(Math.abs(c.delta) * 100) / 100)}`);
+      montage.push(`${c.label} went ${c.delta > 0 ? "up" : "down"} by ${c.money ? formatMoney(Math.abs(c.delta), world.currency) : String(Math.round(Math.abs(c.delta) * 100) / 100)}`);
   }
   return { outcome, montage };
 }
@@ -78014,6 +79227,16 @@ function describeProposal(p, world, state2) {
       return "you";
     return state2.entities[v]?.name ?? world.places[v]?.name ?? v;
   };
+  const subject = (k) => {
+    const who = s(k);
+    return who === "you" ? "You" : who;
+  };
+  const be = (who) => who === "You" ? "are" : "is";
+  const whose = (k) => {
+    const who = subject(k);
+    return who === "You" ? "Your" : `${who}'s`;
+  };
+  const change2 = (delta) => `${delta >= 0 ? "went up" : "went down"} by ${Math.abs(delta)}`;
   switch (p.type) {
     case "purchase":
       return `Bought ${s("item")}`;
@@ -78025,19 +79248,24 @@ function describeProposal(p, world, state2) {
     case "give":
       return `${s("from")} gave ${s("item")} to ${s("to")}`;
     case "location":
-      return `${s("entity")} \u2192 ${s("place")}`;
+      return `${subject("entity")} went to ${s("place")}`;
     case "condition": {
-      if (typeof p.condition !== "string")
-        return `${s("entity")} ${s("field")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
-      const who = typeof p.who === "string" && p.who !== "" ? s("who") : "you";
-      return p.clear === true ? `${who}: no longer ${raw("condition")}` : `${who}: ${raw("condition")}`;
+      if (typeof p.condition !== "string") {
+        const kind = state2?.entities[raw("entity")]?.kind;
+        const label = kind && world ? own(world.kinds, kind)?.fields[raw("field")]?.label : undefined;
+        return `${whose("entity")} ${fieldNoun(label, raw("field")).noun} ${change2(Number(p.delta))}`;
+      }
+      const who = typeof p.who === "string" && p.who !== "" ? subject("who") : "You";
+      return `${who} ${be(who)} ${p.clear === true ? "no longer" : "now"} ${raw("condition").replace(/_/g, " ")}`;
     }
     case "quantity":
-      return `${s("entity")} ${s("item")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
+      return `${whose("entity")} count of ${s("item")} ${change2(Number(p.delta))}`;
     case "regard":
-      return `${s("from")} \u2192 ${s("to")}: ${s("axis")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
-    case "knows":
-      return `${s("who")} learns: ${s("fact")}`;
+      return `${whose("from")} ${s("axis").replace(/_/g, " ")} toward ${s("to")} ${Number(p.delta) >= 0 ? "rose" : "fell"} by ${Math.abs(Number(p.delta))}`;
+    case "knows": {
+      const who = typeof p.who === "string" && p.who.trim() !== "" ? subject("who") : "You";
+      return `${who} ${who === "You" ? "learn" : "learns"}: ${s("fact")}`;
+    }
     case "take":
       return `${s("entity")} picked up ${s("item")}`;
     case "drop":
@@ -78049,11 +79277,13 @@ function describeProposal(p, world, state2) {
     case "lose":
       return typeof p.by === "string" && p.by !== "" ? `${s("by")} stole ${s("item")} from ${s("entity")}` : `${s("entity")} lost ${s("item")}`;
     case "item_condition":
-      return `${s("item")}: condition ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
+      return `${s("item")}'s condition ${change2(Number(p.delta))}`;
     case "spawn":
-      return `New: ${s("name")}`;
-    case "life":
-      return `${s("entity")}: ${raw("state").replace(/_/g, " ")}`;
+      return `${s("name")} appears`;
+    case "life": {
+      const who = subject("entity");
+      return `${who} ${be(who)} now ${raw("state").replace(/_/g, " ")}`;
+    }
     case "routine": {
       const you = world !== undefined && p.entity === world.pov;
       const who = you ? "You" : s("entity");
@@ -78061,14 +79291,14 @@ function describeProposal(p, world, state2) {
       if (p.change === "move")
         return `${who} moved to ${s("place")}`;
       if (p.change === "stop")
-        return `${who} gave up: ${what}`;
+        return `${who} gave up \u201C${what}\u201D`;
       const days = Array.isArray(p.days) ? p.days.filter((d) => typeof d === "string" || typeof d === "number").join(", ") : typeof p.days === "string" ? p.days : "";
       const time = typeof p.start === "string" && p.start !== "" ? `${p.start}${typeof p.end === "string" && p.end !== "" ? `\u2013${p.end}` : ""}` : "";
       const when2 = [days, time].filter((x) => x !== "").join(", ");
-      return `${you ? "Your" : `${who}'s`} routine: ${what}${when2 !== "" ? ` (${when2})` : ""}`;
+      return `${you ? "Your" : `${who}'s`} routine now has \u201C${what}\u201D${when2 !== "" ? ` (${when2})` : ""}`;
     }
     case "time_advance":
-      return `+${s("minutes")} min`;
+      return `Skip ahead ${s("minutes")} min`;
     default:
       return String(p.type);
   }
@@ -78274,7 +79504,6 @@ class Dispatcher {
     const t0 = performance.now();
     try {
       this.rt.warmLore(userId);
-      await this.rt.studio.serve(userId);
       await this.route(raw, userId, session, reply, noted2);
     } catch (error) {
       const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
@@ -78347,13 +79576,14 @@ class Dispatcher {
           this.rt.ledger.page(session, userId, r.chatId, r.chatId !== null && r.viewing !== false);
         if (r.chatId) {
           const run2 = await this.rt.runOf(r.chatId, userId);
-          if (run2) {
-            await this.rt.ledger.open(r.chatId, userId);
+          if (run2)
             this.rt.jsonHiding.seen(r.chatId, run2.worldId, userId);
-          }
           await this.rt.push.snapshot(r.chatId, userId, session);
           this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId: r.chatId, activity: this.rt.diag.activityOf(r.chatId) }, userId, session);
           this.rt.ledger.askAgain(r.chatId, userId, session);
+          const chatId = r.chatId;
+          if (run2)
+            this.rt.ledger.open(chatId, userId).catch((error) => this.rt.diag.error({ chatId, userId, turn: null }, "ledger", error, "the chat wasn't opened"));
         }
         return;
       }
@@ -78469,7 +79699,18 @@ class Dispatcher {
       case "lre.fix": {
         const { state: state2, world } = await this.head(r.chatId, userId);
         let events3;
-        if ("time" in r) {
+        let by = null;
+        if ("hint" in r) {
+          const id = typeof r.hint === "string" ? Object.keys(world.tracks).find((t) => shownTrackId(world, t) === r.hint) : undefined;
+          const shown4 = id === undefined ? null : playerTrack(this.rt.registry, world, state2, world.pov, id);
+          const stage = id === undefined ? null : currentStage(world, state2, id);
+          if (id === undefined || !shown4 || stage === null)
+            throw new RequestError("validation", "no such quest");
+          if (shown4.opened >= shown4.hints.length)
+            throw new RequestError("validation", "No hint to show yet.");
+          events3 = [{ type: ENGINE_EVENTS.hint, data: { track: id, stage } }];
+          by = { action: "hint", label: neutralizeMacros(`Opened a hint: ${shown4.label}`) };
+        } else if ("time" in r) {
           if (typeof r.time !== "string")
             throw new RequestError("bad_request", "a time is a date and time of day, YYYY-MM-DD HH:MM");
           const fixed = clockFix(this.rt.registry, world, state2, r.time, this.runSeedOf(r.chatId));
@@ -78488,7 +79729,7 @@ class Dispatcher {
             throw new RequestError("validation", edit.rejection.reason);
           events3 = edit.events;
         }
-        const result = events3.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: events3 } }) : { pending: false };
+        const result = events3.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: events3, ...by ? { by } : {} } }) : { pending: false };
         reply("lre.fix", { pending: result.pending });
         return;
       }
@@ -78512,6 +79753,14 @@ class Dispatcher {
         if (!view)
           throw new RequestError("unavailable", "the chat's world revision is not loaded");
         reply("lre.gm", view);
+        return;
+      }
+      case "lre.sections": {
+        await this.requireWorldChat(r.chatId, userId);
+        const core = await this.rt.ledger.core(r.chatId, userId);
+        if (!core)
+          throw new RequestError("unavailable", "the chat's world revision is not loaded");
+        reply("lre.sections", await this.rt.previewSections(r.chatId, userId, core, toChain(await this.rt.host.chats.messages(r.chatId, userId))));
         return;
       }
       case "lre.routine": {
@@ -78740,92 +79989,11 @@ class Dispatcher {
         }
         return;
       }
-      case "lre.studio": {
-        reply("lre.studio", await this.studio(r, userId, noted2));
-        return;
-      }
       case "lre.agents": {
         reply("lre.agents", await this.rt.agents.request(r, userId, session));
         return;
       }
     }
-  }
-  async studio(r, userId, noted2) {
-    if (r.op === "offer") {
-      const read = await this.rt.studio.offer(userId);
-      return read.offer ? { offer: (await this.reviewOffer(read.offer, read.hash, userId)).view } : { offer: null, message: read.reason };
-    }
-    return this.rt.studio.installing(userId, async () => {
-      const read = await this.rt.studio.offer(userId);
-      if (!read.offer)
-        throw new RequestError("not_found", read.reason);
-      const offer = read.offer;
-      const { view, world } = await this.reviewOffer(offer, read.hash, userId);
-      if (offer.offerId !== r.offerId || read.hash !== r.hash)
-        throw new RequestError("conflict", "LumiRPEngine Studio offers something else now; review it again.");
-      if (view.installed)
-        throw new RequestError("conflict", "This offer is already installed.");
-      if (view.blocked !== null || world === null)
-        throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
-      if (view.headMoved && r.acceptMovedHead !== true)
-        throw new RequestError("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
-      const store = this.rt.worlds;
-      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId, noted2) : await store.create(world.name, world, userId, "studio").then((created) => ({ ...created, lint: macroReview(created.world) }));
-      await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
-      await this.syncBook(done.world.id, userId);
-      return { installed: { offerId: offer.offerId, mode: offer.mode, worldId: done.world.id, name: done.world.name, revision: done.revision, attachChatId: offer.attachChatId ?? null }, lint: done.lint };
-    });
-  }
-  async reviewOffer(offer, hash, userId) {
-    const installed = await this.rt.studio.installedAs(userId, offer.offerId);
-    const view = {
-      offerId: offer.offerId,
-      mode: offer.mode,
-      name: isRecord(offer.doc) && typeof offer.doc.name === "string" ? offer.doc.name : "(unnamed)",
-      createdAt: offer.createdAt,
-      target: null,
-      counts: {},
-      lint: [],
-      errors: 0,
-      macros: [],
-      attachChatId: offer.attachChatId ?? null,
-      blocked: null,
-      installed: installed ? { worldId: installed.worldId, revision: installed.revision } : null,
-      headMoved: null,
-      hash
-    };
-    if (!isWorldDoc(offer.doc))
-      return { view: { ...view, blocked: `It isn't an ${WORLD_FORMAT} document.` }, world: null };
-    let world;
-    let lint;
-    try {
-      world = migrateWorld(structuredClone(offer.doc));
-      lint = this.rt.worlds.lint(world);
-    } catch (error) {
-      return { view: { ...view, blocked: `This engine can't read it: ${error instanceof Error ? error.message : String(error)}` }, world: null };
-    }
-    const rank = { error: 0, warning: 1, info: 2 };
-    view.lint = [...lint].sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, 50);
-    view.errors = lint.filter((i) => i.severity === "error").length;
-    view.macros = macroReview(world);
-    for (const [collection, items] of Object.entries(world)) {
-      const count = hasOwn(WORLD_COLLECTIONS, collection) && isRecord(items) ? Object.keys(items).length : 0;
-      if (count > 0)
-        view.counts[collection] = count;
-    }
-    if (view.errors > 0)
-      view.blocked = `It has ${view.errors} error${view.errors === 1 ? "" : "s"}; fix ${view.errors === 1 ? "it" : "them"} in LumiRPEngine Studio first.`;
-    if (offer.mode === "revision" && offer.worldId !== undefined) {
-      const index = pathSafe(offer.worldId) ? await this.rt.worlds.index(offer.worldId, userId) : null;
-      view.target = { worldId: offer.worldId, name: index?.name ?? null };
-      if (!index)
-        view.blocked ??= "The world it's a revision of isn't one of your worlds.";
-      else if (await this.rt.worlds.hasDraft(offer.worldId, userId))
-        view.blocked ??= `Build has unsaved changes to \u201C${index.name}\u201D: commit or discard them first.`;
-      if (index && offer.baseRevision !== index.head)
-        view.headMoved = { base: offer.baseRevision ?? null, head: index.head };
-    }
-    return { view, world };
   }
   async world(r, userId, session, noted2) {
     const store = this.rt.worlds;
@@ -79045,6 +80213,14 @@ class Dispatcher {
       this.rt.setSwipeChoice(chatId, choice);
       return { applied: true, pending: false };
     }
+    if (kind === "reply_failed") {
+      if (choice !== "rerun")
+        return { applied: false, pending: false };
+      if (!this.rt.ledger.discardKept(chatId, id.slice("reply_failed:".length)))
+        throw new RequestError("not_found", "the chip has lapsed");
+      this.rt.push.changed(chatId, userId);
+      return { applied: true, pending: false };
+    }
     if (kind === "pause") {
       const w = choice === "discard" ? { kind: "discard", id: this.nextId(), after: messageId } : { kind: "keep", id: this.nextId(), messageId, parentPath: "", convert: [] };
       const result = await this.write(chatId, userId, w);
@@ -79239,11 +80415,15 @@ class Dispatcher {
       }
       case "intent_gate":
       case "outline_gate": {
-        if (choice === "cancel")
+        const text6 = typeof chip.payload.text === "string" ? chip.payload.text : "";
+        if (choice === "cancel") {
+          this.rt.dropMinds(chatId);
+          if (chip.kind === "intent_gate")
+            this.rt.bridgeOf(chatId)?.forget(text6);
           return { applied: true, pending: false };
+        }
         if (choice !== "play" && choice !== "edit")
           throw new RequestError("bad_request", `unknown choice ${choice}`);
-        const text6 = typeof chip.payload.text === "string" ? chip.payload.text : "";
         if (chip.kind === "intent_gate") {
           if (choice === "play")
             return { applied: this.rt.passIntent(chatId, text6), pending: false };
@@ -79251,6 +80431,20 @@ class Dispatcher {
             throw new RequestError("bad_request", "Edit needs the action's details");
           const read = this.rt.bridgeOf(chatId)?.intentOf(text6);
           const { world, state: state2 } = await this.head(chatId, userId);
+          if (read?.action === TIMELAPSE_ACTION2) {
+            const target = parseTarget(payload.params.target);
+            if (!target)
+              throw new RequestError("bad_request", "Edit needs how long the time skip runs");
+            const reached = resolveTarget(this.rt.registry, world, state2, target);
+            if ("code" in reached)
+              throw new RequestError("validation", `Timelapse: ${reached.reason}`);
+            const overrides = {};
+            for (const [k, v] of Object.entries(parseOverrides(payload.params.overrides)))
+              if (typeof v === "string")
+                overrides[k] = v;
+            const follows = typeof payload.params.followRoutine === "boolean" ? payload.params.followRoutine : read.params.povRoutine !== false;
+            return { applied: this.rt.passIntent(chatId, text6, timelapseIntent(target, Object.keys(overrides).length > 0 ? overrides : undefined, 1, follows).params), pending: false };
+          }
           const action = read?.action ? (hasOwn(world.actions, read.action) ? world.actions[read.action] : undefined) ?? this.rt.registry.actions.get(read.action) : undefined;
           if (!read || !action)
             throw new RequestError("not_found", "the read has lapsed");
@@ -80086,13 +81280,6 @@ function createSpindleHost() {
       onLifecycle(handler) {
         return spindle.backendProcesses.onLifecycle((e) => handler({ processId: e.processId, key: e.key ?? "", state: e.state, ...e.error ? { error: e.error } : {} }));
       }
-    },
-    rpc: {
-      handle(channel, requires, handler) {
-        spindle.rpcPool.handle(channel, ({ requesterExtensionId }) => handler(requesterExtensionId), { requires: [...requires] });
-      },
-      unregister: (channel) => spindle.rpcPool.unregister(channel),
-      read: (endpoint) => spindle.rpcPool.read(endpoint)
     },
     log(level2, message2, userId, turn) {
       if (level2 === "error")

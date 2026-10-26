@@ -133,22 +133,10 @@ function bundledKitOf(module) {
   return "run" in kit && typeof kit.run === "function" ? kit : "it runs no command line";
 }
 
-// src/shared/world.ts
-var WORLD_FORMAT = "lre-world-v1";
-var ENGINE_VERSION = "0.1.0";
-var ACTIVITY_SPAN_OF = "_activity_span";
-var ACTIVITY_PLACE = "_activity_place";
-var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activity_offered: true };
-
-// src/shared/studio-bridge.ts
-var ENGINE_EXTENSION = "lumi_rp_engine";
-var STUDIO_EXTENSION = "lumi_rp_engine_studio";
-var STUDIO_INBOUND = ["file", `rpc:${STUDIO_EXTENSION}.offer`];
-var encoder = new TextEncoder;
-
 // src/shared/protocol.ts
 var PROTOCOL_VERSION = 1;
 var AGENT_API = 2;
+var ENGINE_EXTENSION = "lumi_rp_engine";
 
 // src/shared/minds.ts
 var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
@@ -893,8 +881,6 @@ var package_default = {
     node: ">=22"
   },
   exports: {
-    "./studio": "./src/studio-api.ts",
-    "./studio-bridge": "./src/shared/studio-bridge.ts",
     "./schemas/lre-world-v1.schema.json": "./schemas/lre-world-v1.schema.json",
     "./schemas/lre-map-v1.schema.json": "./src/shared/lre-map-v1.schema.json"
   },
@@ -921,10 +907,17 @@ var package_default = {
   }
 };
 
+// src/shared/world.ts
+var WORLD_FORMAT = "lre-world-v1";
+var ENGINE_VERSION = "0.1.0";
+var ACTIVITY_SPAN_OF = "_activity_span";
+var ACTIVITY_PLACE = "_activity_place";
+var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activity_offered: true };
+
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "96375fe8";
+var BUILD = "ecbfad11";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

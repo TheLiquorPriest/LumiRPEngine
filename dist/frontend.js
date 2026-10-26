@@ -558,7 +558,7 @@ function useSelect(source, select) {
 // src/frontend/app.ts
 var SHOW_IDS_KEY = "lre:ui:show-ids";
 function initialUi(showIds) {
-  return { mode: "play", play: { dest: "now", tab: {}, stack: [] }, gm: { revealed: false, section: "world" }, build: { view: "worlds" }, settings: { page: "home" }, overlay: null, studioOffer: 0, showIds };
+  return { mode: "play", play: { dest: "now", tab: {}, stack: [] }, gm: { revealed: false, section: "world" }, build: { view: "worlds" }, settings: { page: "home" }, overlay: null, showIds };
 }
 function playAt(ui, dest, panel) {
   return { ...ui, mode: "play", play: { dest, tab: panel === undefined ? ui.play.tab : { ...ui.play.tab, [dest]: panel }, stack: [] } };
@@ -922,9 +922,26 @@ var STEP_VARS = {
   skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] }
 };
 var PROSE_PROMPTS = {
-  brief: "You brief a roleplay narrator before their next reply. In two or three sentences, say what matters right now in {{world}}: where {{pov}} is, who is present, what the player just did and how it turned out, and anything pressing. Use only the facts given; invent nothing.",
-  outline: "You outline a roleplay narrator's next reply. Expand the engine's beats into two to four short beats, in order, consistent with the facts and the outcome. Don't decide anything the facts don't settle, and don't add events.",
-  choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts. Each under twelve words, first person, as the player would type it."
+  brief: [
+    "You brief a roleplay narrator before their next reply in {{world}}, so they can write it without guessing at anything. From the facts given only, in one paragraph, say:",
+    "where and when the scene is (the place, the time of day) and what it is like now; who is present and what each of them is doing; what the player just did and exactly how it turned out, with the results, rolls and amounts as the Outcome gives them; anything that changed hands, moved or was spent, and between whom; how much time passes; and what is pressing or about to happen.",
+    "Name people and places as the facts do. State only what the facts establish: invent nothing, decide nothing they leave open, and never say what {{pov}} doesn't know."
+  ].join(`
+`),
+  outline: [
+    "You outline a roleplay narrator's next reply in {{world}}, beat by beat, so the narrator can write it without inferring anything. Expand the engine's beats into a complete outline, in order, consistent with the facts and the Outcome. Account for everything the reply must cover:",
+    "- every beat, in the order it happens;",
+    "- who does and says what, in substance (no dialogue lines);",
+    "- what is decided and why, as the Outcome states it;",
+    "- every result with its numbers: rolls, amounts, prices;",
+    "- each item that changes hands, from whom to whom;",
+    "- each place reached and each move, by name;",
+    "- how much time passes;",
+    "- what each person knows or doesn't. Where the facts leave something unknown to {{pov}}, or someone keeps a thing to themselves, add a beat saying it stays unsaid.",
+    `Write each beat as one full sentence that names its people and places (never a bare "he" or "there"). Decide nothing the facts don't settle and add no events of your own; point only at the sections the narrator has this turn.`
+  ].join(`
+`),
+  choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts: each something the scene as written makes possible right now, with the people present and the things {{pov}} has. Each under twelve words, first person, as the player would type it, naming who or what it involves."
 };
 var DECISION_PROMPTS = {
   "npc.choose": "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.",
@@ -1129,9 +1146,18 @@ function topicSuggestions(world) {
 }
 
 // src/shared/world.ts
-var WORLD_FORMAT = "lre-world-v1";
-var ENGINE_VERSION = "0.1.0";
 var EFFECT_ONLY_FUNCTIONS = ["roll"];
+function overlayKind(pack, mine) {
+  return { ...pack, ...mine, fields: { ...pack.fields, ...mine.fields } };
+}
+function playedKinds(packKinds, kinds) {
+  const out = { ...packKinds };
+  for (const [id, mine] of Object.entries(kinds)) {
+    const pack = packKinds && hasOwn(packKinds, id) ? packKinds[id] : undefined;
+    out[id] = pack ? overlayKind(pack, mine) : mine;
+  }
+  return out;
+}
 var BUILTIN_RELATIONS = ["in", "owns", "uses", "worn_by", "equipped", "knows", "member_of", "regard", "route"];
 var ACTIVITY_SPAN_OF = "_activity_span";
 var ACTIVITY_PLACE = "_activity_place";
@@ -1594,6 +1620,19 @@ function Empty(props) {
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
+}
+function NoView(props) {
+  const { client } = useApp();
+  return /* @__PURE__ */ u3(Empty, {
+    icon: "alert",
+    title: "No view of this chat from the engine",
+    action: /* @__PURE__ */ u3(Button, {
+      icon: "refresh",
+      onClick: () => client.retry(),
+      children: "Try again"
+    }, undefined, false, undefined, this),
+    children: props.failed
+  }, undefined, false, undefined, this);
 }
 function oddsSeries(odds) {
   let other = 0;
@@ -2854,6 +2893,18 @@ async function discardDraft(app) {
 
 // src/shared/ids.ts
 var DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"];
+var DOMAIN_LABEL = {
+  money: "Money",
+  gear: "Gear",
+  vehicles: "Vehicles",
+  castlife: "Cast life",
+  relationships: "Relationships",
+  space: "Space & travel",
+  calendar: "Calendar & time",
+  weather: "Weather",
+  sheets: "Sheets & checks"
+};
+var LEVEL_LABEL = { 0: "Off", 1: "Narrative", 2: "Simple", 3: "Detailed", 4: "Simulation" };
 var BANDS = ["principal", "supporting", "background"];
 var INTERRUPT_CLASSES = ["invitation", "bill", "decline", "incident", "quest", "rule", "arrival", "overdue", "needs", "weather"];
 
@@ -4363,7 +4414,31 @@ var PART_SPECS = {
             { kind: "number", key: "sightRadius", label: "Sight radius (cells the POV sees around it)", min: 0, max: 32, step: 1 }
           ]
         },
-        { kind: "bool", key: "travelSimulation", label: "Travel simulation: moves need a route", hint: "Off (the default): moves are story first, so a move the reply tells always lands and Go goes even where no route leads. On: a narrated move no route reaches didn't happen, and Go needs a walking route" }
+        { kind: "bool", key: "travelSimulation", label: "Travel simulation: moves need a route", hint: "Off (the default): moves are story first, so a move the reply tells always lands and Go goes even where no route leads. On: a narrated move no route reaches didn't happen, and Go needs a walking route" },
+        {
+          kind: "object",
+          key: "travel",
+          label: "Travel times",
+          optional: true,
+          fields: [
+            {
+              kind: "object",
+              key: "speeds",
+              label: "Speed by way of travel (km/h)",
+              optional: true,
+              fields: [
+                { kind: "number", key: "walk", label: "On foot", min: 0, step: 0.5, optional: true, hint: "Unset: each route's own minutes. Set: every leg with a distance takes that distance at this speed" },
+                { kind: "number", key: "road", label: "By road", min: 0, step: 1, optional: true },
+                { kind: "number", key: "offroad", label: "Off road", min: 0, step: 1, optional: true },
+                { kind: "number", key: "water", label: "On water", min: 0, step: 1, optional: true }
+              ]
+            },
+            { kind: "record", key: "vehicleSpeeds", label: "Speed by vehicle class (km/h)", keyLabel: "Vehicle class", item: { kind: "number", key: "", label: "km/h", min: 0, step: 1 }, hint: "A class of the vehicles table (atv_utility, pickup_midsize…): its vehicles take every leg with a distance at this speed, whatever the way" },
+            { kind: "number", key: "startMinutes", label: "Getting a vehicle going (minutes)", min: 0, step: 1, optional: true, hint: "Default 1: in, started and out of its spot" },
+            { kind: "number", key: "parkMinutes", label: "Parking it (minutes)", min: 0, step: 1, optional: true, hint: "Default 1" },
+            { kind: "number", key: "fetchMinutes", label: "Longest walk to fetch a vehicle (minutes)", min: 0, step: 1, optional: true, hint: "Default 30: a vehicle parked further away isn't offered; 0 offers only one where you are" }
+          ]
+        }
       ]
     }
   ]
@@ -4532,7 +4607,7 @@ function MoneyInput(props) {
 
 // src/shared/state-view.ts
 function chipRegenerates(kind, choice) {
-  return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop") || (kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit");
+  return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || (kind === "read_failed" || kind === "reply_failed") && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop") || (kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit");
 }
 
 // src/shared/party.ts
@@ -4611,6 +4686,9 @@ function whereFixTarget(hud, entity, here) {
 }
 function timeFixRequest(time, chatId) {
   return { type: "lre.fix", chatId, time };
+}
+function hintRequest(track2, chatId) {
+  return { type: "lre.fix", chatId, hint: track2 };
 }
 function editRequest(chatId, ops) {
   return { type: "lre.edit", chatId, ops };
@@ -4698,18 +4776,6 @@ function sheetPreviewRequest(worldId, ruleset, entity) {
 }
 
 // src/frontend/settings/realism.tsx
-var DOMAIN_LABEL = {
-  money: "Money",
-  gear: "Gear",
-  vehicles: "Vehicles",
-  castlife: "Cast life",
-  relationships: "Relationships",
-  space: "Space & travel",
-  calendar: "Calendar & time",
-  weather: "Weather",
-  sheets: "Sheets & checks"
-};
-var LEVEL_LABEL = { 0: "Off", 1: "Narrative", 2: "Simple", 3: "Detailed", 4: "Simulation" };
 var PRESETS = [
   { value: "story", label: "Story" },
   { value: "grounded", label: "Grounded" },
@@ -11490,7 +11556,7 @@ function RoutineEditor(props) {
   const [busy, run] = useBusy();
   const [reverts, setReverts] = d2(0);
   useHeld(routine, setRoutine, stored ?? blank, `${props.world.id}/routines/${props.id ?? ""}`, JSON.stringify(stored ?? null));
-  const doc = b2(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds } }), [props.world, draft?.packKinds]);
+  const doc = b2(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds) }), [props.world, draft?.packKinds]);
   if (!id)
     return /* @__PURE__ */ u3("span", {
       class: "lre-muted",
@@ -11553,7 +11619,7 @@ function RoutineList(props) {
   const [adding, setAdding] = d2(false);
   if (!draft)
     return null;
-  const doc = { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } };
+  const doc = { ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) };
   const info = COLLECTION_INFO.routines;
   const all = Object.values(draft.doc.routines ?? {});
   const q2 = query.trim().toLowerCase();
@@ -11679,7 +11745,7 @@ var WHO = [
 function RoutineJobStart(props) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d3) => d3);
-  const doc = b2(() => draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } } : null, [draft]);
+  const doc = b2(() => draft ? { ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) } : null, [draft]);
   const [who, setWho] = d2("all");
   const [picked, setPicked] = d2([]);
   const [find, setFind] = d2("");
@@ -11974,7 +12040,7 @@ function ProposalEditor(props) {
 }
 function RoutineProposalReview(props) {
   const draft = useSelect(props.app.drafts, (d3) => d3?.worldId === props.worldId ? d3 : null);
-  const doc = b2(() => draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } } : null, [draft]);
+  const doc = b2(() => draft ? { ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) } : null, [draft]);
   const offered = b2(() => offeredProposals(props.proposals), [props.proposals]);
   const kept = useSelect(reviews, (all) => all[props.jobId]);
   const state = kept ?? { accepted: doc ? [...reviewTicked(offered, doc)] : [], edits: {}, applied: false };
@@ -13100,6 +13166,7 @@ var ROLE = {
   contradiction: "decision",
   read_failed: "decision",
   engine_failed: "decision",
+  reply_failed: "decision",
   claim: "decision",
   check: "decision",
   routine_ask: "decision",
@@ -13126,12 +13193,14 @@ var ROLE = {
   fix: "done",
   pending: "done",
   degraded: "done",
+  untracked: "done",
   decline: "done"
 };
 var TONE = {
   decline: "neg",
   read_failed: "neg",
   engine_failed: "neg",
+  reply_failed: "neg",
   claim: "neutral",
   check: "neutral",
   routine_ask: "neutral",
@@ -13160,7 +13229,8 @@ var TONE = {
   routine_added: "neutral",
   not_action: "neutral",
   mode_change: "neutral",
-  fix: "neutral"
+  fix: "neutral",
+  untracked: "neutral"
 };
 function chipRole(chip) {
   return chip.kind === "decline" && chip.actions.length > 0 ? "decision" : ROLE[chip.kind];
@@ -13199,12 +13269,6 @@ var HOST_LIMITS = {
     noneMs: 0,
     source: "src/spindle/worker-host-process-api.ts:769 (the clamp), 273-286 (the watchdog; 0 checks nothing)",
     effect: "Lumiverse terminates the process (“Backend process heartbeat timed out”); its job fails."
-  },
-  sharedRpc: {
-    what: "Another extension's read of LumiRPEngine's shared endpoint (LumiRPEngine Studio)",
-    maxMs: 1e4,
-    source: "src/spindle/worker-host.ts:971, 1715-1719",
-    effect: "The reader's request fails as timed out."
   },
   socketIdle: {
     what: "An idle event socket (the command line and MCP server)",
@@ -13838,6 +13902,7 @@ var CHIP_ICON = {
   contradiction: "info",
   read_failed: "alert",
   engine_failed: "alert",
+  reply_failed: "alert",
   claim: "help",
   check: "dice",
   claimed: "sparkle",
@@ -13846,10 +13911,11 @@ var CHIP_ICON = {
   fix: "edit",
   refused: "alert",
   intent_gate: "pause",
-  outline_gate: "list"
+  outline_gate: "list",
+  untracked: "info"
 };
 var ACTION_ICON = { undo: "undo", regenerate: "refresh", rerun: "refresh", send: "send", timelapse: "fast-forward", play: "play", edit: "edit" };
-var RECEIPT_ORDER = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change"];
+var RECEIPT_ORDER = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change", "untracked"];
 var RECEIPT_SEGMENTS = 3;
 function receiptLine(done) {
   const rank = (chip) => {
@@ -14025,7 +14091,7 @@ function useChipControls(chip, chatId) {
   const press = (action) => {
     const input = action.input;
     if (input?.type === "action")
-      app.overlays.openPalette("actions", { chatId, chip, action: input.action, params: input.params });
+      app.overlays.openPalette(input.action === view?.palette?.timelapse?.action ? "timelapse" : "actions", { chatId, chip, action: input.action, params: input.params });
     else if (input)
       setAsking(asking === action.id ? null : action.id);
     else
@@ -14832,6 +14898,7 @@ function mapSettingsOf(world) {
     travelSimulation: raw.travelSimulation === true
   };
 }
+var DEFAULT_TRAVEL = Object.freeze({ speeds: {}, vehicleSpeeds: {}, startMinutes: 1, parkMinutes: 1, fetchMinutes: 30 });
 function compileGrid(key, map, mine, places2, grids) {
   const scope = places2[map.scope];
   if (!scope || scope.grid !== undefined || hasOwn(grids, key))
@@ -16960,7 +17027,7 @@ function CharacterPage(props) {
       live = false;
     };
   }, [app, id, props.world.id, storedKey]);
-  const formDoc = b2(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds }, relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
+  const formDoc = b2(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds), relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
   const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
   const path = `entities.${id}`;
   const ctx = { doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields };
@@ -17453,7 +17520,7 @@ var CHECKS = [
 function ItemObjectivePicker(props) {
   const app = useApp();
   const packKinds = useSelect(app.drafts, (d3) => d3?.packKinds);
-  const kinds = b2(() => ({ ...packKinds, ...props.world.kinds }), [packKinds, props.world.kinds]);
+  const kinds = b2(() => playedKinds(packKinds, props.world.kinds), [packKinds, props.world.kinds]);
   const [check, setCheck] = d2("carries");
   const [item, setItem] = d2("");
   const [place, setPlace] = d2("");
@@ -19883,6 +19950,7 @@ function RoutineSettingsEditor() {
 
 // src/shared/adjudication.ts
 var ADJUDICATION_PRESET_IDS = ["narrative", "balanced", "crunchy", "custom"];
+var ADJUDICATION_PRESET_LABEL = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 var CHECK_TIMINGS = ["every", "risky", "marked", "never"];
 var DESCRIPTION_WEIGHTS = ["none", "bonus", "advantage", "dc"];
 var CHECK_AUTHORITIES = ["mechanics", "hybrid", "narrative"];
@@ -19942,19 +20010,20 @@ function whole2(v3, [lo, hi], fallback) {
 function oneOf2(v3, values, fallback) {
   return values.find((x2) => x2 === v3) ?? fallback;
 }
+function samePlay(a3, b3) {
+  return a3.checks === b3.checks && a3.riskyAt === b3.riskyAt && a3.trivialAt === b3.trivialAt && a3.impossibleAt === b3.impossibleAt && a3.description.weight === b3.description.weight && a3.description.max === b3.description.max && a3.description.advantageAt === b3.description.advantageAt && a3.authority === b3.authority && a3.closeBy === b3.closeBy && a3.retry === b3.retry && a3.retryAfter === b3.retryAfter;
+}
 function readAdjudication(raw) {
   if (!isRecord(raw))
     return null;
   const preset = ADJUDICATION_PRESET_IDS.find((p3) => p3 === raw.preset);
   if (!preset)
     return null;
-  if (preset !== "custom")
-    return presetAdjudication(preset);
-  const base = ADJUDICATION_PRESETS.crunchy;
+  const base = ADJUDICATION_PRESETS[preset === "custom" ? "crunchy" : preset];
   const d3 = isRecord(raw.description) ? raw.description : {};
   const max = whole2(d3.max, ADJUDICATION_BOUNDS.descriptionMax, base.description.max);
-  return {
-    preset,
+  const read = {
+    preset: "custom",
     checks: oneOf2(raw.checks, CHECK_TIMINGS, base.checks),
     riskyAt: threshold(raw.riskyAt, base.riskyAt) ?? base.riskyAt,
     trivialAt: threshold(raw.trivialAt, base.trivialAt),
@@ -19965,6 +20034,7 @@ function readAdjudication(raw) {
     retry: oneOf2(raw.retry, RETRY_RULES, base.retry),
     retryAfter: whole2(raw.retryAfter, ADJUDICATION_BOUNDS.retryAfter, base.retryAfter)
   };
+  return preset !== "custom" && samePlay(read, base) ? presetAdjudication(preset) : read;
 }
 
 // src/shared/inferred.ts
@@ -20449,7 +20519,7 @@ for (const s3 of SAVES2)
 var MODERN = {
   id: "modern",
   label: "Modern",
-  summary: "Present-day adventure on a d20: six abilities, a Defense score, a modern skill list with ranks, points to spend pushing a skill, HP, and levels from XP.",
+  summary: "Present-day adventure on a d20: six abilities, a Defense score, a modern skill list with ranks, points to spend pushing a skill that a night's rest refills, HP, and levels from XP.",
   fields: {
     ...abilityFields(),
     ...levelFields(20),
@@ -20487,7 +20557,7 @@ var MODERN = {
     save_check: saveAction("modern.saves"),
     attack: attackAction("roll(self.damage) + self.str_mod", "roll(self.damage) + roll(self.damage) + self.str_mod"),
     total_defense: stanceAction("total_defense", "Total defense", "defend"),
-    long_rest: restAction("Rest for the night")
+    long_rest: restAction("Rest for the night", [{ type: "recover", args: { entity: "self", field: "action_points", full: true } }])
   },
   tables: {
     "modern.levels": profileTable("modern.levels", "Modern levels", { xp: { type: "int", doc: "XP the level needs" }, attack: { type: "int", doc: "Base attack bonus" }, defense: { type: "int", doc: "Defense bonus" }, save: { type: "int", doc: "Base save bonus" } }, levelRows((level) => ({ xp: triangularXp(level), attack: Math.floor(level * 3 / 4), defense: 1 + Math.floor(level / 2), save: 1 + Math.floor(level / 3) }))),
@@ -20503,7 +20573,7 @@ var MODERN = {
         {
           id: "vitals",
           label: "Vitals",
-          rows: [{ pool: "hp" }, { pool: "action_points" }, { progression: "level" }, { formula: "self.defense", label: "Defense" }, { formula: signed("self.attack_bonus"), label: "Attack" }, { formula: signed("self.dex_mod"), label: "Initiative" }, { field: "reputation" }]
+          rows: [{ pool: "hp" }, { pool: "action_points", label: "Action Points (a night's rest or a new level refills them)" }, { progression: "level" }, { formula: "self.defense", label: "Defense" }, { formula: signed("self.attack_bonus"), label: "Attack" }, { formula: signed("self.dex_mod"), label: "Initiative" }, { field: "reputation" }]
         },
         { id: "abilities", label: "Abilities", rows: abilityRows() },
         { id: "saves", label: "Saves", rows: SAVES2.map((s3) => ({ formula: signed(`self.${s3.id}`), label: s3.label })) },
@@ -21235,7 +21305,6 @@ function YouPanel(props) {
 }
 
 // src/frontend/adjudication-form.tsx
-var ADJUDICATION_PRESET_LABEL = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 var PRESETS2 = ["narrative", "balanced", "crunchy", "custom"].map((value) => ({ value, label: ADJUDICATION_PRESET_LABEL[value] }));
 var TIMING = { every: "Every check", risky: "Only risky ones", marked: "Only where marked", never: "Never" };
 var WEIGHT = { none: "Doesn't count", bonus: "Adds a bonus", advantage: "Grants advantage", dc: "Lowers the DC" };
@@ -22402,7 +22471,7 @@ function ProgressionSheet(props) {
           onChange: (next) => set("xpField", next)
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(RefPicker, {
-          label: "Level field (the engine sets it)",
+          label: "Level field (set from XP)",
           value: value.levelField,
           options: fields,
           onChange: (next) => set("levelField", next)
@@ -22478,7 +22547,7 @@ function ProgressionEditor(props) {
     children: [
       /* @__PURE__ */ u3("span", {
         class: "lre-small lre-muted",
-        children: "A progression raises a level as XP grows: after each change, an entity whose XP reached the next threshold goes up, and each level gained runs its effects."
+        children: "A progression's level follows its XP, both ways: after each change, an entity whose XP reached the next threshold goes up a level at a time, each level gained running its effects, and one whose XP fell below its level's threshold goes straight down. Change XP to change a level."
       }, undefined, false, undefined, this),
       Object.keys(props.value).length === 0 ? /* @__PURE__ */ u3("span", {
         class: "lre-small lre-muted",
@@ -22582,7 +22651,6 @@ var COMBAT = {
     { kind: "json", key: "wounds", label: "Wound bands over the HP left in percent", optional: true, hint: '[{"label": "hurt", "min": 50, "max": 100}, …]' }
   ]
 };
-var PRESET_LABEL = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 function RulesetEditor() {
   const app = useApp();
   const draft = useSelect(app.drafts, (d3) => d3);
@@ -22593,7 +22661,7 @@ function RulesetEditor() {
   const [busy, run] = useBusy();
   const [part, setPart] = d2(null);
   useHeld(value, setValue, stored, `${draft?.worldId ?? ""}/ruleset`, storedKey);
-  const formDoc = b2(() => draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds }, relations: { ...draft.packRelations, ...draft.doc.relations } } : null, [draft?.doc, draft?.packKinds, draft?.packRelations]);
+  const formDoc = b2(() => draft ? { ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds), relations: { ...draft.packRelations, ...draft.doc.relations } } : null, [draft?.doc, draft?.packKinds, draft?.packRelations]);
   const identifiers = b2(() => draft ? worldIdentifiers(draft.doc) : [], [draft?.doc]);
   if (!draft || !formDoc)
     return null;
@@ -22675,7 +22743,7 @@ function RulesetEditor() {
         children: /* @__PURE__ */ u3(List, {
           children: [
             row("profile", "wand", "Start from a profile…", changed ? "Save or revert your edits first" : "A ready-made ruleset: Modern, Classic, Fifth or Custom", []),
-            row("checks", "dice", "How checks are decided", `${adjudication ? PRESET_LABEL[adjudication.preset] : value.adjudication !== undefined ? "Set, but not readable: open it" : "Not set: every check rolls"}${inferred ? ` · inferred checks: ${INFER_MODE_LABEL[inferred.mode].toLowerCase()}` : ""}`, checksLint),
+            row("checks", "dice", "How checks are decided", `${adjudication ? ADJUDICATION_PRESET_LABEL[adjudication.preset] : value.adjudication !== undefined ? "Set, but not readable: open it" : "Not set: every check rolls"}${inferred ? ` · inferred checks: ${INFER_MODE_LABEL[inferred.mode].toLowerCase()}` : ""}`, checksLint),
             row("floors", "sliders", "Level floors", floors.length > 0 ? floors.join(", ") : "None", lintOf("ruleset.minLevels")),
             row("progression", "star", "Progression", Object.keys(progression).length > 0 ? Object.values(progression).map((p3) => p3.label).join(", ") : "None: levels never change on their own", lintOf("ruleset.progression")),
             row("sheet", "layers", "Sheet Designer", sections.length > 0 ? `${sections.length} section${sections.length === 1 ? "" : "s"}, ${rows} row${rows === 1 ? "" : "s"}` : "Not designed: the Sheets pack's own sheet", lintOf("ruleset.sheet")),
@@ -22781,195 +22849,6 @@ function RulesetEditor() {
       saveBar
     ]
   }, undefined, true, undefined, this);
-}
-
-// src/shared/studio-bridge.ts
-var STUDIO_EXTENSION = "lumi_rp_engine_studio";
-var STATE_EVENT = "lre-state-v1";
-var STATE_REQUEST_EVENT = "lre-state-request-v1";
-var STUDIO_OFFER_EVENT = "lre-studio-offer-v1";
-var STUDIO_INSTALLED_EVENT = "lre-studio-installed-v1";
-var STUDIO_INBOUND = ["file", `rpc:${STUDIO_EXTENSION}.offer`];
-var encoder = new TextEncoder;
-
-// src/frontend/build/studio-offer.tsx
-function useStudioOffer(props) {
-  const app = useApp();
-  const view = useView();
-  const asked = useUi((ui) => ui.studioOffer);
-  const [offer, setOffer] = d2(null);
-  const [message, setMessage] = d2(null);
-  const [busy, run] = useBusy();
-  const load = () => run(async () => {
-    const result = await app.request({ type: "lre.studio", op: "offer" });
-    setOffer(result?.offer ?? null);
-    setMessage(result && !result.offer ? result.message ?? null : null);
-  });
-  A(() => {
-    if (asked > 0)
-      load();
-  }, [asked]);
-  const install = (reviewed) => run(async () => {
-    const result = await app.request({ type: "lre.studio", op: "install", offerId: reviewed.offerId, hash: reviewed.hash, ...reviewed.headMoved ? { acceptMovedHead: true } : {} });
-    const done = result?.installed;
-    if (!done)
-      return;
-    setOffer(null);
-    props.installed();
-    if (result.lint && result.lint.length > 0)
-      props.review({ worldId: done.worldId, name: done.name, issues: result.lint });
-    const detail = { offerId: done.offerId, mode: done.mode, worldId: done.worldId, revision: done.revision };
-    window.dispatchEvent(new CustomEvent(STUDIO_INSTALLED_EVENT, { detail }));
-    app.toast(done.mode === "new" ? `Installed “${done.name}” as a new world.` : `“${done.name}” has a new revision. Upgrade its chats in GM → This chat.`, "info");
-    if (!done.attachChatId)
-      return;
-    if (view?.chatId !== done.attachChatId) {
-      app.toast("Open the chat it was made for and attach it from Play.", "info");
-      return;
-    }
-    if (view.status !== "not_world") {
-      if (view.worldId !== done.worldId)
-        app.toast("This chat already plays another world, so it stays as it is.", "info");
-      return;
-    }
-    if (!await app.host.confirm("Attach world", `Attach “${done.name}” to this chat? The world starts at its current revision.`, "info", "Attach"))
-      return;
-    if (await app.request({ type: "lre.world", op: "attach", worldId: done.worldId, chatId: done.attachChatId }))
-      app.client.open(done.attachChatId);
-  });
-  return { offer, message, busy, load, dismiss: () => setOffer(null), install };
-}
-var COUNTED = [
-  ["entities", "entity", "entities"],
-  ["places", "place", "places"],
-  ["routes", "route", "routes"],
-  ["maps", "map", "maps"],
-  ["tracks", "track", "tracks"],
-  ["schedules", "schedule", "schedules"],
-  ["lore", "lore entry", "lore entries"],
-  ["rules", "rule", "rules"],
-  ["actions", "action", "actions"]
-];
-function StudioOfferReview(props) {
-  const { offer, busy } = props.state;
-  if (!offer)
-    return null;
-  const counts = COUNTED.flatMap(([key, one, many]) => {
-    const n2 = offer.counts[key];
-    return n2 ? [`${n2} ${n2 === 1 ? one : many}`] : [];
-  });
-  const what = offer.mode === "new" ? "A new world" : offer.target?.name ? `The next revision of “${offer.target.name}”` : "A revision of a world you don't have";
-  const open = offer.blocked === null && offer.installed === null;
-  return /* @__PURE__ */ u3(Section, {
-    title: "From LumiRPEngine Studio",
-    aside: offer.errors > 0 ? /* @__PURE__ */ u3(Badge, {
-      tone: "neg",
-      children: offer.errors === 1 ? "1 error" : `${offer.errors} errors`
-    }, undefined, false, undefined, this) : null,
-    children: /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      "data-lre-studio-offer": true,
-      children: [
-        /* @__PURE__ */ u3("div", {
-          class: "lre-build-offer",
-          children: [
-            /* @__PURE__ */ u3("span", {
-              class: "lre-build-tile",
-              children: /* @__PURE__ */ u3(Icon, {
-                name: "sparkle"
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              class: "lre-build-offer-text",
-              children: [
-                /* @__PURE__ */ u3("strong", {
-                  class: "lre-build-offer-name",
-                  children: offer.name
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3("span", {
-                  class: "lre-build-note",
-                  children: [
-                    what,
-                    offer.attachChatId ? ", to attach to a chat" : ""
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
-        counts.length > 0 ? /* @__PURE__ */ u3("p", {
-          class: "lre-build-note",
-          children: counts.join(" · ")
-        }, undefined, false, undefined, this) : null,
-        offer.installed ? /* @__PURE__ */ u3(Banner, {
-          tone: "info",
-          icon: "check",
-          children: "Already installed."
-        }, undefined, false, undefined, this) : offer.blocked ? /* @__PURE__ */ u3(Banner, {
-          tone: offer.errors > 0 ? "neg" : "warn",
-          children: offer.blocked
-        }, undefined, false, undefined, this) : null,
-        offer.lint.length > 0 ? /* @__PURE__ */ u3("div", {
-          class: "lre-build-issues lre-build-well",
-          role: "list",
-          children: [
-            offer.lint.slice(0, 8).map((issue, i3) => /* @__PURE__ */ u3(IssueRow, {
-              issue
-            }, i3, false, undefined, this)),
-            offer.lint.length > 8 ? /* @__PURE__ */ u3("p", {
-              class: "lre-build-note",
-              children: [
-                "and ",
-                offer.lint.length - 8,
-                " more"
-              ]
-            }, undefined, true, undefined, this) : null
-          ]
-        }, undefined, true, undefined, this) : null,
-        offer.macros.length > 0 ? /* @__PURE__ */ u3(Banner, {
-          tone: "warn",
-          title: "Macros to review",
-          children: [
-            "Its lore and templates hold ",
-            offer.macros.length,
-            " macro",
-            offer.macros.length === 1 ? "" : "s",
-            " that Lumiverse runs when it builds a prompt; after installing, review each before you play."
-          ]
-        }, undefined, true, undefined, this) : null,
-        offer.mode === "revision" && open ? /* @__PURE__ */ u3("p", {
-          class: "lre-build-note",
-          children: "Its chats stay on their revision until you Upgrade them in GM → This chat."
-        }, undefined, false, undefined, this) : null,
-        offer.headMoved && open ? /* @__PURE__ */ u3(Banner, {
-          tone: "warn",
-          title: "Changed in Build since",
-          children: [
-            "“",
-            offer.target?.name ?? "This world",
-            "” changed in Build since LumiRPEngine Studio took it. Installing makes this the new head without what was committed since; that revision stays, and so do its chats. To keep both, take the world into the Studio again."
-          ]
-        }, undefined, true, undefined, this) : null,
-        /* @__PURE__ */ u3("div", {
-          class: "lre-build-actions",
-          children: [
-            /* @__PURE__ */ u3(Button, {
-              variant: "primary",
-              disabled: busy || !open,
-              onClick: () => props.state.install(offer),
-              children: offer.headMoved ? "Install anyway" : "Install"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Button, {
-              variant: "ghost",
-              disabled: busy,
-              onClick: props.state.dismiss,
-              children: "Not now"
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      ]
-    }, undefined, true, undefined, this)
-  }, undefined, false, undefined, this);
 }
 
 // src/frontend/json-text.ts
@@ -24905,13 +24784,6 @@ function Worlds() {
   const fileInput = T2(null);
   const refresh = () => void app.request({ type: "lre.world", op: "list" }).then((result) => setWorlds(result?.worlds ?? []));
   A(refresh, []);
-  const studio = useStudioOffer({
-    installed: () => {
-      refresh();
-      setAdding(false);
-    },
-    review: (next) => setReview({ ...next, from: "LumiRPEngine Studio" })
-  });
   const importFile = (file) => run(async () => {
     let parsed;
     try {
@@ -24924,7 +24796,7 @@ function Worlds() {
     if (result) {
       const issues = result.lint ?? [];
       app.toast(issues.length > 0 ? `Imported “${result.world?.name ?? "world"}”. Review ${issues.length} item(s) below before playing.` : `Imported “${result.world?.name ?? "world"}”.`, "info");
-      setReview(result.world && issues.length > 0 ? { worldId: result.world.id, name: result.world.name, issues, from: "a file" } : null);
+      setReview(result.world && issues.length > 0 ? { worldId: result.world.id, name: result.world.name, issues } : null);
       setAdding(false);
       refresh();
     }
@@ -24960,9 +24832,6 @@ function Worlds() {
           children: "New world"
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(StudioOfferReview, {
-        state: studio
-      }, undefined, false, undefined, this),
       review ? /* @__PURE__ */ u3(Section, {
         title: "Review before playing",
         aside: /* @__PURE__ */ u3(Badge, {
@@ -24978,9 +24847,7 @@ function Worlds() {
               children: [
                 "“",
                 review.name,
-                "” came from ",
-                review.from,
-                ". Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play."
+                "” came from a file. Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play."
               ]
             }, undefined, true, undefined, this),
             /* @__PURE__ */ u3("div", {
@@ -25005,7 +24872,6 @@ function Worlds() {
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this) : null,
       adding ? /* @__PURE__ */ u3(NewWorld, {
-        studio,
         importing: busy,
         onImport: () => fileInput.current?.click()
       }, undefined, false, undefined, this) : worlds === null ? /* @__PURE__ */ u3(Empty, {
@@ -25110,7 +24976,6 @@ function NewWorld(props) {
         go(app, { view: "world", worldId: result.world.id });
     });
   };
-  const message = props.studio.message && !props.studio.offer ? props.studio.message : null;
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(Section, {
@@ -25202,25 +25067,15 @@ function NewWorld(props) {
         title: "Or bring one in",
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: [
-            /* @__PURE__ */ u3(ListRow, {
-              icon: "upload",
-              title: "Import a file",
-              subtitle: "An lre-world-v1 file, as Export writes it",
-              chevron: true,
-              disabled: props.importing,
-              onClick: props.onImport
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(ListRow, {
-              icon: "sparkle",
-              title: "Import from LumiRPEngine Studio",
-              subtitle: message ?? "Review what the Studio offers, then install it",
-              chevron: true,
-              disabled: props.studio.busy,
-              onClick: props.studio.load
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
+          children: /* @__PURE__ */ u3(ListRow, {
+            icon: "upload",
+            title: "Import a file",
+            subtitle: "An lre-world-v1 file, as Export writes it",
+            chevron: true,
+            disabled: props.importing,
+            onClick: props.onImport
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -25348,7 +25203,7 @@ function CollectionView(props) {
   const q2 = query.trim().toLowerCase();
   const shown = items.filter((item) => !q2 || item.id.toLowerCase().includes(q2) || item.label.toLowerCase().includes(q2));
   const chosen = items.filter((item) => selection.ids.includes(item.id)).map((item) => item.id);
-  const kinds = { ...draft.packKinds, ...doc.kinds };
+  const kinds = playedKinds(draft.packKinds, doc.kinds);
   const canAdd = props.collection !== "tables";
   const detail = (value) => {
     if (!isRecord(value))
@@ -25536,7 +25391,7 @@ function SchemaEditor(props) {
   const [busy, run] = useBusy();
   useHeld(value, setValue, initial, `${props.world.id}/${props.collection}/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
-  const formDoc = b2(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds }, relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
+  const formDoc = b2(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds), relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
   const path = `${props.collection}.${id}`;
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
   const PackConfig = props.collection === "packs" ? app.catalog.configs.get(id) : undefined;
@@ -25665,7 +25520,7 @@ function ItemView(props) {
   if (!draft)
     return null;
   const registered = app.catalog.editors.get(props.collection);
-  const character = opensCharacterPage({ ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } }, props.collection, props.id);
+  const character = opensCharacterPage({ ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) }, props.collection, props.id);
   const Editor = registered ? registered.component : character ? CharacterPage : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return /* @__PURE__ */ u3(Editor, {
     world: draft.doc,
@@ -26256,6 +26111,8 @@ function helperCallOf(config, helper) {
     params: { ...helper.params, ...route?.params }
   };
 }
+var UNREASONED_STEPS = ["memory", "consolidate", "skip"];
+var UNREASONED_ROUTE = Object.freeze({ provider: "helper", connectionId: null, model: null, effort: "off" });
 var LORE_POLICIES = ["none", "prefetch", "lookup", "prefetch+lookup"];
 var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
 function stepLoreOf(config) {
@@ -26264,7 +26121,7 @@ function stepLoreOf(config) {
 function stepConfigOf(steps, purpose) {
   const saved = steps[purpose];
   if (isMindPurpose(purpose))
-    return saved ?? { enabled: purpose !== "skip", signals: [] };
+    return saved ?? { enabled: purpose !== "skip", signals: [], ...UNREASONED_STEPS.includes(purpose) ? { route: { ...UNREASONED_ROUTE } } : {} };
   if (purpose !== "puzzle.answer")
     return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
@@ -26763,6 +26620,163 @@ function PinsAndUpgrade(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/shared/words.ts
+function listWords2(words3) {
+  return words3.length <= 1 ? words3[0] ?? "" : `${words3.slice(0, -1).join(", ")} and ${words3[words3.length - 1] ?? ""}`;
+}
+function possessive(name) {
+  return name === "You" ? "Your" : name === "you" ? "your" : `${name}'s`;
+}
+var LABEL_UNITS = { g: true, kg: true, l: true, mi: true, km: true, h: true, min: true, days: true, months: true, years: true };
+function fieldNoun(label, field) {
+  const plain = field.replace(/_/g, " ");
+  const text = (label ?? plain).trim();
+  const bracket = /^(.*?)\s*\(([^()]*)\)$/.exec(text);
+  const base = (bracket?.[1] ?? text).trim() || plain;
+  const percent2 = base.endsWith(" %");
+  const noun = percent2 ? base.slice(0, -2) : base;
+  const unit = percent2 ? "%" : bracket && LABEL_UNITS[bracket[2] ?? ""] ? ` ${bracket[2] ?? ""}` : "";
+  return { noun: /^[A-Z]{2}/.test(noun) ? noun : noun.charAt(0).toLowerCase() + noun.slice(1), unit };
+}
+var SCOPE_TELLS = {
+  player: "tells what your character knows",
+  scene: "also tells what the people with your character know",
+  gm: "tells everything, with what your character doesn't know marked"
+};
+function feedSentence(label, to) {
+  if (to === null)
+    return `The ${label} section follows the world's settings again in this chat`;
+  if (to.enabled === false)
+    return `The ${label} section is left out of the prompt in this chat`;
+  const caps = [to.maxLines !== undefined ? `${to.maxLines} ${to.maxLines === 1 ? "line" : "lines"}` : null, to.maxTokens !== undefined ? `${to.maxTokens} tokens` : null].filter((c3) => c3 !== null);
+  const parts = [
+    SCOPE_TELLS[to.scope ?? "player"],
+    caps.length > 0 ? `cut to at most ${listWords2(caps)}` : "with no cap",
+    to.include ? `from ${to.include.length === 1 ? "the 1 source" : `the ${to.include.length} sources`} picked for it` : null
+  ].filter((p3) => p3 !== null);
+  return `In this chat, the ${label} section ${parts.join(", ")}`;
+}
+
+// src/frontend/gm/section-preview.tsx
+var TURN_WRITES = {
+  outcome: "When the turn plays, it opens with what your character's action resolved to: rolls, results and what the world did in answer.",
+  montage: "Only a time skip fills it: the key events of the skipped time, for the narrator to tell as a montage.",
+  outline: "When the turn plays, it holds the turn's plan for the reply, pointing only at the sections that went in.",
+  scene: "When the turn plays, it also says how long the turn took."
+};
+var STATUS_LABEL2 = {
+  sent: "In the prompt",
+  off: "Off",
+  unplaced: "Not placed",
+  empty: "Nothing now",
+  clipped: "Over budget"
+};
+function previewNotes(s3, budget) {
+  const notes = [];
+  if (s3.status === "off")
+    notes.push("Switched off for this chat or by the world: the narrator doesn't get it.");
+  if (s3.status === "unplaced")
+    notes.push("It has no entry in the world's book to go into, so the narrator doesn't get it.");
+  if (s3.status === "empty")
+    notes.push("Nothing to tell right now, so it stays out of the prompt.");
+  if (s3.status === "clipped")
+    notes.push(s3.slot === "minds" ? `Too big for the Minds budget of ${budget.minds} tokens, so it stays out.` : `Too big for what is left of the section budget of ${budget.sections} tokens, so it stays out.`);
+  if (s3.status === "sent" && s3.tokens !== null)
+    notes.push(`About ${s3.tokens} tokens, of a section budget of ${budget.sections}.`);
+  if (s3.status !== "off" && s3.scope !== "player")
+    notes.push(`Whose knowledge: ${SCOPE_LABEL[s3.scope].toLowerCase()}.`);
+  if (s3.marked > 0)
+    notes.push(`${s3.marked} ${s3.marked === 1 ? "fact" : "facts"} your character doesn't know, each marked for the narrator.`);
+  if (s3.hints > 0)
+    notes.push(`${s3.hints} background ${s3.hints === 1 ? "hint" : "hints"} at the end.`);
+  if (s3.cut > 0)
+    notes.push(`${s3.cut} ${s3.cut === 1 ? "line" : "lines"} left out by its caps.`);
+  const turn = TURN_WRITES[s3.slot];
+  if (turn && s3.status !== "off")
+    notes.push(turn);
+  return notes;
+}
+function useSectionsPreview(chatId, key) {
+  const app = useApp();
+  const [preview, setPreview] = d2(null);
+  const [failed, setFailed] = d2(false);
+  A(() => {
+    let live = true;
+    app.request({ type: "lre.sections", chatId }).then((result) => {
+      if (!live)
+        return;
+      setFailed(result === null);
+      if (result)
+        setPreview(result);
+    });
+    return () => {
+      live = false;
+    };
+  }, [chatId, key]);
+  return { preview, failed };
+}
+function SectionHolds(props) {
+  const s3 = props.section;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-section-preview",
+    "data-lre-section-preview": s3.slot,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-section-preview-head",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            children: props.title ?? "What it holds now"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Badge, {
+            tone: s3.status === "sent" ? "pos" : s3.status === "clipped" ? "warn" : "neutral",
+            children: STATUS_LABEL2[s3.status]
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      previewNotes(s3, props.budget).map((n2) => /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: n2
+      }, n2, false, undefined, this)),
+      s3.content !== null ? /* @__PURE__ */ u3("pre", {
+        class: "lre-section-text",
+        children: s3.content
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function PreviewAll(props) {
+  if (!props.preview)
+    return props.failed ? /* @__PURE__ */ u3(Empty, {
+      icon: "alert",
+      children: "The preview couldn't be built; the reason is in the notice above."
+    }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
+      icon: "clock",
+      children: "Building the preview…"
+    }, undefined, false, undefined, this);
+  const { sections, budget } = props.preview;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-sections-preview": true,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: [
+          "What the narrator would get if the next turn played now, in prompt order: built from the chat as it stands, the way a turn builds it, with no model call. The sections spend about ",
+          budget.used,
+          " of ",
+          budget.sections,
+          " tokens; what a turn writes itself (its outcome, a montage, its outline) comes when it plays."
+        ]
+      }, undefined, true, undefined, this),
+      sections.map((s3) => /* @__PURE__ */ u3(SectionHolds, {
+        section: s3,
+        budget,
+        title: s3.label
+      }, s3.slot, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/gm/feed.tsx
 function feedSummary(feed) {
   if (feed.enabled === false)
@@ -26772,15 +26786,6 @@ function feedSummary(feed) {
   if (feed.include)
     parts.push(`${feed.include.length} picked ${feed.include.length === 1 ? "source" : "sources"}`);
   return parts.join(" · ");
-}
-function feedNotice(label, to) {
-  if (to === null)
-    return `${label}: the world's settings again, this chat`;
-  if (to.enabled === false)
-    return `${label}: left out of the prompt, this chat`;
-  const caps = [to.maxLines !== undefined ? `${to.maxLines} lines` : null, to.maxTokens !== undefined ? `${to.maxTokens} tokens` : null].filter((c3) => c3 !== null);
-  const parts = [to.scope !== undefined && to.scope !== "player" ? SCOPE_LABEL[to.scope].toLowerCase() : null, caps.length > 0 ? `at most ${caps.join(", ")}` : null, to.include ? `${to.include.length} picked ${to.include.length === 1 ? "source" : "sources"}` : null].filter((p3) => p3 !== null);
-  return `${label}: ${parts.length > 0 ? parts.join(", ") : "in the prompt with no cap"}, this chat`;
 }
 function feedNoticeStands(notice, chips) {
   return notice.undo.every((chip) => chips.some((c3) => c3.id === chip));
@@ -26824,7 +26829,7 @@ function SectionFeedForm(props) {
     if (result?.pending)
       app.toast("Saved — it applies when the reply finishes.", "info");
     if (result)
-      props.onDone(result.undo !== null ? { text: feedNotice(props.row.label, to), undo: [result.undo] } : null);
+      props.onDone(result.undo !== null ? { text: feedSentence(props.row.label, to), undo: [result.undo] } : null);
   });
   const noneTaken = sourcesMissing(draft, picked, own);
   return /* @__PURE__ */ u3("div", {
@@ -26923,11 +26928,13 @@ function SectionFeedForm(props) {
     ]
   }, undefined, true, undefined, this);
 }
+var PREVIEW_ALL = "\x00preview";
 function FeedThisChat(props) {
   const app = useApp();
   const pages = usePages();
   const [notice, setNotice] = d2(null);
   const [busy, run] = useBusy();
+  const { preview, failed } = useSectionsPreview(props.chatId, props.controls);
   const rows = props.controls?.sections ?? [];
   if (rows.length === 0)
     return /* @__PURE__ */ u3(Empty, {
@@ -26935,6 +26942,7 @@ function FeedThisChat(props) {
       children: "Section settings appear once the chat has started."
     }, undefined, false, undefined, this);
   const row = rows.find((r3) => r3.id === pages.page);
+  const holds = preview?.sections.find((s3) => s3.slot === row?.id);
   const shown = notice && feedNoticeStands(notice, props.chips) ? notice : null;
   const undo = (chips) => run(async () => {
     let all = true;
@@ -26956,11 +26964,20 @@ function FeedThisChat(props) {
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
-        hidden: row !== undefined,
+        hidden: pages.page !== null,
         children: [
           /* @__PURE__ */ u3("span", {
             class: "lre-small lre-muted",
             children: "What goes into each section the narrator reads in this chat. A change is a GM edit with its own Undo; the world's settings are in Build → Sections."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-row",
+            children: /* @__PURE__ */ u3(Button, {
+              variant: "secondary",
+              icon: "eye",
+              onClick: () => pages.open(PREVIEW_ALL),
+              children: "Preview all"
+            }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Section, {
             flush: true,
@@ -26976,22 +26993,42 @@ function FeedThisChat(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      pages.page === PREVIEW_ALL ? /* @__PURE__ */ u3(GmPage, {
+        name: "sections-preview",
+        title: "Preview all",
+        subtitle: "What the narrator would get next turn",
+        backLabel: "Sections",
+        onBack: pages.back,
+        children: /* @__PURE__ */ u3(PreviewAll, {
+          preview,
+          failed
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
       row ? /* @__PURE__ */ u3(GmPage, {
         name: "section",
         title: row.label,
         subtitle: "Section, this chat",
         backLabel: "Sections",
         onBack: pages.back,
-        children: /* @__PURE__ */ u3(SectionFeedForm, {
-          chatId: props.chatId,
-          row,
-          sources: props.controls?.sources ?? [],
-          onDone: (made) => {
-            setNotice(made);
-            pages.back();
-          }
-        }, row.id, false, undefined, this)
-      }, undefined, false, undefined, this) : null,
+        children: [
+          holds && preview ? /* @__PURE__ */ u3(SectionHolds, {
+            section: holds,
+            budget: preview.budget
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: failed ? "What it holds now couldn't be read." : "Reading what it holds now…"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SectionFeedForm, {
+            chatId: props.chatId,
+            row,
+            sources: props.controls?.sources ?? [],
+            onDone: (made) => {
+              setNotice(made);
+              pages.back();
+            }
+          }, row.id, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
       shown ? /* @__PURE__ */ u3(EditNoticeBar, {
         notice: shown,
         busy,
@@ -27246,6 +27283,10 @@ function GmMode() {
       icon: "eye",
       children: "Open a chat to see what's behind the curtain."
     }, undefined, false, undefined, this);
+  if (!view && sync.failed !== null)
+    return /* @__PURE__ */ u3(NoView, {
+      failed: sync.failed
+    }, undefined, false, undefined, this);
   if (!view && sync.status !== "closed")
     return /* @__PURE__ */ u3(Empty, {
       icon: "hourglass",
@@ -27375,7 +27416,9 @@ function Play() {
       "data-lre-section": "play",
       children: /* @__PURE__ */ u3("div", {
         class: "lre-play-main lre-play-away",
-        children: view === null && sync.status !== "closed" ? /* @__PURE__ */ u3(Empty, {
+        children: view === null && sync.failed !== null ? /* @__PURE__ */ u3(NoView, {
+          failed: sync.failed
+        }, undefined, false, undefined, this) : view === null && sync.status !== "closed" ? /* @__PURE__ */ u3(Empty, {
           icon: "hourglass",
           title: "Connecting to the engine…"
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3(NotWorld, {
@@ -29561,7 +29604,6 @@ var GROUPS4 = [
   { title: "Your agent", pages: ["mcp"] },
   { title: "About", pages: ["caveats", "diagnostics"] }
 ];
-var PRESET_LABEL2 = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 var STATIC_CAVEATS = [
   "Lumiverse's World Info works as usual in world chats, but for two cases: an entry LumiRPEngine keeps secret stays off until its gate holds, and an entry whose text a section already carries that turn (such as the lore about where your character is, in the Place section) is left out.",
   "Realism, checks and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat in GM → This chat.",
@@ -29586,7 +29628,7 @@ function summaryOf(page, data, caveats, showIds, connections) {
     case "realism":
       return { subtitle: settings.overrideWorldDefaults ? `${humanize(settings.realism.preset)} for new chats` : `World defaults, then ${humanize(settings.realism.preset)}` };
     case "checks":
-      return { subtitle: settings.overrideWorldAdjudication ? `${PRESET_LABEL2[settings.adjudication.preset]} for new chats` : `World rules, then ${PRESET_LABEL2[settings.adjudication.preset]}` };
+      return { subtitle: settings.overrideWorldAdjudication ? `${ADJUDICATION_PRESET_LABEL[settings.adjudication.preset]} for new chats` : `World rules, then ${ADJUDICATION_PRESET_LABEL[settings.adjudication.preset]}` };
     case "time":
       return { subtitle: `${settings.time.scale}× scale · montage by ${settings.time.montage === "key" ? "key moments" : settings.time.montage}` };
     case "extraction": {
@@ -30686,10 +30728,11 @@ function paletteTabs(palette) {
 function PaletteSheet(props) {
   const view = useView();
   const palette = view?.palette ?? null;
-  const editing = props.edit && palette ? palette.entries.find((entry) => entry.action === props.edit?.action) : undefined;
-  const [tab, setTab] = d2(editing ? GROUP_TAB[editing.group] : props.tab === "actions" && view?.palette?.encounter?.yours ? "combat" : props.tab);
+  const skip = props.edit && palette?.timelapse && props.edit.action === palette.timelapse.action ? props.edit : undefined;
+  const editing = props.edit && palette && !skip ? palette.entries.find((entry) => entry.action === props.edit?.action) : undefined;
+  const [tab, setTab] = d2(skip ? "timelapse" : editing ? GROUP_TAB[editing.group] : props.tab === "actions" && view?.palette?.encounter?.yours ? "combat" : props.tab);
   const panelId = P2();
-  const tabs = palette ? editing ? paletteTabs(palette).filter((t3) => t3.id === GROUP_TAB[editing.group]) : paletteTabs(palette) : [];
+  const tabs = palette ? skip ? paletteTabs(palette).filter((t3) => t3.id === "timelapse") : editing ? paletteTabs(palette).filter((t3) => t3.id === GROUP_TAB[editing.group]) : paletteTabs(palette) : [];
   const active = tabs.some((entry) => entry.id === tab) ? tab : tabs[0]?.id ?? tab;
   return /* @__PURE__ */ u3("div", {
     class: props.desk ? "lre lre-sheet desk" : "lre lre-sheet",
@@ -30711,7 +30754,7 @@ function PaletteSheet(props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("h2", {
             class: "title",
-            children: editing ? "Change the action" : active === "timelapse" ? "Timelapse" : "Actions"
+            children: editing ? "Change the action" : skip ? "Change the timelapse" : active === "timelapse" ? "Timelapse" : "Actions"
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(ClockToggle, {
             view
@@ -30739,7 +30782,7 @@ function PaletteSheet(props) {
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
         children: [
-          editing ? null : /* @__PURE__ */ u3("div", {
+          editing || skip ? null : /* @__PURE__ */ u3("div", {
             class: "lre-chat-tabs",
             children: /* @__PURE__ */ u3(Tabs, {
               label: "Action groups",
@@ -30752,6 +30795,7 @@ function PaletteSheet(props) {
           active === "timelapse" && palette.timelapse && !editing ? /* @__PURE__ */ u3(TimelapsePanel, {
             view,
             timelapse: palette.timelapse,
+            edit: skip,
             panel: tabPanel(panelId, active),
             onSent: props.onClose
           }, undefined, false, undefined, this) : /* @__PURE__ */ u3(ActionList, {
@@ -31213,12 +31257,13 @@ function FollowRoutineChoice(props) {
 }
 function TimelapsePanel(props) {
   const app = useApp();
-  const { timelapse } = props;
-  const [target, setTarget] = d2(null);
+  const { timelapse, edit } = props;
+  const read = edit && isRecord(edit.params.target) && typeof edit.params.target.type === "string" ? edit.params.target : null;
+  const [target, setTarget] = d2(read);
   const [custom, setCustom] = d2("");
   const [unit, setUnit] = d2("h");
   const [overrides, setOverrides] = d2({});
-  const [follow, setFollow] = d2(timelapse.followRoutine);
+  const [follow, setFollow] = d2(typeof edit?.params.followRoutine === "boolean" ? edit.params.followRoutine : timelapse.followRoutine);
   const [busy, run] = useBusy();
   const customMinutes = /^\d+(\.\d+)?$/.test(custom.trim()) ? Number(custom) * UNIT_MINUTES2[unit] : null;
   const chosen = customMinutes !== null && customMinutes > 0 ? { type: "duration", minutes: customMinutes } : target;
@@ -31231,6 +31276,11 @@ function TimelapsePanel(props) {
         class: "body",
         "data-lre-timelapse": true,
         children: [
+          edit ? /* @__PURE__ */ u3("p", {
+            class: "lre-chat-hint",
+            "data-lre-palette-edit": true,
+            children: "Change how long your message's time skip runs. It plays this instead of what was read."
+          }, undefined, false, undefined, this) : null,
           timelapse.blocked ? /* @__PURE__ */ u3(Banner, {
             tone: "warn",
             icon: "pause",
@@ -31366,8 +31416,8 @@ function TimelapsePanel(props) {
             if (!chosen)
               return;
             run(async () => {
-              const result = await app.request(timelapseRequest(timelapse, chosen, overrides, props.view.chatId, follow));
-              if (result)
+              const request = timelapseRequest(timelapse, chosen, overrides, props.view.chatId, follow);
+              if (edit ? await sendChipChoice(app, edit.chip, "edit", edit.chatId, { params: request.params }) : await app.request(request))
                 props.onSent();
             });
           },
@@ -31375,7 +31425,7 @@ function TimelapsePanel(props) {
             /* @__PURE__ */ u3(Icon, {
               name: "fast-forward"
             }, undefined, false, undefined, this),
-            chosen ? `Timelapse ${chosen.type === "duration" ? formatMinutes(chosen.minutes) : (timelapse.until.find((entry) => sameTarget(chosen, entry.target))?.label ?? "").toLowerCase()}` : "Choose how long"
+            chosen ? `${edit ? "Play " : ""}Timelapse ${chosen.type === "duration" ? formatMinutes(chosen.minutes) : (timelapse.until.find((entry) => sameTarget(chosen, entry.target))?.label ?? (chosen.type === "at" ? "to the time you said" : "")).toLowerCase()}` : "Choose how long"
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
@@ -32946,6 +32996,15 @@ function findEntities(entities, query, kind) {
 }
 function claimedThings(gm) {
   return gm.entities.filter((e3) => e3.claimed && !e3.gone).sort((a3, b3) => a3.name.localeCompare(b3.name)).map((entity) => ({ entity, where: entity.holder !== null ? `held by ${nameOf3(gm, entity.holder)}` : entity.place !== null ? `at ${nameOf3(gm, entity.place)}` : "nowhere" }));
+}
+function holdersFor(gm, entity) {
+  if (entity.goes === "nowhere")
+    return [];
+  return gm.entities.filter((e3) => e3.id !== entity.id && !e3.gone && e3.holds !== undefined && (entity.goes !== "vehicle" || e3.holds === "vehicle")).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.id.localeCompare(b3.id)).map((e3) => {
+    const holder = e3.holder !== null ? gm.entities.find((h3) => h3.id === e3.holder) : undefined;
+    const where = holder ? ` (${holder.person ? "on" : "in"} ${holder.name})` : e3.place !== null ? ` (at ${nameOf3(gm, e3.place)})` : "";
+    return { id: e3.id, label: `${e3.name}${where}` };
+  });
 }
 
 // src/packs/castlife/ui/routines-gm.tsx
@@ -34635,6 +34694,7 @@ var DICE_LIMITS = Object.freeze({
   maxExplodeExtra: 20,
   maxExactWork: 20000000
 });
+var MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 
 // src/engine/expr.ts
 var DEFAULT_LIMITS = Object.freeze({
@@ -34656,15 +34716,15 @@ var MATH = {
 var MATH_FUNCTIONS = Object.keys(MATH);
 
 // src/engine/scope.ts
-function kindDef(reg, world, kind) {
-  return own(world.kinds, kind) ?? reg.kinds.get(kind);
+function kindParent(reg, world, kind) {
+  return own(world.kinds, kind)?.extends ?? reg.kinds.get(kind)?.extends;
 }
 function kindIs2(reg, world, kind, ancestor) {
   let id = kind;
   for (let guard = 0;id && guard < 32; guard++) {
     if (id === ancestor)
       return true;
-    id = kindDef(reg, world, id)?.extends;
+    id = kindParent(reg, world, id);
   }
   return false;
 }
@@ -34842,6 +34902,9 @@ function tellLife(state, subject, who) {
 // src/engine/player-events.ts
 var POV_ONLY = new Set(["castlife.need", "economy.anchor"]);
 
+// src/engine/lore.ts
+var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w3) => [w3, true]));
+
 // src/engine/time-limits.ts
 var TIME_LIMITS = Object.freeze({
   tickMinutes: MINUTES_PER_DAY,
@@ -34863,6 +34926,7 @@ function minutesBetween(from, to) {
 }
 
 // src/engine/engine-pack.ts
+var LEVELS4 = [0, 1, 2, 3, 4];
 var ENGINE_PACK = "engine";
 var ENGINE_EVENTS = {
   fired: "engine.fired",
@@ -34874,6 +34938,7 @@ var ENGINE_EVENTS = {
   choice: "engine.choice",
   attempt: "engine.attempt",
   revealed: "engine.revealed",
+  hint: "engine.hint",
   pause: "engine.pause",
   check: "engine.check",
   entity: "engine.entity",
@@ -34897,6 +34962,14 @@ function sub(state, key) {
   const fresh = {};
   s3[key] = fresh;
   return fresh;
+}
+function bumpStage(state, key, track2, stage) {
+  if (!safeKey(track2) || !safeKey(stage))
+    return;
+  const all = sub(state, key);
+  const row = isRecord(all[track2]) ? all[track2] : {};
+  const n2 = row[stage];
+  all[track2] = { ...row, [stage]: (typeof n2 === "number" ? n2 : 0) + 1 };
 }
 function str2(e3, key) {
   const v3 = e3.data[key];
@@ -34988,9 +35061,22 @@ var events = [
         const attempts = sub(state, "attempts");
         const n2 = own(attempts, track2);
         attempts[track2] = (typeof n2 === "number" ? n2 : 0) + 1;
+        bumpStage(state, "missed", track2, str2(e3, "stage"));
       }
     },
     describe: (e3) => `attempt on ${str2(e3, "track")}`
+  },
+  {
+    type: ENGINE_EVENTS.hint,
+    validate: (e3, ctx) => {
+      const missing = need(e3, "track", "stage");
+      if (missing)
+        return missing;
+      const t3 = own(ctx.world.tracks, str2(e3, "track"));
+      return t3 && own(t3.stages, str2(e3, "stage")) ? null : { code: "missing_track", reason: `no stage ${str2(e3, "stage")} of track ${str2(e3, "track")}` };
+    },
+    apply: (e3, state) => bumpStage(state, "hints", str2(e3, "track"), str2(e3, "stage")),
+    describe: (e3) => `hint opened on ${str2(e3, "track")}`
   },
   {
     type: ENGINE_EVENTS.revealed,
@@ -35081,16 +35167,20 @@ var events = [
       return ["tier", "agent", "levels"].filter((aspect) => e3.data[aspect] !== undefined).map((aspect) => ({ entity, aspect }));
     },
     describe: (e3, ctx) => {
-      const parts = [];
+      const clauses = [];
       if (typeof e3.data.tier === "string")
-        parts.push(tierLabel(ctx.world, e3.data.tier));
+        clauses.push(`is now in the ${tierLabel(ctx.world, e3.data.tier)} tier`);
       if (typeof e3.data.agent === "boolean")
-        parts.push(e3.data.agent ? "lives off-screen" : "no longer lives off-screen");
+        clauses.push(e3.data.agent ? "now lives their own life off-screen" : "no longer lives their own life off-screen");
       const levels = e3.data.levels;
       if (isRecord(levels))
-        for (const [d3, v3] of Object.entries(levels))
-          parts.push(`${d3} level ${v3 === null ? "from the tier" : String(v3)}`);
-      return `${own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity")}: ${parts.join(", ")}`;
+        for (const [d3, v3] of Object.entries(levels)) {
+          const domain = DOMAINS.find((x2) => x2 === d3);
+          const area = domain ? DOMAIN_LABEL[domain] : d3;
+          const level = LEVELS4.find((n2) => n2 === v3);
+          clauses.push(v3 === null ? `has ${area} detail from their tier again` : `now has ${area} detail at level ${String(v3)}${level !== undefined ? ` (${LEVEL_LABEL[level]})` : ""}`);
+        }
+      return `${own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity")} ${listWords2(clauses)}`;
     }
   },
   {
@@ -35120,23 +35210,24 @@ var events = [
     describe: (e3, ctx, viewer) => {
       const classes = classOf(e3.data.class) ?? {};
       const name = own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity");
-      const valuesOf = (f3, values) => values.length > 0 ? values.map((v3) => own(f3.values, v3)?.label ?? v3).join(", ") : "none";
+      const valuesOf = (f3, values) => values.length > 0 ? listWords2(values.map((v3) => own(f3.values, v3)?.label ?? v3)) : "none";
+      const facetLine = (f3, values) => `${possessive(name)} ${fieldNoun(f3.label, "").noun} is now ${valuesOf(f3, values)}`;
       if (viewer !== undefined) {
         const was = classOf(e3.data.was);
         if (!was)
           return "";
         const same = (a3, b3) => a3.length === b3.length && a3.every((x2) => b3.includes(x2));
-        const changed = facetsInOrder(ctx.world).filter(([id, f3]) => f3.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? [])).map(([id, f3]) => `${f3.label} ${valuesOf(f3, own(classes, id) ?? [])}`);
-        return changed.length > 0 ? `${name}: ${changed.join("; ")}` : "";
+        const changed = facetsInOrder(ctx.world).filter(([id, f3]) => f3.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? [])).map(([id, f3]) => facetLine(f3, own(classes, id) ?? []));
+        return changed.join("; ");
       }
       const parts = facetsInOrder(ctx.world).flatMap(([id, f3]) => {
         const values = own(classes, id) ?? [];
-        return values.length > 0 ? [`${f3.label} ${valuesOf(f3, values)}`] : [];
+        return values.length > 0 ? [facetLine(f3, values)] : [];
       });
       const tags = tagList(e3.data.tags) ?? [];
       if (tags.length > 0)
-        parts.push(`tags ${tags.join(", ")}`);
-      return parts.length > 0 ? `${name}: ${parts.join("; ")}` : `${name}: no classification or tags`;
+        parts.push(`${possessive(name)} tags are now ${listWords2(tags)}`);
+      return parts.length > 0 ? parts.join("; ") : `${name} now has no classes and no tags`;
     }
   },
   {
@@ -35176,10 +35267,11 @@ var events = [
       const id = str2(e3, "entity");
       const def = lifeStateOf(ctx.world, str2(e3, "to"));
       const name = own(ctx.state.entities, id)?.name ?? id;
+      const state = def.label.toLowerCase();
       if (viewer === undefined)
-        return `${name}: ${def.label}`;
+        return `${name} is now ${state}`;
       if (id === viewer)
-        return `You: ${def.label}`;
+        return `You are now ${state}`;
       return witnessesOf2(e3)?.includes(viewer) === true ? `${name} ${def.reads}` : "";
     }
   },
@@ -35197,7 +35289,7 @@ var events = [
       const name = own(ctx.state.entities, id)?.name ?? id;
       const who = Array.isArray(e3.data.who) ? e3.data.who.filter((x2) => typeof x2 === "string") : [];
       if (viewer === undefined)
-        return `${who.map((w3) => own(ctx.state.entities, w3)?.name ?? w3).join(", ")} learn: ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
+        return `${listWords2(who.map((w3) => own(ctx.state.entities, w3)?.name ?? w3))} now ${who.length === 1 ? "knows" : "know"} that ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
       return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
     }
   }
@@ -38202,7 +38294,7 @@ function routePick(route) {
     return ROUTE_ELSEWHERE;
   return route.to ?? " ";
 }
-function possessive(name, household) {
+function possessive2(name, household) {
   return household && name.endsWith("s") ? `${name}'` : `${name}'s`;
 }
 var SECTION_LABELS = { overview: "Overview", accounts: "Accounts", flows: "Flows", jobs: "Jobs", businesses: "Businesses", investments: "Investments", properties: "Properties", credit: "Credit", household: "Household" };
@@ -38459,9 +38551,9 @@ function flowTargets(view, palette, payers = []) {
   const target = (a3) => a3.status === "open" && !CLASS_TRAITS[a3.class].cash && !payers.includes(a3.id) && !paysForThem(view, payers, a3.id);
   const own2 = view.accounts.filter((a3) => target(a3) && rights(a3.role).sees).map((a3) => {
     const holder = rights(a3.role).worth ? undefined : a3.owners.find((o4) => rights(o4.role).worth);
-    return { id: a3.id, label: `${a3.name} (${holder ? possessive(holder.name, false) : "yours"})` };
+    return { id: a3.id, label: `${a3.name} (${holder ? possessive2(holder.name, false) : "yours"})` };
   });
-  const run = view.businesses.flatMap((b3) => b3.managed.filter(target).map((a3) => ({ id: a3.id, label: `${a3.name} (${possessive(b3.name, false)})` })));
+  const run = view.businesses.flatMap((b3) => b3.managed.filter(target).map((a3) => ({ id: a3.id, label: `${a3.name} (${possessive2(b3.name, false)})` })));
   const theirs = new Set([view.party, view.household?.id ?? "", ...own2.map((o4) => o4.id), ...run.map((r3) => r3.id)]);
   return [...own2, ...run, ...knownPeople(palette).filter((p3) => !theirs.has(p3.id) && !paysForThem(view, payers, p3.id))];
 }
@@ -38640,7 +38732,7 @@ function BedPicker2(props) {
 }
 
 // src/frontend/gm/entity.tsx
-var LEVELS4 = [0, 1, 2, 3, 4];
+var LEVELS5 = [0, 1, 2, 3, 4];
 function EntityBadges(props) {
   const { entity, full } = props;
   const badges = [
@@ -38733,8 +38825,8 @@ function FieldRow(props) {
     ]
   }, undefined, true, undefined, this);
   if (text === null) {
-    const note = [field.derived ? "Worked out from other values" : field.extra ? "Not in the kind" : null, bounds].filter((part) => part !== null).join(" · ");
-    const edit = field.derived ? undefined : /* @__PURE__ */ u3(IconButton, {
+    const note = [field.derived ? "Worked out from other values" : field.follows !== undefined ? `Set from ${field.follows}: edit ${field.follows} to change it` : field.extra ? "Not in the kind" : null, bounds].filter((part) => part !== null).join(" · ");
+    const edit = field.derived || field.follows !== undefined ? undefined : /* @__PURE__ */ u3(IconButton, {
       icon: "edit",
       label: `Edit ${field.label}`,
       onClick: () => setText(textOf2(field, editor.currency))
@@ -38855,7 +38947,7 @@ function FieldRow(props) {
 }
 function AddToValue(props) {
   const { entity, editor } = props;
-  const numbers2 = entity.fields.filter((f3) => !f3.derived && (f3.type === "number" || f3.type === "money" || f3.type === "duration"));
+  const numbers2 = entity.fields.filter((f3) => !f3.derived && f3.follows === undefined && (f3.type === "number" || f3.type === "money" || f3.type === "duration"));
   const [fieldId, setFieldId] = d2(numbers2[0]?.id ?? "");
   const [delta, setDelta] = d2("");
   const field = numbers2.find((f3) => f3.id === fieldId) ?? numbers2[0];
@@ -39040,9 +39132,10 @@ function Placement(props) {
         ]
       }, undefined, true, undefined, this),
       props.children,
-      /* @__PURE__ */ u3(Field, {
+      entity.goes === "nowhere" ? null : /* @__PURE__ */ u3(Field, {
         label: "Put inside",
         for: put,
+        help: entity.goes === "vehicle" ? "Only a vehicle can hold this." : undefined,
         children: /* @__PURE__ */ u3("select", {
           id: put,
           class: "lre-input",
@@ -39054,10 +39147,10 @@ function Placement(props) {
               value: "",
               children: "Choose what holds it…"
             }, undefined, false, undefined, this),
-            editor.gm.entities.filter((e3) => e3.id !== entity.id).map((e3) => /* @__PURE__ */ u3("option", {
-              value: e3.id,
-              children: e3.name
-            }, e3.id, false, undefined, this))
+            holdersFor(editor.gm, entity).map((h3) => /* @__PURE__ */ u3("option", {
+              value: h3.id,
+              children: h3.label
+            }, h3.id, false, undefined, this))
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
@@ -39292,7 +39385,7 @@ function Simulation(props) {
                     value: "",
                     children: "From the tier"
                   }, undefined, false, undefined, this),
-                  LEVELS4.map((n2) => /* @__PURE__ */ u3("option", {
+                  LEVELS5.map((n2) => /* @__PURE__ */ u3("option", {
                     value: String(n2),
                     children: [
                       n2,
@@ -40238,7 +40331,7 @@ function AccountPage(props) {
         }, undefined, false, undefined, this) : null
       }, undefined, false, undefined, this),
       runFor ? /* @__PURE__ */ u3(Note2, {
-        children: `${possessive(runFor.name, false)} own account, which ${controls.mode === "player" ? "you manage" : `${view.name} manages`} for the business.`
+        children: `${possessive2(runFor.name, false)} own account, which ${controls.mode === "player" ? "you manage" : `${view.name} manages`} for the business.`
       }, undefined, false, undefined, this) : null,
       controls.mode === "player" ? can.some((c3) => c3 !== "autopay") || newFlow ? /* @__PURE__ */ u3(Controls, {
         name: a3.id,
@@ -42722,7 +42815,7 @@ function RemoveMemberPage(props) {
         onChange: setLeaving
       }, undefined, false, undefined, this),
       who ? /* @__PURE__ */ u3(Note2, {
-        children: `${who.name} no longer shares ${possessive(h3.name, true)} costs.`
+        children: `${who.name} no longer shares ${possessive2(h3.name, true)} costs.`
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -43212,7 +43305,7 @@ function BusinessPage(props) {
               others > 0 ? /* @__PURE__ */ u3(ListRow, {
                 icon: "bank",
                 title: controls.mode === "gm" ? accounts.others.map((id) => controls.gm.entities.find((e3) => e3.id === id)?.name ?? "another account").join(", ") : `${others} ${accounts.shown.length > 0 ? "more " : ""}${others === 1 ? "account" : "accounts"}`,
-                subtitle: `${possessive(b3.name, false)} own`
+                subtitle: `${possessive2(b3.name, false)} own`
               }, undefined, false, undefined, this) : null
             ]
           }, undefined, true, undefined, this)
@@ -43233,7 +43326,7 @@ function BusinessPage(props) {
         nav,
         route: b3.route,
         reinvest: true,
-        label: controls.mode === "player" ? "Your share of its profit goes to" : `${possessive(view.name, view.partyKind === "household")} share of its profit goes to`,
+        label: controls.mode === "player" ? "Your share of its profit goes to" : `${possessive2(view.name, view.partyKind === "household")} share of its profit goes to`,
         page: actionPage("business", b3.id, "route")
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(Section, {
@@ -43609,7 +43702,7 @@ function businessPage(control, inner, props, b3) {
       target: { business: b3.id },
       route: b3.route,
       reinvest: true,
-      label: controls.mode === "player" ? "Your share of its profit goes to" : `${possessive(view.name, view.partyKind === "household")} share of its profit goes to`,
+      label: controls.mode === "player" ? "Your share of its profit goes to" : `${possessive2(view.name, view.partyKind === "household")} share of its profit goes to`,
       subtitle: b3.name
     }, undefined, false, undefined, this) : null;
   if (inner !== undefined) {
@@ -43727,7 +43820,7 @@ function HubPageView(props) {
     name: "gone",
     title: "Not here any more",
     icon: "info",
-    children: `This isn't in ${controls.mode === "player" ? "your" : possessive(view.name, view.partyKind === "household")} money any more, or it can't be done now.`
+    children: `This isn't in ${controls.mode === "player" ? "your" : possessive2(view.name, view.partyKind === "household")} money any more, or it can't be done now.`
   }, undefined, false, undefined, this);
 }
 function isSection(head) {
@@ -43801,7 +43894,7 @@ function usePageStack() {
 function GmHub(props) {
   const { view, controls } = props;
   const pages = usePageStack();
-  const label = `${possessive(view.name, view.partyKind === "household")} money`;
+  const label = `${possessive2(view.name, view.partyKind === "household")} money`;
   const top = pages.stack.length;
   const navAt = (level) => {
     const under2 = level >= 2 ? pages.stack[level - 2] : undefined;
@@ -47709,6 +47802,7 @@ function PlaceEditor(props) {
 
 // src/packs/space/ui/view.ts
 var TRAVEL_MODES2 = ["walk", "road", "offroad", "water"];
+var TRIP_PARTS = ["fetch", "start", "drive", "park", "walk"];
 function numbers2(value) {
   return Array.isArray(value) ? value.filter((n2) => typeof n2 === "number") : [];
 }
@@ -47773,7 +47867,7 @@ function decodeMapView(value) {
     display: value.display === "fog" ? "fog" : "knowledge",
     movement: value.movement === true,
     scopes: list(value.scopes, decodeScope),
-    travel: list(value.travel, (t3) => typeof t3.to === "string" && typeof t3.action === "string" ? { to: t3.to, label: str(t3.label, t3.action), mode: oneOf(t3.mode, TRAVEL_MODES2, "walk"), minutes: num(t3.minutes), cents: optNum(t3.cents), vehicle: optStr(t3.vehicle), action: t3.action, params: isRecord(t3.params) ? t3.params : {}, disabled: optStr(t3.disabled) } : null)
+    travel: list(value.travel, (t3) => typeof t3.to === "string" && typeof t3.action === "string" ? { to: t3.to, label: str(t3.label, t3.action), mode: oneOf(t3.mode, TRAVEL_MODES2, "walk"), minutes: num(t3.minutes), parts: list(t3.parts, (p3) => typeof p3.words === "string" ? { kind: oneOf(p3.kind, TRIP_PARTS, "drive"), minutes: num(p3.minutes), words: p3.words } : null), cents: optNum(t3.cents), vehicle: optStr(t3.vehicle), action: t3.action, params: isRecord(t3.params) ? t3.params : {}, disabled: optStr(t3.disabled) } : null)
   };
 }
 
@@ -47798,6 +47892,11 @@ function placeStatus(view, place) {
   if (!place.visited)
     return { icon: "help", text: "You've heard of it, but you haven't been there.", short: "Heard of" };
   return { icon: "check", text: "You've been there.", short: "Been there" };
+}
+function tripWords(option) {
+  const parts = option.parts ?? [];
+  const whole3 = formatMinutes(option.minutes);
+  return parts.length === 0 ? whole3 : `${whole3}: ${parts.map((p3) => `${formatMinutes(p3.minutes)} ${p3.words}`).join(", ")}`;
 }
 function PlaceDetail(props) {
   const app = useApp();
@@ -47841,7 +47940,7 @@ function PlaceDetail(props) {
           children: options.map((option) => /* @__PURE__ */ u3(ListRow, {
             icon: MODE_ICON[option.mode],
             title: option.label,
-            subtitle: [option.disabled === undefined ? formatMinutes(option.minutes) : null, option.vehicle, option.disabled].filter((part) => part).join(" · "),
+            subtitle: [option.disabled === undefined ? tripWords(option) : null, option.parts && option.parts.length > 0 ? null : option.vehicle, option.disabled].filter((part) => part).join(" · "),
             value: option.cents !== undefined ? formatCents(option.cents) : undefined,
             disabled: busy || option.disabled !== undefined,
             onClick: () => run(async () => {
@@ -51015,7 +51114,7 @@ var KINDS = ["quest", "secret", "puzzle", "agenda"];
 var STATUSES = ["active", "done", "failed"];
 var KIND_LABEL = { quest: "Quest", secret: "Secret", puzzle: "Puzzle", agenda: "Agenda" };
 var KIND_ICON = { quest: "flag", secret: "key", puzzle: "help", agenda: "scroll" };
-var STATUS_LABEL2 = { active: "Active", done: "Done", failed: "Failed" };
+var STATUS_LABEL3 = { active: "Active", done: "Done", failed: "Failed" };
 function decodeQuestsView(value) {
   if (!isRecord(value) || !STATUSES.some((status) => Array.isArray(value[status])))
     return null;
@@ -51029,6 +51128,7 @@ function decodeQuestsView(value) {
       truths: strings(t3.truths),
       objectives: list(t3.objectives, (o4) => ({ label: str(o4.label), done: o4.done === true })),
       hints: strings(t3.hints),
+      opened: num(t3.opened),
       status
     } : null))
   };
@@ -51057,7 +51157,7 @@ function QuestsPanel(props) {
       /* @__PURE__ */ u3(Seg, {
         label: "Quest status",
         value: status,
-        options: STATUSES.map((s3) => ({ value: s3, label: `${STATUS_LABEL2[s3]} ${view.tracks.filter((t3) => t3.status === s3).length}` })),
+        options: STATUSES.map((s3) => ({ value: s3, label: `${STATUS_LABEL3[s3]} ${view.tracks.filter((t3) => t3.status === s3).length}` })),
         onChange: (next) => setStatus(next)
       }, undefined, false, undefined, this),
       tracks.length === 0 ? /* @__PURE__ */ u3(Empty, {
@@ -51108,10 +51208,9 @@ function StoryGlance(props) {
 }
 
 // src/packs/story/ui/quest.tsx
-var shownHints = new Map;
 function QuestSheet(props) {
-  const key = `${props.chatId}\x00${props.id}`;
-  const [hints, setHints] = d2(() => shownHints.get(key) ?? 0);
+  const app = useApp();
+  const [busy, run] = useBusy();
   const track2 = decodeQuestsView(props.state.panels["story.quests"])?.tracks.find((t3) => t3.id === props.id);
   if (!track2) {
     return /* @__PURE__ */ u3("div", {
@@ -51128,18 +51227,19 @@ function QuestSheet(props) {
       ]
     }, undefined, true, undefined, this);
   }
-  const shown2 = Math.min(hints, track2.hints.length);
-  const reveal = () => {
-    shownHints.set(key, shown2 + 1);
-    setHints(shown2 + 1);
-  };
+  const shown2 = Math.min(track2.opened, track2.hints.length);
+  const reveal = () => run(async () => {
+    const result = await app.request(hintRequest(track2.id, props.chatId));
+    if (result?.pending)
+      app.toast("Hint saved — it shows when the reply finishes.", "info");
+  });
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-world",
     "data-lre-sheet-quest": track2.id,
     children: [
       /* @__PURE__ */ u3(PageHeader, {
         title: track2.label,
-        subtitle: `${KIND_LABEL[track2.kind]} · ${STATUS_LABEL2[track2.status]}`,
+        subtitle: `${KIND_LABEL[track2.kind]} · ${STATUS_LABEL3[track2.status]}`,
         onBack: props.close
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(IdText, {
@@ -51222,6 +51322,7 @@ function QuestSheet(props) {
               shown2 < track2.hints.length ? /* @__PURE__ */ u3("div", {
                 children: /* @__PURE__ */ u3(Button, {
                   icon: "help",
+                  busy,
                   onClick: reveal,
                   children: shown2 === 0 ? "Show a hint" : "Show another hint"
                 }, undefined, false, undefined, this)
@@ -51803,7 +51904,7 @@ function TrackEditor(props) {
   const draft = useSelect(app.drafts, (d3) => d3);
   const mobile = useSelect(app.host.viewport, isMobile);
   useHeld(track2, setTrack, stored ?? blank, `${props.world.id}/tracks/${props.id ?? ""}`, JSON.stringify(stored ?? null));
-  const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
+  const identifiers2 = b2(() => worldIdentifiers(props.world), [props.world]);
   if (!id)
     return /* @__PURE__ */ u3("span", {
       class: "lre-muted",
@@ -51982,7 +52083,7 @@ function TrackEditor(props) {
           /* @__PURE__ */ u3(FieldInput, {
             spec: { kind: "json", key: "", label: "The track as JSON", hint: "Every field as the world file keeps it. A change applies when you leave the box." },
             value: track2,
-            ctx: { doc: props.world, lint: [], path: `tracks.${id}`, identifiers, functions },
+            ctx: { doc: props.world, lint: [], path: `tracks.${id}`, identifiers: identifiers2, functions },
             path: `tracks.${id}`,
             parent: {},
             onChange: (next) => {
@@ -52001,7 +52102,7 @@ function TrackEditor(props) {
         track: track2,
         id: open,
         world: props.world,
-        identifiers,
+        identifiers: identifiers2,
         functions,
         lint,
         path: `tracks.${id}`,
@@ -52722,6 +52823,7 @@ function TrackCard(props) {
       /* @__PURE__ */ u3(Field, {
         label: "Stage",
         for: stage,
+        help: "On to a stage that follows: it plays as in the story (its effects, rewards and reveal). Back: only the stage is set.",
         children: /* @__PURE__ */ u3("select", {
           id: stage,
           class: "lre-input",
@@ -52808,7 +52910,7 @@ function EditsLog(props) {
             const undo = e3.undo;
             return /* @__PURE__ */ u3(ActionRow, {
               title: e3.by ?? (e3.lines.join(" · ") || "Bookkeeping"),
-              subtitle: e3.by ? `The player's action: ${e3.lines.join(" · ")}` : undefined,
+              subtitle: e3.by ? e3.lines.length > 0 ? `The player's action: ${e3.lines.join(" · ")}` : "The player's action" : undefined,
               id: `${e3.messageId} · ${e3.seq}`,
               actions: undo === null ? undefined : /* @__PURE__ */ u3(Button, {
                 size: "sm",
@@ -52831,7 +52933,7 @@ function EditsLog(props) {
 }
 
 // src/frontend/gm/batch.tsx
-var LEVELS5 = [0, 1, 2, 3, 4];
+var LEVELS6 = [0, 1, 2, 3, 4];
 var BLANK_CHOICES = { tier: null, domain: null, level: null, role: null, pin: null, text: "", approach: null, to: null, tierAll: false, levelAll: false };
 function batchChanges(c3) {
   const intent = c3.text.trim() === "" && c3.approach === null ? null : { kind: "intent", text: c3.text, approach: c3.approach === "mind" || c3.approach === null ? null : c3.approach };
@@ -52862,22 +52964,34 @@ function pickedSummary(gm, ids) {
 function routineStanding2(gm, entity) {
   return gm.routineRoles.find((r3) => r3.entity === entity)?.role ?? "world";
 }
+var ROLE_DOES = { informative: "only context", enforced: "lived as written", off: "ignored" };
+function placeWords3(gm, id) {
+  const place = gm.places.find((p3) => p3.id === id);
+  if (!place)
+    return id;
+  const around = [];
+  for (let up = gm.places.find((p3) => p3.id === place.parent);up && around.length < 32; up = gm.places.find((p3) => p3.id === up?.parent))
+    around.unshift(up.name);
+  return around.length > 0 ? `${place.name} (${around.join(" › ")})` : place.name;
+}
 function bulkDone(gm, change, count) {
+  const are = count === 1 ? "is" : "are";
+  const have = count === 1 ? "has" : "have";
   switch (change.kind) {
     case "tier":
-      return `Set ${count} to ${gm.tiers.find((t3) => t3.id === change.tier)?.label ?? change.tier}`;
+      return `${count} ${are} now in the ${gm.tiers.find((t3) => t3.id === change.tier)?.label ?? change.tier} tier`;
     case "level": {
       const area = gm.domains.find((d3) => d3.id === change.domain)?.label ?? change.domain;
-      return change.level === null ? `${area} back to the tier for ${count}` : `${area} set to ${change.level} · ${LEVEL_LABEL[change.level]} for ${count}`;
+      return change.level === null ? `${count} ${have} ${area} detail from their tier again` : `${count} now ${have} ${area} detail at level ${change.level} (${LEVEL_LABEL[change.level]})`;
     }
     case "role":
-      return change.role === null ? `Routine back to the world's for ${count}` : `Routine set to ${ROUTINE_ROLE_LABEL[change.role]} for ${count}`;
+      return change.role === null ? `${count} ${have} their routine as the world sets it again` : `For ${count}, their routine is now ${ROLE_DOES[change.role]} (${ROUTINE_ROLE_LABEL[change.role]})`;
     case "pin":
-      return change.level === null ? `Unpinned ${count}` : `Pinned ${count} to ${FIDELITY_LABEL[change.level]}`;
+      return change.level === null ? `${count} ${count === 1 ? "mind goes" : "minds go"} by their score again` : `${count} ${count === 1 ? "mind is" : "minds are"} now pinned at ${FIDELITY_LABEL[change.level]} fidelity`;
     case "intent":
-      return change.text.trim() === "" && change.approach === null ? `Cleared the intent of ${count}` : `Gave ${count} your intent`;
+      return change.text.trim() === "" && change.approach === null ? `${count} no longer ${have} your intent` : `${count} now ${have} your intent${change.text.trim() === "" ? "" : `: “${change.text.trim()}”`}`;
     case "move":
-      return `Moved ${count} to ${gm.places.find((p3) => p3.id === change.to)?.name ?? change.to}`;
+      return `${count} ${are} now at ${placeWords3(gm, change.to)}`;
   }
 }
 function ChangeCard2(props) {
@@ -52929,7 +53043,7 @@ function BatchPage(props) {
   const placed = entities(reach("move"));
   const tierOf3 = (id) => gm.tiers.find((t3) => t3.id === id)?.label ?? id;
   const levelOf = (e3) => {
-    const level = LEVELS5.find((n2) => n2 === e3.levels.find((l3) => l3.domain === choices.domain)?.override);
+    const level = LEVELS6.find((n2) => n2 === e3.levels.find((l3) => l3.domain === choices.domain)?.override);
     return level === undefined ? "from the tier" : `set to ${level} · ${LEVEL_LABEL[level]}`;
   };
   const routineOf = (id) => {
@@ -53036,7 +53150,7 @@ function BatchPage(props) {
                 id: field.level,
                 class: "lre-input",
                 value: choices.level === null ? "" : String(choices.level),
-                onChange: (event) => choose({ level: event.currentTarget.value === "tier" ? "tier" : LEVELS5.find((n2) => String(n2) === event.currentTarget.value) ?? null }),
+                onChange: (event) => choose({ level: event.currentTarget.value === "tier" ? "tier" : LEVELS6.find((n2) => String(n2) === event.currentTarget.value) ?? null }),
                 children: [
                   /* @__PURE__ */ u3("option", {
                     value: "",
@@ -53046,7 +53160,7 @@ function BatchPage(props) {
                     value: "tier",
                     children: "From the tier"
                   }, undefined, false, undefined, this),
-                  LEVELS5.map((n2) => /* @__PURE__ */ u3("option", {
+                  LEVELS6.map((n2) => /* @__PURE__ */ u3("option", {
                     value: String(n2),
                     children: [
                       n2,
@@ -54706,6 +54820,7 @@ var REQUEST_TYPES = {
   "lre.fix": true,
   "lre.edit": true,
   "lre.gm": true,
+  "lre.sections": true,
   "lre.state.get": true,
   "lre.marker": true,
   "lre.keep": true,
@@ -54718,7 +54833,6 @@ var REQUEST_TYPES = {
   "lre.map": true,
   "lre.job": true,
   "lre.lore": true,
-  "lre.studio": true,
   "lre.preset": true,
   "lre.diag": true,
   "lre.minds": true,
@@ -54753,7 +54867,9 @@ class ProtocolClient {
   newReqId;
   schedule;
   timers;
-  state = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null, canStop: null };
+  state = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null, canStop: null, failed: null };
+  sync = null;
+  greeted = undefined;
   notifyQueued = false;
   disposed = false;
   counter = 0;
@@ -54799,27 +54915,16 @@ class ProtocolClient {
   }
   visible = () => true;
   open(chatId) {
-    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop });
-    const reply = this.request({ type: "lre.hello", chatId, viewing: chatId !== null && this.visible() });
-    reply.then((message) => {
-      if (message.type === "lre.error" && this.state.chatId === chatId) {
-        this.update({ ...this.state, status: "closed" });
-        this.emitError(message);
-      }
-    });
-    return reply;
+    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop, failed: null });
+    return this.ask("lre.hello");
   }
   resync() {
-    const chatId = this.state.chatId;
-    if (chatId === null || this.state.status === "resyncing")
-      return;
-    this.update({ ...this.state, status: "resyncing", resyncs: this.state.resyncs + 1 });
-    this.request({ type: "lre.state.resync", chatId, viewing: this.visible() }).then((message) => {
-      if (message.type !== "lre.error" || this.state.chatId !== chatId || this.state.status !== "resyncing")
-        return;
-      this.update({ ...this.state, status: this.state.view ? "live" : "syncing" });
-      this.emitError(message);
-    });
+    if (this.state.chatId !== null && this.sync === null)
+      this.ask("lre.state.resync");
+  }
+  retry() {
+    if (this.state.chatId !== null)
+      this.ask(this.state.view === null && this.greeted !== this.state.chatId ? "lre.hello" : "lre.state.resync");
   }
   page() {
     this.request({ type: "lre.page", chatId: this.state.chatId, viewing: this.state.chatId !== null && this.visible() });
@@ -54829,6 +54934,8 @@ class ProtocolClient {
       return;
     this.disposed = true;
     this.unsubscribe();
+    this.timers.clear(this.sync?.timer ?? null);
+    this.sync = null;
     for (const [reqId, entry] of this.pending) {
       this.timers.clear(entry.timer);
       entry.resolve(errorMessage(reqId, "unavailable", "The extension was unloaded"));
@@ -54836,29 +54943,83 @@ class ProtocolClient {
     this.pending.clear();
     this.listeners.clear();
   }
+  ask(type) {
+    const chatId = this.state.chatId;
+    this.endSync();
+    if (chatId === null) {
+      const reply2 = this.request({ type: "lre.hello", chatId, viewing: false });
+      reply2.then((message) => {
+        if (message.type === "lre.error" && this.state.chatId === null)
+          this.emitError(message);
+      });
+      return reply2;
+    }
+    this.update({ ...this.state, status: this.state.view ? "resyncing" : "syncing", resyncs: this.state.resyncs + (type === "lre.state.resync" ? 1 : 0), failed: null });
+    const viewing = this.visible();
+    const { reqId, reply } = this.post(type === "lre.hello" ? { type: "lre.hello", chatId, viewing } : { type: "lre.state.resync", chatId, viewing }, false);
+    if (this.disposed)
+      return reply;
+    const ms = timerMs(this.requestMs);
+    const timer = ms === null ? null : this.timers.set(() => this.syncFailed(reqId, errorMessage(reqId, "unavailable", `No view of this chat from the engine within ${formatMs(ms)} (Settings → Timeouts → ${TIMEOUTS.requestMs.label}). Try again, or the page asks again when it reconnects.`)), ms);
+    this.sync = { reqId, chatId, timer };
+    reply.then((message) => {
+      if (message.type === "lre.error")
+        this.syncFailed(reqId, message);
+    });
+    return reply;
+  }
+  endSync() {
+    const sync = this.sync;
+    if (sync === null)
+      return;
+    this.sync = null;
+    this.timers.clear(sync.timer);
+    const entry = this.pending.get(sync.reqId);
+    if (entry && entry.timer === null)
+      entry.timer = this.limit(sync.reqId, entry.resolve);
+  }
+  syncFailed(reqId, error) {
+    const sync = this.sync;
+    if (sync === null || sync.reqId !== reqId)
+      return;
+    this.sync = null;
+    this.timers.clear(sync.timer);
+    this.settle(reqId)?.resolve(error);
+    if (this.state.chatId !== sync.chatId)
+      return;
+    this.update({ ...this.state, status: this.state.view ? "live" : "closed", failed: error.message });
+    this.emitError(error);
+  }
   request(body) {
+    return this.post(body, true).reply;
+  }
+  post(body, timed) {
     const { promise, resolve } = Promise.withResolvers();
     const reqId = this.newReqId();
     if (this.disposed) {
       resolve(errorMessage(reqId, "unavailable", "The extension was unloaded"));
-      return promise;
+      return { reqId, reply: promise };
     }
-    const ms = timerMs(this.requestMs);
-    const timer = ms === null ? null : this.timers.set(() => {
-      if (!this.pending.delete(reqId))
-        return;
-      resolve(errorMessage(reqId, "unavailable", `No reply from the engine within ${formatMs(ms)} (Settings → Timeouts → ${TIMEOUTS.requestMs.label}). It may still finish what was asked.`));
-    }, ms);
-    this.pending.set(reqId, { type: body.type, resolve, timer });
+    const entry = { type: body.type, resolve, timer: timed ? this.limit(reqId, resolve) : null, ...body.type === "lre.hello" ? { chat: body.chatId } : {} };
+    this.pending.set(reqId, entry);
     const message = { ...body, lre: PROTOCOL_VERSION, reqId };
     try {
       this.transport.send(message);
     } catch (error) {
       this.pending.delete(reqId);
-      this.timers.clear(timer);
+      this.timers.clear(entry.timer);
       resolve(errorMessage(reqId, "unavailable", error instanceof Error ? error.message : String(error)));
     }
-    return promise;
+    return { reqId, reply: promise };
+  }
+  limit(reqId, resolve) {
+    const ms = timerMs(this.requestMs);
+    if (ms === null)
+      return null;
+    return this.timers.set(() => {
+      if (this.pending.delete(reqId))
+        resolve(errorMessage(reqId, "unavailable", `No reply from the engine within ${formatMs(ms)} (Settings → Timeouts → ${TIMEOUTS.requestMs.label}). It may still finish what was asked.`));
+    }, ms);
   }
   receive(payload) {
     if (this.disposed || !isRecord(payload) || payload.lre !== PROTOCOL_VERSION)
@@ -54940,8 +55101,12 @@ class ProtocolClient {
     const limit = payload.request === "lre.hello" ? body.requestMs : isRecord(settings) && isRecord(settings.timeouts) ? settings.timeouts.requestMs : undefined;
     if (limit === "none" || typeof limit === "number" && Number.isFinite(limit) && limit >= 0)
       this.requestMs = limit;
-    if (payload.request === "lre.hello" && typeof body.canStop === "boolean" && body.canStop !== this.state.canStop)
-      this.update({ ...this.state, canStop: body.canStop });
+    if (payload.request === "lre.hello") {
+      if (entry.chat !== undefined)
+        this.greeted = entry.chat;
+      if (typeof body.canStop === "boolean" && body.canStop !== this.state.canStop)
+        this.update({ ...this.state, canStop: body.canStop });
+    }
     entry.resolve(payload);
   }
   receiveError(payload) {
@@ -54951,13 +55116,16 @@ class ProtocolClient {
     const entry = typeof payload.reqId === "string" ? this.settle(payload.reqId) : null;
     if (entry)
       entry.resolve(error);
+    else if (this.sync !== null && payload.reqId === this.sync.reqId)
+      this.syncFailed(this.sync.reqId, error);
     else
       this.emitError(error);
   }
   receiveSnapshot(payload) {
     if (payload.chatId !== this.state.chatId || typeof payload.rev !== "number" || !isStateView(payload.view))
       return;
-    this.update({ ...this.state, rev: payload.rev, view: payload.view, status: "live" });
+    this.endSync();
+    this.update({ ...this.state, rev: payload.rev, view: payload.view, status: "live", failed: null });
   }
   receiveDelta(payload) {
     if (payload.chatId !== this.state.chatId || typeof payload.base !== "number" || typeof payload.rev !== "number" || !Array.isArray(payload.ops))
@@ -55000,6 +55168,53 @@ class ProtocolClient {
         listener(this.state);
     });
   }
+}
+
+// src/frontend/reconnect.ts
+function watchReconnects(events2, installationId, recheck) {
+  const offConnected = events2.on("CONNECTED", (payload) => {
+    if (isRecord(payload) && (typeof payload.userId === "string" && payload.userId !== "" || typeof payload.role === "string" && payload.role !== ""))
+      recheck();
+  });
+  const offLoaded = events2.on("SPINDLE_EXTENSION_LOADED", (payload) => {
+    if (installationId !== null && isRecord(payload) && payload.extensionId === installationId)
+      recheck();
+  });
+  return () => {
+    offConnected();
+    offLoaded();
+  };
+}
+
+// src/frontend/restart.ts
+var REMEMBERED = 64;
+function remember(turns, turn) {
+  turns.add(turn);
+  if (turns.size > REMEMBERED)
+    turns.delete(turns.values().next().value ?? "");
+}
+function startPreparedReplies(client, page) {
+  const started = new Set;
+  const told = new Set;
+  return client.onGenerate((push) => {
+    if (page.activeChat() !== push.chatId || !client.visible() || started.has(push.turn))
+      return;
+    const as = push.as;
+    if (as === "send") {
+      if (!told.has(push.turn))
+        page.toast("The engine is ready: press Send for the reply.", "info");
+      remember(told, push.turn);
+      return;
+    }
+    client.send({ type: "lre.restart", chatId: push.chatId, turn: push.turn }).then(async (claim) => {
+      if (claim.type !== "lre.result" || claim.request !== "lre.restart" || !claim.body.start || started.has(push.turn))
+        return;
+      remember(started, push.turn);
+      const command = as === "continue" ? "Continue" : "Regenerate";
+      if (!await page.generate(as))
+        page.toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
+    });
+  });
 }
 
 // src/frontend/styles/build.ts
@@ -55837,6 +56052,11 @@ textarea.lre-input.lre-gm-prose{font-family:inherit;font-size:var(--lre-fs-md)}
 .lre-gm-lore+.lre-gm-lore{padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
 .lre-gm-queries{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
 .lre-gm-warnline{margin:0;display:flex;align-items:flex-start;gap:var(--lre-s1);font-size:var(--lre-fs-sm);color:var(--lre-warn)}
+/* GM → This chat → Sections' preview: a section as the narrator reads it */
+.lre-section-text{margin:0;max-height:min(50vh,360px);overflow:auto;overscroll-behavior:contain;padding:var(--lre-s2) var(--lre-s3);border-radius:var(--lre-r);background:var(--lre-well);color:var(--lre-fg);font:var(--lre-fs-sm)/1.45 var(--lre-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.lre-section-preview{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
+.lre-section-preview+.lre-section-preview{margin-top:var(--lre-s2);padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
+.lre-section-preview-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-width:0;font-weight:600}
 `;
 
 // src/frontend/styles/minds.ts
@@ -56569,22 +56789,6 @@ function setup(ctx) {
   cleanups.push(() => client.dispose());
   cleanups.push(trackJobs(client));
   cleanups.push(client.subscribe((state) => setCurrency(state.view?.currency ?? null)));
-  let announced = null;
-  let packsInPlay = {};
-  const announce = (packs, again = false) => {
-    const key = JSON.stringify(packs);
-    if (key === announced && !again)
-      return;
-    announced = key;
-    packsInPlay = packs;
-    const detail = { engineVersion: ENGINE_VERSION, worldFormat: WORLD_FORMAT, packs, inbound: [...STUDIO_INBOUND] };
-    window.dispatchEvent(new CustomEvent(STATE_EVENT, { detail }));
-  };
-  announce({});
-  cleanups.push(client.subscribe((state) => state.view ? announce(state.view.packs) : undefined));
-  const announceAgain = () => announce(packsInPlay, true);
-  window.addEventListener(STATE_REQUEST_EVENT, announceAgain);
-  cleanups.push(() => window.removeEventListener(STATE_REQUEST_EVENT, announceAgain));
   let showIds = false;
   try {
     showIds = localStorage.getItem(SHOW_IDS_KEY) === "true";
@@ -56608,26 +56812,7 @@ function setup(ctx) {
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
   client.visible = () => document.visibilityState === "visible";
-  const startedTurns = new Set;
-  cleanups.push(client.onGenerate((push) => {
-    if (host.activeChat() !== push.chatId || !client.visible() || startedTurns.has(push.turn))
-      return;
-    if (push.as === "send") {
-      toast("The engine is ready: press Send for the reply.", "info");
-      return;
-    }
-    startedTurns.add(push.turn);
-    if (startedTurns.size > 64)
-      startedTurns.delete(startedTurns.values().next().value ?? "");
-    const as = push.as;
-    const command = as === "continue" ? "Continue" : "Regenerate";
-    client.send({ type: "lre.restart", chatId: push.chatId, turn: push.turn }).then(async (claim) => {
-      if (claim.type !== "lre.result" || claim.request !== "lre.restart" || !claim.body.start)
-        return;
-      if (!await host.generate(as))
-        toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
-    });
-  }));
+  cleanups.push(startPreparedReplies(client, { activeChat: host.activeChat, generate: host.generate, toast }));
   let overlays = null;
   const app = {
     client,
@@ -56657,7 +56842,7 @@ function setup(ctx) {
   cleanups.push(client.onAgents((view) => app.agents.set(view)));
   const recheck = () => {
     recheckDraft(app);
-    client.resync();
+    client.retry();
   };
   const visible = () => {
     if (document.visibilityState === "visible")
@@ -56667,7 +56852,7 @@ function setup(ctx) {
   };
   window.addEventListener("online", recheck);
   document.addEventListener("visibilitychange", visible);
-  cleanups.push(ctx.events.on("CONNECTED", recheck), () => window.removeEventListener("online", recheck), () => document.removeEventListener("visibilitychange", visible));
+  cleanups.push(watchReconnects(ctx.events, ctx.host.extensionInstallationId, recheck), () => window.removeEventListener("online", recheck), () => document.removeEventListener("visibilitychange", visible));
   const tab = host.ui.registerDrawerTab({
     id: "lumirpengine",
     title: "LumiRPEngine",
@@ -56692,12 +56877,6 @@ function setup(ctx) {
     G(null, tab.root);
     tab.destroy();
   });
-  const reviewOffer = () => {
-    ui.update((state) => ({ ...state, mode: "build", build: { view: "worlds" }, studioOffer: state.studioOffer + 1 }));
-    tab.activate();
-  };
-  window.addEventListener(STUDIO_OFFER_EVENT, reviewOffer);
-  cleanups.push(() => window.removeEventListener(STUDIO_OFFER_EVENT, reviewOffer));
   const showDiagnostics = () => {
     ui.update((state) => ({ ...state, mode: "settings", settings: { page: "diagnostics" } }));
     tab.activate();
