@@ -117,10 +117,11 @@ function heldAsSource(disabled: boolean, own: BookLoreFields | null, gate: strin
  * the stricter secrecy of the two, since the author may make either secret, and of every other secret
  * its text is (`parts`, `secrecyParts`): secret when any is, open only once every secret side's gate
  * holds (a missing gate never does), its audience and holders joined; Known by when any is, about what
- * each links.
+ * each links. A book text the world's entry already holds is that entry, as `heldTo` keeps an entry
+ * nothing holds back: each engine run reads its lore afresh, and these are kept for several runs.
  */
 export function indexedEntry(entry: LoreEntryDef, e: HostBookEntry, parts: readonly BookLoreFields[]): LoreEntryDef {
-  return heldTo(e.content.trim() === "" ? entry : { ...entry, content: e.content }, parts);
+  return heldTo(e.content.trim() === "" || e.content === entry.content ? entry : { ...entry, content: e.content }, parts);
 }
 
 /**

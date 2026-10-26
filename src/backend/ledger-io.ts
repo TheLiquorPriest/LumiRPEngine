@@ -44,6 +44,11 @@ export function journalPath(chatId: ChatId): string {
   return `${runDir(chatId)}journal.json`;
 }
 
+/** A journal text's digest, which an open chat keeps instead of the text (a long chat's journal is megabytes). */
+function journalHash(text: string): string {
+  return hashParts("lre.journal", text);
+}
+
 /** DESIGN §4.3 overflow: a metadata value never exceeds 32 KB; a larger ledger goes in continuation chunks. */
 export const METADATA_CAP_BYTES = 32 * 1024;
 /** Characters per chunk: at most 3 UTF-8 bytes per UTF-16 unit keeps a chunk under the cap. */
@@ -132,7 +137,7 @@ interface ChatSlot {
   core: LedgerCore;
   userId: UserId;
   queue: Promise<void>;
-  /** The journal text last read or written; an unchanged journal isn't written again. */
+  /** The hash of the journal text last read or written (`journalHash`): an unchanged journal isn't written again, and its text isn't kept to tell. */
   written: string | null;
   /** Operations queued or running on this chat; a slot with none (and no turn in flight) may be evicted. */
   ops: number;
@@ -145,14 +150,24 @@ interface ChatSlot {
    * a generation under way in this backend keeps its window, however often a page resyncs.
    */
   leftOpen: Set<string>;
+  /** The JSON characters of its journal and its snapshots as last read or written: about half of what it holds of them once parsed (`OPEN_CHATS_CHARS`). */
+  chars: { journal: number; snapshots: number };
 }
 
 /**
- * Open chats kept in memory; the least recently opened idle ones are evicted past this. A chat's slot
- * holds its fold's states and pins its world revisions (several MB each for a large world), and opens
- * again from its journal and snapshots, so few are kept: a player plays a handful of chats at a time.
+ * Open chats kept in memory; idle ones are let go past this, the least recently used first. A chat's
+ * slot holds its journal and fold snapshots (several MB for a long chat in a large world) and pins
+ * its world revisions, and opens again from its journal and snapshots, so few are kept: a player
+ * plays a handful of chats at a time.
  */
 export const OPEN_CHATS_CAP = 16;
+
+/**
+ * The JSON characters the open chats' journals and snapshots may come to (about 50 MB once parsed):
+ * past it, idle chats are let go too, the least recently used first, so a few long chats in a large
+ * world hold no more than many short ones.
+ */
+export const OPEN_CHATS_CHARS = 24_000_000;
 
 /** Fold snapshots kept per chat (the newest; older chain positions fold from the nearest kept one). */
 export const SNAPSHOTS_PER_CHAT = 6;
@@ -1638,7 +1653,13 @@ export class LedgerService {
    */
   private async slot(chatId: ChatId, userId: UserId | null): Promise<ChatSlot | null> {
     const known = this.chats.get(chatId);
-    if (known) return userId === null || known.userId === userId ? known : null;
+    if (known) {
+      if (userId !== null && known.userId !== userId) return null;
+      // The most recently used last: the idle chats let go first are those used longest ago.
+      this.chats.delete(chatId);
+      this.chats.set(chatId, known);
+      return known;
+    }
     if (!userId || this.notWorld.has(`${userId}\u0000${chatId}`)) return null;
     const pending = this.opening.get(chatId);
     if (pending) {
@@ -1662,15 +1683,20 @@ export class LedgerService {
         if (this.resets.size > 256) this.resets.delete(this.resets.keys().next().value ?? "");
       } else if (reset) this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its journal was ${reset}; starting a fresh one (the chat's records still fold)`, userId);
       // Snapshots are a shortcut: a missing or unreadable file only means a full fold.
-      const snapshots = ChatSnapshots.parse(await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null));
+      const stored = await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null);
+      const snapshots = ChatSnapshots.parse(stored);
       // A stamped journal differs from the stored text, so the next persist writes it.
-      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset ? null : raw, ops: 0, snapshots, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...Object.keys(journal.pending)]) };
+      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 } };
       // The revisions its folds will ask for are loaded before anyone folds it.
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);
-      for (const id of this.chats.keys()) {
-        if (this.chats.size <= OPEN_CHATS_CAP) break;
-        if (id !== chatId && !this.busy(id)) this.chats.delete(id);
+      let chars = 0;
+      for (const s of this.chats.values()) chars += s.chars.journal + s.chars.snapshots;
+      for (const [id, s] of this.chats) {
+        if (this.chats.size <= OPEN_CHATS_CAP && chars <= OPEN_CHATS_CHARS) break;
+        if (id === chatId || this.busy(id)) continue;
+        this.chats.delete(id);
+        chars -= s.chars.journal + s.chars.snapshots;
       }
       return slot;
     })();
@@ -1727,15 +1753,19 @@ export class LedgerService {
     if (slot.snapshots.dirty) {
       slot.snapshots.dirty = false;
       const at = snapshotsPath(chatId);
-      await this.host.storage.write(`${at}.tmp`, JSON.stringify(slot.snapshots), slot.userId);
+      const stored = JSON.stringify(slot.snapshots);
+      await this.host.storage.write(`${at}.tmp`, stored, slot.userId);
       await this.host.storage.move(`${at}.tmp`, at, slot.userId);
+      slot.chars.snapshots = stored.length;
     }
     const text = JSON.stringify(slot.core.journal);
-    if (text === slot.written) return;
+    const hash = journalHash(text);
+    if (hash === slot.written) return;
     const path = journalPath(chatId);
     await this.host.storage.write(`${path}.tmp`, text, slot.userId);
     await this.host.storage.move(`${path}.tmp`, path, slot.userId);
-    slot.written = text;
+    slot.written = hash;
+    slot.chars.journal = text.length;
   }
 
   /**

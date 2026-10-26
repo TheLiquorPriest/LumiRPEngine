@@ -293,7 +293,7 @@ export function interpretScene(reg: Registry, world: WorldDoc, state: Readonly<W
  * oldest that doesn't fit whole keeps its end, where a reply leaves off. Oldest first; none while
  * `on` is false.
  */
-export function recentMessages(messages: readonly ChainMessage[], recent: Readonly<Omit<RecentHistory, "on"> & { on?: boolean }>, hideJson: boolean): string[] {
+export function recentMessages(messages: readonly Pick<ChainMessage, "isUser" | "swipes" | "swipeId">[], recent: Readonly<Omit<RecentHistory, "on"> & { on?: boolean }>, hideJson: boolean): string[] {
   const out: string[] = [];
   if (recent.on === false) return out;
   const most = limitOf(recent.messages);

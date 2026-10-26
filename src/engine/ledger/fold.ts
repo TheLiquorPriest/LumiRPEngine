@@ -1,7 +1,9 @@
 // The optimized fold (DESIGN §4.3 Fold): the same semantics as the reference fold, plus
 //  - a prefix cache keyed by fold key (path, record path, pause state), so a re-fold after a
-//    change at the head reuses everything before it; only every SNAPSHOT_EVERY-th step (and each
-//    fold's last) keeps a state copy, the rest keep their outputs;
+//    change at the head reuses everything before it; only every SNAPSHOT_EVERY-th step (a
+//    checkpoint) and each fold's last keep a state copy, the rest keep their outputs; of those,
+//    the TAILS_KEPT fold ends and CHECKPOINTS_KEPT checkpoints used last keep it, and steps that
+//    hold the same state (one that changed nothing, a stored snapshot) hold the same copy;
 //  - stored snapshots (cold folds): a fold with no cached prefix finds the furthest stored
 //    state on its chain by path hash, rebuilds the outputs before it without state (and caches
 //    them, so the next fold walks the cache past it), and folds on from there; it stores a
@@ -22,7 +24,7 @@ import { activeRecord, activeText, contentId, isLive, isTombstoned, markersHash,
 import type { FoldTypes } from "./reference";
 
 interface Step {
-  /** The state after this step; kept on checkpoints and each fold's last step only. */
+  /** The state after this step: kept on few checkpoints and fold ends (`kept`), else null. */
   state: WorldState | null;
   result: MessageResult;
   notes: JournalNote[];
@@ -53,6 +55,11 @@ function refEq(a: EventRef, b: EventRef): boolean {
 const dependentNote = (n: JournalNote): boolean => n.kind === "dropped" || n.kind === "note";
 const dependentKeep = (k: KeepLine): boolean => k.status === "dropped" || k.status === "converted";
 
+/** Fold ends whose state the cache keeps, the most recently used: a turn folds its chat's head, and the messages just before it, over and over. */
+export const TAILS_KEPT = 8;
+/** Checkpoints whose state the cache keeps, the most recently used; the chat's stored snapshots hold its own too. */
+export const CHECKPOINTS_KEPT = 16;
+
 export interface LedgerFoldOptions {
   /** Steps between state copies in the cache and between stored snapshots. */
   snapshotEvery?: number;
@@ -61,6 +68,11 @@ export interface LedgerFoldOptions {
   /** Cached steps (most hold outputs only). */
   capacity?: number;
 }
+
+/** What a cached step keeps its state for: it is a checkpoint, or it ended a fold. */
+type Kept = "checkpoint" | "tail";
+
+const KEPT_LIMIT: Readonly<Record<Kept, number>> = { checkpoint: CHECKPOINTS_KEPT, tail: TAILS_KEPT };
 
 export class LedgerFold {
   private readonly cache = new Map<string, Step>();
@@ -75,15 +87,15 @@ export class LedgerFold {
   private readonly every: number;
   private readonly fingerprint: string;
   private readonly capacity: number;
-  /** Cache keys whose state copy exists only because they ended a fold (demoted when they age out). */
-  private readonly tails: string[] = [];
+  /** The cache keys whose step keeps its state, by what for, least recently used first (`keep`). */
+  private readonly kept: Record<Kept, Map<string, true>> = { checkpoint: new Map(), tail: new Map() };
   /**
-   * Digests of message texts, stored records, markers and record folds, keyed by their exact text
-   * (a warm fold's prefix walk then hashes only what changed; the lookup is the host's string
-   * hashing). Records and markers come from parsed JSON, so their JSON text determines their
-   * canonical digest.
+   * Digests of stored records, markers and record folds, keyed by their exact text (a warm fold's
+   * prefix walk then hashes only what changed; the lookup is the host's string hashing). Records and
+   * markers come from parsed JSON, so their JSON text determines their canonical digest. Message
+   * texts are `contentId`'s, which keeps one copy of each, the one the chat's messages hold now.
    */
-  private readonly digests = { content: new Map<string, string>(), record: new Map<string, string>(), markers: new Map<string, string>(), folds: new Map<string, string>(), key: new Map<string, string>() };
+  private readonly digests = { record: new Map<string, string>(), markers: new Map<string, string>(), folds: new Map<string, string>(), key: new Map<string, string>() };
 
   constructor(
     private readonly types: FoldTypes,
@@ -100,8 +112,7 @@ export class LedgerFold {
     const stored = m.ledger?.swipes[String(m.swipeId)];
     const recKey = stored ? `${rec ? "r" : "t"}${this.digest(this.digests.record, JSON.stringify(stored), () => hashJson(stored))}` : "";
     const markers = m.ledger ? this.digest(this.digests.markers, JSON.stringify(m.ledger.markers), () => hashJson(m.ledger?.markers)) : "";
-    const text = activeText(m);
-    const content = this.digest(this.digests.content, text, () => contentId(text).hash);
+    const content = contentId(activeText(m)).hash;
     const flags = `${m.isUser ? "u" : "a"}${paused ? "p" : ""}${pausesHere ? "P" : ""}`;
     // The memo key: every part but the message id has a fixed form without NUL, and the id comes last.
     const memo = `${prev}\u0000${flags}\u0000${m.swipeId}\u0000${content}\u0000${recKey}\u0000${markers}\u0000${m.id}`;
@@ -143,8 +154,9 @@ export class LedgerFold {
       if (cached.state) base = i;
     }
     const from = base >= 0 ? steps[base] : undefined;
-    // A kept state (a cached step's, a snapshot's) is shared: it is copied once, only if a step runs
-    // on it or the output takes it. The working state is local to this fold, so the output takes it as is.
+    if (base >= 0) this.used(keys[base] as string);
+    // A kept state (a cached step's, a snapshot's) is shared: it is copied once, only when a step
+    // changes it or the output takes it. The working state is local to this fold, so the output takes it as is.
     let shared: WorldState | null = from?.state ?? null;
     let state: WorldState = shared ?? initialState(startWorld, input.revision, this.types);
     steps.length = base + 1;
@@ -193,7 +205,7 @@ export class LedgerFold {
           const f = frames[i - base - 1] as Frame;
           const k = frameKeys[i - base - 1] as string;
           const step: Step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...(notes.get(i) ?? [])], keep: [...f.keep, ...(keep.get(i) ?? [])], violations: violations.get(i) ?? [], paused: false };
-          this.remember(k, i === best ? { ...step, state: snapshot.state } : step, i === best, false);
+          this.remember(k, i === best ? { ...step, state: snapshot.state } : step, i === best ? "checkpoint" : null, true);
           steps.push(step);
           keys.push(k);
         }
@@ -206,23 +218,25 @@ export class LedgerFold {
       }
     }
 
-    // 3. Fold on from there.
-    if (shared && base < n - 1) {
-      state = structuredClone(shared);
-      shared = null;
-    }
+    // 3. Fold on from there. A step that changes nothing (a user message, a paused one, one with no
+    // record or marker to fold) ends on the state it started from: a kept state is copied only when
+    // the first step that may change it runs, and the steps before that keep the same state.
     for (let i = base + 1; i < n; i++) {
       const m = input.chain[i] as ChainMessage;
       key = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
       const f = this.frame(input, m, parent, paused, pausedAfter.has(m.id));
-      const step = this.step(input, m, f, state);
+      if (shared && !(m.isUser || f.result.fold === "paused" || (!f.rec && f.liveMarkers.length === 0))) {
+        state = structuredClone(shared);
+        shared = null;
+      }
+      const step = this.step(input, m, f, shared ?? state);
       const checkpoint = (i + 1) % this.every === 0;
-      this.remember(key, step, checkpoint || i === n - 1, !checkpoint && i === n - 1);
+      const kept = this.remember(key, step, checkpoint ? "checkpoint" : i === n - 1 ? "tail" : null, shared !== null);
       steps.push(step);
       keys.push(key);
       parent = step.result.path;
       paused = step.paused;
-      if (checkpoint && input.snapshots && input.pauses.length === 0) input.snapshots.put(this.snapshotOf(hashParts(context, parent), steps, state));
+      if (kept && checkpoint && input.snapshots && input.pauses.length === 0) input.snapshots.put(this.snapshotOf(hashParts(context, parent), steps, kept));
     }
 
     const out: FoldOutput = { state: shared ? structuredClone(shared) : state, notes: [], keepReport: [], messages: [], violations: [] };
@@ -235,9 +249,10 @@ export class LedgerFold {
     return out;
   }
 
+  /** The stored snapshot of a checkpoint: `state` is the copy its cached step keeps, which no fold changes, so the snapshot holds that copy too. */
   private snapshotOf(key: string, steps: readonly Step[], state: WorldState): FoldSnapshot {
     const clocks: [number, number][] = [];
-    const snap: FoldSnapshot = { key, state: structuredClone(state), notes: [], keep: [], violations: [], clocks };
+    const snap: FoldSnapshot = { key, state, notes: [], keep: [], violations: [], clocks };
     steps.forEach((s, i) => {
       for (const x of s.notes) if (dependentNote(x)) snap.notes.push([i, x]);
       for (const x of s.keep) if (dependentKeep(x)) snap.keep.push([i, x]);
@@ -247,24 +262,45 @@ export class LedgerFold {
     return snap;
   }
 
-  private remember(key: string, step: Step, withState: boolean, tail: boolean): void {
-    // Steps share the live working state while a fold runs; copy it only where it is kept.
-    const entry: Step = { ...step, state: withState && step.state ? structuredClone(step.state) : null };
-    this.cache.set(key, entry);
-    if (tail) {
-      this.tails.push(key);
-      // Only the newest fold ends keep their state; older ones fall back to the checkpoints.
-      while (this.tails.length > 64) {
-        const old = this.tails.shift();
-        const e = old === undefined ? undefined : this.cache.get(old);
-        if (e && old !== key) e.state = null;
-      }
-    }
+  /**
+   * Caches a step's outputs and, for `kept`, its state, which it returns. The live working state is
+   * copied; a `shared` one (a stored snapshot's, or a kept state that a step that changed nothing
+   * ended on) is a copy no fold changes, kept as it is.
+   */
+  private remember(key: string, step: Step, kept: Kept | null, shared: boolean): WorldState | null {
+    const state = kept && step.state ? (shared ? step.state : structuredClone(step.state)) : null;
+    this.cache.set(key, { ...step, state });
+    this.kept.checkpoint.delete(key);
+    this.kept.tail.delete(key);
+    if (kept && state) this.keep(kept, key);
     while (this.cache.size > this.capacity) {
       const oldest = this.cache.keys().next().value;
       if (oldest === undefined) break;
       this.cache.delete(oldest);
+      this.kept.checkpoint.delete(oldest);
+      this.kept.tail.delete(oldest);
     }
+    return state;
+  }
+
+  /** `key`'s state is the newest of its kind kept; past the kind's limit the one used longest ago is let go (its step keeps its outputs). */
+  private keep(kind: Kept, key: string): void {
+    const kept = this.kept[kind];
+    kept.delete(key);
+    kept.set(key, true);
+    while (kept.size > KEPT_LIMIT[kind]) {
+      const oldest = kept.keys().next().value;
+      if (oldest === undefined) break;
+      kept.delete(oldest);
+      const entry = this.cache.get(oldest);
+      if (entry) entry.state = null;
+    }
+  }
+
+  /** A fold started from `key`'s kept state: it is the newest kept again. */
+  private used(key: string): void {
+    if (this.kept.tail.has(key)) this.keep("tail", key);
+    else if (this.kept.checkpoint.has(key)) this.keep("checkpoint", key);
   }
 
   private step(input: FoldInput, m: ChainMessage, f: Frame, state: WorldState): Step {

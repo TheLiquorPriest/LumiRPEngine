@@ -232,8 +232,15 @@ export interface SignalFacts {
   /** Assistant turns so far, counting this one. */
   turn: number;
   /** Not a signal: the messages before the turn's, which a step that reads recent chat takes its own share of (`StepRun.recent`), and whether the display hides their JSON blocks. */
-  earlier: { messages: readonly ChainMessage[]; hideJson: boolean };
+  earlier: { messages: readonly EarlierMessage[]; hideJson: boolean };
 }
+
+/**
+ * A message before the turn's as a step that reads recent chat takes it (`recentMessages`): whose
+ * it is and the text it shows, with its id. The pre phase's facts are kept for the turn's later
+ * steps and reads (`Runtime.prePhase`), so they hold this much of each message, not its swipes or record.
+ */
+export type EarlierMessage = Pick<ChainMessage, "id" | "isUser" | "swipes" | "swipeId">;
 
 export function noFacts(turn = 0): SignalFacts {
   return { typed: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn, earlier: { messages: [], hideJson: true } };

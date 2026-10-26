@@ -1,8 +1,9 @@
 // The whole backend on the fake host: runtime, dispatcher and job runner, driven over the protocol.
 
 import type { BuildInfo } from "../../src/backend/agents";
-import type { QuietRequest } from "../../src/backend/host";
+import type { HostPort, QuietRequest } from "../../src/backend/host";
 import { isRecord } from "../../src/shared/json";
+import type { WorldDoc } from "../../src/shared/world";
 import type { BackendToFrontend, FrontendToBackend } from "../../src/shared/protocol";
 import { PROTOCOL_VERSION } from "../../src/shared/protocol";
 import { enginePack } from "../../src/engine/engine-pack";
@@ -25,6 +26,10 @@ export interface RigOptions {
   minds?: boolean;
   /** This build and its agent kit, as the build would define them (DESIGN §23): "dev" with none unless named. */
   build?: BuildInfo;
+  /** More templates by id beside the starter worlds (with `shipped`): the large world the memory measurements play. */
+  templates?: Record<string, (id: string, name: string) => WorldDoc>;
+  /** The port the backend talks to the host through (default: the fake host itself); the memory measurements copy what crosses it, as Spindle's IPC does. */
+  port?: (host: FakeHost) => HostPort;
 }
 
 /** A helper that answers every mind plainly (no plans, no interrupt) and every other call with nothing. */
@@ -48,10 +53,11 @@ export class Rig {
     this.host.quietReply ??= () => "{}";
     const settingsFile = `${this.host.userId}/settings.json`;
     if (!options.minds && !this.host.files.has(settingsFile)) this.host.files.set(settingsFile, JSON.stringify({ v: 1, minds: { enabled: false } }));
+    const port = options.port ? options.port(this.host) : this.host;
     this.rt = options.shipped
-      ? new Runtime({ host: this.host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS, templateInfo: STARTER_INFO, ...(options.build ? { build: options.build } : {}) })
-      : new Runtime({ host: this.host, packs: [enginePack, testPack, tieStubPack], pipeline: { plan: planTurn, post: postTurn }, templates: { test: () => testWorld() }, ...(options.build ? { build: options.build } : {}) });
-    this.jobs = new JobRunner(this.host, this.rt.worlds, this.rt.steps, this.rt.settings, this.rt.registry);
+      ? new Runtime({ host: port, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: { ...STARTER_WORLDS, ...options.templates }, templateInfo: STARTER_INFO, ...(options.build ? { build: options.build } : {}) })
+      : new Runtime({ host: port, packs: [enginePack, testPack, tieStubPack], pipeline: { plan: planTurn, post: postTurn }, templates: { test: () => testWorld() }, ...(options.build ? { build: options.build } : {}) });
+    this.jobs = new JobRunner(port, this.rt.worlds, this.rt.steps, this.rt.settings, this.rt.registry);
     this.dispatch = new Dispatcher(this.rt, this.jobs);
     this.rt.start();
     this.dispatch.start();

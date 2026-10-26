@@ -296,6 +296,29 @@ describe("reference fold", () => {
     expect(restarted.messages.every((m) => m.clock !== null)).toBe(true);
   });
 
+  test("past the states the cache keeps, every fold of several chats still equals the reference fold, and no output or snapshot a caller changes reaches a later fold", () => {
+    const stored = new Map<string, FoldSnapshot>();
+    const snapshots: SnapshotStore = { get: (key) => stored.get(key), put: (snapshot) => void stored.set(snapshot.key, snapshot) };
+    const folder = new LedgerFold(registry, { snapshotEvery: 4 });
+    const chats: ChainMessage[][] = [0, 1, 2].map((c) => [reply(`c${c}a0`, "Morning.")]);
+    const tick: LedgerEvent = { type: "clock", minutes: 3, cause: "tick" };
+    for (let t = 1; t <= 30; t++) {
+      for (const [c, chain] of chats.entries()) {
+        chain.push(user(`c${c}u${t}`, `walk ${t}`), reply(`c${c}a${t}`, `Walked ${t}.`));
+        record(chain, chain.length - 1, [tick]);
+        // The head, the message before it, and a prefix from an earlier turn, each against the reference fold.
+        for (const end of [chain.length, chain.length - 1, Math.max(1, chain.length - 9)]) {
+          const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain: chain.slice(0, end), snapshots };
+          const out = folder.fold(input);
+          expect(hashJson(out.state)).toBe(hashJson(referenceFold(input, registry).state));
+          // The caller owns what it was given: changing it changes neither the cache nor a stored snapshot.
+          out.state.clock += 1000;
+        }
+      }
+    }
+    for (const s of stored.values()) expect(s.state.clock).toBeLessThan(1000);
+  });
+
   test("a GM's stage move kept on a later reply drops whole, with what it paid, on a rebased view where the story already took the track there (DESIGN §10)", () => {
     const types = createRegistry([enginePack, testPack]);
     const pay = (delta: number) => [{ type: "add", args: { entity: POV, field: "cash", delta } }];

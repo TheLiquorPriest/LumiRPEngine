@@ -95,7 +95,7 @@ import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, type ReadChip, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
-import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, slotVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
+import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, slotVars, type EarlierMessage, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION } from "./view";
 import { actionWords, compactSpan, editedText, spanText } from "../engine/action-words";
 import { WorldStore } from "./worlds";
@@ -761,8 +761,8 @@ export class Runtime implements TurnHooks {
   private readonly preBudgets = new Map<string, StepBudget>();
   /** The POV's place after each chat's last plan (the `scene_change` signal). */
   private readonly lastPlace = new Map<ChatId, string | null>();
-  /** What the pre phase saw, per generation, for the plan phase's signals. */
-  private readonly prePhase = new Map<string, { facts: SignalFacts; text: string; start: PlanStart; connectionId: string | null; preset: PresetConfig }>();
+  /** What the pre phase saw, per generation, for the plan phase's signals and the reply's read (a Re-read's too, while it is kept). */
+  private readonly prePhase = new Map<string, { chatId: ChatId; facts: SignalFacts; text: string; start: PlanStart; connectionId: string | null; preset: PresetConfig }>();
   /** Each generation's lore traces, step by step (the inspector shows them, DESIGN §6.5). */
   private readonly loreTraces = new Map<string, LoreStepTrace[]>();
   /** Each engine run's lore with World Info read live, by its turn id: one read for its phases (DESIGN §4.2). */
@@ -1021,7 +1021,7 @@ export class Runtime implements TurnHooks {
       tieZone: ties.present.length > 0,
       invitation: (before.findLast((m) => !m.isUser)?.ledger?.swipes[String(before.findLast((m) => !m.isUser)?.swipeId ?? 0)]?.events ?? []).some((e) => e.type === "castlife.invitation"),
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION,
-      earlier: { messages: earlier, hideJson: settings.hideJsonBlocks },
+      earlier: { messages: this.keptEarlier(input.chatId, earlier), hideJson: settings.hideJsonBlocks },
     };
     // Character minds (DESIGN §24) start now, beside the rest of the pre phase: separate calls, on the
     // phase's wall clock, apart from its call count. They think from the state the turn plans from,
@@ -1101,7 +1101,7 @@ export class Runtime implements TurnHooks {
       this.keepMinds(input.chatId, mindsKey, thinking);
       return { waiting: `waiting for you to play the read action: ${card.what}` };
     }
-    this.prePhase.set(p.generationId, { facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
+    this.prePhase.set(p.generationId, { chatId: input.chatId, facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
     trimMap(this.prePhase);
     // Let through the outline gate, the turn plays the plan the player was shown (`TurnBridge.plan`):
     // its minds, decisions and skip are that plan's, so nothing more is asked.
@@ -2885,6 +2885,26 @@ export class Runtime implements TurnHooks {
     const bookId = run ? (await this.worlds.index(run.worldId, userId))?.loreBookId : null;
     this.carriedEntries.delete(chatId);
     if (bookId) await this.book.vacate(bookId, userId);
+  }
+
+  /**
+   * The messages before a turn's as its pre phase's facts keep them: those stay in `prePhase` for the
+   * turn's later steps and its reads, up to 64 turns' worth, so each message keeps only what recent
+   * chat reads (`EarlierMessage`), and one the chat's latest kept turn holds unchanged is that one's,
+   * holding the text as the chat's messages hold it now (the same text, its latest copy). However
+   * many turns are kept, the chat's text is held once, not once per turn read afresh.
+   */
+  private keptEarlier(chatId: ChatId, earlier: readonly ChainMessage[]): EarlierMessage[] {
+    let kept: readonly EarlierMessage[] = [];
+    for (const pre of this.prePhase.values()) if (pre.chatId === chatId) kept = pre.facts.earlier.messages;
+    const known = new Map(kept.map((m) => [m.id, m]));
+    return earlier.map((m) => {
+      const text = m.swipes[m.swipeId] ?? "";
+      const was = known.get(m.id);
+      if (!was || was.isUser !== m.isUser || was.swipes[0] !== text) return { id: m.id, isUser: m.isUser, swipes: [text], swipeId: 0 };
+      was.swipes[0] = text;
+      return was;
+    });
   }
 
   /**

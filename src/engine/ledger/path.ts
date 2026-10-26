@@ -8,14 +8,20 @@ import type { ChainMessage } from "./chain";
 
 /**
  * Content ids by text (DESIGN §9.6): every sync and fold hashes each message of the chat, the same
- * long texts over and over, so each is hashed once while it is among the latest texts hashed.
+ * long texts over and over, so each is hashed once while it is among the latest texts hashed. A text
+ * found is kept again under the copy just asked about, as the newest: each read of the chat brings a
+ * copy of every text, and the copy kept is the one the chat's messages hold now, not an older one.
  */
 const CONTENT_IDS = new Map<string, ContentId>();
 const CONTENT_IDS_KEPT = 4096;
 
 export function contentId(text: string): ContentId {
   const known = CONTENT_IDS.get(text);
-  if (known) return { ...known };
+  if (known) {
+    CONTENT_IDS.delete(text);
+    CONTENT_IDS.set(text, known);
+    return { ...known };
+  }
   const id: ContentId = { len: text.length, hash: hashParts("lre.content", text) };
   if (CONTENT_IDS.size >= CONTENT_IDS_KEPT) CONTENT_IDS.delete(CONTENT_IDS.keys().next().value ?? "");
   CONTENT_IDS.set(text, id);
