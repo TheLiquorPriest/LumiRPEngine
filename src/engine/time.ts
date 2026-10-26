@@ -270,7 +270,7 @@ const SPAN_NOT_BEFORE = / (?:last|past|previous|every|per|each|\d+(?:\.\d+)?)$/;
 const SPAN_NOT_AFTER = /^ (?:ago|earlier|before|already|back|previously|old)(?= )/;
 /** How far either side of a length those words are looked for: a word or two, whatever the message's length. */
 const SPAN_CONTEXT = 24;
-/** A day and time in the words ("Friday at 6 PM", "at 8", "18:00", "1:45p", "noon", "the 18th"): the read's stated time, never half-read here. */
+/** A day and time in the words ("Friday at 6 PM", "at 8", "18:00", "9:15a", "noon", "the 18th"): the read's stated time, never half-read here. */
 const STATED_TIME = / \d{1,2}:\d{2}| (?:\d{1,2} ?(?:am|pm)|o clock|at \d+|noon|midnight|\d{1,2}(?:st|nd|rd|th)|\d{4} \d{1,2} \d{1,2})(?= )/;
 /** How a part of the day is led: up to it, later the same day, the coming one counted as "next", or tomorrow's. */
 const PART_LEADS: Readonly<Record<string, "until" | "today" | "next" | "tomorrow">> = { until: "until", till: "until", til: "until", to: "until", by: "until", "later that": "today", "later this": "today", "later in the": "today", that: "today", this: "today", next: "next", following: "next", tomorrow: "tomorrow" };
