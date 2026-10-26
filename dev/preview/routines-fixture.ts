@@ -2,7 +2,7 @@
 // engine's read model gives them to the GM (`lre.routine {op: "day", view: "gm"}`), and who this chat
 // changed (`{op: "changed"}`). This chat's changes are kept here, as the castlife slice keeps them, so
 // the tab's controls apply and their Undo restores: Dev Patel's routine rests on his sheet and on the
-// world's lore, the story switched a block off and you added one; Mr. Haskell makes no invitations
+// world's lore, the story switched a block off and you added one; Mr. Pemberton makes no invitations
 // in this chat.
 
 import { calendarOf, formatClock } from "../../src/engine/calendar";
@@ -125,25 +125,25 @@ function rosieBase(): Base {
   };
 }
 
-function haskellBase(): Base {
-  const haskell = own("npc_haskell", "Mr. Haskell");
+function pembertonBase(): Base {
+  const pemberton = own("npc_pemberton", "Mr. Pemberton");
   const swim: RoutineBlock = { id: "swim", label: "Morning swim", activity: "leisure", kind: "fixed", at: "06:00", minutes: 45, place: { nearest: "pool" }, private: true };
   return {
-    blocks: routineOf([{ block: swim, routine: "haskell_days", owner: haskell, source: { type: "lore", entry: "haskell", title: "Mr. Haskell", quote: "swims forty lengths before anyone else is up", label: "Lore: Mr. Haskell" } }]),
+    blocks: routineOf([{ block: swim, routine: "pemberton_days", owner: pemberton, source: { type: "lore", entry: "pemberton", title: "Mr. Pemberton", quote: "swims forty lengths before anyone else is up", label: "Lore: Mr. Pemberton" } }]),
     schedules: [],
-    day: [laid("06:00", "06:45", "Morning swim", "leisure", "other", { type: "routine", block: "swim", owner: haskell, source: AUTHORED }, null), laid("10:00", "11:00", "Meet the broker about the diner", "work", "work", { type: "plan", plan: "pl_haskell_broker", source: "memory", made: 960 }, null, ["a story plan bends his day"])],
+    day: [laid("06:00", "06:45", "Morning swim", "leisure", "other", { type: "routine", block: "swim", owner: pemberton, source: AUTHORED }, null), laid("10:00", "11:00", "Meet the broker about the diner", "work", "work", { type: "plan", plan: "pl_pemberton_broker", source: "memory", made: 960 }, null, ["a story plan bends his day"])],
     story: [],
     invitations: { made: [], received: [] },
   };
 }
 
-const BASES: Record<string, () => Base> = { npc_dev: devBase, npc_rosie: rosieBase, npc_haskell: haskellBase };
+const BASES: Record<string, () => Base> = { npc_dev: devBase, npc_rosie: rosieBase, npc_pemberton: pembertonBase };
 
-/** The chat's changes the preview starts with: the story switched Dev's basketball off, you added his late coffee, and Mr. Haskell makes no invitations. */
+/** The chat's changes the preview starts with: the story switched Dev's basketball off, you added his late coffee, and Mr. Pemberton makes no invitations. */
 export function previewRoutines(): PreviewRoutines {
   const late: RoutineBlock = { id: "late_coffee", label: "Late coffee at Rosie's", activity: "leisure", kind: "optional", window: { from: "15:00", to: "17:00" }, minutes: 30, chance: 0.6, place: { place: "diner" } };
   return {
-    follow: { npc_haskell: { mode: "no_invitations", awareness: null, role: null, skips: null } },
+    follow: { npc_pemberton: { mode: "no_invitations", awareness: null, role: null, skips: null } },
     blocks: { npc_dev: { hoops: { value: { id: "hoops", off: true }, source: { type: "story", at: NOW - 620, turn: "m3" } }, late_coffee: { value: late, source: { type: "gm", at: NOW - 40 } } } },
     schedules: {},
   };

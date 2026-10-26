@@ -125,7 +125,7 @@ describe("pages across reconnects", () => {
     const pages = new Pages(rig);
     const desk = lumiversePage(pages, "desk", chatId);
     await pages.settle();
-    // A turn's read runs on the chat's queue (on lumi-dev a resync waited 11.3 s behind one, ending as it did).
+    // A turn's read runs on the chat's queue (a live resync once waited 11.3 s behind one, ending as it did).
     // The step here lasts a hundred turns of the event loop, while the page resyncs.
     const from = rig.host.sent.length;
     let duringStep = false;

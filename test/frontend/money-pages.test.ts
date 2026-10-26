@@ -114,7 +114,7 @@ describe("what a money line shows", () => {
 
   test("an owner's name: a household's is its family's, a plural", () => {
     expect(possessive("Marcus Delgado", false)).toBe("Marcus Delgado's");
-    expect(possessive("Silas", false)).toBe("Silas's");
+    expect(possessive("Marcus", false)).toBe("Marcus's");
     expect(possessive("The Kowalczyks", true)).toBe("The Kowalczyks'");
     expect(possessive("Unit 2B", true)).toBe("Unit 2B's");
   });

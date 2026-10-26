@@ -670,7 +670,7 @@ export function portAlderMoney(party: string): { play: JsonValue; gm: Omit<GmVie
 /**
  * GM → Minds as the minds pack builds it (DESIGN §24.9) at the state fixture's clock, Tue 07:42: everyone
  * but Sam, closest on the ladder first, scored with the default weights. Rosie is the author's Always
- * Live and Mara the GM's pin; Teo has no mind yet and a refresh asked for; Mr. Haskell's last mind, at a
+ * Live and Mara the GM's pin; Teo has no mind yet and a refresh asked for; Mr. Pemberton's last mind, at a
  * beat of Monday afternoon's skip, named him (so the narrator got none of it) and interrupted the skip;
  * Vic is out of the world. Notes fade as in a world with a half-day half-life, so a faded one shows.
  */
@@ -687,7 +687,7 @@ function gmMinds(): MindsGmView {
   const rosieBroker: MindPlan = { id: "pl_rosie_broker", what: "Call the broker about the listing", kind: "errand", when: { from: 2310, to: 2340 }, where: "back_office", with: [], priority: 4, status: "open", made: 1890, source: "memory", closed: null, reason: null };
   const devBracket: MindPlan = { id: "pl_dev_bracket", what: "Pick up the transom bracket at Kim's Garage", kind: "errand", when: { from: 2460, to: 2490 }, where: "garage", with: [], priority: 3, status: "open", made: 1890, source: "memory", closed: null, reason: null };
   const maraBanner: MindPlan = { id: "pl_mara_banner", what: "Hang the banner and the lights", kind: "other", when: { from: 7800, to: 7920 }, where: "apartment", with: ["npc_dev"], priority: 5, status: "open", made: 1890, source: "memory", closed: null, reason: null };
-  const haskellBroker: MindPlan = { id: "pl_haskell_broker", what: "Meet the broker about the diner", kind: "meet", when: { from: 3540, to: 3600 }, where: null, with: [], priority: 4, status: "open", made: 960, source: "memory", closed: null, reason: null };
+  const pembertonBroker: MindPlan = { id: "pl_pemberton_broker", what: "Meet the broker about the diner", kind: "meet", when: { from: 3540, to: 3600 }, where: null, with: [], priority: 4, status: "open", made: 960, source: "memory", closed: null, reason: null };
   return {
     enabled: true,
     secrecy: "brief",
@@ -868,10 +868,10 @@ function gmMinds(): MindsGmView {
         summary: "",
       },
       {
-        entity: "npc_haskell",
-        name: "Mr. Haskell",
+        entity: "npc_pemberton",
+        name: "Mr. Pemberton",
         fidelity: {
-          entity: "npc_haskell",
+          entity: "npc_pemberton",
           level: "far",
           score: 30,
           reasons: [
@@ -891,7 +891,7 @@ function gmMinds(): MindsGmView {
           moment: "beat",
           reason: "the broker returns his call",
           monologue: "Rosie hasn't said no, which means she's counting. Two more weeks of slow winter trade and she'll take the shell company's number. Better that nobody on Main Street learns who is behind it.",
-          depiction: "Mr. Haskell leaves Rosie a polite voicemail from an unlisted number.",
+          depiction: "Mr. Pemberton leaves Rosie a polite voicemail from an unlisted number.",
           intent: "Get Rosie's signature before the first of November through the broker, without showing his hand.",
           reactions: [],
           plans: [],
@@ -900,7 +900,7 @@ function gmMinds(): MindsGmView {
           withheld: true,
           clock: clock(960),
         },
-        plans: [plan(haskellBroker)],
+        plans: [plan(pembertonBroker)],
         notes: [],
         commitments: [],
         witness: [],
@@ -966,7 +966,7 @@ export function gmFixture(): GmView {
       entity("npc_mara", "Mara Lopez", "npc", "supporting", "apartment", { fields: npcFields(0, 80, "calm", "Landlord", "Planning Sam's surprise party"), relations: [{ type: "knows", to: "pov", toName: "Sam Rivera" }] }),
       entity("npc_teo", "Teo Brandt", "npc", "background", "diner", { spawned: true, fields: npcFields(1200, 50, "calm", "Delivery driver", "") }),
       entity("npc_vic", "Vic Moreau", "npc", "background", "garage", { gone: true, fields: npcFields(800, 40, "tense", "Tow driver", "") }),
-      entity("npc_haskell", "Mr. Haskell", "npc", "supporting", null, { agent: true, visibility: "secret", levels: gmLevels(SUPPORTING, { castlife: 3 }), fields: npcFields(0, 60, "calm", "Developer", "Buying up Main Street through a shell company") }),
+      entity("npc_pemberton", "Mr. Pemberton", "npc", "supporting", null, { agent: true, visibility: "secret", levels: gmLevels(SUPPORTING, { castlife: 3 }), fields: npcFields(0, 60, "calm", "Developer", "Buying up Main Street through a shell company") }),
       entity("diner_crew", "Rosie's crew", "group", "background", "diner"),
       entity("civic", "Honda Civic", "vehicle", "background", "apartment", { fields: [{ id: "fuel", label: "fuel", type: "number", value: 38, min: 0, max: 100 }, { id: "owner", label: "owner", type: "ref", value: "pov", ref: "person" }] }),
       entity("glovebox", "Glovebox", "container", "background", "apartment", { holder: "civic", visibility: "discoverable", fields: [{ id: "capacity_l", label: "capacity_l", type: "number", value: 4 }, { id: "stock", label: "stock", type: "text", value: "Registration, gum, $7 in quarters" }] }),

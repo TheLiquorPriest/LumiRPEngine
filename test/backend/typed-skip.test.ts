@@ -113,7 +113,7 @@ describe("a span in the player's own words", () => {
     const read = (span: string) => interpretedTarget({ span }, world, state, "");
     // None stated, one gone by, a rate, an age, or two different ones (a sentence's end keeps lengths apart).
     for (const span of ["for some time", "two hours ago", "the last two hours", "every hour", "$20 an hour", "a four day old relationship", "an hour, then until evening", "An hour. Two hours."]) expect(read(span)).toBeNull();
-    expect(read("cover the next hour of progress (1:45p to 2:45p)")).toBeNull();
+    expect(read("get through the next hour of work (9:15a to 10:15a)")).toBeNull();
     // A day and time is the read's stated time, never half-read as a part of the day.
     expect(interpretedTarget({ span: "tomorrow evening at 8", at: "2026-09-15 20:00" }, world, state, "")).toEqual({ type: "at", at: clock("2026-09-15 20:00") });
     expect(interpretedTarget({ span: "Friday at 6 PM", at: "2026-09-18 18:00" }, world, state, "")).toEqual({ type: "at", at: clock("2026-09-18 18:00") });
@@ -189,7 +189,7 @@ describe("an out-of-character instruction that states a span", () => {
   test("a skip the read chose without a span it can read takes the one the message states", async () => {
     const { rig, chatId } = await alder(() => ({ action: "timelapse", params: {}, confidence: 0.9 }));
     const before = await folded(rig, chatId);
-    await rig.turn(chatId, "We stand up the piano and keep at it.\n\nOOC:\n- cover the next hour of the plan's progress", "The piano stands by noon.");
+    await rig.turn(chatId, "We sort the stock on the back shelves.\n\nOOC:\n- play out the next hour of the work", "The stock is sorted by noon.");
     const after = await folded(rig, chatId);
     expect(timelapseOf(after.record?.events)).toMatchObject({ target: { type: "duration", minutes: 60 } });
     expect(after.state.clock).toBe(before.state.clock + 60);

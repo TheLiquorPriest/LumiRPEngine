@@ -255,7 +255,7 @@ const PATCH_OPS: Record<JsonPatchOp["op"], true> = { add: true, remove: true, re
 
 /** The operations as sent, checked for shape so a malformed one is named before anything is sent. */
 function patchOps(raw: unknown): JsonPatchOp[] {
-  if (!Array.isArray(raw) || raw.length === 0) throw new ToolError('Give ops: a list of JSON Patch operations, such as [{"op": "replace", "path": "/entities/mara/name", "value": "Mara Voss"}].');
+  if (!Array.isArray(raw) || raw.length === 0) throw new ToolError('Give ops: a list of JSON Patch operations, such as [{"op": "replace", "path": "/entities/mara/name", "value": "Mara Quill"}].');
   if (raw.length > 500) throw new ToolError(`That is ${raw.length} operations; send at most 500 at once.`);
   return raw.map((op, i): JsonPatchOp => {
     const where = `ops[${i}]`;

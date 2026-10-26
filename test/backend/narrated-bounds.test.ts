@@ -75,7 +75,7 @@ async function fight(rig: Rig, chatId: string): Promise<void> {
 async function timelapse(rig: Rig, chatId: string): Promise<void> {
   rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 30 } }, source: "palette", now: true }));
   const g = await rig.host.start(chatId, { type: "normal" });
-  await rig.host.finish(g, "The yards work for another quarter of an hour.");
+  await rig.host.finish(g, "The shop works on for another quarter of an hour.");
 }
 
 describe("a narrated time skip under confirm", () => {

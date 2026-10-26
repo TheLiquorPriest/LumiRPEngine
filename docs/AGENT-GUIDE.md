@@ -64,7 +64,7 @@ When someone starts dead or dying, `lifeKnownBy` lists the ids of the people who
 - on someone who starts alive it changes nothing (lint warns), and every id in it must be an entity of the world.
 
 ```json
-{ "id": "old_bram", "kind": "person", "name": "Old Bram", "tier": "supporting", "life": "dead", "lifeKnownBy": ["silas"], "fields": { "place": "net_loft" }, "relations": [] }
+{ "id": "old_bram", "kind": "person", "name": "Old Bram", "tier": "supporting", "life": "dead", "lifeKnownBy": ["corin"], "fields": { "place": "net_loft" }, "relations": [] }
 ```
 
 ## Character minds
@@ -374,14 +374,14 @@ A track is a small state machine: `start` names its first stage, and each stage'
 The engine records a reveal only when a track **enters** a stage with a `truth`. A track that starts on its truth stage never enters it, so the truth is never revealed: the Journal never shows it and the narrator is kept from saying it. **Never start a secret track on a stage that has a `truth`.** For a secret the player has already learned, start one stage earlier on a stage that moves on at once, so the first turn reveals it:
 
 ```json
-{ "id": "silas_debt", "kind": "secret", "label": "What Silas owes", "visibility": "secret", "owner": "silas", "start": "rumor", "stages": {
+{ "id": "corin_debt", "kind": "secret", "label": "What Corin owes", "visibility": "secret", "owner": "corin", "start": "rumor", "stages": {
   "rumor": { "label": "Something is off", "next": [{ "to": "known", "when": "true" }] },
-  "known": { "label": "Silas owes the guild", "truth": "Silas borrowed the guild's harbor dues to pay a gambling debt.", "next": [] } } }
+  "known": { "label": "Corin owes the guild", "truth": "Corin borrowed the guild's harbor dues to pay a gambling debt.", "next": [] } } }
 ```
 
 ### Cues never name the secret
 
-A person's `cues` are what the narrator sees them do while a secret of theirs stays hidden: `{"text": "Changes the subject whenever the guild comes up.", "track": "silas_debt"}`.
+A person's `cues` are what the narrator sees them do while a secret of theirs stays hidden: `{"text": "Changes the subject whenever the guild comes up.", "track": "corin_debt"}`.
 
 - Each cue stands for exactly one secret: a `track` (while it keeps something hidden), a secret `lore` entry (until its gate holds) or a story `flag` (until it is set). A cue keyed to none, or to several, never shows.
 - Write behaviour, never the secret: a cue that holds a track's truth or a phrase of secret lore is a lint error, because it gives the secret away.

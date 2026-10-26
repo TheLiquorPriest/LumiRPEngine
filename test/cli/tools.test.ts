@@ -115,7 +115,7 @@ describe("live tools", () => {
     // Build renames Mara after the tool read version 1 and before its patch lands: the agent's rename must not win unseen.
     buildWritesFirst(fake, worldId, [{ op: "replace", path: "/entities/mara/name", value: "Mara Vale" }]);
     const sent = tries();
-    const same = await call(ctx, "lre_edit", { worldId, ops: [{ op: "replace", path: "/entities/mara/name", value: "Mara Voss" }] });
+    const same = await call(ctx, "lre_edit", { worldId, ops: [{ op: "replace", path: "/entities/mara/name", value: "Mara Quill" }] });
     expect(same.isError).toBe(true);
     expect(same.text).toContain(`the draft of ${worldId} went from version 1 to 2`);
     expect(same.text).toContain("entities › Mara Vale (mara) at /entities/mara");
@@ -144,9 +144,9 @@ describe("live tools", () => {
     await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "add", path: "/entities/mara", value: person("mara", "Mara") }, { op: "replace", path: "/name", value: "Alpha Prime" }] });
     const draft = await call(ctx, "lre_draft", { worldId: w.index.id });
     expect(draft.data).toMatchObject({ stored: true, version: 1, headMoved: false, changes: { counts: { entities: { added: 1 }, name: { changed: 1 } } } });
-    await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "/entities/mara/name", value: "Mara Voss" }] });
+    await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "/entities/mara/name", value: "Mara Quill" }] });
     const diff = await call(ctx, "lre_diff", { worldId: w.index.id });
-    expect(diff.data.changes).toEqual(expect.arrayContaining([expect.objectContaining({ key: "/entities/mara", label: "entities › Mara Voss (mara)", kind: "added" }), expect.objectContaining({ key: "/name", kind: "changed", fields: [{ path: "/name", kind: "changed", from: '"Alpha"', to: '"Alpha Prime"' }] })]));
+    expect(diff.data.changes).toEqual(expect.arrayContaining([expect.objectContaining({ key: "/entities/mara", label: "entities › Mara Quill (mara)", kind: "added" }), expect.objectContaining({ key: "/name", kind: "changed", fields: [{ path: "/name", kind: "changed", from: '"Alpha"', to: '"Alpha Prime"' }] })]));
     const commit = await call(ctx, "lre_commit", { worldId: w.index.id, note: "Add Mara" });
     expect(commit.isError).toBe(false);
     expect(fake.lre.sent("lre.world", "commit")).toEqual([{ type: "lre.world", op: "commit", worldId: w.index.id, base: first, version: 2, note: "Add Mara" }]);
@@ -156,9 +156,9 @@ describe("live tools", () => {
       ["agent", "Add Mara", true],
     ]);
     // A changed field of a changed item shows as a pointer below it.
-    await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "/entities/mara/name", value: "Mara V." }] });
+    await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "/entities/mara/name", value: "Mara Q." }] });
     const field = await call(ctx, "lre_diff", { worldId: w.index.id, from: "head", to: "draft" });
-    expect(field.data.changes).toEqual([{ key: "/entities/mara", label: "entities › Mara V. (mara)", kind: "changed", fields: [{ path: "/entities/mara/name", kind: "changed", from: '"Mara Voss"', to: '"Mara V."' }] }]);
+    expect(field.data.changes).toEqual([{ key: "/entities/mara", label: "entities › Mara Q. (mara)", kind: "changed", fields: [{ path: "/entities/mara/name", kind: "changed", from: '"Mara Quill"', to: '"Mara Q."' }] }]);
   });
 
   test("a commit LumiRPEngine refuses lists the lint errors; a moved head says so", async () => {
