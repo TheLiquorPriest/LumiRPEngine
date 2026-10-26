@@ -88,9 +88,10 @@ describe("an NPC's cash gift", () => {
   });
 
   test("a decline note keeps names' case", async () => {
-    const { state, world } = await baseline();
+    const { rig, state, world } = await baseline();
     const move = { type: "location", entity: "danny_okafor", place: "harbor_street_114" };
-    const notes = [declineNote(move, "no route", "accept", state, world), declineNote(move, "no route", "remove", state, world)];
+    const view = { registry: rig.rt.registry, world, state };
+    const notes = [declineNote(move, "no route", "accept", view), declineNote(move, "no route", "remove", view)];
     expect(notes.every((n) => n.includes('"Danny Okafor'))).toBe(true);
     expect(notes.some((n) => n.includes("danny"))).toBe(false);
   });

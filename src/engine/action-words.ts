@@ -5,7 +5,7 @@
 import type { EntityId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { tableChoices } from "../shared/tables";
-import type { ActionDef, WorldDoc } from "../shared/world";
+import type { ActionDef, ParamDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { namesHiddenOrSecretLore } from "./lore";
 import { optionalQuery, own } from "./pack-kit";
@@ -48,24 +48,13 @@ export function paramLabel(action: ActionDef, name: string, world: WorldDoc, reg
 }
 
 /**
- * An action's picks in words, as the palette names them ("Bluebird Coffee, with Danny Okafor"):
- * each place or person by name, a list of people after "with", an amount in the world's currency, a
- * count with the thing it counts ("2 coffees"), another number with its label, a length of time, a
- * table row, a stat or a quest by the label the palette and the quest log give it, and other text as
- * written. Never an id: a pick the player character may not know of (a hidden place, someone it
- * hasn't met) is left out, and text written as an id names nothing the player has words for. For a
- * surface the player reads (the intent gate's card), `typed` is their message, theirs to see again: a
- * pick the world has no name for (a thing they say they have, "letter"; a code written as an id,
- * "red_door") shows as they typed it, whether or not a hidden thing goes by it, so a pick that is a
- * hidden thing's id reads as one nothing has. A surface the narrator reads passes none. Words no
- * name vouches for, as written or as typed, are left out when they carry a secret or name anything
- * hidden (`namesHiddenOrSecretLore`) that `typed` doesn't say too: a model's read may write a hidden
- * person into a free-text pick ("Vex Morrow" for "whoever was in the shop last night").
+ * How a surface reads an action's picks (`actionWords`). `typed` is the player's message for a pick
+ * shown as they typed it; `heard` what its reader has seen said, which no screen counts against it.
  */
-export function actionWords(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, typed = ""): string {
-  const said = typed.toLowerCase();
+function pickReader(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, typed: string, heard: string) {
+  const said = heard.toLowerCase();
   const secrets = unrevealedSecrets(registry, world, state).filter((s) => !said.includes(s.toLowerCase()));
-  const screened = (words: string): string | null => (findLeaks(words, secrets).length > 0 || namesHiddenOrSecretLore(registry, world, state, words, typed) ? null : words);
+  const screened = (words: string): string | null => (findLeaks(words, secrets).length > 0 || namesHiddenOrSecretLore(registry, world, state, words, heard) ? null : words);
   const nameOf = (value: JsonValue | undefined): string | null => {
     if (typeof value !== "string" || value === "") return null;
     const entity = own(state.entities, value);
@@ -78,7 +67,7 @@ export function actionWords(registry: Registry, world: WorldDoc, state: Readonly
   // case aside, so a model's "red_door" for a typed "Red Door" is found, and shown as typed.
   const asTyped = (value: string): string | null => {
     const words = value.replace(/[_~]/g, " ").trim();
-    if (said === "" || words === "") return null;
+    if (typed === "" || words === "") return null;
     const found = new RegExp(words.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s_~]+"), "iu").exec(typed);
     return found ? screened(found[0]) : null;
   };
@@ -95,6 +84,37 @@ export function actionWords(registry: Registry, world: WorldDoc, state: Readonly
     }
     return nameOf(value);
   };
+  // A pick given as text (not a ref or a list of refs): as labelled (`label`, words the value stands
+  // for); else as written, unless written as an id (one word with `_` or `~`), which names nothing the
+  // player has words for; else as the player typed it. Null when none may be shown.
+  const text = (def: ParamDef, value: string): { words: string; label: boolean } | null => {
+    const label = labelOf(def.table, value);
+    if (label !== null) return findLeaks(label, secrets).length === 0 ? { words: label, label: true } : null;
+    const words = (def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null) ?? asTyped(value);
+    return words === null ? null : { words, label: false };
+  };
+  return { nameOf, asTyped, text };
+}
+
+/**
+ * An action's picks in words, as the palette names them ("Bluebird Coffee, with Danny Okafor"):
+ * each place or person by name, a list of people after "with", an amount in the world's currency, a
+ * count with the thing it counts ("2 coffees"), another number with its label, a length of time, a
+ * table row, a stat or a quest by the label the palette and the quest log give it, and other text as
+ * written. Never an id: a pick the player character may not know of (a hidden place, someone it
+ * hasn't met) is left out, and text written as an id names nothing the player has words for. For a
+ * surface the player reads (the intent gate's card), `typed` is their message, theirs to see again: a
+ * pick the world has no name for (a thing they say they have, "letter"; a code written as an id,
+ * "red_door") shows as they typed it, whether or not a hidden thing goes by it, so a pick that is a
+ * hidden thing's id reads as one nothing has. A surface the narrator reads passes none, and hears the
+ * turn's own message (`heard`), which the narrator reads anyway. Words no name vouches for, as
+ * written or as typed, are left out when they carry a secret or name anything hidden
+ * (`namesHiddenOrSecretLore`) that `heard` doesn't say too: a model's read may write a hidden person
+ * into a free-text pick ("Vex Morrow" for "whoever was in the shop last night"), while the player's
+ * own words read the same whether or not someone hidden goes by them.
+ */
+export function actionWords(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, typed = "", heard = typed): string {
+  const read = pickReader(registry, world, state, typed, heard);
   // A count of the action's thing (`qty`) reads with it ("2 coffees"), never apart as a number with its label.
   const count = action.params[COUNT_PARAM]?.type === "number" && typeof params[COUNT_PARAM] === "number" ? params[COUNT_PARAM] : null;
   const counted = count === null ? undefined : Object.keys(action.params).find((name) => name !== COUNT_PARAM && (action.params[name]?.type === "ref" || action.params[name]?.type === "text"));
@@ -104,20 +124,14 @@ export function actionWords(registry: Registry, world: WorldDoc, state: Readonly
     const value = params[name];
     if (value === undefined || value === null || value === "" || (name === COUNT_PARAM && counted !== undefined)) continue;
     let word: string | null = null;
-    if (def.type === "ref") word = nameOf(value) ?? (typeof value === "string" ? asTyped(value) : null);
+    if (def.type === "ref") word = read.nameOf(value) ?? (typeof value === "string" ? read.asTyped(value) : null);
     else if (def.type === "list" && def.ref !== undefined) {
-      const names = (Array.isArray(value) ? value : []).map(nameOf).filter((n): n is string => n !== null);
+      const names = (Array.isArray(value) ? value : []).map(read.nameOf).filter((n): n is string => n !== null);
       if (names.length > 0) word = `with ${names.join(" and ")}`;
     } else if (def.type === "money" && typeof value === "number") word = formatMoney(value, world.currency);
     else if (def.type === "number" && typeof value === "number") word = `${value} ${paramLabel(action, name, world, registry).toLowerCase()}`;
     else if (def.type === "duration" && typeof value === "number" && value > 0) word = compactSpan(value);
-    else if (typeof value === "string") {
-      // As labelled; else as written, unless written as an id (one word with `_` or `~`), which names
-      // nothing the player has words for; else as the player typed it.
-      const label = labelOf(def.table, value);
-      const written = label === null && def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null;
-      word = label !== null ? (findLeaks(label, secrets).length === 0 ? label : null) : (written ?? asTyped(value));
-    }
+    else if (typeof value === "string") word = read.text(def, value)?.words ?? null;
     if (word === null) continue;
     if (name === counted && count !== null && count !== 1) {
       // Only the player's own words are made plural ("2 coffees"); a name (someone's, a holding's) or a
@@ -130,6 +144,21 @@ export function actionWords(registry: Registry, world: WorldDoc, state: Readonly
   // A count whose thing has no words still says how many.
   if (count !== null && count !== 1 && counted !== undefined && !counts) parts.push(`× ${count}`);
   return parts.join(", ");
+}
+
+/**
+ * The text picks the intent gate's Edit opens the palette with (DESIGN §5.1), as its card shows them
+ * (`actionWords`, the player's message `typed`): a pick the card names by its label as the value it
+ * stands for (a table row, a stat, a quest, someone or somewhere the player character may know of),
+ * else in the card's words for it; null when the card shows none, so the page gets no free text that
+ * carries a secret or names anything hidden the player didn't type.
+ */
+export function editedText(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, typed: string): (def: ParamDef, value: string) => string | null {
+  const read = pickReader(registry, world, state, typed, typed);
+  return (def, value) => {
+    const shown = read.text(def, value);
+    return shown === null ? null : shown.label ? value : shown.words;
+  };
 }
 
 /**

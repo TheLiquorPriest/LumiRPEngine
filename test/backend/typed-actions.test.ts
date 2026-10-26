@@ -110,7 +110,8 @@ describe("a typed action that names nothing in the world", () => {
     expect(chip?.detail).toContain("Rena");
     expect(chip?.actions.map((a) => a.id)).toEqual(["remove", "accept"]);
     const told = (await nextTurn(rig, chatId, "I look around.")).split("\n").find((line) => line.includes("Pay"));
-    expect(told).toContain("Rena");
+    // The next reply's note says why in one wording, whatever the player called them (DESIGN §5.2).
+    expect(told).toContain("it names no one you know");
     expect(rig.rt.ledger.errors).toEqual([]);
 
     // Remove it rewords that note before the next reply.
@@ -124,7 +125,7 @@ describe("a typed action that names nothing in the world", () => {
     expect(removed).not.toBe(told);
   });
 
-  test("a name the player typed reads the same on the chip, made up or hidden, and the next reply is told no hidden one", async () => {
+  test("a name the player typed reads the same, made up or hidden, on the chip and in the next reply's note", async () => {
     const declined = async (extra: { hidden?: string; secretAlias?: string }): Promise<{ detail: string; told: string }> => {
       const { rig, chatId } = await chat(extra);
       reading(rig, pay("vex_morrow"));
@@ -135,14 +136,10 @@ describe("a typed action that names nothing in the world", () => {
     };
     const none = await declined({});
     expect(none.detail).toStartWith("Vex Morrow isn't anyone you know.");
-    // Someone hidden by that name, or a secret entry going by it: the chip says the player's own words, as in a world without them.
-    for (const extra of [{ hidden: "Vex Morrow" }, { secretAlias: "Vex Morrow" }]) {
-      const got = await declined(extra);
-      expect(got.detail).toBe(none.detail);
-      // The narrator is told no hidden name, the player's own included.
-      expect(got.told).toContain("Pay");
-      expect(got.told).not.toMatch(/Vex|Morrow/);
-    }
+    expect(none.told).toContain("it names no one you know");
+    // Someone hidden by that name, or a secret entry going by it: the chip says the player's own words,
+    // and the note its one wording, as in a world without them.
+    for (const extra of [{ hidden: "Vex Morrow" }, { secretAlias: "Vex Morrow" }]) expect(await declined(extra)).toEqual(none);
   });
 
   test("a name the player didn't type is never repeated on the chip", async () => {
@@ -180,7 +177,7 @@ describe("a typed action that names nothing in the world", () => {
     if (!reread) throw new Error("no Re-read chip");
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: reread.id, choice: "reread" }));
     expect((await replyChips(rig, chatId)).some((c) => c.kind === "decline")).toBe(true);
-    expect((await nextTurn(rig, chatId, "I look around.")).split("\n").find((line) => line.includes("Pay"))).toContain("Rena");
+    expect((await nextTurn(rig, chatId, "I look around.")).split("\n").find((line) => line.includes("Pay"))).toContain("didn't happen (it names no one you know)");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
@@ -498,5 +495,36 @@ describe("an incidental action before the move a turn is about (#30)", () => {
     }
     expect(chips[0]).not.toBe("");
     expect(chips[0]).toBe(chips[1]);
+  });
+});
+
+describe("a new reply after a reply (Send with nothing typed)", () => {
+  test("repeats nothing the message before it left: no decline or second note, no rest of the message and no Timelapse offer", async () => {
+    const { rig, chatId } = await chat();
+    // The pay names nobody in the world, the muffin is left to say, and an hour is let pass after them.
+    const paid: JsonObject = { action: "pay", params: { to: "rena", amount: 6 }, confidence: 0.9, next: "I buy a muffin", then: { minutes: 60 } };
+    reading(rig, (text) => (text.startsWith("I pay") ? paid : { action: null, params: {}, confidence: 0.9 }));
+    await rig.turn(chatId, "I pay Rena for the latte, buy a muffin and wait an hour.", "You hand Rena a few bills.");
+    expect((await replyChips(rig, chatId)).map((c) => c.kind)).toEqual(expect.arrayContaining(["decline", "choice", "timelapse_offer"]));
+    // The new reply is told once that the pay didn't happen, and offers nothing of the message again.
+    const g = await rig.host.start(chatId, { type: "normal" });
+    expect(rig.host.section("Outcome")).toContain(`the player's "Pay"`);
+    await rig.host.finish(g, "The cafe hums along.");
+    const repeated = (await replyChips(rig, chatId)).filter((c) => c.kind === "decline" || c.kind === "choice" || c.kind === "timelapse_offer").map((c) => c.kind);
+    // The reply after that isn't told it again.
+    const toldAgain = (await nextTurn(rig, chatId, "I look around.")).includes(`the player's "Pay"`);
+    expect({ repeated, toldAgain }).toEqual({ repeated: [], toldAgain: false });
+  });
+
+  test("a message that went unread puts no Retry on the reply after its reply", async () => {
+    const { rig, chatId } = await chat();
+    // The choice takes the only call before the reply, so none is left to fill its params.
+    await decisionRoute(rig, "go", 1);
+    reading(rig, () => ({ action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9 }));
+    await rig.turn(chatId, "I walk to Bluebird Coffee.", "You set off down Main Street.");
+    expect((await replyChips(rig, chatId)).some((c) => c.kind === "read_failed")).toBe(true);
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "The street is quiet.");
+    expect((await replyChips(rig, chatId)).some((c) => c.kind === "read_failed")).toBe(false);
   });
 });

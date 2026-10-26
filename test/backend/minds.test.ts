@@ -130,6 +130,21 @@ describe("minds around a turn", () => {
     expect(recall("priya_nair")).toContain("Priya smiles at you");
   });
 
+  test("a reply sent after a reply with nothing typed is recalled as the story alone: the message before it is recalled once, with its own reply", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig, {}, ["danny_okafor"]);
+    await rig.turn(chatId, "TIDE-MARK: I ask Danny about the tide.", "Danny squints at the water.");
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, "GULLS-MARK: the gulls circle the pier.");
+    const { state } = await stateOf(rig, chatId);
+    const messages = await rig.host.chats.messages(chatId, rig.host.userId);
+    const turns = recallFor({ state, who: "danny_okafor", memory: DEFAULT_MINDS_MEMORY, messages, hideJson: true }, "").map((t) => t.text);
+    expect(turns.filter((t) => t.includes("GULLS-MARK"))).toHaveLength(1);
+    expect(turns.filter((t) => t.includes("TIDE-MARK"))).toHaveLength(1);
+  });
+
   test("a travel turn: who heard the message remembers it, and whoever the POV met at its destination never recalls or notes it", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     const LINE = "I'll take Helen's recipe book tonight";

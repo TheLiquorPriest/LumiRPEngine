@@ -19,6 +19,7 @@ import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import { activitySpanEnd, ENGINE_FIELDS, formatMoney } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock, formatHHMM, holidaysOn } from "../engine/calendar";
 import { cuesOf } from "../engine/cues";
+import { ownMessage } from "../engine/ledger/path";
 import { loreHeldBy, loreReadable, loreSearch, loreSnippet } from "../engine/lore";
 import { fitPins, type PinnedText } from "../engine/lore-pins";
 import { optionalQuery, own } from "../engine/pack-kit";
@@ -171,7 +172,8 @@ export interface RecalledTurn {
  * Recall by presence (DESIGN §24.4): of the turns `who` was present for, the latest `recall.recent`
  * and the `recall.relevant` that share the most words with `about` (what the moment is to them),
  * oldest first, within `recall.tokens`: whole turns, the latest kept first. A turn is the player's
- * message before the reply and the reply as displayed.
+ * own message (`ownMessage`), none for a reply sent after a reply, and the reply as displayed, so a
+ * message is recalled once, with the reply it got.
  */
 export function recallFor(scope: Pick<MindScope, "state" | "who" | "memory" | "messages" | "hideJson">, about: string): RecalledTurn[] {
   const { memory, messages } = scope;
@@ -181,7 +183,7 @@ export function recallFor(scope: Pick<MindScope, "state" | "who" | "memory" | "m
     const i = index.get(msg);
     const reply = i === undefined ? undefined : messages[i];
     if (i === undefined || !reply || reply.isUser) continue;
-    const user = messages.slice(0, i).findLast((m) => m.isUser);
+    const user = ownMessage(messages.slice(0, i));
     const said = user ? tidy(user.swipes[user.swipeId] ?? user.content) : "";
     const wrote = tidy(readableReply(reply.swipes[reply.swipeId] ?? reply.content, scope.hideJson));
     if (wrote === "" && said === "") continue;

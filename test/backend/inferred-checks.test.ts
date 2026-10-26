@@ -149,22 +149,31 @@ describe("an attempt that names someone hidden", () => {
   const PAST = tryRead({ attempt: "talk my way past Vex Morrow", skill: "persuasion", difficulty: "hard" });
   const TYPED = ["I try to talk my way past the door.", "I try to talk my way past Vex Morrow."];
 
-  test("the question says it only when the player typed it, and the narrator is never told it", async () => {
-    for (const typed of TYPED) {
-      const { rig, chatId } = await chat({ mode: "suggest" }, { puts: [VEX] });
+  test("the question and the narrator say it only when the player typed it, and then as in a world without them", async () => {
+    /** The check question's detail and the Outcome once the player rolls, after `typed`, in a world with `puts`. */
+    const asked = async (typed: string, puts: [string, JsonObject][]): Promise<{ ask: string; outcome: string }> => {
+      const { rig, chatId } = await chat({ mode: "suggest" }, { puts });
       reading(rig, PAST);
       rig.host.sendUser(chatId, typed);
       await rig.host.settle();
       expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
       const ask = (await chips(rig, chatId)).find((c) => c.kind === "check");
-      expect({ typed, named: /Vex|Morrow/.test(ask?.detail ?? "") }).toEqual({ typed, named: typed.includes("Vex") });
       expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: ask?.id, choice: "roll" })).applied).toBe(true);
       const reply = await rig.host.start(chatId, { type: "regenerate" });
       const outcome = rig.host.section("Outcome");
       await rig.host.finish(reply, "You talk.");
-      expect(outcome).toMatch(/Persuasion check, Jordan Ellis \(hard\)/);
-      expect(outcome).not.toMatch(/Vex|Morrow/);
+      return { ask: ask?.detail ?? "", outcome };
+    };
+    for (const typed of TYPED) {
+      const { ask, outcome } = await asked(typed, [VEX]);
+      expect(outcome).toMatch(/Persuasion check\b.*Jordan Ellis \(hard\)/);
+      expect({ typed, asked: /Vex|Morrow/.test(ask), told: /Vex|Morrow/.test(outcome) }).toEqual({ typed, asked: typed.includes("Vex"), told: typed.includes("Vex") });
     }
+    // The player's own words: the narrator is told the attempt as in a world without anyone hidden by them.
+    const own = TYPED[1] ?? "";
+    const attempt = 'Persuasion check for "talk my way past Vex Morrow"';
+    expect((await asked(own, [])).outcome).toContain(attempt);
+    expect((await asked(own, [VEX])).outcome).toContain(attempt);
   });
 
   test("the intent gate's card says it only when the player typed it", async () => {

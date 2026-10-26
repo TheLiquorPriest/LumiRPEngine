@@ -61,6 +61,14 @@ export interface SetEvent extends EventBase {
   entity: EntityId;
   field: FieldId;
   value: JsonValue;
+  /**
+   * A cap rather than an assignment: a field holding a number at or below `value` (a number) keeps
+   * it, and any other takes `value`. A level that falls caps each pool above its lower max with one
+   * (engine/effects `followXp`), so wherever it is replayed after the pool went lower another way (a
+   * rebased view, a held edit landing after a reply dealt damage) it never raises it. Events
+   * recorded before it existed have none: those assign `value` wherever they apply.
+   */
+  atMost?: true;
 }
 
 /** Accumulator: carries a concrete delta (fuel, odometer, quantities, regard, needs). */
@@ -190,6 +198,7 @@ export type EventRef = { in: "events"; index: number } | { in: "post"; seq: numb
 
 // ---------------------------------------------------------------- records, post entries, markers
 
+/** `narr`: a Re-narrate's reply read, as Re-narrates journaled it before reading it into the record's own `events` (P3); it folds as any entry. */
 export type PostKind = "materialize" | "fix" | "confirm" | "cont" | "narr";
 
 /** An addition to a swipe after its turn (DESIGN §4.3, `post`). */
@@ -277,7 +286,7 @@ export interface KeepOverlay {
   convert: EventRef[];
 }
 
-/** A post entry a swipe didn't carry over (P3: a Re-narrate's copy or a Re-run's fix that failed re-validation, or a Re-run's fix it couldn't re-validate under a pause) or a Re-read didn't keep. */
+/** A post entry a swipe didn't carry over (P3: a Re-narrate's copy or a Re-run's fix that failed re-validation, or that it couldn't re-validate under a pause) or a Re-read didn't keep. */
 export interface CarryDrop {
   seq: number;
   kind: PostKind;
@@ -422,11 +431,11 @@ export interface PendingTurn {
   captured?: ContentId;
   /** Re-narrate source (P3). */
   renarrateOf?: { messageId: MessageId; swipeId: number };
-  /** Re-narrate: the source's live fixes and materializations, re-validated, with their `seq`s and the new parent path as `at` (P3). */
+  /** Re-narrate: the source's live fixes and materializations, with their `seq`s and the new parent path as `at`, carried at commit after the reply's read (P3). */
   copies?: PostEntry[];
   /** Re-narrate: the source's undos of the copies' events, which stay undone. */
   undone?: EventRef[];
-  /** Re-narrate: copies that failed re-validation (P3). */
+  /** Re-narrate: copies a plan journaled before copies were carried at commit had already dropped (P3), still noted. */
   dropped?: CarryDrop[];
 }
 

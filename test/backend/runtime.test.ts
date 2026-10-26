@@ -53,7 +53,7 @@ describe("backend runtime", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("Re-narrate copies the source's seed and pre events and commits its read as a narr entry; Re-run rolls afresh", async () => {
+  test("Re-narrate copies the source's seed and pre events and reads its reply after them, as the record's own events; Re-run rolls afresh", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     await rig.turn(chatId, "look around", "The kitchen is quiet.");
@@ -70,9 +70,9 @@ describe("backend runtime", () => {
     const renarrated = core?.journal.messages[head.id]?.ledger.swipes["1"];
     expect(renarrated?.seed).toBe(source.seed);
     expect(renarrated?.pre).toBe(source.pre);
-    expect(renarrated?.events).toEqual(source.events.slice(0, source.pre));
+    expect(renarrated?.events.slice(0, renarrated.pre)).toEqual(source.events.slice(0, source.pre));
     expect(renarrated?.markersApplied).toBe(source.markersApplied);
-    expect(renarrated?.post.every((p) => p.kind !== "narr" || p.seq > (core?.journal.messages[head.id]?.ledger.swipes["0"]?.seq ?? 0))).toBe(true);
+    expect(renarrated?.post.filter((p) => p.kind === "narr")).toEqual([]);
     // The one-shot choice is spent: the next swipe follows the default (Re-run) with a fresh seed.
     const g2 = await rig.host.start(chatId, { type: "swipe" });
     await rig.host.finish(g2, "Something else entirely.");
@@ -620,19 +620,27 @@ describe("Keep report chip", () => {
 });
 
 describe("proposal labels", () => {
-  test("a sheets condition reads as a sentence about who has it (the undo chip once said '? ? ?')", () => {
+  /** The test world with Dev at home beside Sam: a label names only whom the player character may know. */
+  const devAtHome = () => {
+    const registry = registryOf();
     const world = testWorld();
-    const state = initialState(world, "r", registryOf());
-    expect(describeProposal({ type: "condition", who: "dev", condition: "injured" }, world, state)).toBe("Dev is now injured");
-    expect(describeProposal({ type: "condition", condition: "tired", clear: true }, world, state)).toBe("You are no longer tired");
+    const dev = world.entities.dev;
+    if (dev) dev.fields.place = "home";
+    return { registry, world, state: initialState(world, "r", registry) };
+  };
+
+  test("a sheets condition reads as a sentence about who has it (the undo chip once said '? ? ?')", () => {
+    const view = devAtHome();
+    expect(describeProposal({ type: "condition", who: "dev", condition: "injured" }, view)).toBe("Dev is now injured");
+    expect(describeProposal({ type: "condition", condition: "tired", clear: true }, view)).toBe("You are no longer tired");
   });
 
   test("a transfer chip states the sum the transfer moves: cents as minor units, else the converted amount", () => {
-    const world = testWorld();
-    const state = initialState(world, "r", registryOf());
-    expect(describeProposal({ type: "transfer", from: world.pov, to: "dev", cents: 1500 }, world, state)).toBe("Paid $15.00 to Dev");
-    expect(describeProposal({ type: "transfer", from: world.pov, to: "dev", amount: 2000 }, world, state)).toBe("Paid $20.00 to Dev");
-    expect(describeProposal({ type: "transfer", from: world.pov, to: "dev", amount: 2000, cents: 20 }, world, state)).toBe("Paid $0.20 to Dev");
+    const view = devAtHome();
+    const pov = view.world.pov;
+    expect(describeProposal({ type: "transfer", from: pov, to: "dev", cents: 1500 }, view)).toBe("Paid $15.00 to Dev");
+    expect(describeProposal({ type: "transfer", from: pov, to: "dev", amount: 2000 }, view)).toBe("Paid $20.00 to Dev");
+    expect(describeProposal({ type: "transfer", from: pov, to: "dev", amount: 2000, cents: 20 }, view)).toBe("Paid $0.20 to Dev");
   });
 });
 

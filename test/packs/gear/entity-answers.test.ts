@@ -159,6 +159,41 @@ describe("only what holds things holds them", () => {
     expect(told()).toEqual([]);
     expect(put("doubloon")).toBeNull();
   });
+
+  test("Check world reads what the engine certainly moves: a formula that is a parameter's name, a received thing, a lend of what the actor must carry; a lend of a parked thing and the scope's own names stay quiet", () => {
+    const world = newBlankWorld("w_moves", "Moves", reg);
+    const thing = (id: string, kind: string, name: string, inside?: string) => ({ id, kind, name, tier: "background", fields: inside ? {} : { place: "home" }, relations: inside ? [{ type: "in", to: inside }] : [] });
+    const kinds = ["crate", "stall", "perch", "bench", "token", "relic", "hutch"];
+    for (const id of kinds) world.kinds[id] = { id, label: id.charAt(0).toUpperCase() + id.slice(1), fields: {} };
+    Object.assign(world.entities, { coin: thing("coin", "item", "Coin", "you"), chip: thing("chip", "token", "Chip"), bike: thing("bike", "item", "Bike"), box1: thing("box1", "crate", "Box"), stall1: thing("stall1", "stall", "Stall"), perch1: thing("perch1", "perch", "Perch"), bench1: thing("bench1", "bench", "Bench"), here: thing("here", "hutch", "Hutch") });
+    const later = "=clock + 1440";
+    const act = (id: string, label: string, params: Record<string, { type: "ref"; ref: string; label: string }>, requires: string[], effects: { type: string; args: Record<string, string> }[]) => ({ id, label, params, requires, outcomes: { default: effects }, duration: "1" });
+    Object.assign(world.actions, {
+      stash: act("stash", "Stash it", { box: { type: "ref", ref: "crate", label: "Box" }, loot: { type: "ref", ref: "token", label: "Loot" } }, [], [{ type: "gear.transfer", args: { item: "=loot", to: "=box" } }]),
+      hand: act("hand", "Hand over", {}, [], [{ type: "gear.receive", args: { name: "Flyer", to: "stall1" } }]),
+      lend: act("lend", "Lend it", { thing: { type: "ref", ref: "item", label: "Thing" } }, ["carries(self, thing)"], [{ type: "gear.lend", args: { item: "=params.thing", to: "perch1", until: later } }]),
+      lend_relic: act("lend_relic", "Lend the relic", { relic: { type: "ref", ref: "relic", label: "Relic" } }, ["carries(self, relic)"], [{ type: "gear.lend", args: { item: "relic", to: "you", until: later } }]),
+      lend_bike: act("lend_bike", "Lend the bike", {}, [], [{ type: "gear.lend", args: { item: "bike", to: "bench1", until: later } }]),
+      drop_in: act("drop_in", "Put it here", {}, [], [{ type: "gear.transfer", args: { item: "coin", to: "=here" } }]),
+    });
+    const told = (code: string) => lintWorld(world, reg).filter((i) => i.code === code).map((i) => [i.path, i.message.match(/in this world \((.*?)\) but/)?.[1]]);
+    expect(told("gear.holders")).toEqual([
+      ["kinds.crate", "Stash it gives things to its Box"],
+      ["kinds.stall", "Hand over gives things to Stall"],
+      ["kinds.perch", "Lend it gives things to Perch"],
+    ]);
+    expect(told("gear.contents")).toEqual([
+      ["kinds.token", "Stash it moves its Loot"],
+      ["kinds.relic", "Lend the relic moves its Relic"],
+    ]);
+    // As the engine plays them: the box and the perch are refused, the stall is given a thing, the parked bike is lent where it stands.
+    const state = initialState(world, "moves", reg);
+    const run = (action: string, params: Record<string, string> = {}) => resolveOn(reg, world, state, { action, params }, createRng(action));
+    expect(run("stash", { box: "box1", loot: "chip" }).resolution.rejected.map((r) => r.rejection.reason)).toEqual(["Box can't hold anything"]);
+    expect(run("lend", { thing: "coin" }).resolution.rejected.map((r) => r.rejection.reason)).toEqual(["Perch can't hold anything"]);
+    expect(Object.values(run("hand").state.entities).filter((e) => e.relations.some((r) => r.type === "in" && r.to === "stall1")).map((e) => e.name)).toEqual(["Flyer"]);
+    expect(run("lend_bike").resolution.rejected).toEqual([]);
+  });
 });
 
 describe("the Place section lists only things lying there", () => {

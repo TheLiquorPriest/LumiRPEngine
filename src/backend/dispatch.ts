@@ -1189,7 +1189,7 @@ export class Dispatcher {
         }
         const { state, world } = await this.head(chatId, userId);
         if (choice === "remove" || choice === "accept") {
-          await this.rt.setOutcomeNote(chatId, userId, chip.id, declineNote(proposal, reason, choice, state, world));
+          await this.rt.setOutcomeNote(chatId, userId, chip.id, declineNote(proposal, reason, choice, { registry: this.rt.registry, world, state }));
           this.rt.push.changed(chatId, userId);
           return { applied: true, pending: false };
         }

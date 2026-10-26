@@ -23,7 +23,7 @@ import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { planSkip } from "./skip-plan";
 import { mindLines } from "../packs/minds/core/section";
-import { namedInText } from "../packs/minds/core/fidelity";
+import { namedInText, singlesOut } from "../packs/minds/core/fidelity";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
 import { holderOf } from "../packs/gear/core/model";
@@ -38,6 +38,7 @@ import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatTimeOf
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
+import { ownMessage } from "../engine/ledger/path";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
@@ -45,18 +46,19 @@ import { createRng } from "../engine/rng";
 import { readPass } from "../engine/read-pass";
 import { claimsOf } from "../engine/realism";
 import { kindIs, placeOfEntity, placeWithin } from "../engine/scope";
-import { placeMenu, placeSaid, placeUnheard } from "../engine/place-names";
+import { placeKey, placeMenu, placeSaid } from "../engine/place-names";
+import { heardPlace } from "../engine/narration-channels";
 import type { EntityState, WorldState } from "../engine/state";
 import { actionOdds, companionCandidates, findAction, paramCandidates, type Resolution } from "../engine/resolve";
 import { allowedSkills, inferredOf, inferredRead, rolledByTry, skillSources, TRY_ACTION, tryJudged } from "../engine/inferred";
 import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
-import { namesHiddenOrSecretLore, secretLoreNames } from "../engine/lore";
+import { loreReadable, namesHiddenOrSecretLore, secretLoreNames } from "../engine/lore";
 import { pinsFor, type PinnedText } from "../engine/lore-pins";
 import { hiddenNameCheck, namesHidden, povMayKnow } from "../engine/player-events";
-import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, loreGateReader, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { feedOf, MARKED_FACTS_RULE, renderersOf } from "../engine/feed";
-import { answerParams, inOwnWords, openPuzzle } from "../packs/story/core/index";
+import { answerParams, answerWords, expectedAnswers, openPuzzle, ownAnswer, saysAmount } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { resolveUsualMoves, usualRoutineForExtract } from "../packs/castlife/core/usual";
 import { dayPlan, type DayPlan } from "../packs/castlife/core/index";
@@ -83,7 +85,7 @@ import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
 import { failureWords } from "./requirement-words";
 import { buildSections } from "./sections-build";
 import { routineAsks } from "./routine-ask";
-import { CallMeter, dedupeProposals, extract, interpret, NotNeeded, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ThingSort } from "./steps";
+import { CallMeter, dedupeProposals, extract, interpret, NotNeeded, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ReadAction, type ThingSort } from "./steps";
 import { PlanNotes, type PlanLines } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { StagedActions } from "./staged";
@@ -94,7 +96,7 @@ import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, type ReadChip, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
 import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, slotVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION } from "./view";
-import { actionWords, compactSpan, spanText } from "../engine/action-words";
+import { actionWords, compactSpan, editedText, spanText } from "../engine/action-words";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
 import { CANNOT_STOP, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
@@ -154,6 +156,38 @@ const RULED_OUT: ReadonlySet<string> = new Set(["declined", "unpriced", "bound",
 
 /** Refusals of a change the state already holds (a fact already known, a life state already so): nothing to show or tell. */
 const ALREADY_SO: ReadonlySet<string> = new Set(["already_known", "already"]);
+
+/**
+ * What each reference of a read's change names (DESIGN §11): someone, a place, a thing, or a `knows`
+ * fact, which may be any of them. A thing changing hands or bought is named as the reply puts it (a
+ * reply hands over and sells what the world doesn't track yet), and a routine's refusals are unseen,
+ * so neither is one.
+ */
+type RefRole = "person" | "place" | "thing" | "fact";
+const REF_ROLES: Readonly<Record<string, Readonly<Record<string, RefRole>>>> = {
+  location: { entity: "person", place: "place" },
+  knows: { who: "person", fact: "fact" },
+  regard: { from: "person", to: "person" },
+  give: { from: "person", to: "person" },
+  transfer: { from: "person", to: "person" },
+  purchase: { payer: "person" },
+  condition: { who: "person", entity: "person" },
+  quantity: { entity: "person", item: "thing" },
+  life: { entity: "person" },
+  take: { entity: "person", item: "thing" },
+  drop: { entity: "person", item: "thing" },
+  use_up: { entity: "person", item: "thing" },
+  wear: { entity: "person", item: "thing" },
+  lose: { entity: "person", item: "thing", by: "person" },
+  item_condition: { entity: "person", item: "thing" },
+  spawn: { place: "place" },
+};
+
+/** How a change names, in each role, what the POV doesn't know: alike whether it is hidden or nowhere in the world. */
+const UNKNOWN_PHRASE: Readonly<Record<RefRole, string>> = { person: "someone you don't know", place: "a place you don't know", thing: "something you don't know", fact: "something you don't know" };
+
+/** Why a change naming what the POV doesn't know keeps nothing. */
+const UNKNOWN_REASON = "the engine keeps only whom and what you know of";
 
 /**
  * The most a host token count may be, as a multiple of the section's padded estimate (which stays at
@@ -231,11 +265,10 @@ function inRecordOrder(record: readonly LedgerEvent[], events: readonly LedgerEv
 }
 
 /**
- * Whether every entity and place a proposal names is one the POV may know; others never become chips
- * or changes. A value is matched as the channels read it, trimmed (and lowercased when only that
- * names something), so `" vera "` is Vera. The one exception is a `knows` proposal's place: hearing
- * of a `known_by` or `discoverable` place is how the POV comes to know it, and the channel takes no
- * secret one.
+ * Whether every entity and place a proposal names is one the POV may know; a read leaves out one
+ * that isn't. A value is matched as the channels read it, trimmed (and lowercased when only that
+ * names something), so `" vera "` is Vera. The one exception is the place a `knows` proposal teaches
+ * the POV (`heardPlace`): hearing of a `known_by` or `discoverable` place is how it comes to know it.
  */
 export function proposalKnown(p: JsonObject, reg: Registry, world: WorldDoc, state: Readonly<WorldState>): boolean {
   const named = (s: string): string => {
@@ -252,11 +285,43 @@ export function proposalKnown(p: JsonObject, reg: Registry, world: WorldDoc, sta
     if (isRecord(v)) return Object.values(v).every((x) => ok(x as JsonValue, depth + 1));
     return true;
   };
-  const heard = (v: JsonValue | undefined): boolean => {
-    const place = typeof v === "string" && hasOwn(world.places, v.trim()) ? world.places[v.trim()] : undefined;
-    return place?.visibility === "known_by" || place?.visibility === "discoverable";
-  };
-  return Object.entries(p).every(([k, v]) => k === "type" || (p.type === "knows" && k === "fact" && heard(v)) || ok(v, 0));
+  return Object.entries(p).every(([k, v]) => k === "type" || (k === "fact" && heardPlace({ registry: reg, world, state }, p) !== null) || ok(v, 0));
+}
+
+/** What a read's labels and receipts name things against: the registry, the world and the state. */
+type PovView = Pick<ReadContext, "registry" | "world" | "state">;
+
+/**
+ * Who or what a change's reference names, as the POV may know it (DESIGN §11): itself, an entity it
+ * may be told of (by id in any case, else by name as `placeKey` compares names), and for a place or a
+ * fact, a place it can see (`placeSaid`). Null when it names no one and nothing the POV knows,
+ * whether that is hidden or nowhere in the world: the two read alike.
+ */
+function knownRef(view: PovView, role: RefRole, said: string): { id: string; name: string } | null {
+  const { registry: reg, world, state } = view;
+  const t = said.trim();
+  if (role === "place" || role === "fact") {
+    const place = placeSaid(reg, world, state, t);
+    if (place !== null && canSeePlace(reg, world, state, world.pov, place)) return { id: place, name: own(world.places, place)?.name ?? place };
+    if (role === "place") return null;
+  }
+  const key = placeKey(t);
+  const byId = hasOwn(state.entities, t) ? t : hasOwn(state.entities, t.toLowerCase()) ? t.toLowerCase() : null;
+  const id = byId !== null ? (povMayKnow(reg, world, state, byId) ? byId : null) : (Object.keys(state.entities).find((e) => key !== "" && placeKey(own(state.entities, e)?.name ?? "") === key && povMayKnow(reg, world, state, e)) ?? null);
+  return id === null ? null : { id, name: id === world.pov ? "you" : (own(state.entities, id)?.name ?? id) };
+}
+
+/**
+ * Whether a change names, in one of its references (`REF_ROLES`), anyone or anything the POV doesn't
+ * know (`knownRef`), save the place a `knows` teaches it (`heardPlace`).
+ */
+function namesUnknown(view: PovView, p: JsonObject): boolean {
+  const roles = typeof p.type === "string" ? own(REF_ROLES, p.type) : undefined;
+  if (!roles) return false;
+  return Object.entries(roles).some(([field, role]) => {
+    const v = p[field];
+    return typeof v === "string" && v.trim() !== "" && knownRef(view, role, v) === null && !(role === "fact" && heardPlace(view, p) !== null);
+  });
 }
 
 /**
@@ -484,13 +549,14 @@ export function splitAlongBuy(p: JsonObject, pre: readonly LedgerEvent[], ctx: R
  * with Marcus" while the engine has the POV at the market), and no change would say the story and the
  * world have parted. It is a guess, which the read only offers. None when the engine has them there
  * or inside it, when the turn's own events moved them (the engine's outcome wins), or when a narrated
- * move of theirs already says where. The place is given by id or by name (`placeSaid`).
+ * move of theirs already says where. The place is given by id or by name (`placeSaid`), and is one
+ * the POV can see: any other is no guess the player could make.
  */
 function replyPlace(reg: Registry, where: string | null, narrated: readonly JsonObject[], context: ReadInput): JsonObject[] {
   const { world, state } = context;
   const here = placeOfEntity(state, world.pov);
   const to = placeSaid(reg, world, state, where ?? "");
-  if (here === null || to === null || placeWithin(world, here, to) || placeOfEntity(context.start, world.pov) !== here) return [];
+  if (here === null || to === null || !canSeePlace(reg, world, state, world.pov, to) || placeWithin(world, here, to) || placeOfEntity(context.start, world.pov) !== here) return [];
   if (narrated.some((p) => p.type === "location" && (typeof p.entity !== "string" || p.entity.trim() === world.pov))) return [];
   return [{ type: "location", entity: world.pov, place: to }];
 }
@@ -895,11 +961,8 @@ export class Runtime implements TurnHooks {
     const preset = await this.presets.current(input.chatId, input.userId);
     const target = p.messageId ? input.observed.findIndex((m) => m.id === p.messageId) : input.observed.length;
     const before = input.observed.slice(0, target < 0 ? input.observed.length : target);
-    // The turn's own words are the user messages after the reply before it, as its plan reads them
-    // (`planBase`): a new reply after a reply has none, so the message an earlier turn played is never
-    // read, gated or asked about again, and what this turn keeps goes by the words its plan looks up.
-    const tail = before.at(-1);
-    const lastUser = tail?.isUser ? tail : undefined;
+    // What this turn keeps goes by its own words (`ownMessage`), which are the words its plan looks up.
+    const lastUser = ownMessage(before);
     const text = lastUser ? (lastUser.swipes[lastUser.swipeId] ?? "") : "";
     const folded = input.core.renderState(input.observed);
     if (!folded) return;
@@ -956,7 +1019,8 @@ export class Runtime implements TurnHooks {
     this.keptMinds.delete(input.chatId);
     if (kept && kept.key !== mindsKey) kept.stop?.abort(new NotNeeded("the turn they were thinking for changed"));
     const same = kept?.key === mindsKey ? kept : undefined;
-    const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", guidance: preset.guidance.mind ?? "" };
+    // A Regenerate's or swipe's minds read the chat up to the reply it replaces, never that reply again.
+    const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", guidance: preset.guidance.mind ?? "", ...(p.messageId ? { replaces: p.messageId } : {}) };
     const readTimelapse = (): boolean => bridge.intentOf(text)?.action === TIMELAPSE_ACTION;
     const known = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text);
     let thinking = shown ? null : this.thinkMinds(asking, known ? readTimelapse() : facts.timelapse, budget.signal, same);
@@ -1162,13 +1226,19 @@ export class Runtime implements TurnHooks {
       const vars = safeVars(this.stepVars(render.world, render.state, plan, pre.text, "", "", recent), secrets);
       const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join("\n"), links: this.sceneLinks(render.world, render.state) };
       const at = await this.lorePhase("pre", input.generationId, input.chatId, input.userId, render.world, render.state, budget, pre.text, pre.preset.guidance);
-      // The narrator is told no hidden name, the player's own included (DESIGN §7): a brief or a line
-      // that names someone or something hidden is withheld whole, as one carrying a secret is, and the
-      // outline gate shows what is left. The prose steps never read secret lore, so a secret entry
-      // counts by its title only (`hiddenNameCheck`), never by the everyday words it is keyed to.
-      const hidden = hiddenNameCheck(this.registry, render.world, render.state, render.world.pov);
-      const withheld = (line: string): boolean => findLeaks(line, secrets).length > 0 || hidden(line);
-      const run = (r: StepRun, kind: "brief" | "outline", stepVars = vars): Promise<string[]> => (budget.take() ? promptedText(this.steps, r, kind, stepVars, withheld, input.userId, budget.signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []) : Promise.resolve([]));
+      // A brief or an outline line that names someone or something hidden is withheld whole, as one
+      // carrying a secret is, and the outline gate shows what is left (DESIGN §5.2, §7). What the step
+      // was given counts as said: the player's message, which the narrator reads anyway, and its other
+      // inputs, which hold only what the POV may know, so a line naming nothing else tells nothing. The
+      // prose steps never read secret lore or a track's stages, so a secret entry counts by its title
+      // only and a hidden track by its own label (`hiddenNameCheck`).
+      const hidden = hiddenNameCheck(this.registry, render.world, render.state, render.world.pov, { stages: false });
+      const run = (r: StepRun, kind: "brief" | "outline", stepVars = vars): Promise<string[]> => {
+        if (!budget.take()) return Promise.resolve([]);
+        const heard = [pre.text, ...Object.values(stepVars)].join("\n");
+        const withheld = (line: string): boolean => findLeaks(line, secrets).length > 0 || hidden(line, heard);
+        return promptedText(this.steps, r, kind, stepVars, withheld, input.userId, budget.signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []);
+      };
       const briefTask = Promise.all(briefRuns.map((r) => run(r, "brief")));
       // The outline is told the sections the narrator has this turn, so it points at no other (DESIGN §9.5).
       const outlineVars = outlineRuns.length > 0 ? { ...vars, sections: this.narratorSections(render.world, render.state, plan).join(", ") } : vars;
@@ -1377,21 +1447,68 @@ export class Runtime implements TurnHooks {
       playStaged();
       return;
     }
+    // A puzzle's answer is the player's own (DESIGN §10): `saysAnswer` reads whether words give one as
+    // the player's message must. Words the read offers to send (the chip, the intent gate's card)
+    // that give an answer a puzzle expects and the message doesn't are the read's solution, never
+    // the player's, so nothing offers them.
+    const saysAnswer = answerReader(this.registry, render.world, render.state, mayKnow);
+    const unsaidAnswers = expectedAnswers(render).filter((a) => saysAnswer(a, text) === null);
+    const givesUnsaid = (words: string): boolean => unsaidAnswers.some((a) => saysAnswer(a, words) !== null);
     // Words the turn won't play are offered on a chip that sends them as the next message (DESIGN
     // §5.2), each piece only when it may be (`offeredNext`); "" when it may not.
-    const chipText = (piece: string): string => offeredNext(this.registry, render.world, render.state, piece, text, secrets) ?? "";
+    const chipText = (piece: string): string => (givesUnsaid(piece) ? "" : (offeredNext(this.registry, render.world, render.state, piece, text, secrets) ?? ""));
     let next = (result.next ?? []).map(chipText);
     // The player's own words for the first action, or for what fills a time skip, as the intent
-    // gate's card quotes them (DESIGN §5.1): none when they carry a secret or name anything hidden
-    // the player's message doesn't.
-    const lead = quotedWords(this.registry, render.world, render.state, result.text ?? "", secrets, text) ?? "";
+    // gate's card quotes them (DESIGN §5.1): none when they carry a secret, name anything hidden the
+    // player's message doesn't, or give an answer it doesn't.
+    const lead = givesUnsaid(result.text ?? "") ? "" : (quotedWords(this.registry, render.world, render.state, result.text ?? "", secrets, text) ?? "");
+    // An action's puzzle answers (`answerParams`) as the player gave them: each param the read filled
+    // as the message gives it (`saysAnswer`: its own words, a number's digits without the words the
+    // read added, or someone the POV may know whom the words pick out; a money param by its amount,
+    // `saysAmount`), else the name of the first the message neither says nor picks out: drawn from
+    // lore the read may see, a hidden person's name or the read's own solution. Such an action is no
+    // answer and never a try at the puzzle, wherever the read put it: its decline repeats none of what
+    // the read gave.
+    const ownAnswers = (def: ActionDef, given: JsonObject): JsonObject | string => {
+      let out = given;
+      for (const name of answerParams(def)) {
+        const v = given[name];
+        if (own(def.params, name)?.type === "money") {
+          if (typeof v === "number" && saysAmount(v, text, render.world.currency)) continue;
+          return name;
+        }
+        const read = typeof v === "string" || typeof v === "number" ? String(v) : "";
+        const played = saysAnswer(read, text);
+        if (played === null) return name;
+        if (played !== read) out = { ...out, [name]: played };
+      }
+      return out;
+    };
+    const dropped: UnfitAction[] = [];
+    const dropAnswer = (def: ActionDef, param: string): void => {
+      this.host.log("info", `[LumiRPEngine] interpret: ${def.id}'s ${param} isn't in the player's words; dropped`, userId);
+      const reason = "the message doesn't say the answer itself, so it isn't a try at the puzzle";
+      dropped.push({ label: def.label, reason, told: reason });
+    };
+    // A queued action left in words, when a time skip leads or the queue stops early, goes to the
+    // chip and the intent gate's card only as the player's own: one answering a puzzle with what the
+    // message doesn't give is dropped as a played one is, so neither offers the read's answer to send.
+    const leftWords = (q: ReadAction): string => {
+      const def = q.action === TRY_ACTION || q.action === TIMELAPSE_ACTION ? undefined : all.find((a) => a.id === q.action);
+      const answered = def ? ownAnswers(def, playable(def, q.params, render.world, [q.text, text])) : q.params;
+      if (def && typeof answered === "string") {
+        dropAnswer(def, answered);
+        return "";
+      }
+      return chipText(q.text);
+    };
     // A time skip, the timelapse itself or time with no action before it (DESIGN §9.2), plays alone:
     // anything after it is offered in words once it has run. Time after another action ("I head home
     // and sleep until the next morning") is offered once the actions have run. The read names the
     // skip; its span is the read's own (its params, else a `then` it split off), else the one the
     // message states when it states exactly one, so a chosen skip isn't lost to a half-filled answer.
     if (result.action === TIMELAPSE_ACTION || (!result.action && result.then !== undefined)) {
-      bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
+      bridge.setNext(text, joinActions([...(result.queue ?? []).map(leftWords), ...next]) || null);
       const target = (result.action === TIMELAPSE_ACTION ? interpretedTarget(result.params, render.world, render.state, text, this.registry) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text, this.registry) : null) ?? interpretedTarget({ span: text }, render.world, render.state, text, this.registry);
       if (!target) this.host.log("info", `[LumiRPEngine] interpret: lets time pass but states no span it can read; the turn plays as roleplay`, userId);
       // A span up to how long the user lets a skip run without asking runs in the turn; a longer one
@@ -1400,7 +1517,9 @@ export class Runtime implements TurnHooks {
       bridge.setOffer(text, over ? target : null);
       // A span the player's words spend ("for the next two hours, I service the fleet") keeps the POV
       // where the story has it until it's over (DESIGN §8); a run to a routine point follows its routine.
-      bridge.setIntent(text, target && !over ? { ...timelapseIntent(target, undefined, 1, target.type !== "duration"), ...(lead !== "" ? { text: lead } : {}) } : null, target !== null && !over);
+      const intent = target && !over ? { ...timelapseIntent(target, undefined, 1, target.type !== "duration"), ...(lead !== "" ? { text: lead } : {}) } : null;
+      if (dropped.length > 0) bridge.setUnfit(text, dropped, intent);
+      else bridge.setIntent(text, intent, intent !== null);
       return;
     }
     const chosen = result.action ? all.find((a) => a.id === result.action) : undefined;
@@ -1413,26 +1532,18 @@ export class Runtime implements TurnHooks {
     // doesn't ("I pour Theresa a coffee" with no coffee) is a claim the chat's policy decides
     // (`claimFor`): made real, asked about first, or dropped as above; money never is made.
     const policy = claimsOf(render.world, render.state);
-    const dropped: UnfitAction[] = [];
     const steps: ReadStep[] = [];
     // Whether a step that rolls its own check was kept: a Try something after it is never kept (DESIGN
     // §11), since the queue stops at that check, and leaving it in words would offer the same attempt again.
     let rolls = false;
     // `picked`: the staged action, whose params are the player's own picks, not the read's.
-    const take = (def: ActionDef, given: JsonObject, words: string, thing: ThingSort | undefined, said: readonly string[], picked = false): void => {
-      // A puzzle's answer is the player's own (DESIGN §10): one the read gives that the message doesn't
-      // (drawn from lore the read may see, a hidden person's name, the read's own solution) is no
-      // answer and never a try at the puzzle, and its decline repeats none of what the read gave.
-      const unsaid = picked ? undefined : answerParams(def).find((name) => {
-        const v = given[name];
-        return !inOwnWords(typeof v === "string" || typeof v === "number" ? String(v) : "", text);
-      });
-      if (unsaid !== undefined) {
-        this.host.log("info", `[LumiRPEngine] interpret: ${def.id}'s ${unsaid} isn't in the player's words; dropped`, userId);
-        const reason = "the message doesn't say the answer itself, so it isn't a try at the puzzle";
-        dropped.push({ label: def.label, reason, told: reason });
+    const take = (def: ActionDef, read: JsonObject, words: string, thing: ThingSort | undefined, said: readonly string[], picked = false): void => {
+      const answered = picked ? read : ownAnswers(def, read);
+      if (typeof answered === "string") {
+        dropAnswer(def, answered);
         return;
       }
+      const given = answered;
       // The player character's own thing that the world keeps elsewhere is a tracking gap, not a veto:
       // it goes to the claims policy rather than failing and stopping the message (DESIGN §9.4).
       const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state, mayKnow);
@@ -1448,8 +1559,10 @@ export class Runtime implements TurnHooks {
       else if (verdict?.kind === "ask") steps.push({ action: def.id, params: given, text: words, claim: verdict.claim, ask: { kind: "claim", question: verdict.question, detail: verdict.detail } });
       else {
         this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
-        // The chip may echo the player's own words; the next reply is told none that carry a secret or name anything hidden.
-        const why = (heard: string, known: readonly string[]): string => (verdict?.kind === "hold" && verdict.reason ? verdict.reason : unfitReason(this.registry, render.world, render.state, ref, text, known, mayKnow, heard));
+        // The chip may echo the player's own words for what the read named; the next reply is told
+        // one wording whatever was named, unless the POV knows it, so it reads alike whether or not
+        // anyone hidden goes by those words (DESIGN §5.2).
+        const why = (said: string, known: readonly string[]): string => (verdict?.kind === "hold" && verdict.reason ? verdict.reason : unfitReason(this.registry, render.world, render.state, ref, said, known, mayKnow));
         dropped.push({ label: def.label, reason: why(text, secrets), told: why("", unrevealed) });
         return;
       }
@@ -1481,11 +1594,11 @@ export class Runtime implements TurnHooks {
       const def = q.action === TRY_ACTION ? undefined : all.find((a) => a.id === q.action);
       if (q.action === TIMELAPSE_ACTION || (!def && q.action !== TRY_ACTION)) {
         if (k === further.length - 1 && !then && q.action === TIMELAPSE_ACTION) then = q.params;
-        else next = [...further.slice(k).map((r) => chipText(r.text)), ...next];
+        else next = [...further.slice(k).map(leftWords), ...next];
         break;
       }
       if (findLeaks(q.params, secrets).length > 0) {
-        next = [...further.slice(k + 1).map((r) => chipText(r.text)), ...next];
+        next = [...further.slice(k + 1).map(leftWords), ...next];
         break;
       }
       if (!def) {
@@ -1548,9 +1661,9 @@ export class Runtime implements TurnHooks {
    * It reads the lore its action, target, place and the player's words find (§5.4), a secret its
    * audience allows included, and it is told only who the POV can see. Its reason, which the roll
    * chip and the Journal show, is dropped (the rating stands) when it carries a secret's unrevealed
-   * text the player didn't type, or names someone, a track or a place the POV can't see that the
-   * player's message doesn't name too (§7): their own words never blank it, which would tell them a
-   * name they typed is hidden.
+   * text the player didn't type, or names someone, a track or a place the POV can't see, or what leads
+   * to a secret lore entry (`namesHiddenOrSecretLore`), that the player's message doesn't name too
+   * (§7): their own words never blank it, which would tell them a name they typed is hidden.
    */
   private async judgeApproach(bridge: TurnBridge, text: string, render: { world: WorldDoc; state: WorldState }, settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase): Promise<void> {
     const userId = at.userId;
@@ -1573,7 +1686,7 @@ export class Runtime implements TurnHooks {
     }
     const typed = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typed.includes(s.toLowerCase()));
-    const leaks = findLeaks(judgement.reason, secrets).length > 0 || namesHidden(this.registry, render.world, render.state, judgement.reason, text);
+    const leaks = findLeaks(judgement.reason, secrets).length > 0 || namesHiddenOrSecretLore(this.registry, render.world, render.state, judgement.reason, text);
     if (leaks) this.host.log("info", `[LumiRPEngine] judge: the reason for ${action.id} carried an unrevealed secret or a hidden name; it isn't shown`, userId);
     const judged = leaks ? { ...judgement, reason: "" } : judgement;
     // The judgement rides on the action it rates: the first, or the queued one whose check it is.
@@ -1820,10 +1933,11 @@ export class Runtime implements TurnHooks {
     const told = [...(plan ? planLines(plan, context.world, this.registry).outcome : []), ...factLines(this.registry, context.world, context.state, secrets)];
     const contradictionTask = contradictionRun && post && budget.take() ? contradiction(this.steps, contradictionRun, told, text, userId, budget.signal, lore(contradictionRun)) : Promise.resolve(null);
     const choiceRuns = runsOf(modelUse, context.world, "choices", facts, { output: "text", guidance });
-    // A suggestion names no one hidden the player hasn't seen said, in their message or the reply
-    // (DESIGN §7). The step never reads secret lore, so a secret entry counts by its title only.
-    const hidden = choiceRuns.length > 0 ? hiddenNameCheck(this.registry, live, context.state, live.pov) : () => false;
-    const unshown = (line: string): boolean => findLeaks(line, secrets).length > 0 || hidden(line, read.text);
+    // A suggestion names no one hidden that the player hasn't seen said, in their message or the reply,
+    // or that the step's inputs don't name, read as the brief and the outline are (DESIGN §5.2, §7).
+    const hidden = choiceRuns.length > 0 ? hiddenNameCheck(this.registry, live, context.state, live.pov, { stages: false }) : () => false;
+    const heard = choiceRuns.length > 0 ? [read.text, ...Object.values(vars)].join("\n") : "";
+    const unshown = (line: string): boolean => findLeaks(line, secrets).length > 0 || hidden(line, heard);
     const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, unshown, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([])));
     // The minds' post phase (DESIGN §24.4): who was present, their memory of what was written, and
     // consolidation, beside the reply's other steps, on the phase's wall clock.
@@ -1870,15 +1984,24 @@ export class Runtime implements TurnHooks {
       if (along === "unsure") unsure.add(p);
       return along !== "retold";
     });
-    const known = deduped.filter((p) => proposalKnown(p, this.registry, context.world, context.state));
-    if (known.length < deduped.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${deduped.length - known.length} proposal(s) naming what the player hasn't seen`, userId);
-    // So is one carrying a secret's unrevealed truth: its chip would show it.
-    const unleaked = known.filter((p) => findLeaks(p, secrets).length === 0);
-    if (unleaked.length < known.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${known.length - unleaked.length} proposal(s) carrying an unrevealed secret`, userId);
+    // A change carrying a secret's unrevealed truth is left out: its chip would show it.
+    const unleaked = deduped.filter((p) => findLeaks(p, secrets).length === 0);
+    if (unleaked.length < deduped.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${deduped.length - unleaked.length} proposal(s) carrying an unrevealed secret`, userId);
+    // One naming, in one of its references, anyone or anything the POV doesn't know never reaches its
+    // channel, whether that is hidden or nowhere in the world: it is a receipt naming it only as
+    // "someone you don't know" and the like, so every world reads the same (DESIGN §11). The log
+    // counts those naming what the POV hasn't seen. Any other change naming that is left out.
+    const unnamed: JsonObject[] = [];
+    const named: JsonObject[] = [];
+    for (const p of unleaked) (namesUnknown(ctx, p) ? unnamed : named).push(p);
+    const unseen = unnamed.filter((p) => !proposalKnown(p, this.registry, context.world, context.state)).length;
+    if (unseen > 0) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${unseen} proposal(s) naming what the player hasn't seen, each a receipt that doesn't name it`, userId);
+    const known = named.filter((p) => proposalKnown(p, this.registry, context.world, context.state));
+    if (known.length < named.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${named.length - known.length} proposal(s) naming what the player hasn't seen`, userId);
     // A change to someone's routine is the story's only for someone the reply speaks of: the player
     // character, or a person it names (DESIGN §9.4). It carries the reply's message as its turn, which
     // the model can't set, so the change records where it came from.
-    const proposals = unleaked.flatMap((p): JsonObject[] => {
+    const proposals = known.flatMap((p): JsonObject[] => {
       if (p.type !== "routine") return [p];
       const who = typeof p.entity === "string" ? p.entity : "";
       if (who === context.world.pov || namedInText(context.state.entities[who]?.name ?? "", text)) return [{ ...p, turn: messageId }];
@@ -1941,7 +2064,13 @@ export class Runtime implements TurnHooks {
     const w = new Working(this.registry, context.world, context.state);
     const outcomes = applyProposals(this.registry, w, auto.filter((p) => p.type !== "time_advance"), `${context.seed}:preview`, bridge.runSeed);
     const stored: StoredChip[] = [];
-    const declines: { proposal: JsonObject; reason: string; code: string; payment: boolean; unpriced: boolean }[] = [...spent.map((proposal) => ({ proposal, reason: REGARD_SPENT, code: "regard_spent", payment: false, unpriced: false })), ...held.map((proposal) => ({ proposal, reason: IN_FIGHT, code: "in_fight", payment: false, unpriced: false }))];
+    const declines: { proposal: JsonObject; reason: string; code: string; payment: boolean; unpriced: boolean }[] = [
+      // One naming what the POV doesn't know is refused for that alone, under any mode but its type's
+      // `never`, and never by bounds, which would tell of whom it names.
+      ...unnamed.filter((p) => EXTRACTION_TYPES.some((t) => t === p.type && effectiveMode(settings, learning, connection, t).mode !== "never")).map((proposal) => ({ proposal, reason: UNKNOWN_REASON, code: "unknown_ref", payment: false, unpriced: false })),
+      ...spent.map((proposal) => ({ proposal, reason: REGARD_SPENT, code: "regard_spent", payment: false, unpriced: false })),
+      ...held.map((proposal) => ({ proposal, reason: IN_FIGHT, code: "in_fight", payment: false, unpriced: false })),
+    ];
     outcomes.forEach((o, i) => {
       if (o.rejection) {
         if (o.rejection.code !== "declined") this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: ${describeProposal(o.proposal)} didn't apply (${o.rejection.code}: ${o.rejection.reason})`, input.userId);
@@ -1961,7 +2090,7 @@ export class Runtime implements TurnHooks {
         kind: "undo",
         messageId: input.messageId,
         swipeId,
-        label: `${describeProposal(o.proposal, context.world, context.state)}${quote?.text ?? ""}`,
+        label: `${describeProposal(o.proposal, ctx)}${quote?.text ?? ""}`,
         detail: "Applied automatically.",
         actions: [{ id: "undo", label: "Undo", style: "danger" }, ...(quote?.limited ? [{ id: "amount", label: "Edit amount", input: { type: "money" as const, label: "Amount", value: quote.cents } }] : [])],
         expires: "next_send",
@@ -1981,7 +2110,7 @@ export class Runtime implements TurnHooks {
             kind: "confirm",
             messageId: input.messageId,
             swipeId,
-            label: describeProposal(proposal, context.world, context.state),
+            label: describeProposal(proposal, ctx),
             detail: "The narration says this much time passed. Apply it?",
             actions: [
               { id: "confirm", label: "Apply", style: "primary" },
@@ -2030,8 +2159,9 @@ export class Runtime implements TurnHooks {
         return;
       }
       // Anything else refused is shown as an automatic refusal is, never vanishing: what it names is
-      // what the POV may know (`proposalKnown` dropped the rest before here), and a refusal unseen came
-      // back as no change. One that may be the Buy told again stays silent: the Buy itself was paid.
+      // what the POV may know (`namesUnknown` and `proposalKnown` took the rest before here), and a
+      // refusal unseen came back as no change. One that may be the Buy told again stays silent: the
+      // Buy itself was paid.
       if (check?.rejection && !(also && check.rejection.code === "declined")) {
         declines.push({ proposal, reason: check.rejection.reason, code: check.rejection.code, payment: false, unpriced: false });
         return;
@@ -2050,7 +2180,7 @@ export class Runtime implements TurnHooks {
         kind: "confirm",
         messageId: input.messageId,
         swipeId,
-        label: also ? `Also bought ${describeItem(proposal)}?${quote?.text ?? ""}` : `${describeProposal(proposal, context.world, context.state)}${quote?.text ?? ""}`,
+        label: also ? `Also bought ${describeItem(proposal)}?${quote?.text ?? ""}` : `${describeProposal(proposal, ctx)}${quote?.text ?? ""}`,
         detail: also ? "The reply may be telling your purchase again. Apply it only if this was bought too." : guess ? `The reply has you there, but the engine still has you ${here?.id ? `at ${here.name}` : "elsewhere"}. Apply the move?` : "The narration says this happened. Apply it?",
         actions: [{ id: "confirm", label: "Apply", style: "primary" }, ...(quote?.limited ? [{ id: "amount", label: "Edit amount", input: { type: "money" as const, label: "Amount", value: quote.cents } }] : []), { id: "reject", label: "No" }],
         expires: "next_send",
@@ -2066,25 +2196,18 @@ export class Runtime implements TurnHooks {
         this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(d.proposal)} (${d.code}: ${d.reason})`, input.userId);
         return;
       }
-      // Only `knows` may name a place the POV hasn't heard of, since hearing of it is how the POV learns
-      // it (`proposalKnown`); refused (someone else learning it), it would tell of that place, so it is
-      // dropped unseen.
-      if (d.proposal.type === "knows" && typeof d.proposal.fact === "string" && placeUnheard(this.registry, context.world, context.state, d.proposal.fact)) {
-        this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(d.proposal)} (${d.code}: it names a place the player character hasn't heard of)`, input.userId);
-        return;
-      }
-      // What the engine has no place for (a fact told in prose, a thing as a newcomer, a place it
-      // doesn't have) still happened in the story: a receipt says so, with no decision to make, and
-      // the next reply is never told it didn't happen.
+      // What the engine has no place for (a thing as a newcomer, a change naming anyone or anything
+      // the POV doesn't know) still happened in the story: a receipt says so, with no decision to
+      // make, and the next reply is never told it didn't happen. It names only what the POV knows
+      // (`describeProposal`), so it reads the same whether or not the world holds what it names.
       if (d.proposal.type !== "purchase" && d.proposal.type !== "transfer" && !RULED_OUT.has(d.code)) {
         stored.push({
           id: `untracked:${input.messageId}:${input.generationId}:${i}`,
           kind: "untracked",
           messageId: input.messageId,
           swipeId,
-          label: `Not tracked: ${describeProposal(d.proposal, context.world, context.state)}`,
-          // A fact no world has is refused in the words it was told; the receipt says what the engine keeps instead.
-          detail: `${d.code === "unknown_fact" ? "The engine keeps whom and what you know of, not facts told in words" : d.reason.replace(/[.\s]+$/, "")}. The story stands as told, and the next reply isn't told otherwise.`,
+          label: `Not tracked: ${describeProposal(d.proposal, ctx)}`,
+          detail: `${d.reason.replace(/[.\s]+$/, "")}. The story stands as told, and the next reply isn't told otherwise.`,
           actions: [],
           expires: "next_send",
           payload: { type: String(d.proposal.type), proposal: d.proposal, reason: d.reason },
@@ -2092,13 +2215,13 @@ export class Runtime implements TurnHooks {
         return;
       }
       const id = `decline:${input.messageId}:${input.generationId}:${i}`;
-      notes.push({ id, messageId, text: declineNote(d.proposal, d.reason, "accept", context.state, context.world) });
+      notes.push({ id, messageId, text: declineNote(d.proposal, d.reason, "accept", ctx) });
       stored.push({
         id,
         kind: "decline",
         messageId: input.messageId,
         swipeId,
-        label: !d.payment ? `Didn't apply: ${describeProposal(d.proposal, context.world, context.state)}` : d.proposal.type === "purchase" ? `Couldn't pay for ${describeItem(d.proposal)}` : `Declined: ${describeProposal(d.proposal, context.world, context.state)}`,
+        label: !d.payment ? `Didn't apply: ${describeProposal(d.proposal, ctx)}` : d.proposal.type === "purchase" ? `Couldn't pay for ${describeItem(d.proposal)}` : `Declined: ${describeProposal(d.proposal, ctx)}`,
         detail: d.payment ? `${d.reason}. It stays unowned, and the next reply is told so.` : `${d.reason}. Nothing changed, and the next reply is told so.`,
         actions: [...(d.payment ? [{ id: "other", label: "Pay another way", style: "primary" as const }] : []), ...(d.unpriced ? pricingActions(d.proposal, ctx) : []), { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }],
         expires: "next_send",
@@ -2141,7 +2264,10 @@ export class Runtime implements TurnHooks {
     const plan = rec ? bridge.planFor(rec.seed) : undefined;
     if (rec && rec.seed !== "" && !plan && input.kind !== "renarrate" && input.kind !== "continue") this.host.log("warn", `[LumiRPEngine] chat ${input.chatId}: no engine plan for the committed turn (seed ${rec.seed.slice(0, 8)}); its chips are missing`, input.userId);
     const idx = input.observed.findIndex((m) => m.id === input.messageId);
-    const user = input.observed.slice(0, idx < 0 ? input.observed.length : idx).findLast((m) => m.isUser);
+    // The chips after the reply answer the turn's own message (`ownMessage`): a new reply after a reply
+    // has none, so it repeats no decline, note, rest of the message, Timelapse offer or failed read that
+    // the bridge still keeps for the message before the reply it follows.
+    const user = ownMessage(input.observed.slice(0, idx < 0 ? input.observed.length : idx));
     const userText = user ? (user.swipes[user.swipeId] ?? "") : "";
     // Rolls and odds, and an action that couldn't run (DESIGN §12 chips), from the turn's actions as they played.
     const played = plan?.resolutions ?? [];
@@ -2308,7 +2434,7 @@ export class Runtime implements TurnHooks {
   requestRefusal(world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, know: "read" | "seen", skip?: string): string | null {
     const mayKnow = (id: EntityId): boolean => (know === "read" ? povMayKnow(this.registry, world, state, id) : id === world.pov || canSeeEntity(this.registry, world, state, world.pov, id));
     const unfit = unfitRef(this.registry, action, params, world, state, mayKnow, skip);
-    return unfit ? `${action.label}: ${unfitReason(this.registry, world, state, unfit, "", unrevealedSecrets(this.registry, world, state), mayKnow, "")}` : null;
+    return unfit ? `${action.label}: ${unfitReason(this.registry, world, state, unfit, "", unrevealedSecrets(this.registry, world, state), mayKnow)}` : null;
   }
 
   /**
@@ -2324,7 +2450,7 @@ export class Runtime implements TurnHooks {
     const refused = this.requestRefusal(world, state, action, params, "read", claim !== undefined && kept(claim) ? claim : undefined);
     if (refused) return refused;
     const mayKnow = (id: EntityId): boolean => povMayKnow(this.registry, world, state, id);
-    const why = (param: string, def: ParamDef, value: JsonValue): string => `${action.label}: ${unfitReason(this.registry, world, state, { param, def, value }, "", unrevealedSecrets(this.registry, world, state), mayKnow, "")}`;
+    const why = (param: string, def: ParamDef, value: JsonValue): string => `${action.label}: ${unfitReason(this.registry, world, state, { param, def, value }, "", unrevealedSecrets(this.registry, world, state), mayKnow)}`;
     for (const [name, def] of Object.entries(action.params)) {
       const value = params[name];
       if (value === undefined || value === null || value === "" || kept(name)) continue;
@@ -2341,10 +2467,13 @@ export class Runtime implements TurnHooks {
   /**
    * The intent gate's Edit (DESIGN §5.1): the Actions palette opened at the read action with its picks
    * already made, when the palette offers that action here; only the picks it could offer travel to
-   * the page. Null when the palette has no such action, so Edit isn't offered.
+   * the page, and a text pick only as the card shows it (`editedText`, the player's message `typed`),
+   * so a read's free text never carries a secret or a hidden name there. Null when the palette has no
+   * such action, so Edit isn't offered.
    */
-  private intentEdit(world: WorldDoc, state: WorldState, action: ActionDef, params: JsonObject): ChipInput | null {
+  private intentEdit(world: WorldDoc, state: WorldState, action: ActionDef, params: JsonObject, typed: string): ChipInput | null {
     if (!palette(world, state, this.registry).entries.some((e) => e.action === action.id)) return null;
+    const text = editedText(this.registry, world, state, typed);
     const picks: JsonObject = {};
     for (const [name, def] of Object.entries(action.params)) {
       const value = params[name];
@@ -2354,6 +2483,9 @@ export class Runtime implements TurnHooks {
       } else if (def.type === "list" && def.ref !== undefined) {
         const along = companionCandidates(this.registry, world, state, action, name);
         if (Array.isArray(value)) picks[name] = value.filter((id): id is string => typeof id === "string" && along.includes(id));
+      } else if (typeof value === "string") {
+        const shown = text(def, value);
+        if (shown !== null) picks[name] = shown;
       } else picks[name] = value;
     }
     return { type: "action", label: `Change ${action.label}`, action: action.id, params: picks };
@@ -2396,7 +2528,7 @@ export class Runtime implements TurnHooks {
       ...(rest ? [`Not read as an action: “${rest}”`] : []),
     ];
     const def = (hasOwn(world.actions, action) ? world.actions[action] : undefined) ?? this.registry.actions.get(action);
-    return { label: `Play ${head}${queue.length > 0 ? `, then ${queue.length} more` : ""}?`, detail: lines.join("\n"), edit: def ? this.intentEdit(world, state, def, read.params) : null, what: head };
+    return { label: `Play ${head}${queue.length > 0 ? `, then ${queue.length} more` : ""}?`, detail: lines.join("\n"), edit: def ? this.intentEdit(world, state, def, read.params, text) : null, what: head };
   }
 
   /**
@@ -2425,7 +2557,9 @@ export class Runtime implements TurnHooks {
    * null: when every action played, the reply tells that time after them, and its read moves the
    * clock by what it tells, so the Timelapse offered after the reply is only what it didn't tell.
    * None while some of the actions are left to play, for a time skip (which runs the time itself),
-   * and for a span longer than a skip runs without asking, which waits on its Timelapse instead.
+   * and for a span longer than a skip runs without asking, which waits on its Timelapse instead. Its
+   * words for the time are the read's, quoted when they name nothing hidden that the player's message
+   * doesn't say too (DESIGN §7): the narrator reads that message anyway.
    */
   private thenLine(chatId: ChatId, said: string, seed: string, world: WorldDoc, state: WorldState, settings: UserSettings, secrets: readonly string[]): string | null {
     const bridge = this.bridges.get(chatId);
@@ -2434,7 +2568,8 @@ export class Runtime implements TurnHooks {
     const turn = bridge?.planFor(seed);
     if (!intent?.action || intent.action === TIMELAPSE_ACTION || !offer || !turn || turn.stopped) return null;
     if (offer.type === "duration" && offer.minutes > settings.time.askBeyondMinutes) return null;
-    const words = typeof intent.then?.span === "string" ? quotedWords(this.registry, world, state, intent.then.span, secrets, "") : null;
+    const typed = said.toLowerCase();
+    const words = typeof intent.then?.span === "string" ? quotedWords(this.registry, world, state, intent.then.span, secrets.filter((s) => !typed.includes(s.toLowerCase())), said) : null;
     return `After those actions, the player's message lets time pass: ${skipWords(this.registry, world, state, offer, false)}${words ? ` (“${words}”)` : ""}. Tell that time in this reply, after them.`;
   }
 
@@ -3293,9 +3428,9 @@ function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
 /**
  * The words a read gave for one of its actions as they are quoted (DESIGN §5.1, §9.2), or null: a
  * placeholder for nothing ("none", "N/A"), and words carrying an unrevealed secret (`secrets`) or
- * naming anything hidden that `heard` doesn't say too. The intent gate's card hears the player's
- * message, so their own words are never cut for a hidden name they typed (which would tell them
- * someone hidden goes by it); the narrator's Outcome hears nothing.
+ * naming anything hidden that `heard` doesn't say too. The intent gate's card and the narrator's
+ * Outcome both hear the player's message, which the narrator reads anyway, so their own words are
+ * never cut for a hidden name they typed (which would tell them someone hidden goes by it).
  */
 function quotedWords(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, piece: string, secrets: readonly string[], heard: string): string | null {
   const said = piece.replace(/\s+/g, " ").trim();
@@ -3412,13 +3547,12 @@ function playable(action: ActionDef, params: JsonObject, world: WorldDoc, said: 
 /**
  * Why `interpret`'s action couldn't apply (DESIGN §9.4), for its decline chip and the next reply's
  * note: a real thing the POV knows, of another kind, by its name ("Bluebird Coffee isn't a person");
- * anything else, made up or hidden alike, only in the player's own words, as one nothing has
- * ("Rena isn't anyone you know", "Vex Morrow isn't anyone you know"); or that it has none. Words the
- * player didn't type (`text`, whole words only), ones carrying an unrevealed secret (`secrets`) or
- * naming anything hidden that `heard` doesn't say too, and anything too long for a name are never
- * repeated: "it names no one you know". The chip hears the player's message; the note hears nothing.
+ * anything else, made up or hidden alike, as one nothing has, in the player's own words for it
+ * (`text`, whole words only: "Rena isn't anyone you know"), else, with none of theirs (as the note is
+ * told, with no `text`) or too long for a name, "it names no one you know"; or that it has none.
+ * Neither reads otherwise for someone hidden going by those words.
  */
-function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, unfit: UnfitRef, text: string, secrets: readonly string[], mayKnow: (id: EntityId) => boolean, heard: string): string {
+function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, unfit: UnfitRef, text: string, secrets: readonly string[], mayKnow: (id: EntityId) => boolean): string {
   const { def, value } = unfit;
   const place = def.ref === "place";
   const person = !place && def.ref !== undefined && kindIs(reg, world, def.ref, "person");
@@ -3440,8 +3574,60 @@ function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
   // underscores read as spaces.
   const given = id.replace(/_+/g, " ").trim();
   const typed = given === "" ? undefined : new RegExp(`(?<![\\p{L}\\p{N}])${given.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").exec(text)?.[0];
-  if (typed === undefined || typed.length > 80 || findLeaks(typed, secrets).length > 0 || namesHiddenOrSecretLore(reg, world, state, typed, heard)) return none;
+  if (typed === undefined || typed.length > 80) return none;
   return `${typed} isn't ${place ? "a place" : person ? "anyone" : "anything"} you know`;
+}
+
+/**
+ * Reads how words give a puzzle's answer as the player's message must (DESIGN §5.2, §10): the answer
+ * to play, or null. In them, case and spacing aside, or a number's digits without the words the read
+ * added (`ownAnswer`), or naming, by its id, name or an alias, the one person, place or thing the POV
+ * may know that they pick out: a whole word or run of words of its name or an alias that nothing else
+ * the POV may know has ("It was Avery", with one Avery they know). A word that can't single anyone
+ * out (`singlesOut`) counts only as a whole name. Its aliases are those of the lore entries about it
+ * alone that a prose step may read. A hidden one counts only by its words, as a name nothing has
+ * would, so an answer never tells the player who is hidden. What the POV may know is gathered once,
+ * on the first answer that isn't in the words themselves.
+ */
+function answerReader(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, mayKnow: (id: EntityId) => boolean): (value: string, text: string) => string | null {
+  let known: Map<string, string[][]> | undefined;
+  const namesKnown = (): Map<string, string[][]> => {
+    if (known) return known;
+    const names = new Map<string, string[][]>();
+    for (const [id, e] of Object.entries(state.entities)) if (mayKnow(id)) names.set(id, [answerWords(e.name)]);
+    for (const [id, p] of Object.entries(world.places)) if (!names.has(id) && canSeePlace(reg, world, state, world.pov, id)) names.set(id, [answerWords(p.name)]);
+    const open = loreGateReader(reg, world, state);
+    for (const entry of Object.values(world.lore)) {
+      const about = entry.links.length === 1 ? names.get(entry.links[0] ?? "") : undefined;
+      if (about && loreReadable(reg, world, state, entry, "brief", false, open)) for (const alias of entry.aliases ?? []) about.push(answerWords(alias));
+    }
+    known = names;
+    return names;
+  };
+  const bare = (w: readonly string[]): string => (w.length > 1 && /^(the|a|an)$/.test(w[0] ?? "") ? w.slice(1) : w).join(" ");
+  const within = (hay: readonly string[], run: readonly string[]): boolean => {
+    for (let i = 0; i + run.length <= hay.length; i++) if (run.every((w, k) => hay[i + k] === w)) return true;
+    return false;
+  };
+  return (value, text) => {
+    const typed = ownAnswer(value, text);
+    if (typed !== null) return typed;
+    const names = namesKnown();
+    const given = bare(answerWords(value));
+    const named = names.has(value) ? [value] : [...names].filter(([, ns]) => given !== "" && ns.some((n) => bare(n) === given)).map(([id]) => id);
+    const target = named.length === 1 ? named[0] : undefined;
+    const said = answerWords(text);
+    for (const name of target === undefined ? [] : (names.get(target) ?? [])) {
+      for (let i = 0; i < name.length; i++) {
+        for (let j = i + 1; j <= name.length; j++) {
+          const run = name.slice(i, j);
+          if (run.length < name.length && !run.some(singlesOut)) continue;
+          if (within(said, run) && [...names].every(([id, ns]) => id === target || !ns.some((n) => within(n, run)))) return value;
+        }
+      }
+    }
+    return null;
+  };
 }
 
 /**
@@ -3596,16 +3782,18 @@ function narratedNote(what: string, reason: string, choice: "accept" | "remove")
 
 /**
  * The next Outcome slot's line for a declined narrated change (DESIGN §9.5): by default (and on
- * Accept) it didn't happen; Remove asks the narrator to drop it from the story.
+ * Accept) it didn't happen; Remove asks the narrator to drop it from the story. It names only what
+ * the POV may know (`describeProposal`).
  */
-export function declineNote(p: JsonObject, reason: string, choice: "accept" | "remove", state: Readonly<WorldState>, world: WorldDoc): string {
+export function declineNote(p: JsonObject, reason: string, choice: "accept" | "remove", view: PovView): string {
   // A purchase reads by its item; any other change (a gift of cash, a move) by its chip label,
   // quoted as written, so a name keeps its case ("Danny Okafor paid $20.00 to you").
-  const what = p.type === "purchase" ? describeItem(p) : `"${describeProposal(p, world, state)}"`;
+  const what = p.type === "purchase" ? describeItem(p) : `"${describeProposal(p, view)}"`;
   if (choice === "remove" || p.type !== "purchase") return narratedNote(what, reason, choice);
-  const payerId = typeof p.payer === "string" && p.payer !== "" ? p.payer : null;
-  const who = (payerId ? state.entities[payerId]?.name : undefined) ?? "The payment";
-  return payerId ? `Earlier, ${who}'s payment for ${what} was declined (${reason}); they don't have it.` : `Earlier, paying for ${what} was declined (${reason}); it isn't owned.`;
+  // The payer by name when the POV knows them; a payment by anyone else reads as no one's.
+  const payer = typeof p.payer === "string" && p.payer.trim() !== "" ? knownRef(view, "person", p.payer) : null;
+  const who = payer ? own(view.state.entities, payer.id)?.name : undefined;
+  return who !== undefined ? `Earlier, ${who}'s payment for ${what} was declined (${reason}); they don't have it.` : `Earlier, paying for ${what} was declined (${reason}); it isn't owned.`;
 }
 
 /**
@@ -3650,19 +3838,39 @@ function pricingActions(p: JsonObject, ctx: ReadContext): ChipAction[] {
   ];
 }
 
-/** A one-line label for a proposal chip, in a sentence; ids read as names (and money in the world's currency) when the world and state are given. */
-export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readonly<WorldState>): string {
+/**
+ * A one-line label for a proposal chip, in a sentence. With `view`, ids read as names (and money in
+ * the world's currency), but only what the POV knows. A reference (`REF_ROLES`) names someone or
+ * somewhere it knows (`knownRef`), or the place a `knows` teaches it (`heardPlace`); anyone or
+ * anything else, hidden or nowhere in the world, reads as "someone you don't know", "a place you
+ * don't know" or "something you don't know". Any other value reads as an entity the POV may be told
+ * of or a place it can see, else as the reply gave it. So a label reads the same whether or not the
+ * world holds what it names (DESIGN §11).
+ */
+export function describeProposal(p: JsonObject, view?: PovView): string {
+  const world = view?.world;
+  const state = view?.state;
   const raw = (k: string): string => (typeof p[k] === "string" || typeof p[k] === "number" ? String(p[k]) : "?");
+  const roles = typeof p.type === "string" ? own(REF_ROLES, p.type) : undefined;
   const s = (k: string): string => {
     const v = raw(k);
-    if (!world || !state) return v;
-    if (v === world.pov) return "you";
-    return state.entities[v]?.name ?? world.places[v]?.name ?? v;
+    if (!view) return v;
+    if (v === view.world.pov) return "you";
+    const role = roles ? own(roles, k) : undefined;
+    if (role !== undefined && typeof p[k] === "string" && v.trim() !== "") {
+      const heard = role === "fact" ? heardPlace(view, p) : null;
+      if (heard !== null) return own(view.world.places, heard)?.name ?? heard;
+      return knownRef(view, role, v)?.name ?? UNKNOWN_PHRASE[role];
+    }
+    if (hasOwn(view.state.entities, v)) return povMayKnow(view.registry, view.world, view.state, v) ? (own(view.state.entities, v)?.name ?? v) : v;
+    if (hasOwn(view.world.places, v)) return canSeePlace(view.registry, view.world, view.state, view.world.pov, v) ? (own(view.world.places, v)?.name ?? v) : v;
+    return v;
   };
-  // A sentence's subject: the POV reads "You", and takes "are", "know", "have".
+  // A sentence's subject: the POV reads "You", and takes "are", "know", "have"; someone it doesn't
+  // know reads "Someone you don't know".
   const subject = (k: string): string => {
     const who = s(k);
-    return who === "you" ? "You" : who;
+    return who === "you" ? "You" : Object.values(UNKNOWN_PHRASE).includes(who) ? `${who.charAt(0).toUpperCase()}${who.slice(1)}` : who;
   };
   const be = (who: string): string => (who === "You" ? "are" : "is");
   const whose = (k: string): string => {
@@ -3686,7 +3894,9 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
     case "condition": {
       // Sheets: {who, condition, clear?}; a bare field change (entity, field, delta) otherwise.
       if (typeof p.condition !== "string") {
-        const kind = state?.entities[raw("entity")]?.kind;
+        // A field's own label only on the sheet of someone the POV knows: its kind tells of them.
+        const known = view && typeof p.entity === "string" ? knownRef(view, "person", p.entity) : null;
+        const kind = known && state ? own(state.entities, known.id)?.kind : undefined;
         const label = kind && world ? own(world.kinds, kind)?.fields[raw("field")]?.label : undefined;
         return `${whose("entity")} ${fieldNoun(label, raw("field")).noun} ${change(Number(p.delta))}`;
       }

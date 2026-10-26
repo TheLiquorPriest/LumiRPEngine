@@ -201,6 +201,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     else timelapse = outcome;
   } else {
     const steps: TurnStep[] = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null }))] : [];
+    const heard = input.userTexts.join("\n");
     // With no action the loop runs once all the same: a fight under way takes its turns, and the turn its tick.
     for (let i = 0; i < Math.max(1, steps.length); i++) {
       const step = steps[i] ?? null;
@@ -225,11 +226,12 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         const claimed = step.claim ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
         if (claimed && step.claim) made = { entity: claimed.entity, name: step.claim.name, events: claimed.events };
         const params = claimed && step.claim ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
-        // Its picks in words as the POV knows them now, before the action gives away or uses up what it names.
+        // Its picks in words as the POV knows them now, before the action gives away or uses up what it
+        // names; the turn's own message counts as said, since the narrator reads it anyway (DESIGN §7).
         const def = findAction(reg, w.world, step.action);
-        before.picks = def ? actionWords(reg, w.world, w.state, def, params) : "";
+        before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard) : "";
         // An inferred check plays as Try something, carrying the world's own check (DESIGN §11).
-        resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
+        resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
         scene = sceneKey(w.world, w.state);
         // The rules see the claimed thing's making too, so a world rule can react to its mark.
         const done = w.events.slice(mark, mark + (made?.events ?? 0) + resolution.events.length);

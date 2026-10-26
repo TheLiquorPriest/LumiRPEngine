@@ -367,6 +367,19 @@ describe("the intent gate's card names no one hidden the player didn't name", ()
     expect(hidden?.label).toBe("Play Take: lantern?");
     expect(hidden?.label).toBe(none?.label);
   });
+
+  test("Edit opens the palette with a text pick only as the card shows it, the player's own words as in a world without them", async () => {
+    const read: JsonObject = { action: "buy", params: { item: "Vex Morrow's usual" } };
+    const edit = async (typed: string, puts: [string, JsonObject][]): Promise<unknown> => (await card(read, typed, puts))?.actions.find((a) => a.id === "edit")?.input;
+    // The read wrote someone hidden for "whatever the stranger had": the palette opens without it.
+    const unsaid = await edit("I buy whatever the stranger had.", [VEX]);
+    expect(unsaid).toMatchObject({ type: "action", action: "buy" });
+    expect(JSON.stringify(unsaid)).not.toMatch(/Vex|Morrow/);
+    const typed = "I buy Vex Morrow's usual.";
+    const own = await edit(typed, [VEX]);
+    expect(own).toMatchObject({ type: "action", action: "buy", params: { item: "Vex Morrow's usual" } });
+    expect(own).toEqual(await edit(typed, []));
+  });
 });
 
 describe("the intent gate's Edit and a claimed thing (DESIGN §9.4)", () => {

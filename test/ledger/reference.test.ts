@@ -6,12 +6,16 @@ import { hashJson } from "../../src/shared/hash";
 import type { EventRef, LedgerEvent, Marker, PostEntry, Rec } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
 import { resolveEdit } from "../../src/engine/edits";
+import { applyEffects } from "../../src/engine/effects";
 import { enginePack } from "../../src/engine/engine-pack";
 import type { ChainMessage, FoldInput, FoldOutput, FoldSnapshot, SnapshotStore } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
 import { computePaths, contentId, storedRecordHash } from "../../src/engine/ledger/path";
 import { referenceFold, type FoldTypes } from "../../src/engine/ledger/reference";
+import { playerLines } from "../../src/engine/player-events";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
+import { createRng } from "../../src/engine/rng";
+import { Working } from "../../src/engine/working";
 import { initialState } from "../../src/engine/world-state";
 import { POV, testPack, testWorld, testWorlds } from "../support/test-pack";
 
@@ -58,6 +62,27 @@ function shop(): ChainMessage[] {
   record(chain, 4, [use("lamp")]);
   return chain;
 }
+
+/**
+ * The test world with levels: the level follows XP (300 for Level 2, 900 for 3), max HP is 10 and 5
+ * a level, and Sam starts at Level 3 with HP 25 of 25, stored.
+ */
+function levelled(): WorldDoc {
+  const world = testWorld();
+  const person = world.kinds.person;
+  const sam = world.entities[POV];
+  if (!person || !sam) throw new Error("no person");
+  person.fields.xp = { type: "number", default: 0 };
+  person.fields.level = { type: "number", default: 1 };
+  person.fields.max_hp = { type: "number", derived: "10 + self.level * 5" };
+  person.fields.hp = { type: "number", label: "HP", pool: { max: "max_hp" } };
+  sam.fields = { ...sam.fields, xp: 1000, level: 3, hp: 25 };
+  world.ruleset = { progression: { character: { label: "Level", xpField: "xp", levelField: "level", thresholds: [0, 300, 900] } } };
+  return world;
+}
+
+/** Sam's level and HP in a fold. */
+const levelAndHp = (out: FoldOutput): unknown[] => [out.state.entities[POV]?.fields.level, out.state.entities[POV]?.fields.hp];
 
 describe("reference fold", () => {
   test("a chain without records folds to the initial state", () => {
@@ -295,5 +320,55 @@ describe("reference fold", () => {
     expect(out.messages[4]?.fold).toBe("view");
     expect(cashOf(out)).toBe(450);
     expect(out.keepReport.map((k) => k.status)).toEqual(edit.events.map(() => "dropped"));
+  });
+
+  test("a level-down held through a reply that dealt damage caps HP at the lower max without healing it, and says so (DESIGN §11)", () => {
+    const types = createRegistry([enginePack, testPack]);
+    const world = levelled();
+    const rev = hashJson(world);
+    const own = { worlds: (r: string) => (r === rev ? world : undefined), revision: rev };
+    // The GM takes Sam back to 200 XP while the reply streams: Level 1, whose max HP is 15.
+    const edit = resolveEdit(types, world, initialState(world, rev, types), [{ op: "set", entity: POV, field: "xp", value: 200 }], { gm: true, runSeed: "r" });
+    if ("rejection" in edit) throw new Error(edit.rejection.reason);
+    const chain = [reply("a0", "Morning."), user("u1", "spar"), reply("a1", "A hard blow.")];
+    // The reply deals 13 damage (HP 12), and the held edit lands after it.
+    const turn = record(chain, 2, [{ type: "add", entity: POV, field: "hp", delta: -13 }], { defHash: rev });
+    turn.post = [{ seq: 1, at: turn.path, kind: "fix", gm: true, events: edit.events }];
+    const out = both({ chain, ...own }, types);
+    expect(levelAndHp(out)).toEqual([1, 12]);
+    expect(out.violations).toEqual([]);
+    // The edit's line holds at HP 12 as at 15.
+    expect(playerLines(types, world, out.state, POV, edit.events)).toContain("Your HP is now at most 15");
+  });
+
+  test("a level-down rebased onto a swipe that dealt damage keeps the lower HP, while one an earlier build recorded folds as it did (DESIGN §11)", () => {
+    const types = createRegistry([enginePack, testPack]);
+    const world = levelled();
+    const rev = hashJson(world);
+    const own = { worlds: (r: string) => (r === rev ? world : undefined), revision: rev };
+    // The turn's own level-down, recorded where HP is still 25: Level 1, and HP capped at its max of 15.
+    const w = new Working(types, world, initialState(world, rev, types));
+    const down = applyEffects(types, w, [{ type: "add", args: { entity: POV, field: "xp", delta: -800 } }], { bindings: { self: POV }, rng: createRng("down") }).applied;
+    const chain = [reply("a0", "Morning."), user("u1", "rest"), reply("a1", "A quiet hour."), user("u2", "train"), reply("a2", "Out of practice.")];
+    record(chain, 2, [], { defHash: rev });
+    const later = record(chain, 4, down, { defHash: rev });
+    expect(levelAndHp(both({ chain, ...own }, types))).toEqual([1, 15]);
+    // A swipe of the reply before, where Sam takes 13 damage: the level-down is a rebased view on HP 12.
+    const a1 = chain[2];
+    if (!a1) throw new Error("no a1");
+    a1.swipes.push("A hard blow.");
+    a1.swipeId = 1;
+    record(chain, 2, [{ type: "add", entity: POV, field: "hp", delta: -13 }], { defHash: rev });
+    const out = both({ chain, ...own }, types);
+    expect(out.messages[4]?.fold).toBe("view");
+    expect(levelAndHp(out)).toEqual([1, 12]);
+    expect(out.keepReport).toEqual([]);
+    // As an earlier build recorded it, its HP an assignment: that record folds as it always did.
+    later.events = down.map((e): LedgerEvent => {
+      if (e.type !== "set") return e;
+      const { atMost: _cap, ...assigned } = e;
+      return assigned;
+    });
+    expect(levelAndHp(both({ chain, ...own }, types))).toEqual([1, 15]);
   });
 });

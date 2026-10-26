@@ -10,7 +10,7 @@ import { buildGmWorld } from "../engine/gm-view";
 import { buildMindsGm } from "../packs/minds/core/gm";
 import type { ChainMessage } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
-import { activeRecord } from "../engine/ledger/path";
+import { activeRecord, ownMessage } from "../engine/ledger/path";
 import { authorLines } from "../engine/player-events";
 import { readPass } from "../engine/read-pass";
 import type { Registry } from "../engine/registry-impl";
@@ -48,9 +48,12 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
   });
 }
 
-/** The latest user message and the reply before it, as a turn's fidelity reads them; a GM's minds run picks Live and Near by them too. */
+/**
+ * The texts the next turn's fidelity reads, as its pre phase reads them: its own message
+ * (`ownMessage`), none when the chat ends with a reply, since a Send with nothing typed adds none,
+ * and the reply before it. A GM's minds run picks Live and Near by them too.
+ */
 export function latestTexts(observed: readonly ChainMessage[]): { user: string; reply: string } {
   const text = (m: ChainMessage | undefined): string => (m ? (m.swipes[m.swipeId] ?? "") : "");
-  const lastUser = observed.findLastIndex((m) => m.isUser);
-  return { user: text(observed[lastUser]), reply: text(observed.slice(0, lastUser < 0 ? observed.length : lastUser).findLast((m) => !m.isUser)) };
+  return { user: text(ownMessage(observed)), reply: text(observed.findLast((m) => !m.isUser)) };
 }

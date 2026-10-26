@@ -64,13 +64,21 @@ function nameOf(ctx: ReadContext, id: EntityId): string {
 
 const setDef: EventTypeDef<SetEvent> = {
   type: "set",
-  validate: (e, ctx) => (!hasEntity(ctx.state, e.entity) ? reject("missing_entity", `no entity ${e.entity}`) : safeKey(e.field) ? null : reject("bad_field", "not a field name")),
+  validate: (e, ctx) => {
+    if (!hasEntity(ctx.state, e.entity)) return reject("missing_entity", `no entity ${e.entity}`);
+    if (!safeKey(e.field)) return reject("bad_field", "not a field name");
+    return e.atMost && (typeof e.value !== "number" || !Number.isFinite(e.value)) ? reject("bad_value", "a cap is a finite number") : null;
+  },
   apply: (e, state) => {
     const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
-    if (entity && safeKey(e.field)) entity.fields[e.field] = e.value;
+    if (!entity || !safeKey(e.field)) return;
+    // A cap lowers only: a number already at or below it stays (`SetEvent.atMost`).
+    const current = entity.fields[e.field];
+    if (e.atMost && typeof current === "number" && typeof e.value === "number" && current <= e.value) return;
+    entity.fields[e.field] = e.value;
   },
   touches: (e) => [{ entity: e.entity, field: e.field }],
-  describe: (e, ctx) => `${nameOf(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? `is now ${String(e.value)}` : "changed"}`,
+  describe: (e, ctx) => `${nameOf(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? `is ${e.atMost ? "at most" : "now"} ${String(e.value)}` : "changed"}`,
 };
 
 const addDef: EventTypeDef<AddEvent> = {

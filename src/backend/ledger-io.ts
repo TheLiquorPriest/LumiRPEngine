@@ -520,6 +520,12 @@ interface Gate {
    * that stopped the generation is still the chat's before it prepares anything on it.
    */
   running: string | null;
+  /**
+   * Text for a kept empty reply came late (`lateReply`): its read's id, from the moment it takes the
+   * kept turn until that read ran. The gate stays meanwhile, so a turn the player leaves for another
+   * swipe before the read runs is kept again on it.
+   */
+  reading: string | null;
 }
 
 /**
@@ -860,6 +866,7 @@ export class LedgerService {
     const generationId = `late-${crypto.randomUUID()}`;
     p.generationId = generationId;
     gate.prepared = null;
+    gate.reading = generationId;
     const at = { chatId, userId, turn: generationId };
     void this.run(chatId, userId, async (core, observed) => {
       const saved = observed.find((m) => m.id === message.id);
@@ -883,6 +890,8 @@ export class LedgerService {
       core.sync(observed);
       await this.hooks?.adopted(chatId, userId, p.id, generationId);
       await this.commitReply(core, observed, chatId, userId, generationId, message.id, content);
+    }).finally(() => {
+      if (gate.reading === generationId) gate.reading = null;
     });
     return true;
   }
@@ -1070,12 +1079,12 @@ export class LedgerService {
     if (!worldId) return null;
     const raced = this.gates.get(chatId);
     if (raced) return raced.userId === userId ? raced : null;
-    const gate: Gate = { userId, worldId, mirror: null, epoch: ++this.epochs, halt: null, prepared: null, taken: null, running: null };
+    const gate: Gate = { userId, worldId, mirror: null, epoch: ++this.epochs, halt: null, prepared: null, taken: null, running: null, reading: null };
     this.gates.set(chatId, gate);
     for (const [id, g] of this.gates) {
       if (this.gates.size <= OPEN_CHATS_CAP * 8) break;
-      // A gate holding a stopped generation, its engine run, a prepared turn or a taken one stays: those live only here.
-      if (id !== chatId && !g.prepared && !g.halt && !g.taken && g.running === null) this.gates.delete(id);
+      // A gate holding a stopped generation, its engine run, a prepared turn, a taken one or a late reply's read stays: those live only here.
+      if (id !== chatId && !g.prepared && !g.halt && !g.taken && g.running === null && g.reading === null) this.gates.delete(id);
     }
     return gate;
   }
@@ -1627,9 +1636,9 @@ export class LedgerService {
       this.chats.set(chatId, slot);
       for (const [id, s] of this.chats) {
         if (this.chats.size <= OPEN_CHATS_CAP) break;
-        // A chat keeps its slot from the guard's stop to the end of its engine run, while its prepared turn waits and while a reply holds that turn: the turn lives only in memory.
+        // A chat keeps its slot from the guard's stop to the end of its engine run, while its prepared turn waits, while a reply holds that turn and until a late reply's read runs: the turn lives only in memory.
         const gate = this.gates.get(id);
-        if (id !== chatId && s.ops === 0 && !s.core.inFlight && !gate?.prepared && !gate?.halt && !gate?.taken && !gate?.running) this.chats.delete(id);
+        if (id !== chatId && s.ops === 0 && !s.core.inFlight && !gate?.prepared && !gate?.halt && !gate?.taken && !gate?.running && !gate?.reading) this.chats.delete(id);
       }
       return slot;
     })();

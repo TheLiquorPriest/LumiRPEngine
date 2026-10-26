@@ -19,7 +19,7 @@ import type { Registry } from "./registry-impl";
 import { bandOf, fieldDef, GONE_FIELD, kindIs, placeOfEntity } from "./scope";
 import type { WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
-import { canSeeEntity, canSeePlace, eventVisible, findLeaks, knows, namesAny, secretLoreTitles, trackShown, unrevealedSecrets, unseenPlaceNames } from "./visibility";
+import { canSeeEntity, canSeePlace, couldSeeEntity, eventVisible, findLeaks, knows, namesAny, secretLoreTitles, trackShown, unrevealedSecrets, unseenPlaceNames } from "./visibility";
 
 /**
  * Event types that are engine or pack bookkeeping: never player-facing lines. Built on first use:
@@ -319,9 +319,10 @@ function valueText(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, 
  * A field's change in a sentence (DESIGN §7, Player-facing wording): who, what the field is and the
  * value in words, never the form's label glued to a value. A place and a bed, a home and an owner
  * read as what they mean ("Danny Okafor now sleeps at Alder Automotive (Lakeshore County › Port
- * Alder)"); any other field as itself ("Festival clipboard's condition is now worn").
+ * Alder)"); any other field as itself ("Festival clipboard's condition is now worn"); a cap
+ * (`atMost`) as the most it can be ("Your HP is now at most 15"), true wherever it was replayed.
  */
-function setLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, words: Words, entity: EntityId, field: string, value: JsonValue): string | null {
+function setLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, words: Words, entity: EntityId, field: string, value: JsonValue, atMost: boolean): string | null {
   const who = words.name(entity);
   const many = plural(who);
   const ref = (v: string): string => (hasOwn(world.places, v) ? words.place(v) : words.thing(v));
@@ -360,7 +361,7 @@ function setLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, wo
     return shown.length === 0 ? `${whose} ${noun} are now none` : `${whose} ${noun} are now ${listWords(shown)}`;
   }
   const v = field === "temp_c" && typeof value === "number" ? formatTemperature(value) : valueText(reg, world, state, words, kind, field, value);
-  return v === null ? null : `${whose} ${noun} is now ${v}`;
+  return v === null ? null : `${whose} ${noun} is now ${atMost ? "at most " : ""}${v}`;
 }
 
 /** A relation's change in a sentence: who now knows, carries, holds, owns, wears or belongs to whom. */
@@ -407,24 +408,25 @@ function relabel(line: string, refs: readonly Ref[], world: WorldDoc, state: Rea
   return out;
 }
 
-/** Labels only the GM may see: hidden tracks' labels and their stage labels of six characters or more. */
-export function hiddenTrackLabels(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
+/** Labels only the GM may see: hidden tracks' labels and, with `stages`, their stage labels of six characters or more. */
+export function hiddenTrackLabels(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, stages = true): string[] {
   const out: string[] = [];
   for (const [id, t] of Object.entries(world.tracks)) {
     if (trackShown(reg, world, state, pov, id)) continue;
     out.push(t.label);
-    for (const s of Object.values(t.stages)) if (s.label.length >= 6) out.push(s.label);
+    if (stages) for (const s of Object.values(t.stages)) if (s.label.length >= 6) out.push(s.label);
   }
   return out;
 }
 
 /**
  * The names of the people and the things the POV can't see, apart: a person is named by any word of
- * their name, a thing only by its whole name (`namesAny`).
+ * their name, a thing only by its whole name (`namesAny`). One gone from the world that the POV
+ * could see (`couldSeeEntity`: a coffee drunk, a bill stopped) isn't hidden, so its name stays.
  */
 export function hiddenEntityNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): { people: string[]; things: string[] } {
   const out: { people: string[]; things: string[] } = { people: [], things: [] };
-  for (const [id, e] of Object.entries(state.entities)) if (!canSeeEntity(reg, world, state, pov, id)) (kindIs(reg, world, e.kind, "person") ? out.people : out.things).push(e.name);
+  for (const [id, e] of Object.entries(state.entities)) if (!couldSeeEntity(reg, world, state, pov, id)) (kindIs(reg, world, e.kind, "person") ? out.people : out.things).push(e.name);
   return out;
 }
 
@@ -440,13 +442,16 @@ export function hiddenNames(reg: Registry, world: WorldDoc, state: Readonly<Worl
  * their name ("Vex is watching" names Vex Morrow, while a hidden Dan doesn't make "dangerous" a
  * leak); a hidden place or thing, a track's label and a secret entry's title only by all their words
  * in order. A word or name `heard` says too doesn't count: whoever reads the text has seen it said
- * (the player's own message, for what the player reads). The names are gathered once, so one check
- * reads many texts, and once per read pass (DESIGN §9.6), where every section checks its lines.
+ * (the player's own message, for what the player reads). With `stages` false a hidden track counts
+ * by its own label only, for a step that never reads a track's stages, where a stage's everyday
+ * words ("Whispers", "Take a breath") name nothing. The names are gathered once, so one check reads
+ * many texts, and once per read pass (DESIGN §9.6), where every section checks its lines.
  */
-export function hiddenNameCheck(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): (text: string, heard?: string) => boolean {
-  return passMemo([state, world, reg], `visibility.hidden_names\u0000${pov}`, () => {
+export function hiddenNameCheck(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, opts: { stages?: boolean } = {}): (text: string, heard?: string) => boolean {
+  const stages = opts.stages ?? true;
+  return passMemo([state, world, reg], `visibility.hidden_names\u0000${pov}\u0000${stages}`, () => {
     const hidden = hiddenEntityNames(reg, world, state, pov);
-    const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
+    const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov, stages), ...secretLoreTitles(reg, world, state)];
     return (text: string, heard = "") => namesAny(text, hidden.people, labels, heard);
   });
 }
@@ -469,7 +474,7 @@ function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, po
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
-      return setLine(reg, world, state, words, e.entity, e.field, value);
+      return setLine(reg, world, state, words, e.entity, e.field, value, e.atMost === true);
     }
     case "add": {
       if (INTERNAL_FIELD.test(e.field)) return null;

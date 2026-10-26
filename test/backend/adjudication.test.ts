@@ -305,6 +305,17 @@ describe("the judge step and people the POV can't see", () => {
     expect(await keptReason("Rotten mortar makes this climb risky", { lore })).toBe("");
   });
 
+  test("a reason saying what else leads to a secret entry the judge may read (an alias, a key) is dropped, unless the player's message says it too", async () => {
+    const lore = { rot: { id: "rot", title: "Rotten mortar", aliases: ["the soft course"], content: "The east wall was never repointed after the flood, and it crumbles under any weight.", keys: ["ivy"], links: [], secret: true, gate: "self.cash > 100000", audience: ["judge"] } };
+    const ivy = "The ivy hides loose bricks, so it is risky";
+    expect(await keptReason(ivy, { lore })).toBe("");
+    expect(await keptReason("Mind the soft course halfway up", { lore })).toBe("");
+    // The player's own words never blank it: it stands, as in a world without the entry.
+    const typed = "I climb where the ivy grows thickest.";
+    expect(await keptReason(ivy, { lore }, typed)).toBe(ivy);
+    expect(await keptReason(ivy, {}, typed)).toBe(ivy);
+  });
+
   test("a person is named by any word of their name; a place, a thing, a label or a title only by all its words in order", () => {
     expect(namesAny("Vex's knife glints", ["Vex Morrow"])).toBe(true);
     expect(namesAny("Morrow's men are near", ["Vex Morrow"])).toBe(true);

@@ -212,6 +212,8 @@ export interface ResolveOptions {
   runSeed?: string;
   /** The turn's recorded `judge` answer (DESIGN §11): the approach's rating, and the story's odds under narrative authority. */
   judgement?: Judgement | null;
+  /** The turn's own messages, which the narrator reads anyway: an inferred check's attempt names nothing hidden by words they say too (DESIGN §7). */
+  heard?: string;
 }
 
 /**

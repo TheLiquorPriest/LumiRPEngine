@@ -83,6 +83,17 @@ export function activeText(m: ChainMessage): string {
   return m.swipes[m.swipeId] ?? "";
 }
 
+/**
+ * A turn's own message: the user message right before its reply (`before` is the chain up to the
+ * reply), as the turn's plan reads its words (`planBase`), or none for a new reply after a reply. The
+ * pre phase reads it, the chips after the reply, a mind's recall and the GM's fidelity go by it, so
+ * the message an earlier turn played is never read or counted again for a later one.
+ */
+export function ownMessage<M extends Pick<ChainMessage, "isUser">>(before: readonly M[]): M | undefined {
+  const tail = before.at(-1);
+  return tail?.isUser ? tail : undefined;
+}
+
 export interface PathPoint {
   parentPath: PathHash;
   path: PathHash;

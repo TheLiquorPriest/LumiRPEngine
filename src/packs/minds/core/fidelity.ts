@@ -42,7 +42,12 @@ function words(text: string): string[] {
   return text.toLowerCase().replace(/['’]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
-/** Whether the texts name someone: their whole name, or a word of it that singles them out (three letters or more, no honorific). */
+/** Whether a word of a name singles someone out on its own: three letters or more, and no honorific or particle. */
+export function singlesOut(word: string): boolean {
+  return word.length >= 3 && !NAME_FILLER[word];
+}
+
+/** Whether the texts name someone: their whole name, or a word of it that singles them out (`singlesOut`). */
 export function namedIn(name: string, said: readonly string[]): boolean {
   const own = words(name);
   if (own.length === 0 || said.length === 0) return false;
@@ -50,7 +55,7 @@ export function namedIn(name: string, said: readonly string[]): boolean {
   const joined = ` ${said.join(" ")} `;
   if (joined.includes(` ${whole} `)) return true;
   const present = new Set(said);
-  return own.some((w) => w.length >= 3 && !NAME_FILLER[w] && present.has(w));
+  return own.some((w) => singlesOut(w) && present.has(w));
 }
 
 /** Whether a text names someone, as `namedIn` reads a turn's words: the reply's read checks whom a change it reads is about. */

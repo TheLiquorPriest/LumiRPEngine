@@ -21,6 +21,7 @@ import { stepConfigOf } from "../shared/settings";
 import type { StepPurpose, WorldDoc } from "../shared/world";
 import { parseMoneyInput } from "../shared/money";
 import { calendarOf, clockOfStamp, formatClock, nextTimeOfDay } from "../engine/calendar";
+import { ownMessage } from "../engine/ledger/path";
 import { feedOf } from "../engine/feed";
 import { loreReadable } from "../engine/lore";
 import { pinsFor } from "../engine/lore-pins";
@@ -73,6 +74,8 @@ export interface RunMindsInput {
   guidance?: string;
   /** The chat's messages, when the caller has read them (recall reads them otherwise). */
   messages?: readonly HostMessage[];
+  /** The reply the turn replaces, a Regenerate's or a swipe's target, which the chat still holds: Recent chat stops before it (`chatBefore`). */
+  replaces?: MessageId;
   /** The trace's phase: the turn's pre phase, or a skip's beat. */
   phase?: MindCallTrace["phase"];
   /** How many calls run at once; absent, all of them. */
@@ -262,11 +265,19 @@ async function chatMessages(deps: MindsDeps, chatId: ChatId, userId: UserId): Pr
 }
 
 /**
- * The chat before the turn a minds call is about (DESIGN §24.5, Recent chat): with a turn in hand (a
- * player's message, or a time skip's, whose reply is being written or was just written), the
- * messages before its message, which the call reads as the moment; between turns, all of them.
+ * The chat before the turn a minds call is about (DESIGN §24.5, Recent chat), which the call reads as
+ * the moment or the turn. When the chat holds the turn's reply (`reply`: the one just written, or the
+ * one a Regenerate replaces), the chat before that reply, less the turn's own message (`ownMessage`):
+ * a reply sent after a reply has none, so the messages before it stay. Otherwise a turn in hand (a
+ * player's message, or a time skip's) ends the chat with its message, so the chat before the player's
+ * last message. Between turns, all of it.
  */
-export function chatBefore(messages: readonly HostMessage[], inTurn: boolean): readonly HostMessage[] {
+export function chatBefore(messages: readonly HostMessage[], inTurn: boolean, reply?: MessageId): readonly HostMessage[] {
+  const written = reply === undefined ? -1 : messages.findIndex((m) => m.id === reply);
+  if (written >= 0) {
+    const before = messages.slice(0, written);
+    return ownMessage(before) ? before.slice(0, -1) : before;
+  }
   if (!inTurn) return messages;
   const at = messages.findLastIndex((m) => m.isUser);
   return at < 0 ? messages : messages.slice(0, at);
@@ -298,8 +309,9 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
   const messages = input.messages ?? (await chatMessages(deps, input.chatId, userId));
   const reads = settings.minds.reads;
   const phase = input.phase ?? (input.moment.kind === "beat" ? "skip" : "pre");
-  // A turn is in hand before its reply and through a time skip; a GM's run between turns has none.
-  const history = reads.history.on ? chatBefore(messages, phase === "skip" || input.moment.kind === "beat" || input.moment.user.trim() !== "") : undefined;
+  // A turn is in hand before its reply and through a time skip; a GM's run between turns has none. A
+  // Regenerate's turn has its reply too, the one it replaces, which its minds don't read again.
+  const history = reads.history.on ? chatBefore(messages, phase === "skip" || input.moment.kind === "beat" || input.moment.user.trim() !== "", input.replaces) : undefined;
   // The lore pinned to each of them, to every mind (the mind step's; at a time skip's beat, the beats
   // step's too) and to where they are (DESIGN §24.5), each book entry and whole book read once, when
   // minds read it.
@@ -420,6 +432,8 @@ export interface PreMindsInput {
   guidance?: string;
   /** What minds answered in a failed engine run from this same state (`RunMindsInput.kept`). */
   kept?: ReadonlyMap<EntityId, MindEventData>;
+  /** The reply the turn replaces, a Regenerate's or a swipe's target (`RunMindsInput.replaces`). */
+  replaces?: MessageId;
 }
 
 /**
@@ -458,7 +472,7 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
   }
   // Each thinks for their own refresh reason; the moment itself is the player's message.
   const moment: MindMoment = { kind: "turn", at: thinking.state.clock, reason: "", user: input.user, reply: input.reply };
-  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), phase: "pre", spared: true });
+  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), ...(input.replaces !== undefined ? { replaces: input.replaces } : {}), phase: "pre", spared: true });
   return { events: [opened, ...ran.events], traces: ran.traces, ...(ran.report ? { report: ran.report } : {}) };
 }
 
@@ -592,8 +606,9 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   const reads = settings.minds.reads;
   const messages = remembering.length > 0 ? await chatMessages(deps, input.chatId, userId) : [];
   const moment: MindMoment = { kind: "turn", at: state.clock, reason: "after the reply", user: input.user, reply: input.reply };
-  // Recent chat, while minds read it, is the chat before the turn just written, which each memory reads as the turn.
-  const history = reads.history.on && remembering.length > 0 ? chatBefore(messages, true) : undefined;
+  // Recent chat, while minds read it, is the chat before the turn just written, which each memory reads
+  // as the turn: before its reply and its own message, so a reply sent after a reply keeps the one before.
+  const history = reads.history.on && remembering.length > 0 ? chatBefore(messages, true, input.messageId) : undefined;
   // The lore pinned to the memory step (DESIGN §24.5), its only lore, read once for everyone it remembers for.
   const memoryPins = remembering.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["memory"]), userId) : [];
   const remembered = new Map(
@@ -640,7 +655,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
     : [];
   const consolidatePins = due.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["consolidate"]), userId) : [];
   // A consolidation reads the same recent chat as the memories, read now if no memory read the chat.
-  const before = reads.history.on && due.length > 0 ? (history ?? chatBefore(await chatMessages(deps, input.chatId, userId), true)) : undefined;
+  const before = reads.history.on && due.length > 0 ? (history ?? chatBefore(await chatMessages(deps, input.chatId, userId), true, input.messageId)) : undefined;
   const consolidate = async (id: EntityId, fold: readonly MindNote[], at: Readonly<WorldState>, signal: AbortSignal): Promise<{ event: LedgerEvent | null; trace: MindCallTrace | null }> => {
     const prompt = mindPrompt("consolidate", world, settings.minds, varsFor(world, at, id));
     const asked = consolidateContext({ reg, state: at, world, who: id, reads, pinned: consolidatePins, hideJson: settings.hideJsonBlocks, ...(before ? { history: before } : {}) }, fold);

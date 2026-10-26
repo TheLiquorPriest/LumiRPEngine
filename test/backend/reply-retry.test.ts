@@ -4,7 +4,8 @@
 // card, the reply's or the engine run's, starts its reply the way the stopped one started.
 
 import { describe, expect, test } from "bun:test";
-import { toChain } from "../../src/backend/ledger-io";
+import type { ContextHandlerInput, ContextVerdict } from "../../src/backend/host";
+import { OPEN_CHATS_CAP, toChain } from "../../src/backend/ledger-io";
 import type { Chip } from "../../src/shared/state-view";
 import { press } from "../support/chip-press";
 import type { AssembledEntry, Generation } from "../support/fake-host";
@@ -67,6 +68,29 @@ async function emptySwipe(rig: Rig, chatId: string): Promise<{ replyId: string; 
   await rig.host.finish(empty, "");
   expect((await card(rig, chatId))?.label).toBe("The reply came back empty");
   return { replyId: reply.id, played };
+}
+
+/** What the fake host keeps of the guard it was given: the context handler Lumiverse calls before a generation. */
+interface GuardHolder {
+  contextHandler: ((input: ContextHandlerInput, signal: AbortSignal) => Promise<ContextVerdict>) | null;
+}
+
+/** More world chats than the guard keeps state for, each opened by a dry run (Lumiverse's preset check). */
+async function openMany(rig: Rig): Promise<() => Promise<void>> {
+  const worldId = await rig.newWorld("Elsewhere");
+  const chats: string[] = [];
+  for (let n = 0; n <= OPEN_CHATS_CAP * 8; n++) {
+    const chatId = rig.host.createChat("Hello.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    chats.push(chatId);
+  }
+  // The fake host keeps its registered context handler in a private field; the test calls it as the host does.
+  const holder = rig.host as unknown as GuardHolder;
+  const guard = holder.contextHandler;
+  if (!guard) throw new Error("no guard");
+  return async () => {
+    for (const chatId of chats) await guard({ chatId, userId: rig.host.userId, generationType: "normal", dryRun: true, connectionId: null, personaId: null }, new AbortController().signal);
+  };
 }
 
 /** The player's message, and a reply to it that fails with a provider error before anything streams: what its prompt carried. */
@@ -201,6 +225,30 @@ describe("a reply that fails keeps its engine turn", () => {
     expect((await recordOf(rig, chatId, replyId, 0))?.seq).toBe(played);
     expect(await card(rig, chatId)).toBeUndefined();
   });
+
+  test("late text whose read waits behind the chat's queue while the player's other chats open: back on the played reply before it runs, the turn stays kept with its card", async () => {
+    const { rig, chatId } = await fullChat();
+    const { replyId, played } = await emptySwipe(rig, chatId);
+    const open = await openMany(rig);
+    const calls = rig.host.quietCalls.length;
+    // The chat's queue is busy, so the late text's read waits; the player is back on the played reply
+    // and every other chat is opened before it runs.
+    const idle = rig.host.idle;
+    rig.host.idle = async () => undefined;
+    const busy = Promise.withResolvers<void>();
+    const held = rig.rt.ledger.with(chatId, rig.host.userId, () => busy.promise);
+    rig.host.editMessage(chatId, replyId, "A bell rings in the back.");
+    rig.host.navigate(chatId, replyId, 0);
+    await rig.host.settle();
+    await open();
+    busy.resolve();
+    await held;
+    rig.host.idle = idle;
+    await rig.host.settle();
+    expect(readsSince(rig, calls)).toEqual([]);
+    expect((await recordOf(rig, chatId, replyId, 0))?.seq).toBe(played);
+    expect((await card(rig, chatId))?.label).toBe("The reply came back empty");
+  }, 30_000);
 
   test("a failed swipe of a reply keeps its turn for that reply: the next swipe takes it", async () => {
     const { rig, chatId } = await fullChat();

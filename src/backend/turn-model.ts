@@ -110,7 +110,7 @@ export interface ReadChip {
 /**
  * An action `interpret` read whose params name nothing in the world that fits (DESIGN §9.4): its
  * label and why, as its decline chip tells the player (`reason`, which may echo their own words)
- * and as the next reply is told it (`told`, which names nothing hidden, the player's words included).
+ * and as the next reply is told it (`told`, one wording whatever the read named, unless the POV knows it).
  */
 export interface UnfitAction {
   label: string;

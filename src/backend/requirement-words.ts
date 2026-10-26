@@ -19,8 +19,9 @@ interface RequirementShape {
 /** Most specific first: the first shape a requirement matches words it, in either use. */
 const SHAPES: readonly RequirementShape[] = [
   { shape: /\bto\s*!=\s*here\b/, needs: "{p} isn't where you are" },
-  // A vehicle driven to where it already stands (`drive`): that's a walk, not a drive.
-  { shape: /\bplace\(\w+\)\s*!=\s*\w+/, needs: "{p} isn't at {q} already", fails: "it's there already, so walk there" },
+  // The drive action's vehicle at the place already (`drive`): that's a walk, not a drive. Only
+  // its own form, so an authored `place(x) != here` keeps its ordinary words.
+  { shape: /\bplace\(vehicle\)\s*!=\s*to\b/, needs: "{p} isn't at {q} already", fails: "it's there already, so walk there" },
   { shape: /\broute_exists\(/, needs: "a way from here to {p}" },
   { shape: /\bgrid_reachable\(/, needs: "a square of this grid you can walk to" },
   { shape: /\blevel\.(\w+)\s*>=/, needs: "this world simulates it in enough detail", fails: "this world doesn't simulate that in enough detail" },

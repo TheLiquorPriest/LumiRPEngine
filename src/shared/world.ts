@@ -1023,8 +1023,8 @@ export type SuppressedSource =
  * A progression (DESIGN §11): experience in one field, the level in another, and the thresholds
  * between them. The level follows the XP, both ways: after an effect changes an entity's XP, the
  * engine raises its level to the last threshold reached one level at a time, running `onLevel` for
- * each, or lowers it straight there, running nothing, with any pool then above its lower max set
- * down to it. Nothing else writes the level.
+ * each, or lowers it straight there, running nothing, with any pool then above its lower max capped
+ * at it. Nothing else writes the level.
  */
 export interface ProgressionDef {
   label: string;

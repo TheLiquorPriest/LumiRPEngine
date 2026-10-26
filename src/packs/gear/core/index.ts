@@ -18,7 +18,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import { hashParts } from "../../../shared/hash";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable } from "../../../shared/tables";
-import type { EffectSpec, EntityDef, KindDef, WorldCurrency, WorldDoc } from "../../../shared/world";
+import type { ActionDef, EffectSpec, EntityDef, KindDef, WorldCurrency, WorldDoc } from "../../../shared/world";
 import { calendarOf, clockOfPhrase } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
@@ -98,17 +98,52 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
 const PRESENT_GEAR_CAP = 6;
 
 /**
- * The authored effects that move a thing through `transfer`, by the argument naming what they move
- * and the one naming what it goes into. A kit's piece comes from the kit (`gear.take_piece`), so it
- * names no thing; one the world puts in a kit is among the world's contents.
+ * The authored effects that move a thing, by the argument naming what they move and the one naming
+ * what it goes into: each through `transfer`, and `gear.receive` bringing a new thing into being
+ * held by its `to`. A kit's piece comes from the kit (`gear.take_piece`) and a received thing is the
+ * gear pack's own, so neither names a thing of the world's; one the world puts in a kit is among its
+ * contents. `gear.lend` moves only a thing carried or with no place (a parked vehicle stays put), so
+ * it counts only in an action that requires the actor to carry the thing it lends (`carried`).
  */
-const MOVES: Record<string, { thing?: string; into: string }> = { "gear.transfer": { thing: "item", into: "to" }, "gear.give": { thing: "item", into: "to" }, "gear.take_piece": { into: "to" } };
+const MOVES: Record<string, { thing?: string; into: string; carried?: string }> = {
+  "gear.transfer": { thing: "item", into: "to" },
+  "gear.give": { thing: "item", into: "to" },
+  "gear.take_piece": { into: "to" },
+  "gear.receive": { into: "to" },
+  "gear.lend": { thing: "item", into: "to", carried: "item" },
+};
+
+/** The names an effect's argument reads as its scope's own (`evalArg`): its bindings, never an entity's id. */
+const BOUND: Record<string, true> = { self: true, actor: true, target: true, owner: true };
+
+/** The names a formula reads as its scope's own before an entity's id (`scopeEnv`): bindings, vars and the clock. */
+const FORMULA_NAMES: Record<string, true> = { ...BOUND, here: true, event: true, track: true, level: true, from: true, roll: true, params: true, difficulty: true, clock: true, minute: true, hour: true, day: true, weekday: true, date: true, month: true, year: true, daypart: true };
+
+/**
+ * The one name an effect's argument reads, or null when it reads no single name: a name as written,
+ * or a formula that is only a name (`=box`, `=params.box`). A formula's `params.` names a parameter.
+ */
+function argName(arg: JsonValue | undefined): { name: string; formula: boolean; param: boolean } | null {
+  if (typeof arg !== "string") return null;
+  if (!arg.startsWith("=")) return arg === "" ? null : { name: arg, formula: false, param: false };
+  const m = /^\s*(params\.)?([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(arg.slice(1));
+  return m?.[2] === undefined ? null : { name: m[2], formula: true, param: m[1] !== undefined };
+}
+
+/** A requirement that is only `carries(self, <name>)` (or the actor's, or `params.<name>`): the name it requires carried. */
+const CARRIES = /^\s*carries\(\s*(?:self|actor)\s*,\s*(?:params\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*$/;
+
+/** Whether an action requires its actor to carry what `name` names, so a lend of it certainly hands it over (`lend`: a carried thing changes hands). */
+function requiresCarried(action: ActionDef, name: string): boolean {
+  return action.requires.some((req) => typeof req === "string" && CARRIES.exec(req)?.[1] === name);
+}
 
 /**
  * The kinds of the world's own that it moves things of, and that it moves things into (DESIGN §7):
  * each thing it puts inside another entity, and each authored move (`MOVES`). Each kind keeps its
- * first case, in words. An argument names an action's parameter when one has the name, a binding
- * winning as `evalArg` reads it (its kind), else an entity (its own kind).
+ * first case, in words. An argument is read as the engine reads it: an action's parameter by its
+ * name (its kind), else the scope's own names (the actor, the event, the clock) name no kind here,
+ * else an entity by its id; a formula only when it is one name, and `pov` as the POV.
  */
 function authoredMoves(world: WorldDoc): { things: Map<string, string>; holders: Map<string, string> } {
   const things = new Map<string, string>();
@@ -127,15 +162,21 @@ function authoredMoves(world: WorldDoc): { things: Map<string, string>; holders:
   for (const { path, effects } of effectLists(world)) {
     const action = path.startsWith("actions.") ? own(world.actions, path.split(".")[1] ?? "") : undefined;
     const named = (arg: JsonValue | undefined): { kind: string | undefined; words: string } | null => {
-      if (typeof arg !== "string" || arg.startsWith("=")) return null;
-      const param = action ? own(action.params, arg) : undefined;
-      if (param) return { kind: param.type === "ref" ? param.ref : undefined, words: `its ${param.label ?? arg}` };
-      const e = own(world.entities, arg);
-      return { kind: e?.kind, words: e?.name ?? arg };
+      const at = argName(arg);
+      if (!at) return null;
+      const param = action ? own(action.params, at.name) : undefined;
+      if (param) return { kind: param.type === "ref" ? param.ref : undefined, words: `its ${param.label ?? at.name}` };
+      if (at.param || hasOwn(at.formula ? FORMULA_NAMES : BOUND, at.name)) return null;
+      const e = own(world.entities, at.formula && at.name === "pov" ? world.pov : at.name);
+      return e ? { kind: e.kind, words: e.name } : null;
     };
     for (const spec of effects) {
       const move = hasOwn(MOVES, spec.type) ? MOVES[spec.type] : undefined;
       if (!move) continue;
+      if (move.carried !== undefined) {
+        const carried = argName(spec.args?.[move.carried]);
+        if (!action || !carried || !requiresCarried(action, carried.name)) continue;
+      }
       const by = action?.label ?? path;
       const into = named(spec.args?.[move.into]);
       if (into) note(holders, into.kind, `${by} gives things to ${into.words}`);
@@ -1029,7 +1070,7 @@ export const gearPack: PackDef = {
             severity: "warning" as const,
             code: "gear.holders",
             path: `kinds.${kind}`,
-            message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) holds things in this world (${why}) but isn't a container, a vehicle or a person, so nothing can be put in it: a transfer, a gift or a GM's Put inside into it is refused. Set its Extends to container, or to a kind built on one.`,
+            message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) holds things in this world (${why}) but isn't a container, a vehicle or a person, so a transfer, a gift or a GM's Put inside into it is refused. Set its Extends to container, or to a kind built on one.`,
           }));
       },
     });

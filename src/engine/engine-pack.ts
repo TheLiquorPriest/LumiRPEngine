@@ -284,9 +284,10 @@ const events: EventTypeDef<PackEvent>[] = [
   },
   {
     // `n`: how many of the stage's hints are open with this one, as the player saw them when they asked
-    // (DESIGN §10). The count only rises to it, so a second tap on the same "Show a hint", sent before
-    // the first one showed (both held through a reply), opens nothing more. One recorded without it
-    // opens one more, as it always has.
+    // (DESIGN §10). Each opens one more, and only while fewer than `n` are open: a second tap on the
+    // same "Show a hint", sent before the first one showed (both held through a reply), opens nothing
+    // more, an Undo of either of two hints opened closes one, and a rebased view that lost an earlier
+    // one never jumps to `n`. One recorded without it opens one more, as it always has.
     type: ENGINE_EVENTS.hint,
     validate: (e, ctx) => {
       const missing = need(e, "track", "stage");
@@ -298,7 +299,7 @@ const events: EventTypeDef<PackEvent>[] = [
     },
     apply: (e, state) => {
       const n = e.data.n;
-      countStage(state, "hints", str(e, "track"), str(e, "stage"), (open) => (typeof n === "number" ? Math.max(open, n) : open + 1));
+      countStage(state, "hints", str(e, "track"), str(e, "stage"), (open) => (typeof n === "number" ? (open < n ? open + 1 : open) : open + 1));
     },
     describe: (e) => `hint opened on ${str(e, "track")}`,
   },

@@ -20,10 +20,10 @@ const TRUCK = "p_township_truck";
 
 /**
  * A Port Alder chat with the player character and `holder` at Alder Automotive, `holder` carrying
- * the unsigned letter; Vex Morrow is someone the POV can't see. With `truckOpen` the truck puzzle
- * is one the player knows of.
+ * the unsigned letter; Vex Morrow is someone the POV can't see (unless `world.vex` is false), and
+ * `world.puts` adds more. With `truckOpen` the truck puzzle is one the player knows of.
  */
-async function atTheShop(holder: "marcus_delgado" | "vex_morrow", truckOpen = false): Promise<{ rig: Rig; chatId: string }> {
+async function atTheShop(holder: "marcus_delgado" | "vex_morrow", truckOpen = false, world: { vex?: boolean; puts?: [string, JsonObject][] } = {}): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
   const put = async (collection: string, id: string, value: JsonObject): Promise<void> => {
@@ -35,9 +35,10 @@ async function atTheShop(holder: "marcus_delgado" | "vex_morrow", truckOpen = fa
     if (!e) throw new Error(`no ${id}`);
     await put("entities", id, { ...e, fields: { ...e.fields, place: "alder_automotive" } });
   }
-  await put("entities", "vex_morrow", { id: "vex_morrow", kind: "character", name: "Vex Morrow", tier: "background", visibility: "secret", fields: { place: "alder_automotive" }, relations: [] });
+  if (world.vex ?? true) await put("entities", "vex_morrow", { id: "vex_morrow", kind: "character", name: "Vex Morrow", tier: "background", visibility: "secret", fields: { place: "alder_automotive" }, relations: [] });
   await put("entities", "unsigned_letter", { id: "unsigned_letter", kind: "item", name: "Unsigned letter", tier: "background", fields: { owner: holder }, relations: [{ type: "in", to: holder }] });
   if (truckOpen) await put("tracks", TRUCK, { ...draft.tracks[TRUCK], visibility: "public" });
+  for (const [collection, value] of world.puts ?? []) await put(collection, String(value.id), value);
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -89,6 +90,24 @@ describe("the turn's actions in words (Outcome and Outline)", () => {
     expect(outcome).toContain("doesn't say the answer itself");
     expect(outcome).not.toMatch(/Vex|Morrow/);
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("the player's own answer is told the narrator as in a world without anyone hidden, or any secret entry, going by it", async () => {
+    /** The Answer line of the Outcome and of the Outline once the player typed `typed`, read as answering `answer`. */
+    const told = async (typed: string, answer: string, world: { vex?: boolean; puts?: [string, JsonObject][] }): Promise<string[]> => {
+      const { rig, chatId } = await atTheShop("marcus_delgado", true, world);
+      rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify({ action: "answer", params: { puzzle: TRUCK, answer }, confidence: 0.9 }) : "{}");
+      await rig.turn(chatId, typed, "Marcus shakes his head.");
+      return ["Outcome", "Outline"].map((section) => lines(rig.host.section(section)).find((l) => l.startsWith("Answer")) ?? "");
+    };
+    const vex = await told("I answer: Vex.", "Vex", { vex: false });
+    for (const line of vex) expect(line).toContain("Vex");
+    expect(await told("I answer: Vex.", "Vex", {})).toEqual(vex);
+    // A secret entry whose key is the player's own word.
+    const mill = { id: "mill_fire", title: "The fire at the old mill", content: "The mill fire was set for the insurance money.", keys: ["mill"], links: [], secret: true, gate: "false", audience: [] };
+    const said = await told("I answer: the mill.", "the mill", { vex: false });
+    for (const line of said) expect(line).toContain("the mill");
+    expect(await told("I answer: the mill.", "the mill", { vex: false, puts: [["lore", mill]] })).toEqual(said);
   });
 
   test("arriving ends the walk, and the lines read as the narrator's own words: a count with its thing, whose routine comes next, no notation", async () => {

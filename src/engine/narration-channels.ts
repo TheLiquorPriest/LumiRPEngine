@@ -47,23 +47,38 @@ function knowsAlready(ctx: ReadContext, who: EntityId, id: string): boolean {
   return own(ctx.state.entities, who)?.relations.some((r) => r.type === "knows" && r.to === id) ?? false;
 }
 
+/** What the knows channel reads a fact against: the registry, the world and the state. */
+type FactView = Pick<ReadContext, "registry" | "world" | "state">;
+
 /** A place the POV may not even hear of: a secret one it can't see. A reply's name never finds it, so a refusal can't tell of it. */
-function placeKept(ctx: ReadContext, id: string): boolean {
+function placeKept(ctx: FactView, id: string): boolean {
   const v = own(ctx.world.places, id)?.visibility;
   return !isPublic(v) && v !== "known_by" && v !== "discoverable" && !canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
 }
 
 /** A place a reply names by its name (as the POV hears it, the id is never shown; compared as `placeKey` compares names): the one place with that name the POV may hear of. */
-function placeNamed(ctx: ReadContext, fact: string): string | null {
+function placeNamed(ctx: FactView, fact: string): string | null {
   const key = placeKey(fact);
   const ids = key === "" ? [] : Object.keys(ctx.world.places).filter((id) => placeKey(own(ctx.world.places, id)?.name ?? "") === key && !placeKept(ctx, id));
   return ids.length === 1 ? (ids[0] ?? null) : null;
 }
 
 /** The world fact a proposal's `fact` names: an entity or place id, else a place by its name, else itself. */
-function factOf(ctx: ReadContext, fact: string): string {
+function factOf(ctx: FactView, fact: string): string {
   if (hasOwn(ctx.state.entities, fact) || hasOwn(ctx.world.places, fact)) return fact;
   return placeNamed(ctx, fact) ?? fact;
+}
+
+/**
+ * The place a `knows` proposal teaches the POV (DESIGN §9.4): its fact, by id or by name as the
+ * channel reads it, a `known_by` or `discoverable` place the POV can't see yet. Null for anyone
+ * else's, and for any other fact. Hearing of it is how the POV learns it, so a read names it.
+ */
+export function heardPlace(ctx: FactView, p: JsonObject): string | null {
+  if (p.type !== "knows" || (text(p.who) || ctx.world.pov) !== ctx.world.pov) return null;
+  const fact = factOf(ctx, text(p.fact));
+  const v = hasOwn(ctx.world.places, fact) ? own(ctx.world.places, fact)?.visibility : undefined;
+  return (v === "known_by" || v === "discoverable") && !canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, fact) ? fact : null;
 }
 
 /**

@@ -25,9 +25,9 @@
 // Arguments are evaluated just before the effect resolves; `=` formulas there may call `roll()`,
 // drawing from the effect's own generator, so the event records the result (DESIGN §11). After
 // each effect, every entity whose XP it changed has its level follow its XP (`levelsFollowXp`):
-// up a level at a time with `onLevel`, or straight down, taking any pool left above its lower max
-// down to it in the same unit, so an award, a quest reward, a narrated gain or a correction moves
-// it the same way. Nothing else writes a level (`follows_xp`).
+// up a level at a time with `onLevel`, or straight down, capping any pool left above its lower max
+// at it in the same unit, so an award, a quest reward, a narrated gain or a correction moves it the
+// same way. Nothing else writes a level (`follows_xp`).
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -377,8 +377,9 @@ function applyCheck(reg: Registry, w: Working, spec: EffectSpec, scope: EffectSc
  * field's bounds (DESIGN §11). Rising, the level field is set a level at a time, each followed by
  * `onLevel` with `level` and `from` (the level before the gain), then a Journal line. Falling is one
  * unit, applied all or none, which a rebased view keeps or drops whole: the level set straight to
- * the one reached, running nothing, so what earlier levels gave stays; each of the entity's pools
- * then above its lower max set down to it, so none reads above its max and no recovery lowers one;
+ * the one reached, running nothing, so what earlier levels gave stays; a cap (`SetEvent.atMost`) on
+ * each of the entity's pools then above its lower max, so none reads above its max and no recovery
+ * lowers one, while a pool replayed lower than that (after damage, on a rebased view) stays lower;
  * and the line. A new entity (`spawned`) just starts at its XP's level: no `onLevel`, no line.
  */
 function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog: ProgressionDef, scope: EffectScope, spawned: boolean): EffectOutcome {
@@ -420,7 +421,7 @@ function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog:
       if (!def.pool || def.derived !== undefined) continue;
       const value = own(own(w.state.entities, entity)?.fields ?? {}, field) ?? def.default;
       const max = fieldBounds(reg, w.ctx, entity, def).max;
-      if (typeof value === "number" && max !== undefined && value > max) whole = landed({ type: "set", entity, field, value: max });
+      if (typeof value === "number" && max !== undefined && value > max) whole = landed({ type: "set", entity, field, value: max, atMost: true });
     }
     if (whole && landed(line(`${who} dropped to ${prog.label} ${to} (from ${from}).`))) out.applied.push(...unit);
     else w.restore(mark);

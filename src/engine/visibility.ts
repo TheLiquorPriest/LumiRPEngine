@@ -89,6 +89,16 @@ export function canSeeEntity(reg: Registry, world: WorldDoc, state: Readonly<Wor
   if (id === pov) return true;
   // A removed entity is out of the world for the player; the GM view still lists it.
   if (!own(state.entities, id) || isGone(state, id)) return false;
+  return couldSeeEntity(reg, world, state, pov, id);
+}
+
+/**
+ * Whether the POV could see an entity were it still in the world (`canSeeEntity`, gone or not): one
+ * used up, ended or removed that it could see (a coffee drunk, a bill stopped) is no hidden name.
+ */
+export function couldSeeEntity(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: EntityId): boolean {
+  if (id === pov) return true;
+  if (!own(state.entities, id)) return false;
   // A `discoverable` thing is hidden until found (a search where it lies, or opening what holds it,
   // writes the POV's `knows` to it), as a `discoverable` place is until visited; every other reader
   // takes it for secret, failing closed.
@@ -490,6 +500,11 @@ function unaccented(text: string): string {
   return text.normalize("NFD").replace(ACCENTS, "").normalize("NFC");
 }
 
+/** A lowercase word as people write it plain: without the accents they leave out, and with the letters that have no decomposition written plain (Zoë is zoe, Søren is soren, Łukasz is lukasz). */
+export function plainLetters(word: string): string {
+  return unaccented(word).replace(/[øæœßđłıðþ]/g, (c) => PLAIN_LETTERS[c] ?? c);
+}
+
 /** A word as name checks compare it: as written ("zoë", "łukasz") and plain ("zoe", "lukasz"). */
 export interface Spelling {
   written: string;
@@ -513,7 +528,7 @@ function spellings(text: string): Spelling[] {
 }
 
 function spell(text: string): Spelling[] {
-  return (text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []).map((written) => ({ written, plain: unaccented(written).replace(/[øæœßđłıðþ]/g, (c) => PLAIN_LETTERS[c] ?? c) }));
+  return (text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []).map((written) => ({ written, plain: plainLetters(written) }));
 }
 
 /** How long a text may be to be spelt once and kept; how many spellings and patterns are kept. */

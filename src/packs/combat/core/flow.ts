@@ -150,8 +150,9 @@ export function hpSeen(ctx: ReadContext, rules: CombatDef, id: EntityId, gm = fa
 /**
  * A player's line (a chip, the Journal) for a change to someone else's HP that the POV sees as a
  * wound band: the band a `set` leaves them in, or which way an `add` went, never a number (an
- * `add` carries no HP to band, and the state the line is read against may be later than it). Null
- * for someone the POV can't see; undefined for any other event, which reads as usual.
+ * `add` carries no HP to band, and the state the line is read against may be later than it). A cap
+ * (`SetEvent.atMost`, a fallen level's) has no line: it bounds their HP without saying where it is.
+ * Null for someone the POV can't see; undefined for any other event, which reads as usual.
  */
 export function hpLine(ctx: ReadContext, e: LedgerEvent): string | null | undefined {
   const rules = rulesOf(ctx.world);
@@ -161,6 +162,7 @@ export function hpLine(ctx: ReadContext, e: LedgerEvent): string | null | undefi
   if (!("wound" in seen)) return undefined;
   const who = labelOf(ctx, e.entity);
   if (e.type === "add") return `${who} ${e.delta < 0 ? "takes damage" : "recovers"}`;
+  if (e.atMost) return null;
   const band = typeof e.value === "number" ? woundOf(rules, e.value, hpMaxOf(ctx, rules, e.entity)) : "";
   return band !== "" ? `${who} is now ${band}` : null;
 }

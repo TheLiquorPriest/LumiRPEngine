@@ -188,3 +188,21 @@ describe("GM view → Minds round trip", () => {
     expect((await character(rig, chatId, "danny_okafor")).plans.find((p) => p.id === plan?.id)?.status).toBe("done");
   });
 });
+
+describe("the Minds tab reads what the next turn reads", () => {
+  test("once a reply follows a reply, the message before them no longer counts toward who matters now", async () => {
+    /** Marcus's fidelity once `said` got a reply and a second reply followed it, Send with nothing typed. */
+    const after = async (said: string) => {
+      const rig = new Rig({ shipped: true });
+      const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+      const chatId = rig.host.createChat("Morning.");
+      rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+      await rig.turn(chatId, said, "The street wakes up around you.");
+      const reply = await rig.host.start(chatId, { type: "normal" });
+      await rig.host.finish(reply, "A bus rolls past.");
+      return (await character(rig, chatId, "marcus_delgado")).fidelity;
+    };
+    // Neither reply names him, and the next turn reads no message of the player's.
+    expect(await after("I ask about Marcus Delgado's shop.")).toEqual(await after("I wait on the porch."));
+  });
+});

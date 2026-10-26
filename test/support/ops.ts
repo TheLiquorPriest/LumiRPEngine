@@ -890,9 +890,10 @@ export class Runner {
 
   /**
    * L11: a Re-narrate folds as its source up to the reply (same seed, `pre` and `markersApplied`);
-   * its copies are the source's live fixes and materializations with their seqs, anchored at the
-   * new record's path; its `narr` entry takes a fresh seq. It falls back to a Re-run only when the
-   * source can't be reproduced (no planned source, a pause, or a `pre` event that no longer validates).
+   * its reply's read follows `pre` in its own events, as any turn's does; its copies are the source's
+   * live fixes and materializations with their seqs, anchored at the new record's path. It falls
+   * back to a Re-run only when the source can't be reproduced (no planned source, a pause, or a
+   * `pre` event that no longer validates).
    */
   private async checkRenarrate(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[]): Promise<void> {
     let source: Rec | undefined;
@@ -903,7 +904,7 @@ export class Runner {
     const core = await this.h.core(chat);
     const made = core.journal.messages[messageId]?.ledger.swipes[String(swipeId)];
     if (!source || !made || source.path === "" || source.seed === "") return;
-    const copied = made.seed === source.seed && hashJson(made.events) === hashJson(source.events.slice(0, source.pre)) && made.markersApplied === source.markersApplied && made.pre === source.pre;
+    const copied = made.seed === source.seed && hashJson(made.events.slice(0, made.pre)) === hashJson(source.events.slice(0, source.pre)) && made.markersApplied === source.markersApplied && made.pre === source.pre;
     if (!copied) {
       if (core.journal.pauses.length > 0 || made.seed === "") return;
       // A fallback is legitimate only if a source `pre` event fails on the current prefix.
@@ -923,11 +924,6 @@ export class Runner {
     }
     const sourcePosts = new Map(source.post.map((p) => [p.seq, p]));
     for (const p of made.post) {
-      if (p.kind === "narr") {
-        if (sourcePosts.has(p.seq) || p.seq <= source.seq) throw new InvariantError("L11", `${chat}/${messageId}: the narr entry reuses an old seq`);
-        if (p.at !== made.path) throw new InvariantError("L11", `${chat}/${messageId}: the narr entry is not anchored at the record's path`);
-        continue;
-      }
       const original = sourcePosts.get(p.seq);
       if (!original || (p.kind !== "fix" && p.kind !== "materialize") || original.kind !== p.kind || strippedFrom(original.events, p.events) === null) throw new InvariantError("L11", `${chat}/${messageId}: post ${p.seq} is not a copy of a source fix or materialization`);
       if (p.at !== made.path) throw new InvariantError("L11", `${chat}/${messageId}: copy ${p.seq} is not anchored at the new parent path`);

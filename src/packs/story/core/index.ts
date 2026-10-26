@@ -5,9 +5,9 @@
 // no realism domain: tracks behave the same at every level.
 
 import type { TrackId } from "../../../shared/ids";
-import { hasOwn, type JsonValue } from "../../../shared/json";
+import { hasOwn, isRecord, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import type { ActionDef, Expr, FeedScope, WorldDoc } from "../../../shared/world";
+import type { ActionDef, Expr, FeedScope, WorldCurrency, WorldDoc } from "../../../shared/world";
 import { objectiveWhen } from "../../../shared/world";
 import { callsIn, identifiers } from "../../../engine/expr";
 import { wordsOf } from "../../../engine/lore";
@@ -17,7 +17,8 @@ import type { Registry } from "../../../engine/registry-impl";
 import { effectLists } from "../../../engine/ruleset-lint";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { checkAnswer } from "../../../engine/tracks";
-import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, trackKnown, visibilityOf, type PlayerTrack } from "../../../engine/visibility";
+import { canSeeEntity, canSeePlace, plainLetters, playerTrack, shownTrackId, trackKnown, visibilityOf, type PlayerTrack } from "../../../engine/visibility";
+import { parseMoneyInput } from "../../../shared/money";
 import { together } from "../../../engine/presence";
 
 declare module "../../../engine/registry" {
@@ -315,41 +316,159 @@ export function openPuzzle(ctx: ReadContext, ref: string): TrackId | null {
 }
 
 /**
- * The params an action takes a puzzle's answer from (DESIGN §10): those its `story.answer` outcomes
- * read for `answer`, as `=answer` or `=params.code` name them. A typed read's value for each must be
- * in the player's own words (`inOwnWords`).
+ * The params an action takes a puzzle's answer from (DESIGN §10): those its `story.answer` effects
+ * read for `answer`, as `=answer`, `=params.code` or `=suspect` name them, in its outcomes or a
+ * check's within them. A typed read's value for each must be the player's own: in their words
+ * (`ownAnswer`), or naming someone or something the POV may know that their words pick out (the
+ * backend's `answerReader`).
  */
 export function answerParams(action: Pick<ActionDef, "params" | "outcomes">): string[] {
   const out = new Set<string>();
-  for (const specs of Object.values(action.outcomes)) {
+  const visit = (specs: JsonValue | undefined): void => {
+    if (!Array.isArray(specs)) return;
     for (const spec of specs) {
+      if (!isRecord(spec) || !isRecord(spec.args)) continue;
       const answer = spec.type === "story.answer" ? spec.args.answer : undefined;
-      if (typeof answer !== "string" || !answer.startsWith("=")) continue;
-      for (const name of identifiers(answer.slice(1))) if (hasOwn(action.params, name)) out.add(name);
+      if (typeof answer === "string" && answer.startsWith("=")) for (const name of identifiers(answer.slice(1))) if (hasOwn(action.params, name)) out.add(name);
+      if (spec.type === "check" && isRecord(spec.args.outcomes)) for (const list of Object.values(spec.args.outcomes)) visit(list);
     }
-  }
+  };
+  for (const specs of Object.values(action.outcomes)) visit(specs as unknown as JsonValue);
   return [...out];
 }
 
 /**
- * Whether `value` is in `text`, the player's own words (DESIGN §10): compared as names are, case and
- * spacing aside, its letters and digits, less a leading article, are those of a run of whole words
- * of the text. So "1 8 8 7" gives 1887 and "the Wind" gives "wind", but no word gives a part of itself
- * ("Washington" isn't "ash"), and a read that answers for the player with what they never typed (a
- * name, a code) gives nothing.
+ * Every answer the puzzles' current stages expect (DESIGN §10), hidden puzzles' too, since an
+ * authored action may answer one by its id: words the read offers for the player to send that give
+ * one the player's message doesn't are the read's solution, never the player's.
  */
-export function inOwnWords(value: string, text: string): boolean {
-  const words = (s: string): string[] => s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  const given = words(value);
-  const want = (given.length > 1 && /^(the|a|an)$/.test(given[0] ?? "") ? given.slice(1) : given).join("");
+export function expectedAnswers(ctx: Pick<ReadContext, "world" | "state">): string[] {
+  return Object.keys(ctx.world.tracks).flatMap((id) => {
+    const t = own(ctx.world.tracks, id);
+    return t?.kind === "puzzle" ? (own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer?.expect ?? []) : [];
+  });
+}
+
+/** Scripts written without spaces between words: each of their letters is a word of its own to an answer, so "東京" is found in "答えは東京です". */
+const UNSPACED = String.raw`\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}`;
+/** A word as answers are compared: one letter of an unspaced script with its marks, or a run of letters, marks and digits, a possessive kept on it ("Holt's"). */
+const ANSWER_WORD = new RegExp(String.raw`[${UNSPACED}]\p{M}*|(?:(?![${UNSPACED}])[\p{L}\p{M}\p{N}])+(?:['’]s(?![\p{L}\p{M}\p{N}]))?`, "gu");
+
+/** A decimal digit of any script as the plain digit it is ("١" is 1): every script's digits run 0 to 9 in order, so a digit is its distance from the start of its run. */
+function plainDigit(d: string): string {
+  const cp = d.codePointAt(0) ?? 0x30;
+  let zero = cp;
+  while (zero > 0 && /\p{Nd}/u.test(String.fromCodePoint(zero - 1))) zero--;
+  return String((cp - zero) % 10);
+}
+
+/** A word of an answer, and where it stands in the text it came from. */
+interface AnswerWord {
+  word: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * A text's words as answers are compared (DESIGN §10), each with where it stands: lowercase, plain as
+ * name checks write them (`plainLetters`: Zoë is zoe, Søren is soren), compatibility forms and every
+ * script's digits plain ("１８８７" and "١٨٨٧" are 1887). A possessive stays on its word, so "Holt's
+ * daughter" never gives Holt, and a script written without spaces gives each letter as a word.
+ */
+function answerTokens(text: string): AnswerWord[] {
+  return [...text.matchAll(ANSWER_WORD)].map((m) => {
+    const word = plainLetters(m[0].normalize("NFKC").replace(/\p{Nd}/gu, (d) => (d >= "0" && d <= "9" ? d : plainDigit(d))).toLowerCase()).replace(/’/g, "'");
+    return { word, start: m.index, end: m.index + m[0].length };
+  });
+}
+
+/** A text's words as answers are compared (`answerTokens`). */
+export function answerWords(text: string): string[] {
+  return answerTokens(text).map((t) => t.word);
+}
+
+/** An answer's words less a leading article, which never counts ("the Wind" is wind). */
+function bare<T extends string | AnswerWord>(words: readonly T[]): readonly T[] {
+  const first = words[0];
+  return words.length > 1 && /^(the|a|an)$/.test(typeof first === "string" ? first : (first?.word ?? "")) ? words.slice(1) : words;
+}
+
+/** Whether `want` is the letters and digits of a run of whole words of `said`, so spacing is aside and no word gives a part of itself. */
+function runIn(want: string, said: readonly string[]): boolean {
   if (want === "") return false;
-  const said = words(text);
   for (let i = 0; i < said.length; i++) {
     let run = "";
     for (let j = i; j < said.length && run.length < want.length; j++) {
       run += said[j];
       if (run === want) return true;
     }
+  }
+  return false;
+}
+
+/**
+ * Whether `text` gives `letter`, a one-letter answer of a cased script, which prose also holds as a
+ * word ("a", "I") or a stray letter ("don't"): typed alone, in quotes ("“B”"), or as a capital other
+ * than I or A ("door B").
+ */
+function saysLetter(letter: string, text: string): boolean {
+  const said = answerWords(text);
+  if (said.length === 1 && said[0] === letter) return true;
+  for (const m of text.matchAll(/(?<![\p{L}\p{M}\p{N}])\p{L}(?![\p{L}\p{M}\p{N}])/gu)) {
+    const raw = m[0];
+    if (answerWords(raw)[0] !== letter) continue;
+    const before = text.slice(0, m.index).trimEnd().slice(-1);
+    const after = text.slice(m.index + raw.length).trimStart().charAt(0);
+    if (/["“”‘’'«»]/.test(before) && /["“”‘’'«»]/.test(after)) return true;
+    if (raw !== raw.toLowerCase() && raw !== "I" && raw !== "A") return true;
+  }
+  return false;
+}
+
+/**
+ * Whether `value` is in `text`, the player's own words (DESIGN §10): compared as names are, case and
+ * spacing aside, its letters and digits, less a leading article, are those of a run of whole words
+ * of the text (`answerTokens`). So "1 8 8 7" gives 1887 and "the Wind" gives "wind", but no word gives
+ * a part of itself ("Washington" isn't "ash"), a possessive gives its owner as no answer, a single
+ * letter counts only set apart (`saysLetter`), and a read that answers for the player with what they
+ * never typed (a name, a code) gives nothing.
+ */
+export function inOwnWords(value: string, text: string): boolean {
+  const want = bare(answerWords(value)).join("");
+  if (/^\p{L}$/u.test(want) && want.toUpperCase() !== want) return saysLetter(want, text);
+  return runIn(want, answerWords(text));
+}
+
+/**
+ * The answer to play for the read's `value` from the player's `text` (DESIGN §10), or null when it
+ * isn't theirs: `value` itself when it is in their words (`inOwnWords`); a number the read gave with
+ * words the message doesn't have ("Room 12", "1887 AD") as the longest run of its words around all
+ * its digits that the message has, as the read wrote it ("12", "1887"), so the read's additions never
+ * turn the player's right answer wrong, nor are any of them played.
+ */
+export function ownAnswer(value: string, text: string): string | null {
+  if (inOwnWords(value, text)) return value;
+  const words = bare(answerTokens(value));
+  const first = words.findIndex((w) => /\p{N}/u.test(w.word));
+  const last = words.findLastIndex((w) => /\p{N}/u.test(w.word));
+  if (first < 0) return null;
+  const said = answerWords(text);
+  for (let size = words.length - 1; size >= last - first + 1; size--) {
+    for (let i = Math.max(0, last - size + 1); i <= first && i + size <= words.length; i++) {
+      const run = words.slice(i, i + size);
+      const start = run[0];
+      const end = run.at(-1);
+      if (start && end && runIn(run.map((w) => w.word).join(""), said)) return value.slice(start.start, end.end);
+    }
+  }
+  return null;
+}
+
+/** Whether the player's `text` states `minor`, an amount of the world's money, as typed amounts read ("$12.50", "12.5", "1,200 USD"): a money answer is the player's own by its amount. */
+export function saysAmount(minor: number, text: string, currency: WorldCurrency): boolean {
+  for (const m of text.matchAll(/\S*\d[\d,.]*\S*/g)) {
+    const typed = m[0].replace(/^[(["“‘]+/, "").replace(/[.,!?;:)\]"”’]+$/, "");
+    if (parseMoneyInput(typed, currency) === minor) return true;
   }
   return false;
 }
@@ -374,10 +493,15 @@ function askedForGm(ctx: ReadContext, ref: string): string {
   return t ? `"${ref}" (${t.label})` : `"${ref}"`;
 }
 
-/** An answer to `track`, a puzzle: its attempt, or a refusal when it needs a judgement first or its stage takes none. */
+/**
+ * An answer to `track`, a puzzle: its attempt, or a refusal when it needs a judgement first or its
+ * stage takes none. A number answers as its digits (a number param's, or a money param's amount in
+ * minor units, as formulas read money).
+ */
 function answerTo(ctx: ReadContext, track: TrackId, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const decision = typeof a.decision === "number" ? a.decision : undefined;
-  const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
+  const answer = typeof a.answer === "number" && Number.isFinite(a.answer) ? String(a.answer) : strOf(a.answer);
+  const check = checkAnswer(ctx.world, ctx.state, track, answer, decision);
   // The author opted this stage into model judgement: the turn asks `puzzle.answer`, then retries with `decision`.
   if (check.needsDecision) return reject("needs_decision", "this answer needs a judgement");
   return check.event ? [check.event] : reject("no_answer", "there is nothing to answer here");

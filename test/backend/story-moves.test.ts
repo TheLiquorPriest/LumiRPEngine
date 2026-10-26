@@ -131,7 +131,7 @@ describe("✎ Place", () => {
 });
 
 describe("a refused confirm-mode change", () => {
-  test("gets a decline chip; one naming a place the POV may not know shows nothing", async () => {
+  test("gets a decline chip; one naming a secret place is a receipt naming it only as something you don't know", async () => {
     const { rig, chatId } = await portAlder();
     script(rig, NONE, { proposals: [{ type: "transfer", from: MARCUS, to: "pov", amount: 0 }], where: null });
     await rig.turn(chatId, "I ask Marcus about pay.", "Marcus waves the question off.");
@@ -139,5 +139,9 @@ describe("a refused confirm-mode change", () => {
     script(rig, NONE, { proposals: [{ type: "knows", who: "pov", fact: "smugglers_den" }], where: null });
     await rig.turn(chatId, "I listen.", "Marcus mutters about the old smugglers.");
     expect(await declines(rig, chatId)).toEqual([]);
+    const head = rig.host.head(chatId);
+    const shown = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === head?.id);
+    expect(shown.filter((c) => c.kind === "untracked").map((c) => c.label)).toEqual(["Not tracked: You learn: something you don't know"]);
+    for (const said of ["Smugglers' Den", "smugglers_den"]) expect(JSON.stringify(shown)).not.toContain(said);
   });
 });

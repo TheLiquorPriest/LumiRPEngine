@@ -348,6 +348,15 @@ describe("what the POV may see", () => {
     world.ruleset!.combat!.showHp = "exact";
     expect(playerLines(reg, world, after, POV, hits, 8).join("\n")).toMatch(/Goblin's HP (is now|went down by) \d/);
   });
+
+  test("in wounds mode a cap on someone else's HP (a fallen level's) has no line: it bounds their HP without saying where it is", () => {
+    const world = fightWorld((w) => povFirst(w));
+    const state = started(world, ["goblin"]).state;
+    const capped: LedgerEvent = { type: "set", entity: "goblin", field: "hp", value: 7, atMost: true };
+    expect(playerLines(reg, world, state, POV, [capped])).toEqual([]);
+    // The same value assigned reads as the band it leaves them in.
+    expect(playerLines(reg, world, state, POV, [{ type: "set", entity: "goblin", field: "hp", value: 7 }])[0]).toMatch(/^Goblin is now \w/);
+  });
 });
 
 describe("lint", () => {

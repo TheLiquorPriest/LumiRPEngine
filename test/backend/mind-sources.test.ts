@@ -120,6 +120,38 @@ describe("each source of what a mind reads, on or off, within its own limit", ()
     expect(recentLines(danny)).toEqual([`Player: U3-MARK ${PAD}`, `Story: R3-MARK ${PAD}`, `Player: U4-MARK ${PAD}`]);
   });
 
+  test("a reply sent after a reply with nothing typed: its memory's Recent chat is the chat before that reply, the message before it and its reply included", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const seen = fakeModels(rig);
+    const chatId = await alderChat(rig, async () => undefined);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true, messages: 3 } } } } }));
+    await rig.turn(chatId, `U1-MARK ${PAD}`, `R1-MARK ${PAD}`);
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, `R2-MARK ${PAD}`);
+    const lines = recentLines(lastFor(seen.memories, "Danny Okafor"));
+    expect(lines).toEqual(expect.arrayContaining([`Player: U1-MARK ${PAD}`, `Story: R1-MARK ${PAD}`]));
+    expect(lines.join("\n")).not.toContain("R2-MARK");
+  });
+
+  test("a Regenerate of a reply sent after a reply: a mind's Recent chat stops before the reply it replaces, and the reply before that is read once, as how the story ended", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const seen = fakeModels(rig);
+    const chatId = await alderChat(rig, async () => undefined);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true, messages: 3 } } } } }));
+    await rig.turn(chatId, `U1-MARK ${PAD}`, `R1-MARK ${PAD}`);
+    const sent = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(sent, `R2-MARK ${PAD}`);
+    const again = await rig.host.start(chatId, { type: "regenerate" });
+    expect(again.halted).toBeUndefined();
+    await rig.host.finish(again, `R3-MARK ${PAD}`);
+    const danny = lastFor(seen.minds, "Danny Okafor");
+    expect(danny).toContain(`The story so far ended: R1-MARK ${PAD}`);
+    const lines = recentLines(danny);
+    expect(lines).toContain(`Player: U1-MARK ${PAD}`);
+    expect(lines.join("\n")).not.toMatch(/R1-MARK|R2-MARK/);
+  });
+
   test("Settings → Minds saves each source's switch and limit, recall's as its memory override with no limit allowed, and none of it touches the preset", async () => {
     const rig = new Rig();
     const set = async (patch: JsonObject | null): Promise<{ minds: MindsSettings; preset: string }> => {

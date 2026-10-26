@@ -36,6 +36,16 @@ function decide(req: DecideRequest): Answers {
 
 const ALL_ON: JsonObject = Object.fromEntries(["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
 
+/** The brief answers `brief` and the outline `beats`; every other step as `quiet`. */
+const prose =
+  (brief: string, beats: string[]) =>
+  (req: QuietRequest): string => {
+    const system = req.messages[0]?.content ?? "";
+    if (system.includes("You brief a roleplay narrator")) return JSON.stringify({ text: brief });
+    if (system.includes("You outline a roleplay narrator")) return JSON.stringify({ beats });
+    return quiet(req);
+  };
+
 async function turnCalls(preset: "lean" | "standard" | "full" | "custom", steps?: JsonObject, reply: (req: QuietRequest) => string = quiet): Promise<{ rig: Rig; chatId: string; counts: Record<string, number>; total: number }> {
   const rig = new Rig();
   if (preset === "custom") {
@@ -165,13 +175,14 @@ describe("the prose steps and someone the POV can't see", () => {
   const VEX: JsonObject = { id: "vex", kind: "person", name: "Vex Morrow", tier: "background", fields: {}, relations: [], visibility: "secret" };
   /** A secret lore entry filed under an everyday word, "ticket". */
   const PASSAGE: JsonObject = { id: "passage", title: "The smuggler's passage", content: "A berth below the car deck is let out to those who pay in cash.", keys: ["ticket"], links: [], secret: true, gate: "false", audience: [] };
+  const WITH_VEX: [string, JsonObject][] = [["entities", VEX], ["lore", PASSAGE]];
 
-  /** A "Calls" chat with every step on, after `patches`, in a world with Vex Morrow and the passage entry; the helper answers by `reply`. */
-  async function withVex(reply: (req: QuietRequest) => string, patches: JsonObject[] = []): Promise<{ rig: Rig; chatId: string }> {
+  /** A "Calls" chat with every step on, after `patches`, in a world with `puts` (Vex Morrow and the passage entry unless given); the helper answers by `reply`. */
+  async function withVex(reply: (req: QuietRequest) => string, patches: JsonObject[] = [], puts: [string, JsonObject][] = WITH_VEX): Promise<{ rig: Rig; chatId: string }> {
     const rig = new Rig();
     for (const patch of [{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: ALL_ON } }, { minds: { enabled: false } }, ...patches]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
     const worldId = await rig.newWorld("Calls");
-    for (const [collection, value] of [["entities", VEX], ["lore", PASSAGE]] as const) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id: String(value.id), value }));
+    for (const [collection, value] of puts) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id: String(value.id), value }));
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     const chatId = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -180,32 +191,46 @@ describe("the prose steps and someone the POV can't see", () => {
     return { rig, chatId };
   }
 
-  /** A brief and an outline line that name Vex Morrow, beside a line that doesn't. */
-  const naming = (req: QuietRequest): string => {
-    const system = req.messages[0]?.content ?? "";
-    if (system.includes("You brief a roleplay narrator")) return JSON.stringify({ text: "Sam waits at the ferry for Vex Morrow." });
-    if (system.includes("You outline a roleplay narrator")) return JSON.stringify({ beats: ["Vex Morrow steps off the ferry.", "The horn sounds."] });
-    return quiet(req);
-  };
-  const TYPED = "I walk to the ferry and wait for Vex Morrow.";
+  /** The narrator's Outline after `typed`, and the outline gate's lines for it, in a world with `puts`. */
+  async function outlined(reply: (req: QuietRequest) => string, typed: string, puts: [string, JsonObject][]): Promise<{ outline: string; gate: string }> {
+    const played = await withVex(reply, [], puts);
+    await played.rig.turn(played.chatId, typed, "The ferry horn sounds.");
+    const gated = await withVex(reply, [{ gates: { outline: true } }], puts);
+    gated.rig.host.sendUser(gated.chatId, typed);
+    await gated.rig.host.settle();
+    expect((await gated.rig.host.start(gated.chatId, { type: "normal" })).halted).toBe("cancelled");
+    const gate = (await gated.rig.rt.view(gated.chatId, gated.rig.host.userId)).chips.find((c) => c.kind === "outline_gate");
+    return { outline: played.rig.host.section("Outline"), gate: gate?.detail ?? "" };
+  }
 
-  test("a brief or an outline line naming them is withheld whole, even when the player named them", async () => {
-    const { rig, chatId } = await withVex(naming);
-    await rig.turn(chatId, TYPED, "The ferry horn sounds.");
-    const outline = rig.host.section("Outline");
-    expect(outline).toContain("The horn sounds.");
-    expect(outline).not.toContain("Brief:");
-    expect(outline).not.toMatch(/Vex|Morrow/);
+  const NAMING = prose("Sam waits at the ferry for Vex Morrow.", ["Vex Morrow steps off the ferry.", "The horn sounds."]);
+
+  test("a brief or an outline line naming them that neither the player nor the step's inputs said is withheld whole, on the gate too", async () => {
+    const { outline, gate } = await outlined(NAMING, "I walk to the ferry and wait.", WITH_VEX);
+    for (const told of [outline, gate]) {
+      expect(told).toContain("The horn sounds.");
+      expect(told).not.toContain("Brief:");
+      expect(told).not.toMatch(/Vex|Morrow/);
+    }
   });
 
-  test("the outline gate shows the same lines, screened", async () => {
-    const { rig, chatId } = await withVex(naming, [{ gates: { outline: true } }]);
-    rig.host.sendUser(chatId, TYPED);
-    await rig.host.settle();
-    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
-    const gate = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "outline_gate");
-    expect(gate?.detail).toContain("The horn sounds.");
-    expect(gate?.detail ?? "").not.toMatch(/Vex|Morrow/);
+  test("a line saying a name the player typed reads the same with or without someone hidden by it: 'I wait for Vex'", async () => {
+    const reply = prose("Sam waits at the ferry for Vex.", ["Vex steps off the ferry.", "The horn sounds."]);
+    const none = await outlined(reply, "I wait for Vex.", []);
+    expect(none.outline).toContain("Brief: Sam waits at the ferry for Vex.");
+    expect(none.gate).toContain("Vex steps off the ferry.");
+    expect(await outlined(reply, "I wait for Vex.", WITH_VEX)).toEqual(none);
+  });
+
+  test("a name the step's inputs say belongs to whoever they name: Dev in the room, beside a hidden Dev Rourke", async () => {
+    const home = (id: string, name: string, cash: number): [string, JsonObject] => ["entities", { id, kind: "person", name, tier: "principal", fields: { cash, place: "home" }, relations: [], ...(id === "dev" ? { agent: true } : {}) }];
+    const room = [home("sam", "Sam", 100), home("dev", "Dev", 50)];
+    const reply = prose("Dev waves Sam over to the window.", ["Dev pours the coffee.", "The horn sounds."]);
+    const none = await outlined(reply, "I wave back.", room);
+    expect(none.outline).toContain("Brief: Dev waves Sam over to the window.");
+    expect(none.gate).toContain("Dev pours the coffee.");
+    const rourke: [string, JsonObject] = ["entities", { id: "dev_rourke", kind: "person", name: "Dev Rourke", tier: "background", fields: {}, relations: [], visibility: "secret" }];
+    expect(await outlined(reply, "I wave back.", [...room, rourke])).toEqual(none);
   });
 
   test("a suggestion naming them is dropped, unless the player saw them named in their message or the reply", async () => {
@@ -228,6 +253,28 @@ describe("the prose steps and someone the POV can't see", () => {
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     expect(rig.host.section("Outline")).toContain("Sam buys a ticket at the window.");
     expect((await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "choice").map((c) => c.label)).toEqual(["I buy a ticket", "I go home"]);
+  });
+});
+
+describe("Port Alder's brief and outline keep their everyday words", () => {
+  test("whispers, a breath and a coffee drunk earlier name nothing hidden: a secret track's stages, and a thing used up", async () => {
+    const rig = new Rig({ shipped: true });
+    for (const patch of [{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: ALL_ON } }, { minds: { enabled: false } }]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    // The coffee Jordan said they had, made real and drunk: used up, as a claimed drink is once used.
+    const coffee = { id: "claimed_coffee", kind: "item", name: "Coffee", tier: "background", fields: { place: "harbor_street_114", claimed: true, consumable: true, gone: true }, relations: [] };
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: coffee.id, value: coffee }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const brief = "Jordan whispers a curse at the cold coffee, takes a breath and heads out.";
+    const beats = ["Jordan finishes the coffee.", "Jordan takes a breath before the drive."];
+    rig.host.quietReply = prose(brief, beats);
+    rig.host.decideReply = decide;
+    await rig.turn(chatId, "I finish my coffee and head out.", "Jordan rinses the mug.");
+    const outline = rig.host.section("Outline");
+    expect(outline).toContain(`Brief: ${brief}`);
+    for (const beat of beats) expect(outline).toContain(beat);
   });
 });
 
