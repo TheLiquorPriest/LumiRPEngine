@@ -32,6 +32,7 @@ import { checkOf, readyCheck, rollCheck, type ReadyCheck } from "./checks";
 import { diceDistribution, meanFloor } from "./dice";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { acts } from "./life";
+import { namesHiddenOrSecretLore } from "./lore";
 import { materializeAll } from "./materialize";
 import { optionalQuery, own } from "./pack-kit";
 import { povMayKnow } from "./player-events";
@@ -349,6 +350,7 @@ export interface InferredResult {
   /** "Persuasion check". */
   label: string;
   skill: string;
+  /** What was attempted, in the input's words, as the narrator is told it: empty when the read gave none, or when it names anything hidden (DESIGN §7). */
   attempt: string;
   /** The POV's name. */
   pov: string;
@@ -431,6 +433,6 @@ export function resolveTry(reg: Registry, w: Working, params: JsonObject, rng: R
     w.apply({ type: ENGINE_EVENTS.check, data: { check: ready.check.id ?? "", skill: skill.id, actor: id, notation: ready.notation, natural: roll.natural, total: roll.total, dc: ready.dc, outcome: roll.outcome, npc: true } });
     rolled.push({ who: id, name: nameOf(id), outcome: roll.outcome, pass: pass.includes(roll.outcome), notation: ready.notation, modifier: base.modifier, total: roll.roll.total + base.modifier });
   }
-  const inferred: InferredResult = { label: `${skill.label} check`, skill: skill.id, attempt: read.attempt, pov: nameOf(pov), band, dc, against, companions: rolled, share, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
+  const inferred: InferredResult = { label: `${skill.label} check`, skill: skill.id, attempt: namesHiddenOrSecretLore(reg, world, w.state, read.attempt) ? "" : read.attempt, pov: nameOf(pov), band, dc, against, companions: rolled, share, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
   return { ...res, events: w.events.slice(start), inferred };
 }

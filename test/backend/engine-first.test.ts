@@ -3,14 +3,17 @@
 // again and the guard lets it through, with every outlet filled. Any enabled step that fails halts
 // the run: nothing is generated, and the chat says what failed and why, with a Retry that asks only
 // what failed. A transient provider error is asked again first. The entries are emptied once the
-// reply ends, and a turn the chat changed under is never used. Dry runs change nothing.
+// reply ends, and a turn the chat changed under is never used. Dry runs change nothing. A new reply
+// after a reply keeps the choices and the minds' thoughts it asked for, as any turn does.
 
 import { describe, expect, test } from "bun:test";
-import type { HostPresetBlock, QuietRequest } from "../../src/backend/host";
+import type { DecideRequest, HostPresetBlock, QuietRequest } from "../../src/backend/host";
+import type { Answers } from "../../src/engine/decide";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { placeOfEntity } from "../../src/engine/scope";
 import { toChain } from "../../src/backend/ledger-io";
+import { readCharacter } from "../../src/packs/minds/core/state";
 import { NOT_LAST_REPLY } from "../../src/shared/diagnostics";
 import { Rig } from "../support/rig";
 
@@ -419,3 +422,55 @@ function activitiesTo(rig: Rig, session: string, from: number): string[] {
     return i >= from && (to === session || to === undefined) && m.type === "lre.activity" && m.activity ? [m.activity.label] : [];
   });
 }
+
+describe("a new reply after a reply", () => {
+  /** Every Decision question answered with its first choice. */
+  const firstChoice = (req: DecideRequest): Answers => {
+    const out: Answers = {};
+    for (const [key, q] of Object.entries(req.questions)) {
+      const first = Object.keys(q.type === "choice" ? q.criteria : {})[0];
+      if (first) out[key] = { type: "choice", choice: first, probabilities: { [first]: 1 }, confidence: 1 };
+    }
+    return out;
+  };
+
+  test("the choice it asked of someone present goes into its turn", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld("Ties");
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: "jo", value: { id: "jo", kind: "person", name: "Jo Park", tier: "supporting", agent: true, fields: { place: "home", tie: true }, relations: [] } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes("You map a player's typed input") ? JSON.stringify({ action: null, params: {}, confidence: 0.9 }) : JSON.stringify({ proposals: [] }));
+    rig.host.decideReply = firstChoice;
+    await rig.turn(chatId, "I wait by the door.", "Jo stretches.");
+    // Send, with nothing typed: Jo is asked what she does, and the new reply's turn holds her choice.
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, "Jo heads out.");
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const events = core?.journal.messages[reply.messageId ?? ""]?.ledger.swipes["0"]?.events ?? [];
+    expect(events.filter((e) => e.type === "castlife.decision")).toHaveLength(1);
+  });
+
+  test("the minds' thoughts it asked for are the ones the world keeps", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await alderChat(rig);
+    let turn = 1;
+    rig.host.quietReply = (req) => {
+      const mind = MIND.exec(req.messages[0]?.content ?? "")?.[1];
+      return mind ? JSON.stringify({ monologue: `${mind} thinks over turn ${turn}.`, depiction: `${mind} leans on the counter`, intent: `${mind} means to talk`, reactions: [], plans: [], mood: "calm" }) : mindAnswer(req);
+    };
+    await rig.turn(chatId, "Hello.", "Danny waves.");
+    turn = 2;
+    // Send, with nothing typed: the minds think again, and what they thought is theirs from this turn on.
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, "Priya checks her clipboard.");
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+    if (!state) throw new Error("no state");
+    expect(readCharacter(state, "danny_okafor").mind?.monologue).toContain("turn 2");
+    expect(readCharacter(state, "priya_nair").mind?.monologue).toContain("turn 2");
+  });
+});

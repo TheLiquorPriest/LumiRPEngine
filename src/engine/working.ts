@@ -58,6 +58,18 @@ export class Working {
     return out;
   }
 
+  /**
+   * Makes the events applied since index `from` one unit, `group` (DESIGN §4.3): a rebased view keeps
+   * or drops them together, whatever units they formed before. Nothing to do for fewer than two.
+   */
+  unite(from: number, group: string): void {
+    if (this.events.length - from < 2) return;
+    for (let i = from; i < this.events.length; i++) {
+      const e = this.events[i];
+      if (e) this.events[i] = { ...e, group };
+    }
+  }
+
   /** A state snapshot plus the event counts, for an all-or-nothing step. */
   mark(): WorkingMark {
     return { state: structuredClone(this.state), events: this.events.length, dropped: this.dropped.length };

@@ -11,8 +11,10 @@
 
 import type { JsonObject } from "../../../shared/json";
 import { fixedReason, type FixedReason } from "../../../shared/items-build";
-import type { EntityId } from "../../../shared/ids";
+import type { EntityId, KindId } from "../../../shared/ids";
+import type { WorldDoc } from "../../../shared/world";
 import type { ReadContext } from "../../../engine/registry";
+import type { Registry } from "../../../engine/registry-impl";
 import { numOf, objOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import { kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
@@ -101,28 +103,35 @@ export function fixedOf(ctx: ReadContext, id: EntityId): FixedReason | null {
   return e ? fixedReason(kindIs(ctx.registry, ctx.world, e.kind, "vehicle"), e.fields, ctx.world.tables) : null;
 }
 
-/** What a thing holds as (DESIGN §7): a person carries, a vehicle and a container (a bag, a safe, a kit) hold; anything else holds nothing. */
+/** What a kind of thing holds as (DESIGN §7): a person carries, a vehicle and a container (a bag, a safe, a kit) hold; any other kind holds nothing. */
+export function kindHoldsAs(reg: Registry, world: WorldDoc, kind: KindId): "person" | "vehicle" | "container" | null {
+  if (kindIs(reg, world, kind, "person")) return "person";
+  if (kindIs(reg, world, kind, "vehicle")) return "vehicle";
+  return kindIs(reg, world, kind, "container") ? "container" : null;
+}
+
+/** What a thing holds as, by its kind (`kindHoldsAs`); null for no such thing. */
 export function holdsAs(ctx: ReadContext, id: EntityId): "person" | "vehicle" | "container" | null {
   const e = own(ctx.state.entities, id);
-  if (!e) return null;
-  if (kindIs(ctx.registry, ctx.world, e.kind, "person")) return "person";
-  if (kindIs(ctx.registry, ctx.world, e.kind, "vehicle")) return "vehicle";
-  return kindIs(ctx.registry, ctx.world, e.kind, "container") ? "container" : null;
+  return e ? kindHoldsAs(ctx.registry, ctx.world, e.kind) : null;
 }
 
 /**
- * Where a thing may be put (DESIGN §7): inside anything that holds (a thing, or the one money record
- * a holder carries, a cash account); only in a vehicle (a person riding, a vehicle carried on
- * another); or nowhere (a built-in part, a fixed thing, and what isn't a thing: a job, a flow, a group).
+ * Where a kind of thing may be put (DESIGN §7), before what one of them is fixed to: inside anything
+ * that holds (a thing, or the one money record a holder carries, a cash account); only in a vehicle
+ * (a person riding, a vehicle carried on another); or nowhere (what isn't a thing: a job, a flow, a group).
  */
+export function kindGoesIn(reg: Registry, world: WorldDoc, kind: KindId): "any" | "vehicle" | "nowhere" {
+  if (kindIs(reg, world, kind, "person") || kindIs(reg, world, kind, "vehicle")) return "vehicle";
+  return kindIs(reg, world, kind, "item") || kind === "account" ? "any" : "nowhere";
+}
+
+/** Where a thing may be put: as its kind goes (`kindGoesIn`), and nowhere once it stays put (a built-in part, a fixed thing: `fixedOf`). */
 export function goesIn(ctx: ReadContext, id: EntityId): "any" | "vehicle" | "nowhere" {
   const e = own(ctx.state.entities, id);
   if (!e) return "nowhere";
-  if (kindIs(ctx.registry, ctx.world, e.kind, "person")) return "vehicle";
-  const fixed = fixedOf(ctx, id);
-  if (fixed === "vehicle") return "vehicle";
-  if (fixed !== null) return "nowhere";
-  return kindIs(ctx.registry, ctx.world, e.kind, "item") || e.kind === "account" ? "any" : "nowhere";
+  const goes = kindGoesIn(ctx.registry, ctx.world, e.kind);
+  return goes === "any" && fixedOf(ctx, id) !== null ? "nowhere" : goes;
 }
 
 /** Why `holder` can't hold `thing`, in words, or null when it can: what holds and what goes where (`holdsAs`, `goesIn`). */

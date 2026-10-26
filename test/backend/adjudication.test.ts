@@ -267,12 +267,12 @@ describe("the judge step and people the POV can't see", () => {
     expect(adjudged).toMatchObject({ data: { rating: 1, reason: "" } });
   });
 
-  /** The reason a judged climb kept, with the hidden Vex and Dan (and `extra`'s people and places) where the POV is. */
-  const keptReason = async (reason: string, extra: { lore?: Record<string, JsonObject>; people?: Record<string, JsonObject>; places?: Record<string, JsonObject> } = {}): Promise<unknown> => {
+  /** The reason a judged climb kept, with the hidden Vex and Dan (and `extra`'s people and places) where the POV is, the player having typed `typed`. */
+  const keptReason = async (reason: string, extra: { lore?: Record<string, JsonObject>; people?: Record<string, JsonObject>; places?: Record<string, JsonObject> } = {}, typed = "I climb carefully, keeping low."): Promise<unknown> => {
     const rig = new Rig();
     const dan: JsonObject = { id: "dan", kind: "person", name: "Dan", tier: "background", visibility: "secret", fields: { place: "home" }, relations: [] };
     const chatId = await climbChat(rig, presetAdjudication("balanced"), { rating: 1, reason }, extra.lore, { ...people, dan, ...extra.people }, extra.places);
-    await climbTurn(rig, chatId, "I climb carefully, keeping low.");
+    await climbTurn(rig, chatId, typed);
     const chain = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
     const adjudged = chain.flatMap((m) => Object.values(m.ledger?.swipes ?? {}).flatMap((r) => r.events)).find((e) => e.type === "engine.adjudged");
     return adjudged && "data" in adjudged ? adjudged.data.reason : undefined;
@@ -281,6 +281,13 @@ describe("the judge step and people the POV can't see", () => {
   test("a reason is read word for word: a hidden person's first name drops it, a hidden Dan doesn't drop 'dangerous'", async () => {
     expect(await keptReason("Vex is watching from the corner, so it is risky")).toBe("");
     expect(await keptReason("The ledge looks dangerous, but it holds")).toBe("The ledge looks dangerous, but it holds");
+  });
+
+  test("a reason naming someone hidden that the player named stands; the player's own words never blank it", async () => {
+    const reason = "Vex is watching from the corner, so it is risky";
+    expect(await keptReason(reason, {}, "I climb carefully while Vex watches from the corner.")).toBe(reason);
+    // A name the player didn't type still drops it.
+    expect(await keptReason("Vex is watching and Dan is near, so it is risky", {}, "I climb carefully while Vex watches from the corner.")).toBe("");
   });
 
   test("a hidden name written without spaces or inflected drops the reason; a secret place counts only by all its words", async () => {

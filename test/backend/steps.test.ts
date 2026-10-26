@@ -161,6 +161,76 @@ describe("model calls per preset (DESIGN §5.3)", () => {
   });
 });
 
+describe("the prose steps and someone the POV can't see", () => {
+  const VEX: JsonObject = { id: "vex", kind: "person", name: "Vex Morrow", tier: "background", fields: {}, relations: [], visibility: "secret" };
+  /** A secret lore entry filed under an everyday word, "ticket". */
+  const PASSAGE: JsonObject = { id: "passage", title: "The smuggler's passage", content: "A berth below the car deck is let out to those who pay in cash.", keys: ["ticket"], links: [], secret: true, gate: "false", audience: [] };
+
+  /** A "Calls" chat with every step on, after `patches`, in a world with Vex Morrow and the passage entry; the helper answers by `reply`. */
+  async function withVex(reply: (req: QuietRequest) => string, patches: JsonObject[] = []): Promise<{ rig: Rig; chatId: string }> {
+    const rig = new Rig();
+    for (const patch of [{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: ALL_ON } }, { minds: { enabled: false } }, ...patches]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
+    const worldId = await rig.newWorld("Calls");
+    for (const [collection, value] of [["entities", VEX], ["lore", PASSAGE]] as const) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id: String(value.id), value }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.host.quietReply = reply;
+    rig.host.decideReply = decide;
+    return { rig, chatId };
+  }
+
+  /** A brief and an outline line that name Vex Morrow, beside a line that doesn't. */
+  const naming = (req: QuietRequest): string => {
+    const system = req.messages[0]?.content ?? "";
+    if (system.includes("You brief a roleplay narrator")) return JSON.stringify({ text: "Sam waits at the ferry for Vex Morrow." });
+    if (system.includes("You outline a roleplay narrator")) return JSON.stringify({ beats: ["Vex Morrow steps off the ferry.", "The horn sounds."] });
+    return quiet(req);
+  };
+  const TYPED = "I walk to the ferry and wait for Vex Morrow.";
+
+  test("a brief or an outline line naming them is withheld whole, even when the player named them", async () => {
+    const { rig, chatId } = await withVex(naming);
+    await rig.turn(chatId, TYPED, "The ferry horn sounds.");
+    const outline = rig.host.section("Outline");
+    expect(outline).toContain("The horn sounds.");
+    expect(outline).not.toContain("Brief:");
+    expect(outline).not.toMatch(/Vex|Morrow/);
+  });
+
+  test("the outline gate shows the same lines, screened", async () => {
+    const { rig, chatId } = await withVex(naming, [{ gates: { outline: true } }]);
+    rig.host.sendUser(chatId, TYPED);
+    await rig.host.settle();
+    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
+    const gate = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "outline_gate");
+    expect(gate?.detail).toContain("The horn sounds.");
+    expect(gate?.detail ?? "").not.toMatch(/Vex|Morrow/);
+  });
+
+  test("a suggestion naming them is dropped, unless the player saw them named in their message or the reply", async () => {
+    const offered = async (reply: string): Promise<string[]> => {
+      const { rig, chatId } = await withVex((req) => (req.messages[0]?.content.includes("Suggest three short") ? JSON.stringify({ choices: ["I ask Vex Morrow about the ferry", "I go home"] }) : quiet(req)));
+      await rig.turn(chatId, "I walk to the ferry and wait.", reply);
+      return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "choice").map((c) => c.label);
+    };
+    expect(await offered("The ferry horn sounds.")).toEqual(["I go home"]);
+    expect(await offered("The ferry horn sounds, and Vex Morrow steps off the gangway.")).toEqual(["I ask Vex Morrow about the ferry", "I go home"]);
+  });
+
+  test("an everyday word a secret entry is filed under doesn't withhold a line: the prose steps never read secret lore", async () => {
+    const { rig, chatId } = await withVex((req) => {
+      const system = req.messages[0]?.content ?? "";
+      if (system.includes("You outline a roleplay narrator")) return JSON.stringify({ beats: ["Sam buys a ticket at the window."] });
+      if (system.includes("Suggest three short")) return JSON.stringify({ choices: ["I buy a ticket", "I go home"] });
+      return quiet(req);
+    });
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(rig.host.section("Outline")).toContain("Sam buys a ticket at the window.");
+    expect((await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "choice").map((c) => c.label)).toEqual(["I buy a ticket", "I go home"]);
+  });
+});
+
 describe("interpret money params", () => {
   test("an amount the player states lands in minor units ($200 once moved $2.00)", async () => {
     const rig = new Rig();

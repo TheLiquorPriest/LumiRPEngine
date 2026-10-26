@@ -7,21 +7,23 @@ import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
+import { STARTER_WORLDS } from "../../src/packs/index";
 import type { JsonObject } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";
+import { press } from "../support/chip-press";
 import { Rig } from "../support/rig";
 
 const INTERPRET_MARK = "You map a player's typed input";
 const OUTLINE_MARK = "You outline a roleplay narrator's next reply";
 
-/** A Port Alder chat after `settings` patches, with minds off (no model answers them here), and `places` committed first. */
-async function alder(settings: JsonObject[], places: [string, JsonObject][] = []): Promise<{ rig: Rig; chatId: string }> {
+/** A Port Alder chat after `settings` patches, with minds off (no model answers them here), and `puts` ([collection, value with its id]) committed first. */
+async function alder(settings: JsonObject[], puts: [string, JsonObject][] = []): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
   rig.host.quietReply = () => "{}";
   for (const patch of [...settings, { minds: { enabled: false } }]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
-  for (const [id, value] of places) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "places", id, value }));
-  if (places.length > 0) rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+  for (const [collection, value] of puts) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id: String(value.id), value }));
+  if (puts.length > 0) rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   return { rig, chatId };
@@ -166,6 +168,29 @@ describe("the intent gate", () => {
     expect((await chipOf(rig, chatId, "intent_gate"))?.label).toBe(`Play Go to: ${await placeName(rig, chatId, "alder_market")}?`);
     expect(rig.host.assembled).toEqual([]);
   });
+
+  test("a new reply after a reply reads nothing again: no second read, and no gate for the action the turn before played", async () => {
+    const { rig, chatId } = await alder([{ gates: { intent: true } }]);
+    let reads = 0;
+    rig.host.quietReply = (req: QuietRequest) => {
+      if (!(req.messages[0]?.content ?? "").includes(INTERPRET_MARK)) return "{}";
+      reads++;
+      return JSON.stringify({ action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9 });
+    };
+    rig.host.sendUser(chatId, "I walk to Bluebird Coffee.");
+    await rig.host.settle();
+    await rig.host.start(chatId, { type: "normal" });
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: (await chipOf(rig, chatId, "intent_gate"))?.id, choice: "play" }));
+    const played = await rig.host.start(chatId, { type: "regenerate" });
+    await rig.host.finish(played, "You walk to the cafe.");
+    // Send, with nothing typed: the reply after that one goes out, and the walk isn't asked about again.
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    expect(reads).toBe(1);
+    expect(await chipOf(rig, chatId, "intent_gate")).toBeUndefined();
+    await rig.host.finish(reply, "The barista waves.");
+    expect(await where(rig, chatId)).toBe("bluebird_coffee");
+  });
 });
 
 describe("the outline gate", () => {
@@ -195,10 +220,44 @@ describe("the outline gate", () => {
     expect(outlines).toBe(1);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
+
+  test("on a new reply after a reply, Edit keeps the outline and the player's Send writes that reply from it: no button rolls the reply before it again", async () => {
+    const { rig, chatId } = await alder([{ modelUse: { preset: "full" } }]);
+    let outlines = 0;
+    rig.host.quietReply = (req: QuietRequest) => {
+      if (!(req.messages[0]?.content ?? "").startsWith(OUTLINE_MARK)) return "{}";
+      outlines++;
+      return JSON.stringify({ beats: ["Danny glances at the clock."] });
+    };
+    await rig.turn(chatId, "I wait by the counter.", "The shop is quiet.");
+    const earlier = [...(rig.host.head(chatId)?.swipes ?? [])];
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { gates: { outline: true } } }));
+    // Send, with nothing typed: the new reply's outline waits.
+    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
+    const gate = await chipOf(rig, chatId, "outline_gate");
+    if (!gate) throw new Error("no gate");
+    const asked = outlines;
+    const pressed = await press(rig, chatId, gate, "edit", { text: "Danny waits by the window.\nThe rain starts." });
+    // Only the player's Send can start that reply, so the card asks for it and starts nothing itself.
+    expect(pressed.began).toEqual([]);
+    expect(pressed.told).toHaveLength(1);
+    expect(rig.host.head(chatId)?.swipes).toEqual(earlier);
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    const outline = rig.host.section("Outline");
+    expect(outline).toContain("- Danny waits by the window.");
+    expect(outline).toContain("- The rain starts.");
+    expect(outline).not.toContain("Danny glances at the clock.");
+    await rig.host.finish(reply, "Rain taps the glass.");
+    // The Send writes no new outline: the edited one stands in for it, after the reply before it.
+    expect(outlines).toBe(asked);
+    expect(rig.host.chat(chatId).messages.filter((m) => !m.isUser).map((m) => m.swipes)).toEqual([["Morning."], earlier, ["Rain taps the glass."]]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });
 
 describe("no request plays a place the player character can't know of", () => {
-  const vault: [string, JsonObject] = ["hidden_vault", { id: "hidden_vault", name: "The Vault", parent: "port_alder", visibility: "secret", fields: {} }];
+  const vault: [string, JsonObject] = ["places", { id: "hidden_vault", name: "The Vault", parent: "port_alder", visibility: "secret", fields: {} }];
 
   test("the intent gate's Edit to a secret place is refused, and the chip stays", async () => {
     const { rig, chatId } = await alder([{ gates: { intent: true } }], [vault]);
@@ -258,6 +317,55 @@ describe("an outline let through is for its one turn", () => {
     expect(swiped.halted).toBe("cancelled");
     expect(outlines).toBe(2);
     expect((await chipOf(rig, chatId, "outline_gate"))?.detail).toContain("Beat number 2.");
+  });
+});
+
+describe("the intent gate's card names no one hidden the player didn't name", () => {
+  const VEX: [string, JsonObject] = ["entities", { id: "vex_morrow", kind: "character", name: "Vex Morrow", tier: "background", visibility: "secret", fields: { place: "alder_automotive" }, relations: [] }];
+
+  /** The card a typed message waits on, its read `read`, in a world with `puts`. */
+  async function card(read: JsonObject, typed: string, puts: [string, JsonObject][]): Promise<Chip | undefined> {
+    const { rig, chatId } = await alder([{ gates: { intent: true } }], puts);
+    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify({ confidence: 0.9, ...read }) : "{}");
+    rig.host.sendUser(chatId, typed);
+    await rig.host.settle();
+    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
+    return chipOf(rig, chatId, "intent_gate");
+  }
+
+  test("an answer the read gave as someone hidden is no answer: no card, and no chip names them", async () => {
+    // The truck puzzle open, as the player would know it.
+    const truck = STARTER_WORLDS.modern_slice_of_life?.("w", "Port Alder").tracks.p_township_truck;
+    if (!truck) throw new Error("no truck puzzle");
+    const { rig, chatId } = await alder([{ gates: { intent: true } }], [VEX, ["tracks", { ...truck, visibility: "public" } as unknown as JsonObject]]);
+    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify({ confidence: 0.9, action: "answer", params: { puzzle: "p_township_truck", answer: "Vex Morrow" } }) : "{}");
+    rig.host.sendUser(chatId, "I give my answer: whoever was in the shop last night.");
+    await rig.host.settle();
+    // Nothing is left to play, so nothing waits on the gate; the reply goes out and is read.
+    const g = await rig.host.start(chatId, { type: "normal" });
+    expect(g.halted).toBeUndefined();
+    await rig.host.finish(g, "Marcus wipes his hands and says nothing.");
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
+    expect(chips.some((c) => c.kind === "intent_gate")).toBe(false);
+    expect(chips.find((c) => c.kind === "decline")?.label).toBe("Answer: couldn't");
+    expect(JSON.stringify(chips)).not.toMatch(/Vex|Morrow/);
+  });
+
+  test("the player's own words naming someone hidden are quoted as in a world without them", async () => {
+    const read: JsonObject = { action: "go", params: { to: "bluebird_coffee" }, text: "I walk to Bluebird Coffee to look for Vex Morrow" };
+    const typed = "I walk to Bluebird Coffee to look for Vex Morrow.";
+    const hidden = await card(read, typed, [VEX]);
+    const none = await card(read, typed, []);
+    expect(hidden?.detail).toBe("“I walk to Bluebird Coffee to look for Vex Morrow”");
+    expect({ label: hidden?.label, detail: hidden?.detail }).toEqual({ label: none?.label, detail: none?.detail });
+  });
+
+  test("a pick that is a hidden thing's id reads as one nothing has", async () => {
+    const read: JsonObject = { action: "take", params: { item: "lantern" }, thing: "other" };
+    const hidden = await card(read, "I take the lantern.", [["entities", { id: "lantern", kind: "item", name: "Lantern", tier: "background", visibility: "secret", fields: { place: "harbor_street_114" }, relations: [] }]]);
+    const none = await card(read, "I take the lantern.", []);
+    expect(hidden?.label).toBe("Play Take: lantern?");
+    expect(hidden?.label).toBe(none?.label);
   });
 });
 

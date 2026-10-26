@@ -18,13 +18,14 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import { hashParts } from "../../../shared/hash";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable } from "../../../shared/tables";
-import type { EffectSpec, EntityDef, KindDef, WorldCurrency } from "../../../shared/world";
+import type { EffectSpec, EntityDef, KindDef, WorldCurrency, WorldDoc } from "../../../shared/world";
 import { calendarOf, clockOfPhrase } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
+import { effectLists } from "../../../engine/ruleset-lint";
 import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
-import { carriedBy, contentsOf, findPiece, fitProblem, fixedOf, goesIn, grants, hasItem, holderOf, holdProblem, holdsAs, isInside, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
+import { carriedBy, contentsOf, findPiece, fitProblem, fixedOf, goesIn, grants, hasItem, holderOf, holdProblem, holdsAs, isInside, kindGoesIn, kindHoldsAs, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
 import { canSeeEntity, isDiscoverable, knows } from "../../../engine/visibility";
 import { together } from "../../../engine/presence";
 import type { FeedScope } from "../../../shared/world";
@@ -95,6 +96,55 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
 
 /** At most this many things are told of each person with the POV. */
 const PRESENT_GEAR_CAP = 6;
+
+/**
+ * The authored effects that move a thing through `transfer`, by the argument naming what they move
+ * and the one naming what it goes into. A kit's piece comes from the kit (`gear.take_piece`), so it
+ * names no thing; one the world puts in a kit is among the world's contents.
+ */
+const MOVES: Record<string, { thing?: string; into: string }> = { "gear.transfer": { thing: "item", into: "to" }, "gear.give": { thing: "item", into: "to" }, "gear.take_piece": { into: "to" } };
+
+/**
+ * The kinds of the world's own that it moves things of, and that it moves things into (DESIGN §7):
+ * each thing it puts inside another entity, and each authored move (`MOVES`). Each kind keeps its
+ * first case, in words. An argument names an action's parameter when one has the name, a binding
+ * winning as `evalArg` reads it (its kind), else an entity (its own kind).
+ */
+function authoredMoves(world: WorldDoc): { things: Map<string, string>; holders: Map<string, string> } {
+  const things = new Map<string, string>();
+  const holders = new Map<string, string>();
+  const note = (into: Map<string, string>, kind: string | undefined, why: string): void => {
+    if (kind !== undefined && own(world.kinds, kind) && !into.has(kind)) into.set(kind, why);
+  };
+  for (const e of Object.values(world.entities)) {
+    for (const rel of e.relations) {
+      const holder = rel.type === "in" ? own(world.entities, rel.to) : undefined;
+      if (!holder) continue;
+      note(holders, holder.kind, `${holder.name} holds ${e.name}`);
+      note(things, e.kind, `${holder.name} holds ${e.name}`);
+    }
+  }
+  for (const { path, effects } of effectLists(world)) {
+    const action = path.startsWith("actions.") ? own(world.actions, path.split(".")[1] ?? "") : undefined;
+    const named = (arg: JsonValue | undefined): { kind: string | undefined; words: string } | null => {
+      if (typeof arg !== "string" || arg.startsWith("=")) return null;
+      const param = action ? own(action.params, arg) : undefined;
+      if (param) return { kind: param.type === "ref" ? param.ref : undefined, words: `its ${param.label ?? arg}` };
+      const e = own(world.entities, arg);
+      return { kind: e?.kind, words: e?.name ?? arg };
+    };
+    for (const spec of effects) {
+      const move = hasOwn(MOVES, spec.type) ? MOVES[spec.type] : undefined;
+      if (!move) continue;
+      const by = action?.label ?? path;
+      const into = named(spec.args?.[move.into]);
+      if (into) note(holders, into.kind, `${by} gives things to ${into.words}`);
+      const thing = move.thing === undefined ? null : named(spec.args?.[move.thing]);
+      if (thing) note(things, thing.kind, `${by} moves ${thing.words}`);
+    }
+  }
+  return { things, holders };
+}
 
 /**
  * What each person with the POV that it can see visibly wears and carries (DESIGN §6.11): worn and
@@ -963,6 +1013,42 @@ export const gearPack: PackDef = {
           if (typeof e.fields.kit === "string" && table && !own(table.rows, e.fields.kit)) issues.push({ severity: "error" as const, code: "gear.kits", message: `${e.name} names an unknown kit ${e.fields.kit}.`, path: `entities.${e.id}.fields.kit` });
         }
         return issues;
+      },
+    });
+
+    r.lint({
+      code: "gear.holders",
+      check(world, registry) {
+        if (!registry) return [];
+        // Only a person, a vehicle or a container holds things (`kindHoldsAs`, DESIGN §7): a kind of the
+        // world's own it moves things into that is none of those is refused every transfer, gift and Put
+        // inside into it. Said once per kind.
+        return [...authoredMoves(world).holders]
+          .filter(([kind]) => kindHoldsAs(registry, world, kind) === null)
+          .map(([kind, why]) => ({
+            severity: "warning" as const,
+            code: "gear.holders",
+            path: `kinds.${kind}`,
+            message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) holds things in this world (${why}) but isn't a container, a vehicle or a person, so nothing can be put in it: a transfer, a gift or a GM's Put inside into it is refused. Set its Extends to container, or to a kind built on one.`,
+          }));
+      },
+    });
+
+    r.lint({
+      code: "gear.contents",
+      check(world, registry) {
+        if (!registry) return [];
+        // Only a thing goes inside anything (`kindGoesIn`, DESIGN §7): an item or a kind built on one, a
+        // cash account, and a person or a vehicle into a vehicle. A kind of the world's own it moves things
+        // of that is none of those is never taken, given or put anywhere. Said once per kind.
+        return [...authoredMoves(world).things]
+          .filter(([kind]) => kindGoesIn(registry, world, kind) === "nowhere")
+          .map(([kind, why]) => ({
+            severity: "warning" as const,
+            code: "gear.contents",
+            path: `kinds.${kind}`,
+            message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) is moved in this world (${why}) but isn't built on Item (nor is it a person, a vehicle or a cash account), so nothing can take it, give it or put it in anything: Take never offers it, and a transfer, a gift or a GM's Put inside of it is refused. Set its Extends to item, or to a kind built on one.`,
+          }));
       },
     });
   },

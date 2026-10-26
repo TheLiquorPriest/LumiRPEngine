@@ -11,6 +11,7 @@ import { formatMoney } from "../shared/world";
 import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
+import type { GenerateAs } from "../shared/protocol";
 import { chatFeed, sourceOf, worldFeed } from "../engine/feed";
 import { compactSpan, paramLabel, spanText } from "../engine/action-words";
 import { sectionsOf } from "./book";
@@ -536,22 +537,28 @@ const REFUSED_WHAT: Record<Exclude<HeldWrite["kind"], "post">, string> = { marke
 
 /**
  * The card for a turn kept from a reply that failed (DESIGN §5.1), on the chat's last message while
- * the turn lasts: Retry the reply is Lumiverse's Regenerate, which takes the turn as it is; Re-run
- * the engine drops it first, so the engine runs again. The provider's error stays in Diagnostics.
+ * the turn lasts. Retry the reply starts it as the turn's reply started (`as`): Lumiverse's
+ * Regenerate, or its Continue for a Continue; a new reply after a reply only the player's own Send
+ * can start, so that card says to press it and has no Retry button, since a Regenerate would roll the
+ * reply before it again. Re-run the engine drops the turn first, so the engine runs again. The
+ * provider's error stays in Diagnostics.
  */
-export function replyFailedChip(turn: string, failed: ReplyFailure, messageId: MessageId): Chip {
+export function replyFailedChip(turn: string, failed: ReplyFailure, as: GenerateAs, messageId: MessageId): Chip {
   const why = failed === "error" ? " Diagnostics says why it failed." : "";
+  const retry = as === "send" ? "Press Send, with nothing typed, to write it again from that same turn" : "Retry the reply writes it again from that same turn";
+  const rerun = as === "send" ? "Re-run the engine drops it, so your Send runs the turn again." : "Re-run the engine runs the turn again, then the reply.";
   return {
     id: `reply_failed:${turn}`,
     kind: "reply_failed",
     messageId,
     label: failed === "error" ? "The reply failed" : "The reply came back empty",
-    detail: `The engine's work for this turn is kept. Retry the reply writes it again from that same turn: the same reading, plan, minds and sections, with no engine calls first. Re-run the engine runs the turn again, then the reply.${why}`,
+    detail: `The engine's work for this turn is kept. ${retry}: the same reading, plan, minds and sections, with no engine calls first. ${rerun}${why}`,
     actions: [
-      { id: "regenerate", label: "Retry the reply", style: "primary" },
+      ...(as === "send" ? [] : [{ id: as, label: "Retry the reply", style: "primary" as const }]),
       { id: "rerun", label: "Re-run the engine" },
       { id: "diagnostics", label: "Diagnostics" },
     ],
+    as,
     expires: "next_send",
   };
 }

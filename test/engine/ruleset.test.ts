@@ -228,6 +228,35 @@ describe("progression", () => {
     expect([w.state.entities[POV]?.fields.level, w.state.entities[POV]?.fields.perks]).toEqual([2, 73]);
   });
 
+  test("a level that drops takes a pool left above its lower max down to it, in the same unit, so a rest never lowers it", () => {
+    const world = rulesWorld();
+    const reg = registryOf();
+    const w = new Working(reg, world, startState(world));
+    const scope = { bindings: { self: POV }, rng: createRng("pools") };
+    const hp = (): unknown => w.state.entities[POV]?.fields.hp;
+    // Level 3 (max HP 25) with HP held at 25: a stored value, as after any change to it.
+    const up = applyEffects(reg, w, [{ type: "award", args: { entity: "self", progression: "character", amount: 1000 } }, { type: "set", args: { entity: "self", field: "hp", value: 25 } }], scope);
+    expect(hp()).toBe(25);
+    const down = applyEffects(reg, w, [{ type: "add", args: { entity: "self", field: "xp", delta: -800 } }], scope);
+    expect(down.rejected).toEqual([]);
+    // Level 1's max HP is 15: the drop sets HP to it, and the level, HP and the line are one unit.
+    const drop = down.applied.slice(1);
+    expect(drop.map((e) => (e.type === "set" ? [e.field, e.value] : e.type))).toEqual([["level", 1], ["hp", 15], "engine.note"]);
+    expect(drop.every((e) => e.group !== undefined && e.group === drop[0]?.group)).toBe(true);
+    // A night's rest heals 3, stopped at the max: nothing to record, and HP doesn't go down.
+    const rest = applyEffects(reg, w, [{ type: "recover", args: { entity: "self", field: "hp" } }], scope);
+    expect([rest.applied, hp()]).toEqual([[], 15]);
+    // Back at Level 3 with HP 10, a drop leaves HP alone: it is within Level 1's max.
+    const back = applyEffects(reg, w, [{ type: "add", args: { entity: "self", field: "hp", delta: -5 } }, { type: "add", args: { entity: "self", field: "xp", delta: 800 } }], scope);
+    const again = applyEffects(reg, w, [{ type: "add", args: { entity: "self", field: "xp", delta: -800 } }], scope);
+    expect(again.applied.map((e) => (e.type === "set" ? [e.field, e.value] : e.type))).toEqual(["add", ["level", 1], "engine.note"]);
+    expect(hp()).toBe(10);
+    // The recorded events replay to the same state.
+    const replay = new Working(reg, world, startState(world));
+    replay.applyAll([...up.applied, ...down.applied, ...rest.applied, ...back.applied, ...again.applied]);
+    expect(replay.state).toEqual(w.state);
+  });
+
   test("only XP moves the level: a fix or a GM edit to XP takes it along, and anything that writes the level is refused", () => {
     const world = rulesWorld();
     const reg = registryOf();

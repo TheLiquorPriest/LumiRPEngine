@@ -6,7 +6,7 @@ The formulas are explained in [EXPRESSIONS.md](EXPRESSIONS.md), and every effect
 
 ## XP and levels
 
-A progression keeps experience in one field and the level in another, and the level follows the XP both ways. After any effect changes an entity's XP (an award, a quest reward, a ✎ fix, a GM edit), the engine raises its level to the last threshold reached, one level at a time, and runs `onLevel` for each level gained; XP that falls below the level's threshold drops the level straight back, running nothing. Nothing else writes the level: to change one, change XP. Here sparring earns 150 XP, Level 2 starts at 300, and every level adds a point of Grit. The maximum hit points are derived from the level, so the pool grows with it, and the sheet shows the level, the XP to the next one, and the pool as a bar.
+A progression keeps experience in one field and the level in another, and the level follows the XP both ways. After any effect changes an entity's XP (an award, a quest reward, a ✎ fix, a GM edit), the engine raises its level to the last threshold reached, one level at a time, and runs `onLevel` for each level gained; XP that falls below the level's threshold drops the level straight back, running nothing, and a pool left above its lower max comes down to it. Nothing else writes the level: to change one, change XP. Here sparring earns 150 XP, Level 2 starts at 300, and every level adds a point of Grit. The maximum hit points are derived from the level, so the pool grows with it, and the sheet shows the level, the XP to the next one, and the pool as a bar.
 
 ```json
 {

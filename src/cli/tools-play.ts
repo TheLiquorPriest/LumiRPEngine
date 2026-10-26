@@ -13,9 +13,9 @@ import { isRecord } from "../shared/json";
 import type { EventRef, ResolveScope, TimeControl, TimeScope } from "../shared/ledger";
 import type { MindEditOp } from "../shared/minds";
 import type { RoutineEditOp } from "../shared/routines";
-import type { EditOp, ResultBodies } from "../shared/protocol";
+import type { EditOp, GenerateAs, ResultBodies } from "../shared/protocol";
 import type { Chip } from "../shared/state-view";
-import { chipRegenerates } from "../shared/state-view";
+import { chipStarts } from "../shared/state-view";
 import type { AdjudicationDef } from "../shared/world";
 import { TIME_CONTROLS } from "../engine/events";
 // The one limit on a GM edit's operations: the schemas take no more than the engine accepts.
@@ -77,7 +77,10 @@ function written(chatId: string, done: JsonObject, pending: boolean): ToolResult
   return { text: json({ chatId, ...done, pending, ...(pending ? { note: PENDING } : {}) }) };
 }
 
-/** A chip as the agent reads it: each action says when Lumiverse has to regenerate the reply to finish it. */
+/** What the user presses in the chat to start the reply a chip's choice waits for (`chipStarts`). */
+const START_PRESS: Record<GenerateAs, string> = { regenerate: "Regenerate (or swipe)", continue: "Continue", send: "Send, with nothing typed," };
+
+/** A chip as the agent reads it: each action says how Lumiverse has to start the reply to finish it. */
 function chipOut(chip: Chip): JsonValue {
   return {
     id: chip.id,
@@ -86,7 +89,10 @@ function chipOut(chip: Chip): JsonValue {
     ...(chip.swipeId !== undefined ? { swipeId: chip.swipeId } : {}),
     label: chip.label,
     ...(chip.detail !== undefined ? { detail: chip.detail } : {}),
-    actions: chip.actions.map((a): JsonValue => ({ id: a.id, label: a.label, ...(a.style !== undefined ? { style: a.style } : {}), ...(a.input !== undefined ? { input: JSON.parse(JSON.stringify(a.input)) as JsonValue } : {}), ...(chipRegenerates(chip.kind, a.id) ? { regenerates: true } : {}) })),
+    actions: chip.actions.map((a): JsonValue => {
+      const start = chipStarts(chip, a.id);
+      return { id: a.id, label: a.label, ...(a.style !== undefined ? { style: a.style } : {}), ...(a.input !== undefined ? { input: JSON.parse(JSON.stringify(a.input)) as JsonValue } : {}), ...(start ? { starts: start } : {}) };
+    }),
     expires: chip.expires,
   };
 }
@@ -110,7 +116,7 @@ async function chips(args: Args, ctx: ToolContext): Promise<ToolResult> {
       status: view.status,
       chips: view.chips.map(chipOut),
       ...(view.keepReport.length > 0 ? { keepReport: JSON.parse(JSON.stringify(view.keepReport)) as JsonValue } : {}),
-      about: "Answer one with lre_chip {chatId, chip, choice}. An action marked regenerates is finished only by Lumiverse regenerating the reply, which the user does in the chat.",
+      about: "Answer one with lre_chip {chatId, chip, choice}. An action marked starts is finished only by the reply Lumiverse starts, which the user does in the chat: Regenerate (or a swipe), Continue, or Send with nothing typed.",
     }),
   };
 }
@@ -251,10 +257,11 @@ function chipTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
     const chip = (await stateOf(ctx, chatId)).view.chips.find((c) => c.id === id);
     if (chip === undefined) throw new ToolError(`Chat ${chatId} has no chip ${id} now (a chip lapses at the next send, and goes once answered): lre_chips lists the ones it has.`);
     if (!chip.actions.some((a) => a.id === choice)) throw new ToolError(`The chip ${id} has no action ${choice}; its actions: ${chip.actions.map((a) => `${a.id} (${a.label})`).join(", ")}.`);
-    // A plain Regenerate is the frontend's own: nothing to send, and only a page can do it.
-    if (choice === "regenerate") throw new ToolError(`${chip.label}: ${choice} only regenerates the reply, which Lumiverse does, not this client: ask the user to press Regenerate (or swipe) in the chat.`);
+    // Regenerate and Continue are the frontend's own: nothing to send, and only a page can do them.
+    if (choice === "regenerate" || choice === "continue") throw new ToolError(`${chip.label}: ${choice} only ${choice === "continue" ? "continues" : "regenerates"} the reply, which Lumiverse does, not this client: ask the user to press ${START_PRESS[choice]} in the chat.`);
     const body = await ask(ctx, chatId, "lre.chip", { chatId, chip: id, choice, ...(isRecord(payload) ? { payload: payload as JsonObject } : {}) });
     const sends = chip.kind === "choice" && choice === "send";
+    const start = chipStarts(chip, choice);
     return {
       text: json({
         chatId,
@@ -263,7 +270,7 @@ function chipTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
         applied: body.applied,
         pending: body.pending,
         ...(body.pending ? { note: PENDING } : {}),
-        ...(chipRegenerates(chip.kind, choice) ? { reply: "This takes effect on the reply's next swipe, which Lumiverse makes: ask the user to press Regenerate (or swipe) in the chat." } : {}),
+        ...(start ? { reply: `This takes effect on the reply Lumiverse writes next: ask the user to press ${START_PRESS[start]} in the chat.` } : {}),
         ...(sends ? { reply: REPLY } : {}),
       }),
     };

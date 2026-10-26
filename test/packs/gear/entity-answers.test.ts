@@ -1,7 +1,9 @@
 // What holds what and what lies where, as the engine answers it (DESIGN §7, §6.11, §9.7): nobody
-// takes a vehicle, a part built into one or a fixed thing; only what holds things holds them; the
-// Place section lists only things; a bed is never a truck's bed; import reads a truck bed as the
-// part the gear tables declare; and a world kind that takes a pack kind's place is reported.
+// takes a vehicle, a part built into one or a fixed thing; only what holds things holds them, and
+// Check world names a kind of the world's own given things it can't hold; the Place section lists
+// only things; a bed is never a truck's bed; import reads a truck bed as the part the gear tables
+// declare; and a world kind with a pack kind's id lies over it, Check world telling the kind whose
+// own Extends cuts the pack's chain.
 
 import { describe, expect, test } from "bun:test";
 import type { JobProposal } from "../../../src/shared/protocol";
@@ -90,6 +92,73 @@ describe("only what holds things holds them", () => {
     expect(at("bill_phone")?.goes).toBe("nowhere");
     expect(at("pov_truck_bed")?.goes).toBe("nowhere");
   });
+
+  test("Check world names a kind of the world's own that it puts things in or transfers things to but that holds nothing; one built on a container is quiet", () => {
+    const world = newBlankWorld("w_holders", "Holders", reg);
+    const thing = (id: string, kind: string, name: string, inside?: string) => ({ id, kind, name, tier: "background", fields: inside ? {} : { place: "home" }, relations: inside ? [{ type: "in", to: inside }] : [] });
+    Object.assign(world.kinds, {
+      chest: { id: "chest", label: "Chest", fields: {} },
+      crate: { id: "crate", label: "Crate", fields: {} },
+      bin: { id: "bin", label: "Bin", fields: {} },
+      safe: { id: "safe", label: "Safe", extends: "container", fields: {} },
+    });
+    Object.assign(world.entities, { strongbox: thing("strongbox", "chest", "Strongbox"), coin: thing("coin", "item", "Coin", "strongbox"), dustbin: thing("dustbin", "bin", "Dustbin"), vault: thing("vault", "safe", "Vault"), ring: thing("ring", "item", "Ring", "vault") });
+    world.actions.stash = {
+      id: "stash",
+      label: "Stash it",
+      params: { box: { type: "ref", ref: "crate", label: "Box" } },
+      requires: [],
+      outcomes: { default: [{ type: "gear.transfer", args: { item: "coin", to: "box" } }, { type: "gear.give", args: { item: "ring", from: "you", to: "dustbin" } }] },
+      duration: "1",
+    };
+    const told = () => lintWorld(world, reg).filter((i) => i.code === "gear.holders");
+    expect(told().map((i) => [i.severity, i.path])).toEqual([
+      ["warning", "kinds.chest"],
+      ["warning", "kinds.crate"],
+      ["warning", "kinds.bin"],
+    ]);
+    expect(told().map((i) => i.message.match(/in this world \((.*?)\) but/)?.[1])).toEqual(["Strongbox holds Coin", "Stash it gives things to its Box", "Stash it gives things to Dustbin"]);
+    expect(told()[0]?.message).toContain("Set its Extends to container");
+    for (const kind of ["chest", "crate", "bin"]) Object.assign(world.kinds[kind] ?? {}, { extends: "container" });
+    expect(told()).toEqual([]);
+  });
+
+  test("Check world names a kind of the world's own whose things it moves but that goes nowhere, as the engine refuses them; one built on Item is quiet", () => {
+    const world = newBlankWorld("w_contents", "Contents", reg);
+    const thing = (id: string, kind: string, name: string, inside?: string) => ({ id, kind, name, tier: "background", fields: inside ? {} : { place: "home" }, relations: inside ? [{ type: "in", to: inside }] : [] });
+    Object.assign(world.kinds, {
+      coin: { id: "coin", label: "Coin", fields: {} },
+      token: { id: "token", label: "Token", fields: {} },
+      relic: { id: "relic", label: "Relic", fields: {} },
+      gem: { id: "gem", label: "Gem", extends: "item", fields: {} },
+    });
+    Object.assign(world.entities, { pouch: thing("pouch", "container", "Pouch"), doubloon: thing("doubloon", "coin", "Doubloon", "pouch"), idol: thing("idol", "relic", "Idol"), ruby: thing("ruby", "gem", "Ruby", "pouch") });
+    world.actions.pocket = {
+      id: "pocket",
+      label: "Pocket it",
+      params: { loot: { type: "ref", ref: "token", label: "Loot" } },
+      requires: [],
+      outcomes: { default: [{ type: "gear.transfer", args: { item: "loot", to: "you" } }, { type: "gear.give", args: { item: "idol", from: "you", to: "pouch" } }] },
+      duration: "1",
+    };
+    const told = () => lintWorld(world, reg).filter((i) => i.code === "gear.contents");
+    expect(told().map((i) => [i.severity, i.path])).toEqual([
+      ["warning", "kinds.coin"],
+      ["warning", "kinds.token"],
+      ["warning", "kinds.relic"],
+    ]);
+    expect(told().map((i) => i.message.match(/in this world \((.*?)\) but/)?.[1])).toEqual(["Pouch holds Doubloon", "Pocket it moves its Loot", "Pocket it moves Idol"]);
+    expect(told()[0]?.message).toContain("Set its Extends to item");
+    // What it warns of is what the engine does: a GM can't put the doubloon on you, the ruby can.
+    const put = (entity: string): string | null => {
+      const out = resolveEdit(reg, world, initialState(world, "contents", reg), [{ op: "put", entity, into: "you" }], { gm: true, runSeed: "contents" });
+      return "rejection" in out ? out.rejection.code : null;
+    };
+    expect([put("doubloon"), put("ruby")]).toEqual(["cant_hold", null]);
+    for (const kind of ["coin", "token", "relic"]) Object.assign(world.kinds[kind] ?? {}, { extends: "item" });
+    expect(told()).toEqual([]);
+    expect(put("doubloon")).toBeNull();
+  });
 });
 
 describe("the Place section lists only things lying there", () => {
@@ -152,6 +221,20 @@ describe("a world kind with a pack kind's id lies over it", () => {
     expect(shadow?.message).toContain("Capacity (l)");
     expect(shadow?.message).toContain("Set its Extends back to container");
     expect(lintWorld(await portAlder(), reg).some((i) => i.code === "kind_shadow")).toBe(false);
+  });
+
+  test("Check world's advice goes to the kind whose own Extends cuts the pack's chain, and following it clears the warning", () => {
+    const world = newBlankWorld("w_chain", "Chain", reg);
+    Object.assign(world.kinds, { widget: { id: "widget", label: "Widget", fields: {} }, item: { id: "item", label: "Item", extends: "widget", fields: {} }, container: { id: "container", label: "Container", fields: {} } });
+    const shadows = () => lintWorld(world, reg).filter((i) => i.code === "kind_shadow");
+    expect(shadows().map((i) => i.path)).toEqual(["kinds.item"]);
+    expect(shadows()[0]?.message).toContain("builds on widget instead of thing");
+    expect(shadows()[0]?.message).toContain("Set its Extends back to thing");
+    // A container that keeps the pack's parent, or names it, loses only what its Item cuts: told there.
+    Object.assign(world.kinds.container ?? {}, { extends: "item" });
+    expect(shadows().map((i) => i.path)).toEqual(["kinds.item"]);
+    Object.assign(world.kinds.item ?? {}, { extends: "thing" });
+    expect(shadows()).toEqual([]);
   });
 
   test("Build's forms read the same: the world's Person over the pack's keeps Home and Extends beside its own Grit", () => {

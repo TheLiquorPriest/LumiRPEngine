@@ -422,30 +422,31 @@ function dataBlock(vars: Readonly<Record<string, string>>): string {
 
 /**
  * A prompted step's lines: its non-empty strings, trimmed, at most `max` of them. Each is checked whole
- * for an unrevealed secret and withheld when it carries one, before anything is cut, so a cut never
- * leaves part of a secret that the check looks for whole. One longer than `chars` is then cut to it,
- * or with `"drop"`, left out before the others are counted.
+ * (`withheld`: an unrevealed secret, a hidden name) and withheld when it carries one, before anything
+ * is cut, so a cut never leaves part of what the check looks for whole. One longer than `chars` is
+ * then cut to it, or with `"drop"`, left out before the others are counted.
  */
-function proseLines(v: JsonValue | undefined, max: number, secrets: readonly string[], chars = 300, long: "cut" | "drop" = "cut"): string[] {
+function proseLines(v: JsonValue | undefined, max: number, withheld: (line: string) => boolean, chars = 300, long: "cut" | "drop" = "cut"): string[] {
   const all = (typeof v === "string" ? [v] : Array.isArray(v) ? v : []).flatMap((x) => (typeof x === "string" && x.trim() !== "" ? [x.trim()] : []));
   return (long === "drop" ? all.filter((x) => x.length <= chars) : all)
     .slice(0, max)
-    .filter((x) => findLeaks(x, secrets).length === 0)
+    .filter((x) => !withheld(x))
     .map((x) => x.slice(0, chars));
 }
 
 /**
  * A prompted step (`brief`, `outline`, `choices`): the world's template or the built-in
- * instructions, the output contract, and the facts. Prose comes back leak-checked; null when
- * the call fails.
+ * instructions, the output contract, and the facts. Prose comes back checked whole by `withheld`
+ * (the caller's: an unrevealed secret, and a name hidden from whoever reads it); null when the
+ * call fails.
  */
-export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "outline" | "choices", vars: Readonly<Record<string, string>>, secrets: readonly string[], userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string[] | null> {
+export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "outline" | "choices", vars: Readonly<Record<string, string>>, withheld: (line: string) => boolean, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string[] | null> {
   const instructions = renderTemplate(run.template?.template ?? PROSE_PROMPTS[kind], vars);
   const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent });
   if (!isRecord(raw)) return null;
   // A brief or an outline beat may run long and is cut, once checked whole. A suggestion is a chip's
   // text and the player's next message: one too long for a chip is dropped rather than cut.
-  return kind === "brief" ? proseLines(raw.text, 1, secrets, BRIEF_CHARS) : kind === "outline" ? proseLines(raw.beats, OUTLINE_BEATS_MAX, secrets, BEAT_CHARS) : proseLines(raw.choices, 4, secrets, 120, "drop");
+  return kind === "brief" ? proseLines(raw.text, 1, withheld, BRIEF_CHARS) : kind === "outline" ? proseLines(raw.beats, OUTLINE_BEATS_MAX, withheld, BEAT_CHARS) : proseLines(raw.choices, 4, withheld, 120, "drop");
 }
 
 /** A prompted `effects` step (a world template with `output: "effects"`): proposals, for the caller to validate and bound like extraction. */

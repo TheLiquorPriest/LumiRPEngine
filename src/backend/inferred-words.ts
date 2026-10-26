@@ -145,11 +145,14 @@ export function inferredChip(res: Resolution, info: InferredResult): { label: st
   return { label: `${info.label}: ${res.outcome ?? ""}`, detail: `${own}${companions}${opponents}` };
 }
 
-/** What a suggestion chip asks before an inferred check rolls (DESIGN §11): "Roll Persuasion?", with what it is about and how hard it looks. */
-export function checkQuestion(verdict: Extract<InferredVerdict, { ok: true }>, nameOf: (id: EntityId) => string): { question: string; detail: string } {
+/**
+ * What a suggestion chip asks before an inferred check rolls (DESIGN §11): "Roll Persuasion?", with
+ * what it is about (`attempt`, as the chip may show it; empty, it isn't said) and how hard it looks.
+ */
+export function checkQuestion(verdict: Extract<InferredVerdict, { ok: true }>, attempt: string, nameOf: (id: EntityId) => string): { question: string; detail: string } {
   const { skill, band, read } = verdict;
   const against = read.against.length > 0 ? ` against ${listed(read.against.map((a) => nameOf(a.who)))}` : "";
   const joined = read.with.length > 0 ? ` with ${listed(read.with.map(nameOf))}` : "";
-  const what = read.attempt !== "" ? `, to "${read.attempt}"` : "";
+  const what = attempt !== "" ? `, to "${attempt}"` : "";
   return { question: `Roll ${skill.label}?`, detail: `${skill.label}${joined}${against}, looking ${band.label.toLowerCase()}${what}. Roll plays your message with the roll; No roll plays it as written.` };
 }

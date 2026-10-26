@@ -1,10 +1,11 @@
 // Quests as they play (DESIGN §10, §11): an end stage pays out, a stage this turn's action reaches is
 // told to this turn's narrator, hints wait behind Show a hint and only opened ones are told, the GM's
-// Stage enters a stage as play does, a person's secret cue is told once, by Stance, the lists of
-// actions name no step the story hasn't come to, and the lint names a flag nothing sets. Played
-// through the starters, as the player and the GM would.
+// Stage enters a stage as play does and is never made twice when its reply is read again, a person's
+// secret cue is told once, by Stance, the lists of actions name no step the story hasn't come to, and
+// the lint names a flag nothing sets. Played through the starters, as the player and the GM would.
 
 import { describe, expect, test } from "bun:test";
+import type { QuietRequest } from "../../src/backend/host";
 import { interpretCatalog } from "../../src/backend/interpret-context";
 import { toChain } from "../../src/backend/ledger-io";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -77,6 +78,12 @@ async function lastFix(rig: Rig, chatId: string) {
   const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "fix").at(-1);
   if (!chip) throw new Error("no fix chip");
   return chip;
+}
+
+/** Answers a puzzle from the Actions sheet, as a turn of its own. */
+async function answer(rig: Rig, chatId: string, puzzle: string, text: string): Promise<void> {
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "answer", params: { puzzle, answer: text }, source: "palette", now: true }));
+  await rig.host.finish(await rig.host.start(chatId, { type: "normal" }), "Nothing comes of it.");
 }
 
 /** Each starter quest, the stage before its end, the end, and the regard its end rewards. */
@@ -157,6 +164,63 @@ describe("hints", () => {
     expect(refused.type === "lre.error" ? refused.message : "").toContain("No hint to show");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
+
+  test("a second tap on Show a hint before the first has shown opens that same hint, so the narrator is never told one the player didn't open", async () => {
+    const rig = new Rig({ shipped: true });
+    const [first, second] = ["It moves the trees.", "You never see it."];
+    const riddle: JsonObject = { id: "p_riddle", kind: "puzzle", label: "The chalked riddle", start: "ask", visibility: "public", stages: { ask: { label: "The riddle", cue: "A riddle is chalked on the board: what rings the bells with no hand?", answer: { expect: ["the wind"], normalize: true }, hints: [first, second], next: [{ to: "answered", when: "false" }] }, answered: { label: "Answered", next: [] } } };
+    const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [riddle]);
+    rig.host.quietReply = () => "{}";
+    const row = async () => (await questLog(rig, chatId)).find((q) => q.id === "p_riddle");
+    // One wrong answer earns one hint.
+    await answer(rig, chatId, "p_riddle", "a ghost");
+    expect([(await row())?.hints, (await row())?.opened]).toEqual([[first], 0]);
+    // While the next reply is written, both taps are held: the sheet still says Show a hint.
+    rig.host.sendUser(chatId, "I think it over.");
+    await rig.host.settle();
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    for (let tap = 0; tap < 2; tap++) expect(rig.body(await rig.send({ type: "lre.fix", chatId, hint: "p_riddle" })).pending).toBe(true);
+    await rig.host.finish(reply, "You turn it over in your head.");
+    expect((await row())?.opened).toBe(1);
+    // A second wrong answer earns the second hint, which stays closed until the player opens it.
+    await answer(rig, chatId, "p_riddle", "a priest");
+    expect([(await row())?.hints, (await row())?.opened]).toEqual([[first, second], 1]);
+    const told = (await sections(rig, chatId)).quest;
+    expect([told.includes(first), told.includes(second)]).toEqual([true, false]);
+    rig.body(await rig.send({ type: "lre.fix", chatId, hint: "p_riddle" }));
+    expect((await sections(rig, chatId)).quest).toContain(second);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("a typed answer", () => {
+  test("counts only in the player's own words: one the read gives that the message doesn't is no try at all, and its decline names none of it", async () => {
+    const rig = new Rig({ shipped: true });
+    const visitor: JsonObject = { id: "p_visitor", kind: "puzzle", label: "The night visitor", start: "ask", visibility: "public", stages: { ask: { label: "Who came in?", cue: "Someone was in the shop last night, and the till is short.", answer: { expect: ["Avery Holt"], normalize: true }, hints: ["The back door's lock is scratched."], next: [{ to: "named", when: "false" }] }, named: { label: "Named", next: [] } } };
+    const cellar: JsonObject = { id: "p_cellar", kind: "puzzle", label: "The cellar riddle", start: "ask", visibility: "public", stages: { ask: { label: "The riddle", cue: "Chalked on the cellar door: what answers without a mouth?", answer: { expect: ["echo"], normalize: true }, next: [{ to: "open", when: "false" }] }, open: { label: "Open", next: [] } } };
+    const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [visitor, cellar]);
+    const row = async (id: string) => (await questLog(rig, chatId)).find((q) => q.id === id);
+    /** A typed turn interpret reads as Answer with `answer`; the turn's decline chips, as "label | detail". */
+    const typed = async (text: string, answer: string): Promise<string[]> => {
+      rig.host.quietReply = (req) => (req.messages.map((m) => m.content).join("\n").includes("You map a player's typed input") ? JSON.stringify({ action: "answer", params: { puzzle: "p_visitor", answer }, confidence: 0.9 }) : "{}");
+      await rig.turn(chatId, text, "You give it some thought.");
+      return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "decline").map((c) => `${c.label} | ${c.detail ?? ""}`);
+    };
+    // The read answers with a name the player never typed: nothing is solved, it isn't even a try, and the chip says why without the name.
+    const declined = await typed("I give my answer: whoever was in the shop last night.", "Avery Holt");
+    expect(declined).toEqual([expect.stringMatching(/^Answer: couldn't \| The message doesn't say the answer itself, so it isn't a try at the puzzle\./)]);
+    expect(declined.join("\n")).not.toContain("Avery");
+    expect([(await row("p_visitor"))?.status, (await row("p_visitor"))?.hints]).toEqual(["active", []]);
+    // Typed, it is the player's own, case and spacing aside.
+    expect(await typed("My answer is   avery   HOLT.", "Avery Holt")).toEqual([]);
+    expect((await row("p_visitor"))?.status).toBe("done");
+    // An Answer picked on the Actions sheet keeps its own answer, whatever words go with it.
+    rig.host.quietReply = () => "{}";
+    expect(rig.body(await rig.send({ type: "lre.action", chatId, action: "answer", params: { puzzle: "p_cellar", answer: "echo" }, source: "palette" })).staged).toBe(true);
+    await rig.turn(chatId, "I say it out loud, once.", "The word comes back off the stones.");
+    expect((await row("p_cellar"))?.status).toBe("done");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });
 
 describe("the GM's Stage", () => {
@@ -180,6 +244,133 @@ describe("the GM's Stage", () => {
     // Back to the start: the stage only, and what the trial's entry did stays.
     await gm(rig, chatId, { op: "stage", track: "q_fleet_contract", to: "kickoff" });
     expect([(await head(rig, chatId)).state.tracks.q_fleet_contract?.stage, await knows()]).toEqual(["kickoff", true]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("the GM's Stage, its reply read again", () => {
+  const EXTRACT_MARK = "propose concrete state changes";
+  /** An errand that moves on once Danny trusts the player character a good deal more, paying (in Priya's respect) as it leaves its start and at its end. */
+  const ERRAND: JsonObject = {
+    id: "q_errand",
+    kind: "quest",
+    label: "The errand",
+    start: "asked",
+    visibility: "public",
+    stages: {
+      asked: { label: "Asked to help", next: [{ to: "done", when: "regard('danny_okafor', 'pov', 'trust') >= 30" }], rewards: [{ type: "relationships.adjust", args: { from: "priya_nair", to: "pov", axis: "respect", delta: 5, why: "Priya hears the errand is under way." } }] },
+      done: { label: "Done", next: [], rewards: [{ type: "relationships.adjust", args: { from: "priya_nair", to: "pov", axis: "respect", delta: 5, why: "Priya hears the errand is done." } }] },
+    },
+  };
+  /** How many times each of the errand's payouts is in Priya's regard for the player character. */
+  const paid = async (rig: Rig, chatId: string): Promise<number[]> => {
+    const { why } = await regardOf(rig, chatId, "priya_nair", "respect");
+    return ["Priya hears the errand is under way.", "Priya hears the errand is done."].map((reason) => why.filter((w) => w === reason).length);
+  };
+  const stage = async (rig: Rig, chatId: string): Promise<string> => (await head(rig, chatId)).state.tracks.q_errand?.stage ?? "asked";
+  /** The errand's quest signals the latest reply holds, in its own events and in the entries kept on it. */
+  const signals = async (rig: Rig, chatId: string): Promise<number> => {
+    const m = toChain(await rig.host.chats.messages(chatId, rig.host.userId)).at(-1);
+    const rec = m?.ledger?.swipes[String(m.swipeId)];
+    return [...(rec?.events ?? []), ...(rec?.post ?? []).flatMap((p) => p.events)].filter((e) => e.type === "engine.signal" && "data" in e && e.data.class === "quest" && String(e.data.text).startsWith("The errand")).length;
+  };
+  /** A reply read as Danny trusting the player character more: on its own, it takes the errand to its end. */
+  const trusting = (req: QuietRequest): string => ((req.messages[0]?.content ?? "").includes(EXTRACT_MARK) ? JSON.stringify({ proposals: [{ type: "regard", from: "danny_okafor", to: "pov", axis: "trust", delta: 8, why: "Danny trusts you now." }] }) : "{}");
+  /** A Port Alder chat with the errand, whose replies' regard is applied as read. */
+  const errandChat = async (rig: Rig): Promise<string> => {
+    const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [ERRAND]);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { regard: { mode: "auto" } } } }));
+    rig.host.quietReply = () => "{}";
+    return chatId;
+  };
+  /** A first reply that reads as nothing, then the GM moving the errand to its end on it. */
+  const movedOnReply = async (rig: Rig, chatId: string): Promise<void> => {
+    await rig.turn(chatId, "I look around.", "The shop is quiet.");
+    expect([await stage(rig, chatId), await paid(rig, chatId)]).toEqual(["asked", [0, 0]]);
+    await gm(rig, chatId, { op: "stage", track: "q_errand", to: "done" });
+    expect([await stage(rig, chatId), await paid(rig, chatId)]).toEqual(["done", [1, 1]]);
+  };
+
+  test("a Re-run carries the GM's move while its reply leaves the quest where it was, and drops it whole once its own reply takes the quest to the same end: each reward is paid once, and the quest is told of once", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await errandChat(rig);
+    await movedOnReply(rig, chatId);
+    rig.rt.setSwipeChoice(chatId, "rerun");
+    // A reply that reads as nothing: the move is carried onto it as it was made.
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The shop is quiet again.");
+    expect([await stage(rig, chatId), await paid(rig, chatId), await signals(rig, chatId)]).toEqual(["done", [1, 1], 1]);
+    // One read as taking the errand to its end itself: the move the swipe before carried is dropped with what it paid.
+    rig.host.quietReply = trusting;
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "Danny claps you on the shoulder. He trusts you now.");
+    expect([await stage(rig, chatId), await paid(rig, chatId), await signals(rig, chatId)]).toEqual(["done", [1, 1], 1]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("so does a Re-read of the reply, edited so that it takes the quest there", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await errandChat(rig);
+    await movedOnReply(rig, chatId);
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    rig.host.quietReply = trusting;
+    rig.host.editMessage(chatId, reply.id, "Danny claps you on the shoulder. He trusts you now.");
+    await rig.host.settle();
+    const reread = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "reread");
+    if (!reread) throw new Error("no Re-read chip");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: reread.id, choice: "reread" }));
+    expect([await stage(rig, chatId), await paid(rig, chatId), await signals(rig, chatId)]).toEqual(["done", [1, 1], 1]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("made while a reply streams that takes the quest there itself, it is refused with a notice", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await errandChat(rig);
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "stage", track: "q_errand", to: "done" }] })).pending).toBe(true);
+    rig.host.quietReply = trusting;
+    await rig.host.finish(reply, "Danny claps you on the shoulder. He trusts you now.");
+    expect([await stage(rig, chatId), await paid(rig, chatId), await signals(rig, chatId)]).toEqual(["done", [1, 1], 1]);
+    expect((await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "refused").map((c) => c.label)).toEqual(["Your correction didn't apply after the reply"]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("a stage the story enters, its turn replayed on another swipe of the reply before", () => {
+  test("is entered once: replaying a turn whose tracks took a quest to an end the new swipe already reached drops that entry whole, with what it paid, its record coarsened or not", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld();
+    const pay = (delta: number): JsonObject[] => [{ type: "add", args: { entity: "sam", field: "cash", delta } }];
+    const errand: JsonObject = { id: "q_errand", kind: "quest", label: "The errand", start: "asked", visibility: "public", stages: { asked: { label: "Asked", next: [{ to: "done", when: "sam.cash >= 500" }], rewards: pay(100) }, done: { label: "Done", next: [], rewards: pay(250) } } };
+    // A dollar every turn, into the field the errand pays into: a turn's coarsened record merges what it may.
+    const tip: JsonObject = { id: "r_tip", on: { tick: "turn" }, do: pay(1) };
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "tracks", id: "q_errand", value: errand }));
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "rules", id: "r_tip", value: tip }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    // A reply that finds a wallet reads as $900 more, which takes the errand to its end.
+    rig.host.quietReply = (req) => (req.messages[0]?.content.includes("propose concrete state changes") && (req.messages[1]?.content.split("Narration:\n")[1] ?? "").includes("wallet") ? JSON.stringify({ proposals: [{ type: "condition", entity: "sam", field: "cash", delta: 900 }] }) : "{}");
+    const cash = async (): Promise<number> => Number(await rig.cashOf(chatId));
+    await rig.turn(chatId, "I look around.", "Quiet.");
+    const first = rig.host.head(chatId);
+    if (!first) throw new Error("no reply");
+    expect(await cash()).toBe(101);
+    // Its Re-run finds the wallet: on that swipe the errand pays out.
+    rig.rt.setSwipeChoice(chatId, "rerun");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "You find a wallet.");
+    expect(await cash()).toBe(1351);
+    // Back on the first swipe, the next reply finds it instead, and the errand pays out there.
+    rig.host.navigate(chatId, first.id, 0);
+    await rig.host.settle();
+    expect(await cash()).toBe(101);
+    await rig.turn(chatId, "I check my pockets.", "You find a wallet.");
+    expect(await cash()).toBe(1352);
+    // On the Re-run's swipe again, that later turn is replayed: its wallet and its dollar count, its payout doesn't.
+    rig.host.navigate(chatId, first.id, 1);
+    await rig.host.settle();
+    expect(await cash()).toBe(2252);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

@@ -1020,6 +1020,13 @@ export class FakeHost implements HostPort {
         await this.settle();
         return;
       }
+      if (opts.error && g.type === "continue" && text === "") {
+        // A Continue that failed before anything streamed: Lumiverse saves nothing onto the message
+        // (`persistPartialContent` merges only what streamed) and ends with the error alone.
+        this.emit("GENERATION_ENDED", { generationId: g.id, chatId, content: "", generationType: g.type, error: opts.error });
+        await this.settle();
+        return;
+      }
       if (g.type === "continue") {
         target.swipes[g.swipeId] = (g.original ?? "") + g.postfix + text;
         this.emit("MESSAGE_EDITED", { chatId, message: this.hostMessage(chatId, target.id) });

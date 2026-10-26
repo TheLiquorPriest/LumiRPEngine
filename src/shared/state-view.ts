@@ -6,6 +6,7 @@ import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
 import type { JsonObject, JsonValue } from "./json";
 import type { MindCallTrace, MindsGmView } from "./minds";
+import type { GenerateAs } from "./protocol";
 import type {
   ActionId,
   Band,
@@ -194,17 +195,28 @@ export interface Chip {
   label: string;
   detail?: string;
   actions: ChipAction[];
+  /**
+   * How the reply this chip's choices wait for starts (`chipStarts`): Lumiverse's Regenerate (as
+   * when it's absent), its Continue, or Send, which only the player can press. A failed reply's card,
+   * a failed engine run's and the outline gate say it, from how the stopped generation started
+   * (DESIGN §5.1).
+   */
+  as?: GenerateAs;
   /** Confirm and action chips lapse at the next send (DESIGN §11). */
   expires: "next_send" | "never";
 }
 
 /**
- * Whether a chip's action is finished by Lumiverse regenerating the reply (a new swipe), which only
- * a page can start: `regenerate` is nothing but that, and the others set up what the next swipe
- * does. The frontend regenerates after them; an outside client tells the user to.
+ * How a chip's choice is finished by a reply Lumiverse starts, which only a page can start; null
+ * when it waits for none. `regenerate` and `continue` are nothing but that command; the others set
+ * up what the next reply does, then start it as the chip says (`Chip.as`): Regenerate, Continue, or
+ * the player's own Send. The frontend starts it after them; an outside client tells the user to.
  */
-export function chipRegenerates(kind: ChipKind, choice: string): boolean {
-  return choice === "regenerate" || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || ((kind === "read_failed" || kind === "reply_failed") && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit"));
+export function chipStarts(chip: Pick<Chip, "kind" | "as">, choice: string): GenerateAs | null {
+  if (choice === "regenerate" || choice === "continue") return choice;
+  const kind = chip.kind;
+  const starts = (kind === "reply_failed" && choice === "rerun") || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit"));
+  return starts ? (chip.as ?? "regenerate") : null;
 }
 
 /** Detail opened during an in-flight window shows "pending" until it closes (DESIGN §9.2). */

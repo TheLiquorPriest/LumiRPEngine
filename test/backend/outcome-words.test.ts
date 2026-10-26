@@ -15,15 +15,21 @@ const INTERPRET_MARK = "You map a player's typed input";
 const TYPED = "I take the letter from Marcus, fold it into my jacket, and tell him I'll walk over to Bluebird Coffee and get us both a coffee.";
 /** The message read as Take, Go to and Buy, in that order. */
 const READ: JsonObject = { action: "take", params: { item: "unsigned_letter" }, confidence: 0.9, more: [{ action: "go", params: { to: "bluebird_coffee" }, text: "I walk over to Bluebird Coffee" }, { action: "buy", params: { item: "coffee", qty: 2 }, text: "get us both a coffee" }] };
+/** Port Alder's puzzle of the township pickup, "The truck that won't start". */
+const TRUCK = "p_township_truck";
 
-/** A Port Alder chat with the player character and `holder` at Alder Automotive, `holder` carrying the unsigned letter; Vex Morrow is someone the POV can't see. */
-async function atTheShop(holder: "marcus_delgado" | "vex_morrow"): Promise<{ rig: Rig; chatId: string }> {
+/**
+ * A Port Alder chat with the player character and `holder` at Alder Automotive, `holder` carrying
+ * the unsigned letter; Vex Morrow is someone the POV can't see. With `truckOpen` the truck puzzle
+ * is one the player knows of.
+ */
+async function atTheShop(holder: "marcus_delgado" | "vex_morrow", truckOpen = false): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
   const put = async (collection: string, id: string, value: JsonObject): Promise<void> => {
     rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id, value }));
   };
-  const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })) as { draft: { pov: string; entities: Record<string, JsonObject & { fields: JsonObject }> } };
+  const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })) as { draft: { pov: string; entities: Record<string, JsonObject & { fields: JsonObject }>; tracks: Record<string, JsonObject> } };
   for (const id of [draft.pov, "marcus_delgado"]) {
     const e = draft.entities[id];
     if (!e) throw new Error(`no ${id}`);
@@ -31,6 +37,7 @@ async function atTheShop(holder: "marcus_delgado" | "vex_morrow"): Promise<{ rig
   }
   await put("entities", "vex_morrow", { id: "vex_morrow", kind: "character", name: "Vex Morrow", tier: "background", visibility: "secret", fields: { place: "alder_automotive" }, relations: [] });
   await put("entities", "unsigned_letter", { id: "unsigned_letter", kind: "item", name: "Unsigned letter", tier: "background", fields: { owner: holder }, relations: [{ type: "in", to: holder }] });
+  if (truckOpen) await put("tracks", TRUCK, { ...draft.tracks[TRUCK], visibility: "public" });
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -67,6 +74,20 @@ describe("the turn's actions in words (Outcome and Outline)", () => {
       expect(told).not.toContain("Vex");
       expect(told).not.toContain("Morrow");
     }
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("an answer the read gave as someone the player character can't see is never told: the message didn't say it, so it is no answer", async () => {
+    const { rig, chatId } = await atTheShop("marcus_delgado", true);
+    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify({ action: "answer", params: { puzzle: TRUCK, answer: "Vex Morrow" }, confidence: 0.9 }) : "{}");
+    await rig.turn(chatId, "I give my answer: whoever was in the shop last night.", "Marcus wipes his hands and says nothing.");
+    for (const section of ["Outcome", "Outline"]) expect(rig.host.section(section)).not.toMatch(/Answer \(|Vex|Morrow/);
+    // The next reply is told the answer didn't happen, in words that still don't name them.
+    rig.host.quietReply = () => "{}";
+    await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
+    const outcome = rig.host.section("Outcome");
+    expect(outcome).toContain("doesn't say the answer itself");
+    expect(outcome).not.toMatch(/Vex|Morrow/);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

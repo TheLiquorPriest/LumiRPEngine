@@ -437,6 +437,8 @@ export const vehiclesPack: PackDef = {
         // takes you there") still rides it from where it stands.
         const driverAt = placeOfEntity(ctx.state, driver);
         const vehicleAt = placeOfEntity(ctx.state, v);
+        // Driving a vehicle to where it already is would only take it away to park and walk back.
+        if (vehicleAt === to) return reject("already_there", `${e.name} is at ${labelOf(ctx, to)} already: walk there`);
         const trip = (driverAt ? tripFor(ctx, v, driverAt, to) : null) ?? (vehicleAt && vehicleAt !== driverAt ? tripFor(ctx, v, vehicleAt, to) : null);
         if (!trip) return reject("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
         const leg = legOf(trip);
@@ -510,7 +512,7 @@ export const vehiclesPack: PackDef = {
       pack: "vehicles",
       params: { vehicle: { type: "ref", ref: "vehicle" }, to: { type: "ref", ref: "place", label: "Destination" } },
       // A vehicle parked elsewhere is fetched on foot, within the world's travel tuning: the trip from here says whether it can go.
-      requires: ["vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "drive_minutes(vehicle, to, here) > 0", "fuel_ok(vehicle, to, here)"],
+      requires: ["vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "place(vehicle) != to", "drive_minutes(vehicle, to, here) > 0", "fuel_ok(vehicle, to, here)"],
       outcomes: { default: [{ type: "vehicles.drive", args: { vehicle: "vehicle", to: "=to", driver: "self" } }] },
       duration: "drive_minutes(vehicle, to, here)",
       activity: { type: "travel", until: "clock + drive_minutes(vehicle, to, here)" },

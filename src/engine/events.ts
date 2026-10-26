@@ -171,7 +171,14 @@ const stageDef: EventTypeDef<StageEvent> = {
   validate: (e, ctx) => {
     const track = safeKey(e.track) && hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
     if (!track) return reject("missing_track", `no track ${e.track}`);
-    return safeKey(e.to) && hasOwn(track.stages, e.to) ? null : reject("missing_stage", `no stage ${e.to} in ${e.track}`);
+    if (!safeKey(e.to) || !hasOwn(track.stages, e.to)) return reject("missing_stage", `no stage ${e.to} in ${e.track}`);
+    if (e.from === undefined) return null;
+    // A move holds only where the track still stands where it moved from (DESIGN §10): replayed after
+    // the story got there another way, it isn't made, and paid for, twice.
+    const at = (hasOwn(ctx.state.tracks, e.track) ? ctx.state.tracks[e.track]?.stage : undefined) ?? track.start;
+    if (at === e.from) return null;
+    const label = (stage: string): string => (hasOwn(track.stages, stage) ? track.stages[stage]?.label : undefined) ?? stage;
+    return reject("stage_moved", `${track.label} is at ${label(at)} now, no longer at ${label(e.from)}, where this move began`);
   },
   apply: (e, state) => {
     if (safeKey(e.track)) state.tracks[e.track] = { stage: e.to, since: state.clock };

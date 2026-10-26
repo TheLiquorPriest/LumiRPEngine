@@ -492,6 +492,7 @@ A session goes like this:
  { "op": "stage", "track": "q_pontoon_weekend", "to": "diagnose" }]
 ```
 
+- A `stage` op moves a track as the story would: on to a stage that follows, it plays that stage's entry (rewards, effects, its reveal); back, it only sets the stage. It is made from where the track stands now, so if the reply it waits for, or a swipe or re-read of that reply, moves the track first, it is dropped whole, rewards included, never paid twice, and the chat says it didn't apply.
 - `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes), `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back) and `infer` (when typed attempts roll skill checks, the same way from `/controls/inferred`). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.
 - `lre_view_open` opens a panel as the player does, which settles detail the chat hadn't decided yet (a balance first looked at); opening `core.context` checks the active preset.
 - `lre_chip` answers a chip with one of its action ids (an amount or a pick in `payload` when the action asks for one).

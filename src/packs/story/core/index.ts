@@ -7,9 +7,9 @@
 import type { TrackId } from "../../../shared/ids";
 import { hasOwn, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import type { Expr, FeedScope, WorldDoc } from "../../../shared/world";
+import type { ActionDef, Expr, FeedScope, WorldDoc } from "../../../shared/world";
 import { objectiveWhen } from "../../../shared/world";
-import { callsIn } from "../../../engine/expr";
+import { callsIn, identifiers } from "../../../engine/expr";
 import { wordsOf } from "../../../engine/lore";
 import { labelOf, mutableSlice, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
 import type { FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
@@ -312,6 +312,46 @@ function puzzlesFor(ctx: ReadContext, ref: string): TrackId[] {
 export function openPuzzle(ctx: ReadContext, ref: string): TrackId | null {
   const fits = puzzlesFor(ctx, ref);
   return fits.length === 1 ? (fits[0] ?? null) : null;
+}
+
+/**
+ * The params an action takes a puzzle's answer from (DESIGN §10): those its `story.answer` outcomes
+ * read for `answer`, as `=answer` or `=params.code` name them. A typed read's value for each must be
+ * in the player's own words (`inOwnWords`).
+ */
+export function answerParams(action: Pick<ActionDef, "params" | "outcomes">): string[] {
+  const out = new Set<string>();
+  for (const specs of Object.values(action.outcomes)) {
+    for (const spec of specs) {
+      const answer = spec.type === "story.answer" ? spec.args.answer : undefined;
+      if (typeof answer !== "string" || !answer.startsWith("=")) continue;
+      for (const name of identifiers(answer.slice(1))) if (hasOwn(action.params, name)) out.add(name);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Whether `value` is in `text`, the player's own words (DESIGN §10): compared as names are, case and
+ * spacing aside, its letters and digits, less a leading article, are those of a run of whole words
+ * of the text. So "1 8 8 7" gives 1887 and "the Wind" gives "wind", but no word gives a part of itself
+ * ("Washington" isn't "ash"), and a read that answers for the player with what they never typed (a
+ * name, a code) gives nothing.
+ */
+export function inOwnWords(value: string, text: string): boolean {
+  const words = (s: string): string[] => s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const given = words(value);
+  const want = (given.length > 1 && /^(the|a|an)$/.test(given[0] ?? "") ? given.slice(1) : given).join("");
+  if (want === "") return false;
+  const said = words(text);
+  for (let i = 0; i < said.length; i++) {
+    let run = "";
+    for (let j = i; j < said.length && run.length < want.length; j++) {
+      run += said[j];
+      if (run === want) return true;
+    }
+  }
+  return false;
 }
 
 /**

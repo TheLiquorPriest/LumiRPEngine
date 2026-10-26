@@ -25,8 +25,9 @@
 // Arguments are evaluated just before the effect resolves; `=` formulas there may call `roll()`,
 // drawing from the effect's own generator, so the event records the result (DESIGN §11). After
 // each effect, every entity whose XP it changed has its level follow its XP (`levelsFollowXp`):
-// up a level at a time with `onLevel`, or straight down, so an award, a quest reward, a narrated
-// gain or a correction moves it the same way. Nothing else writes a level (`follows_xp`).
+// up a level at a time with `onLevel`, or straight down, taking any pool left above its lower max
+// down to it in the same unit, so an award, a quest reward, a narrated gain or a correction moves
+// it the same way. Nothing else writes a level (`follows_xp`).
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -45,7 +46,7 @@ import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { linkEvents, spawnLinks, unlinkEvents } from "./relations";
 import { levelProgression, progressionApplies, progressOf } from "./ruleset";
-import { evalArg, evalArgs, evalExpr, fieldDef, isGone, objects, placeOfEntity, poolMax, scopeEnv } from "./scope";
+import { evalArg, evalArgs, evalExpr, fieldDef, isGone, kindFields, objects, placeOfEntity, poolMax, scopeEnv } from "./scope";
 import { acts } from "./life";
 import { together } from "./presence";
 import { classOf, classProblems } from "./selector";
@@ -374,9 +375,11 @@ function applyCheck(reg: Registry, w: Working, spec: EffectSpec, scope: EffectSc
 /**
  * One entity's level on one progression, brought to the level its XP reaches within the level
  * field's bounds (DESIGN §11). Rising, the level field is set a level at a time, each followed by
- * `onLevel` with `level` and `from` (the level before the gain); falling, it is set straight to
- * that level and nothing runs, so what earlier levels gave stays. Either ends with a Journal line.
- * A new entity (`spawned`) just starts at its XP's level: no `onLevel`, no line.
+ * `onLevel` with `level` and `from` (the level before the gain), then a Journal line. Falling is one
+ * unit, applied all or none, which a rebased view keeps or drops whole: the level set straight to
+ * the one reached, running nothing, so what earlier levels gave stays; each of the entity's pools
+ * then above its lower max set down to it, so none reads above its max and no recovery lowers one;
+ * and the line. A new entity (`spawned`) just starts at its XP's level: no `onLevel`, no line.
  */
 function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog: ProgressionDef, scope: EffectScope, spawned: boolean): EffectOutcome {
   const out: EffectOutcome = { applied: [], rejected: [] };
@@ -392,22 +395,46 @@ function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog:
     out.applied.push(ev);
     return true;
   };
-  if (spawned || to < from) {
-    if (!applied({ type: "set", entity, field: prog.levelField, value: to }) || spawned) return out;
-  } else {
-    const depth = scope.depth ?? 0;
-    for (let level = from + 1; level <= to; level++) {
-      if (!applied({ type: "set", entity, field: prog.levelField, value: level })) return out;
-      if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP) continue;
-      const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 });
-      out.applied.push(...r.applied);
-      out.rejected.push(...r.rejected);
-    }
-  }
   const who = entity === w.world.pov ? "You" : e.name;
-  const text = to > from ? `${who} reached ${prog.label} ${to}${to - from > 1 ? ` (from ${from})` : ""}.` : `${who} dropped to ${prog.label} ${to} (from ${from}).`;
   // The POV's level is the player's news; anyone else's is the author's and the GM's.
-  applied({ type: ENGINE_EVENTS.note, data: { text, entity, ...(entity === w.world.pov ? {} : { visibility: "secret" }) } });
+  const line = (text: string): LedgerEvent => ({ type: ENGINE_EVENTS.note, data: { text, entity, ...(entity === w.world.pov ? {} : { visibility: "secret" }) } });
+  if (spawned) {
+    applied({ type: "set", entity, field: prog.levelField, value: to });
+    return out;
+  }
+  if (to < from) {
+    const group = `fx:${hashParts(scope.rng.seed, "level", id, entity).slice(0, 10)}`;
+    const mark = w.mark();
+    const unit: LedgerEvent[] = [];
+    const landed = (ev: LedgerEvent): boolean => {
+      const member: LedgerEvent = { ...ev, group };
+      if (w.apply(member)) return false;
+      unit.push(member);
+      return true;
+    };
+    let whole = landed({ type: "set", entity, field: prog.levelField, value: to });
+    // Each pool as `change` reads it (stored, else its default; an unset one reads full at any
+    // max), held against its max at the new level.
+    for (const [field, def] of Object.entries(kindFields(reg, w.world, e.kind))) {
+      if (!whole) break;
+      if (!def.pool || def.derived !== undefined) continue;
+      const value = own(own(w.state.entities, entity)?.fields ?? {}, field) ?? def.default;
+      const max = fieldBounds(reg, w.ctx, entity, def).max;
+      if (typeof value === "number" && max !== undefined && value > max) whole = landed({ type: "set", entity, field, value: max });
+    }
+    if (whole && landed(line(`${who} dropped to ${prog.label} ${to} (from ${from}).`))) out.applied.push(...unit);
+    else w.restore(mark);
+    return out;
+  }
+  const depth = scope.depth ?? 0;
+  for (let level = from + 1; level <= to; level++) {
+    if (!applied({ type: "set", entity, field: prog.levelField, value: level })) return out;
+    if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP) continue;
+    const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 });
+    out.applied.push(...r.applied);
+    out.rejected.push(...r.rejected);
+  }
+  applied(line(`${who} reached ${prog.label} ${to}${to - from > 1 ? ` (from ${from})` : ""}.`));
   return out;
 }
 

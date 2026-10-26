@@ -9,6 +9,8 @@ import type { TravelTuning, WorldDoc } from "../../src/shared/world";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { createRng } from "../../src/engine/rng";
 import { resolveOn } from "../../src/engine/resolve";
+import { applyEffects } from "../../src/engine/effects";
+import { Working } from "../../src/engine/working";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
@@ -118,5 +120,19 @@ describe("vehicle trips", () => {
     expect(resolution.ok).toBe(true);
     expect(resolution.duration).toBe(pickup.minutes);
     expect(placeOfEntity(after, "pov_truck")).toBe("shoreline_fuel");
+  });
+
+  test("driving a vehicle to where it already is isn't a trip: no row, the action declines and the effect refuses, so it stays put with its fuel", () => {
+    const { world, state } = portAlder("alder_automotive");
+    expect(rows(world, state).some((r) => r.params.vehicle === "pov_truck" && r.to === "harbor_street_114")).toBe(false);
+    const fuel = state.entities.pov_truck?.fields.fuel_pct;
+    const { resolution, state: after } = resolveOn(reg, world, state, { action: "drive", params: { vehicle: "pov_truck", to: "harbor_street_114" } }, createRng("home"));
+    expect(resolution.ok).toBe(false);
+    expect(placeOfEntity(after, "pov_truck")).toBe("harbor_street_114");
+    expect(after.entities.pov_truck?.fields.fuel_pct).toBe(fuel);
+    const w = new Working(reg, world, state);
+    const told = applyEffects(reg, w, [{ type: "vehicles.drive", args: { vehicle: "pov_truck", to: "harbor_street_114" } }], { bindings: {}, rng: createRng("told") });
+    expect(told.rejected.map((r) => r.rejection.code)).toEqual(["already_there"]);
+    expect(placeOfEntity(w.state, "pov_truck")).toBe("harbor_street_114");
   });
 });

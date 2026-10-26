@@ -526,7 +526,7 @@ function ProgressionEditor(props: { value: Record<string, ProgressionDef>; doc: 
   const prog = open !== null ? props.value[open] : undefined;
   return (
     <div class="lre-stack" data-lre-progressions>
-      <span class="lre-small lre-muted">A progression's level follows its XP, both ways: after each change, an entity whose XP reached the next threshold goes up a level at a time, each level gained running its effects, and one whose XP fell below its level's threshold goes straight down. Change XP to change a level.</span>
+      <span class="lre-small lre-muted">A progression's level follows its XP, both ways: after each change, an entity whose XP reached the next threshold goes up a level at a time, each level gained running its effects, and one whose XP fell below its level's threshold goes straight down, any pool above its lower max coming down to it. Change XP to change a level.</span>
       {Object.keys(props.value).length === 0 ? (
         <span class="lre-small lre-muted">No progressions: levels never change on their own.</span>
       ) : (

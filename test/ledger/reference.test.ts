@@ -4,12 +4,16 @@
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import type { EventRef, LedgerEvent, Marker, PostEntry, Rec } from "../../src/shared/ledger";
+import type { WorldDoc } from "../../src/shared/world";
+import { resolveEdit } from "../../src/engine/edits";
+import { enginePack } from "../../src/engine/engine-pack";
 import type { ChainMessage, FoldInput, FoldOutput, FoldSnapshot, SnapshotStore } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
 import { computePaths, contentId, storedRecordHash } from "../../src/engine/ledger/path";
 import { referenceFold, type FoldTypes } from "../../src/engine/ledger/reference";
-import { createRegistry } from "../../src/engine/registry-impl";
-import { POV, testPack, testWorlds } from "../support/test-pack";
+import { createRegistry, type Registry } from "../../src/engine/registry-impl";
+import { initialState } from "../../src/engine/world-state";
+import { POV, testPack, testWorld, testWorlds } from "../support/test-pack";
 
 const registry = createRegistry([testPack]);
 const worlds = testWorlds();
@@ -32,10 +36,10 @@ function record(chain: ChainMessage[], index: number, events: LedgerEvent[], ext
   return r;
 }
 
-function both(input: Partial<FoldInput> & { chain: ChainMessage[] }): FoldOutput {
+function both(input: Partial<FoldInput> & { chain: ChainMessage[] }, types: Registry = registry): FoldOutput {
   const full: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], ...input };
-  const reference = referenceFold(full, registry);
-  const optimized = new LedgerFold(registry).fold(full);
+  const reference = referenceFold(full, types);
+  const optimized = new LedgerFold(types).fold(full);
   expect(hashJson(optimized.state)).toBe(hashJson(reference.state));
   expect(optimized.messages).toEqual(reference.messages);
   expect(optimized.notes).toEqual(reference.notes);
@@ -265,5 +269,31 @@ describe("reference fold", () => {
     const restarted = new LedgerFold(registry, { snapshotEvery: 3 }).fold(input);
     expect(restarted.messages.map((m) => m.clock)).toEqual(full.messages.map((m) => m.clock));
     expect(restarted.messages.every((m) => m.clock !== null)).toBe(true);
+  });
+
+  test("a GM's stage move kept on a later reply drops whole, with what it paid, on a rebased view where the story already took the track there (DESIGN §10)", () => {
+    const types = createRegistry([enginePack, testPack]);
+    const pay = (delta: number) => [{ type: "add", args: { entity: POV, field: "cash", delta } }];
+    const world: WorldDoc = { ...testWorld(), tracks: { errand: { id: "errand", kind: "quest", label: "The errand", start: "asked", visibility: "public", stages: { asked: { label: "Asked", next: [{ to: "done", when: "false" }], rewards: pay(100) }, done: { label: "Done", next: [], rewards: pay(250) } } } } };
+    const rev = hashJson(world);
+    const own = { worlds: (r: string) => (r === rev ? world : undefined), revision: rev };
+    // The GM's move as an edit writes it: one unit, the stage it left recorded with it.
+    const edit = resolveEdit(types, world, initialState(world, "r", types), [{ op: "stage", track: "errand", to: "done" }], { gm: true, runSeed: "r" });
+    if ("rejection" in edit) throw new Error(edit.rejection.reason);
+    const chain = [reply("a0", "Morning."), user("u1", "wait"), reply("a1", "Nothing yet."), user("u2", "wait"), reply("a2", "Still nothing.")];
+    record(chain, 2, [], { defHash: rev });
+    const later = record(chain, 4, [], { defHash: rev });
+    later.post = [{ seq: 1, at: later.path, kind: "fix", gm: true, events: edit.events }];
+    expect(cashOf(both({ chain, ...own }, types))).toBe(450);
+    // The reply before, on a swipe where the story itself takes the errand to its end and pays for it.
+    const a1 = chain[2];
+    if (!a1) throw new Error("no a1");
+    a1.swipes.push("The errand is done.");
+    a1.swipeId = 1;
+    record(chain, 2, [{ type: "add", entity: POV, field: "cash", delta: 100 }, { type: "stage", track: "errand", to: "done" }, { type: "add", entity: POV, field: "cash", delta: 250 }], { defHash: rev });
+    const out = both({ chain, ...own }, types);
+    expect(out.messages[4]?.fold).toBe("view");
+    expect(cashOf(out)).toBe(450);
+    expect(out.keepReport.map((k) => k.status)).toEqual(edit.events.map(() => "dropped"));
   });
 });

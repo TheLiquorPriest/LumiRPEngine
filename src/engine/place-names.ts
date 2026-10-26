@@ -101,3 +101,17 @@ export function placeSaid(reg: Registry, world: WorldDoc, state: Readonly<WorldS
   const [first, second] = matches.map((id) => ({ id, d: placeDistance(world, here, id) })).sort((a, b) => a.d - b.d);
   return first && second && first.d < second.d ? first.id : null;
 }
+
+/**
+ * Whether `said` names a place the POV can't see: its id (in any case), or a name only such places
+ * have (`placeKey`). Hearing of such a place is how the POV comes to know it (the `knows` channel),
+ * so nothing the player sees may name one otherwise.
+ */
+export function placeUnheard(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, said: string): boolean {
+  const t = said.trim();
+  const id = hasOwn(world.places, t) ? t : hasOwn(world.places, t.toLowerCase()) ? t.toLowerCase() : null;
+  if (id !== null) return !canSeePlace(reg, world, state, world.pov, id);
+  const key = placeKey(t);
+  const named = key === "" ? [] : Object.keys(world.places).filter((p) => placeKey(own(world.places, p)?.name ?? "") === key);
+  return named.length > 0 && !named.some((p) => canSeePlace(reg, world, state, world.pov, p));
+}

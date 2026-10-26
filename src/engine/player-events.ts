@@ -439,20 +439,21 @@ export function hiddenNames(reg: Registry, world: WorldDoc, state: Readonly<Worl
  * someone or something `pov` can't see, or a secret lore entry. A hidden person counts by any word of
  * their name ("Vex is watching" names Vex Morrow, while a hidden Dan doesn't make "dangerous" a
  * leak); a hidden place or thing, a track's label and a secret entry's title only by all their words
- * in order. The names are gathered once, so one check reads many texts, and once per read pass
- * (DESIGN §9.6), where every section checks its lines.
+ * in order. A word or name `heard` says too doesn't count: whoever reads the text has seen it said
+ * (the player's own message, for what the player reads). The names are gathered once, so one check
+ * reads many texts, and once per read pass (DESIGN §9.6), where every section checks its lines.
  */
-export function hiddenNameCheck(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): (text: string) => boolean {
+export function hiddenNameCheck(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): (text: string, heard?: string) => boolean {
   return passMemo([state, world, reg], `visibility.hidden_names\u0000${pov}`, () => {
     const hidden = hiddenEntityNames(reg, world, state, pov);
     const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
-    return (text: string) => namesAny(text, hidden.people, labels);
+    return (text: string, heard = "") => namesAny(text, hidden.people, labels, heard);
   });
 }
 
-/** Whether text the player reads names anything the world's POV can't see (`hiddenNameCheck`). */
-export function namesHidden(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, text: string): boolean {
-  return hiddenNameCheck(reg, world, state, world.pov)(text);
+/** Whether text names anything the world's POV can't see that `heard` doesn't say too (`hiddenNameCheck`). */
+export function namesHidden(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, text: string, heard = ""): boolean {
+  return hiddenNameCheck(reg, world, state, world.pov)(text, heard);
 }
 
 /** An event's line, worded for `pov` when it is a player's (`player`), else for the GM or the author; the POV is named `you`. */

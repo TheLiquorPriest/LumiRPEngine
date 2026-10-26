@@ -32,39 +32,46 @@ describe("chip actions", () => {
       ["keep_report", "keep"],
       ["keep_report", "discard"],
     ] as const) {
-      expect(chipIntent(chip(kind, [choice]), choice, "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: `chip-${kind}`, choice }, regenerate: false });
+      expect(chipIntent(chip(kind, [choice]), choice, "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: `chip-${kind}`, choice }, start: null });
     }
   });
 
   test("a payload travels only when given", () => {
-    expect(chipIntent(chip("confirm", ["confirm"]), "confirm", "c1", { cents: 899 })).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-confirm", choice: "confirm", payload: { cents: 899 } }, regenerate: false });
+    expect(chipIntent(chip("confirm", ["confirm"]), "confirm", "c1", { cents: 899 })).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-confirm", choice: "confirm", payload: { cents: 899 } }, start: null });
   });
 
   test("the pause chip's Keep and Discard are chip choices; the backend writes the decision", () => {
     const report = chip("keep_report", ["keep", "discard"]);
-    expect(chipIntent(report, "discard", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-keep_report", choice: "discard" }, regenerate: false });
-    expect(chipIntent(report, "keep", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-keep_report", choice: "keep" }, regenerate: false });
+    expect(chipIntent(report, "discard", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-keep_report", choice: "discard" }, start: null });
+    expect(chipIntent(report, "keep", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-keep_report", choice: "keep" }, start: null });
   });
 
   test("Retry (regenerate) runs the host's Regenerate and sends nothing to the backend", () => {
-    expect(chipIntent(chip("retry", ["regenerate"]), "regenerate", "c1")).toEqual({ request: null, regenerate: true });
-    expect(chipIntent(chip("degraded", ["regenerate"]), "regenerate", "c1")).toEqual({ request: null, regenerate: true });
+    expect(chipIntent(chip("retry", ["regenerate"]), "regenerate", "c1")).toEqual({ request: null, start: "regenerate" });
+    expect(chipIntent(chip("degraded", ["regenerate"]), "regenerate", "c1")).toEqual({ request: null, start: "regenerate" });
   });
 
   test("a swipe option records the one-shot choice, then runs the host's Regenerate", () => {
-    expect(chipIntent(chip("swipe_option", ["renarrate", "rerun"]), "renarrate", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-swipe_option", choice: "renarrate" }, regenerate: true });
-    expect(chipIntent(chip("swipe_option", ["renarrate", "rerun"]), "rerun", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-swipe_option", choice: "rerun" }, regenerate: true });
+    expect(chipIntent(chip("swipe_option", ["renarrate", "rerun"]), "renarrate", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-swipe_option", choice: "renarrate" }, start: "regenerate" });
+    expect(chipIntent(chip("swipe_option", ["renarrate", "rerun"]), "rerun", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-swipe_option", choice: "rerun" }, start: "regenerate" });
   });
 
   test("a contradiction's Re-narrate records the choice and swipes; It's fine only records", () => {
-    expect(chipIntent(chip("contradiction", ["renarrate", "dismiss"]), "renarrate", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-contradiction", choice: "renarrate" }, regenerate: true });
-    expect(chipIntent(chip("contradiction", ["renarrate", "dismiss"]), "dismiss", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-contradiction", choice: "dismiss" }, regenerate: false });
+    expect(chipIntent(chip("contradiction", ["renarrate", "dismiss"]), "renarrate", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-contradiction", choice: "renarrate" }, start: "regenerate" });
+    expect(chipIntent(chip("contradiction", ["renarrate", "dismiss"]), "dismiss", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-contradiction", choice: "dismiss" }, start: null });
   });
 
-  test("a failed reply's Retry the reply only regenerates; Re-run the engine drops the kept turn, then regenerates", () => {
+  test("a failed reply's card starts its reply as its kept turn's did: Retry is that command alone, and Re-run the engine drops the turn first", () => {
     const failed = chip("reply_failed", ["regenerate", "rerun", "diagnostics"]);
-    expect(chipIntent(failed, "regenerate", "c1")).toEqual({ request: null, regenerate: true });
-    expect(chipIntent(failed, "rerun", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-reply_failed", choice: "rerun" }, regenerate: true });
+    expect(chipIntent(failed, "regenerate", "c1")).toEqual({ request: null, start: "regenerate" });
+    expect(chipIntent(failed, "rerun", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-reply_failed", choice: "rerun" }, start: "regenerate" });
+    const continued: Chip = { ...chip("reply_failed", ["continue", "rerun", "diagnostics"]), as: "continue" };
+    expect(chipIntent(continued, "continue", "c1")).toEqual({ request: null, start: "continue" });
+    expect(chipIntent(continued, "rerun", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-reply_failed", choice: "rerun" }, start: "continue" });
+    // A new reply after a reply is the player's own Send: nothing here regenerates the reply before it.
+    const sent: Chip = { ...chip("reply_failed", ["rerun", "diagnostics"]), as: "send" };
+    expect(chipIntent(sent, "rerun", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-reply_failed", choice: "rerun" }, start: "send" });
+    expect(chipIntent(sent, "diagnostics", "c1").start).toBeNull();
   });
 
   test("converting an entry sends its event ref and parent path; markers cannot convert", () => {

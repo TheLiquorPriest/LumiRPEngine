@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { clockLocal, clockOfStoryDay, durationText, localClock, parseDuration, storyDay } from "../../src/frontend/build/schema-form";
+import { clockLocal, clockOfStoryDay, durationText, localClock, numberProblem, parseDuration, storyDay } from "../../src/frontend/build/schema-form";
+import { PART_SPECS, type FieldSpec } from "../../src/frontend/build/schema";
+import { lintWorld } from "../../src/engine/authoring";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 
 describe("Build durations", () => {
   test("a span reads in the ways people write one", () => {
@@ -52,5 +56,36 @@ describe("Build clock times", () => {
     expect(storyDay(16 * 60, custom)).toEqual({ day: 2, minute: 0 });
     expect(clockOfStoryDay(2, 0, custom)).toBe(16 * 60);
     expect(clockOfStoryDay(1, 480, custom)).toBe(0);
+  });
+});
+
+describe("Build travel times", () => {
+  /** The number fields of the map settings' travel speeds, by their path, as the form edits them. */
+  function speedFields(): { path: string; field: Extract<FieldSpec, { kind: "number" }> }[] {
+    const out: { path: string; field: Extract<FieldSpec, { kind: "number" }> }[] = [];
+    const walk = (spec: FieldSpec, path: string): void => {
+      if (spec.kind === "object") for (const f of spec.fields) walk(f, path === "" ? f.key : `${path}.${f.key}`);
+      else if (spec.kind === "record" && spec.key === "vehicleSpeeds" && spec.item.kind === "number") out.push({ path: `${path}.atv_utility`, field: spec.item });
+      else if (spec.kind === "number" && path.includes(".speeds.")) out.push({ path, field: spec });
+    };
+    for (const specs of Object.values(PART_SPECS)) for (const spec of specs) walk(spec, spec.key);
+    return out;
+  }
+
+  test("the form takes no speed lint refuses: never 0, and its least speed lints clean", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const fields = speedFields();
+    expect(fields.length).toBe(5);
+    for (const { path, field } of fields) {
+      expect([path, numberProblem("0", field) !== null]).toEqual([path, true]);
+      const least = field.min ?? 0;
+      const make = STARTER_WORLDS.modern_slice_of_life;
+      if (!make) throw new Error("no starter");
+      const world = make("w", "modern_slice_of_life");
+      const [, , group, key] = path.split(".");
+      const travel = group === "speeds" ? { speeds: { [key ?? ""]: least } } : { vehicleSpeeds: { [key ?? ""]: least } };
+      world.mapSettings = { display: "knowledge", grid: { movement: false, sightRadius: 3 }, travel };
+      expect([path, numberProblem(String(least), field), lintWorld(world, reg).filter((i) => i.path.startsWith("mapSettings.travel"))]).toEqual([path, null, []]);
+    }
   });
 });

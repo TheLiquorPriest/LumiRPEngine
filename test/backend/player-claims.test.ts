@@ -160,6 +160,25 @@ describe("Ask first", () => {
       expect((await chips(rig, chatId)).some((c) => c.kind === "decline" || c.kind === "claim")).toBe(false);
     });
   }
+
+  test("a new reply after a reply asks nothing again about the message the turn before played", async () => {
+    const { rig, chatId } = await chat({ mode: "ask", capped: true });
+    let reads = 0;
+    rig.host.quietReply = (req: QuietRequest) => {
+      if (!(req.messages[0]?.content ?? "").includes(INTERPRET_MARK)) return "{}";
+      reads++;
+      return JSON.stringify({ confidence: 0.9, ...give("coffee", "drink") });
+    };
+    await send(rig, chatId, "I pour Danny a coffee.");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: (await chips(rig, chatId)).find((c) => c.kind === "claim")?.id, choice: "drop" }));
+    const played = await rig.host.start(chatId, { type: "regenerate" });
+    await rig.host.finish(played, "You think better of it.");
+    // Send, with nothing typed: the reply after that one goes out, and the coffee isn't asked about again.
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    expect(reads).toBe(1);
+    expect((await chips(rig, chatId)).some((c) => c.kind === "claim")).toBe(false);
+  });
 });
 
 describe("Hold me to the world", () => {

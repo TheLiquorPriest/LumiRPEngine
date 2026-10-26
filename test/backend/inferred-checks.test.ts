@@ -144,6 +144,42 @@ describe("an attempt read as a check", () => {
   });
 });
 
+describe("an attempt that names someone hidden", () => {
+  const VEX: [string, JsonObject] = ["entities", { id: "vex_morrow", kind: "character", name: "Vex Morrow", tier: "background", visibility: "secret", fields: { place: "alder_automotive" }, relations: [] }];
+  const PAST = tryRead({ attempt: "talk my way past Vex Morrow", skill: "persuasion", difficulty: "hard" });
+  const TYPED = ["I try to talk my way past the door.", "I try to talk my way past Vex Morrow."];
+
+  test("the question says it only when the player typed it, and the narrator is never told it", async () => {
+    for (const typed of TYPED) {
+      const { rig, chatId } = await chat({ mode: "suggest" }, { puts: [VEX] });
+      reading(rig, PAST);
+      rig.host.sendUser(chatId, typed);
+      await rig.host.settle();
+      expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
+      const ask = (await chips(rig, chatId)).find((c) => c.kind === "check");
+      expect({ typed, named: /Vex|Morrow/.test(ask?.detail ?? "") }).toEqual({ typed, named: typed.includes("Vex") });
+      expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: ask?.id, choice: "roll" })).applied).toBe(true);
+      const reply = await rig.host.start(chatId, { type: "regenerate" });
+      const outcome = rig.host.section("Outcome");
+      await rig.host.finish(reply, "You talk.");
+      expect(outcome).toMatch(/Persuasion check, Jordan Ellis \(hard\)/);
+      expect(outcome).not.toMatch(/Vex|Morrow/);
+    }
+  });
+
+  test("the intent gate's card says it only when the player typed it", async () => {
+    for (const typed of TYPED) {
+      const { rig, chatId } = await chat({}, { puts: [VEX], patch: { gates: { intent: true } } });
+      reading(rig, PAST);
+      rig.host.sendUser(chatId, typed);
+      await rig.host.settle();
+      await rig.host.start(chatId, { type: "normal" });
+      const gate = (await chips(rig, chatId)).find((c) => c.kind === "intent_gate");
+      expect(gate?.label).toBe(typed.includes("Vex") ? "Play Persuasion check: “talk my way past Vex Morrow”, looking hard?" : "Play Persuasion check, looking hard?");
+    }
+  });
+});
+
 describe("the chat's policy", () => {
   test("off keeps typed text reading the world's skill actions, as before inferred checks, and offers no Try something", async () => {
     // The Fifth profile's Use a skill, and on Port Alder's own sheet the Sheets pack's Attempt, whose Mechanics stat it rolls.
@@ -183,6 +219,30 @@ describe("the chat's policy", () => {
     const reply = await rig.host.start(chatId, { type: "regenerate" });
     await rig.host.finish(reply, "You talk.");
     expect((await chips(rig, chatId)).find((c) => c.kind === "roll")?.label).toMatch(/^Persuasion check: /);
+  });
+
+  test("a new reply after a reply suggests no check again for the message the turn before played, and rolls nothing more", async () => {
+    const { rig, chatId } = await chat({ mode: "suggest" });
+    let reads = 0;
+    rig.host.quietReply = (req: QuietRequest) => {
+      if (!(req.messages[0]?.content ?? "").includes(INTERPRET)) return "{}";
+      reads++;
+      return JSON.stringify({ confidence: 0.9, ...tryRead({ attempt: "talk my way in", skill: "persuasion", difficulty: "hard" }) });
+    };
+    rig.host.sendUser(chatId, "I try to talk my way in.");
+    await rig.host.settle();
+    await rig.host.start(chatId, { type: "normal" });
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: (await chips(rig, chatId)).find((c) => c.kind === "check")?.id, choice: "roll" }));
+    const played = await rig.host.start(chatId, { type: "regenerate" });
+    await rig.host.finish(played, "You talk.");
+    const rolled = checks(await events(rig, chatId)).length;
+    // Send, with nothing typed: the reply after that one goes out, and the talk isn't asked about or rolled again.
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    expect(reads).toBe(1);
+    expect((await chips(rig, chatId)).some((c) => c.kind === "check")).toBe(false);
+    await rig.host.finish(reply, "The door stays shut.");
+    expect(checks(await events(rig, chatId))).toHaveLength(rolled);
   });
 
   test("'only when the message says it tries' holds: a read that doesn't say so plays as roleplay", async () => {

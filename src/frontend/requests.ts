@@ -7,9 +7,9 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level, TierId, WorldId } from "../shared/ids";
 import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
 import { parseMoneyInput } from "../shared/money";
-import type { EditOp, UpgradePreview } from "../shared/protocol";
+import type { EditOp, GenerateAs, UpgradePreview } from "../shared/protocol";
 import type { Chip, FieldFixTarget, GmEntity, GmView, HudView, PaletteEntry, PaletteOption, StateView, TimelapseView } from "../shared/state-view";
-import { chipRegenerates } from "../shared/state-view";
+import { chipStarts } from "../shared/state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, WorldCurrency } from "../shared/world";
 import { PARTY_RELATION } from "../shared/party";
 import type { RequestBody } from "./registry";
@@ -19,16 +19,19 @@ export type Req<K extends RequestBody["type"]> = Extract<RequestBody, { type: K 
 
 /**
  * What a chip button does. `regenerate` (the Retry chip on an empty reply, D32) runs the host's
- * own Regenerate: only the frontend can start it. A swipe option (`renarrate`, `rerun`), a
- * contradiction's Re-narrate, the Retry of an unread action (`read_failed`, a Re-run) and the
- * answer to a claim's question (Add, Not an action: the turn waiting on it resumes) record the
- * one-shot choice with `lre.chip`, then run the same Regenerate. Every other choice, the pause
- * chip's Keep and Discard included, is `lre.chip {chip, choice: action.id}`, with the value an
- * action's input asked for as its payload.
+ * own Regenerate, and `continue` its Continue: only the frontend can start them. A swipe option
+ * (`renarrate`, `rerun`), a contradiction's Re-narrate, the Retry of an unread action (`read_failed`,
+ * a Re-run) and the answer to a claim's question (Add, Not an action: the turn waiting on it
+ * resumes) record the one-shot choice with `lre.chip`, then run the same Regenerate; a failed
+ * reply's Re-run starts the reply as its card says (`Chip.as`), and a `send` start is the player's
+ * own Send, which no page can press. Every other choice, the pause chip's Keep and Discard
+ * included, is `lre.chip {chip, choice: action.id}`, with the value an action's input asked for as
+ * its payload.
  */
 export interface ChipIntent {
   request: Req<"lre.chip"> | null;
-  regenerate: boolean;
+  /** How the reply the choice waits for starts; null when it waits for none. */
+  start: GenerateAs | null;
 }
 
 /**
@@ -56,9 +59,10 @@ export function upgradeRequest(chatId: ChatId, preview: UpgradePreview, choices:
 }
 
 export function chipIntent(chip: Chip, choice: string, chatId: ChatId, payload?: JsonObject): ChipIntent {
-  if (choice === "regenerate") return { request: null, regenerate: true };
+  const start = chipStarts(chip, choice);
+  if (choice === "regenerate" || choice === "continue") return { request: null, start };
   const request: Req<"lre.chip"> = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
-  return { request, regenerate: chipRegenerates(chip.kind, choice) };
+  return { request, start };
 }
 
 /** Convert one Keep-report entry; markers have no event ref and cannot be converted. */

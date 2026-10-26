@@ -39,6 +39,8 @@ interface Channel {
   running: Promise<void> | null;
   /** A push waits behind the one being built: every change until it starts is in it. */
   queued: boolean;
+  /** Views being built for it now: a channel with one in flight is never let go, so an older view can't land after a newer one. */
+  building: number;
 }
 
 /**
@@ -62,7 +64,7 @@ export class StatePush {
     const key = `${userId}\u0000${chatId}`;
     let c = this.channels.get(key);
     if (!c) {
-      c = { rev: 0, last: null, timer: null, running: null, queued: false };
+      c = { rev: 0, last: null, timer: null, running: null, queued: false, building: 0 };
       this.channels.set(key, c);
     }
     return c;
@@ -77,7 +79,7 @@ export class StatePush {
     this.channels.set(key, c);
     for (const [other, o] of this.channels) {
       if (this.channels.size <= VIEWS_KEPT) break;
-      if (other !== key && o.timer === null && !o.queued) this.channels.delete(other);
+      if (other !== key && o.timer === null && !o.queued && o.building === 0) this.channels.delete(other);
     }
   }
 
@@ -94,13 +96,23 @@ export class StatePush {
   async snapshot(chatId: ChatId, userId: UserId, frontendSessionId?: string): Promise<void> {
     const c = this.channel(chatId, userId);
     if (c.last === null) {
-      await giveWay();
-      const view = asJson(await this.build(chatId, userId));
+      const view = await this.built(c, chatId, userId);
       // Another snapshot or push set the base while this one was built: that one stands, and a delta follows.
       if (c.last === null) this.pushed(chatId, userId, c, view);
       else this.changed(chatId, userId);
     } else this.changed(chatId, userId);
     this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.snapshot", chatId, rev: c.rev, view: c.last as unknown as StateView }, userId, frontendSessionId);
+  }
+
+  /** The chat's view now, built after the messages already waiting (`giveWay`); its channel stays while it is built. */
+  private async built(c: Channel, chatId: ChatId, userId: UserId): Promise<JsonValue> {
+    c.building++;
+    try {
+      await giveWay();
+      return asJson(await this.build(chatId, userId));
+    } finally {
+      c.building--;
+    }
   }
 
   /** Schedules a delta push for the chat (coalesced). */
@@ -145,8 +157,7 @@ export class StatePush {
       await this.snapshot(chatId, userId);
       return;
     }
-    await giveWay();
-    const next = asJson(await this.build(chatId, userId));
+    const next = await this.built(c, chatId, userId);
     const ops = diff(c.last, next);
     if (ops.length === 0) return;
     const base = c.rev;

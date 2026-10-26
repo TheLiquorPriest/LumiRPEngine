@@ -21,10 +21,10 @@ import { hasOwn, isRecord } from "../shared/json";
 import { loreIsSecret, loreSourceOf, PROSE_STEPS, topicIdOf } from "../shared/lore";
 import type { LoreEntryDef, LoreKeep, StepPurpose, WorldDoc } from "../shared/world";
 import { cuesOf } from "./cues";
-import { playerKnows } from "./player-events";
+import { namesHidden, playerKnows } from "./player-events";
 import type { Registry } from "./registry-impl";
 import type { WorldState } from "./state";
-import { canSeePlace, loreGateReader } from "./visibility";
+import { canSeePlace, loreGateReader, namesAny } from "./visibility";
 
 /** Who reads: a helper step, or the GM, who reads everything. */
 export type LorePurpose = StepPurpose | "gm";
@@ -184,6 +184,18 @@ export function secretLoreNames(reg: Registry, world: WorldDoc, state: Readonly<
     add(topic.label);
   }
   return [...names];
+}
+
+/**
+ * Whether words no name of the world vouches for (a pick as a model's read wrote it, the player's
+ * words for an action as it gave them, a helper's suggestion) name anything hidden (DESIGN §7): what
+ * `namesHidden` finds, or anything else that leads to a secret entry whose gate doesn't hold
+ * (`secretLoreNames`), by all its words in order. Words `heard` says too don't count, since whoever
+ * reads the text has seen them said: the player's own message for what the player reads, nothing
+ * for what the narrator is told.
+ */
+export function namesHiddenOrSecretLore(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, text: string, heard = ""): boolean {
+  return namesHidden(reg, world, state, text, heard) || namesAny(text, [], secretLoreNames(reg, world, state), heard);
 }
 
 /**

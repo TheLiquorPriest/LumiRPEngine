@@ -4,10 +4,12 @@
 // `next[i]` whose `when` holds and whose target's `gate` holds. Leaving a stage by `next` grants
 // its `rewards`, and reaching an end stage (no way out) grants its own, since it is never left;
 // entering a stage applies its `effects`, records a reveal when it carries `truth` and, for quests,
-// signals a `quest` interrupt. Secret stages are never advanced by a model; a puzzle stage with an
-// `answer` also advances on a correct answer (exact or normalized, then the authored
-// `puzzle.answer` decision threshold). The GM's Stage moves a track on as a real entry does, or back
-// with no entry at all (`moveTrack`). Agenda stages feed the planner their `priority`.
+// signals a `quest` interrupt. Each entry is one unit, its stage event recording the stage it left
+// (`from`), so wherever it is replayed it lands only from that stage, whole or not at all. Secret
+// stages are never advanced by a model; a puzzle stage with an `answer` also advances on a correct
+// answer (exact or normalized, then the authored `puzzle.answer` decision threshold). The GM's Stage
+// moves a track on as a real entry does, or back with no entry at all (`moveTrack`). Agenda stages
+// feed the planner their `priority`.
 
 import { hashParts } from "../shared/hash";
 import type { EntityId, StageId, TrackId } from "../shared/ids";
@@ -70,15 +72,20 @@ function trackEnv(reg: Registry, w: Working, track: TrackDef, trackId: TrackId):
 
 /**
  * Moves a track into a stage: the rewards of the stage it leaves (unless it fails), the stage event,
- * its effects, its own rewards when it is an end stage, a reveal and the quest signal.
+ * its effects, its own rewards when it is an end stage, a reveal and the quest signal. The entry is
+ * one unit (`Working.unite`), and its stage event records the stage it left (`from`), which must
+ * still be where the track stands wherever the record is replayed (a rebased view, a carried or held
+ * GM edit): one the story has already made there is dropped whole, its rewards with it, never
+ * entered and paid for twice.
  */
 function enter(reg: Registry, w: Working, trackId: TrackId, track: TrackDef, from: StageId, to: StageId, via: TrackChange["via"], seed: string): TrackChange | null {
   const start = w.events.length;
   const leaving = own(track.stages, from);
-  const rng = createRng(hashParts(seed, "track", trackId, from, to, w.state.clock));
+  const key = hashParts(seed, "track", trackId, from, to, w.state.clock);
+  const rng = createRng(key);
   const bindings: Record<string, EntityId> = track.owner ? { self: track.owner, owner: track.owner } : {};
   if (via !== "fail" && leaving?.rewards && leaving.rewards.length > 0) applyEffects(reg, w, leaving.rewards, { bindings, rng: rng.fork("rewards") });
-  if (w.apply({ type: "stage", track: trackId, to })) return null;
+  if (w.apply({ type: "stage", track: trackId, to, from })) return null;
   const entering = own(track.stages, to);
   if (entering?.effects && entering.effects.length > 0) applyEffects(reg, w, entering.effects, { bindings, rng: rng.fork("effects") });
   // An end stage is never left, so what it rewards comes with reaching it: the quest is done (or lost) here.
@@ -90,6 +97,7 @@ function enter(reg: Registry, w: Working, trackId: TrackId, track: TrackDef, fro
     const text = cue ?? `${track.label}: ${entering?.label ?? to}`;
     w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text, visibility: track.visibility } });
   }
+  w.unite(start, `stage:${key.slice(0, 10)}`);
   return { track: trackId, from, to, via, events: w.events.slice(start) };
 }
 
@@ -152,6 +160,11 @@ function stagesAfter(track: TrackDef, stage: StageId): Set<StageId> {
  * no part. A stage that doesn't follow from where it stands (one already passed, a way back) is only
  * set, so nothing is granted, spawned or revealed twice. The stage's own ways on wait for the next
  * step of the tracks, so the chat stands where the GM put it. The same stage again changes nothing.
+ * Either way the stage event records where the track stood (`from`), as every entry's does: the edit
+ * holds only while it still stands there, so carried onto a reading of its reply in which the story
+ * moved the track itself (a Re-run, a Re-read, a reply it was held through), it is dropped whole,
+ * with what it granted (`resolveEdit` makes an edit one unit), rather than entered and paid for a
+ * second time.
  */
 export function moveTrack(reg: Registry, w: Working, trackId: TrackId, to: StageId, seed: string): Rejection | null {
   const track = own(w.world.tracks, trackId);
@@ -159,7 +172,7 @@ export function moveTrack(reg: Registry, w: Working, trackId: TrackId, to: Stage
   if (!own(track.stages, to)) return { code: "missing_stage", reason: `${track.label} has no stage ${to}` };
   const from = own(w.state.tracks, trackId)?.stage ?? track.start;
   if (from === to) return null;
-  if (!stagesAfter(track, from).has(to)) return w.apply({ type: "stage", track: trackId, to });
+  if (!stagesAfter(track, from).has(to)) return w.apply({ type: "stage", track: trackId, to, from });
   const leaving = own(track.stages, from);
   const fails = leaving !== undefined && leaving.fail?.to === to && !leaving.next.some((n) => n.to === to);
   return enter(reg, w, trackId, track, from, to, fails ? "fail" : "gm", seed) ? null : { code: "bad_stage", reason: `${track.label} can't move to ${to}` };

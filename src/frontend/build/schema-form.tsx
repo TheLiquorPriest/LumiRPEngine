@@ -308,7 +308,7 @@ export function TextInput(props: { label: string; value: JsonValue | undefined; 
 }
 
 /** Why a typed number can't be kept, or null. */
-function numberProblem(text: string, field: { min?: number; max?: number; step?: number; optional?: boolean }): string | null {
+export function numberProblem(text: string, field: { min?: number; max?: number; step?: number; optional?: boolean }): string | null {
   const t = text.trim().replace(/\u2212/g, "-");
   if (t === "") return field.optional ? null : "Give a number.";
   const n = Number(t);

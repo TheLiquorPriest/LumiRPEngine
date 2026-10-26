@@ -29,6 +29,7 @@ function isStoredChip(raw: unknown): raw is StoredChip {
   if (raw.swipeId !== undefined && !Number.isInteger(raw.swipeId)) return false;
   if (raw.detail !== undefined && typeof raw.detail !== "string") return false;
   if (raw.expires !== "next_send" && raw.expires !== "never") return false;
+  if (raw.as !== undefined && raw.as !== "regenerate" && raw.as !== "continue" && raw.as !== "send") return false;
   return Array.isArray(raw.actions) && raw.actions.every((a) => isRecord(a) && typeof a.id === "string" && typeof a.label === "string" && (a.style === undefined || a.style === "primary" || a.style === "danger") && (a.input === undefined || isChipInput(a.input)));
 }
 

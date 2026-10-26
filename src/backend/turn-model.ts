@@ -107,10 +107,15 @@ export interface ReadChip {
   reason: "over_cap" | "unit_cap";
 }
 
-/** An action `interpret` read whose params name nothing in the world that fits (DESIGN §9.4): its label and why, for its decline chip. */
+/**
+ * An action `interpret` read whose params name nothing in the world that fits (DESIGN §9.4): its
+ * label and why, as its decline chip tells the player (`reason`, which may echo their own words)
+ * and as the next reply is told it (`told`, which names nothing hidden, the player's words included).
+ */
 export interface UnfitAction {
   label: string;
   reason: string;
+  told: string;
 }
 
 /**

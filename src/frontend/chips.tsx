@@ -166,8 +166,9 @@ function Receipt(props: { chips: readonly Chip[]; show(chip: Chip): ComponentChi
 }
 
 /**
- * Sends a chip's choice as the player made it (with any payload), then Regenerates when the choice
- * is finished by a new swipe. False when the engine refused it, which the player is told.
+ * Sends a chip's choice as the player made it (with any payload), then starts the reply the choice
+ * waits for: Lumiverse's Regenerate or Continue, or, for a new reply after a reply, which only the
+ * player can start, a word to press Send. False when the engine refused it, which the player is told.
  */
 export async function sendChipChoice(app: App, chip: Chip, choice: string, chatId: ChatId, payload?: JsonObject): Promise<boolean> {
   const intent = chipIntent(chip, choice, chatId, payload);
@@ -177,9 +178,13 @@ export async function sendChipChoice(app: App, chip: Chip, choice: string, chatI
       app.toast(message.message, "error");
       return false;
     }
-    if (message.request === "lre.chip" && message.body.pending && !intent.regenerate) app.toast("Saved — it applies when the reply finishes.", "info");
+    if (message.request === "lre.chip" && message.body.pending && intent.start === null) app.toast("Saved — it applies when the reply finishes.", "info");
   }
-  if (intent.regenerate && !(await app.host.generate("regenerate"))) app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
+  if (intent.start === "send") app.toast("Press Send, with nothing typed, for the reply.", "info");
+  else if (intent.start !== null && !(await app.host.generate(intent.start))) {
+    const command = intent.start === "continue" ? "Continue" : "Regenerate";
+    app.toast(`Couldn't start ${command} here; use the message's ${command} button.`, "error");
+  }
   return true;
 }
 

@@ -347,7 +347,8 @@ function aroundOf(world: WorldDoc, place: PlaceId): PlaceId[] {
  * trip is the nominal move from where both are, with no overheads. From 2, the driver walks to the
  * vehicle (up to the world's `fetchMinutes`), gets it going, drives over the modes it goes by,
  * parks, and walks the rest: the vehicle is left at the destination, else wherever the drive and
- * the walk from it take least time. A destination it can't get nearer has no trip.
+ * the walk from it take least time. A destination it can't get nearer, or where it already is, has
+ * no trip.
  */
 export function vehicleTrips(ctx: ReadContext, ask: VehicleTripAsk, targets: readonly PlaceId[]): Map<PlaceId, VehicleTrip> {
   const out = new Map<PlaceId, VehicleTrip>();
@@ -356,6 +357,7 @@ export function vehicleTrips(ctx: ReadContext, ask: VehicleTripAsk, targets: rea
   if (level <= 1 || first === undefined) {
     if (ask.at !== ask.from || first === undefined) return out;
     for (const to of targets) {
+      if (to === ask.at) continue;
       const drive = nominalRoute(ctx, ask.at, to, first);
       if (drive) out.set(to, { fetch: null, startMinutes: 0, drive, park: to, parkMinutes: 0, walk: null, minutes: drive.minutes });
     }
@@ -372,7 +374,8 @@ export function vehicleTrips(ctx: ReadContext, ask: VehicleTripAsk, targets: rea
   // A search per set of open modes and weather, shared by the targets that have the same.
   const searches = new Map<string, { tree: Tree; costing: Costing }>();
   for (const to of targets) {
-    if (to === ask.from || !own(ctx.world.places, to)) continue;
+    // Where the vehicle already is needs no drive: it would only be driven away to park and walked back from.
+    if (to === ask.from || to === ask.at || !own(ctx.world.places, to)) continue;
     const modes = ask.modes.filter((m) => !(closes && (closes(ctx, ask.at).includes(m) || closes(ctx, to).includes(m))));
     if (modes.length === 0) continue;
     const factors = new Map(modes.map((m) => [m, weather ? Math.max(weather(ctx, ask.at, m), weather(ctx, to, m)) : 1]));

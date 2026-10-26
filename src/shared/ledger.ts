@@ -110,6 +110,15 @@ export interface StageEvent extends EventBase {
   type: "stage";
   track: TrackId;
   to: StageId;
+  /**
+   * The stage the track stood at when the engine (a stage entry) or the GM's Stage moved it (DESIGN
+   * §10). Such an event applies only while the track still stands there, and an entry is one unit
+   * with its rewards and effects, so wherever it is replayed after the story got the track there
+   * another way (a rebased view, a carried or held GM edit), it is dropped whole, never entered and
+   * paid for twice. The `stage` effect, an assignment, leaves it out, and so does every event
+   * recorded before it existed: those apply wherever the track stands.
+   */
+  from?: StageId;
 }
 
 /** The clock advance applied by a turn: its elapsed time, a timelapse or an applied `time.advance`. */

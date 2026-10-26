@@ -171,13 +171,13 @@ function sub(state: WorldState, key: string): JsonObject {
   return fresh;
 }
 
-/** Counts one more at a track's stage in a by-stage count of the slice (`missed`, `hints`). */
-function bumpStage(state: WorldState, key: string, track: string, stage: string): void {
+/** Sets a track's stage in a by-stage count of the slice (`missed`, `hints`) to what `next` makes of its count there. */
+function countStage(state: WorldState, key: string, track: string, stage: string, next: (n: number) => number): void {
   if (!safeKey(track) || !safeKey(stage)) return;
   const all = sub(state, key);
   const row = isRecord(all[track]) ? (all[track] as JsonObject) : {};
   const n = row[stage];
-  all[track] = { ...row, [stage]: (typeof n === "number" ? n : 0) + 1 };
+  all[track] = { ...row, [stage]: next(typeof n === "number" ? n : 0) };
 }
 
 function str(e: PackEvent, key: string): string {
@@ -277,20 +277,29 @@ const events: EventTypeDef<PackEvent>[] = [
         const n = own(attempts, track);
         attempts[track] = (typeof n === "number" ? n : 0) + 1;
         // The stage's own count: a later stage's hints don't come from the wrong answers given before it.
-        bumpStage(state, "missed", track, str(e, "stage"));
+        countStage(state, "missed", track, str(e, "stage"), (count) => count + 1);
       }
     },
     describe: (e) => `attempt on ${str(e, "track")}`,
   },
   {
+    // `n`: how many of the stage's hints are open with this one, as the player saw them when they asked
+    // (DESIGN §10). The count only rises to it, so a second tap on the same "Show a hint", sent before
+    // the first one showed (both held through a reply), opens nothing more. One recorded without it
+    // opens one more, as it always has.
     type: ENGINE_EVENTS.hint,
     validate: (e, ctx) => {
       const missing = need(e, "track", "stage");
       if (missing) return missing;
+      const n = e.data.n;
+      if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1)) return { code: "bad_event", reason: `${e.type} needs n, a whole number from 1` };
       const t = own(ctx.world.tracks, str(e, "track"));
       return t && own(t.stages, str(e, "stage")) ? null : { code: "missing_track", reason: `no stage ${str(e, "stage")} of track ${str(e, "track")}` };
     },
-    apply: (e, state) => bumpStage(state, "hints", str(e, "track"), str(e, "stage")),
+    apply: (e, state) => {
+      const n = e.data.n;
+      countStage(state, "hints", str(e, "track"), str(e, "stage"), (open) => (typeof n === "number" ? Math.max(open, n) : open + 1));
+    },
     describe: (e) => `hint opened on ${str(e, "track")}`,
   },
   {

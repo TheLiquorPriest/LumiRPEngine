@@ -19,7 +19,7 @@ import { rulesetFloor, type Registry } from "./registry-impl";
 import { relationIssues } from "./relations";
 import { effectLists, lintRuleset } from "./ruleset-lint";
 import { scheduleOverlaps } from "./schedules";
-import { kindDef, kindFields } from "./scope";
+import { kindDef, kindFields, kindParent } from "./scope";
 import { classOf, classProblems, selectorProblems } from "./selector";
 import { own } from "./pack-kit";
 import { knownBySelector } from "./visibility";
@@ -55,19 +55,58 @@ function typeProblem(f: FieldDef, v: JsonValue, world: WorldDoc): string | null 
   }
 }
 
+/**
+ * A kind's fields as the world's own kinds give them: at each step its own definition, else the
+ * pack's, up the Extends each names. What only a pack kind under a world kind of the same id brings
+ * (DESIGN §4.1: that kind's fields, and the parent it keeps) is left out.
+ */
+function ownFields(reg: Registry, world: WorldDoc, kind: string): Record<string, FieldDef> {
+  const chain: KindDef[] = [];
+  for (let def = kindDef(reg, world, kind), guard = 0; def && guard < 32; def = def.extends ? kindDef(reg, world, def.extends) : undefined, guard++) chain.unshift(def);
+  const out: Record<string, FieldDef> = {};
+  for (const def of chain) Object.assign(out, def.fields);
+  return out;
+}
+
+/** The first world kind up `kind`'s chain that lies over a pack kind of the same id, with that pack kind. */
+function overlayOf(reg: Registry, world: WorldDoc, kind: string): { mine: KindDef; pack: KindDef } | null {
+  for (let id: string | undefined = kind, guard = 0; id && guard < 32; id = kindParent(reg, world, id), guard++) {
+    const mine = own(world.kinds, id);
+    const pack = reg.kinds.get(id);
+    if (mine && pack) return { mine, pack };
+  }
+  return null;
+}
+
 export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   const issues: LintIssue[] = [];
   const err = (path: string, code: string, message: string): void => void issues.push({ severity: "error", path, code, message });
   const warn = (path: string, code: string, message: string): void => void issues.push({ severity: "warning", path, code, message });
   const known = (id: string): boolean => !!own(world.entities, id) || !!own(world.places, id);
 
-  // References and field types.
+  // References and field types, as the kind's fields type them. How firmly follows the world's own
+  // kinds (`ownFields`): a value only a pack kind under a world kind of the same id types (DESIGN
+  // §4.1) was the world's own words before that kind lay over the pack's, so a reference of it that
+  // names nothing is told, and never refuses a commit or an import.
+  const typed = new Map<string, { fields: Record<string, FieldDef>; mine: Record<string, FieldDef>; overlay: { mine: KindDef; pack: KindDef } | null }>();
   for (const [id, e] of Object.entries(world.entities)) {
-    const fields = kindFields(reg, world, e.kind);
+    let kind = typed.get(e.kind);
+    if (!kind) typed.set(e.kind, (kind = { fields: kindFields(reg, world, e.kind), mine: ownFields(reg, world, e.kind), overlay: overlayOf(reg, world, e.kind) }));
     for (const [name, v] of Object.entries(e.fields)) {
-      const f = own(fields, name);
+      const f = own(kind.fields, name);
       const problem = f ? typeProblem(f, v, world) : null;
-      if (problem) (f?.type === "ref" ? err : warn)(`entities.${id}.fields.${name}`, f?.type === "ref" ? "refs" : "types", `${e.name}'s ${f?.label ?? name} ${problem}.`);
+      if (!f || problem === null) continue;
+      const at = `entities.${id}.fields.${name}`;
+      const mine = own(kind.mine, name);
+      const mineProblem = mine === f ? problem : mine ? typeProblem(mine, v, world) : null;
+      if (mine && mineProblem !== null) {
+        (mine.type === "ref" ? err : warn)(at, mine.type === "ref" ? "refs" : "types", `${e.name}'s ${mine.label ?? name} ${mineProblem}.`);
+        continue;
+      }
+      const label = f.label ?? name;
+      const o = kind.overlay;
+      const from = o ? `Your ${o.mine.label} kind doesn't define ${label}: it has it from the packs' ${o.pack.label}, which it lies over, so the value is read as theirs.` : `None of your kinds defines ${label}: it is a pack's field, read as theirs.`;
+      warn(at, f.type === "ref" ? "refs" : "types", `${e.name}'s ${label} ${problem}. ${from} ${f.type === "ref" ? "Name something in the world there" : "Give it a value that fits"}, or define ${label} on your ${o ? o.mine.label : "own"} kind to keep your own.`);
     }
     for (const r of e.relations) if (!known(r.to)) err(`entities.${id}.relations`, "refs", `${e.name}'s ${r.type} relation names "${r.to}", which isn't in the world.`);
   }
@@ -103,17 +142,19 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   }
   for (const [id, k] of Object.entries(world.kinds)) {
     if (k.extends && !own(world.kinds, k.extends) && !reg.kinds.has(k.extends)) err(`kinds.${id}.extends`, "refs", `Kind ${id} extends an unknown kind "${k.extends}".`);
-    // A world kind with a pack kind's id lies over it (DESIGN §4.1), keeping the pack's fields; only an
-    // Extends of its own can lose some, the ones the pack's chain gives and the new chain doesn't.
+    // A world kind with a pack kind's id lies over it (DESIGN §4.1), keeping the pack's fields and
+    // parent. Only an Extends of its own that isn't the pack's cuts the pack's chain, losing what the
+    // pack's parents give and the new chain doesn't; a kind that keeps the pack's parent loses only
+    // what a kind above it cuts, and that kind is told.
     const pack = reg.kinds.get(id);
-    if (!pack) continue;
+    if (!pack || k.extends === undefined || k.extends === pack.extends) continue;
     const packFields = new Map<string, FieldDef>();
     for (let cur: KindDef | undefined = pack, guard = 0; cur && guard < 32; cur = cur.extends ? reg.kinds.get(cur.extends) : undefined, guard++) {
       for (const [field, def] of Object.entries(cur.fields)) if (!packFields.has(field)) packFields.set(field, def);
     }
     const kept = kindFields(reg, world, id);
     const lost = [...packFields].filter(([field]) => !hasOwn(kept, field)).map(([field, def]) => def.label ?? field);
-    if (lost.length > 0) warn(`kinds.${id}`, "kind_shadow", `Kind ${k.label} (${id}) lies over the ${pack.pack ?? "engine"} pack's ${pack.label} but builds on ${k.extends ?? "nothing"} instead of ${pack.extends ?? "nothing"}, so it and every kind built on it lose ${lost.length} of that kind's fields (${lost.slice(0, 6).join(", ")}${lost.length > 6 ? ", …" : ""}): forms show those values as untyped text and the levels that gate them no longer apply. Set its Extends back to ${pack.extends ?? "nothing"}, or give the kind its own id.`);
+    if (lost.length > 0) warn(`kinds.${id}`, "kind_shadow", `Kind ${k.label} (${id}) lies over the ${pack.pack ?? "engine"} pack's ${pack.label} but builds on ${k.extends || "nothing"} instead of ${pack.extends ?? "nothing"}, so it and every kind built on it lose ${lost.length} of that kind's fields (${lost.slice(0, 6).join(", ")}${lost.length > 6 ? ", …" : ""}): forms show those values as untyped text and the levels that gate them no longer apply. ${pack.extends ? `Set its Extends back to ${pack.extends}` : "Clear its Extends"}, or give the kind its own id.`);
   }
 
   // Classifications (DESIGN §4.1): each value's parent is a value of the same facet, with no cycle;

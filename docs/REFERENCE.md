@@ -817,7 +817,7 @@ Detail on demand: `gear` (version 1).
 
 ### Lint codes
 
-`gear.kits`.
+`gear.contents`, `gear.holders`, `gear.kits`.
 
 ## Minds pack (`minds`)
 

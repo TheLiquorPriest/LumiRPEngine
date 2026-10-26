@@ -506,12 +506,18 @@ const CLOCK_TRANSPARENT = new Set<string>(["set", "add", "post", ENGINE_EVENTS.s
 /** Signal classes whose notes collapse to the latest per entity in a record (period-close status). */
 const COLLAPSED_SIGNALS = new Set<string>(["arrival", "needs", "weather", "overdue", "invitation"]);
 
-/** Conservative pass: merges only within runs no other event reads (exact by construction, bar float sums). */
-function coarsenRuns(events: readonly LedgerEvent[]): LedgerEvent[] {
+/** Conservative pass: merges only within runs no other event reads (exact by construction, bar float sums). `held` events stay as they are, and nothing merges across them. */
+function coarsenRuns(events: readonly LedgerEvent[], held: (e: LedgerEvent) => boolean): LedgerEvent[] {
   const out: (LedgerEvent | null)[] = [];
   let keys = new Map<string, { set?: number; add?: number }>();
   let lastClock: number | null = null;
   for (const ev of events) {
+    if (held(ev)) {
+      keys = new Map();
+      if (!CLOCK_TRANSPARENT.has(ev.type)) lastClock = null;
+      out.push(ev);
+      continue;
+    }
     if (ev.type === "set" || ev.type === "add") {
       const key = `${ev.entity}\u0000${ev.field}`;
       const slot = keys.get(key) ?? {};
@@ -593,10 +599,10 @@ function creditOnly(e: LedgerEvent): boolean {
  * Aggressive pass: every collapsible group becomes its merged form at its last member's position,
  * except credit-only postings, which land at their first member's. Then every debit aggregate sees
  * at least the balance the raw record had at its last member, so the funds guard on `post` holds
- * in the coarse record wherever it held in the raw one.
+ * in the coarse record wherever it held in the raw one. `held` events stay as they are, in place.
  */
-function collapse(reg: Registry, start: Readonly<WorldState>, events: readonly LedgerEvent[]): LedgerEvent[] {
-  const keys = events.map((e) => groupKey(reg, e));
+function collapse(reg: Registry, start: Readonly<WorldState>, events: readonly LedgerEvent[], held: (e: LedgerEvent) => boolean): LedgerEvent[] {
+  const keys = events.map((e) => (held(e) ? null : groupKey(reg, e)));
   const first = new Map<string, number>();
   const last = new Map<string, number>();
   const members = new Map<string, LedgerEvent[]>();
@@ -652,10 +658,12 @@ function foldOf(reg: Registry, world: WorldDoc, start: Readonly<WorldState>, eve
  * Coarsens a timelapse or catch-up record (DESIGN §4.3): one event per entity field (its last value,
  * or its summed delta, L21), postings summed per memo and accounts, catch-up cursors and status
  * signals (arrivals, needs, weather, overdue, invitations) at their latest, pack accumulators
- * merged through their `coarsen` hook, and adjacent clock moves joined. The result is checked:
- * when it doesn't fold from `start` to exactly the raw fold's state, the conservative pass is
- * used, and when that doesn't either, the raw events. Moving everyone once loses what the POV saw
- * on the way, so a coarse record ends with an `engine.observed` event putting that back. The
+ * merged through their `coarsen` hook, and adjacent clock moves joined. A stage entry (DESIGN §10),
+ * one unit with its rewards and effects, is left as it is: merged into the period's sums, a reward
+ * would land wherever the record is replayed, even where the entry it came with doesn't. The result
+ * is checked: when it doesn't fold from `start` to exactly the raw fold's state, the conservative
+ * pass is used, and when that doesn't either, the raw events. Moving everyone once loses what the POV
+ * saw on the way, so a coarse record ends with an `engine.observed` event putting that back. The
  * touched record is left out of the check: the stored record is what play applied, so a field
  * whose deltas net to nothing over the period isn't touched by it.
  */
@@ -668,7 +676,9 @@ export function coarsen(reg: Registry, world: WorldDoc, start: Readonly<WorldSta
     return hashJson(copy);
   };
   const expected = worldOnly(full);
-  for (const candidate of [collapse(reg, start, events), coarsenRuns(events)]) {
+  const entries = new Set(events.flatMap((e) => (e.type === "stage" && e.group !== undefined ? [e.group] : [])));
+  const held = (e: LedgerEvent): boolean => e.group !== undefined && entries.has(e.group);
+  for (const candidate of [collapse(reg, start, events, held), coarsenRuns(events, held)]) {
     const coarse = foldOf(reg, world, start, candidate);
     if (coarse === null || worldOnly(coarse) !== expected) continue;
     const lost = lostObservations(full, coarse);

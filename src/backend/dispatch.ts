@@ -359,7 +359,8 @@ export class Dispatcher {
           const stage = id === undefined ? null : currentStage(world, state, id);
           if (id === undefined || !shown || stage === null) throw new RequestError("validation", "no such quest");
           if (shown.opened >= shown.hints.length) throw new RequestError("validation", "No hint to show yet.");
-          events = [{ type: ENGINE_EVENTS.hint, data: { track: id, stage } }];
+          // The hint the player saw next, by its place (`n`): a tap again before it shows (held through a reply) is the same hint.
+          events = [{ type: ENGINE_EVENTS.hint, data: { track: id, stage, n: shown.opened + 1 } }];
           by = { action: "hint", label: neutralizeMacros(`Opened a hint: ${shown.label}`) };
         } else if ("time" in r) {
           // The clock's ✎ (DESIGN §9.2, §12): later runs the time between as an applied advance, earlier sets the clock back (L48).
@@ -1067,10 +1068,11 @@ export class Dispatcher {
       }
       case "intent_gate":
       case "outline_gate": {
-        // A preview gate (DESIGN §5.1): Play and Edit keep the answer with the turn, and the frontend's
-        // Regenerate resumes it; Cancel only takes the chip, so nothing is generated, and stops the minds
-        // its run started. The intent gate's Cancel drops the read too, so the message is read afresh
-        // the next time it plays.
+        // A preview gate (DESIGN §5.1): Play and Edit keep the answer with the turn, and the reply the
+        // chip starts resumes it (`chipStarts`: the frontend's Regenerate, or for a new reply after a
+        // reply the player's own Send); Cancel only takes the chip, so nothing is generated, and stops
+        // the minds its run started. The intent gate's Cancel drops the read too, so the message is read
+        // afresh the next time it plays.
         const text = typeof chip.payload.text === "string" ? chip.payload.text : "";
         if (choice === "cancel") {
           this.rt.dropMinds(chatId);

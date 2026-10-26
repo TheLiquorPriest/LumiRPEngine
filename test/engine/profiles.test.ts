@@ -282,6 +282,30 @@ describe("a profile in an authored world", () => {
     expect([rest.ok, ap()]).toEqual([true, full]);
   });
 
+  test("losing XP brings HP and Action Points down to the lower level's maxima, so Rest for the night never lowers them", () => {
+    const make = STARTER_WORLDS.modern_slice_of_life;
+    if (!make) throw new Error("no starter");
+    const world = applyProfile(make("s", "s"), PROFILES.modern, packKinds);
+    const pov = world.pov;
+    const w = new Working(reg, world, initialState(world, hashJson(world), reg));
+    const scope = { bindings: { self: pov }, rng: createRng("xp") };
+    const value = (field: string): number => Number(read(world, w.state, pov, field));
+    // Level 5 at 10,000 XP, with HP and Action Points full and stored, as after any change to them.
+    applyEffects(reg, w, [{ type: "award", args: { entity: pov, progression: "level", amount: 10_000 } }], scope);
+    applyEffects(reg, w, [{ type: "set", args: { entity: pov, field: "hp", value: value("max_hp") } }, { type: "set", args: { entity: pov, field: "action_points", value: value("ap_max") } }], scope);
+    const high = [value("level"), value("hp"), value("action_points")];
+    expect(high[0]).toBe(5);
+    applyEffects(reg, w, [{ type: "add", args: { entity: pov, field: "xp", delta: -10_000 } }], scope);
+    const low = [value("level"), value("hp"), value("action_points")];
+    expect(low).toEqual([1, value("max_hp"), value("ap_max")]);
+    expect([low[1]! < high[1]!, low[2]! < high[2]!]).toEqual([true, true]);
+    const rest = resolveAction(reg, w, { action: "long_rest", params: {} }, createRng("rest"));
+    expect(rest.ok).toBe(true);
+    // A night's rest only heals and refills: nothing it records takes either down.
+    expect(rest.events.filter((e) => e.type === "add" && (e.field === "hp" || e.field === "action_points") && e.delta < 0)).toEqual([]);
+    expect([value("hp"), value("action_points")]).toEqual(low.slice(1));
+  });
+
   test("a push whose roll totals exactly 0 still spends its Action Point; one settled without a roll doesn't", () => {
     const delta = PROFILES.modern.actions?.push_skill?.outcomes.failure?.[0]?.args.delta;
     if (typeof delta !== "string" || !delta.startsWith("=")) throw new Error("no Action Point charge");

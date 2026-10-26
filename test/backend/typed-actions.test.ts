@@ -124,29 +124,34 @@ describe("a typed action that names nothing in the world", () => {
     expect(removed).not.toBe(told);
   });
 
-  test("a name the POV can't see is never repeated on the chip", async () => {
-    const { rig, chatId } = await chat({ hidden: "Vex Morrow" });
-    reading(rig, pay("Vex"));
-    await rig.turn(chatId, "I pay Vex for the latte.", "You look around for Vex.");
-    const chips = await replyChips(rig, chatId);
-    expect(chips.some((c) => c.kind === "decline")).toBe(true);
-    for (const c of chips) expect(`${c.label} ${c.detail ?? ""}`.toLowerCase()).not.toContain("vex");
+  test("a name the player typed reads the same on the chip, made up or hidden, and the next reply is told no hidden one", async () => {
+    const declined = async (extra: { hidden?: string; secretAlias?: string }): Promise<{ detail: string; told: string }> => {
+      const { rig, chatId } = await chat(extra);
+      reading(rig, pay("vex_morrow"));
+      await rig.turn(chatId, "I pay Vex Morrow for the latte.", "You look around for the barista.");
+      const detail = (await replyChips(rig, chatId)).find((c) => c.kind === "decline")?.detail ?? "";
+      const told = (await nextTurn(rig, chatId, "I look around.")).split("\n").find((line) => line.includes("Pay")) ?? "";
+      return { detail, told };
+    };
+    const none = await declined({});
+    expect(none.detail).toStartWith("Vex Morrow isn't anyone you know.");
+    // Someone hidden by that name, or a secret entry going by it: the chip says the player's own words, as in a world without them.
+    for (const extra of [{ hidden: "Vex Morrow" }, { secretAlias: "Vex Morrow" }]) {
+      const got = await declined(extra);
+      expect(got.detail).toBe(none.detail);
+      // The narrator is told no hidden name, the player's own included.
+      expect(got.told).toContain("Pay");
+      expect(got.told).not.toMatch(/Vex|Morrow/);
+    }
   });
 
-  test("a name the player didn't type, or one that leads to secret lore, is never repeated on the chip", async () => {
+  test("a name the player didn't type is never repeated on the chip", async () => {
     const made = await chat();
     reading(made.rig, pay("Lena"));
     await made.rig.turn(made.chatId, "I pay the barista for the latte.", "You hand the barista a few bills.");
     const madeChips = await replyChips(made.rig, made.chatId);
-    expect(madeChips.some((c) => c.kind === "decline")).toBe(true);
+    expect(madeChips.find((c) => c.kind === "decline")?.detail).toStartWith("It names no one you know.");
     for (const c of madeChips) expect(`${c.label} ${c.detail ?? ""}`).not.toContain("Lena");
-
-    const lore = await chat({ secretAlias: "Rena" });
-    reading(lore.rig, pay("rena"));
-    await lore.rig.turn(lore.chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
-    const loreChips = await replyChips(lore.rig, lore.chatId);
-    expect(loreChips.some((c) => c.kind === "decline")).toBe(true);
-    for (const c of loreChips) expect(`${c.label} ${c.detail ?? ""}`.toLowerCase()).not.toContain("rena");
   });
 
   test("on the Decision route with no call left to read where the player goes, the move goes unread, never 'couldn't'", async () => {
@@ -257,7 +262,7 @@ describe("a second action in the same message", () => {
     expect((await replyChips(rig, chatId)).filter((c) => c.kind === "choice").map((c) => c.label)).toEqual(["I buy a latte"]);
   });
 
-  test("a secret in it, or a name that leads to secret lore, drops only it: the walk still plays", async () => {
+  test("a secret in it, or a name that leads to secret lore the player didn't type, drops only it: the walk still plays", async () => {
     const { rig, chatId } = await chat({ truth: true, secretAlias: "Rena" });
     const { state, world } = await folded(rig, chatId);
     expect(unrevealedSecrets(rig.rt.registry, world, state)).toContain(TRUTH);
@@ -269,9 +274,27 @@ describe("a second action in the same message", () => {
     expect(chips.some((c) => c.kind === "choice")).toBe(false);
     for (const c of chips) expect(`${c.label} ${c.detail ?? ""}`).not.toContain(TRUTH);
 
+    // The read gave the courier the name her secret entry goes by.
     reading(rig, walkThenBuy("I buy Rena a latte"));
-    await rig.turn(chatId, "I walk to Bluebird Coffee and buy Rena a latte.", "The cafe is quiet.");
+    await rig.turn(chatId, "I walk to Bluebird Coffee and buy the courier a latte.", "The cafe is quiet.");
     expect((await replyChips(rig, chatId)).some((c) => c.kind === "choice")).toBe(false);
+  });
+
+  test("the player's own words stay on the chip when they name someone hidden, as in a world without them", async () => {
+    const TYPED = "I walk to Bluebird Coffee and ask Vex Morrow about the truck.";
+    const offered = async (extra: { hidden?: string; secretAlias?: string }, typed: string): Promise<string[]> => {
+      const { rig, chatId } = await chat(extra);
+      reading(rig, walkThenBuy("I ask Vex Morrow about the truck"));
+      await rig.turn(chatId, typed, "You push open the door of the cafe.");
+      return (await replyChips(rig, chatId)).filter((c) => c.kind === "choice").map((c) => c.label);
+    };
+    const none = await offered({}, TYPED);
+    expect(none).toEqual(["I ask Vex Morrow about the truck"]);
+    // Hidden, or the alias a secret entry goes by: dropping their own words would say so.
+    expect(await offered({ hidden: "Vex Morrow" }, TYPED)).toEqual(none);
+    expect(await offered({ secretAlias: "Vex Morrow" }, TYPED)).toEqual(none);
+    // Words the read added are its own: a hidden name in them is dropped.
+    expect(await offered({ hidden: "Vex Morrow" }, "I walk to Bluebird Coffee and ask whoever runs the shop about the truck.")).toEqual([]);
   });
 
   test("time the read puts after the walk is offered as a Timelapse, never as words to send", async () => {
