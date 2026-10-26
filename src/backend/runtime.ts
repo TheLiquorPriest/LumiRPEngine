@@ -70,6 +70,7 @@ import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
 import { LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks, type TurnInputs } from "./ledger-io";
+import type { TrimReport } from "./memory-budget";
 import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
@@ -690,6 +691,8 @@ function signalWithin(signal: AbortSignal, ms: number): AbortSignal {
 
 export class Runtime implements TurnHooks {
   readonly host: HostPort;
+  /** Each chat's messages, read whole once and kept current from the host's events (DESIGN §9.6). */
+  private readonly messages: MessageCache;
   readonly registry: Registry;
   readonly worlds: WorldStore;
   readonly settings: SettingsStore;
@@ -787,8 +790,8 @@ export class Runtime implements TurnHooks {
 
   constructor(options: RuntimeOptions) {
     // Chat reads come from a copy the host's message events keep current (DESIGN §9.6).
-    const messages = new MessageCache(options.host);
-    this.host = messages.host;
+    this.messages = new MessageCache(options.host);
+    this.host = this.messages.host;
     this.registry = createRegistry(options.packs);
     this.pipeline = options.pipeline;
     this.templates = options.templates ?? {};
@@ -817,7 +820,7 @@ export class Runtime implements TurnHooks {
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }), (chatId) => this.messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     // A view slower than a second is kept in the chat's diagnostics (a slow tab says where it went).
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
@@ -881,6 +884,26 @@ export class Runtime implements TurnHooks {
     for (const key of [...this.runs.keys()]) if (key.endsWith(`\u0000${chatId}`)) this.runs.delete(key);
     this.bridges.delete(chatId);
     this.ledger.forget(chatId);
+  }
+
+  /** Hears each whole read of a chat from the host, once it has landed (the memory budget, DESIGN §9.6). */
+  onChatRead(listener: (chatId: ChatId) => void): void {
+    this.messages.onRead = listener;
+  }
+
+  /**
+   * The memory budget's trim (DESIGN §9.6): for every chat not in use, lets go of what is built
+   * again when it is next used: its copy of the messages, its open ledger with the world revisions
+   * that pins, and its last pushed view. A chat is in use while a page shows it on screen, while it
+   * holds a turn or an operation, and while it is its user's latest chat read. How many of each went.
+   */
+  trimIdle(): TrimReport {
+    const viewed = this.ledger.viewed();
+    const latest = this.messages.latest();
+    const inUse = (chatId: ChatId): boolean => viewed.has(chatId) || latest.has(chatId) || this.ledger.busy(chatId);
+    const ledgers = new Set(this.ledger.trim(inUse));
+    for (const key of [...this.pins.keys()]) if (ledgers.has(key.slice(key.indexOf("\u0000") + 1))) this.pins.delete(key);
+    return { messages: this.messages.trim(inUse), ledgers: ledgers.size, views: this.push.trim(inUse) };
   }
 
   private async resolveEnv(chatId: ChatId, userId: UserId): Promise<LedgerEnv | null> {

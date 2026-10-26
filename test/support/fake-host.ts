@@ -459,7 +459,11 @@ export class FakeHost implements HostPort {
 
   // ------------------------------------------------------------------ delivery
 
+  /** Events lost on their way to the backend, the next one of each name: a host whose event never arrived. */
+  readonly lost = new Set<HostEventName>();
+
   private emit<K extends HostEventName>(event: K, payload: HostEventMap[K]): void {
+    if (this.lost.delete(event)) return;
     this.queue.push({ event, payload: structuredClone(payload) });
   }
 
@@ -621,6 +625,19 @@ export class FakeHost implements HostPort {
   settingsSaved(keys: string[]): void {
     const event = decodeEvent("SETTINGS_UPDATED", { keys });
     if (event) this.emit("SETTINGS_UPDATED", event);
+  }
+
+  /** A `CHAT_CHANGED` as Lumiverse sends it (a raw payload: `{ chatId, reattributedUserMessages }`, or `{ chat, changedFields }`), read as the engine reads the host's payload. */
+  chatChanged(payload: unknown): void {
+    const event = decodeEvent("CHAT_CHANGED", payload);
+    if (event) this.emit("CHAT_CHANGED", event);
+  }
+
+  /** The user's messages in a chat renamed for a persona (`reattributeUserMessages`): written without message events, then one `CHAT_CHANGED`. */
+  reattribute(chatId: ChatId, name: string): void {
+    const renamed = this.chat(chatId).messages.filter((m) => m.isUser);
+    for (const m of renamed) m.name = name;
+    if (renamed.length > 0) this.chatChanged({ chatId, reattributedUserMessages: renamed.length });
   }
 
   /** Host restart: in-flight generations vanish and their staged empty replies are removed; the extension's handlers go with it. */

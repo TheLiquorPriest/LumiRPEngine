@@ -125,6 +125,15 @@ export interface ChatDeletedEvent {
   chatId: ChatId;
 }
 
+/**
+ * A chat's own record changed (`CHAT_CHANGED`). `renamed`: the host renamed the chat's user
+ * messages for a persona (`reattributedUserMessages`), which sends no message events.
+ */
+export interface ChatChangedEvent {
+  chatId: ChatId;
+  renamed: boolean;
+}
+
 /** A preset was written (`PRESET_CHANGED`): its blocks, and so the outlets it places, may differ now. */
 export interface PresetChangedEvent {
   presetId: string | null;
@@ -155,6 +164,7 @@ export interface HostEventMap {
   MESSAGE_DELETED: MessageDeletedEvent;
   WORLD_INFO_ACTIVATED: WorldInfoActivatedEvent;
   CHAT_DELETED: ChatDeletedEvent;
+  CHAT_CHANGED: ChatChangedEvent;
   PRESET_CHANGED: PresetChangedEvent;
   SETTINGS_UPDATED: SettingsUpdatedEvent;
   FRONTEND_SESSION_CLOSED: FrontendSessionClosedEvent;

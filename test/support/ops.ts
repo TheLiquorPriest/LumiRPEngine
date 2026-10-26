@@ -1071,6 +1071,10 @@ export class Runner {
   async check(): Promise<void> {
     if (this.h.service.errors.length > 0) throw new InvariantError("errors", this.h.service.errors.join("\n"));
     for (const chatId of this.chats) {
+      // The copy the ledger reads the chat through, when it has one (`HarnessOptions.copy`), holds what the host reads now, and read the chat whole once since the backend started or forgot it (DESIGN §9.6).
+      const copy = this.h.copy;
+      if (copy && hashJson(await copy.host.chats.messages(chatId, this.h.host.userId)) !== hashJson(await this.h.host.chats.messages(chatId, this.h.host.userId))) throw new InvariantError("copy", `${chatId}: the copy of its messages differs from the host's`);
+      if ((this.h.copyReads.get(chatId) ?? 0) > 1) throw new InvariantError("copy", `${chatId}: read whole ${this.h.copyReads.get(chatId)} times since the backend started`);
       const core = await this.h.core(chatId);
       const { reference, optimized, cold, materializedTwice } = await this.h.folds(chatId);
       // L42: a cold fold that starts from the chat's stored snapshots equals the full fold.

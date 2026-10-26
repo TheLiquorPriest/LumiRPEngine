@@ -97,9 +97,12 @@ export function decodeMessage(raw: unknown, chatId: ChatId): HostMessage | null 
   const id = str(raw, "id");
   if (!id) return null;
   const swipes = Array.isArray(raw.swipes) ? raw.swipes.map((s) => (typeof s === "string" ? s : "")) : [];
-  const content = str(raw, "content") ?? "";
+  const stored = str(raw, "content") ?? "";
   const swipeId = num(raw, "swipe_id") ?? 0;
-  if (swipes.length === 0) swipes.push(content);
+  if (swipes.length === 0) swipes.push(stored);
+  // The host keeps the shown swipe's text as `content` too: a message kept holds that text once.
+  const shown = swipes[swipeId];
+  const content = shown === stored ? shown : stored;
   const extra = isRecord(raw.extra) ? raw.extra : {};
   const metadata = isRecord(raw.metadata) ? raw.metadata : isRecord(extra.spindle_metadata) ? extra.spindle_metadata : {};
   const role = str(raw, "role");
@@ -133,7 +136,8 @@ export function decodeEvent(event: HostEventName, p: unknown): HostEventMap[Host
     const frontendSessionId = str(p, "frontendSessionId");
     return frontendSessionId ? { frontendSessionId } : null;
   }
-  // CHAT_DELETED names its chat `id`; every other event, `chatId`.
+  // CHAT_DELETED names its chat `id`; every other event, `chatId`. A CHAT_CHANGED for a write of the
+  // chat's own record (`{ chat, changedFields }`) names none: nothing the engine reads changed.
   const chatId = str(p, event === "CHAT_DELETED" ? "id" : "chatId");
   if (!chatId) return null;
   switch (event) {
@@ -191,6 +195,8 @@ export function decodeEvent(event: HostEventName, p: unknown): HostEventMap[Host
     }
     case "CHAT_DELETED":
       return { chatId };
+    case "CHAT_CHANGED":
+      return { chatId, renamed: (num(p, "reattributedUserMessages") ?? 0) > 0 };
     case "MESSAGE_DELETED": {
       const messageId = str(p, "messageId");
       return messageId ? { chatId, messageId } : null;
@@ -324,9 +330,9 @@ export function createSpindleHost(): HostPort {
   return {
     chats: {
       async messages(chatId) {
-        const rows = await spindle.chat.getMessages(chatId);
         const out: HostMessage[] = [];
-        for (const row of rows) {
+        // The rows carry every message's reasoning, most of a long chat's size: nothing holds them past this loop.
+        for (const row of await spindle.chat.getMessages(chatId)) {
           const m = decodeMessage(row, chatId);
           if (m) out.push(m);
         }

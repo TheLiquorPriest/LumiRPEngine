@@ -1536,6 +1536,40 @@ export class LedgerService {
     if (gate && p) this.drop(chatId, gate.userId, p);
   }
 
+  /**
+   * Whether the chat holds what only memory keeps: an operation queued or running, a turn in flight,
+   * or a turn its gate holds from the guard's stop to the end of its engine run, while a prepared turn
+   * waits, while a reply holds it and until a late reply's read runs.
+   */
+  busy(chatId: ChatId): boolean {
+    const slot = this.chats.get(chatId);
+    const gate = this.gates.get(chatId);
+    if (slot && (slot.ops > 0 || slot.core.inFlight)) return true;
+    return gate !== undefined && (gate.prepared !== null || gate.halt !== null || gate.taken !== null || gate.running !== null || gate.reading !== null);
+  }
+
+  /** The chats a page shows on screen, as the pages last said (hello, resync, `lre.page`). */
+  viewed(): Set<ChatId> {
+    const out = new Set<ChatId>();
+    for (const page of this.pages.values()) if (page.chatId !== null && page.viewing) out.add(page.chatId);
+    return out;
+  }
+
+  /**
+   * Lets go of the open chats `keep` doesn't name that hold nothing only memory keeps (the memory
+   * budget, DESIGN §9.6): each opens again from its journal and snapshots, as one evicted past
+   * `OPEN_CHATS_CAP` does. The chats let go.
+   */
+  trim(keep: (chatId: ChatId) => boolean): ChatId[] {
+    const gone: ChatId[] = [];
+    for (const id of [...this.chats.keys()]) {
+      if (keep(id) || this.busy(id)) continue;
+      this.chats.delete(id);
+      gone.push(id);
+    }
+    return gone;
+  }
+
   /** The turn the engine prepared for the chat, if any: its id, and the generation that took it (DESIGN §5.1). */
   preparedOf(chatId: ChatId): { id: string; generationId: string | null } | null {
     const p = this.gates.get(chatId)?.prepared;
@@ -1634,11 +1668,9 @@ export class LedgerService {
       // The revisions its folds will ask for are loaded before anyone folds it.
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);
-      for (const [id, s] of this.chats) {
+      for (const id of this.chats.keys()) {
         if (this.chats.size <= OPEN_CHATS_CAP) break;
-        // A chat keeps its slot from the guard's stop to the end of its engine run, while its prepared turn waits, while a reply holds that turn and until a late reply's read runs: the turn lives only in memory.
-        const gate = this.gates.get(id);
-        if (id !== chatId && s.ops === 0 && !s.core.inFlight && !gate?.prepared && !gate?.halt && !gate?.taken && !gate?.running && !gate?.reading) this.chats.delete(id);
+        if (id !== chatId && !this.busy(id)) this.chats.delete(id);
       }
       return slot;
     })();

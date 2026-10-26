@@ -89,6 +89,20 @@ export class StatePush {
   }
 
   /**
+   * Lets go of the views kept for the chats `inUse` doesn't name (the memory budget, DESIGN §9.6),
+   * but not one with a push scheduled or under way: such a chat's next push is a snapshot. How many went.
+   */
+  trim(inUse: (chatId: ChatId) => boolean): number {
+    let gone = 0;
+    for (const [key, c] of this.channels) {
+      if (inUse(key.slice(key.indexOf("\u0000") + 1)) || c.timer !== null || c.queued || c.building > 0) continue;
+      this.channels.delete(key);
+      gone++;
+    }
+    return gone;
+  }
+
+  /**
    * A full snapshot for one page (hello, resync, chat open), at once: the last view pushed, at its
    * rev, which every other page's deltas build on too; a delta follows with what changed since. A chat
    * that has pushed nothing yet builds its view first, after the messages already waiting (`giveWay`).
