@@ -221,7 +221,7 @@ describe("no stale outlets", () => {
     await rig.host.finish(looked, "The square is quiet.");
     const flipped = await rig.host.begin(flipper, { type: "regenerate" });
     expect(flipped.halted).toBeUndefined();
-    expect(rig.host.section("Outcome")).toMatch(/^\[Outcome\]\n- Flip a coin: (success|fail)/);
+    expect(rig.host.section("Outcome")).toMatch(/^\[Outcome\]\n(?:.*\n)*- Flip a coin: (success|fail)/);
     expect(rig.host.section("Scene")).not.toBe(lookerScene);
     await rig.host.finish(flipped, "Heads.");
     expect(await liveEntries(rig, flipper)).toEqual([]);

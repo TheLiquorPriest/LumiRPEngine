@@ -20,7 +20,7 @@ import type { LintIssue } from "../../shared/protocol";
 import { NEED_IDS, NEED_WORDS } from "../../shared/needs";
 import type { RoutineBlock, RoutineBlockKind, RoutineDays, RoutineDef, RoutineEntry, RoutinePlace, RoutineSeason, RoutineSource, WorldRoutineSource } from "../../shared/routines";
 import { AWARENESS_LABEL, BASIC_BLOCKS, INVITATIONS_LABEL, isOff, ROUTINE_BLOCK_KINDS, routineSettingsOf } from "../../shared/routines";
-import type { ScheduleSlot, WorldDoc } from "../../shared/world";
+import { playedKinds, type ScheduleSlot, type WorldDoc } from "../../shared/world";
 import { useApp, useUi } from "../app";
 import { Button, Disclosure, Empty, Field, HostSelect, IconButton, List, ListRow, NumberStepper, PageHeader, SaveBar, Section, Seg, useBusy, type SegOption } from "../components";
 import { humanize } from "../format";
@@ -811,7 +811,7 @@ export function RoutineEditor(props: EditorProps) {
   const [reverts, setReverts] = useState(0);
   useHeld(routine, setRoutine, stored ?? blank, `${props.world.id}/routines/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   // Owners, company and sheet fields see the packs' kinds too (groups among them); the world's own win.
-  const doc = useMemo(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds } }), [props.world, draft?.packKinds]);
+  const doc = useMemo(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds) }), [props.world, draft?.packKinds]);
   if (!id) return <span class="lre-muted">Choose a routine.</span>;
   const changed = JSON.stringify(routine) !== JSON.stringify(stored ?? null);
   const path = `routines.${id}`;
@@ -863,7 +863,7 @@ export function RoutineList(props: { worldId: string }) {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   if (!draft) return null;
-  const doc: WorldDoc = { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } };
+  const doc: WorldDoc = { ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) };
   const info = COLLECTION_INFO.routines;
   const all = Object.values(draft.doc.routines ?? {});
   const q = query.trim().toLowerCase();

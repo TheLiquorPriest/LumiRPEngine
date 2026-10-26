@@ -58,6 +58,20 @@ export type DomainId = (typeof DOMAINS)[number];
 /** Realism level per domain: 0 off … 4 simulation. */
 export type Level = 0 | 1 | 2 | 3 | 4;
 
+/** Each domain and each level by its name (DESIGN §9.1), as Settings → Realism, the GM view and the engine's lines say them. */
+export const DOMAIN_LABEL: Record<DomainId, string> = {
+  money: "Money",
+  gear: "Gear",
+  vehicles: "Vehicles",
+  castlife: "Cast life",
+  relationships: "Relationships",
+  space: "Space & travel",
+  calendar: "Calendar & time",
+  weather: "Weather",
+  sheets: "Sheets & checks",
+};
+export const LEVEL_LABEL: Record<Level, string> = { 0: "Off", 1: "Narrative", 2: "Simple", 3: "Detailed", 4: "Simulation" };
+
 /**
  * The three fixed detail bands (DESIGN §9.1), each with a cap per domain. A world's own tiers
  * (`WorldDoc.tiers`) map onto them; the ids are the original tier ids, so settings, `resolve`

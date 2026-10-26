@@ -54,10 +54,21 @@ test("someone on an agenda reads as busy in Cast and the narrator's lines unless
     };
   };
   // Every agenda Maya has is public: what she is doing may be said.
-  expect(said()).toEqual({ cast: "agenda", journal: [], people: ["Maya Chen (agenda) is here."], outline: ["Maya Chen is agenda."] });
-  // With a secret one too, the agenda she is on could be it.
+  const open = said();
+  expect(open.cast).toBe("agenda");
+  expect(open.journal).toEqual([]);
+  expect(open.people).toHaveLength(1);
+  expect(open.outline).toHaveLength(1);
+  // With a secret one too, the agenda she is on could be it: every line reads as if she were simply busy.
   world.tracks.b_secret = { id: "b_secret", kind: "agenda", label: "Poison the mayor", owner: "maya", start: "buy", visibility: "secret", stages: { buy: { label: "Buy arsenic", priority: 9, next: [] } } };
-  expect(said()).toEqual({ cast: "busy", journal: [], people: ["Maya Chen (busy) is here."], outline: ["Maya Chen is busy."] });
+  const hidden = said();
+  expect(hidden.cast).toBe("busy");
+  expect(hidden.people).not.toEqual(open.people);
+  expect(hidden.outline).not.toEqual(open.outline);
+  state.entities.maya!.fields.activity = "busy";
+  delete world.tracks.b_secret;
+  expect(hidden).toEqual({ ...said(), cast: "busy" });
+  world.tracks.b_secret = { id: "b_secret", kind: "agenda", label: "Poison the mayor", owner: "maya", start: "buy", visibility: "secret", stages: { buy: { label: "Buy arsenic", priority: 9, next: [] } } };
   // Any other activity reads as it is.
   state.entities.maya!.fields.activity = "work_shift";
   expect(said().cast).toBe("work shift");

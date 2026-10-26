@@ -114,4 +114,9 @@ textarea.lre-input.lre-gm-prose{font-family:inherit;font-size:var(--lre-fs-md)}
 .lre-gm-lore+.lre-gm-lore{padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
 .lre-gm-queries{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
 .lre-gm-warnline{margin:0;display:flex;align-items:flex-start;gap:var(--lre-s1);font-size:var(--lre-fs-sm);color:var(--lre-warn)}
+/* GM → This chat → Sections' preview: a section as the narrator reads it */
+.lre-section-text{margin:0;max-height:min(50vh,360px);overflow:auto;overscroll-behavior:contain;padding:var(--lre-s2) var(--lre-s3);border-radius:var(--lre-r);background:var(--lre-well);color:var(--lre-fg);font:var(--lre-fs-sm)/1.45 var(--lre-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.lre-section-preview{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
+.lre-section-preview+.lre-section-preview{margin-top:var(--lre-s2);padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
+.lre-section-preview-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-width:0;font-weight:600}
 `;

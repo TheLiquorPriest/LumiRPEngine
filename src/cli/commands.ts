@@ -44,7 +44,7 @@ Sign-in
 Offline (no sign-in)
   guide [<topic>]                             The agent guide, or its part about a topic
   docs <words…> [--doc <name>]                Look up LumiRPEngine's docs (reference, expressions, recipes, design,
-                                              user-guide, studio, presets)
+                                              user-guide, presets)
   schema [<pointer>] [--map] [--offset <n>]   The world (or map) JSON Schema at a JSON Pointer
   templates                                   The starter worlds
   template <id> [--out <file>] [--pointer <p>] [--offset <n>]

@@ -32,6 +32,8 @@ import type { FeedScope } from "../../../shared/world";
 import { buildGarageView } from "./view";
 import classes from "./tables/modern-us/classes.json";
 import factors from "./tables/modern-us/factors.json";
+import type { TravelPart, VehicleTrip } from "../../../shared/travel";
+import { travelTuningOf } from "../../../shared/maps";
 
 const TABLES: DataTable[] = [classes, factors] as unknown as DataTable[];
 const KM_TO_MI = 0.621371;
@@ -47,7 +49,9 @@ export interface TravelOption {
   to: PlaceId;
   label: string;
   mode: TravelMode;
+  /** The whole trip: the sum of its parts. */
   minutes: number;
+  parts: TravelPart[];
   vehicle: string;
   action: string;
   params: JsonObject;
@@ -150,7 +154,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       parts.push(whose);
       if (burnsFuel(ctx, v)) {
         const range = rangeLeft(ctx, v);
-        parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? ` (~${Math.round(range.value)} ${range.unit})` : ""}`);
+        parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? `, about ${Math.round(range.value)} ${range.unit} left` : ""}`);
       }
       if (e.fields.status !== "ok" && e.fields.status !== undefined) parts.push(String(e.fields.status).replace(/_/g, " "));
     }
@@ -158,7 +162,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   }
   const elsewhere = [...away].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
   const total = elsewhere.reduce((sum, [, n]) => sum + n, 0);
-  if (total > 0) lines.push({ text: `Elsewhere: ${total} (${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}).`, known: "pov" });
+  if (total > 0) lines.push({ text: `${total} more ${total === 1 ? "vehicle" : "vehicles"} you may use, away from here: ${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}.`, known: "pov" });
   // Other people's vehicles at his site: the ones he can see with whose they are; past the cap, a count.
   const seen = others.filter((o) => see(pov, o.v));
   for (const o of seen.slice(0, OTHERS_CAP)) lines.push({ text: `${own(ctx.state.entities, o.v)?.name ?? o.v}: ${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}.`, known: "pov" });
@@ -284,13 +288,35 @@ const consume = (ctx: ReadContext, vehicle: EntityId, leg: Leg, rng?: Rng): Ledg
   return out;
 };
 
-function legFor(ctx: ReadContext, vehicle: EntityId, from: PlaceId, to: PlaceId): Leg | null {
-  const route = optionalQuery(ctx, "space.route");
-  for (const mode of modesOf(ctx, vehicle)) {
-    const plan = route ? route(ctx, from, to, mode) : null;
-    if (plan) return { minutes: plan.minutes, distanceKm: plan.distanceKm, terrain: plan.legs.find((l) => l.terrain)?.terrain ?? null, mode };
-  }
-  return null;
+/**
+ * Trips for a vehicle from where its driver is to each of `targets` (DESIGN §9.1): the walk to it
+ * when it's parked elsewhere, the drive over every mode it goes by at the world's speeds (its
+ * class's first), and the walk from where it's left when it can't reach the place itself. It is
+ * left only at a place the player character may know, since the Getting there rows name it,
+ * whoever drives, so a trip plans the same wherever it is asked for.
+ */
+function tripsFor(ctx: ReadContext, vehicle: EntityId, from: PlaceId, targets: readonly PlaceId[]): Map<PlaceId, VehicleTrip> {
+  const plan = optionalQuery(ctx, "space.vehicle_trips");
+  const at = placeOfEntity(ctx.state, vehicle);
+  if (!plan || !at) return new Map();
+  const cls = strOf(own(ctx.state.entities, vehicle)?.fields.class);
+  const speed = cls === "" ? undefined : own(travelTuningOf(ctx.world).vehicleSpeeds, cls);
+  const pov = ctx.world.pov;
+  return plan(ctx, { from, at, modes: modesOf(ctx, vehicle), ...(speed !== undefined ? { speed } : {}), canPark: (p) => canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p) }, targets);
+}
+
+function tripFor(ctx: ReadContext, vehicle: EntityId, from: PlaceId, to: PlaceId): VehicleTrip | null {
+  return tripsFor(ctx, vehicle, from, [to]).get(to) ?? null;
+}
+
+/** The drive of a trip, as fuel and wear read it. */
+function legOf(trip: VehicleTrip): Leg {
+  return { minutes: trip.drive.minutes, distanceKm: trip.drive.distanceKm, terrain: trip.drive.legs.find((l) => l.terrain)?.terrain ?? null, mode: trip.drive.mode };
+}
+
+/** Where a trip starts: the place given, else where the vehicle is. */
+function startOf(ctx: ReadContext, vehicle: EntityId, from: unknown): PlaceId | null {
+  return typeof from === "string" && from !== "" ? from : placeOfEntity(ctx.state, vehicle);
 }
 
 const fuelOk = (ctx: ReadContext, vehicle: EntityId, leg: Leg): boolean => {
@@ -349,32 +375,50 @@ export const vehiclesPack: PackDef = {
     r.query("vehicles.travel_options", (ctx, from) => {
       const out: TravelOption[] = [];
       const pov = ctx.world.pov;
+      const walk = optionalQuery(ctx, "space.route");
+      const targets = Object.keys(ctx.world.places)
+        .sort()
+        .filter((to) => to !== from);
+      const placeName = (p: PlaceId): string => own(ctx.world.places, p)?.name ?? p;
+      const home = own(ctx.state.entities, pov)?.fields.home;
       for (const v of Object.keys(ctx.state.entities).sort()) {
         const e = own(ctx.state.entities, v);
-        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle")) continue;
+        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v)) continue;
         const mine = e.fields.owner === pov || own(ctx.state.entities, pov)?.relations.some((x) => x.type === "uses" && x.to === v);
-        if (!mine || placeOfEntity(ctx.state, v) !== from) continue;
-        for (const to of Object.keys(ctx.world.places).sort()) {
-          if (to === from) continue;
-          const leg = legFor(ctx, v, from, to);
-          if (!leg || leg.mode === "walk") continue;
+        const at = placeOfEntity(ctx.state, v);
+        // One parked elsewhere is offered where the player character may know it is: the row says where.
+        if (!mine || !at || (at !== from && !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at))) continue;
+        const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : `the ${e.name}`;
+        for (const [to, trip] of tripsFor(ctx, v, from, targets)) {
+          // Left short of the place, a trip is worth offering only when it beats walking there.
+          const direct = walk ? walk(ctx, from, to, "walk") : null;
+          if (trip.park !== to && direct && trip.minutes >= direct.minutes) continue;
+          const leg = legOf(trip);
           const why = e.fields.status === "broken" ? "broken down" : !fuelOk(ctx, v, leg) ? "not enough fuel" : undefined;
-          const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : `the ${e.name}`;
-          out.push({ to, label: `${leg.mode === "water" ? "Sail" : "Drive"} ${named} to ${own(ctx.world.places, to)?.name ?? to}`, mode: leg.mode, minutes: leg.minutes, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...(why ? { disabled: why } : {}) });
+          const sail = trip.drive.mode === "water";
+          const parts: TravelPart[] = [];
+          if (trip.fetch) parts.push({ kind: "fetch", minutes: trip.fetch.minutes, words: `to reach it ${at === home ? "at home" : `at ${placeName(at)}`}` });
+          if (trip.startMinutes > 0) parts.push({ kind: "start", minutes: trip.startMinutes, words: "to get going" });
+          if (trip.drive.minutes > 0) parts.push({ kind: "drive", minutes: trip.drive.minutes, words: sail ? "sailing" : "driving" });
+          if (trip.parkMinutes > 0) parts.push({ kind: "park", minutes: trip.parkMinutes, words: sail ? "to tie up" : "to park" });
+          if (trip.walk && trip.walk.minutes > 0) parts.push({ kind: "walk", minutes: trip.walk.minutes, words: `on foot from ${placeName(trip.park)}` });
+          out.push({ to, label: `${sail ? "Sail" : "Drive"} ${named} to ${placeName(to)}`, mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...(why ? { disabled: why } : {}) });
         }
       }
       return out;
     });
-    r.formula("fuel_ok", (ctx, vehicle, to) => {
+    // `from`, where the trip starts (the driver's place: the drive action passes `here`), defaults
+    // to where the vehicle is.
+    r.formula("fuel_ok", (ctx, vehicle, to, from) => {
       const v = String(vehicle ?? "");
-      const from = placeOfEntity(ctx.state, v);
-      const leg = from ? legFor(ctx, v, from, String(to ?? "")) : null;
-      return leg !== null && fuelOk(ctx, v, leg);
+      const start = startOf(ctx, v, from);
+      const trip = start ? tripFor(ctx, v, start, String(to ?? "")) : null;
+      return trip !== null && fuelOk(ctx, v, legOf(trip));
     });
-    r.formula("drive_minutes", (ctx, vehicle, to) => {
+    r.formula("drive_minutes", (ctx, vehicle, to, from) => {
       const v = String(vehicle ?? "");
-      const from = placeOfEntity(ctx.state, v);
-      return (from ? legFor(ctx, v, from, String(to ?? "")) : null)?.minutes ?? 0;
+      const start = startOf(ctx, v, from);
+      return (start ? tripFor(ctx, v, start, String(to ?? "")) : null)?.minutes ?? 0;
     });
     r.formula("fuel_pct", (ctx, vehicle) => numOf(own(ctx.state.entities, String(vehicle ?? ""))?.fields.fuel_pct, 100));
 
@@ -388,20 +432,27 @@ export const vehiclesPack: PackDef = {
         const e = own(ctx.state.entities, v);
         if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (e.fields.status === "broken") return reject("broken", `${e.name} has broken down`);
-        const from = placeOfEntity(ctx.state, v);
-        const leg = from ? legFor(ctx, v, from, to) : null;
-        if (!leg) return reject("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
+        // The trip starts where the driver is: they walk to the vehicle when it's parked elsewhere.
+        // An effect tells what happened, so a driver too far to fetch it (a rule's "the tow truck
+        // takes you there") still rides it from where it stands.
+        const driverAt = placeOfEntity(ctx.state, driver);
+        const vehicleAt = placeOfEntity(ctx.state, v);
+        const trip = (driverAt ? tripFor(ctx, v, driverAt, to) : null) ?? (vehicleAt && vehicleAt !== driverAt ? tripFor(ctx, v, vehicleAt, to) : null);
+        if (!trip) return reject("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
+        const leg = legOf(trip);
         if (!fuelOk(ctx, v, leg)) return reject("no_fuel", `${e.name} doesn't have the fuel`);
-        const out: LedgerEvent[] = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: to }];
+        const out: LedgerEvent[] = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: trip.park }];
         // The driver and anyone riding along (people at the same place named in `riders`, and the
-        // player character's party when it drives) arrive too, through the one move path; whoever
-        // rides inside the vehicle goes with it.
+        // player character's party when it drives) arrive too, through the one move path. Whoever
+        // rides inside the vehicle goes with it, unless it's left short of the place: then the
+        // driver and the riders get out and walk the rest.
+        const leftShort = trip.park !== to;
         const named = Array.isArray(args.riders) ? args.riders.filter((x): x is string => typeof x === "string") : [];
         const riders = driver === ctx.world.pov ? [...named, ...partyAt(ctx, placeOfEntity(ctx.state, driver))] : named;
         const moved = new Set<string>();
         for (const p of [driver, ...riders]) {
           const pe = own(ctx.state.entities, p);
-          if (!pe || moved.has(p) || pe.relations.some((x) => x.type === "in" && x.to === v)) continue;
+          if (!pe || moved.has(p) || (!leftShort && pe.relations.some((x) => x.type === "in" && x.to === v))) continue;
           moved.add(p);
           // A rider comes along: what they were doing stays behind, as for a Go companion.
           const events = relocate(ctx, p, to, p === driver ? {} : { along: true });
@@ -458,10 +509,11 @@ export const vehiclesPack: PackDef = {
       description: "Drive, ride or sail a vehicle you own or may use to another place.",
       pack: "vehicles",
       params: { vehicle: { type: "ref", ref: "vehicle" }, to: { type: "ref", ref: "place", label: "Destination" } },
-      requires: ["place(vehicle) == here", "vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "drive_minutes(vehicle, to) > 0", "fuel_ok(vehicle, to)"],
+      // A vehicle parked elsewhere is fetched on foot, within the world's travel tuning: the trip from here says whether it can go.
+      requires: ["vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "drive_minutes(vehicle, to, here) > 0", "fuel_ok(vehicle, to, here)"],
       outcomes: { default: [{ type: "vehicles.drive", args: { vehicle: "vehicle", to: "=to", driver: "self" } }] },
-      duration: "drive_minutes(vehicle, to)",
-      activity: { type: "travel", until: "clock + drive_minutes(vehicle, to)" },
+      duration: "drive_minutes(vehicle, to, here)",
+      activity: { type: "travel", until: "clock + drive_minutes(vehicle, to, here)" },
       lexicon: ["drive to", "drive over to", "take the truck", "take the car", "sail to", "ride to"],
       observable: "drives off",
     });

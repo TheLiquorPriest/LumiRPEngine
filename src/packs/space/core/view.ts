@@ -22,6 +22,7 @@ import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { byShownId, defaultScope, hasGrid, placeChildren, placePath, scopeView, shownName, WORLD_SCOPE_NAME, type CellView, type MapItemView, type MapScopeView, type ScopeFilter } from "./map-scope";
 import { hiddenCells } from "./positions";
 import { closedRoutes, goMinutes, routeAt } from "./travel";
+import type { TravelPart } from "../../../shared/travel";
 
 export type { MapGridView, MapItemView, MapPlaceView, MapRouteView, MapScopeView } from "./map-scope";
 
@@ -38,7 +39,8 @@ export interface MapView {
   movement: boolean;
   /** Every scope the POV can open: the world, and each place it can see with places inside it or a grid. */
   scopes: MapScopeView[];
-  travel: { to: PlaceId; label: string; mode: TravelMode; minutes: number; cents?: number; vehicle?: string; action: ActionId; params: JsonObject; disabled?: string }[];
+  /** `parts`: how a vehicle trip's minutes break down, each in words after its minutes ("to reach it at home", "driving"); none for a walk. */
+  travel: { to: PlaceId; label: string; mode: TravelMode; minutes: number; parts?: TravelPart[]; cents?: number; vehicle?: string; action: ActionId; params: JsonObject; disabled?: string }[];
 }
 
 /**

@@ -96,8 +96,9 @@ function waysOut(ctx: ReadContext, here: PlaceId): PlaceId[] {
 }
 
 /**
- * The Place section: the place's description; the things lying here the POV can see (not people,
- * vehicles or accounts, which have their own sections, nor anything inside something else), each
+ * The Place section: the place's description; the things lying here the POV can see (only things,
+ * an item or a kind built on one, never a business, a bill, a job or a group, and not vehicles,
+ * which have their own section, nor anything inside something else), each
  * with whose it is as the POV may know (`engine/access`): its own, another's, or lent to it to use;
  * and a layout digest, the rooms inside it and the ways out. A place the POV can't see (it stands
  * in a secret one) gives its description only in `gm` scope, under its real name. In `scene` and
@@ -124,7 +125,8 @@ export function placeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     .filter((id) => {
       const e = own(ctx.state.entities, id);
       if (!e || isGone(ctx.state, id) || e.fields.place !== here || e.relations.some((r) => r.type === "in")) return false;
-      return !["person", "vehicle", "account", "property"].some((k) => kindIs(ctx.registry, ctx.world, e.kind, k));
+      // Only a thing lies anywhere (an item or a kind built on one): a business, a bill or a job given a place is no object on the floor (DESIGN §6.11). Vehicles have their own section.
+      return kindIs(ctx.registry, ctx.world, e.kind, "item") && !kindIs(ctx.registry, ctx.world, e.kind, "vehicle");
     });
   const seen = things.filter((id) => seeThing(pov, id));
   // Whose a thing is, as the POV may know: its own, one it may use by a grant, or another's it can see.
@@ -134,9 +136,9 @@ export function placeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const owner = accessOf(ctx.state, id).owners.map((o) => o.party).find((p) => seeThing(pov, p));
     return owner ? ` (${nameOf(ctx, owner)}'s)` : "";
   };
-  if (seen.length > 0) lines.push({ text: `Here: ${seen.slice(0, THINGS_CAP).map((id) => `${nameOf(ctx, id)}${whose(id)}`).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
+  if (seen.length > 0) lines.push({ text: `Lying here: ${seen.slice(0, THINGS_CAP).map((id) => `${nameOf(ctx, id)}${whose(id)}`).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
   for (const id of things.filter((t) => !seeThing(pov, t))) {
-    const line = beyond(ctx, scope, `Here: ${nameOf(ctx, id)}.`, (who) => seeThing(who, id));
+    const line = beyond(ctx, scope, `Lying here: ${nameOf(ctx, id)}.`, (who) => seeThing(who, id));
     if (line) lines.push(line);
   }
   const inside = Object.values(ctx.world.places)
@@ -144,12 +146,12 @@ export function placeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     .map((p) => p.id)
     .sort();
   const insideSeen = inside.filter((id) => seePlace(pov, id));
-  if (insideSeen.length > 0) lines.push({ text: `Inside: ${insideSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
+  if (insideSeen.length > 0) lines.push({ text: `Places inside it: ${insideSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
   const ways = waysOut(ctx, here);
   const waysSeen = ways.filter((id) => seePlace(pov, id));
-  if (waysSeen.length > 0) lines.push({ text: `Ways out: ${waysSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
+  if (waysSeen.length > 0) lines.push({ text: `Ways out from here, to: ${waysSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
   for (const id of [...inside, ...ways].filter((p) => !seePlace(pov, p))) {
-    const line = beyond(ctx, scope, `Leads to: ${placeName(ctx, id)}.`, (who) => seePlace(who, id));
+    const line = beyond(ctx, scope, `A way from here leads to ${placeName(ctx, id)}.`, (who) => seePlace(who, id));
     if (line) lines.push(line);
   }
   if (scope === "gm") {
@@ -161,7 +163,7 @@ export function placeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
           const e = own(ctx.state.entities, p);
           return !!e && p !== pov && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, p) && placeOfEntity(ctx.state, p) === id;
         });
-      if (there.length > 0) lines.push({ text: `In ${placeName(ctx, id)}: ${there.map((p) => nameOf(ctx, p)).join(", ")}.`, known: "gm" });
+      if (there.length > 0) lines.push({ text: `${inside.includes(id) ? `In ${placeName(ctx, id)}, inside this place` : `At ${placeName(ctx, id)}, one of the ways out`}: ${there.map((p) => nameOf(ctx, p)).join(", ")}.`, known: "gm" });
     }
   }
   return lines;

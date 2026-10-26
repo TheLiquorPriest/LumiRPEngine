@@ -10,7 +10,7 @@ import { LUMIVERSE_HARNESS } from "../shared/agents";
 import type { AgentCheckIn } from "../shared/agents";
 import { isRecord } from "../shared/json";
 import type { ResultBodies } from "../shared/protocol";
-import { ENGINE_EXTENSION } from "../shared/studio-bridge";
+import { ENGINE_EXTENSION } from "../shared/protocol";
 import type { CliIO } from "./commands";
 import { HostConnection } from "./connection";
 import type { KitFiles, KitNews } from "./follow";

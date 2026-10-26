@@ -65,6 +65,6 @@ describe("the module tools' commands", () => {
   });
 
   test("are listed in the usage text under their headings", () => {
-    for (const line of ["Settings and presets", "settings-set --patch <file|json>", "Jobs", "job-apply <worldId> <jobId>", "lore-save <chatId>", "studio-install <offerId> <hash>"]) expect(USAGE).toContain(line);
+    for (const line of ["Settings and presets", "settings-set --patch <file|json>", "Jobs", "job-apply <worldId> <jobId>", "lore-save <chatId>", "profile <worldId> <profile>"]) expect(USAGE).toContain(line);
   });
 });

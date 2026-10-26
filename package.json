@@ -11,8 +11,6 @@
     "node": ">=22"
   },
   "exports": {
-    "./studio": "./src/studio-api.ts",
-    "./studio-bridge": "./src/shared/studio-bridge.ts",
     "./schemas/lre-world-v1.schema.json": "./schemas/lre-world-v1.schema.json",
     "./schemas/lre-map-v1.schema.json": "./src/shared/lre-map-v1.schema.json"
   },

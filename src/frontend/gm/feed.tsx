@@ -5,12 +5,14 @@ import { useState } from "preact/hooks";
 import type { Chip, ControlsView } from "../../shared/state-view";
 import type { SectionFeed } from "../../shared/world";
 import { FEED_SCOPES, SCOPE_LABEL } from "../../shared/world";
+import { feedSentence } from "../../shared/words";
 import { useApp } from "../app";
 import { CheckField } from "../build/form-kit";
 import { Button, Empty, HostSelect, HostSwitch, List, ListRow, NumberStepper, Section, useBusy } from "../components";
 import { editRequest } from "../requests";
 import type { EditNotice } from "./editor";
 import { EditNoticeBar, GmPage, usePages } from "./ui";
+import { PreviewAll, SectionHolds, useSectionsPreview } from "./section-preview";
 
 type SectionRow = ControlsView["sections"][number];
 type SourceRow = ControlsView["sources"][number];
@@ -25,18 +27,6 @@ export function feedSummary(feed: SectionFeed): string {
   const parts = ["In the prompt", SCOPE_LABEL[feed.scope ?? "player"], caps.length > 0 ? `at most ${caps.join(", ")}` : "no cap"];
   if (feed.include) parts.push(`${feed.include.length} picked ${feed.include.length === 1 ? "source" : "sources"}`);
   return parts.join(" · ");
-}
-
-/**
- * The notice a save leaves, as any GM edit's does: the section and what this chat now sets for it
- * (only what differs from its plain delivery), or that it's back to the world's settings.
- */
-export function feedNotice(label: string, to: SectionFeed | null): string {
-  if (to === null) return `${label}: the world's settings again, this chat`;
-  if (to.enabled === false) return `${label}: left out of the prompt, this chat`;
-  const caps = [to.maxLines !== undefined ? `${to.maxLines} lines` : null, to.maxTokens !== undefined ? `${to.maxTokens} tokens` : null].filter((c) => c !== null);
-  const parts = [to.scope !== undefined && to.scope !== "player" ? SCOPE_LABEL[to.scope].toLowerCase() : null, caps.length > 0 ? `at most ${caps.join(", ")}` : null, to.include ? `${to.include.length} picked ${to.include.length === 1 ? "source" : "sources"}` : null].filter((p) => p !== null);
-  return `${label}: ${parts.length > 0 ? parts.join(", ") : "in the prompt with no cap"}, this chat`;
 }
 
 /** Whether a notice's Undo still reaches its edit: its chip is still on the chat (the next send or an Undo retires it). */
@@ -100,7 +90,7 @@ function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: read
       const result = await app.request(editRequest(props.chatId, [{ op: "feed", section: props.row.id, to }]));
       // One made while a reply is being written lands when it finishes: there's no Undo to show yet.
       if (result?.pending) app.toast("Saved — it applies when the reply finishes.", "info");
-      if (result) props.onDone(result.undo !== null ? { text: feedNotice(props.row.label, to), undo: [result.undo] } : null);
+      if (result) props.onDone(result.undo !== null ? { text: feedSentence(props.row.label, to), undo: [result.undo] } : null);
     });
   const noneTaken = sourcesMissing(draft, picked, own);
   return (
@@ -138,15 +128,25 @@ function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: read
   );
 }
 
-/** The chat's sections; each opens its settings as a page of its own, at its top. A save leaves a notice with its Undo, as any GM edit does. */
+/** The page "Preview all" opens: no section's id, since ids are the world's names. */
+const PREVIEW_ALL = "\u0000preview";
+
+/**
+ * The chat's sections; each opens its settings as a page of its own, at its top, with what it holds
+ * now; "Preview all" shows every section as the next turn would give it. A save leaves a notice
+ * with its Undo, as any GM edit does.
+ */
 export function FeedThisChat(props: { chatId: string; controls: ControlsView | null; chips: readonly Chip[] }) {
   const app = useApp();
   const pages = usePages<string>();
   const [notice, setNotice] = useState<EditNotice | null>(null);
   const [busy, run] = useBusy();
+  // Asked again whenever the chat's controls change: a save here, an Undo, a turn.
+  const { preview, failed } = useSectionsPreview(props.chatId, props.controls);
   const rows = props.controls?.sections ?? [];
   if (rows.length === 0) return <Empty icon="scroll">Section settings appear once the chat has started.</Empty>;
   const row = rows.find((r) => r.id === pages.page);
+  const holds = preview?.sections.find((s) => s.slot === row?.id);
   const shown = notice && feedNoticeStands(notice, props.chips) ? notice : null;
   const undo = (chips: readonly string[]): void =>
     run(async () => {
@@ -161,8 +161,13 @@ export function FeedThisChat(props: { chatId: string; controls: ControlsView | n
     });
   return (
     <div ref={pages.host.ref} class="lre-gm-pages" onKeyDown={pages.host.onKeyDown} data-lre-gm-feed>
-      <div class="lre-stack lre-gm-list" hidden={row !== undefined}>
+      <div class="lre-stack lre-gm-list" hidden={pages.page !== null}>
         <span class="lre-small lre-muted">What goes into each section the narrator reads in this chat. A change is a GM edit with its own Undo; the world's settings are in Build → Sections.</span>
+        <div class="lre-row">
+          <Button variant="secondary" icon="eye" onClick={() => pages.open(PREVIEW_ALL)}>
+            Preview all
+          </Button>
+        </div>
         <Section flush>
           <List>
             {rows.map((r) => (
@@ -171,8 +176,14 @@ export function FeedThisChat(props: { chatId: string; controls: ControlsView | n
           </List>
         </Section>
       </div>
+      {pages.page === PREVIEW_ALL ? (
+        <GmPage name="sections-preview" title="Preview all" subtitle="What the narrator would get next turn" backLabel="Sections" onBack={pages.back}>
+          <PreviewAll preview={preview} failed={failed} />
+        </GmPage>
+      ) : null}
       {row ? (
         <GmPage name="section" title={row.label} subtitle="Section, this chat" backLabel="Sections" onBack={pages.back}>
+          {holds && preview ? <SectionHolds section={holds} budget={preview.budget} /> : <span class="lre-small lre-muted">{failed ? "What it holds now couldn't be read." : "Reading what it holds now…"}</span>}
           <SectionFeedForm
             key={row.id}
             chatId={props.chatId}

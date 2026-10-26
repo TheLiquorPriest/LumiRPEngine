@@ -74,8 +74,6 @@ export interface UiState {
   settings: { page: SettingsPage };
   /** The float overlay that is open; one at a time. */
   overlay: "map" | "palette" | "world" | null;
-  /** Bumped each time LumiRPEngine Studio says an offer is waiting (DESIGN §15), so Build reviews it. */
-  studioOffer: number;
   /** Ids show beside names everywhere (Settings → Display); kept on this device under SHOW_IDS_KEY. */
   showIds: boolean;
 }
@@ -85,7 +83,7 @@ export const SHOW_IDS_KEY = "lre:ui:show-ids";
 
 /** The UI state a session starts with. */
 export function initialUi(showIds: boolean): UiState {
-  return { mode: "play", play: { dest: "now", tab: {}, stack: [] }, gm: { revealed: false, section: "world" }, build: { view: "worlds" }, settings: { page: "home" }, overlay: null, studioOffer: 0, showIds };
+  return { mode: "play", play: { dest: "now", tab: {}, stack: [] }, gm: { revealed: false, section: "world" }, build: { view: "worlds" }, settings: { page: "home" }, overlay: null, showIds };
 }
 
 /** Play at a destination, on one of its panels when given. Navigating starts with no sheet open. */

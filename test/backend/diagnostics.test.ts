@@ -8,6 +8,7 @@ import type { DiagRecord } from "../../src/shared/diagnostics";
 import { isRecord } from "../../src/shared/json";
 import type { ActivityPush } from "../../src/shared/protocol";
 import { FakeHost } from "../support/fake-host";
+import { alderChat, fakeModels } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 
 const at = (turn: string | null = "gen-1") => ({ chatId: "chat-1", userId: "u1", turn });
@@ -177,5 +178,23 @@ describe("diagnostics on a running chat", () => {
     // The line carries its step's label and whether Cancel can stop it, nothing else.
     for (const m of pushed) if (m.type === "lre.activity" && m.activity) expect(Object.keys(m.activity).filter((k) => k !== "cancellable").sort()).toEqual(["chatId", "label", "since", "state", "turn"]);
     for (const m of pushed) if (m.type === "lre.state.snapshot") expect(isRecord(m.view) && "diagnostics" in m.view).toBe(false);
+  });
+});
+
+describe("the minds' memory beside the reply's read", () => {
+  test("a memory cut off at its token limit is the minds' own failed step, never the read's: the line doesn't say reading the reply failed", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig);
+    const answer = rig.host.quietReply;
+    rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes("You keep the memory of") ? { content: "", finishReason: "length" } : answer ? answer(req) : "{}");
+    const chatId = await alderChat(rig, async () => {});
+    await rig.turn(chatId, "Hello, Danny.", "He looks up from the bench.");
+    const records = (rig.body(await rig.send({ type: "lre.diag", chatId, op: "get" })).records ?? []) as DiagRecord[];
+    const read = records.findLast((r) => r.kind === "step" && r.step === "read");
+    const minds = records.findLast((r) => r.kind === "step" && r.step === "minds");
+    expect(read?.status).toBe("ok");
+    expect((read?.calls ?? []).map((c) => c.purpose)).not.toContain("memory");
+    expect(minds).toMatchObject({ phase: "memory", status: "failed", reason: expect.stringContaining("memory answer cut off") });
+    expect(activities(rig.host).filter((m) => m.chatId === chatId).at(-1)?.activity).toMatchObject({ state: "failed", label: "Failed: Updating the characters' memories" });
   });
 });

@@ -23,7 +23,7 @@ import type { WorldDoc } from "../shared/world";
 import type { LedgerFold } from "../engine/ledger/fold";
 import { activeText, contentId } from "../engine/ledger/path";
 import { giveWay } from "./give-way";
-import type { ContextHandlerInput, ContextVerdict, GenerationStartedEvent, HostGenerationType, HostMessage, HostPort } from "./host";
+import type { ContextHandlerInput, ContextVerdict, GenerationEndedEvent, GenerationStartedEvent, HostGenerationType, HostMessage, HostPort } from "./host";
 import { setAside } from "./stored-json";
 import type { Diagnostics } from "./diagnostics";
 import { messageOf } from "./diagnostics";
@@ -444,6 +444,9 @@ interface Halt {
   session?: string;
 }
 
+/** How a reply that took a prepared turn failed (DESIGN §5.1): its generation ended in error, or it came back empty. */
+export type ReplyFailure = "error" | "empty";
+
 /** A turn the engine prepared for the chat's next generation of its type (DESIGN §5.1). */
 interface Prepared {
   id: string;
@@ -469,6 +472,12 @@ interface Prepared {
   holder: string | null;
   /** The generation the guard let through with it; null until one came: then it is consumed. */
   generationId: string | null;
+  /**
+   * Set when the turn is kept from a reply that failed (DESIGN §5.1): no page is asked to start it,
+   * only the player's own retry takes it, and a change to what it was made from drops it quietly,
+   * since its reply was never asked for again. Null for a turn an engine run prepared.
+   */
+  kept: ReplyFailure | null;
 }
 
 /** The guard's view of one world chat, in memory only: after a restart the next generation runs the engine again. */
@@ -481,6 +490,11 @@ interface Gate {
   epoch: number;
   halt: Halt | null;
   prepared: Prepared | null;
+  /**
+   * The turn the generation under way took, from its prompt on, with its sections emptied: kept for
+   * a retry when that reply fails, let go when it ends otherwise or stops.
+   */
+  taken: Prepared | null;
 }
 
 /**
@@ -581,10 +595,12 @@ export class LedgerService {
       }),
       h.on("MESSAGE_EDITED", (e, userId) => {
         this.mirror(e.chatId, e.message);
+        if (this.lateReply(e.chatId, userId, e.message)) return;
         this.onMessage(e.chatId, userId, e.message.id, "edited");
       }),
       h.on("MESSAGE_SWIPED", (e, userId) => {
         this.mirror(e.chatId, e.message);
+        if (e.action === "updated" && e.swipeId === e.message.swipeId && this.lateReply(e.chatId, userId, e.message)) return;
         this.onSwiped(e.chatId, userId, e.message.id, e.action, e.swipeId);
       }),
       h.on("MESSAGE_DELETED", (e, userId) => {
@@ -609,6 +625,8 @@ export class LedgerService {
       }),
       h.on("GENERATION_ENDED", (e, userId) => {
         this.generationOver(e.chatId, e.generationId);
+        // Kept at once, so a retry pressed the moment the reply failed finds its turn.
+        const failed = this.afterReply(e.chatId, e.generationId, e);
         const at = userId ? { chatId: e.chatId, userId, turn: e.generationId } : null;
         const halt = this.haltOf(e.chatId, e.generationId);
         // The host ended a generation the guard stopped instead of stopping it: no engine run follows.
@@ -623,38 +641,20 @@ export class LedgerService {
             if (at) this.diag?.end(at, { status: "failed", reason: `the reply's generation failed: ${e.error.slice(0, 300)}` });
             return;
           }
-          const p = core.journal.pending[e.generationId];
-          const swipeId = p?.swipeId ?? observed.find((m) => m.id === e.messageId)?.swipeId ?? 0;
-          const flight = this.flight(e.chatId);
-          const turn = p && e.messageId && userId ? { chatId: e.chatId, userId, core, observed, generationId: e.generationId, messageId: e.messageId, swipeId, kind: p.kind, signal: flight.signal } : null;
-          const diag = at && turn ? this.diag : null;
-          if (at && diag) diag.begin(at, STEP_LABEL.read);
-          try {
-            if (this.hooks && turn && p && p.kind !== "impersonate") {
-              const hooks = this.hooks;
-              // A Continue reads only its suffix (L13): prepare that text.
-              const text = p.kind === "continue" ? (p.captured && e.content.length >= p.captured.len ? e.content.slice(p.captured.len) : "") : e.content;
-              if (text !== "") await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
-              else if (at && diag) diag.skipped(at, "read", "read", "the reply had no new text to read");
-            }
-            // A cancelled read commits as stopped, as a failed generation does: the reply stands unread,
-            // nothing its calls answered applies, and the reply's Retry read reads it again.
-            if (flight.signal.aborted) core.stopped({ generationId: e.generationId, content: e.content }, observed);
-            else {
-              core.ended({ generationId: e.generationId, ...(e.messageId ? { messageId: e.messageId } : {}), content: e.content }, observed);
-              if (this.hooks && turn) {
-                const hooks = this.hooks;
-                await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: e.content })) : hooks.afterCommit({ ...turn, content: e.content }));
-              }
-            }
-          } finally {
-            this.landed(e.chatId, flight);
+          // An empty reply to a prepared turn failed as well: none of the turn is committed, so the
+          // retry that takes it plays it once.
+          if (failed === "empty") {
+            core.stopped({ generationId: e.generationId, content: "" }, observed);
+            if (at) this.diag?.end(at, { status: "failed", reason: "the narrator returned an empty reply" });
+            return;
           }
-          if (at && diag) diag.end(at, flight.signal.aborted ? { status: "skipped", reason: "you cancelled reading the reply; Retry read reads it again" } : undefined);
+          await this.commitReply(core, observed, e.chatId, userId, e.generationId, e.messageId, e.content);
         });
       }),
       h.on("GENERATION_STOPPED", (e, userId) => {
         this.generationOver(e.chatId, e.generationId);
+        // A stop is the player's: the turn it took goes, as it always has.
+        this.afterReply(e.chatId, e.generationId, null);
         const halt = this.haltOf(e.chatId, e.generationId);
         if (userId && !halt) this.diag?.end({ chatId: e.chatId, userId, turn: e.generationId }, { status: "skipped", reason: "the reply was stopped" });
         return this.run(e.chatId, userId, (core, observed) => {
@@ -763,7 +763,8 @@ export class LedgerService {
   /**
    * A turn the engine prepared that no generation took goes the moment anything it was made from
    * changes (DESIGN §5.1): its entries are emptied, and the next generation runs the engine again.
-   * Age alone never makes it stale.
+   * Age alone never makes it stale. One kept from a failed reply goes quietly: nothing asked for its
+   * reply again, so nothing says that reply didn't start, and the chat just loses its retry card.
    */
   private dropIfStale(chatId: ChatId): void {
     const gate = this.gates.get(chatId);
@@ -771,8 +772,123 @@ export class LedgerService {
     const changed = gate && p && p.generationId === null ? this.changedSince(chatId, gate, p) : null;
     if (!gate || !p || changed === null) return;
     gate.prepared = null;
-    this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
+    if (p.kept === null) this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
+    else this.hooks?.changed(chatId, gate.userId);
     this.drop(chatId, gate.userId, p);
+  }
+
+  /**
+   * A generation is over (DESIGN §5.1): `ended` is how it ended, null for a stop. When it took a
+   * prepared turn and its reply failed (it ended in error, or a reply other than a Continue came back
+   * empty), the turn is kept for the retry as it was prepared: the player's own Regenerate or swipe
+   * takes it, writing the same sections and adopting the same plan, with no engine run. It is kept
+   * under the failed generation's id, which is what the runtime's state for the turn goes by now. A
+   * new reply that left its message (empty, or what streamed before the error) is retried as a
+   * Regenerate of that message, which is what Lumiverse makes of a retry once the chat ends with it,
+   * on the same chain. Anything else lets the turn go. Returns how the reply failed, kept or not.
+   */
+  private afterReply(chatId: ChatId, generationId: string, ended: GenerationEndedEvent | null): ReplyFailure | null {
+    const gate = this.gates.get(chatId);
+    const p = gate?.taken;
+    if (!gate || !p || p.generationId !== generationId) return null;
+    gate.taken = null;
+    const failed: ReplyFailure | null = !ended ? null : ended.error ? "error" : p.type !== "continue" && ended.content.trim() === "" ? "empty" : null;
+    // A turn the engine prepared since, or a run it was asked for, comes first.
+    if (failed === null || gate.prepared !== null || gate.halt !== null) return failed;
+    const started = this.started.get(chatId);
+    const message = started?.generationId === generationId ? started.targetMessageId : null;
+    const left = p.type === "normal" && message !== null && gate.mirror?.some((m) => m.id === message) === true;
+    gate.prepared = { ...p, id: generationId, generationId: null, writing: null, holder: null, kept: failed, ...(left ? { type: "regenerate" as const, target: message } : {}) };
+    // What the reply's end itself changed, such as an edit it saved, drops it at once.
+    this.dropIfStale(chatId);
+    return failed;
+  }
+
+  /**
+   * Text for a reply that came back empty, arriving after it (DESIGN §5.1): Lumiverse saving it late,
+   * or the player writing it in. Its turn is still kept for a retry, so that text is the reply the
+   * turn waits for: the turn is taken for it as a retry takes it, with no engine call and no prompt,
+   * and the text is read and committed with the turn's plan, so the turn plays once. Only while the
+   * kept turn is fresh and its message the chat's last. True when it was taken; false, with nothing
+   * done, when no kept turn waits for this message, so the edit is an assistant edit as ever (L38).
+   */
+  private lateReply(chatId: ChatId, userId: UserId | null, message: HostMessage): boolean {
+    const gate = this.gates.get(chatId);
+    const p = gate?.prepared;
+    const text = message.swipes[message.swipeId] ?? message.content;
+    if (!gate || !p || !userId || gate.userId !== userId || p.kept !== "empty" || p.generationId !== null || p.target !== message.id || message.isUser || text.trim() === "") return false;
+    if (gate.mirror?.at(-1)?.id !== message.id || this.changedSince(chatId, gate, p) !== null) return false;
+    const generationId = `late-${crypto.randomUUID()}`;
+    p.generationId = generationId;
+    gate.prepared = null;
+    const at = { chatId, userId, turn: generationId };
+    void this.run(chatId, userId, async (core, observed) => {
+      const saved = observed.find((m) => m.id === message.id);
+      this.diag?.begin(at, STEP_LABEL.read);
+      // Begun before the chat is synced, so the text is this turn's save, not an edit of the message.
+      core.started({ generationId, kind: p.turn?.kind ?? KIND[p.type], targetMessageId: message.id, targetSwipeId: saved?.swipeId ?? message.swipeId }, observed);
+      if (p.turn && !core.adopt(generationId, p.turn)) this.diag?.failed(at, "plan", "plan", "the reply's text couldn't take the prepared plan, so this turn commits without it");
+      core.saved(generationId);
+      core.sync(observed);
+      await this.hooks?.adopted(chatId, userId, p.id, generationId);
+      await this.commitReply(core, observed, chatId, userId, generationId, message.id, saved ? (saved.swipes[saved.swipeId] ?? text) : text);
+    });
+    return true;
+  }
+
+  /**
+   * A saved reply's read and commit (DESIGN §5.1 step 5): the post phase reads its text (a Continue
+   * only what it added, L13), the turn commits with what the read prepared, then what follows a
+   * commit runs. A read Cancel stopped commits as stopped, as a failed generation does: the reply
+   * stands unread, nothing its calls answered applies, and the reply's Retry read reads it again.
+   */
+  private async commitReply(core: LedgerCore, observed: ChainMessage[], chatId: ChatId, userId: UserId | null, generationId: string, messageId: MessageId | undefined, content: string): Promise<void> {
+    const at = userId ? { chatId, userId, turn: generationId } : null;
+    const p = core.journal.pending[generationId];
+    const swipeId = p?.swipeId ?? observed.find((m) => m.id === messageId)?.swipeId ?? 0;
+    const flight = this.flight(chatId);
+    const turn = p && messageId && userId ? { chatId, userId, core, observed, generationId, messageId, swipeId, kind: p.kind, signal: flight.signal } : null;
+    const diag = at && turn ? this.diag : null;
+    if (at && diag) diag.begin(at, STEP_LABEL.read);
+    try {
+      if (this.hooks && turn && p && p.kind !== "impersonate") {
+        const hooks = this.hooks;
+        const text = p.kind === "continue" ? (p.captured && content.length >= p.captured.len ? content.slice(p.captured.len) : "") : content;
+        if (text !== "") await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
+        else if (at && diag) diag.skipped(at, "read", "read", "the reply had no new text to read");
+      }
+      if (flight.signal.aborted) core.stopped({ generationId, content }, observed);
+      else {
+        core.ended({ generationId, ...(messageId ? { messageId } : {}), content }, observed);
+        if (this.hooks && turn) {
+          const hooks = this.hooks;
+          await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content })) : hooks.afterCommit({ ...turn, content }));
+        }
+      }
+    } finally {
+      this.landed(chatId, flight);
+    }
+    if (at && diag) diag.end(at, flight.signal.aborted ? { status: "skipped", reason: "you cancelled reading the reply; Retry read reads it again" } : undefined);
+  }
+
+  /** The turn kept from a reply that failed, while a retry can still take it (DESIGN §5.1): its id, and how that reply failed. */
+  keptOf(chatId: ChatId): { turn: string; failed: ReplyFailure } | null {
+    const p = this.gates.get(chatId)?.prepared;
+    return p && p.kept !== null && p.generationId === null ? { turn: p.id, failed: p.kept } : null;
+  }
+
+  /**
+   * Re-run the engine (DESIGN §5.1): the turn kept from a failed reply goes, so the next generation
+   * runs the engine again. False when the chat keeps none, or `turn` names another. Callers have
+   * checked the chat is the user's, as for every chip.
+   */
+  discardKept(chatId: ChatId, turn?: string): boolean {
+    const gate = this.gates.get(chatId);
+    const p = gate?.prepared;
+    if (!gate || !p || p.kept === null || p.generationId !== null || (turn !== undefined && p.id !== turn)) return false;
+    gate.prepared = null;
+    this.drop(chatId, gate.userId, p);
+    return true;
   }
 
   /**
@@ -846,7 +962,8 @@ export class LedgerService {
   askAgain(chatId: ChatId, userId: UserId, session?: string): void {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
-    if (!gate || gate.userId !== userId || !p || p.generationId !== null) return;
+    // A turn kept from a failed reply waits for the player's retry: the engine never regenerates on its own.
+    if (!gate || gate.userId !== userId || !p || p.generationId !== null || p.kept !== null) return;
     // A host that names no page can't hold a claim: every page of the user's is asked.
     if (session === undefined || !this.host.capabilities.sessions) {
       this.host.frontend.send(restartPush(chatId, p), userId);
@@ -866,7 +983,7 @@ export class LedgerService {
   claimRestart(chatId: ChatId, userId: UserId, session: string | undefined, turn: string): boolean {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
-    if (!gate || gate.userId !== userId || !p || p.id !== turn || p.generationId !== null) return false;
+    if (!gate || gate.userId !== userId || !p || p.id !== turn || p.generationId !== null || p.kept !== null) return false;
     return !this.host.capabilities.sessions || session === undefined || p.holder === session;
   }
 
@@ -892,11 +1009,11 @@ export class LedgerService {
     if (!worldId) return null;
     const raced = this.gates.get(chatId);
     if (raced) return raced.userId === userId ? raced : null;
-    const gate: Gate = { userId, worldId, mirror: null, epoch: 0, halt: null, prepared: null };
+    const gate: Gate = { userId, worldId, mirror: null, epoch: 0, halt: null, prepared: null, taken: null };
     this.gates.set(chatId, gate);
     for (const [id, g] of this.gates) {
       if (this.gates.size <= OPEN_CHATS_CAP * 8) break;
-      if (id !== chatId && !g.prepared && !g.halt) this.gates.delete(id);
+      if (id !== chatId && !g.prepared && !g.halt && !g.taken) this.gates.delete(id);
     }
     return gate;
   }
@@ -967,9 +1084,11 @@ export class LedgerService {
   /** The generation the guard let through takes the prepared plan; what the engine run recorded follows it. */
   private adopt(chatId: ChatId, userId: UserId, p: Prepared, generationId: string): Promise<void> {
     return this.run(chatId, userId, async (core) => {
-      if (p.turn && !core.adopt(generationId, p.turn)) this.diag?.failed({ chatId, userId, turn: p.id }, "plan", "plan", "the reply's generation couldn't take the prepared plan, so this turn commits without it");
+      // A kept turn's failed reply closed its turn in diagnostics: its retry is one of its own there.
+      if (p.kept !== null) this.diag?.begin({ chatId, userId, turn: generationId }, STEP_LABEL.reply ?? "Waiting for the reply…");
+      if (p.turn && !core.adopt(generationId, p.turn)) this.diag?.failed({ chatId, userId, turn: p.kept === null ? p.id : generationId }, "plan", "plan", "the reply's generation couldn't take the prepared plan, so this turn commits without it");
       await this.hooks?.adopted(chatId, userId, p.id, generationId);
-      this.diag?.rename(chatId, p.id, generationId);
+      if (p.kept === null) this.diag?.rename(chatId, p.id, generationId);
       this.diag?.rest({ chatId, userId }, STEP_LABEL.reply ?? "Waiting for the reply…");
     });
   }
@@ -982,7 +1101,8 @@ export class LedgerService {
 
   /**
    * A generation's prompt is assembled, or it ended or stopped: an Impersonate gives the book back,
-   * and the turn a reply took gives it back with its entries emptied (DESIGN §6.4).
+   * and the turn a reply took gives it back with its entries emptied (DESIGN §6.4). That turn is
+   * held as taken until its reply's end says whether it is kept for a retry (`afterReply`).
    */
   private release(chatId: ChatId, generationId: string): void {
     this.answered.delete(generationId);
@@ -991,6 +1111,7 @@ export class LedgerService {
     const p = gate?.prepared;
     if (!gate || !p || p.generationId !== generationId) return;
     gate.prepared = null;
+    gate.taken = p;
     this.drop(chatId, gate.userId, p);
   }
 
@@ -1202,7 +1323,7 @@ export class LedgerService {
       // the first page to show the chat claims it (`askAgain`).
       const viewer = this.viewerOf(chatId, userId);
       const holder = halt.session !== undefined && (this.reports(halt.session, chatId) || (viewer === null && this.shows(halt.session, chatId))) ? halt.session : viewer;
-      const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, writing: null, as, holder, generationId: null };
+      const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, writing: null, as, holder, generationId: null, kept: null };
       gate.prepared = prepared;
       // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
       this.dropIfStale(chatId);

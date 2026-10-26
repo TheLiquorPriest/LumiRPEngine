@@ -25,6 +25,7 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId, TierId } from "../../../shared/ids";
 import { facetsInOrder, facetTree } from "../../../shared/classes";
+import { activityPhrase } from "../../../shared/activity";
 import { MINDS_EVENTS } from "../../../shared/minds";
 import { tierLabel, tierOf, tiersInOrder } from "../../../shared/tiers";
 import { activitySpanEnd, type FacetId, type FacetValueId, type FeedScope, type ScheduleDef, type WorldDoc } from "../../../shared/world";
@@ -37,8 +38,9 @@ import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sl
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
 import { clockPaused, fightHoldsClock, speedThrough } from "../../../engine/time";
 import type { AgentInstant, EventTypeDef, FeedLine, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
-import type { PlayerBlock, RoutineEditOp, RoutineRole, RoutineSociability, SkipBlock } from "../../../shared/routines";
+import type { PlayerBlock, RoutineAwareness, RoutineEditOp, RoutineMode, RoutineRole, RoutineSociability, SkipBlock, SkipLife } from "../../../shared/routines";
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
+import { listWords } from "../../../shared/words";
 import type { NeedId, NeedTuning } from "../../../shared/needs";
 import { CONVERSATION, isNeedId, NEED_DEFAULTS, NEED_IDS, NEED_WORDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
 import { createRng, type Rng } from "../../../engine/rng";
@@ -1164,9 +1166,39 @@ function isScheduleChange(v: JsonValue | undefined): boolean {
   return Array.isArray(o.slots) && o.slots.length > 0 && o.slots.every((s) => typeof objOf(s).start === "string" && time.test(strOf(objOf(s).start)) && time.test(strOf(objOf(s).end))) && (o.recurrence === undefined || typeof objOf(o.recurrence).every === "string");
 }
 
-/** Whose a chat change is, for the GM's lines: a player's line never tells of one (DESIGN §8, §24.9). */
-function changeLine(ctx: ReadContext, e: PackEvent, viewer: EntityId | undefined, what: string): string {
-  return viewer !== undefined ? "" : `${own(ctx.state.entities, strOf(e.data.entity))?.name ?? strOf(e.data.entity)}: ${what} (${objOf(e.data.source).type === "story" ? "the story" : "GM"})`;
+/**
+ * A chat's routine change for the GM, in a sentence with where it came from ("Danny Okafor's
+ * “Morning swim” is off in this chat (set by the GM)"): a player's line never tells of one
+ * (DESIGN §8, §24.9). `what` is the sentence for the person's name.
+ */
+function changeLine(ctx: ReadContext, e: PackEvent, viewer: EntityId | undefined, what: (name: string) => string): string {
+  if (viewer !== undefined) return "";
+  const name = own(ctx.state.entities, strOf(e.data.entity))?.name ?? strOf(e.data.entity);
+  return `${what(name)} in this chat (${objOf(e.data.source).type === "story" ? "from the story" : "set by the GM"})`;
+}
+
+/** How someone follows their routine in a chat, each part the chat sets as what it does (null parts are the world's and go unsaid). */
+const FOLLOW_WORDS = {
+  mode: { follows: "follows their routine", no_invitations: "follows their routine but makes and accepts no invitations", off: "has no routine" },
+  awareness: { story_first: "puts the story before their routine", balanced: "weighs the story and their routine alike", routine_first: "puts their routine before the story" },
+  role: { informative: "takes their routine as context only", enforced: "lives their routine as written", off: "ignores their routine" },
+  skips: { stay: "stays put in a time skip", routine: "follows their routine in a time skip", model: "lives a time skip as the model plans it" },
+} satisfies { mode: Record<RoutineMode, string>; awareness: Record<RoutineAwareness, string>; role: Record<RoutineRole, string>; skips: Record<SkipLife, string> };
+
+function followWords(follow: JsonObject): string[] {
+  const mode = ROUTINE_MODES.find((m) => m === follow.mode);
+  const awareness = ROUTINE_AWARENESS.find((a) => a === follow.awareness);
+  const role = ROUTINE_ROLES.find((r) => r === follow.role);
+  const skips = SKIP_LIVES.find((s) => s === follow.skips);
+  return [mode ? FOLLOW_WORDS.mode[mode] : null, awareness ? FOLLOW_WORDS.awareness[awareness] : null, role ? FOLLOW_WORDS.role[role] : null, skips ? FOLLOW_WORDS.skips[skips] : null].filter((w) => w !== null);
+}
+
+/** A routine block by its label: the chat's own value's, else the world's block of that id, else a basic need's. */
+function blockLabel(ctx: ReadContext, block: string, value: JsonValue | undefined): string {
+  const label = objOf(value).label;
+  if (typeof label === "string" && label !== "") return label;
+  for (const r of worldRoutines(ctx.world)) for (const b of r.blocks) if (b.id === block && "label" in b && typeof b.label === "string") return b.label;
+  return BASIC_BLOCKS.find((b) => b.id === block)?.label ?? block.replace(/_/g, " ");
 }
 
 const EVENTS: EventTypeDef<PackEvent>[] = [
@@ -1190,7 +1222,12 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     coarsen: { key: (e) => (typeof e.data.from === "number" ? `${strOf(e.data.entity)}:${strOf(e.data.need)}` : null), merge: (_earlier, later) => later },
     // A need the turn's own time met (`lived`) is the turn's bookkeeping, as catch-up's is: Play → Me
     // shows it, and no "what changed" line repeats it every turn spent with friends.
-    describe: (e) => (e.data.lived === true ? "" : `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`),
+    describe: (e, ctx, viewer) => {
+      if (e.data.lived === true) return "";
+      const who = strOf(e.data.entity);
+      const whose = viewer !== undefined && who === viewer ? "Your" : `${own(ctx.state.entities, who)?.name ?? who}'s`;
+      return `${whose} ${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`;
+    },
   },
   {
     type: "castlife.decision",
@@ -1234,7 +1271,11 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       if (e.data.follow === null) delete follow[who];
       else follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null, ...(f.role !== undefined ? { role: f.role } : {}), ...(f.skips !== undefined ? { skips: f.skips } : {}) };
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness, objOf(e.data.follow).role, objOf(e.data.follow).skips].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`),
+    describe: (e, ctx, viewer) =>
+      changeLine(ctx, e, viewer, (name) => {
+        const words = e.data.follow === null ? [] : followWords(objOf(e.data.follow));
+        return words.length === 0 ? `${name} follows their routine as the world sets it again` : `${name} ${listWords(words)}`;
+      }),
   },
   {
     // The model's plan for a time skip (DESIGN §8), recorded in the turn ahead of the timelapse it
@@ -1277,7 +1318,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       if (Object.keys(mine).length === 0) delete routines[who];
       else routines[who] = mine;
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `routine block ${strOf(e.data.block)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`),
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, (name) => `${name}'s “${blockLabel(ctx, strOf(e.data.block), e.data.value)}” ${e.data.value === null ? "is back to the world's" : objOf(e.data.value).off === true ? "is off" : "changed"}`),
   },
   {
     // One of someone's schedules in this chat (`schedule_override`, or the story's): off, their own slots, or null to drop the chat's change.
@@ -1296,7 +1337,14 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       if (Object.keys(mine).length === 0) delete schedules[who];
       else schedules[who] = mine;
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `schedule ${strOf(e.data.schedule)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`),
+    describe: (e, ctx, viewer) =>
+      changeLine(ctx, e, viewer, (name) => {
+        // A schedule has no name of its own: its id, and what it sets ("where they are").
+        const target = allSchedules(ctx.registry, ctx.world).find((s) => s.id === strOf(e.data.schedule))?.target;
+        const sets = target === "place" ? "where they are" : target === "activity" ? "what they're doing" : target ? `their ${target.replace(/_/g, " ")}` : null;
+        const label = `“${strOf(e.data.schedule).replace(/_/g, " ")}” schedule${sets ? ` (it sets ${sets})` : ""}`;
+        return e.data.value === null ? `${name} keeps the world's ${label} again` : objOf(e.data.value).off === true ? `${name} is off their ${label}` : `${name} has their own ${label}`;
+      }),
   },
 ];
 
@@ -1587,10 +1635,10 @@ export function stanceLines(ctx: ReadContext): string[] {
     // Nobody regards a stranger: regard toward the POV is knowing it as much as a `knows` relation.
     const known = knows(state, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
     const words = regard?.(ctx, id, pov) ?? null;
-    const parts = [`${e.name} ${known ? "knows" : "doesn't know"} you${words ? `; regard: ${words}` : ""}.`];
+    const parts = [`${e.name} ${known ? "knows" : "doesn't know"} you${words ? ` and feels ${words} toward you` : ""}.`];
     const activity = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
-    const doing = typeof activity === "string" && activity !== "idle" ? shownActivity(ctx, id, activity).replace(/_/g, " ") : "";
-    if (doing !== "" && safe(doing)) parts.push(listed("Doing", [doing]));
+    const doing = typeof activity === "string" ? activityPhrase(shownActivity(ctx, id, activity)) : null;
+    if (doing !== null && safe(doing)) parts.push(`Right now they are ${doing}.`);
     // A public agenda's current stage, in its cue's words where the author wrote one, else its label as Cast shows it.
     const agenda = agendaFor(world, state, id)
       .filter((a) => publicTrack(world, a.track))
@@ -1671,16 +1719,19 @@ export function peopleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       // The narrator is told only who the POV can see, unless the scope asks for more, marked.
       if (scope === "player") continue;
       const knowers = present.filter((k) => k !== id && see(pov, k) && see(k, id)).map((k) => own(ctx.state.entities, k)?.name ?? k);
-      const act = typeof e.fields.activity === "string" && e.fields.activity !== "idle" ? ` (${e.fields.activity.replace(/_/g, " ")})` : "";
-      if (knowers.length > 0) lines.push({ text: `${e.name}${act} is here.`, known: "scene", who: knowers.join(", ") });
-      else if (scope === "gm") lines.push({ text: `${e.name}${act} is here.`, known: "gm" });
+      const act = typeof e.fields.activity === "string" ? activityPhrase(e.fields.activity) : null;
+      const text = `${e.name} is here${act ? `, ${act}` : ""}.`;
+      if (knowers.length > 0) lines.push({ text, known: "scene", who: knowers.join(", ") });
+      else if (scope === "gm") lines.push({ text, known: "gm" });
       continue;
     }
     // What they are doing is a field: told only when the POV may see it. A life state the POV
     // knows reads instead ("lies dead"); one it doesn't know of is never told.
     const life = povLife(ctx.world, ctx.state, id);
     const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
-    lines.push({ text: life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`, known: "pov" });
+    // "Danny Okafor is here, at work."; with nothing they're seen doing, only that they are here.
+    const doing = typeof act === "string" ? activityPhrase(shownActivity(ctx, id, act)) : null;
+    lines.push({ text: life ? `${e.name} ${life.reads}.` : `${e.name} is here${doing ? `, ${doing}` : ""}.`, known: "pov" });
     // How they regard the POV follows them; a body the POV knows of holds no regard to voice.
     const regard = life && !life.acts ? null : (voice?.(ctx, id) ?? null);
     if (regard) lines.push({ text: regard, known: "pov" });

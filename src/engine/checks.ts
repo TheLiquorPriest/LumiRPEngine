@@ -1,7 +1,8 @@
 // Checks (DESIGN §11): the one check mechanism. A check is a dice expression plus outcome bands.
 // What it reads from the world (modifier, advantage, DC, an opponent's side) is evaluated from the
-// state before the roll and fixed into a `ReadyCheck`; its exact odds (`checkOdds`) and its roll
-// (`rollCheck`) read the same notation and bands, so the odds the palette shows are the real odds.
+// state before the roll and fixed into a `ReadyCheck`; its outcomes counted exactly (`checkCounts`,
+// shown as `checkOdds`) and its roll (`rollCheck`) read the same notation and bands, so the odds the
+// palette shows are the real odds.
 //
 //   natural bands  match the natural die's face (`naturalDie`), before the total bands
 //   advantage      −1, 0 or 1: more natural dice (`withAdvantage`), never a modifier
@@ -16,7 +17,7 @@ import type { EntityId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { JsonValue } from "../shared/json";
 import type { CheckBand, CheckDef, Span, WorldDoc } from "../shared/world";
-import { DiceError, diceDistribution, naturalDie, naturalSplit, opposedDice, parseDice, rollDice, withAdvantage, type DiceRoll } from "./dice";
+import { DiceError, diceDistribution, naturalDie, naturalSplit, opposedDice, parseDice, rollDice, share, withAdvantage, type DiceRoll } from "./dice";
 import type { EnvVars, Value } from "./expr";
 import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
@@ -184,30 +185,52 @@ function readingOf(ready: ReadyCheck, natural: number | null, sum: number): Chec
   return { natural, total, margin: ready.dc === null ? null : total - ready.dc };
 }
 
-/** Exact probability of each outcome; `none` collects any mass no band covers. */
-export function checkOdds(ready: ReadyCheck): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const b of ready.bands) out[b.outcome] = 0;
-  const add = (x: CheckReading, p: number): void => {
+/**
+ * A check's outcomes counted exactly: how many of its dice's equally likely results read each
+ * outcome, out of `outcomes`. A chance is a count over them, so it is an exact fraction until it
+ * is shown (DESIGN §11).
+ */
+export interface OutcomeCounts {
+  readonly counts: Readonly<Record<string, bigint>>;
+  readonly outcomes: bigint;
+}
+
+/** Each outcome's count over the dice's equally likely results; `none` collects any no band covers. */
+export function checkCounts(ready: ReadyCheck): OutcomeCounts {
+  const counts: Record<string, bigint> = {};
+  for (const b of ready.bands) counts[b.outcome] = 0n;
+  const add = (x: CheckReading, n: bigint): void => {
     const outcome = bandOutcome(ready.bands, x) ?? NO_BAND;
-    out[outcome] = (out[outcome] ?? 0) + p;
+    counts[outcome] = (counts[outcome] ?? 0n) + n;
   };
   const split = ready.bands.some((b) => b.natural) ? naturalSplit(ready.notation) : null;
   if (split) {
-    split.natural.probs.forEach((pn, i) => {
-      if (pn === 0) return;
+    split.natural.counts.forEach((cn, i) => {
+      if (cn === 0n) return;
       const n = split.natural.min + i;
-      split.rest.probs.forEach((pr, j) => {
-        if (pr > 0) add(readingOf(ready, n, split.sign * n + split.rest.min + j), pn * pr);
+      split.rest.counts.forEach((cr, j) => {
+        if (cr > 0n) add(readingOf(ready, n, split.sign * n + split.rest.min + j), cn * cr);
       });
     });
-    return out;
+    return { counts, outcomes: split.natural.outcomes * split.rest.outcomes };
   }
   const dist = diceDistribution(ready.notation);
-  dist.probs.forEach((p, i) => {
-    if (p > 0) add(readingOf(ready, null, dist.min + i), p);
+  dist.counts.forEach((n, i) => {
+    if (n > 0n) add(readingOf(ready, null, dist.min + i), n);
   });
+  return { counts, outcomes: dist.outcomes };
+}
+
+/** Each outcome's exact probability, rounded once from its count: 19 faces of a d20 are 0.95. */
+export function oddsOf(counted: OutcomeCounts): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [outcome, n] of Object.entries(counted.counts)) out[outcome] = share(n, counted.outcomes);
   return out;
+}
+
+/** Exact probability of each outcome, as shown; `none` collects any mass no band covers. */
+export function checkOdds(ready: ReadyCheck): Record<string, number> {
+  return oddsOf(checkCounts(ready));
 }
 
 /** Rolls a ready check. Draws only from `rng`, through the dice roller. */

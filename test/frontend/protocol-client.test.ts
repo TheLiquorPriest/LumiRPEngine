@@ -266,3 +266,97 @@ describe("snapshot, delta and resync", () => {
     expect(seen).toEqual(["j1:running:0.5"]);
   });
 });
+
+/** The backend's answer to a hello or resync, sent before it builds the view (dispatch.ts). */
+const accepted = (reqId: string | undefined, request: "lre.hello" | "lre.state.resync") => ({ lre: 1, type: "lre.result", reqId, request, body: { accepted: true } });
+
+describe("a sync that is lost or fails", () => {
+  test("a view that fails after its resync was answered ends the resync, says why once, and the next stale delta asks again", async () => {
+    const h = harness();
+    const errors: string[] = [];
+    h.client.onError((error) => errors.push(error.code));
+    void h.client.open("c1");
+    h.push(snapshot("c1", 1, 100));
+    h.push(delta("c1", 4, 5, 0));
+    const resync = h.sent.at(-1);
+    h.push(accepted(resync?.reqId, "lre.state.resync"));
+    h.push({ lre: 1, type: "lre.error", reqId: resync?.reqId, code: "internal", message: "the view failed" });
+    await Promise.resolve();
+    expect(errors).toEqual(["internal"]);
+    expect(h.client.getState()).toMatchObject({ status: "live", rev: 1, failed: "the view failed" });
+    h.push(delta("c1", 6, 7, 0));
+    expect(h.sent.filter((m) => m.type === "lre.state.resync")).toHaveLength(2);
+  });
+
+  test("a hello answered but never followed by its view gives up at the Engine requests limit, and the page can ask again", async () => {
+    const h = harness();
+    const errors: string[] = [];
+    h.client.onError((error) => errors.push(error.message));
+    void h.client.open("c1");
+    h.push(accepted("q1", "lre.hello"));
+    h.fireTimers();
+    await Promise.resolve();
+    expect(h.client.getState()).toMatchObject({ chatId: "c1", status: "closed", view: null });
+    expect(h.client.getState().failed).toStartWith("No view of this chat from the engine within 1 s");
+    expect(errors).toEqual([h.client.getState().failed ?? ""]);
+    // Try again: the hello was answered, so a resync, and its view ends the failure.
+    h.client.retry();
+    expect(h.sent.at(-1)).toMatchObject({ type: "lre.state.resync", chatId: "c1" });
+    expect(h.client.getState()).toMatchObject({ status: "syncing", failed: null });
+    h.push(snapshot("c1", 3, 100));
+    expect(h.client.getState()).toMatchObject({ status: "live", rev: 3, failed: null });
+  });
+
+  test("a hello lost on the way is said again when the page reconnects, and a late answer to the lost one changes nothing", async () => {
+    const h = harness();
+    const errors: string[] = [];
+    h.client.onError((error) => errors.push(error.code));
+    void h.client.open("c1");
+    h.client.retry();
+    expect(h.sent.map((m) => [m.type, m.reqId])).toEqual([
+      ["lre.hello", "q1"],
+      ["lre.hello", "q2"],
+    ]);
+    h.push(accepted("q2", "lre.hello"));
+    h.push(snapshot("c1", 2, 100));
+    h.push(accepted("q1", "lre.hello"));
+    h.fireTimers();
+    await Promise.resolve();
+    expect(errors).toEqual([]);
+    expect(h.client.getState()).toMatchObject({ status: "live", rev: 2 });
+  });
+
+  test("a resync lost on the way is asked again when the page reconnects, though it still waits for it", () => {
+    const h = harness();
+    void h.client.open("c1");
+    h.push(snapshot("c1", 1, 100));
+    h.push(delta("c1", 4, 5, 0));
+    expect(h.client.getState().status).toBe("resyncing");
+    // A stale delta while it waits doesn't ask again; a reconnect does.
+    h.push(delta("c1", 6, 7, 0));
+    expect(h.sent.filter((m) => m.type === "lre.state.resync")).toHaveLength(1);
+    h.client.retry();
+    const resyncs = h.sent.filter((m) => m.type === "lre.state.resync");
+    expect(resyncs).toHaveLength(2);
+    h.push(accepted(resyncs[1]?.reqId, "lre.state.resync"));
+    h.push(snapshot("c1", 8, 200));
+    h.push(delta("c1", 8, 9, 210));
+    expect(h.client.getState()).toMatchObject({ status: "live", rev: 9 });
+    expect(h.client.getState().view?.hud?.clock.minutes).toBe(210);
+  });
+
+  test("an error naming a resync the page asked again for changes nothing", async () => {
+    const h = harness();
+    const errors: string[] = [];
+    h.client.onError((error) => errors.push(error.code));
+    void h.client.open("c1");
+    h.push(snapshot("c1", 1, 100));
+    h.push(delta("c1", 4, 5, 0));
+    const first = h.sent.at(-1);
+    h.client.retry();
+    h.push({ lre: 1, type: "lre.error", reqId: first?.reqId, code: "internal", message: "late" });
+    await Promise.resolve();
+    expect(errors).toEqual([]);
+    expect(h.client.getState().status).toBe("resyncing");
+  });
+});

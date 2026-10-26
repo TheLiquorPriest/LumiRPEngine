@@ -17,7 +17,6 @@ type Zone =
   | { kind: "backend" }
   | { kind: "worker" }
   | { kind: "frontend" }
-  | { kind: "studio" }
   | { kind: "augment" }
   | { kind: "entry-backend" }
   | { kind: "entry-frontend" }
@@ -32,7 +31,6 @@ function zoneOf(file: string): Zone {
   const rel = relative(SRC, file).split("\\").join("/");
   if (rel.startsWith("..")) return { kind: "outside" };
   if (rel.startsWith("cli/")) return { kind: "cli" };
-  if (rel === "studio-api.ts") return { kind: "studio" };
   if (rel === "spindle-augment.ts") return { kind: "augment" };
   if (rel === "backend.ts") return { kind: "entry-backend" };
   if (rel === "frontend.ts" || rel === "frontend.tsx") return { kind: "entry-frontend" };
@@ -83,7 +81,6 @@ const PACKAGES: Record<Zone["kind"], Record<string, "value" | "type">> = {
   backend: { "lumiverse-spindle-types": "type" },
   worker: { "lumiverse-spindle-types": "type" },
   frontend: { preact: "value", "preact/hooks": "value", "preact/jsx-runtime": "value", "lumiverse-spindle-types": "type" },
-  studio: {},
   augment: { "lumiverse-spindle-types": "type" },
   "entry-backend": { "lumiverse-spindle-types": "type" },
   "entry-frontend": { "lumiverse-spindle-types": "type" },
@@ -113,8 +110,6 @@ function allowedLocal(from: Zone, to: Zone, typeOnly: boolean, targetRel: string
       return pure || to.kind === "pack-core" || to.kind === "pack-index" || to.kind === "worker";
     case "frontend":
       return to.kind === "shared" || to.kind === "pack-ui" || to.kind === "frontend" || (to.kind === "augment" && typeOnly);
-    case "studio":
-      return pure || to.kind === "pack-core" || to.kind === "pack-index";
     case "pack-index":
       // The one list of every pack: each pack's core through its public index, and the starter worlds.
       return pure || to.kind === "pack-starters" || (to.kind === "pack-core" && targetRel === `packs/${to.pack}/core/index.ts`);
@@ -127,8 +122,8 @@ function allowedLocal(from: Zone, to: Zone, typeOnly: boolean, targetRel: string
     case "entry-frontend":
       return to.kind === "frontend" || to.kind === "shared" || to.kind === "pack-ui" || (to.kind === "augment" && typeOnly);
     case "cli":
-      // The studio seam, the pack index for the starters, and pure code; never the backend, the frontend or a pack's UI.
-      return pure || to.kind === "studio" || to.kind === "pack-index" || to.kind === "cli";
+      // The pack index (for the starters and the local engine's registry), and pure code; never the backend, the frontend or a pack's UI.
+      return pure || to.kind === "pack-index" || to.kind === "cli";
     case "outside":
       return false;
   }

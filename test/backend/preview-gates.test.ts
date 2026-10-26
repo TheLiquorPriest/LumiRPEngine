@@ -38,6 +38,21 @@ async function where(rig: Rig, chatId: string): Promise<string | null> {
   return placeOfEntity(state, "pov");
 }
 
+async function clock(rig: Rig, chatId: string): Promise<number> {
+  const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+  const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+  if (!state) throw new Error("no state");
+  return state.clock;
+}
+
+async function placeName(rig: Rig, chatId: string, place: string): Promise<string> {
+  const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+  const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+  const name = state ? core?.worldAt(state.revision)?.places[place]?.name : undefined;
+  if (!name) throw new Error(`no place ${place}`);
+  return name;
+}
+
 describe("the intent gate", () => {
   test("a typed action waits with nothing generated, Edit changes where it goes, and Play's Regenerate plays it as edited", async () => {
     const { rig, chatId } = await alder([{ gates: { intent: true } }]);
@@ -74,9 +89,82 @@ describe("the intent gate", () => {
     await rig.host.settle();
     await rig.host.start(chatId, { type: "normal" });
     const gate = await chipOf(rig, chatId, "intent_gate");
-    expect(gate?.detail).toContain("Bluebird Coffee");
+    expect(gate?.label).toBe("Play Go to: Bluebird Coffee?");
     expect(`${gate?.label} ${gate?.detail}`).not.toContain("bluebird_coffee");
     expect(`${gate?.label} ${gate?.detail}`).not.toMatch(/[{}"]/);
+  });
+
+  test("the card names what the action acts on in the player's words, and each action after it", async () => {
+    const { rig, chatId } = await alder([{ gates: { intent: true } }]);
+    // "letter" is a thing the player says is there (Take's claim); nothing in the world goes by it.
+    rig.host.quietReply = (req: QuietRequest) =>
+      (req.messages[0]?.content ?? "").includes(INTERPRET_MARK)
+        ? JSON.stringify({
+            action: "take",
+            params: { item: "letter" },
+            thing: "other",
+            text: "I take the letter from the clerk",
+            confidence: 0.9,
+            more: [
+              { action: "give_gift", params: { target: "danny_okafor" }, text: "I give Danny his present" },
+              { action: "chat_with", params: { target: "danny_okafor" }, text: "I chat with Danny" },
+            ],
+          })
+        : "{}";
+    rig.host.sendUser(chatId, "I take the letter from the clerk, give Danny his present and chat with him.");
+    await rig.host.settle();
+    await rig.host.start(chatId, { type: "normal" });
+    const gate = await chipOf(rig, chatId, "intent_gate");
+    expect(gate?.label).toBe("Play Take: letter, then 2 more?");
+    expect(gate?.detail?.split("\n")).toEqual(["“I take the letter from the clerk”", "Then Give a gift: Danny Okafor — “I give Danny his present”", "Then Chat with: Danny Okafor — “I chat with Danny”"]);
+  });
+
+  test("a time skip's card says how long it runs, from when to when, and what fills it, and Edit changes its length", async () => {
+    const { rig, chatId } = await alder([{ gates: { intent: true } }]);
+    let reads = 0;
+    rig.host.quietReply = (req: QuietRequest) => {
+      if (!(req.messages[0]?.content ?? "").includes(INTERPRET_MARK)) return "{}";
+      reads++;
+      return JSON.stringify({ action: "timelapse", params: { span: "an hour", minutes: 60 }, text: "I sort the stock", confidence: 0.9 });
+    };
+    const before = await clock(rig, chatId);
+    rig.host.sendUser(chatId, "(OOC: skip ahead an hour, I sort the stock.)");
+    await rig.host.settle();
+    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
+    const gate = await chipOf(rig, chatId, "intent_gate");
+    expect(gate?.label).toMatch(/^Play Timelapse: 1 h, \d{1,2}:\d{2} [AP]M to \d{1,2}:\d{2} [AP]M\?$/);
+    expect(gate?.detail).toContain("Filled with: “I sort the stock”");
+    expect(gate?.detail).toContain("Play runs the clock on in one go");
+    // Edit is the Timelapse sheet at the skip as read: its length, and the POV held where the story has it.
+    expect(gate?.actions.find((a) => a.id === "edit")?.input).toMatchObject({ type: "action", action: "timelapse", params: { target: { type: "duration", minutes: 60 }, followRoutine: false } });
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "edit", payload: { params: { target: { type: "duration", minutes: 30 }, overrides: {}, followRoutine: false } } })).applied).toBe(true);
+    const reply = await rig.host.start(chatId, { type: "regenerate" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, "Half an hour goes by among the shelves.");
+    expect((await clock(rig, chatId)) - before).toBe(30);
+    expect(reads).toBe(1);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("Cancel drops the read: the next Regenerate reads the message afresh and shows the new read", async () => {
+    const { rig, chatId } = await alder([{ gates: { intent: true } }]);
+    let reads = 0;
+    rig.host.quietReply = (req: QuietRequest) => {
+      if (!(req.messages[0]?.content ?? "").includes(INTERPRET_MARK)) return "{}";
+      reads++;
+      return JSON.stringify({ action: "go", params: { to: reads === 1 ? "bluebird_coffee" : "alder_market" }, confidence: 0.9 });
+    };
+    rig.host.sendUser(chatId, "I walk over there.");
+    await rig.host.settle();
+    await rig.host.start(chatId, { type: "normal" });
+    const gate = await chipOf(rig, chatId, "intent_gate");
+    expect(gate?.label).toBe("Play Go to: Bluebird Coffee?");
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "cancel" })).applied).toBe(true);
+    expect(await chipOf(rig, chatId, "intent_gate")).toBeUndefined();
+    expect((await rig.host.start(chatId, { type: "regenerate" })).halted).toBe("cancelled");
+    expect(reads).toBe(2);
+    expect((await chipOf(rig, chatId, "intent_gate"))?.label).toBe(`Play Go to: ${await placeName(rig, chatId, "alder_market")}?`);
+    expect(rig.host.assembled).toEqual([]);
   });
 });
 

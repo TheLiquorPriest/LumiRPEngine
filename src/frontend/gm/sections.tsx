@@ -73,7 +73,7 @@ function TrackCard(props: { track: Track; editor: Editor }) {
   const kind = t.kind.replace(/_/g, " ");
   return (
     <GmCard name={t.id} title={t.label} id={t.id} subtitle={t.owner ? `${t.owner}'s ${kind}` : humanize(t.kind)} badges={<Badge tone={t.visibility === "public" ? "neutral" : "gm"}>{humanize(t.visibility)}</Badge>}>
-      <Field label="Stage" for={stage}>
+      <Field label="Stage" for={stage} help="On to a stage that follows: it plays as in the story (its effects, rewards and reveal). Back: only the stage is set.">
         <select id={stage} class="lre-input" value={t.stage} disabled={editor.busy} onChange={(event) => void editor.edit([{ op: "stage", track: t.id, to: event.currentTarget.value }])}>
           {t.stages.map((s) => (
             <option key={s.id} value={s.id}>
@@ -133,11 +133,11 @@ export function EditsLog(props: { gm: GmView; busy: boolean; onUndo(chip: string
             {gm.edits.map((e) => {
               const undo = e.undo;
               return (
-                // The player's own bookkeeping (a trade, a transfer) is their action, not a correction.
+                // The player's own bookkeeping (a trade, a transfer) or a hint they opened is their action, not a correction.
                 <ActionRow
                   key={`${e.messageId}:${e.seq}`}
                   title={e.by ?? (e.lines.join(" · ") || "Bookkeeping")}
-                  subtitle={e.by ? `The player's action: ${e.lines.join(" · ")}` : undefined}
+                  subtitle={e.by ? (e.lines.length > 0 ? `The player's action: ${e.lines.join(" · ")}` : "The player's action") : undefined}
                   id={`${e.messageId} · ${e.seq}`}
                   actions={
                     undo === null ? undefined : (

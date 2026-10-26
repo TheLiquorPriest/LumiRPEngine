@@ -34,7 +34,10 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const where = (id: EntityId, viewer: EntityId | null): string => {
     const place = placeOfEntity(ctx.state, id);
     if (!place) return "";
-    return viewer === null || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place) ? ` at ${own(ctx.world.places, place)?.name ?? place}` : " somewhere";
+    if (viewer !== null && !canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) return " somewhere";
+    const at = own(ctx.world.places, place)?.name ?? place;
+    // A building named for its place ("114 Harbor Street at 114 Harbor Street") says where it is already.
+    return at === name(id) ? "" : ` at ${at}`;
   };
   /** A holder's role and share, as every property line names them. */
   const roleOf = (o: { role: OwnerRole; worth: number }): string => `${ROLE_LABEL[o.role]}${o.worth > 0 ? `, ${Math.round(o.worth)}%` : ""}`;

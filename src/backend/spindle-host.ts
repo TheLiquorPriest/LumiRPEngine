@@ -709,13 +709,6 @@ export function createSpindleHost(): HostPort {
         return spindle.backendProcesses.onLifecycle((e) => handler({ processId: e.processId, key: e.key ?? "", state: e.state, ...(e.error ? { error: e.error } : {}) }));
       },
     },
-    rpc: {
-      handle(channel, requires, handler) {
-        spindle.rpcPool.handle(channel, ({ requesterExtensionId }) => handler(requesterExtensionId), { requires: [...requires] });
-      },
-      unregister: (channel) => spindle.rpcPool.unregister(channel),
-      read: (endpoint) => spindle.rpcPool.read(endpoint),
-    },
     log(level, message, userId, turn) {
       if (level === "error") spindle.log.error(message);
       else if (level === "warn") spindle.log.warn(message);

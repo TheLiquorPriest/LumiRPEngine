@@ -9,7 +9,7 @@
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { lorePinsOf } from "../shared/lore";
-import { DOMAINS } from "../shared/ids";
+import { DOMAINS, type KindId } from "../shared/ids";
 import type { GmEntity, GmField, GmView } from "../shared/state-view";
 import { tiersInOrder } from "../shared/tiers";
 import type { FieldDef, FieldType, WorldDoc } from "../shared/world";
@@ -19,16 +19,18 @@ import { optionalQuery, own } from "./pack-kit";
 import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { lifeAwareness, lifeOf } from "./life";
-import { buildEntitySheet } from "./ruleset";
-import { GONE_FIELD, isGone, kindFields, kindIs, placeOfEntity, scopeEnv } from "./scope";
+import { buildEntitySheet, levelProgression } from "./ruleset";
+import { fieldDef, GONE_FIELD, isGone, kindFields, kindIs, kindParent, placeOfEntity, scopeEnv } from "./scope";
 import { classValues, tagsOf } from "./selector";
 import type { WorldState } from "./state";
 import { entityVisibility, isDiscoverable, knows } from "./visibility";
 
-function fieldOf(reg: Registry, ctx: ReadContext, entity: string, id: string, def: FieldDef, stored: JsonValue | undefined): GmField {
+function fieldOf(reg: Registry, ctx: ReadContext, entity: string, kind: KindId, id: string, def: FieldDef, stored: JsonValue | undefined): GmField {
   const numeric = def.type === "number" || def.type === "money" || def.type === "duration";
   const derived = def.derived !== undefined;
   const read = derived ? scopeEnv({ reg, ctx, bindings: { self: entity } }).lookup(["self", id]) : undefined;
+  // A progression's level follows its XP: shown with the field it follows, never edited itself.
+  const prog = levelProgression(reg, ctx.world, kind, id);
   return {
     id,
     label: def.label ?? id.replace(/_/g, " "),
@@ -39,6 +41,7 @@ function fieldOf(reg: Registry, ctx: ReadContext, entity: string, id: string, de
     ...(def.ref ? { ref: def.ref } : {}),
     ...(derived ? { derived: true as const } : {}),
     ...(def.locked ? { locked: true as const } : {}),
+    ...(prog ? { follows: fieldDef(reg, ctx.world, kind, prog.xpField)?.label ?? prog.xpField.replace(/_/g, " ") } : {}),
   };
 }
 
@@ -47,7 +50,7 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
   const e = own(state.entities, id);
   if (!e) return null;
   const defs = kindFields(reg, world, e.kind);
-  const fields: GmField[] = Object.entries(defs).map(([field, def]) => fieldOf(reg, ctx, id, field, def, own(e.fields, field)));
+  const fields: GmField[] = Object.entries(defs).map(([field, def]) => fieldOf(reg, ctx, id, e.kind, field, def, own(e.fields, field)));
   for (const [field, value] of Object.entries(e.fields)) {
     // The engine's own records of a span (the activity it was given for, a Speed through offered to
     // it): the GM edits the activity and its end, and an edit of the end stamps it (`resolveEdit`).
@@ -59,6 +62,8 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
   const life = lifeStateOf(world, lifeOf(state, id));
   const awareness = lifeAwareness(reg, world, state, id);
   const named = (ids: readonly string[]): { id: string; name: string }[] => ids.map((p) => ({ id: p, name: own(state.entities, p)?.name ?? p }));
+  // What it can hold and where it may go (DESIGN §7), so Put inside offers only what makes sense; none without the gear pack.
+  const containment = optionalQuery(ctx, "gear.containment")?.(ctx, id);
   return {
     id,
     name: e.name,
@@ -73,6 +78,8 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
     ...(isDiscoverable(world, state, id) ? { visibility: "discoverable", found: knows(state, world.pov, id) } : { visibility: entityVisibility(world, state, id) }),
     place: placeOfEntity(state, id),
     holder: e.relations.find((r) => r.type === "in")?.to ?? null,
+    ...(containment?.holds ? { holds: containment.holds } : {}),
+    ...(containment && containment.goes !== "any" ? { goes: containment.goes } : {}),
     claimed: e.fields.claimed === true,
     ...(own(state.accounts, id) !== undefined ? { balance: own(state.accounts, id) } : {}),
     fields,
@@ -106,10 +113,10 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
     relationTypes.set(def.id, { id: def.id, label: def.label, from: def.from, to: def.to, fields: Object.entries(isRecord(def.fields) ? def.fields : {}).map(([id, f]) => ({ id, label: f.label ?? id.replace(/_/g, " "), type: f.type, ...(f.min !== undefined ? { min: f.min } : {}), ...(f.max !== undefined ? { max: f.max } : {}), ...(f.values ? { values: f.values } : {}) })) });
   }
   for (const id of BUILTIN_RELATIONS) if (!relationTypes.has(id)) relationTypes.set(id, { id, label: id.replace(/_/g, " "), from: "*", to: "*", fields: [] });
-  // The world's own kinds override built-in ones of the same id, as `kindDef` resolves them.
+  // The world's own kinds lie over built-in ones of the same id, as `kindParent` resolves them: its label, its Extends if it gives one.
   const kinds = new Map<string, { label: string; extends: string | null }>();
   for (const k of reg.kinds.values()) kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
-  for (const k of Object.values(world.kinds)) kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
+  for (const k of Object.values(world.kinds)) kinds.set(k.id, { label: k.label, extends: kindParent(reg, world, k.id) ?? null });
   return {
     entities: Object.keys(state.entities)
       .sort()

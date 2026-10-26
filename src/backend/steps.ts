@@ -14,6 +14,7 @@ import type { StepPurpose, WorldCurrency, WorldDoc } from "../shared/world";
 import { lifeStatesOf } from "../shared/world";
 import { firedTimeout } from "../shared/timeouts";
 import type { Answers, Questions } from "../engine/decide";
+import type { PlaceChoice } from "../engine/place-names";
 import { ACTION_QUEUE_LIMIT, type InterpretOutput, type QueuedAction } from "../engine/steps";
 import { TRY_ACTION } from "../engine/inferred";
 import { TIMELAPSE_ACTION } from "../engine/turn";
@@ -212,6 +213,17 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   return promise;
 }
 
+/**
+ * Why a run stopped a call whose answer it no longer needs (minds it started before the player's
+ * message was read, which the read or the player then made pointless): the call shows it, and fails nothing.
+ */
+export class NotNeeded extends Error {
+  constructor(why: string) {
+    super(why);
+    this.name = "NotNeeded";
+  }
+}
+
 /** A decision's questions as a helper reads them, one line each. */
 function questionLines(questions: Questions): string[] {
   return Object.entries(questions).map(([key, q]) => {
@@ -266,9 +278,10 @@ export class Steps {
       this.meter.record({ purpose, via: "helper", ok: false, ms, tokens: 0, ...lookup }, userId);
       const why = error instanceof Error ? error.message : String(error);
       const fired = firedTimeout(signal);
+      const unneeded = signal.reason instanceof NotNeeded ? signal.reason : null;
       const again = attempt < TRANSIENT_RETRIES && !signal.aborted && transientFailure(error);
-      this.onCall?.(userId, { ...route, model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: fired ? `${fired.message} (${why})` : signal.aborted ? `aborted: the step's time ran out (${why})` : why, ...tried, ...(again ? { retried: true } : {}) });
-      this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking again" : ""}: ${why}`, userId);
+      this.onCall?.(userId, { ...route, ...(unneeded ? { spared: true } : {}), model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: unneeded ? `not needed: ${unneeded.message}` : fired ? `${fired.message} (${why})` : signal.aborted ? `aborted: the step's time ran out (${why})` : why, ...tried, ...(again ? { retried: true } : {}) });
+      if (!unneeded) this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking again" : ""}: ${why}`, userId);
       if (!again) return error instanceof Error ? error : new Error(why);
       await pause(RETRY_PAUSE_MS * 2 ** attempt, signal);
       return signal.aborted ? (error instanceof Error ? error : new Error(why)) : this.quiet(purpose, request, userId, signal, o, attempt + 1);
@@ -334,7 +347,7 @@ export class Steps {
       if (options.failure) options.failure.reason = reason;
       return null;
     };
-    if (reply instanceof Error) return failed(signal.aborted ? "the time ran out before it answered" : `the call failed: ${reply.message.replace(/\s+/g, " ").trim().slice(0, 160)}`);
+    if (reply instanceof Error) return failed(signal.reason instanceof NotNeeded ? `not needed: ${signal.reason.message}` : signal.aborted ? "the time ran out before it answered" : `the call failed: ${reply.message.replace(/\s+/g, " ").trim().slice(0, 160)}`);
     const first = reply.content;
     if (first.trim() === "") return failed(reply.finishReason === "length" ? `the answer was cut off at ${base.maxTokens} tokens before it said anything` : "the answer was empty");
     try {
@@ -449,18 +462,16 @@ export class Steps {
 
 // ---------------------------------------------------------------- interpret
 
-function worldBrief(world: WorldDoc, extra: string): string {
+/** The world as `extract` is told it: the player character, the entities it may know, and the places it is offered (`placeMenu`: the ones the reply names, then the nearest). */
+function worldBrief(world: WorldDoc, places: readonly PlaceChoice[]): string {
   const pov = world.entities[world.pov];
   const people = Object.values(world.entities)
     .filter((e) => e.id !== world.pov)
     .slice(0, 40)
     .map((e) => `${e.id} (${e.name}, ${e.kind})`)
     .join(", ");
-  const places = Object.values(world.places)
-    .slice(0, 40)
-    .map((p) => `${p.id} (${p.name})`)
-    .join(", ");
-  return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places: ${places || "none"}. ${extra}`;
+  const listed = places.map((p) => `${p.id} (${p.name})`).join(", ");
+  return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places, those the reply names and the nearest first: ${listed || "none"}.`;
 }
 
 /** What `interpret` may say a thing the player says they have is, for a claim (DESIGN §9.4): food and drink are used up, keys, weapons and documents ask first, money is never made. */
@@ -502,9 +513,10 @@ function catalogLine(e: CatalogEntry): string {
 }
 
 /**
- * `interpret`: typed input to its actions in order (DESIGN §5.2, §9.4, §11): the first, the further
- * ones it reads as engine actions (`queue`), and the rest as the player would type it (`next`), or
- * none with its reason. It reads the scene, the places and the messages before the input
+ * `interpret`: typed input to its actions in order (DESIGN §5.2, §9.4, §11): the first, with the
+ * player's words for it (`text`; a time skip's are what fills it), the further ones it reads as
+ * engine actions (`queue`), and the rest as the player would type it (`next`), or none with its
+ * reason. It reads the scene, the places and the messages before the input
  * (`context`), and only the catalog's actions. `instructions` (a world step template) lead the
  * prompt; the output contract stays; the preset's guidance and the step's lore follow. Null when
  * the call fails.
@@ -529,19 +541,19 @@ export async function interpret(
     `No action ("action": null) for speech alone, out-of-character text ("OOC:", "((…))") that doesn't say time passes, questions, requests to others, what someone else does, hypotheticals, plans for another time, recaps or feelings.`,
     // A time skip is the timelapse whatever else the input says (DESIGN §5.2), so an out-of-character
     // instruction to skip is never read as the activity it describes, with that action's own duration.
-    // The one exception: getting up or going somewhere first is doing something else (§9.2), which ends
-    // a night or a rest, so it plays, with the time after it as its `then`.
+    // The one exception: getting out of bed or up from a rest before the out-of-character part is
+    // doing something else (§9.2), which ends a night or a rest, so it plays, with the time after it as its `then`.
     ...(actions.some((a) => a.id === TIMELAPSE_ACTION)
       ? [
-          `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then". The one exception is in-character input that, before the out-of-character instruction, gets the player character out of bed or up from a rest with a catalog action ("I get out of bed and make coffee. (OOC: skip an hour.)"): read that action, and any actions after it, as usual, and the time as their "then". What the out-of-character instruction itself says happens ("OOC: skip to morning, I get up", "OOC: over the next two hours, I walk to the gym") still fills the time.`,
+          `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. Its "text" is what the input says happens in that time, in the input's own words ("I sort the stock"), left out when it says nothing happens. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then". The one exception is in-character input that, before the out-of-character instruction, gets the player character out of bed or up from a rest with a catalog action ("I get out of bed and make coffee. (OOC: skip an hour.)"): read that action, and any actions after it, as usual, and the time as their "then". What the out-of-character instruction itself says happens ("OOC: skip to morning, I get up", "OOC: over the next two hours, I walk to the gym") still fills the time.`,
         ]
       : []),
     `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null. An incidental action that fits none, or names someone or somewhere nothing lists, is left out: it never hides the actions after it.`,
     `An action on a thing the player says they have that nothing lists ("I pour Theresa a coffee" with no coffee listed) is still read, in order with the rest: its param holds the thing in the input's own words ("coffee"), and "thing" says what sort of thing it is: "food", "drink", "weapon", "key", "document", "money" or "other".`,
     `When the input and its context still leave it unclear which action or which target is meant, give "action": null and a short "reason"; never guess.`,
     `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
-    `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
-    `If the input lets time pass after its last action, in character ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM") or out of character after getting up or going somewhere, add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
+    `Read every action in the input, in order, not only the first. Return the first as "action" with its "params" and its "text": that action written as the player would type it, with whatever and whoever it involves ("I take the envelope from the clerk"). If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
+    `If the input lets time pass after its last action, in character ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM") or out of character after the input gets the player character out of bed or up from a rest, add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
     // A routine the player's own message states is asked about, never played (DESIGN §9.4): it is no
     // action, so it never takes an action's place, and anything short of a plain statement is none.
     `If the input itself plainly states, as settled fact, a lasting change to someone's week (the player character's own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he's started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input's words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: any place the input names for it, as a place id, or in the input's own words when nothing lists it ("the community pool"); left out only when the input names none (for "move", the new home), "with"?: people's ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input's own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone's thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".`,
@@ -569,7 +581,7 @@ export async function interpret(
     `Action catalog:\n${actions.map(catalogLine).join("\n")}`,
     `Rules:\n${rules.map((r) => `- ${r}`).join("\n")}`,
     presumed.map((r) => `- ${r}`).join("\n"),
-    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}]}.`,
+    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "text"?: string, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}]}.`,
   ]
     .filter((part) => part !== "")
     .join("\n");
@@ -604,6 +616,8 @@ export async function interpret(
   // Why it read no action, for the log: a line at most.
   const reason = !action && typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 200) : "";
   const thing = action ? THING_SORTS.find((s) => s === raw.thing) : undefined;
+  // The first action in the player's words (or what fills a time skip), for the intent gate's card.
+  const lead = action ? words(raw.text) : "";
   // Routine changes the input states, read whatever its action: each keeps `said`, so the engine can
   // check the words are the player's own and a statement (`routineAsks`).
   const routine = (Array.isArray(raw.routine) ? raw.routine : []).flatMap((r): SaidRoutine[] => {
@@ -611,7 +625,7 @@ export async function interpret(
     const copy = JSON.parse(JSON.stringify(r)) as JsonObject;
     return [{ ...copy, said: r.said.replace(/\s+/g, " ").trim() }];
   }).slice(0, SAID_ROUTINES_MAX);
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(thing ? { thing } : {}), ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}), ...(reason !== "" ? { reason } : {}), ...(routine.length > 0 ? { routine } : {}) };
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(lead !== "" ? { text: lead } : {}), ...(thing ? { thing } : {}), ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}), ...(reason !== "" ? { reason } : {}), ...(routine.length > 0 ? { routine } : {}) };
 }
 
 /** A way of paying said as a payment: a preposition or "use" before it ("pay with my credit card", "on my debit card", "in cash", "from savings"), and not a thing named after it ("a credit card holder"). */
@@ -634,7 +648,7 @@ export function saidPayMethod(text: string): string | null {
 
 export const EXTRACT_STRICT_RULES = [
   'time_advance only for an explicit jump or stated duration ("an hour later", "the next morning", "for twenty minutes"), as all the time the reply says passes from the player\'s message to its end, never less for what the turn already took; never estimate how long described activity took.',
-  "knows only when the player character newly learns a public fact from what is said or shown in this reply; not facts already known, not what others learn.",
+  "knows only when the player character newly learns of a public person, thing or place from what is said or shown in this reply: fact is its id, or a place's name as the prose gives it; never a sentence or what they learned about it, never one already known, never what others learn.",
   "regard only when the prose states a clear change in how one character feels about another.",
   "give only for an explicit handover between two characters; a seller handing over what was bought is part of the purchase; picking something up is not a give.",
   "A purchase already covers its payment: do not add a transfer for it.",
@@ -655,12 +669,12 @@ export interface ExtractRead {
 }
 
 /** Where the reply leaves the player character, asked beside the changes: a reply can take a move as given without telling it, and no change holds that (DESIGN §9.4). */
-const EXTRACT_WHERE = `Beside "proposals", give "where": the id of the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given; null when it doesn't say.`;
+const EXTRACT_WHERE = `Beside "proposals", give "where": the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given, as its id from Places (or its name as Places lists it); null when it doesn't say.`;
 
 /** How `extract` may use the usual routines it is given (DESIGN §9.4): to place a move the reply describes, never to make one. */
 const EXTRACT_USUAL = `Usual routines are given below the state, only to tell where a move the reply describes is going: someone who heads out to their usual spot ("his usual lunch place", "off to her regular bar") moves to that place; give its id from their usual routine, or place "usual" when the reply doesn't say which. A usual routine is never a move by itself: no location for someone the reply doesn't describe leaving or arriving.`;
 
-/** `extract`: proposals read from a reply (DESIGN §9.4), and where it leaves the player character (`where`, asked while `location` is a channel). `instructions` (a world text template) lead the prompt; the contract stays; the preset's guidance and the step's lore follow. `usual`: the usual routines of the people with the player character as it may know them, given while `location` is a channel, apart from any fact. Empty on failure. */
+/** `extract`: proposals read from a reply (DESIGN §9.4), and where it leaves the player character (`where`, asked while `location` is a channel). `instructions` (a world text template) lead the prompt; the contract stays; the preset's guidance and the step's lore follow. `usual`: the usual routines of the people with the player character as it may know them, given while `location` is a channel, apart from any fact. `places`: the places it is offered (`placeMenu`); `personKinds`: the kinds a newcomer may be. Empty on failure. */
 export async function extract(
   steps: Steps,
   narration: string,
@@ -677,13 +691,15 @@ export async function extract(
   usual: readonly string[] = [],
   recent: readonly string[] = [],
   said = "",
+  places: readonly PlaceChoice[] = [],
+  personKinds: readonly string[] = [],
 ): Promise<ExtractRead> {
   const types =
-    `time_advance{minutes} · location{entity,place} · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) · knows{who,fact} (public facts only) · spawn{kind,name,place?,role?} · life{entity,state} (state: ${lifeStatesOf(world)
+    `time_advance{minutes} · location{entity,place} (place: its id from Places, or its name as Places lists it) · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) · knows{who,fact} (fact: the id of a person, thing or place the player character newly learns of, or the name of a place they first hear of; never a sentence) · spawn{kind,name,place?,role?} (a new character the reply introduces by name${personKinds.length > 0 ? `; kind: ${personKinds.join("|")}` : ""}; never a thing) · life{entity,state} (state: ${lifeStatesOf(world)
       .map(([id]) => id)
       .join("|")}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
-  const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, "")}\nProposal types: ${types} · ${EXTRACT_ITEM_TYPES}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
+  const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, places)}\nProposal types: ${types} · ${EXTRACT_ITEM_TYPES}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
   const moves = channels.length === 0 || channels.includes("location");
   const routines = moves && usual.length > 0;
   const asked = `${moves ? `${system}\n${EXTRACT_WHERE}` : system}${routines ? `\n${EXTRACT_USUAL}` : ""}`;

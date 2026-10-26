@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { moved, parseThresholds, progressionFields, rowChoices, sectionId, tableThresholds, tidyRuleset } from "../../src/frontend/build/ruleset-editor";
 import { sheetPreviewRequest } from "../../src/frontend/requests";
-import { DOMAIN_LABEL, floorNote } from "../../src/frontend/settings/realism";
+import { floorNote } from "../../src/frontend/settings/realism";
+import { DOMAIN_LABEL } from "../../src/shared/ids";
 import { previewSheet } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { thresholdsOf } from "../../src/engine/ruleset";

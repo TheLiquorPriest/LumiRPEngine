@@ -102,9 +102,18 @@ export interface ScopeInput {
 
 const ENGINE_SLICE = "engine";
 
-/** A kind with its inheritance chain resolved: the world's kinds first, then the registry's. */
+/**
+ * A kind's own definition: the world's, else the registry's. A world kind with a pack kind's id lies
+ * over it (DESIGN §4.1): its label wins, and `kindParent`, `fieldDef` and `kindFields` read the two
+ * together, so its fields join the pack's rather than replace them.
+ */
 export function kindDef(reg: Registry, world: WorldDoc, kind: KindId): KindDef | undefined {
   return own(world.kinds, kind) ?? reg.kinds.get(kind);
+}
+
+/** The kind `kind` builds on: the world's Extends for it, else the pack's of the same id. */
+export function kindParent(reg: Registry, world: WorldDoc, kind: KindId): KindId | undefined {
+  return own(world.kinds, kind)?.extends ?? reg.kinds.get(kind)?.extends;
 }
 
 /** True when `kind` is `ancestor` or inherits from it. */
@@ -112,36 +121,36 @@ export function kindIs(reg: Registry, world: WorldDoc, kind: KindId, ancestor: K
   let id: KindId | undefined = kind;
   for (let guard = 0; id && guard < 32; guard++) {
     if (id === ancestor) return true;
-    id = kindDef(reg, world, id)?.extends;
+    id = kindParent(reg, world, id);
   }
   return false;
 }
 
-/** A field's definition, searched up the kind's inheritance chain. */
+/** A field's definition, searched up the kind's inheritance chain, the world's kind before the pack's at each step. */
 export function fieldDef(reg: Registry, world: WorldDoc, kind: KindId, field: string): FieldDef | undefined {
   let id: KindId | undefined = kind;
   for (let guard = 0; id && guard < 32; guard++) {
-    const def = kindDef(reg, world, id);
-    if (!def) return undefined;
-    const f = own(def.fields, field);
+    const mine: KindDef | undefined = own(world.kinds, id);
+    const pack: KindDef | undefined = reg.kinds.get(id);
+    if (!mine && !pack) return undefined;
+    const f = (mine && own(mine.fields, field)) ?? (pack && own(pack.fields, field));
     if (f) return f;
-    id = def.extends;
+    id = mine?.extends ?? pack?.extends;
   }
   return undefined;
 }
 
-/** Every field of a kind, ancestors first, overridden by descendants. */
+/** Every field of a kind, ancestors first, overridden by descendants; at each step the world's kind over the pack's. */
 export function kindFields(reg: Registry, world: WorldDoc, kind: KindId): Record<string, FieldDef> {
-  const chain: KindDef[] = [];
+  const chain: KindId[] = [];
   let id: KindId | undefined = kind;
   for (let guard = 0; id && guard < 32; guard++) {
-    const def = kindDef(reg, world, id);
-    if (!def) break;
-    chain.unshift(def);
-    id = def.extends;
+    if (!own(world.kinds, id) && !reg.kinds.has(id)) break;
+    chain.unshift(id);
+    id = kindParent(reg, world, id);
   }
   const out: Record<string, FieldDef> = {};
-  for (const def of chain) Object.assign(out, def.fields);
+  for (const step of chain) Object.assign(out, reg.kinds.get(step)?.fields, own(world.kinds, step)?.fields);
   return out;
 }
 

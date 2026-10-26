@@ -69,4 +69,16 @@ describe("the Outline points only at sections the narrator has", () => {
     expect(withoutMissing(lines, ["Montage", "Minds"])).toEqual(["Danny pays $4.50 for both. Keep it short.", "Nothing points anywhere here; e.g. the money stays put."]);
     expect(withoutMissing(lines, [])).toEqual(lines);
   });
+
+  test("a full outline reaches the narrator whole: every beat the step gives, in its order", async () => {
+    const { rig, chatId } = await alder([{ modelUse: { preset: "full" } }]);
+    const beats = Array.from({ length: 10 }, (_, i) => `Beat ${i + 1}: Danny Okafor wipes the counter at Bluebird Coffee and looks up.`);
+    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").startsWith("You outline a roleplay narrator's next reply") ? JSON.stringify({ beats }) : "{}");
+    await timelapse(rig, chatId, 10);
+    const outline = rig.host.section("Outline");
+    const at = beats.map((b) => outline.indexOf(`- ${b}`));
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });

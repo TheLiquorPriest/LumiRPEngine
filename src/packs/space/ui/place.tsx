@@ -51,6 +51,13 @@ export function placeStatus(view: MapView, place: MapPlaceView): { icon: IconNam
   return { icon: "check", text: "You've been there.", short: "Been there" };
 }
 
+/** A row's time in words: the whole, then how a vehicle trip's breaks down ("13 min: 4 min to reach it at home, 1 min to get going, 8 min driving"). */
+export function tripWords(option: Pick<MapView["travel"][number], "minutes" | "parts">): string {
+  const parts = option.parts ?? [];
+  const whole = formatMinutes(option.minutes);
+  return parts.length === 0 ? whole : `${whole}: ${parts.map((p) => `${formatMinutes(p.minutes)} ${p.words}`).join(", ")}`;
+}
+
 /** A place's details: where you stand with it, its travel options and its map actions. */
 export function PlaceDetail(props: { view: MapView; place: MapPlaceView; chatId: string; onOpen(): void; onShow?: () => void; onTravelled(): void }) {
   const app = useApp();
@@ -85,7 +92,7 @@ export function PlaceDetail(props: { view: MapView; place: MapPlaceView; chatId:
                   key={`${option.action}:${option.mode}:${option.vehicle ?? ""}`}
                   icon={MODE_ICON[option.mode]}
                   title={option.label}
-                  subtitle={[option.disabled === undefined ? formatMinutes(option.minutes) : null, option.vehicle, option.disabled].filter((part) => part).join(" · ")}
+                  subtitle={[option.disabled === undefined ? tripWords(option) : null, option.parts && option.parts.length > 0 ? null : option.vehicle, option.disabled].filter((part) => part).join(" · ")}
                   value={option.cents !== undefined ? formatCents(option.cents) : undefined}
                   disabled={busy || option.disabled !== undefined}
                   onClick={() =>

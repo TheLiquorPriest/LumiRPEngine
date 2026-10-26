@@ -7,8 +7,10 @@ import type { SlotId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import type { PackEvent } from "../shared/ledger";
 import { readSectionFeed, SECTION_FEED_KEYS, type FeedScope, type SectionFeed, type SectionTemplate } from "../shared/world";
+import { feedSentence } from "../shared/words";
 import type { EventTypeDef, FeedLine, ReadContext, SectionRenderer } from "./registry";
 import type { WorldState } from "./state";
+import { own } from "./pack-kit";
 import { engineSlice } from "./scope";
 
 /** The engine's state-slice key for the GM's per-chat section overrides. */
@@ -89,5 +91,11 @@ export const feedEvent: EventTypeDef<PackEvent> = {
     s[FEED_KEY] = current;
   },
   // A GM setting, not a fact of the story: the player's Journal has no line for it.
-  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `the ${typeof e.data.section === "string" ? e.data.section : "?"} section's settings in this chat`),
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined) return "";
+    const section = typeof e.data.section === "string" ? e.data.section : "";
+    // The world's own sections carry their labels; a default one is named by its id ("montage" reads "Montage").
+    const label = own(ctx.world.sections, section)?.label ?? `${section.charAt(0).toUpperCase()}${section.slice(1).replace(/_/g, " ")}`;
+    return feedSentence(label, e.data.to === null ? null : readSectionFeed(e.data.to));
+  },
 };

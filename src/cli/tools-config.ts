@@ -52,7 +52,7 @@ const NOT_PATCHED: Readonly<Record<string, string>> = { v: "the settings file's 
 /**
  * Where a manual change makes a named preset Custom, as the Settings pages do: a named preset sets
  * these itself, so a change without `preset: "custom"` would sit under a preset that no longer
- * describes it (and for checks, be dropped: a named adjudication preset ignores its fields).
+ * describes it.
  */
 const MANUAL: readonly { part: string; keys: readonly string[] | "any"; preset: readonly [string, string] }[] = [
   { part: "realism", keys: ["levels", "tierCaps", "claims"], preset: ["realism", "preset"] },

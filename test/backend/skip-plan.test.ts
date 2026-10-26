@@ -16,6 +16,7 @@ import { Working } from "../../src/engine/working";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { ROUTINE_EVENTS, routineSettingsOf, type SkipPlan, type SkipPlanCalls } from "../../src/shared/routines";
+import type { StepConfig } from "../../src/shared/settings";
 import { DEFAULT_MIND_READS } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
@@ -37,9 +38,11 @@ const follow = (skips: "model" | "stay"): LedgerEvent => ({ type: ROUTINE_EVENTS
 
 // ---------------------------------------------------------------- through the whole backend
 
-/** A Port Alder chat after one ordinary turn, with Danny's skip planned by the model; `plan` answers the skip plan call, and `setup` edits the world first. */
-async function alder(plan: (req: QuietRequest) => string, setup?: (rig: Rig, worldId: string) => Promise<void>): Promise<{ rig: Rig; chatId: string; calls: () => number }> {
+/** A Port Alder chat after one ordinary turn, with Danny's skip planned by the model and the time-skip step on unless `skipStep` is false; `plan` answers the skip plan call, and `setup` edits the world first. */
+async function alder(plan: (req: QuietRequest) => string, setup?: (rig: Rig, worldId: string) => Promise<void>, skipStep = true): Promise<{ rig: Rig; chatId: string; calls: () => number }> {
   const rig = new Rig({ shipped: true });
+  // The plan is the time-skip step's call: these chats switch the step on (it is off by default).
+  if (skipStep) rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
   let calls = 0;
   rig.host.quietReply = (req: QuietRequest) => {
     if (isPlanCall(req)) {
@@ -133,6 +136,18 @@ describe("a timelapse with someone the model plans", () => {
     expect(state.clock).toBe(before.state.clock + 120);
   });
 
+  test("with the time-skip step switched off, no call is made: the skip runs on the engine alone, everyone the plan would cover keeping to their basic needs", async () => {
+    const { rig, chatId, calls } = await alder(() => JSON.stringify({ plans: [] }), undefined, false);
+    const before = await folded(rig, chatId);
+    await lapse(rig, chatId);
+    const { events, state } = await folded(rig, chatId);
+    expect(calls()).toBe(0);
+    expect(events.find((e) => e.type === ROUTINE_EVENTS.skipPlan)).toMatchObject({ data: { from: before.state.clock, to: before.state.clock + 120, plans: [], note: expect.any(String) } });
+    expect(events.find((e) => e.type === "timelapse")).toMatchObject({ from: before.state.clock, to: before.state.clock + 120 });
+    expect(state.clock).toBe(before.state.clock + 120);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
   /** The part of a plan call's input under `title`, which runs to the next blank line. */
   const partOf = (prompt: string, title: string): string => prompt.split("\n\n").find((part) => part.startsWith(`${title}\n`)) ?? "";
 
@@ -188,8 +203,11 @@ function monday(events: LedgerEvent[]): { world: WorldDoc; state: WorldState; st
   return { world, state: w.state, stamp: (minutes) => formatStamp(cal, start + minutes) };
 }
 
-/** `planSkip` over two hours from `state`, the model answering `answer`; the event and how many calls it made. */
-async function plan(world: WorldDoc, state: WorldState, answer: JsonObject): Promise<{ event: LedgerEvent | null; calls: number }> {
+/** The `skip` step switched on, as the user turns it on in Settings → Steps and connections. */
+const SKIP_ON: StepConfig = { enabled: true, signals: [] };
+
+/** `planSkip` over two hours from `state`, the model answering `answer`; the event and how many calls it made. `config` null: the step switched off. */
+async function plan(world: WorldDoc, state: WorldState, answer: JsonObject, config: StepConfig | null = SKIP_ON): Promise<{ event: LedgerEvent | null; calls: number }> {
   const host = new FakeHost();
   let calls = 0;
   host.quietReply = (req) => {
@@ -197,7 +215,7 @@ async function plan(world: WorldDoc, state: WorldState, answer: JsonObject): Pro
     return JSON.stringify(answer);
   };
   const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 120 } }, probabilities: { timelapse: 1 } };
-  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000, config: null, guidance: "" });
+  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000, config, guidance: "" });
   return { event, calls };
 }
 
@@ -257,7 +275,7 @@ describe("the skip plan's checks", () => {
       throw new Error("the provider refused");
     };
     const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 7 * 60 } }, probabilities: { timelapse: 1 } };
-    const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state: w.state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000, config: null, guidance: "" });
+    const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state: w.state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000, config: SKIP_ON, guidance: "" });
     if (!event) throw new Error("no plan recorded");
     expect(plannedOf(event)).toEqual([]);
     w.applyAll([event]);
@@ -293,7 +311,7 @@ async function planEach(world: WorldDoc, state: WorldState, stamp: (minutes: num
     return JSON.stringify({ plans: named.map((id) => ({ entity: id, blocks: [block(stamp(10), stamp(40), places[id] ?? "")] })) });
   };
   const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 120 } }, probabilities: { timelapse: 1 } };
-  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000, config: null, guidance: "" });
+  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000, config: SKIP_ON, guidance: "" });
   return { event, calls };
 }
 

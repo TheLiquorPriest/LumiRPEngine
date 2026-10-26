@@ -6,7 +6,6 @@ import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
 import type { ExtractionModeView, UpgradePreview } from "../../src/shared/protocol";
-import type { StudioOffer } from "../../src/shared/studio-bridge";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
 import { SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
 import { defaultMindsSettings } from "../../src/shared/minds";
@@ -226,10 +225,10 @@ export function stateFixture(chatId: string): StateView {
       },
       "story.quests": {
         active: [
-          { id: "q_raise", label: "Ask for a raise", kind: "quest", stage: "Build the case", cue: "Rosie respects people who show up early and cover shifts.", truths: ["Rosie gave the last raise to whoever covered the holiday shifts."], objectives: [{ label: "Cover two extra shifts", done: true }, { label: "Get a regular to vouch for you", done: false }, { label: "Ask Rosie after the rush", done: false }], hints: ["Mr. Okafor tips well and talks to Rosie every morning.", "Ask after 10:00, when the rush is over."], status: "active" },
-          { id: "q_boat", label: "Dev's boat", kind: "agenda", stage: "Find a carburetor", cue: null, truths: [], objectives: [{ label: "Check Kim's Garage", done: false }], hints: [], status: "active" },
+          { id: "q_raise", label: "Ask for a raise", kind: "quest", stage: "Build the case", cue: "Rosie respects people who show up early and cover shifts.", truths: ["Rosie gave the last raise to whoever covered the holiday shifts."], objectives: [{ label: "Cover two extra shifts", done: true }, { label: "Get a regular to vouch for you", done: false }, { label: "Ask Rosie after the rush", done: false }], hints: ["Mr. Okafor tips well and talks to Rosie every morning.", "Ask after 10:00, when the rush is over."], opened: 0, status: "active" },
+          { id: "q_boat", label: "Dev's boat", kind: "agenda", stage: "Find a carburetor", cue: null, truths: [], objectives: [{ label: "Check Kim's Garage", done: false }], hints: [], opened: 0, status: "active" },
         ],
-        done: [{ id: "q_lease", label: "Renew the lease", kind: "quest", stage: "Signed", cue: null, truths: [], objectives: [{ label: "Sign by Oct 1", done: true }], hints: [], status: "done" }],
+        done: [{ id: "q_lease", label: "Renew the lease", kind: "quest", stage: "Signed", cue: null, truths: [], objectives: [{ label: "Sign by Oct 1", done: true }], hints: [], opened: 0, status: "done" }],
         failed: [],
       },
       "space.map": {
@@ -1299,41 +1298,6 @@ export function worldFixture(): WorldDoc {
     },
     start: { place: "apartment", at: "2026-10-19T07:00" },
   });
-}
-
-/** What LumiRPEngine Studio has waiting in the preview (`?studio=`): nothing, a new world, a revision of Maple Falls (one taken before its head moved), or a world with an error. */
-export type StudioCase = "none" | "new" | "revision" | "moved" | "errors";
-
-/** Lore the Studio wrote with host macros in it, which Build lists for review before playing. */
-const STUDIO_LORE: WorldDoc["lore"] = {
-  foghorn: { id: "foghorn", title: "The foghorn", content: "{{user}} hears the foghorn from the breakwater before dawn; locals set their watches by it.", keys: ["foghorn"], links: [] },
-  harbor_weather: { id: "harbor_weather", title: "Harbor weather", content: "Mornings on the lake start in {{random::fog,drizzle,a hard wind}} more often than not.", keys: ["weather", "fog"], links: [] },
-};
-
-/** The Studio's offer for a case, as its offer endpoint holds it (`StudioOffer`); null when nothing is waiting. */
-export function studioOfferFixture(kind: StudioCase, chatId: string): StudioOffer | null {
-  if (kind === "none") return null;
-  const createdAt = Date.UTC(2026, 9, 19, 11, 20);
-  if (kind === "revision" || kind === "moved") {
-    const doc = worldFixture();
-    doc.lore = { ...doc.lore, ...structuredClone(STUDIO_LORE) };
-    doc.entities.npc_hale = { id: "npc_hale", kind: "npc", name: "Mrs. Hale", tier: "supporting", fields: { mood: "calm" }, relations: [] };
-    // The Studio fixed what the preview's Maple Falls gets wrong: Rosie goes home to a real place, and Dev's boat isn't named.
-    doc.places.rosie_house = { id: "rosie_house", name: "Rosie's house", parent: "maple", sceneType: "downtime", fields: {} };
-    const shift = doc.schedules.rosie_shift;
-    if (shift) shift.slots = shift.slots.map((slot) => (slot.value === "home" ? { ...slot, value: "rosie_house" } : slot));
-    const dev = doc.entities.npc_dev;
-    if (dev) dev.relations = dev.relations.filter((r) => r.to !== "boat1");
-    const maple = WORLDS[0] as WorldIndex;
-    return { offerId: `offer-${kind}`, doc: doc as unknown as JsonValue, mode: "revision", worldId: maple.id, baseRevision: kind === "moved" ? (maple.revisions[1] ?? maple.head) : maple.head, createdAt };
-  }
-  const make = STARTER_WORLDS.modern_slice_of_life;
-  if (!make) return null;
-  const doc = migrateWorld(make("w-studio", "Harbor Lights"));
-  doc.lore = { ...doc.lore, ...structuredClone(STUDIO_LORE) };
-  // A kind the Studio's draft named but never defined: an error, so the offer can't install as it is.
-  if (kind === "errors") doc.entities.ghost = { id: "ghost", kind: "spectre", name: "The lighthouse ghost", tier: "background", fields: {}, relations: [] };
-  return { offerId: `offer-${kind}`, doc: doc as unknown as JsonValue, mode: "new", attachChatId: chatId, createdAt };
 }
 
 export function settingsFixture(): UserSettings {

@@ -90,7 +90,19 @@
             "sightRadius": { "type": "number", "minimum": 0, "description": "Cells the POV sees around it; read as a whole number up to 32." }
           }
         },
-        "travelSimulation": { "type": "boolean", "description": "Moves need a route: a narrated move no route reaches is refused, and Go needs a walking route. Off or absent: moves are story first." }
+        "travelSimulation": { "type": "boolean", "description": "Moves need a route: a narrated move no route reaches is refused, and Go needs a walking route. Off or absent: moves are story first." },
+        "travel": {
+          "type": "object",
+          "description": "Travel times. A speed set (km/h) times every leg of its way, or every leg a vehicle of the class takes, by its distance in place of the route's minutes; then a vehicle trip's overheads. Absent, or any part: routes keep their own minutes; 1, 1 and 30 minutes.",
+          "additionalProperties": false,
+          "properties": {
+            "speeds": { "type": "object", "additionalProperties": false, "properties": { "walk": { "type": "number", "exclusiveMinimum": 0 }, "road": { "type": "number", "exclusiveMinimum": 0 }, "offroad": { "type": "number", "exclusiveMinimum": 0 }, "water": { "type": "number", "exclusiveMinimum": 0 } } },
+            "vehicleSpeeds": { "type": "object", "description": "km/h by vehicle class (a vehicles.classes row).", "propertyNames": { "minLength": 1 }, "additionalProperties": { "type": "number", "exclusiveMinimum": 0 } },
+            "startMinutes": { "type": "number", "minimum": 0, "description": "Getting a vehicle going." },
+            "parkMinutes": { "type": "number", "minimum": 0, "description": "Parking it where the trip leaves it." },
+            "fetchMinutes": { "type": "number", "minimum": 0, "description": "The longest walk to a vehicle parked elsewhere; 0: only one where you are." }
+          }
+        }
       }
     },
     "classifications": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/facet" } },

@@ -8,6 +8,7 @@ import { toChain } from "../../src/backend/ledger-io";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
 import { dayPlan } from "../../src/packs/castlife/core/index";
+import { activitySpanEnd } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 
 const INTERPRET_MARK = "You map a player's typed input";
@@ -81,5 +82,55 @@ describe("time a reply narrates", () => {
     const before = await folded(rig, chatId);
     await rig.turn(chatId, "I chat with Danny.", "Ten minutes later, Danny is still talking.");
     expect((await folded(rig, chatId)).state.clock - before.state.clock).toBe(15);
+  });
+});
+
+/** Jordan chats with Danny, then lets an hour pass. */
+const CHAT_THEN: JsonObject = { ...CHAT, then: { span: "for an hour", minutes: 60 } };
+const CHAT_THEN_TEXT = "I chat with Danny, then wait for an hour.";
+
+/** The Timelapse chips on the head reply, as the player sees them. */
+async function offers(rig: Rig, chatId: string): Promise<{ label: string; detail?: string }[]> {
+  return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "timelapse_offer").map((c) => ({ label: c.label, ...(c.detail ? { detail: c.detail } : {}) }));
+}
+
+describe("time the message lets pass after its actions runs once", () => {
+  test("the narrator is told to tell it after them, and once the reply has, no Timelapse runs it again", async () => {
+    const { rig, chatId } = await alder(() => CHAT_THEN, [{ type: "time_advance", minutes: 75 }]);
+    const before = await folded(rig, chatId);
+    await rig.turn(chatId, CHAT_THEN_TEXT, "An hour and a quarter later, Danny is still talking.");
+    expect(rig.host.section("Outcome")).toContain("After those actions, the player's message lets time pass: 1 h (“for an hour”). Tell that time in this reply, after them.");
+    expect((await folded(rig, chatId)).state.clock - before.state.clock).toBe(75);
+    expect(await offers(rig, chatId)).toEqual([]);
+  });
+
+  test("a reply that tells part of it leaves only the rest on the Timelapse", async () => {
+    const { rig, chatId } = await alder(() => CHAT_THEN, [{ type: "time_advance", minutes: 45 }]);
+    await rig.turn(chatId, CHAT_THEN_TEXT, "Half an hour on, Danny is still talking.");
+    expect(await offers(rig, chatId)).toEqual([{ label: "Timelapse 30 min?", detail: "The reply already told 30 min of the 1 h you asked for. Run the other 30 min as a timelapse?" }]);
+  });
+
+  test("time the reply tells that waits on Apply counts too", async () => {
+    const { rig, chatId } = await alder(() => CHAT_THEN, [{ type: "time_advance", minutes: 75 }]);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { time_advance: { mode: "confirm" } } } }));
+    await rig.turn(chatId, CHAT_THEN_TEXT, "An hour and a quarter later, Danny is still talking.");
+    expect((await rig.rt.view(chatId, rig.host.userId)).chips.some((c) => c.kind === "confirm")).toBe(true);
+    expect(await offers(rig, chatId)).toEqual([]);
+  });
+
+  test("Speed through to the end of a sleep the reply already told is withdrawn", async () => {
+    const narrated: JsonObject[] = [];
+    const { rig, chatId } = await alder(() => ({ action: "sleep", params: { minutes: 480 }, confidence: 0.9 }), narrated);
+    const before = await folded(rig, chatId);
+    await rig.turn(chatId, "I sleep for eight hours.", "You crawl under the covers.");
+    const end = activitySpanEnd((await folded(rig, chatId)).state.entities.pov?.fields);
+    if (end === null) throw new Error("no sleep to run through");
+    expect((await offers(rig, chatId)).filter((o) => o.label.startsWith("Timelapse to"))).toHaveLength(1);
+    // Played again, its reply tells the whole sleep and a little more.
+    narrated.push({ type: "time_advance", minutes: end - before.state.clock + 30 });
+    const again = await rig.host.start(chatId, { type: "regenerate" });
+    await rig.host.finish(again, "You sleep the eight hours through and lie awake a while.");
+    expect((await folded(rig, chatId)).state.clock).toBeGreaterThan(end);
+    expect((await offers(rig, chatId)).filter((o) => o.label.startsWith("Timelapse to"))).toEqual([]);
   });
 });

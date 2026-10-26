@@ -7,35 +7,34 @@ import { CLAIM_PRESETS } from "../../src/shared/claims";
 import { readInferred } from "../../src/shared/inferred";
 import type { DiagCall, DiagRecord } from "../../src/shared/diagnostics";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
-import { hasOwn, isRecord } from "../../src/shared/json";
+import { isRecord } from "../../src/shared/json";
 import { applyPatch } from "../../src/shared/json-patch";
 import type { MindsRunView } from "../../src/shared/minds";
 import type { LoreBookEntryView, LorePinView } from "../../src/shared/protocol";
 import type { BookLoreFields } from "../../src/shared/lore";
-import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LintIssue, LoreDrift, PresetCard, ResultBodies, StudioOfferView } from "../../src/shared/protocol";
+import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LoreDrift, PresetCard, ResultBodies } from "../../src/shared/protocol";
 import { AGENT_API } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
 import type { GmView, StateView } from "../../src/shared/state-view";
-import type { StudioOffer } from "../../src/shared/studio-bridge";
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
-import { hashJson } from "../../src/shared/hash";
 import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
 import { findPath, gridMinutes } from "../../src/shared/grid";
 import { decodeMapView } from "../../src/packs/space/ui/view";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { bookLoreProblem } from "../../src/backend/book-lore";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
-import { macroReview, WORLD_COLLECTIONS } from "../../src/backend/worlds";
-import type { StudioCase } from "./fixtures";
-import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, studioOfferFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
+import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
 import { applyRoutineOp, chatRolesFixture, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
 import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
-import { isWorldDoc, lintWorld, migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
+import { migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
 import { buildCharacter } from "../../src/engine/character";
 import { initialState } from "../../src/engine/world-state";
+import { buildSections } from "../../src/backend/sections-build";
+import { DEFAULT_SECTIONS, sectionsOf, sectionTokens } from "../../src/backend/book";
+import { unrevealedSecrets } from "../../src/engine/visibility";
 import { ALL_PACKS } from "../../src/packs/index";
 import { applyProfile, profileChoices, profileOf } from "../../src/shared/profiles/index";
 import { modernSheetFixture } from "./profile-fixture";
@@ -53,8 +52,6 @@ export interface MockOptions {
   map?: string;
   /** A Port Alder party (`?money=`): Play's money is theirs and GM → Money everyone's, as the engine keeps them nine days in. */
   money?: string;
-  /** What LumiRPEngine Studio has waiting (`?studio=`); nothing by default. */
-  studio?: StudioCase;
   /** `?draft=elsewhere`: this long after Build first loads a draft, another window changes it (`changeDraftElsewhere`). */
   draftElsewhereMs?: number;
   /** `?activity=`: the engine mid-turn (`busy`), or its last turn failed (`failed`). */
@@ -116,10 +113,8 @@ export class MockBackend {
   private draft: WorldDoc = worldFixture();
   /** The draft's write count, as the backend keeps it: 0 while the draft is the world. */
   private draftVersion = 0;
-  /** The user's worlds as `lre.world list` reads them; a Studio install adds one or moves a head. */
+  /** The user's worlds as `lre.world list` reads them. */
   private worldList: WorldIndex[] = structuredClone(WORLDS);
-  /** What each installed Studio offer became, as the bridge marks it. */
-  private readonly studioInstalled = new Map<string, { worldId: string; revision: string }>();
   /** Whether `?draft=elsewhere`'s change is scheduled, and how many changes were made elsewhere. */
   private elsewhereScheduled = false;
   private elsewhereCount = 0;
@@ -193,66 +188,6 @@ export class MockBackend {
     // A write elsewhere counts one, as every write does.
     this.draftVersion += 1;
     this.emit({ lre: 1, type: "lre.draft.changed", worldId, version: this.draftVersion, stored: JSON.stringify(this.draft) !== JSON.stringify(this.world), base: this.worldList[0]?.head ?? null });
-  }
-
-  /** An offer as the backend reviews it (`Dispatcher.reviewOffer`): read as this engine reads it, linted, its macros listed, and what keeps it from installing. */
-  private reviewOffer(offer: StudioOffer, hash: string): { view: StudioOfferView; world: WorldDoc | null } {
-    const installed = this.studioInstalled.get(offer.offerId);
-    const view: StudioOfferView = { offerId: offer.offerId, mode: offer.mode, name: isRecord(offer.doc) && typeof offer.doc.name === "string" ? offer.doc.name : "(unnamed)", createdAt: offer.createdAt, target: null, counts: {}, lint: [], errors: 0, macros: [], attachChatId: offer.attachChatId ?? null, blocked: null, installed: installed ?? null, headMoved: null, hash };
-    if (!isWorldDoc(offer.doc)) return { view: { ...view, blocked: "It isn't an lre-world-v1 document." }, world: null };
-    const world = migrateWorld(structuredClone(offer.doc));
-    const lint = lintWorld(world, REGISTRY);
-    const rank = { error: 0, warning: 1, info: 2 };
-    view.lint = [...lint].sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, 50);
-    view.errors = lint.filter((i) => i.severity === "error").length;
-    view.macros = macroReview(world);
-    for (const [collection, items] of Object.entries(world)) {
-      const count = hasOwn(WORLD_COLLECTIONS, collection) && isRecord(items) ? Object.keys(items).length : 0;
-      if (count > 0) view.counts[collection] = count;
-    }
-    if (view.errors > 0) view.blocked = `It has ${view.errors} error${view.errors === 1 ? "" : "s"}; fix ${view.errors === 1 ? "it" : "them"} in LumiRPEngine Studio first.`;
-    if (offer.mode === "revision" && offer.worldId !== undefined) {
-      const index = this.worldList.find((w) => w.id === offer.worldId);
-      view.target = { worldId: offer.worldId, name: index?.name ?? null };
-      if (!index) view.blocked ??= "The world it's a revision of isn't one of your worlds.";
-      else if (JSON.stringify(this.draft) !== JSON.stringify(this.world)) view.blocked ??= `Build has unsaved changes to “${index.name}”: commit or discard them first.`;
-      if (index && offer.baseRevision !== index.head) view.headMoved = { base: offer.baseRevision ?? null, head: index.head };
-    }
-    return { view, world };
-  }
-
-  /** LumiRPEngine Studio's offer as the backend serves it (`Dispatcher.studio`): reviewed on `offer`, installed only on `install`. */
-  private studio(reqId: string, message: Extract<FrontendToBackend, { type: "lre.studio" }>): void {
-    const offer = studioOfferFixture(this.options.studio ?? "none", this.view?.chatId ?? "chat-1");
-    if (!offer) {
-      if (message.op === "offer") return this.result(reqId, "lre.studio", { offer: null, message: "LumiRPEngine Studio has no world waiting for you." });
-      return this.error(reqId, "not_found", "LumiRPEngine Studio has no world waiting for you.");
-    }
-    const hash = hashJson(offer);
-    const { view, world } = this.reviewOffer(offer, hash);
-    if (message.op === "offer") return this.result(reqId, "lre.studio", { offer: view });
-    const refuse = (code: string, text: string, lint?: LintIssue[]): void => void setTimeout(() => this.emit({ lre: 1, type: "lre.error", reqId, code, message: text, ...(lint ? { lint } : {}) }), 30);
-    if (offer.offerId !== message.offerId || hash !== message.hash) return refuse("conflict", "LumiRPEngine Studio offers something else now; review it again.");
-    if (view.installed) return refuse("conflict", "This offer is already installed.");
-    if (view.blocked !== null || world === null) return refuse(view.errors > 0 ? "validation" : "conflict", view.blocked ?? "not an lre-world-v1 document", view.errors > 0 ? view.lint : undefined);
-    if (view.headMoved && message.acceptMovedHead !== true) return refuse("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
-    // The preview models one world, as `create` does: the installed one becomes it.
-    const index = offer.mode === "revision" ? this.worldList.find((w) => w.id === offer.worldId) : undefined;
-    const worldId = index?.id ?? `w-studio-${this.studioInstalled.size + 1}`;
-    this.world = compileMaps({ ...world, id: worldId });
-    this.draft = structuredClone(this.world);
-    const revision = hashJson(this.world).slice(0, 32);
-    if (index) {
-      index.head = revision;
-      index.revisions = [...index.revisions, revision];
-    } else this.worldList = [...this.worldList, { id: worldId, name: this.world.name, head: revision, loreBookId: null, revisions: [revision] }];
-    this.studioInstalled.set(offer.offerId, { worldId, revision });
-    this.result(reqId, "lre.studio", { installed: { offerId: offer.offerId, mode: offer.mode, worldId, name: this.world.name, revision, attachChatId: offer.attachChatId ?? null }, lint: macroReview(this.world) });
-    // A revision moves the head under no draft: the working copy takes the next version, and every Build is told after the reply.
-    if (index) {
-      this.draftVersion += 1;
-      setTimeout(() => this.emit({ lre: 1, type: "lre.draft.changed", worldId, version: this.draftVersion, stored: false, base: revision }), 40);
-    }
   }
 
   /**
@@ -491,6 +426,28 @@ export class MockBackend {
         return;
       case "lre.gm":
         return this.result(reqId, "lre.gm", { ...structuredClone(this.gm), routineRoles: chatRolesFixture(this.routines) });
+      case "lre.sections": {
+        // The real builder (`buildSections`) over the preview world as a chat starts it, people where
+        // the GM fixture has them, and each section's settings as This chat → Sections shows them.
+        const world = migrateWorld(structuredClone(this.world));
+        const state = initialState(world, "preview", REGISTRY);
+        for (const g of this.gm.entities) {
+          const e = state.entities[g.id];
+          if (e && g.place !== null) e.fields.place = g.place;
+        }
+        const rows = this.view?.controls?.sections ?? [];
+        // The rows This chat → Sections lists, each from the preview world when it has it, else the shipped default.
+        const own = new Map(sectionsOf(world).map((s) => [s.id, s]));
+        world.sections = Object.fromEntries(rows.flatMap((row) => {
+          const s = own.get(row.id) ?? DEFAULT_SECTIONS[row.id];
+          if (!s) return [];
+          const { enabled: _e, scope: _s, maxLines: _l, maxTokens: _t, include: _i, ...plain } = s;
+          return [[s.id, { ...plain, ...(row.chat ?? row.world) }]];
+        }));
+        const settings = settingsFixture();
+        const built = buildSections({ registry: REGISTRY, world, state, secrets: unrevealedSecrets(REGISTRY, world, state), budget: settings.modelUse.tokens.sections, mindsBudget: settings.minds.tokens, said: "", planned: { outcome: [], montage: [] }, outline: [], elapsed: null, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
+        return this.result(reqId, "lre.sections", { sections: built.sections.map((s) => ({ slot: s.slot, label: s.label, status: s.status, scope: s.feed.scope ?? "player", content: s.content, tokens: s.tokens, cut: s.cut, marked: s.marked, hints: s.hints })), budget: { sections: settings.modelUse.tokens.sections, used: built.used, minds: settings.minds.tokens } });
+      }
       case "lre.character": {
         // The real builder: Build's from the draft; GM's from the preview world as a chat starts it,
         // with each entity's place, holder and relations as the GM fixture has them now, so edits show.
@@ -520,6 +477,11 @@ export class MockBackend {
         this.result(reqId, "lre.edit", { pending: false, undo: chip });
         this.mutate((view) => {
           view.chips.push({ id: chip, kind: "fix", messageId: "m4", label: "GM edit", detail: lines.join(" · "), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+          // A section's settings for this chat show on its row and in the preview, as the backend's view has them.
+          for (const op of message.ops) {
+            const row = op.op === "feed" ? view.controls?.sections.find((r) => r.id === op.section) : undefined;
+            if (row && op.op === "feed") row.chat = op.to;
+          }
           view.journal.push({ kind: "fix", messageId: "m4", ref: { in: "post", seq, index: 0 }, text: lines.join(" · ") });
         }, 40);
         return;
@@ -527,6 +489,15 @@ export class MockBackend {
       case "lre.fix":
         this.result(reqId, "lre.fix", { pending: false });
         this.mutate((view) => {
+          // Show a hint: one more of the row's earned hints open, kept with its Undo, as the backend's would be.
+          if ("hint" in message) {
+            const log = view.panels["story.quests"];
+            const row = (isRecord(log) && Array.isArray(log.active) ? log.active : []).find((t) => isRecord(t) && t.id === message.hint);
+            if (!isRecord(row)) return;
+            row.opened = (typeof row.opened === "number" ? row.opened : 0) + 1;
+            view.chips.push({ id: `fix:m4:0:hint${String(row.opened)}`, kind: "fix", messageId: "m4", label: `Opened a hint: ${String(row.label)}`, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+            return;
+          }
           if (!view.hud) return;
           // The clock's ✎: the pill reads the date and time set, as the backend's would.
           if ("time" in message) {
@@ -854,8 +825,6 @@ export class MockBackend {
         step(0);
         return this.result(reqId, "lre.minds", { run: structuredClone(run) });
       }
-      case "lre.studio":
-        return this.studio(reqId, message);
       case "lre.preset": {
         // As the backend does: Add creates the missing guidance blocks (empty, switched off); every op answers with the card.
         if (message.op === "add") this.presetCard = { ...this.presetCard, blocks: this.presetCard.blocks.map((block) => (block.state === "missing" ? { ...block, state: "empty" } : block)) };

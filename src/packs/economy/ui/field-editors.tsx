@@ -20,7 +20,7 @@ import { ChoiceInput, DateInput, FieldFrame, lintAt, LintBadge, MinorMoneyInput,
 import { kindIs, TagListInput } from "../../../frontend/build/selector-editor";
 import { humanize } from "../../../frontend/format";
 import type { FieldEditorDef, FieldEditorProps, PlaceFieldDef, PlaceFieldEditorProps } from "../../../frontend/registry";
-import { LEVEL_LABEL } from "../../../frontend/settings/realism";
+import { LEVEL_LABEL } from "../../../shared/ids";
 import { MONTH_CHOICES, WEEKDAY_CHOICES, type Choice } from "./forms";
 import { PAY_METHODS } from "./pay-prefs";
 

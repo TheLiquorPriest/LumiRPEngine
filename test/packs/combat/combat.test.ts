@@ -339,14 +339,14 @@ describe("what the POV may see", () => {
     const hits = p.events.filter((e) => (e.type === "set" || e.type === "add") && e.entity === "goblin" && e.field === "hp");
     expect(hits.length).toBeGreaterThan(0);
     const player = playerLines(reg, world, after, POV, p.events, 40).filter((l) => l.startsWith("Goblin")).join("\n");
-    expect(player).toMatch(/Goblin(: (hurt|badly hurt)| takes damage)/);
+    expect(player).toMatch(/Goblin( is now (hurt|badly hurt)| takes damage)/);
     expect(player).not.toMatch(/\d/);
     expect(p.combat.join("\n")).toMatch(/Goblin takes damage \((hurt|badly hurt)\)\./);
     expect(p.combat.join("\n")).not.toContain("Goblin loses");
-    expect(authorLines(reg, world, after, hits, 8).join("\n")).toMatch(/Goblin: HP −?\d/);
+    expect(authorLines(reg, world, after, hits, 8).join("\n")).toMatch(/Goblin's HP (is now|went down by) \d/);
     // With numbers shown, the player gets them too.
     world.ruleset!.combat!.showHp = "exact";
-    expect(playerLines(reg, world, after, POV, hits, 8).join("\n")).toMatch(/Goblin: HP −?\d/);
+    expect(playerLines(reg, world, after, POV, hits, 8).join("\n")).toMatch(/Goblin's HP (is now|went down by) \d/);
   });
 });
 

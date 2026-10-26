@@ -15,7 +15,7 @@ import { bookTextHash } from "../../src/shared/lore";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { readCharacter } from "../../src/packs/minds/core/state";
-import { lint, newWorld } from "../../src/studio-api";
+import { lint, newWorld } from "../../src/cli/local-engine";
 import { Rig } from "../support/rig";
 
 const PEOPLE = ["danny_okafor", "priya_nair"] as const;

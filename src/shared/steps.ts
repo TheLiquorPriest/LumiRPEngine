@@ -136,11 +136,32 @@ export const STEP_VARS: Record<StepPurpose | "skip_plan", { phase: "before the r
   skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] },
 };
 
-/** The prose steps' built-in instructions, which a world template or the user's own prompt replaces; their answer format stays. */
+/**
+ * The prose steps' built-in instructions, which a world template or the user's own prompt replaces;
+ * their answer format stays. The brief and the outline reach the narrator, which must be able to
+ * write the reply from them without inferring anything: each asks for every detail the reply needs,
+ * from the facts given only (the facts hold nothing the player character doesn't know).
+ */
 export const PROSE_PROMPTS: Record<"brief" | "outline" | "choices", string> = {
-  brief: "You brief a roleplay narrator before their next reply. In two or three sentences, say what matters right now in {{world}}: where {{pov}} is, who is present, what the player just did and how it turned out, and anything pressing. Use only the facts given; invent nothing.",
-  outline: "You outline a roleplay narrator's next reply. Expand the engine's beats into two to four short beats, in order, consistent with the facts and the outcome. Don't decide anything the facts don't settle, and don't add events.",
-  choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts. Each under twelve words, first person, as the player would type it.",
+  brief: [
+    "You brief a roleplay narrator before their next reply in {{world}}, so they can write it without guessing at anything. From the facts given only, in one paragraph, say:",
+    "where and when the scene is (the place, the time of day) and what it is like now; who is present and what each of them is doing; what the player just did and exactly how it turned out, with the results, rolls and amounts as the Outcome gives them; anything that changed hands, moved or was spent, and between whom; how much time passes; and what is pressing or about to happen.",
+    "Name people and places as the facts do. State only what the facts establish: invent nothing, decide nothing they leave open, and never say what {{pov}} doesn't know.",
+  ].join("\n"),
+  outline: [
+    "You outline a roleplay narrator's next reply in {{world}}, beat by beat, so the narrator can write it without inferring anything. Expand the engine's beats into a complete outline, in order, consistent with the facts and the Outcome. Account for everything the reply must cover:",
+    "- every beat, in the order it happens;",
+    "- who does and says what, in substance (no dialogue lines);",
+    "- what is decided and why, as the Outcome states it;",
+    "- every result with its numbers: rolls, amounts, prices;",
+    "- each item that changes hands, from whom to whom;",
+    "- each place reached and each move, by name;",
+    "- how much time passes;",
+    "- what each person knows or doesn't. Where the facts leave something unknown to {{pov}}, or someone keeps a thing to themselves, add a beat saying it stays unsaid.",
+    "Write each beat as one full sentence that names its people and places (never a bare \"he\" or \"there\"). Decide nothing the facts don't settle and add no events of your own; point only at the sections the narrator has this turn.",
+  ].join("\n"),
+  choices:
+    "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts: each something the scene as written makes possible right now, with the people present and the things {{pov}} has. Each under twelve words, first person, as the player would type it, naming who or what it involves.",
 };
 
 /** The decision steps' built-in questions, which a world template or the user's own prompt replaces; the choices, facts or scale stay the engine's. */

@@ -15,12 +15,13 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { CommitmentKind, Fidelity, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
-import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
+import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, MINDS_SLOT, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
 import type { StepPurpose, WorldDoc } from "../shared/world";
 import { parseMoneyInput } from "../shared/money";
 import { calendarOf, clockOfStamp, formatClock, nextTimeOfDay } from "../engine/calendar";
+import { feedOf } from "../engine/feed";
 import { loreReadable } from "../engine/lore";
 import { pinsFor } from "../engine/lore-pins";
 import { own } from "../engine/pack-kit";
@@ -35,12 +36,13 @@ import { Working } from "../engine/working";
 import { capText } from "../packs/minds/core/edit";
 import { fidelityOf, pickMinds } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
+import { sectionsOf } from "./book";
 import type { HostMessage, HostPort } from "./host";
 import { pinReader, readPins } from "./lore-pins";
 import { consolidateContext, memoryContext, mindContext, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
 import type { SettingsStore } from "./settings-store";
-import type { Steps } from "./steps";
+import { NotNeeded, type Steps } from "./steps";
 import { renderTemplate } from "./turn-steps";
 
 /** What the minds need of the backend: the host (the chat's messages), the registry, the steps, the user's settings and preset. */
@@ -82,6 +84,11 @@ export interface RunMindsInput {
    * §5.1): each is kept, not asked again, so a Retry asks only the minds that failed.
    */
   kept?: ReadonlyMap<EntityId, MindEventData>;
+  /**
+   * A call that fails fails no step of its own (`DiagCall.spared`): the caller tells which minds
+   * didn't answer from `report`. The pre phase's start before the turn knows it will take them.
+   */
+  spared?: boolean;
 }
 
 export interface RunMindsResult {
@@ -337,7 +344,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const usage = { tokens: 0 };
     const failure = { reason: "" };
     const t0 = performance.now();
-    const raw = await deps.steps.helperJson("mind", prompt.text, mindContext(scope, report), config, userId, input.signal, { guidance, usage, failure });
+    const raw = await deps.steps.helperJson("mind", prompt.text, mindContext(scope, report), config, userId, input.signal, { guidance, usage, failure, spared: input.spared === true });
     const ms = Math.round(performance.now() - t0);
     const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
     const given = shownLore(report.pinned);
@@ -354,7 +361,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const plans = report.plans?.given ?? 0;
     const trace: MindCallTrace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...(given.length > 0 ? { pinned: given } : {}), ...(activated.length > 0 ? { activated } : {}), ...(routine > 0 ? { routine } : {}), ...(plans > 0 ? { plans } : {}), ...(report.history ? { history: report.history } : {}), ...(notes.length > 0 ? { notes } : {}) };
     const why = data !== null ? null : raw !== null ? "the answer said nothing: no thoughts, intent or depiction" : failure.reason !== "" ? failure.reason : "the call failed";
-    if (why !== null) deps.host.log("warn", `[LumiRPEngine] mind for ${who}: ${why}`, userId);
+    if (why !== null && !(input.signal.reason instanceof NotNeeded)) deps.host.log("warn", `[LumiRPEngine] mind for ${who}: ${why}`, userId);
     const entry: MindsRunEntry = {
       entity: who,
       name,
@@ -419,6 +426,9 @@ export interface PreMindsInput {
  * The pre phase (DESIGN §24.1): the round (every turn with minds on, and once with them off after
  * they were on), then, unless the turn is a timelapse, the minds the scene, the ladder and the
  * cadence call. A mind due but not called is recorded on the round with the level it was due at.
+ * While nothing would read them (§24.3: the chat's feed switches the Minds section off and no mind
+ * reads its last thoughts), only a GM's request is called; the rest are recorded as due. Their calls
+ * fail no step (`RunMindsInput.spared`): the run tells from `report` which minds didn't answer.
  */
 export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<RunMindsResult> {
   const settings = await deps.settings.get(input.userId);
@@ -430,7 +440,9 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
   w.apply(round);
   const ctx = deps.registry.context(input.world, w.state);
   const texts = { user: input.user, reply: input.reply };
-  const picks = pickMinds(ctx, fidelityOf(ctx, texts), texts, settings.minds);
+  const section = sectionsOf(input.world).find((s) => s.id === MINDS_SLOT);
+  const read = settings.minds.reads.thoughts.on || (section !== undefined && feedOf(section, input.state).enabled !== false);
+  const picks = pickMinds(ctx, fidelityOf(ctx, texts), texts, settings.minds).map((p) => (read || p.reason === "gm" ? p : { ...p, call: false }));
   const calls = picks.filter((p) => p.call);
   const passed = picks.filter((p) => !p.call);
   // The round keeps where each passed mind stood and the level it was due at, as a mind recorded now
@@ -446,7 +458,7 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
   }
   // Each thinks for their own refresh reason; the moment itself is the player's message.
   const moment: MindMoment = { kind: "turn", at: thinking.state.clock, reason: "", user: input.user, reply: input.reply };
-  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), phase: "pre" });
+  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), phase: "pre", spared: true });
   return { events: [opened, ...ran.events], traces: ran.traces, ...(ran.report ? { report: ran.report } : {}) };
 }
 
@@ -556,7 +568,8 @@ const CONSOLIDATIONS_PER_TURN = 2;
 /**
  * The post phase (DESIGN §24.4): who heard the turn and who the POV met in it (and what each saw
  * happen), then the `memory` step for each who heard it at a level the user chose, from what was
- * written, then `consolidate` for those whose notes overflow or fade, at most once per period each.
+ * written, and beside it `consolidate` for those whose notes overflow or fade, at most once per
+ * period each, while something reads what it folds.
  */
 export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise<RunMindsResult> {
   const { registry: reg } = deps;
@@ -583,57 +596,88 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   const history = reads.history.on && remembering.length > 0 ? chatBefore(messages, true) : undefined;
   // The lore pinned to the memory step (DESIGN §24.5), its only lore, read once for everyone it remembers for.
   const memoryPins = remembering.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["memory"]), userId) : [];
-  const remembered = await Promise.all(
-    remembering.map(async (id) => {
-      const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
-      const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, reads, moment, pinned: memoryPins, ...(history ? { history } : {}) };
-      const usage = { tokens: 0 };
-      const t0 = performance.now();
-      const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
-      // Their listeners: who heard the turn with them, and, unless the POV left them, whoever it met.
-      const listeners = left.includes(id) ? said.who : [...said.who, ...(met?.who ?? [])];
-      const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners);
-      if (traced(reg, world, state, id)) traces.push({ purpose: "memory", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
-      return data;
+  const remembered = new Map(
+    remembering.map((id) => {
+      const task = (async (): Promise<MemoryEventData | null> => {
+        const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
+        const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, reads, moment, pinned: memoryPins, ...(history ? { history } : {}) };
+        const usage = { tokens: 0 };
+        const t0 = performance.now();
+        const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
+        // Their listeners: who heard the turn with them, and, unless the POV left them, whoever it met.
+        const listeners = left.includes(id) ? said.who : [...said.who, ...(met?.who ?? [])];
+        const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners);
+        if (traced(reg, world, state, id)) traces.push({ purpose: "memory", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+        return data;
+      })();
+      return [id, task] as const;
     }),
   );
-  for (const data of remembered) {
+  // Consolidation, the minds' upkeep: notes past the number kept, and the faded, folded into the
+  // summary. It runs only while something reads what it folds, a memory call (the memory step on for
+  // some level) or a mind (its summary or notes), and beside the memories, on the notes and summary
+  // each had before this turn. Someone whose memory rewrites their summary has theirs asked again
+  // once it has, so it folds into that summary.
+  const consolidateConfig = memory.consolidate.enabled ? mindsStepConfig(settings.modelUse, "consolidate") : null;
+  const folding = consolidateConfig !== null && ((memoryConfig !== null && settings.minds.memoryLevels.length > 0) || reads.summary.on || reads.memory.on);
+  const now = w.state.clock;
+  const foldOf = (at: Readonly<WorldState>, id: EntityId): MindNote[] => {
+    const c = readCharacter(at, id);
+    const last = c.consolidated ?? null;
+    if (last !== null && now - last < memory.consolidate.periodDays * 1440) return [];
+    const ranked = [...c.notes].sort((a, b) => salienceNow(a, now, memory) - salienceNow(b, now, memory) || a.at - b.at);
+    const surplus = Math.max(0, c.notes.length - memory.notes.keep);
+    return ranked.filter((n, i) => i < surplus || faded(n, now, memory));
+  };
+  const due = folding
+    ? Object.keys(readSlice(w.state).chars)
+        .sort()
+        .flatMap((id) => {
+          const fold = foldOf(w.state, id);
+          return fold.length > 0 ? [{ id, fold }] : [];
+        })
+        .slice(0, CONSOLIDATIONS_PER_TURN)
+    : [];
+  const consolidatePins = due.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["consolidate"]), userId) : [];
+  // A consolidation reads the same recent chat as the memories, read now if no memory read the chat.
+  const before = reads.history.on && due.length > 0 ? (history ?? chatBefore(await chatMessages(deps, input.chatId, userId), true)) : undefined;
+  const consolidate = async (id: EntityId, fold: readonly MindNote[], at: Readonly<WorldState>, signal: AbortSignal): Promise<{ event: LedgerEvent | null; trace: MindCallTrace | null }> => {
+    const prompt = mindPrompt("consolidate", world, settings.minds, varsFor(world, at, id));
+    const asked = consolidateContext({ reg, state: at, world, who: id, reads, pinned: consolidatePins, hideJson: settings.hideJsonBlocks, ...(before ? { history: before } : {}) }, fold);
+    const usage = { tokens: 0 };
+    const t0 = performance.now();
+    const raw = signal.aborted ? null : await deps.steps.helperJson("consolidate", prompt.text, asked, consolidateConfig, userId, signal, { guidance: input.guidance?.consolidate ?? deps.presets.last(userId).guidance.consolidate ?? "", usage });
+    const summary = isRecord(raw) ? capText(str(raw.summary), MIND_TEXT_CAPS.summary) : "";
+    const trace: MindCallTrace | null = traced(reg, world, state, id) ? { purpose: "consolidate", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source } : null;
+    return { event: summary === "" ? null : { type: MINDS_EVENTS.consolidated, data: { entity: id, at: now, notes: fold.map((n) => n.id), summary } }, trace };
+  };
+  const consolidations = due.map(({ id, fold }) => {
+    const stop = new AbortController();
+    const asked = consolidate(id, fold, w.state, AbortSignal.any([input.signal, stop.signal]));
+    const rewritten = (remembered.get(id) ?? Promise.resolve(null)).then((data) => {
+      if (!data?.summary) return false;
+      stop.abort(new NotNeeded("their memory rewrote their summary this turn, so the notes fold into that"));
+      return true;
+    });
+    return { id, asked, rewritten };
+  });
+  for (const data of await Promise.all(remembered.values())) {
     if (!data) continue;
     // Applied in turn, so a shared plan the first memory recorded is already the others' when theirs records.
     const event: LedgerEvent = { type: MINDS_EVENTS.memory, data: { ...data, plans: unheldPlans(w.state, data.entity, data.plans) } as unknown as JsonObject };
     if (!w.apply(event)) events.push(event);
   }
-  // Consolidation: notes past the number kept, and the faded, folded into the summary.
-  const consolidateConfig = memory.consolidate.enabled ? mindsStepConfig(settings.modelUse, "consolidate") : null;
-  if (consolidateConfig) {
-    const now = w.state.clock;
-    const due = Object.keys(readSlice(w.state).chars)
-      .sort()
-      .flatMap((id) => {
-        const c = readCharacter(w.state, id);
-        const last = c.consolidated ?? null;
-        if (last !== null && now - last < memory.consolidate.periodDays * 1440) return [];
-        const ranked = [...c.notes].sort((a, b) => salienceNow(a, now, memory) - salienceNow(b, now, memory) || a.at - b.at);
-        const surplus = Math.max(0, c.notes.length - memory.notes.keep);
-        const fold = ranked.filter((n, i) => i < surplus || faded(n, now, memory));
-        return fold.length > 0 ? [{ id, fold }] : [];
-      })
-      .slice(0, CONSOLIDATIONS_PER_TURN);
-    const consolidatePins = due.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["consolidate"]), userId) : [];
-    // A consolidation reads the same recent chat as the memories, read now if no memory read the chat.
-    const before = reads.history.on && due.length > 0 ? (history ?? chatBefore(await chatMessages(deps, input.chatId, userId), true)) : undefined;
-    const folded = await Promise.all(
-      due.map(async ({ id, fold }) => {
-        const prompt = mindPrompt("consolidate", world, settings.minds, varsFor(world, w.state, id));
-        const usage = { tokens: 0 };
-        const t0 = performance.now();
-        const raw = input.signal.aborted ? null : await deps.steps.helperJson("consolidate", prompt.text, consolidateContext({ reg, state: w.state, world, who: id, reads, pinned: consolidatePins, hideJson: settings.hideJsonBlocks, ...(before ? { history: before } : {}) }, fold), consolidateConfig, userId, input.signal, { guidance: input.guidance?.consolidate ?? deps.presets.last(userId).guidance.consolidate ?? "", usage });
-        const summary = isRecord(raw) ? capText(str(raw.summary), MIND_TEXT_CAPS.summary) : "";
-        if (traced(reg, world, state, id)) traces.push({ purpose: "consolidate", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
-        return summary === "" ? null : ({ type: MINDS_EVENTS.consolidated, data: { entity: id, at: now, notes: fold.map((n) => n.id), summary } } satisfies LedgerEvent);
-      }),
-    );
-    for (const event of folded) if (event && !w.apply(event)) events.push(event);
+  const folded = await Promise.all(
+    consolidations.map(async ({ id, asked, rewritten }) => {
+      if (!(await rewritten)) return asked;
+      await asked;
+      const fold = foldOf(w.state, id);
+      return fold.length > 0 ? consolidate(id, fold, w.state, input.signal) : null;
+    }),
+  );
+  for (const done of folded) {
+    if (done?.trace) traces.push(done.trace);
+    if (done?.event && !w.apply(done.event)) events.push(done.event);
   }
   return { events, traces };
 }

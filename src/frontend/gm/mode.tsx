@@ -9,7 +9,7 @@
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { GmSection } from "../app";
 import { useApp, useUi } from "../app";
-import { BottomNav, Button, Empty } from "../components";
+import { BottomNav, Button, Empty, NoView } from "../components";
 import type { IconName } from "../icons";
 import { useSelect } from "../store";
 import { ThisChat } from "./chat";
@@ -53,6 +53,7 @@ export function GmMode() {
     </Button>
   );
   if (sync.chatId === null) return <Empty icon="eye">Open a chat to see what's behind the curtain.</Empty>;
+  if (!view && sync.failed !== null) return <NoView failed={sync.failed} />;
   if (!view && sync.status !== "closed") return <Empty icon="hourglass">Connecting to the engine…</Empty>;
   if (!view || view.status === "not_world") {
     return (

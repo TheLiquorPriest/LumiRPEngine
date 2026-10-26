@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import type { Answers } from "../../src/engine/decide";
 import type { DecideRequest, QuietRequest } from "../../src/backend/host";
 import type { JsonObject } from "../../src/shared/json";
+import { BRIEF_CHARS } from "../../src/backend/turn-steps";
 import { Rig } from "../support/rig";
 
 const TRUTH = "the ferryman sank the old boat";
@@ -111,13 +112,15 @@ describe("model calls per preset (DESIGN §5.3)", () => {
   });
 
   test("a brief is checked whole before it's cut: a secret across the cut withholds it, and a long clean one still runs, cut", async () => {
-    const pad = "Sam stands at the window of the little house, watching the gulls wheel over the harbor. ".repeat(6);
-    // The secret runs across the brief's 600th character: a cut there would keep only its start.
-    const leaky = `${pad}Down at the far end of the pier people still whisper that ${TRUTH}, though nobody will say it aloud.`;
-    expect(leaky.indexOf(TRUTH)).toBeLessThan(600);
-    expect(leaky.indexOf(TRUTH) + TRUTH.length).toBeGreaterThan(600);
-    const clean = `${pad}The ferry is late again, and the queue at the ramp grows longer by the minute.`;
-    expect(clean.length).toBeGreaterThan(600);
+    const unit = "Sam stands at the window of the little house, watching the gulls wheel over the harbor. ";
+    const lead = "Down at the far end of the pier people still whisper that ";
+    // The secret runs across the brief's cut: a cut there would keep only its start.
+    const pad = unit.repeat(Math.ceil(BRIEF_CHARS / unit.length)).slice(0, BRIEF_CHARS - lead.length - Math.floor(TRUTH.length / 2));
+    const leaky = `${pad}${lead}${TRUTH}, though nobody will say it aloud.`;
+    expect(leaky.indexOf(TRUTH)).toBeLessThan(BRIEF_CHARS);
+    expect(leaky.indexOf(TRUTH) + TRUTH.length).toBeGreaterThan(BRIEF_CHARS);
+    const clean = `${unit.repeat(Math.ceil(BRIEF_CHARS / unit.length) + 1)}The ferry is late again, and the queue at the ramp grows longer by the minute.`;
+    expect(clean.indexOf("by the minute")).toBeGreaterThan(BRIEF_CHARS);
     const outlineFor = async (brief: string): Promise<string> => {
       const { rig } = await turnCalls("full", undefined, (req) => (req.messages[0]?.content.includes("You brief a roleplay narrator") ? JSON.stringify({ text: brief }) : quiet(req)));
       return rig.host.section("Outline");
@@ -126,7 +129,7 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     expect(withheld).not.toContain("Brief:");
     expect(withheld).not.toContain("ferryman");
     const kept = await outlineFor(clean);
-    expect(kept).toContain(`Brief: ${pad.trim()}`);
+    expect(kept).toContain(`Brief: ${unit.trim()}`);
     expect(kept).not.toContain("by the minute");
   });
 

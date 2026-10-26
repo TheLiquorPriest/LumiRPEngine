@@ -89,7 +89,7 @@ Taxonomy and life states:
 
 Core: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.
 
-Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`.
+Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`.
 
 ### Relation types
 
@@ -709,6 +709,7 @@ Extends `thing`.
 | `category` | Category | text |  |  |  |  |  |
 | `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto, ±25 a turn; bands: broken, worn, good, like new |
 | `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |
+| `fixed` | Fixed in place (can't be picked up) | bool |  |  |  |  | locked |
 | `from_kit` | From kit | ref |  |  |  |  | locked |
 | `notable` | Notable | bool |  |  |  |  | live from gear 1 |
 | `overdue` | Overdue | bool |  |  |  |  | locked |
@@ -762,6 +763,7 @@ Extends `container`.
 - `kit_complete(kit)`
 - `kit_present(kit)`
 - `lent_out(thing)`
+- `movable(thing)`
 
 ### Actions
 
@@ -1085,7 +1087,7 @@ Panels: `story.quests`. Slots it writes: `quest`.
 
 ### Lint codes
 
-`story.answer_track`, `story.leaky_id`, `story.leaky_label`.
+`story.answer_track`, `story.leaky_id`, `story.leaky_label`, `story.unset_flag`.
 
 ## Vehicles pack (`vehicles`)
 
@@ -1118,15 +1120,15 @@ Extends `container`.
 
 ### Formula functions
 
-- `drive_minutes(vehicle, to)`
-- `fuel_ok(vehicle, to)`
+- `drive_minutes(vehicle, to, from)`
+- `fuel_ok(vehicle, to, from)`
 - `fuel_pct(vehicle)`
 
 ### Actions
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `drive` | Drive | Drive, ride or sail a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to)` | drive to, drive over to, take the truck, take the car, sail to, ride to |
+| `drive` | Drive | Drive, ride or sail a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to |
 | `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |
 | `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |
 | `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |

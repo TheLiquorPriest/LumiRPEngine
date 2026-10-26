@@ -13,10 +13,11 @@ import type { EntityId } from "../shared/ids";
 import { loreIsSecret } from "../shared/lore";
 import { spawnTierOf } from "../shared/tiers";
 import { spawnCapOf, type EffectSpec } from "../shared/world";
-import { povMayKnow, trackShown } from "./player-events";
+import { povMayKnow } from "./player-events";
 import type { ProposalChannelDef, ReadContext, Rejection } from "./registry";
 import { kindIs, placeOfEntity } from "./scope";
-import { canSeePlace, loreGateReader } from "./visibility";
+import { canSeePlace, loreGateReader, trackShown } from "./visibility";
+import { placeKey } from "./place-names";
 import { labelOf, own } from "./pack-kit";
 
 /** The `spawned` field value that marks a character a reply introduced. */
@@ -52,10 +53,10 @@ function placeKept(ctx: ReadContext, id: string): boolean {
   return !isPublic(v) && v !== "known_by" && v !== "discoverable" && !canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
 }
 
-/** A place a reply names by its name (as the POV hears it, the id is never shown): the one place with that name the POV may hear of. */
+/** A place a reply names by its name (as the POV hears it, the id is never shown; compared as `placeKey` compares names): the one place with that name the POV may hear of. */
 function placeNamed(ctx: ReadContext, fact: string): string | null {
-  const lower = fact.toLowerCase();
-  const ids = Object.keys(ctx.world.places).filter((id) => own(ctx.world.places, id)?.name.trim().toLowerCase() === lower && !placeKept(ctx, id));
+  const key = placeKey(fact);
+  const ids = key === "" ? [] : Object.keys(ctx.world.places).filter((id) => placeKey(own(ctx.world.places, id)?.name ?? "") === key && !placeKept(ctx, id));
   return ids.length === 1 ? (ids[0] ?? null) : null;
 }
 

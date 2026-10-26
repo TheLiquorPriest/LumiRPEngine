@@ -102,3 +102,21 @@ export function claimedThings(gm: Pick<GmView, "entities" | "places">): { entity
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((entity) => ({ entity, where: entity.holder !== null ? `held by ${nameOf(gm, entity.holder)}` : entity.place !== null ? `at ${nameOf(gm, entity.place)}` : "nowhere" }));
 }
+
+/**
+ * What "Put inside" offers for `entity` (DESIGN §7 containment), as the engine decides it: what holds
+ * things (a person, a vehicle, a container), and only vehicles for a person or a vehicle; nothing for
+ * a part, a fixed thing or what isn't a thing (a bill, a job). Each says where it is, so two
+ * "Wallet"s read apart ("Wallet (on Marcus Delgado)").
+ */
+export function holdersFor(gm: Pick<GmView, "entities" | "places">, entity: Pick<GmEntity, "id" | "goes">): { id: string; label: string }[] {
+  if (entity.goes === "nowhere") return [];
+  return gm.entities
+    .filter((e) => e.id !== entity.id && !e.gone && e.holds !== undefined && (entity.goes !== "vehicle" || e.holds === "vehicle"))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+    .map((e) => {
+      const holder = e.holder !== null ? gm.entities.find((h) => h.id === e.holder) : undefined;
+      const where = holder ? ` (${holder.person ? "on" : "in"} ${holder.name})` : e.place !== null ? ` (at ${nameOf(gm, e.place)})` : "";
+      return { id: e.id, label: `${e.name}${where}` };
+    });
+}

@@ -70,7 +70,7 @@ describe("the Vehicles section", () => {
       w.entities.skiff = vehicle("skiff", "Skiff", { owner: "you", place: "boathouse" });
     });
     expect(out.filter((l) => /^(ATV|Skiff)/.test(l))).toEqual([]);
-    const elsewhere = out.filter((l) => l.startsWith("Elsewhere:"));
+    const elsewhere = out.filter((l) => l.includes("Willow Ranch"));
     expect(elsewhere).toHaveLength(1);
     expect(elsewhere[0]).toContain("4");
     expect(elsewhere[0]).toContain("3 at Willow Ranch");

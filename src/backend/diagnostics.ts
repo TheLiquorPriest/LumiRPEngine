@@ -35,6 +35,8 @@ interface OpenStep {
   start: number;
   calls: DiagCall[];
   label: string;
+  /** The purposes of the calls it takes wherever it sits among the steps under way (a side step's, such as the minds' beside the read); absent: the calls of no other step. */
+  purposes?: ReadonlySet<string>;
 }
 
 interface Turn {
@@ -210,10 +212,12 @@ export class Diagnostics {
   /**
    * Times `fn` as a step: ok, the verdict `judge` gives its value, or failed with what it threw
    * (rethrown). A step whose last model call failed, was cut off or came back empty failed, whatever
-   * it returned: that is how a step that falls back quietly shows.
+   * it returned: that is how a step that falls back quietly shows. With `purposes`, the calls of those
+   * purposes are this step's even while another step runs inside or beside it (one whose work runs
+   * side by side with its parent's), and no other call is.
    */
-  async step<T>(at: DiagAt, phase: DiagPhase, step: string, fn: () => Promise<T>, judge?: (value: T) => DiagVerdict): Promise<T> {
-    const open: OpenStep = { at, phase, step, start: this.now(), calls: [], label: STEP_LABEL[step] ?? STEP_LABEL[phase] ?? "Working…" };
+  async step<T>(at: DiagAt, phase: DiagPhase, step: string, fn: () => Promise<T>, judge?: (value: T) => DiagVerdict, purposes?: readonly string[]): Promise<T> {
+    const open: OpenStep = { at, phase, step, start: this.now(), calls: [], label: STEP_LABEL[step] ?? STEP_LABEL[phase] ?? "Working…", ...(purposes ? { purposes: new Set(purposes) } : {}) };
     const stack = this.open.get(at.userId) ?? [];
     stack.push(open);
     this.open.set(at.userId, stack);
@@ -284,13 +288,14 @@ export class Diagnostics {
     this.publishUser(userId);
   }
 
-  /** One model call: it joins the user's innermost step under way, or stands alone. */
+  /** One model call: it joins the user's innermost step under way that takes its purpose, else the innermost that takes any, or stands alone. */
   call(userId: UserId, call: DiagCall): void {
     const list = this.inflight.get(userId);
     const i = list?.lastIndexOf(call.purpose) ?? -1;
     if (list && i >= 0) list.splice(i, 1);
     if (list?.length === 0) this.inflight.delete(userId);
-    const open = this.open.get(userId)?.at(-1);
+    const stack = this.open.get(userId) ?? [];
+    const open = stack.findLast((s) => s.purposes?.has(call.purpose) === true) ?? stack.findLast((s) => s.purposes === undefined);
     if (open) {
       open.calls.push(call);
       this.publishUser(userId);

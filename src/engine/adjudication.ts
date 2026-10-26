@@ -6,6 +6,9 @@
 //   policy     the chat's `adjudicate` marker, else the world ruleset's, else Crunchy (every check rolls)
 //   success    the check's `pass` outcomes, else `success` and every band listed after it; a check
 //              that names none has no success to grant, so it rolls whenever its action runs
+//   chance     the count of the dice's equally likely results that succeed, over all of them
+//              (`checkCounts`), held as that exact fraction against a line, which is the decimal
+//              it is written as: 19 faces of a d20 are exactly a 95% line, never a hair below it
 //   order      a refused retry, then too hard (impossible), then a sure thing (trivial), then the
 //              timing (every, risky, marked, never), then the authority (the dice or the story)
 //   unrolled   passes with `success` (the action's or the check's), else the check's `auto`, else its
@@ -14,14 +17,15 @@
 //   judgement  `judge`'s rating shifts a rolled check; under narrative authority its outcome odds
 //              are sampled with the turn's seed, and without them (or for an NPC) the dice decide
 
-import { defaultAdjudication, readAdjudication } from "../shared/adjudication";
+import { ADJUDICATION_PRESET_IDS, ADJUDICATION_PRESET_LABEL, defaultAdjudication, presetAdjudication, readAdjudication } from "../shared/adjudication";
 import { hashJson, hashParts } from "../shared/hash";
 import type { EntityId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
 import type { PaletteOption } from "../shared/state-view";
-import type { ActionDef, AdjudicationDef, CheckAuthority, CheckDef, RetryRule, WorldDoc } from "../shared/world";
-import { bandOutcome, checkBands, NO_BAND, type CheckReading, type CheckShift, type ReadyCheck } from "./checks";
+import type { ActionDef, AdjudicationDef, AdjudicationPresetId, CheckAuthority, CheckDef, RetryRule, WorldDoc } from "../shared/world";
+import { bandOutcome, checkBands, NO_BAND, type CheckReading, type CheckShift, type OutcomeCounts, type ReadyCheck } from "./checks";
+import { share } from "./dice";
 import { readEngineSlice, type TryRecord } from "./engine-pack";
 import type { Value } from "./expr";
 import { optionalQuery, own } from "./pack-kit";
@@ -57,8 +61,10 @@ export interface Verdict {
   why: NoRoll | null;
   /** The outcome without a roll; null when it rolls, or the story decides it. */
   outcome: string | null;
-  /** The check's exact success chance before any approach; null when it names no success. */
+  /** The check's exact success chance before any approach, rounded once; null when it names no success. */
   chance: number | null;
+  /** Whether that chance is below the policy's `riskyAt`, read exactly; null when it names no success. */
+  risky: boolean | null;
   /** The outcomes that count as a success. */
   pass: string[];
   /** The earlier failure a refused retry takes. */
@@ -115,24 +121,24 @@ export function oddsSignature(ready: ReadyCheck): string {
   return `${ready.notation}|${ready.modifier}|${ready.dc ?? ""}`;
 }
 
-/** The highest-odds outcome among `among`, the first on a tie; `none` is never picked. */
-function mostLikely(odds: Readonly<Record<string, number>>, among: readonly string[]): string | null {
+/** The outcome with the most results among `among`, the first on a tie; `none` is never picked. */
+function mostLikely(counts: Readonly<Record<string, bigint>>, among: readonly string[]): string | null {
   let best: string | null = null;
-  for (const o of among) if (o !== NO_BAND && (best === null || (odds[o] ?? 0) > (odds[best] ?? 0))) best = o;
+  for (const o of among) if (o !== NO_BAND && (best === null || (own(counts, o) ?? 0n) > (own(counts, best) ?? 0n))) best = o;
   return best;
 }
 
 /** The outcome a check passes with when it isn't rolled: `success` (the action's or the check's), else the check's `auto`, else its most likely passing band. */
-export function passOutcome(action: ActionDef, ready: ReadyCheck, odds: Readonly<Record<string, number>>, pass: readonly string[]): string {
+export function passOutcome(action: ActionDef, ready: ReadyCheck, counted: OutcomeCounts, pass: readonly string[]): string {
   if (own(action.outcomes, "success") || ready.bands.some((b) => b.outcome === "success")) return "success";
   if (typeof ready.check.auto === "string" && ready.check.auto !== "") return ready.check.auto;
-  return mostLikely(odds, pass) ?? NO_BAND;
+  return mostLikely(counted.counts, pass) ?? NO_BAND;
 }
 
 /** The outcome a check too hard to try fails with: `failure` (the action's or the check's), else its most likely failing band. */
-function failOutcome(action: ActionDef, ready: ReadyCheck, odds: Readonly<Record<string, number>>, pass: readonly string[]): string {
+function failOutcome(action: ActionDef, ready: ReadyCheck, counted: OutcomeCounts, pass: readonly string[]): string {
   if (own(action.outcomes, "failure") || ready.bands.some((b) => b.outcome === "failure")) return "failure";
-  return mostLikely(odds, Object.keys(odds).filter((o) => !pass.includes(o))) ?? NO_BAND;
+  return mostLikely(counted.counts, Object.keys(counted.counts).filter((o) => !pass.includes(o))) ?? NO_BAND;
 }
 
 /**
@@ -188,25 +194,46 @@ export interface VerdictInput {
   params: Readonly<Record<string, Value>>;
   /** The check as it would roll, before any approach. */
   ready: ReadyCheck;
-  odds: Readonly<Record<string, number>>;
+  /** Its outcomes counted exactly (`checkCounts`). */
+  counts: OutcomeCounts;
+}
+
+/**
+ * How `made` of `outcomes` results stand against a policy's line, exactly: −1 below it, 0 at it,
+ * 1 above. The line is the decimal it is written as (0.95 is 95/100, not the nearest binary
+ * fraction), so a chance of exactly that much is at it, as the percentages the Actions sheet shows
+ * say. Lines are finite: the policy's reader keeps them from 0 to 1.
+ */
+function againstLine(made: bigint, outcomes: bigint, line: number): -1 | 0 | 1 {
+  // The shortest decimal that reads back as `line` (what `String` writes): its digits over a power of ten.
+  const [mantissa = "0", exponent = "0"] = String(Math.abs(line)).split("e");
+  const [whole = "0", fraction = ""] = mantissa.split(".");
+  const scale = Number(exponent) - fraction.length;
+  const digits = BigInt(whole + fraction) * (line < 0 ? -1n : 1n);
+  const left = scale < 0 ? made * 10n ** BigInt(-scale) : made;
+  const right = (scale > 0 ? digits * 10n ** BigInt(scale) : digits) * outcomes;
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /** What the policy makes of a check before anything is rolled or judged (the palette shows it as is). */
 export function verdictOf(policy: AdjudicationDef, input: VerdictInput): Verdict {
-  const { registry, world, state, action, actor, ready, odds } = input;
+  const { registry, world, state, action, actor, ready, counts } = input;
   const pass = passOutcomes(ready.check, ready.bands);
-  const chance = pass.length > 0 ? pass.reduce((sum, o) => sum + (odds[o] ?? 0), 0) : null;
-  const unrolled = (why: NoRoll, outcome: string | null, prior: TryRecord | null = null): Verdict => ({ roll: false, why, outcome, chance, pass, prior });
-  if (policy.retry !== "free" && pass.length > 0) {
+  const named = pass.length > 0;
+  const made = pass.reduce((sum, o) => sum + (own(counts.counts, o) ?? 0n), 0n);
+  const chance = named ? share(made, counts.outcomes) : null;
+  const risky = named ? againstLine(made, counts.outcomes, policy.riskyAt) < 0 : null;
+  const unrolled = (why: NoRoll, outcome: string | null, prior: TryRecord | null = null): Verdict => ({ roll: false, why, outcome, chance, risky, pass, prior });
+  if (policy.retry !== "free" && named) {
     const prior = own(readEngineSlice(state).tries, tryKey(actor, action.id, input.params));
     if (prior?.failed && !changedSince(policy, registry, world, state, actor, ready, prior)) return unrolled("retry", prior.outcome, prior);
   }
-  if (chance !== null && policy.impossibleAt !== null && chance <= policy.impossibleAt) return unrolled("impossible", failOutcome(action, ready, odds, pass));
-  if (chance !== null && policy.trivialAt !== null && chance >= policy.trivialAt) return unrolled("trivial", passOutcome(action, ready, odds, pass));
-  const asked = pass.length === 0 || policy.checks === "every" || (policy.checks === "risky" && (chance === null || chance < policy.riskyAt)) || (policy.checks === "marked" && markedFor(registry, world, state, action, actor));
-  if (!asked) return unrolled(policy.checks === "never" ? "never" : policy.checks === "risky" ? "safe" : "unmarked", passOutcome(action, ready, odds, pass));
+  if (named && policy.impossibleAt !== null && againstLine(made, counts.outcomes, policy.impossibleAt) <= 0) return unrolled("impossible", failOutcome(action, ready, counts, pass));
+  if (named && policy.trivialAt !== null && againstLine(made, counts.outcomes, policy.trivialAt) >= 0) return unrolled("trivial", passOutcome(action, ready, counts, pass));
+  const asked = !named || policy.checks === "every" || (policy.checks === "risky" && risky !== false) || (policy.checks === "marked" && markedFor(registry, world, state, action, actor));
+  if (!asked) return unrolled(policy.checks === "never" ? "never" : policy.checks === "risky" ? "safe" : "unmarked", passOutcome(action, ready, counts, pass));
   if (policy.authority === "narrative") return unrolled("story", null);
-  return { roll: true, why: null, outcome: null, chance, pass, prior: null };
+  return { roll: true, why: null, outcome: null, chance, risky, pass, prior: null };
 }
 
 /** Whether the policy needs the `judge` step: a rolled check the approach may shift, or one the story decides. */
@@ -262,9 +289,10 @@ export function judgedOutcome(judgement: Judgement | null, choices: readonly str
 }
 
 /**
- * Lint for the ruleset's policy (DESIGN §13): a preset that isn't one, values a custom policy can't
- * hold (each reads as the value it plays with), thresholds that leave no room to roll, `marked`
- * with nothing marked, and checks whose success the policy can't tell.
+ * Lint for the ruleset's policy (DESIGN §13): a preset that isn't one; a value the policy can't hold
+ * (each reads as the value it plays with); a named preset whose values differ from it, which plays
+ * as Custom with them; thresholds that leave no room to roll; `marked` with nothing marked; and
+ * checks whose success the policy can't tell.
  */
 export function lintAdjudication(world: WorldDoc): LintIssue[] {
   const issues: LintIssue[] = [];
@@ -274,15 +302,21 @@ export function lintAdjudication(world: WorldDoc): LintIssue[] {
   if (!isRecord(raw)) return [{ severity: "error", path: at, code: "adjudication", message: "How checks are decided must be an object with a preset." }];
   const policy = readAdjudication(raw);
   if (!policy) return [{ severity: "error", path: `${at}.preset`, code: "adjudication", message: `"${String(raw.preset)}" isn't a preset: use narrative, balanced, crunchy or custom.` }];
-  if (policy.preset === "custom") {
-    const description = isRecord(raw.description) ? raw.description : {};
-    const read: [string, unknown, unknown][] = [
-      ...(["checks", "riskyAt", "trivialAt", "impossibleAt", "authority", "closeBy", "retry", "retryAfter"] as const).map((k): [string, unknown, unknown] => [k, raw[k], policy[k]]),
-      ...(["weight", "max", "advantageAt"] as const).map((k): [string, unknown, unknown] => [`description.${k}`, description[k], policy.description[k]]),
-    ];
-    for (const [key, given, plays] of read) {
-      if (given !== undefined && given !== plays) issues.push({ severity: "warning", path: `${at}.${key}`, code: "adjudication_value", message: `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(plays)}.` });
-    }
+  const values = ["checks", "riskyAt", "trivialAt", "impossibleAt", "authority", "closeBy", "retry", "retryAfter"] as const;
+  const described = ["weight", "max", "advantageAt"] as const;
+  const description = isRecord(raw.description) ? raw.description : {};
+  const read: [string, unknown, unknown][] = [...values.map((k): [string, unknown, unknown] => [k, raw[k], policy[k]]), ...described.map((k): [string, unknown, unknown] => [`description.${k}`, description[k], policy.description[k]])];
+  for (const [key, given, plays] of read) {
+    if (given !== undefined && given !== plays) issues.push({ severity: "warning", path: `${at}.${key}`, code: "adjudication_value", message: `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(plays)}.` });
+  }
+  // A preset named over values of its own: the values apply, so the name can't (DESIGN §11).
+  const named = ADJUDICATION_PRESET_IDS.find((p): p is Exclude<AdjudicationPresetId, "custom"> => p === raw.preset && p !== "custom");
+  if (named && policy.preset === "custom") {
+    const preset = presetAdjudication(named);
+    const changed = [...values.filter((k) => policy[k] !== preset[k]), ...described.filter((k) => policy.description[k] !== preset.description[k]).map((k) => `description.${k}`)];
+    const listed = changed.length > 1 ? `${changed.slice(0, -1).join(", ")} and ${changed.at(-1) ?? ""}` : (changed[0] ?? "");
+    const label = ADJUDICATION_PRESET_LABEL[named];
+    issues.push({ severity: "warning", path: `${at}.preset`, code: "adjudication_preset", message: `This names the ${label} preset but sets ${listed} its own way, so it plays as Custom with them. Name it custom to say so, or drop them to play ${label}.` });
   }
   if (policy.trivialAt !== null && policy.impossibleAt !== null && policy.trivialAt <= policy.impossibleAt) {
     issues.push({ severity: "error", path: `${at}.trivialAt`, code: "adjudication", message: "A sure thing must start above too hard to try, or no check would ever roll." });

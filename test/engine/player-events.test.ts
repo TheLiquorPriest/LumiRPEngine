@@ -32,7 +32,7 @@ describe("player-facing event lines", () => {
     expect(line(world, state, move)).toBeNull();
     state.entities.you!.relations.push({ type: "knows", to: "maya" });
     expect(line(world, state, move)).toBeNull();
-    expect(line(world, state, { type: "set", entity: "you", field: "place", value: "cafe" })).toBe("You → Daybreak Café");
+    expect(line(world, state, { type: "set", entity: "you", field: "place", value: "cafe" })).toBe("You are now at Daybreak Café (Riverton)");
   });
 
   test("someone where the POV is counts as met, and their routine still never reads", () => {
@@ -47,7 +47,7 @@ describe("player-facing event lines", () => {
     expect(line(world, state, { type: "stage", track: "tips", to: "noticed" })).toBeNull();
     expect(line(world, state, { type: "engine.note", data: { text: `Rumor: ${TRUTH}` } })).toBeNull();
     expect(line(world, state, { type: "engine.note", data: { text: "Someone mentions The missing tips" } })).toBeNull();
-    expect(line(world, state, { type: "stage", track: "first_week", to: "garage" })).toMatch(/^Settle in: /);
+    expect(line(world, state, { type: "stage", track: "first_week", to: "garage" })).toMatch(/^Settle in is now at “/);
   });
 
   test("bookkeeping, internal fields and off-screen NPC↔NPC regard never show", () => {
@@ -66,9 +66,11 @@ describe("player-facing event lines", () => {
   test("lines are deduplicated and capped; a field set several times reads once, at its latest value", () => {
     const { world, state } = setup();
     const e: LedgerEvent = { type: "set", entity: "you", field: "activity", value: "working" };
-    expect(playerLines(reg, world, state, "you", [e, e, { type: "set", entity: "you", field: "activity", value: "resting" }])).toEqual(["You: resting"]);
+    expect(playerLines(reg, world, state, "you", [e, e, { type: "set", entity: "you", field: "activity", value: "resting" }])).toEqual(["Your activity is now resting"]);
     const moves: LedgerEvent[] = [{ type: "set", entity: "you", field: "place", value: "cafe" }, { type: "set", entity: "you", field: "place", value: "office" }, { type: "set", entity: "you", field: "activity", value: "working" }];
-    expect(playerLines(reg, world, state, "you", moves, 1)).toEqual([`You → ${world.places.office?.name}`]);
+    const capped = playerLines(reg, world, state, "you", moves, 1);
+    expect(capped).toHaveLength(1);
+    expect(capped[0]).toStartWith(`You are now at ${world.places.office?.name}`);
   });
 
   test("the weather where the POV stands reads in the montage; another region's stays out", () => {
@@ -76,9 +78,9 @@ describe("player-facing event lines", () => {
     state.entities.far = { kind: "region", name: "Far coast", tier: "background", fields: { climate: "temperate", weather: "clear" }, relations: [], levels: {}, agent: false };
     const temps: LedgerEvent[] = [9, 10.5, 12].map((t) => ({ type: "set", entity: "region_riverton", field: "temp_c", value: t }));
     const lines = playerLines(reg, world, state, "you", [{ type: "set", entity: "region_riverton", field: "weather", value: "rain" }, ...temps, { type: "set", entity: "far", field: "weather", value: "snow" }]);
-    expect(lines.filter((l) => l.startsWith("Riverton area:")).length).toBe(2);
+    expect(lines.filter((l) => l.startsWith("Riverton area's")).length).toBe(2);
     // The latest temperature, kept in °C, reads in °F: 12 °C is 54 °F.
-    expect(lines.filter((l) => l.includes("Temperature"))).toEqual(["Riverton area: Temperature 54 °F"]);
+    expect(lines.filter((l) => l.includes("temperature"))).toEqual(["Riverton area's temperature is now 54 °F"]);
     expect(lines.some((l) => l.includes("Far coast"))).toBe(false);
   });
 
@@ -87,7 +89,7 @@ describe("player-facing event lines", () => {
     const transfer: LedgerEvent = { type: "post", memo: "Transfer", lines: [{ account: "checking", amount: -20000 }, { account: "savings", amount: 20000 }] };
     const mirror: LedgerEvent = { type: "economy.txn", data: { memo: "Transfer", account: "checking", cents: -20000 } };
     expect(playerLines(reg, world, state, "you", [transfer, mirror])).toEqual([`Transfer: $200.00 from ${state.entities.checking!.name} to ${state.entities.savings!.name}`]);
-    expect(line(world, state, { type: "post", memo: "Coffee", lines: [{ account: "card", amount: -450 }, { account: "economy.external:cafe", amount: 450 }] })).toBe(`Coffee: −$4.50 (${state.entities.card!.name})`);
+    expect(line(world, state, { type: "post", memo: "Coffee", lines: [{ account: "card", amount: -450 }, { account: "economy.external:cafe", amount: 450 }] })).toBe(`Coffee: $4.50 out of ${state.entities.card!.name}`);
   });
 
   test("past the cap, a payday outranks ordinary lines and routine goes first; kept lines stay in order", () => {
@@ -97,16 +99,16 @@ describe("player-facing event lines", () => {
     const payday: LedgerEvent = { type: "post", memo: "Payroll", lines: [{ account: "economy.external:employer", amount: -75858 }, { account: "checking", amount: 75858 }] };
     const lines = playerLines(reg, world, state, "you", [routine, ...ordinary, payday], 8);
     expect(lines).toHaveLength(8);
-    expect(lines.at(-1)).toBe(`Payroll: +$758.58 (${state.entities.checking!.name})`);
-    expect(lines).not.toContain("You: working");
-    expect(lines.slice(0, 7)).toEqual(Array.from({ length: 7 }, (_, i) => `You: note ${i} n${i}`));
+    expect(lines.at(-1)).toBe(`Payroll: $758.58 into ${state.entities.checking!.name}`);
+    expect(lines).not.toContain("Your activity is now working");
+    expect(lines.slice(0, 7)).toEqual(Array.from({ length: 7 }, (_, i) => `Your note ${i} is now n${i}`));
   });
 
   test("enum values and code-like words read as words", () => {
     const { world, state } = setup();
-    expect(line(world, state, { type: "set", entity: "truck", field: "status", value: "needs_service" })).toBe(`${state.entities.truck!.name}: Status needs service`);
-    expect(line(world, state, { type: "set", entity: "you", field: "activity", value: "on_shift" })).toBe("You: on shift");
-    expect(line(world, state, { type: "set", entity: "you", field: "activity", value: "Reading the paper" })).toBe("You: Reading the paper");
+    expect(line(world, state, { type: "set", entity: "truck", field: "status", value: "needs_service" })).toBe(`${state.entities.truck!.name}'s status is now needs service`);
+    expect(line(world, state, { type: "set", entity: "you", field: "activity", value: "on_shift" })).toBe("Your activity is now on shift");
+    expect(line(world, state, { type: "set", entity: "you", field: "activity", value: "Reading the paper" })).toBe("Your activity is now Reading the paper");
   });
 
   test("pack lines and panels word their values: a route by its ends, a vehicle's status", () => {
@@ -121,7 +123,7 @@ describe("player-facing event lines", () => {
     const { world, state } = setup();
     const reason = "Maya Chen's checking (maya_checking) can't cover $40.00";
     const mine = playerDrop(reg, world, state, "you", { type: "set", entity: "you", field: "place", value: "cafe" }, "no route to cafe");
-    expect(mine).toEqual({ text: "You → Daybreak Café", visible: true, gm: "no route to cafe" });
+    expect(mine).toEqual({ text: "You are now at Daybreak Café (Riverton)", visible: true, gm: "no route to cafe" });
     const unmet = playerDrop(reg, world, state, "you", { type: "set", entity: "maya", field: "place", value: "park" }, reason);
     expect(unmet).toEqual({ text: UNSEEN_DROP, visible: false, gm: reason });
     expect(unmet.text).not.toMatch(/Maya|maya|\$/);
@@ -141,9 +143,9 @@ describe("player-facing event lines", () => {
       { type: "link", rel: "uses", from: "you", to: "truck" },
     ];
     // The player sees all of it as their own.
-    expect(playerLines(reg, world, state, "you", events)).toContain("You → Daybreak Café");
+    expect(playerLines(reg, world, state, "you", events)).toContain("You are now at Daybreak Café (Riverton)");
     expect(playerLines(reg, world, state, "you", events).some((l) => l.startsWith("Rent to landlord"))).toBe(true);
-    expect(witnessLines(reg, world, state, "you", events, 8)).toEqual(["the player character → Daybreak Café", `the player character borrows ${state.entities.truck!.name}`]);
+    expect(witnessLines(reg, world, state, "you", events, 8)).toEqual(["the player character is now at Daybreak Café (Riverton)", `the player character now borrows ${state.entities.truck!.name}`]);
   });
 });
 
@@ -164,10 +166,10 @@ describe("fields the POV can't see", () => {
     const hidden: LedgerEvent[] = [{ type: "add", entity: "maya", field: "debt", delta: 5 }, { type: "set", entity: "maya", field: "debt", value: 3 }, { type: "set", entity: "maya", field: "activity", value: "counting_the_take" }, hunger];
     expect(playerLines(reg, world, state, "you", hidden)).toEqual([]);
     for (const e of hidden) expect(playerDrop(reg, world, state, "you", e, "raw").text).toBe(UNSEEN_DROP);
-    expect(playerLines(reg, world, state, "you", [{ type: "add", entity: "maya", field: "savings", delta: 5 }])).toEqual(["Maya Chen: savings +5"]);
+    expect(playerLines(reg, world, state, "you", [{ type: "add", entity: "maya", field: "savings", delta: 5 }])).toEqual(["Maya Chen's savings went up by 5"]);
     // The needs a castlife event writes read once the field is public.
     world.kinds.insider!.fields.needs = { type: "list" };
-    expect(playerLines(reg, world, state, "you", [hunger])).toEqual(["hunger rose"]);
+    expect(playerLines(reg, world, state, "you", [hunger])).toEqual(["Your hunger rose"]);
   });
 
   test("the narrator isn't told one: the people line and the outline leave a secret activity out", () => {
@@ -178,7 +180,7 @@ describe("fields the POV can't see", () => {
     for (const said of [...people, ...beats]) expect(said).not.toContain("counting");
     // A public activity is told.
     world.kinds.insider!.fields.activity = { type: "text" };
-    expect(reg.renderers.filter((r) => r.slot === "people").flatMap((r) => r.render(reg.context(world, state)))).toContain("Maya Chen (counting the take) is here.");
+    expect(reg.renderers.filter((r) => r.slot === "people").flatMap((r) => r.render(reg.context(world, state))).find((l) => l.startsWith("Maya Chen is here"))).toContain("counting the take");
     expect(outline(reg, world, state, { events: [] }, createRng("beats"))).toContain("Maya Chen is counting the take.");
   });
 });

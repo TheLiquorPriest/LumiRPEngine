@@ -1,13 +1,15 @@
 // Story pack (DESIGN §7, §9.3): flags, the quest log over the engine's tracks (quests, secret ladders,
 // puzzles), puzzle answers through `checkAnswer` with the author's opt-in decision threshold, and
-// the leaky-label, leaky-id and answer-track lints. Track stepping, gates, reveals and hints are the engine's
+// the leaky-label, leaky-id, answer-track and unset-flag lints. Track stepping, gates, reveals and hints are the engine's
 // (tracks.ts); this pack is how they reach effects, formulas, the narrator and the panel. Story has
 // no realism domain: tracks behave the same at every level.
 
 import type { TrackId } from "../../../shared/ids";
 import { hasOwn, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import type { FeedScope, WorldDoc } from "../../../shared/world";
+import type { Expr, FeedScope, WorldDoc } from "../../../shared/world";
+import { objectiveWhen } from "../../../shared/world";
+import { callsIn } from "../../../engine/expr";
 import { wordsOf } from "../../../engine/lore";
 import { labelOf, mutableSlice, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
 import type { FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
@@ -38,17 +40,19 @@ export interface QuestLogView {
 
 /**
  * The Quest section (DESIGN §6, §6.11): each active track the POV can see, with its objectives
- * still open, the hints it has earned and the truths revealed. In `scene` scope, a `known_by` quest
- * the POV doesn't know of whose owner or someone it lets know is with the POV, at its stage, as
- * theirs to know; a secret track and any truth are the GM's alone, told only in `gm` scope.
+ * still open, the hints the player has opened (never the ones still behind "Show a hint") and the
+ * truths revealed. In `scene` scope, a `known_by` quest the POV doesn't know of whose owner or
+ * someone it lets know is with the POV, at its stage, as theirs to know; a secret track and any
+ * truth are the GM's alone, told only in `gm` scope.
  */
 export function questLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const lines: FeedLine[] = [];
   for (const t of buildQuestLog(ctx).active) {
     lines.push({ text: `${t.label}: ${t.cue ?? t.stage}`, known: "pov" });
-    for (const o of t.objectives) if (!o.done) lines.push({ text: `- ${o.label}`, known: "pov" });
-    for (const h of t.hints) lines.push({ text: `Hint: ${h}`, known: "pov" });
-    for (const truth of t.truths) lines.push({ text: `Known: ${truth}`, known: "pov" });
+    // Each tied to its quest by name: a bare "- step" can't say whose it is once lines are listed.
+    for (const o of t.objectives) if (!o.done) lines.push({ text: `${t.label}, still to do: ${o.label.replace(/[.!?]\s*$/, "")}.`, known: "pov" });
+    for (const h of t.hints.slice(0, t.opened)) lines.push({ text: `${t.label}, a hint your character has: ${h}`, known: "pov" });
+    for (const truth of t.truths) lines.push({ text: `${t.label}, known to be true: ${truth}`, known: "pov" });
   }
   if (scope === "player") return lines;
   const pov = ctx.world.pov;
@@ -185,6 +189,47 @@ export function leakyIds(world: WorldDoc, registry?: Registry): LeakyId[] {
     }
     if (gives.length === 0) continue;
     out.push({ path: `entities.${e.id}.id`, id: e.id, secrets: gives, neutral: unused(words.filter((_, i) => !spelt.has(i)).join("_") || e.kind) });
+  }
+  return out;
+}
+
+/** A track or a secret lore entry that waits on story flags nothing in the world sets. */
+export interface UnsetFlags {
+  path: string;
+  /** What waits on them, in the author's words: the track's label or the entry's title. */
+  what: string;
+  kind: "track" | "lore";
+  flags: string[];
+}
+
+/**
+ * What waits on story flags nothing in the world can set (DESIGN §13): a track whose conditions (its
+ * stages' ways on, failures, gates and objectives) or a lore entry whose gate reads a flag that no
+ * `story.flag` effect sets by name (an action's outcomes, a rule's, a stage's effects or rewards),
+ * while the GM view has no control that sets one. Such a flag keeps its starting value for good, so
+ * what reads it never changes. A `story.flag` whose name is a formula may set any flag: then nothing
+ * is reported.
+ */
+export function unsetFlags(world: WorldDoc): UnsetFlags[] {
+  const set = new Set<string>();
+  for (const { effects } of effectLists(world)) {
+    for (const spec of effects) {
+      const name = spec.type === "story.flag" ? spec.args.name : undefined;
+      if (typeof name !== "string") continue;
+      if (name.startsWith("=")) return [];
+      set.add(name);
+    }
+  }
+  // The flags the formulas read by name (`flag('x')`), less those something sets; one named by a formula can't be held to any.
+  const missing = (exprs: readonly (Expr | undefined)[]): string[] => [...new Set(exprs.flatMap((x) => callsIn(x).flatMap((c) => (c.name === "flag" && typeof c.args[0] === "string" ? [c.args[0]] : []))).filter((f) => !set.has(f)))].sort();
+  const out: UnsetFlags[] = [];
+  for (const [id, t] of Object.entries(world.tracks)) {
+    const flags = missing(Object.values(t.stages).flatMap((s) => [...s.next.map((n) => n.when), s.fail?.when, s.gate, ...(s.objectives ?? []).map(objectiveWhen)]));
+    if (flags.length > 0) out.push({ path: `tracks.${id}`, what: t.label, kind: "track", flags });
+  }
+  for (const [id, entry] of Object.entries(world.lore)) {
+    const flags = missing([entry.gate]);
+    if (flags.length > 0) out.push({ path: `lore.${id}.gate`, what: entry.title, kind: "lore", flags });
   }
   return out;
 }
@@ -396,6 +441,25 @@ export const storyPack: PackDef = {
             return [{ severity: "warning" as const, code: "story.answer_track", message: `This answer's track is a formula (${track}), but track takes a puzzle's own id as written, such as "p_safe": the puzzle the formula gives is answered even when the player can't see it. To let the player say which puzzle, pass their words as puzzle instead.`, path: `${path}.${i}.args.track` }];
           }),
         ),
+    });
+    // A warning: the GM can still move such a track by its Stage, but nothing in play ever will.
+    r.lint({
+      code: "story.unset_flag",
+      check: (world) =>
+        unsetFlags(world).map((u) => {
+          const many = u.flags.length > 1;
+          const names = u.flags.map((f) => `"${f}"`);
+          const list = many ? `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}` : (names[0] ?? "");
+          const it = many ? "them" : "it";
+          const reads = u.kind === "track" ? `"${u.what}" waits on` : `The gate of "${u.what}" reads`;
+          const so = u.kind === "track" ? `what reads ${it} in this track never changes, and only the GM's Stage moves the track past ${it}` : "the gate never opens or closes";
+          return {
+            severity: "warning" as const,
+            code: "story.unset_flag",
+            message: `${reads} the story flag${many ? "s" : ""} ${list}, but nothing in this world sets ${it}: no rule, action or stage effect does, and the GM view has no flag control. ${many ? "They keep their" : "It keeps its"} starting value for good, so ${so}. Set ${it} with a story.flag effect where the story makes ${it} true.`,
+            path: u.path,
+          };
+        }),
     });
   },
 };

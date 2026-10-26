@@ -1,7 +1,8 @@
 // A reply that introduces someone (a `spawn` proposal) by the name of a person the POV may not know
 // (DESIGN §7, §9.4): the newcomer is handled as one nobody could tell from that person, so nothing the
 // player sees, and nothing the next reply is told, says such a person exists; only the log says why.
-// A name the POV may know is refused as a duplicate, on a chip, as before; a name nobody has spawns.
+// A name the POV may know is that person already: a Not tracked receipt says so, and the next reply
+// is told nothing (DESIGN §9.5); a name nobody has spawns.
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
@@ -77,12 +78,12 @@ describe("a reply that introduces someone by a hidden person's name", () => {
     });
   }
 
-  test("someone the POV knows: refused on today's chip, and the next reply is told", async () => {
+  test("someone the POV knows: Not tracked on today's receipt, and the next reply is told nothing", async () => {
     const known = await vexWalksIn([person("vex", NAME, { place: "home" })]);
     expect(known.newcomers).toEqual([]);
-    const declined = known.view.chips.filter((c) => c.kind === "decline");
-    expect(declined.map((c) => c.detail)).toEqual([`${NAME} already exists. Nothing changed, and the next reply is told so.`]);
-    expect(known.notes.some((n) => n.includes(`${NAME} already exists`))).toBe(true);
+    expect(known.view.chips.filter((c) => c.kind === "decline")).toEqual([]);
+    expect(known.view.chips.filter((c) => c.kind === "untracked").map((c) => c.detail)).toEqual([`${NAME} already exists. The story stands as told, and the next reply isn't told otherwise.`]);
+    expect(known.notes).toEqual([]);
   });
 
   test("an authored hidden person whose id a name would make: no visible 'exists', and the authored one stays as written", async () => {

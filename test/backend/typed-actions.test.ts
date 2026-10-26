@@ -347,7 +347,7 @@ describe("several actions in one message (the action queue)", () => {
     expect(placeOfEntity(state, world.pov)).toBe("bluebird_coffee");
     expect(await bought(rig, chatId, /latte/i)).toBe(1);
     const lines = outcomeLines(rig);
-    const at = (action: string): number => lines.findIndex((line) => line.startsWith(`${rig.rt.registry.actions.get(action)?.label ?? action}:`));
+    const at = (action: string): number => lines.findIndex((line) => line.startsWith(`${rig.rt.registry.actions.get(action)?.label ?? action} (`));
     expect(at("go")).toBeGreaterThanOrEqual(0);
     expect(at("buy")).toBeGreaterThan(at("go"));
     expect((await replyChips(rig, chatId)).some((c) => c.kind === "choice")).toBe(false);
@@ -412,7 +412,7 @@ describe("an incidental action before the move a turn is about (#30)", () => {
     expect(declines[0]?.detail).not.toContain("after it");
     // The narrator is told the walk played, and that nothing of the message was left unplayed.
     const lines = outcomeLines(rig);
-    expect(lines.some((line) => line.startsWith(`${rig.rt.registry.actions.get("go")?.label}:`))).toBe(true);
+    expect(lines.some((line) => line.startsWith(`${rig.rt.registry.actions.get("go")?.label} (`))).toBe(true);
     expect(lines.some((line) => /hasn't happened/.test(line))).toBe(false);
     // The next reply is told only that the wear didn't happen.
     const told = (await nextTurn(rig, chatId, "I look around.")).split("\n").filter((line) => line.includes("didn't happen"));

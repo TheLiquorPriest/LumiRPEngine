@@ -127,6 +127,12 @@ async function gmView(args: Args, ctx: ToolContext): Promise<ToolResult> {
   return readOut(await ask(ctx, chatId, "lre.gm", { chatId }), `the GM view of chat ${chatId}: everything as it stands, secrets included`, args);
 }
 
+async function sections(args: Args, ctx: ToolContext): Promise<ToolResult> {
+  gate(args, "lre_sections", "shows what the narrator would be told, facts the player character doesn't know included where a section's scope adds them");
+  const chatId = chatIdOf(args);
+  return readOut(await ask(ctx, chatId, "lre.sections", { chatId }), `the sections the narrator would get in chat ${chatId}'s next turn, in prompt order`, args);
+}
+
 async function minds(args: Args, ctx: ToolContext): Promise<ToolResult> {
   gate(args, "lre_minds", "shows characters' private minds, plans and notes");
   const chatId = chatIdOf(args);
@@ -397,6 +403,15 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
     write: false,
     run: gmView,
     cli: { command: "gm", section: SECTION, usage: "gm <chatId> --spoilers [--pointer <p>] [--offset <n>]", summary: "A chat's GM view, secrets included", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" }, "--pointer": { arg: "pointer", as: "text" }, "--offset": { arg: "offset", as: "int" } } },
+  },
+  {
+    name: "lre_sections",
+    description:
+      "What the narrator would get in a chat's next turn, at a JSON Pointer, as GM → This chat → Sections previews it: every section in prompt order (/sections: its status, sent, off, unplaced, empty or clipped, its scope, its text as the narrator reads it with marked facts and hints, its tokens, and the lines its caps cut), and the section budget (/budget). Built the way a turn builds it, with no model call; Outcome, Montage, Outline and Scene's elapsed time are the turn's own and wait for it. Needs spoilers: true.",
+    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, pointer: POINTER, offset: OFFSET }, ["chatId", "spoilers"]),
+    write: false,
+    run: sections,
+    cli: { command: "sections", section: SECTION, usage: "sections <chatId> --spoilers [--pointer <p>] [--offset <n>]", summary: "What the narrator would get next turn, section by section", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" }, "--pointer": { arg: "pointer", as: "text" }, "--offset": { arg: "offset", as: "int" } } },
   },
   {
     name: "lre_minds",

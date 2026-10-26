@@ -84,7 +84,7 @@ describe("engine first", () => {
     expect(reply.type).toBe("normal");
     const at = (outlet: string) => rig.host.assembled.find((e) => e.position === 8 && e.outlet === outlet)?.content ?? "";
     expect(at("lre_scene")).toMatch(/^\[Scene\]\n/);
-    expect(at("lre_outcome")).toMatch(/^\[Outcome\]\n- Flip a coin: (success|fail) \(rolled [12] on 1d2\)/);
+    expect(at("lre_outcome")).toMatch(/^\[Outcome\]\n(?:.*\n)*- Flip a coin: (success|fail) \(rolled [12] on 1d2\)/);
     await rig.host.finish(reply, "The coin lands.");
     // The reply took the plan, and once it ended no engine entry holds text or is on.
     const core = await rig.rt.ledger.core(chatId, rig.host.userId);

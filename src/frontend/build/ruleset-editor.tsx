@@ -9,14 +9,14 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { presetAdjudication, readAdjudication } from "../../shared/adjudication";
+import { ADJUDICATION_PRESET_LABEL, presetAdjudication, readAdjudication } from "../../shared/adjudication";
 import { INFER_MODE_LABEL, inferredDefaults, readInferred, type InferredChecks, type SheetSkill } from "../../shared/inferred";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
 import { profileOf } from "../../shared/profiles/index";
 import type { SheetSectionView } from "../../shared/state-view";
-import type { AdjudicationPresetId, FieldDef, ProgressionDef, RulesetDef, SheetLayoutDef, SheetRowDef, SheetSectionDef, WorldDoc } from "../../shared/world";
+import { playedKinds, type FieldDef, type ProgressionDef, type RulesetDef, type SheetLayoutDef, type SheetRowDef, type SheetSectionDef, type WorldDoc } from "../../shared/world";
 import { SheetSectionCards } from "../../packs/sheets/ui/panel";
 import { useApp } from "../app";
 import type { Draft } from "../app";
@@ -25,7 +25,7 @@ import { InferredForm } from "../inferred-form";
 import { Badge, Button, Empty, Field, HostSwitch, IconButton, IdText, List, ListRow, PageHeader, SaveBar, Section, Seg, useBusy } from "../components";
 import type { IconName } from "../icons";
 import { sheetPreviewRequest } from "../requests";
-import { DOMAIN_LABEL } from "../settings/realism";
+import { DOMAIN_LABEL } from "../../shared/ids";
 import { useSelect } from "../store";
 import { draftSend } from "./draft";
 import { ExprEditor } from "./expr-editor";
@@ -486,7 +486,7 @@ function ProgressionSheet(props: { id: string; value: ProgressionDef; doc: World
         <FieldInput spec={{ kind: "text", key: "label", label: "Label", hint: "The sheet and the Journal show it: “You reached Level 3.”" }} value={json.label} ctx={ctx} path={path} parent={json} onChange={(next) => set("label", typeof next === "string" ? next : "")} />
         <RefPicker label="Applies to kind" value={value.kind ?? ""} none="Any kind with both fields" options={refOptions(doc, "kinds")} onChange={(next) => set("kind", next || undefined)} />
         <RefPicker label="XP field" value={value.xpField} options={fields} onChange={(next) => set("xpField", next)} />
-        <RefPicker label="Level field (the engine sets it)" value={value.levelField} options={fields} onChange={(next) => set("levelField", next)} />
+        <RefPicker label="Level field (set from XP)" value={value.levelField} options={fields} onChange={(next) => set("levelField", next)} />
         <Field label="Thresholds from">
           <Seg<"list" | "table">
             label="Thresholds from"
@@ -526,7 +526,7 @@ function ProgressionEditor(props: { value: Record<string, ProgressionDef>; doc: 
   const prog = open !== null ? props.value[open] : undefined;
   return (
     <div class="lre-stack" data-lre-progressions>
-      <span class="lre-small lre-muted">A progression raises a level as XP grows: after each change, an entity whose XP reached the next threshold goes up, and each level gained runs its effects.</span>
+      <span class="lre-small lre-muted">A progression's level follows its XP, both ways: after each change, an entity whose XP reached the next threshold goes up a level at a time, each level gained running its effects, and one whose XP fell below its level's threshold goes straight down. Change XP to change a level.</span>
       {Object.keys(props.value).length === 0 ? (
         <span class="lre-small lre-muted">No progressions: levels never change on their own.</span>
       ) : (
@@ -617,8 +617,6 @@ const COMBAT: FieldSpec = {
 
 type Part = "profile" | "checks" | "floors" | "progression" | "sheet" | "combat" | "json";
 
-const PRESET_LABEL: Record<AdjudicationPresetId, string> = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
-
 export function RulesetEditor() {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
@@ -630,7 +628,7 @@ export function RulesetEditor() {
   const [part, setPart] = useState<Part | null>(null);
   useHeld(value, setValue, stored, `${draft?.worldId ?? ""}/ruleset`, storedKey);
   // Pickers see the packs' kinds too (DESIGN §13); the world's own win.
-  const formDoc = useMemo(() => (draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds }, relations: { ...draft.packRelations, ...draft.doc.relations } } : null), [draft?.doc, draft?.packKinds, draft?.packRelations]);
+  const formDoc = useMemo(() => (draft ? { ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds), relations: { ...draft.packRelations, ...draft.doc.relations } } : null), [draft?.doc, draft?.packKinds, draft?.packRelations]);
   const identifiers = useMemo(() => (draft ? worldIdentifiers(draft.doc) : []), [draft?.doc]);
   if (!draft || !formDoc) return null;
   const tidy = tidyRuleset(value);
@@ -700,7 +698,7 @@ export function RulesetEditor() {
       <Section flush>
         <List>
           {row("profile", "wand", "Start from a profile…", changed ? "Save or revert your edits first" : "A ready-made ruleset: Modern, Classic, Fifth or Custom", [])}
-          {row("checks", "dice", "How checks are decided", `${adjudication ? PRESET_LABEL[adjudication.preset] : value.adjudication !== undefined ? "Set, but not readable: open it" : "Not set: every check rolls"}${inferred ? ` · inferred checks: ${INFER_MODE_LABEL[inferred.mode].toLowerCase()}` : ""}`, checksLint)}
+          {row("checks", "dice", "How checks are decided", `${adjudication ? ADJUDICATION_PRESET_LABEL[adjudication.preset] : value.adjudication !== undefined ? "Set, but not readable: open it" : "Not set: every check rolls"}${inferred ? ` · inferred checks: ${INFER_MODE_LABEL[inferred.mode].toLowerCase()}` : ""}`, checksLint)}
           {row("floors", "sliders", "Level floors", floors.length > 0 ? floors.join(", ") : "None", lintOf("ruleset.minLevels"))}
           {row("progression", "star", "Progression", Object.keys(progression).length > 0 ? Object.values(progression).map((p) => p.label).join(", ") : "None: levels never change on their own", lintOf("ruleset.progression"))}
           {row("sheet", "layers", "Sheet Designer", sections.length > 0 ? `${sections.length} section${sections.length === 1 ? "" : "s"}, ${rows} row${rows === 1 ? "" : "s"}` : "Not designed: the Sheets pack's own sheet", lintOf("ruleset.sheet"))}

@@ -1,6 +1,6 @@
 // The world's tabletop ruleset (DESIGN §11): progression (levels from XP) and the designed sheet.
-// Pure reads. The level-ups themselves are applied by effects (engine/effects `levelUps`), so they
-// are recorded as events and replay exactly; the realism floors live with effective levels
+// Pure reads. A level follows its XP, applied by effects (engine/effects `levelsFollowXp`), so it
+// is recorded as events and replays exactly; the realism floors live with effective levels
 // (engine/registry-impl `rulesetFloor`).
 
 import type { EntityId, KindId } from "../shared/ids";
@@ -18,6 +18,15 @@ import { own } from "./pack-kit";
 export function progressionApplies(reg: Registry, world: WorldDoc, prog: ProgressionDef, kind: KindId): boolean {
   if (prog.kind !== undefined) return kindIs(reg, world, kind, prog.kind);
   return fieldDef(reg, world, kind, prog.xpField) !== undefined && fieldDef(reg, world, kind, prog.levelField) !== undefined;
+}
+
+/**
+ * The progression whose level field this is for entities of `kind`, or null for any other field.
+ * Such a level follows its XP, so nothing else writes it: an edit, a fix or an effect changes XP.
+ */
+export function levelProgression(reg: Registry, world: WorldDoc, kind: KindId, field: string): ProgressionDef | null {
+  for (const prog of Object.values(world.ruleset?.progression ?? {})) if (prog.levelField === field && progressionApplies(reg, world, prog, kind)) return prog;
+  return null;
 }
 
 /** The XP each level needs, from level 1: the list, or the named table column's numbers in row order. */
@@ -154,7 +163,8 @@ function rowOf(reg: Registry, ctx: ReadContext, entity: EntityId, row: SheetRowD
   const stored = own(e.fields, row.field) ?? def?.default;
   if (!def && stored === undefined) return null;
   const value = def?.derived === undefined && stored !== undefined ? stored : env.lookup(["self", row.field]);
-  const fix = fixes && def ? fixOf(entity, row.field, def, stored, { min: def.min, max: def.max }) : undefined;
+  // A level follows its XP: the progression's own row corrects XP instead.
+  const fix = fixes && def && !levelProgression(reg, ctx.world, e.kind, row.field) ? fixOf(entity, row.field, def, stored, { min: def.min, max: def.max }) : undefined;
   return { label: row.label ?? def?.label ?? words(row.field), ...display(ctx, def, value), ...(fix ? { fix } : {}) };
 }
 

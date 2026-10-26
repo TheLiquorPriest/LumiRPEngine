@@ -13,14 +13,14 @@ import type { EntityId, PlaceId, StageId, TrackId, Visibility } from "../shared/
 import { heldBy } from "../shared/finance";
 import { hashParts } from "../shared/hash";
 import type { LedgerEvent } from "../shared/ledger";
-import type { LoreEntryDef, PlaceDef, Selector, TrackDef, TrackKind, WorldDoc } from "../shared/world";
+import type { ActionDef, Expr, LoreEntryDef, PlaceDef, Selector, StageDef, TrackDef, TrackKind, WorldDoc } from "../shared/world";
 import { objectiveLabel, objectiveWhen } from "../shared/world";
 import { loreIsSecret, lorePhrases } from "../shared/lore";
-import type { ExprEnv } from "./expr";
+import { compile, ExprError, identifiers, type ExprEnv, type Node } from "./expr";
 import { readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { Touch } from "./registry";
 import type { Registry } from "./registry-impl";
-import { asObject, evalExpr, fieldDef, isGone, placeOfEntity, placeWithin, scopeEnv, truthy } from "./scope";
+import { asObject, evalExpr, fieldDef, isGone, kindIs, placeOfEntity, placeWithin, scopeEnv, truthy } from "./scope";
 import { selectorMatches } from "./selector";
 import { placeVisit } from "./seen";
 import type { WorldState } from "./state";
@@ -168,6 +168,72 @@ export function trackKnown(reg: Registry, world: WorldDoc, state: Readonly<World
   return t.owner === pov || (t.owner !== undefined && knows(state, pov, t.owner)) || granted(reg, world, state, pov, t.knownBy);
 }
 
+/** Whether a track may be named to the POV: public, revealed, or `known_by` and known (`trackKnown`). */
+export function trackShown(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
+  const t = own(world.tracks, id);
+  if (!t) return false;
+  const visibility = visibilityOf(t.visibility);
+  if (visibility === "public") return true;
+  if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0) return true;
+  return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
+}
+
+/**
+ * Whether a track still keeps something from the POV: a stage truth not yet revealed, or the track
+ * itself, which may not be named to it (`trackShown`). Its cue is a hint the narrator may play while
+ * this holds (DESIGN §6.6); after that there is nothing left for the cue to hint at.
+ */
+export function trackKeepsSecret(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
+  const t = own(world.tracks, id);
+  if (!t) return false;
+  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
+}
+
+/**
+ * Whether a track's stage cue is how its owner behaves (DESIGN §6.6, §10): someone other than the
+ * POV, a person, owns the track, and it still keeps a secret from the POV. Such a cue has one place,
+ * Stance, which tells it under that person's name while they are in the scene; the quest log, the
+ * Quest section and a quest's signal never carry it, so nothing tells an unnamed someone's
+ * behaviour. Any other stage cue is what the player can notice, and the quest log tells it.
+ */
+export function ownersCue(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: TrackId): boolean {
+  const t = own(world.tracks, id);
+  if (t?.owner === undefined || t.owner === pov) return false;
+  const owner = own(state.entities, t.owner);
+  return owner !== undefined && kindIs(reg, world, owner.kind, "person") && trackKeepsSecret(reg, world, state, pov, id);
+}
+
+/** A track's current stage, with its id; null for a track the world doesn't have or a stage it has lost. */
+function currentStageOf(world: WorldDoc, state: Readonly<WorldState>, id: TrackId): { id: StageId; def: StageDef } | null {
+  const t = own(world.tracks, id);
+  if (!t) return null;
+  const stageId = own(state.tracks, id)?.stage ?? t.start;
+  const def = own(t.stages, stageId);
+  return def ? { id: stageId, def } : null;
+}
+
+/**
+ * The hints the player may open at a track's current stage (DESIGN §10): at a stage that takes an
+ * answer, one for each wrong answer given there; at any other, every hint the stage has, from the
+ * moment the track reaches it. The player opens them one at a time (`engine.hint`), and only the
+ * opened ones reach the narrator (`hintsOpened`).
+ */
+export function hintsEarned(world: WorldDoc, state: Readonly<WorldState>, id: TrackId): string[] {
+  const stage = currentStageOf(world, state, id);
+  if (!stage) return [];
+  const hints = stage.def.hints ?? [];
+  if (stage.def.answer === undefined) return [...hints];
+  return hints.slice(0, own(own(readEngineSlice(state).missed, id) ?? {}, stage.id) ?? 0);
+}
+
+/** How many of the hints earned at a track's current stage the player has opened (`engine.hint`). */
+export function hintsOpened(world: WorldDoc, state: Readonly<WorldState>, id: TrackId): number {
+  const stage = currentStageOf(world, state, id);
+  if (!stage) return 0;
+  return Math.min(own(own(readEngineSlice(state).hints, id) ?? {}, stage.id) ?? 0, hintsEarned(world, state, id).length);
+}
+
 export function signalVisible(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, s: Signal): boolean {
   if (s.visibility === "secret") return false;
   if (s.visibility === "known_by") return s.entity !== undefined && knows(state, pov, s.entity);
@@ -232,11 +298,15 @@ export interface PlayerTrack {
   kind: TrackKind;
   label: string;
   stage: string;
+  /** What the player can notice at the stage; null when it has none, or when it is its owner's behaviour, which only Stance tells (`ownersCue`). */
   cue: string | null;
   /** Revealed truths of this track, oldest first. */
   truths: string[];
   objectives: { label: string; done: boolean }[];
+  /** The hints the player may open at this stage (`hintsEarned`), in order. */
   hints: string[];
+  /** How many of them the player has opened: those reach the narrator, the rest wait behind "Show a hint". */
+  opened: number;
   status: "active" | "done" | "failed";
 }
 
@@ -257,7 +327,9 @@ export function shownTrackId(world: Pick<WorldDoc, "id" | "tracks">, id: TrackId
  * A track as the POV sees it, or null when it is hidden. Secret tracks show only reached cues and
  * revealed truths, under their stand-in id; their labels stay generic until something is revealed.
  * A track still on a start stage with nothing to show or answer (no cue, objectives or puzzle
- * answer) is dormant: it stays out of view until it moves on, so a quest can wait unseen for its trigger.
+ * answer) is dormant: it stays out of view until it moves on, so a quest can wait unseen for its
+ * trigger. A cue that is its owner's behaviour is Stance's alone (`ownersCue`): the row goes without
+ * it, and a secret with nothing else to show has no row until it is revealed.
  */
 export function playerTrack(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: TrackId): PlayerTrack | null {
   const t = own(world.tracks, id);
@@ -271,10 +343,11 @@ export function playerTrack(reg: Registry, world: WorldDoc, state: Readonly<Worl
   const truths = revealed.map((s) => own(t.stages, s)?.truth).filter((x): x is string => typeof x === "string");
   const secret = visibility === "secret";
   const dormant = stageId === t.start && (stage.objectives ?? []).length === 0 && stage.answer === undefined;
-  if (!stage.cue && truths.length === 0 && (secret || dormant)) return null;
+  const cue = !stage.cue || ownersCue(reg, world, state, pov, id) ? null : stage.cue;
+  if (cue === null && truths.length === 0 && (secret || dormant)) return null;
   const env = scopeEnv({ reg, ctx: reg.context(world, state), bindings: t.owner ? { self: t.owner } : {} });
   const objectives = secret ? [] : (stage.objectives ?? []).map((o) => ({ label: objectiveLabel(o), done: truthy(evalExpr(objectiveWhen(o), env, false)) }));
-  const attempts = own(readEngineSlice(state).attempts, id) ?? 0;
+  const hints = hintsEarned(world, state, id);
   const failed = Object.values(t.stages).some((s) => s.fail?.to === stageId);
   const terminal = stage.next.length === 0 && !stage.fail;
   return {
@@ -282,12 +355,54 @@ export function playerTrack(reg: Registry, world: WorldDoc, state: Readonly<Worl
     kind: t.kind,
     label: secret && truths.length === 0 ? "Something is going on" : t.label,
     stage: secret && truths.length === 0 ? "" : stage.label,
-    cue: stage.cue ?? null,
+    cue,
     truths,
     objectives,
-    hints: (stage.hints ?? []).slice(0, attempts),
+    hints,
+    opened: hintsOpened(world, state, id),
     status: terminal ? (failed ? "failed" : "done") : "active",
   };
+}
+
+/** The calls a formula reads how far the story has come by: a track's stage, the time it has stood there, a story flag. */
+const STORY_CALLS: Readonly<Record<string, true>> = { stage: true, since: true, flag: true };
+
+/** Whether a formula reads how far the story has come (DESIGN §10): `stage(…)` or `stage.<track>`, `since(…)` or `flag(…)`. One that doesn't parse reads nothing. */
+export function readsStory(expr: Expr): boolean {
+  const visit = (n: Node): boolean => {
+    switch (n.k) {
+      case "id":
+        return n.path.length === 2 && n.path[0] === "stage";
+      case "call":
+        return hasOwn(STORY_CALLS, n.name) || n.args.some(visit);
+      case "un":
+        return visit(n.a);
+      case "bin":
+        return visit(n.a) || visit(n.b);
+      case "tern":
+        return visit(n.c) || visit(n.a) || visit(n.b);
+      default:
+        return false;
+    }
+  };
+  try {
+    return visit(compile(expr).root);
+  } catch (e) {
+    if (e instanceof ExprError) return false;
+    throw e;
+  }
+}
+
+/**
+ * Whether an action is a step the story hasn't come to (DESIGN §11): one of its requirements that
+ * reads none of its params reads how far the story has come (`readsStory`) and doesn't hold in
+ * `env` (the POV as `self` and `actor`). A quest's or a secret's later step, or one already taken,
+ * isn't an option yet: every list of actions the player or a model reads (the Actions sheet, its
+ * Combat tab, interpret's catalog) leaves it out rather than showing it locked, so no list names a
+ * step the player hasn't reached. A requirement on where they are or what they carry still locks.
+ */
+export function storyLocked(env: ExprEnv, action: Pick<ActionDef, "params" | "requires">): boolean {
+  return action.requires.some((req) => readsStory(req) && identifiers(req).every((name) => !hasOwn(action.params, name)) && !truthy(evalExpr(req, env, false)));
 }
 
 /** Every unrevealed secret truth in the world: text that must never reach a player view. */

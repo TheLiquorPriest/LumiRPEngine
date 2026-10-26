@@ -24,7 +24,8 @@ import { Button, Disclosure, HostSwitch, IconButton, IdText, Seg, useShowIds } f
 import { humanize } from "../format";
 import { MoneyInput } from "../money-input";
 import type { FieldEditorDef } from "../registry";
-import { ClaimsControl, DOMAIN_LABEL, floorNote, LEVEL_LABEL } from "../settings/realism";
+import { DOMAIN_LABEL, LEVEL_LABEL } from "../../shared/ids";
+import { ClaimsControl, floorNote } from "../settings/realism";
 import { useSelect } from "../store";
 import { EffectArgsInput } from "./effect-args";
 import { ExprEditor, ExprReadout } from "./expr-editor";

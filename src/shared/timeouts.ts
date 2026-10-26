@@ -64,12 +64,6 @@ export const HOST_LIMITS = {
     source: "src/spindle/worker-host-process-api.ts:769 (the clamp), 273-286 (the watchdog; 0 checks nothing)",
     effect: "Lumiverse terminates the process (“Backend process heartbeat timed out”); its job fails.",
   },
-  sharedRpc: {
-    what: "Another extension's read of LumiRPEngine's shared endpoint (LumiRPEngine Studio)",
-    maxMs: 10_000,
-    source: "src/spindle/worker-host.ts:971, 1715-1719",
-    effect: "The reader's request fails as timed out.",
-  },
   socketIdle: {
     what: "An idle event socket (the command line and MCP server)",
     maxMs: 120_000,

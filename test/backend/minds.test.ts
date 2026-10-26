@@ -27,6 +27,8 @@ import { readCharacter, readSlice } from "../../src/packs/minds/core/state";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { placeOfEntity } from "../../src/engine/scope";
 import { Rig } from "../support/rig";
+import { editRequest } from "../../src/frontend/requests";
+import type { ResultBodies } from "../../src/shared/protocol";
 
 const PEOPLE = ["danny_okafor", "priya_nair"] as const;
 const MIND = /You are the private mind of (.+?) in the roleplay world/;
@@ -163,7 +165,7 @@ describe("minds around a turn", () => {
     expect(memories["Marcus Delgado"]).toContain(LINE);
     expect(memories["Marcus Delgado"]).toContain("left you partway through");
     // He saw the POV go, worded for an onlooker: never as "you".
-    expect(memories["Marcus Delgado"]).toMatch(/saw: the player character → /);
+    expect(memories["Marcus Delgado"]).toMatch(/saw: the player character is now at /);
     expect(memories["Marcus Delgado"]).not.toMatch(/saw: You\b/);
     expect(memories["Helen Kowalczyk"]).toBeUndefined();
     const presence = readSlice(state).presence;
@@ -208,6 +210,24 @@ describe("minds around a turn", () => {
     const minds = section(rig, "Minds");
     expect(minds).toContain("Danny Okafor's mind: PRIVATE thoughts of Danny Okafor");
     expect(minds).toContain("Intends: Danny Okafor means to ask about the weekend.");
+  });
+
+  test("with the Minds section off for the chat, Stance tells of the people it would have left to Minds, in the turn and in its preview", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig, { secrecy: "full" });
+    // On, Danny's mind goes to Minds, and Stance leaves him to it.
+    await rig.turn(chatId, "Hello.", "They look up.");
+    expect(section(rig, "Minds")).toContain("Danny Okafor");
+    expect(section(rig, "Stance")).not.toContain("Danny Okafor");
+    // Off: his mind is still read, but nothing tells of it, so Stance does, as the GM's preview shows.
+    rig.body(await rig.send(editRequest(chatId, [{ op: "feed", section: "minds", to: { enabled: false } }]) as unknown as Record<string, unknown>));
+    const preview = rig.body(await rig.send({ type: "lre.sections", chatId })) as unknown as ResultBodies["lre.sections"];
+    expect(preview.sections.find((s) => s.slot === "minds")?.status).toBe("off");
+    expect(preview.sections.find((s) => s.slot === "stance")?.content ?? "").toContain("Danny Okafor");
+    await rig.turn(chatId, "Hello again.", "They nod.");
+    expect(section(rig, "Minds")).toBe("");
+    expect(section(rig, "Stance")).toContain("Danny Okafor");
   });
 
   test("over its own budget the Minds section keeps the best on the ladder, and Stance tells of whoever it leaves out", async () => {

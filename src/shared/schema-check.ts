@@ -1,7 +1,7 @@
 // A small JSON Schema reader: the 2020-12 keywords the engine's published schemas use, checking a
 // value and saying what's wrong in plain words, each problem with the JSON path it sits at. Pure
 // and quick, so Build's map editor checks a map on every keystroke with the same schema authors
-// and tools read (`lre-map-v1.schema.json`), and a studio checks a whole world with
+// and tools read (`lre-map-v1.schema.json`), and the command line checks a whole world with
 // `schemas/lre-world-v1.schema.json`, which refers to the map schema by its `$id`.
 
 import { hasOwn, isRecord } from "./json";

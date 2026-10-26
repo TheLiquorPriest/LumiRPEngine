@@ -56,7 +56,7 @@ export type EditorResult = ResultBodies["lre.editor"];
 /** What made a revision the head, as the world's history keeps it. */
 export type HeadSource = RevisionNote["source"];
 
-const HEAD_SOURCES: Record<HeadSource, true> = { create: true, build: true, agent: true, import: true, studio: true };
+const HEAD_SOURCES: Record<HeadSource, true> = { create: true, build: true, agent: true, import: true };
 
 /** The most operations one patch may carry. */
 export const PATCH_OPS_CAP = 500;
@@ -70,7 +70,7 @@ export const PATCH_SIZE_CAP = 4 * 1024 * 1024;
 
 /**
  * How deep a world document may nest: well inside the 128 levels `hashJson` hashes through at
- * commit, with room for the export file and the Studio offer that wrap it.
+ * commit, with room for the export file that wraps it.
  */
 export const DOC_DEPTH_CAP = 64;
 
@@ -140,8 +140,6 @@ export class WorldStore {
    * user's request read another's cached world). Least recently used first; an entry is never replaced.
    */
   private readonly revisions = new Map<string, WorldDoc>();
-  /** Told once a world's revisions change (a commit, an import, a deletion), so the Studio bridge publishes them (DESIGN §15). */
-  onChange: ((worldId: WorldId, userId: UserId) => Promise<void>) | null = null;
   /** Each world's writes in turn, by `user \0 world`: the settling of the last one queued. */
   private readonly writes = new Map<string, Promise<void>>();
 
@@ -290,12 +288,11 @@ export class WorldStore {
       const note: RevisionNote = { revision: rev, at: Date.now(), source: made.source, ...(made.note !== undefined ? { note: made.note } : {}) };
       await this.writeJson(`${worldDir(doc.id)}history.json`, { v: 1, notes: [...(await this.history(doc.id, userId)), note] }, userId);
     }
-    await this.onChange?.(doc.id, userId);
     return { revision: rev, lint: issues, count, moved };
   }
 
   /** A new world, from a template or blank; `source` is what its history says made it. */
-  async create(name: string, template: WorldDoc | null, userId: UserId, source: "create" | "import" | "studio" = "create"): Promise<{ world: WorldDoc; revision: RevisionId }> {
+  async create(name: string, template: WorldDoc | null, userId: UserId, source: "create" | "import" = "create"): Promise<{ world: WorldDoc; revision: RevisionId }> {
     const id = `w_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const doc: WorldDoc = template ? migrateWorld({ ...structuredClone(template), id, name }) : newBlankWorld(id, name, this.registry);
     const made = await this.commitDoc(doc, userId, null, { source });
@@ -313,7 +310,6 @@ export class WorldStore {
   async remove(worldId: WorldId, userId: UserId): Promise<void> {
     await this.serial(userId, worldId, async () => {
       for (const path of await this.host.storage.list(worldDir(worldId), userId)) await this.host.storage.remove(path, userId);
-      await this.onChange?.(worldId, userId);
     });
   }
 
@@ -585,30 +581,6 @@ export class WorldStore {
     return { ...created, lint: macroReview(created.world) };
   }
 
-  /**
-   * A document from LumiRPEngine Studio as the next revision of one of the user's worlds (DESIGN
-   * §15): it keeps the world's id, so its chats stay on their revisions until an Upgrade. Refused
-   * while Build holds an unsaved draft of the world, which a later Commit would otherwise put back
-   * over it; checked in turn with the world's writes, so no draft can begin in between.
-   */
-  async commitRevision(worldId: WorldId, doc: WorldDoc, userId: UserId, changed?: DraftNotice): Promise<{ world: WorldDoc; revision: RevisionId; lint: LintIssue[] }> {
-    return this.serial(userId, worldId, async () => {
-      const index = await this.index(worldId, userId);
-      if (!index) throw new WorldError("not_found", `world ${worldId} not found`);
-      if (await this.storedDraft(index, userId)) throw new WorldError("conflict", `Build has unsaved changes to “${index.name}”: commit or discard them first`);
-      const world = migrateWorld({ ...structuredClone(doc), id: worldId });
-      const made = await this.commitDoc(world, userId, null, { source: "studio" });
-      if (made.moved) changed?.(worldId, { version: made.count, stored: false, base: made.revision });
-      return { world, revision: made.revision, lint: macroReview(world) };
-    });
-  }
-
-  /** Whether Build keeps an unsaved draft of the world. */
-  async hasDraft(worldId: WorldId, userId: UserId): Promise<boolean> {
-    const index = await this.index(worldId, userId);
-    return index !== null && (await this.storedDraft(index, userId)) !== null;
-  }
-
   async exportFile(worldId: WorldId, userId: UserId, revision?: RevisionId): Promise<JsonValue> {
     const { world } = await this.get(worldId, userId, revision);
     return JSON.parse(JSON.stringify({ format: EXPORT_FORMAT, world })) as JsonValue;
@@ -619,7 +591,7 @@ export class WorldStore {
   }
 }
 
-/** The macros in a world from outside (a file, LumiRPEngine Studio), as warnings to review before playing it. */
+/** The macros in a world from outside (an imported file), as warnings to review before playing it. */
 export function macroReview(world: WorldDoc): LintIssue[] {
   return macrosIn(world).map((m) => ({ severity: "warning", path: m.path, code: "import_macro", message: `Review this macro before playing: ${m.macro}` }));
 }

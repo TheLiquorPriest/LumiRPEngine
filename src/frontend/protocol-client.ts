@@ -5,6 +5,14 @@
 // notifications are coalesced, so a burst of deltas renders once. A request waits for its answer
 // as long as the user's Engine requests timeout (Settings → Timeouts): the hello's answer carries
 // it, and so does every settings answer, so a change applies to the next request.
+//
+// A hello or resync (a sync) lasts until its view arrives, not just its answer: Lumiverse drops
+// what a page sends while its socket is down or not yet authenticated, and a view the backend
+// failed to build, or sent while the socket was down, never comes. So a sync ends with its view,
+// with an error naming it (even after its answer), or at the Engine requests limit; the page then
+// says why (`failed`), and the next stale delta or `retry` asks again. `retry` (a reconnect, the
+// engine starting again, the page coming back into view, Try again) asks even while a sync waits,
+// since that one may be lost.
 
 import { isRecord } from "../shared/json";
 import type { Limit } from "../shared/minds";
@@ -55,10 +63,21 @@ export interface SyncState {
   activity: Activity | null;
   /** Whether this Lumiverse stops a generation for the engine run (`lre.hello`'s `canStop`); null until a hello answers. */
   canStop: boolean | null;
+  /** Why the chat's last sync brought no view (its error, or none within the Engine requests limit), until the next sync; the page offers Try again. */
+  failed: string | null;
+}
+
+/** The hello or resync waiting for its view: at most one, and a newer one replaces it. */
+interface Sync {
+  reqId: string;
+  chatId: ChatId;
+  timer: unknown;
 }
 
 interface Pending {
   type: keyof ResultBodies;
+  /** The chat a hello named: its answer means the backend has heard this page on that chat. */
+  chat?: ChatId | null;
   resolve: (message: ResultMessage | ErrorMessage) => void;
   timer: unknown;
 }
@@ -74,6 +93,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.fix": true,
   "lre.edit": true,
   "lre.gm": true,
+  "lre.sections": true,
   "lre.state.get": true,
   "lre.marker": true,
   "lre.keep": true,
@@ -86,7 +106,6 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.map": true,
   "lre.job": true,
   "lre.lore": true,
-  "lre.studio": true,
   "lre.preset": true,
   "lre.diag": true,
   "lre.minds": true,
@@ -124,7 +143,10 @@ export class ProtocolClient {
   private readonly newReqId: () => string;
   private readonly schedule: (fn: () => void) => void;
   private readonly timers: Timers;
-  private state: SyncState = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null, canStop: null };
+  private state: SyncState = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null, canStop: null, failed: null };
+  private sync: Sync | null = null;
+  /** The chat whose hello the backend last answered for this page. */
+  private greeted: ChatId | null | undefined = undefined;
   private notifyQueued = false;
   private disposed = false;
   private counter = 0;
@@ -188,28 +210,23 @@ export class ProtocolClient {
 
   /** Switches to a chat (or none) and asks for its snapshot. Pushes for any other chat are ignored. */
   open(chatId: ChatId | null): Promise<ResultMessage | ErrorMessage> {
-    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop });
-    const reply = this.request({ type: "lre.hello", chatId, viewing: chatId !== null && this.visible() });
-    void reply.then((message) => {
-      if (message.type === "lre.error" && this.state.chatId === chatId) {
-        this.update({ ...this.state, status: "closed" });
-        this.emitError(message);
-      }
-    });
-    return reply;
+    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop, failed: null });
+    return this.ask("lre.hello");
   }
 
-  /** Discards the held view's rev and asks for a fresh snapshot (at most one outstanding). */
+  /** Discards the held view's rev and asks for a fresh snapshot, unless a sync already waits for one (a stale delta). */
   resync(): void {
-    const chatId = this.state.chatId;
-    if (chatId === null || this.state.status === "resyncing") return;
-    this.update({ ...this.state, status: "resyncing", resyncs: this.state.resyncs + 1 });
-    void this.request({ type: "lre.state.resync", chatId, viewing: this.visible() }).then((message) => {
-      if (message.type !== "lre.error" || this.state.chatId !== chatId || this.state.status !== "resyncing") return;
-      // Leave resyncing so the next delta can ask again; surface the failure once.
-      this.update({ ...this.state, status: this.state.view ? "live" : "syncing" });
-      this.emitError(message);
-    });
+    if (this.state.chatId !== null && this.sync === null) void this.ask("lre.state.resync");
+  }
+
+  /**
+   * Asks for the chat's view again even while a sync waits, since what the page asked before may be
+   * lost: it reconnected, its engine started again, it came back into view, or the player pressed
+   * Try again. A hello again while the backend never answered one for this chat and no view came;
+   * else a resync.
+   */
+  retry(): void {
+    if (this.state.chatId !== null) void this.ask(this.state.view === null && this.greeted !== this.state.chatId ? "lre.hello" : "lre.state.resync");
   }
 
   /** Tells the backend whether this page shows its chat on screen now (DESIGN §5.1: who starts a prepared reply). */
@@ -221,6 +238,8 @@ export class ProtocolClient {
     if (this.disposed) return;
     this.disposed = true;
     this.unsubscribe();
+    this.timers.clear(this.sync?.timer ?? null);
+    this.sync = null;
     for (const [reqId, entry] of this.pending) {
       this.timers.clear(entry.timer);
       entry.resolve(errorMessage(reqId, "unavailable", "The extension was unloaded"));
@@ -229,31 +248,96 @@ export class ProtocolClient {
     this.listeners.clear();
   }
 
+  /**
+   * Sends the open chat's hello or resync as its one sync, ending any that waits. For a chat it lasts
+   * until a view of the chat arrives, at most the Engine requests limit; a hello for no chat is an
+   * ordinary request.
+   */
+  private ask(type: "lre.hello" | "lre.state.resync"): Promise<ResultMessage | ErrorMessage> {
+    const chatId = this.state.chatId;
+    this.endSync();
+    if (chatId === null) {
+      const reply = this.request({ type: "lre.hello", chatId, viewing: false });
+      void reply.then((message) => {
+        if (message.type === "lre.error" && this.state.chatId === null) this.emitError(message);
+      });
+      return reply;
+    }
+    this.update({ ...this.state, status: this.state.view ? "resyncing" : "syncing", resyncs: this.state.resyncs + (type === "lre.state.resync" ? 1 : 0), failed: null });
+    const viewing = this.visible();
+    const { reqId, reply } = this.post(type === "lre.hello" ? { type: "lre.hello", chatId, viewing } : { type: "lre.state.resync", chatId, viewing }, false);
+    if (this.disposed) return reply;
+    const ms = timerMs(this.requestMs);
+    const timer = ms === null ? null : this.timers.set(() => this.syncFailed(reqId, errorMessage(reqId, "unavailable", `No view of this chat from the engine within ${formatMs(ms)} (Settings → Timeouts → ${TIMEOUTS.requestMs.label}). Try again, or the page asks again when it reconnects.`)), ms);
+    this.sync = { reqId, chatId, timer };
+    void reply.then((message) => {
+      if (message.type === "lre.error") this.syncFailed(reqId, message);
+    });
+    return reply;
+  }
+
+  /**
+   * Ends the sync that waits: a view of its chat came, a newer sync replaces it, or the page opened
+   * another chat. An answer it still gets changes nothing, and if none comes it expires as any
+   * request does.
+   */
+  private endSync(): void {
+    const sync = this.sync;
+    if (sync === null) return;
+    this.sync = null;
+    this.timers.clear(sync.timer);
+    const entry = this.pending.get(sync.reqId);
+    if (entry && entry.timer === null) entry.timer = this.limit(sync.reqId, entry.resolve);
+  }
+
+  /**
+   * The sync brought no view: an error named it (even after its answer, when building the view
+   * failed), or none came in time. The page says why once and holds what it has; the next stale
+   * delta or `retry` asks again.
+   */
+  private syncFailed(reqId: string, error: ErrorMessage): void {
+    const sync = this.sync;
+    if (sync === null || sync.reqId !== reqId) return;
+    this.sync = null;
+    this.timers.clear(sync.timer);
+    this.settle(reqId)?.resolve(error);
+    if (this.state.chatId !== sync.chatId) return;
+    this.update({ ...this.state, status: this.state.view ? "live" : "closed", failed: error.message });
+    this.emitError(error);
+  }
+
   private request(body: RequestBody): Promise<ResultMessage | ErrorMessage> {
+    return this.post(body, true).reply;
+  }
+
+  /** Sends a request; an untimed one (a sync's) waits until its sync ends it. */
+  private post(body: RequestBody, timed: boolean): { reqId: string; reply: Promise<ResultMessage | ErrorMessage> } {
     const { promise, resolve } = Promise.withResolvers<ResultMessage | ErrorMessage>();
     const reqId = this.newReqId();
     if (this.disposed) {
       resolve(errorMessage(reqId, "unavailable", "The extension was unloaded"));
-      return promise;
+      return { reqId, reply: promise };
     }
-    const ms = timerMs(this.requestMs);
-    const timer =
-      ms === null
-        ? null
-        : this.timers.set(() => {
-            if (!this.pending.delete(reqId)) return;
-            resolve(errorMessage(reqId, "unavailable", `No reply from the engine within ${formatMs(ms)} (Settings → Timeouts → ${TIMEOUTS.requestMs.label}). It may still finish what was asked.`));
-          }, ms);
-    this.pending.set(reqId, { type: body.type, resolve, timer });
+    const entry: Pending = { type: body.type, resolve, timer: timed ? this.limit(reqId, resolve) : null, ...(body.type === "lre.hello" ? { chat: body.chatId } : {}) };
+    this.pending.set(reqId, entry);
     const message = { ...body, lre: PROTOCOL_VERSION, reqId } as FrontendToBackend;
     try {
       this.transport.send(message);
     } catch (error) {
       this.pending.delete(reqId);
-      this.timers.clear(timer);
+      this.timers.clear(entry.timer);
       resolve(errorMessage(reqId, "unavailable", error instanceof Error ? error.message : String(error)));
     }
-    return promise;
+    return { reqId, reply: promise };
+  }
+
+  /** A request's limit: at the user's Engine requests timeout, an unanswered request answers `unavailable`. */
+  private limit(reqId: string, resolve: (message: ErrorMessage) => void): unknown {
+    const ms = timerMs(this.requestMs);
+    if (ms === null) return null;
+    return this.timers.set(() => {
+      if (this.pending.delete(reqId)) resolve(errorMessage(reqId, "unavailable", `No reply from the engine within ${formatMs(ms)} (Settings → Timeouts → ${TIMEOUTS.requestMs.label}). It may still finish what was asked.`));
+    }, ms);
   }
 
   private receive(payload: unknown): void {
@@ -328,7 +412,10 @@ export class ProtocolClient {
     const settings = payload.request === "lre.settings.get" || payload.request === "lre.settings.set" ? body.settings : undefined;
     const limit = payload.request === "lre.hello" ? body.requestMs : isRecord(settings) && isRecord(settings.timeouts) ? settings.timeouts.requestMs : undefined;
     if (limit === "none" || (typeof limit === "number" && Number.isFinite(limit) && limit >= 0)) this.requestMs = limit;
-    if (payload.request === "lre.hello" && typeof body.canStop === "boolean" && body.canStop !== this.state.canStop) this.update({ ...this.state, canStop: body.canStop });
+    if (payload.request === "lre.hello") {
+      if (entry.chat !== undefined) this.greeted = entry.chat;
+      if (typeof body.canStop === "boolean" && body.canStop !== this.state.canStop) this.update({ ...this.state, canStop: body.canStop });
+    }
     entry.resolve(payload as unknown as ResultMessage);
   }
 
@@ -337,12 +424,16 @@ export class ProtocolClient {
     const error = payload as unknown as ErrorMessage;
     const entry = typeof payload.reqId === "string" ? this.settle(payload.reqId) : null;
     if (entry) entry.resolve(error);
+    // A sync is answered at once and can still fail building its view: that error names it after its answer.
+    else if (this.sync !== null && payload.reqId === this.sync.reqId) this.syncFailed(this.sync.reqId, error);
     else this.emitError(error);
   }
 
   private receiveSnapshot(payload: Record<string, unknown>): void {
     if (payload.chatId !== this.state.chatId || typeof payload.rev !== "number" || !isStateView(payload.view)) return;
-    this.update({ ...this.state, rev: payload.rev, view: payload.view, status: "live" });
+    // Any view of the chat ends the sync waiting for one: a snapshot is the whole state at its rev.
+    this.endSync();
+    this.update({ ...this.state, rev: payload.rev, view: payload.view, status: "live", failed: null });
   }
 
   private receiveDelta(payload: Record<string, unknown>): void {

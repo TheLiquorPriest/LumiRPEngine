@@ -11,7 +11,6 @@ import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { measure } from "../../src/shared/json-patch";
 import type { BackendToFrontend, DraftChanged, FrontendToBackend } from "../../src/shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../../src/shared/protocol";
-import { channelId, ENGINE_EXTENSION, STUDIO_EXTENSION } from "../../src/shared/studio-bridge";
 import type { RevisionNote, WorldDoc, WorldIndex } from "../../src/shared/world";
 import { mapTemplate } from "../../src/shared/maps";
 import { STARTER_WORLDS } from "../../src/packs/index";
@@ -101,20 +100,6 @@ describe("one world's writes in turn", () => {
     const worldId = String(rig.body(replies[0] ?? replies[1]!).worldId);
     const lore = (await editorOf(rig, worldId).get()).draft.lore;
     expect(ids.every((id) => lore[id]?.content === "Morning, Sam.")).toBe(true);
-  });
-
-  test("a Studio install and an editor write at once leave a draft begun on the installed head", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const next: WorldDoc = { ...testWorld(), id: worldId, name: "Testville" };
-    next.places.pier = { id: "pier", name: "The pier", fields: {} };
-    const [installed] = await Promise.all([
-      rig.rt.worlds.commitRevision(worldId, next, rig.host.userId),
-      rig.dispatch.handle({ lre: PROTOCOL_VERSION, reqId: "w", type: "lre.editor", worldId, base: null, op: "put", collection: "places", id: "shed", value: place("shed") } as unknown as FrontendToBackend, rig.host.userId),
-    ]);
-    const now = await editorOf(rig, worldId).get();
-    expect([now.base, (await indexOf(rig, worldId)).head]).toEqual([installed.revision, installed.revision]);
-    expect(Object.keys(now.draft.places).sort()).toEqual(["home", "pier", "shed"]);
   });
 });
 
@@ -427,7 +412,7 @@ describe("restore, commits and history", () => {
     expect(failure(await e.send({ op: "restore", revision: "0123456789abcdef0123456789abcdef" })).code).toBe("not_found");
   });
 
-  test("every way a revision becomes head is noted: create, Build, an outside agent with its note, import and Studio installs", async () => {
+  test("every way a revision becomes head is noted: create, Build, an outside agent with its note, and import", async () => {
     const rig = new Rig();
     const worldId = await rig.newWorld();
     const e = editorOf(rig, worldId);
@@ -438,29 +423,13 @@ describe("restore, commits and history", () => {
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null, note: `${"x".repeat(250)}` }, "build-session"));
     // Committing the head as it is makes nothing head, so it adds nothing.
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-    const head = (await indexOf(rig, worldId)).head;
-    const next: WorldDoc = { ...testWorld(), id: worldId, places: { home: { id: "home", name: "Home", fields: {} }, studio: { id: "studio", name: "Studio", fields: {} } } };
-    rig.host.rpcPool.port(STUDIO_EXTENSION).handle(`offer.${channelId(rig.host.userId)}`, [], async (requester) => {
-      if (requester !== ENGINE_EXTENSION) throw new Error("not for you");
-      return { offerId: "o1", doc: JSON.parse(JSON.stringify(next)) as JsonValue, mode: "revision", worldId, baseRevision: head, createdAt: 1 };
-    });
-    const offer = rig.body(await rig.send({ type: "lre.studio", op: "offer" })).offer;
-    if (!isRecord(offer)) throw new Error("no offer");
-    const versionBefore = (await e.get()).version;
-    const before = rig.host.sent.length;
-    rig.body(await rig.send({ type: "lre.studio", op: "install", offerId: "o1", hash: offer.hash }));
-    const installed = (await indexOf(rig, worldId)).head;
-    // The install moved the head under no draft: the working copy is a new state, with its own version.
-    expect(rig.host.sent.slice(before).filter((m) => m.type === "lre.draft.changed")).toEqual([{ lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: versionBefore + 1, stored: false, base: installed }]);
-    expect((await e.get()).version).toBe(versionBefore + 1);
     const history = await historyOf(rig, worldId);
     expect(history.map((h) => [h.source, h.note])).toEqual([
       ["create", undefined],
       ["agent", "Built from the CLI"],
       ["build", "x".repeat(200)],
-      ["studio", undefined],
     ]);
-    expect(history.map((h) => h.revision).at(-1)).toBe(installed);
+    expect(history.map((h) => h.revision).at(-1)).toBe((await indexOf(rig, worldId)).head);
     expect(history.every((h, i) => typeof h.at === "number" && (i === 0 || h.at >= (history[i - 1]?.at ?? 0)))).toBe(true);
     // The list leaves the history out; it lives beside the index.
     const listed = rig.body(await rig.send({ type: "lre.world", op: "list" })).worlds;

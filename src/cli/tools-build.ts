@@ -1,6 +1,6 @@
-// The rest of Build the world tools don't reach (DESIGN §11, §12, §15): the head's lint, the Sheet
-// Designer's preview, a ruleset profile applied to the draft in one write, LumiRPEngine Studio's
-// offer and its install, and a chat's map: how it shows, and what Walk here takes.
+// The rest of Build the world tools don't reach (DESIGN §11, §12): the head's lint, the Sheet
+// Designer's preview, a ruleset profile applied to the draft in one write, and a chat's map: how it
+// shows, and what Walk here takes.
 
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import { ALL_PACKS } from "../packs/index";
@@ -91,14 +91,6 @@ async function sheetTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
   return read.ok ? { text: read.text } : { text: read.text, isError: true };
 }
 
-async function installTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
-  const offerId = neededText(args, "offerId", "the offer's id (lre_studio_offer reviews it)");
-  const hash = neededText(args, "hash", "the offer's hash, as lre_studio_offer reviewed it");
-  const body = await ctx.live().conn.request("lre.studio", { op: "install", offerId, hash, ...(boolArg(args, "acceptMovedHead") ? { acceptMovedHead: true } : {}) });
-  const review = body.lint ?? [];
-  return { text: json({ installed: body.installed ?? null, macroReview: review, ...(review.length > 0 ? { note: "Review each macro before playing the world: Lumiverse runs macros in lore and templates when it builds a prompt." } : {}) }) };
-}
-
 export const BUILD_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_lint",
@@ -137,25 +129,6 @@ export const BUILD_TOOLS: readonly ToolModule[] = [
     write: { destructive: true, idempotent: true },
     run: profileTool,
     cli: { command: "profile", section: "Build", usage: "profile <worldId> <profile> [--take <path> …] [--preview] [--expect-version <n>]", summary: "Apply a ruleset profile to the draft", positionals: ["worldId", "profile"], needs: 2, options: { "--take": { arg: "take", as: "many" }, "--preview": { arg: "preview", as: "flag" }, "--expect-version": { arg: "expectVersion", as: "int" } } },
-  },
-  {
-    name: "lre_studio_offer",
-    description: "The world LumiRPEngine Studio offers now, reviewed as Build reviews it before anything is installed: new world or next revision of one of yours (target), its name, items per collection, the engine's lint (errors first), the macros in its lore and templates, the chat it wants attached, why it can't be installed as it is (blocked), whether the target's head moved since the Studio took it (headMoved), and the hash lre_studio_install names it by. Null, with why, when there is none.",
-    inputSchema: object({}),
-    write: false,
-    run: async (_args, ctx) => {
-      const body = await ctx.live().conn.request("lre.studio", { op: "offer" });
-      return { text: json(body.offer ? { offer: body.offer } : { offer: null, message: body.message ?? "LumiRPEngine Studio offers nothing now." }) };
-    },
-    cli: { command: "studio-offer", section: "Build", usage: "studio-offer", summary: "Review LumiRPEngine Studio's offer" },
-  },
-  {
-    name: "lre_studio_install",
-    description: "Install the LumiRPEngine Studio offer you reviewed with lre_studio_offer, by its offerId and hash: a new world, or the next revision of one of yours, which becomes its head. Refused when the Studio offers something else since the review, when it is blocked or already installed, and, when the target's head moved since the Studio took it, unless acceptMovedHead (the new head then leaves out what was committed since). Answers what it became, with the macros to review before playing it.",
-    inputSchema: object({ offerId: { type: "string", description: "The offer's id." }, hash: { type: "string", description: "The offer's hash, as reviewed." }, acceptMovedHead: { type: "boolean", description: "Install over a head that moved since the Studio took it." } }, ["offerId", "hash"]),
-    write: { destructive: true, idempotent: true },
-    run: installTool,
-    cli: { command: "studio-install", section: "Build", usage: "studio-install <offerId> <hash> [--accept-moved-head]", summary: "Install the reviewed Studio offer", positionals: ["offerId", "hash"], needs: 2, options: { "--accept-moved-head": { arg: "acceptMovedHead", as: "flag" } } },
   },
   {
     name: "lre_map_display",

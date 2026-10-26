@@ -1,5 +1,5 @@
 // The recipes in docs/RECIPES.md, built from the page itself: each fragment, merged into a new
-// world, loads through the studio API, lints clean, conforms to the published schema and plays as
+// world, loads through the local engine, lints clean, conforms to the published schema and plays as
 // its "Try it" says through the engine.
 
 import { describe, expect, test } from "bun:test";
@@ -22,7 +22,7 @@ import { hashJson } from "../../src/shared/hash";
 import { isRecord } from "../../src/shared/json";
 import type { Value } from "../../src/engine/expr";
 import type { WorldDoc } from "../../src/shared/world";
-import { checkSchema, checkWorld, lint, load, MAP_SCHEMA, newWorld, pathText, revisionOf, type Schema } from "../../src/studio-api";
+import { checkSchema, checkWorld, lint, load, MAP_SCHEMA, newWorld, pathText, revisionOf, type Schema } from "../../src/cli/local-engine";
 
 const PAGE = readFileSync(join(import.meta.dir, "../../docs/RECIPES.md"), "utf8");
 // A JSON module's inferred type spells out every node, which `Schema` describes in general.
@@ -48,7 +48,7 @@ function merge(base: unknown, patch: unknown): unknown {
   return out;
 }
 
-/** A new world with the recipe merged in, loaded as a studio loads it; a table the recipe gives replaces the world's copy whole. */
+/** A new world with the recipe merged in, loaded as the command line loads it; a table the recipe gives replaces the world's copy whole. */
 function recipe(title: string): WorldDoc {
   const patch = fragment(title);
   const merged = merge(newWorld("recipe", title), patch);

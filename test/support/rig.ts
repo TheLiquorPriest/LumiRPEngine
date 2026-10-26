@@ -11,6 +11,7 @@ import { Dispatcher } from "../../src/backend/dispatch";
 import { JobRunner } from "../../src/backend/jobs";
 import { toChain } from "../../src/backend/ledger-io";
 import { Runtime } from "../../src/backend/runtime";
+import { applyDelta } from "../../src/frontend/delta";
 import { FakeHost } from "./fake-host";
 import { ALL_PACKS, STARTER_INFO, STARTER_WORLDS } from "../../src/packs/index";
 import { POV, testPack, testWorld, tieStubPack } from "./test-pack";
@@ -135,11 +136,18 @@ export class Rig {
     await this.host.finish(g, reply);
   }
 
+  /** The chat's view as a page holds it: the last snapshot sent, with the deltas sent after it that build on it. */
   latestView(chatId: string): Record<string, unknown> | null {
-    for (let i = this.host.sent.length - 1; i >= 0; i--) {
-      const m = this.host.sent[i];
-      if (m?.type === "lre.state.snapshot" && m.chatId === chatId) return JSON.parse(JSON.stringify(m.view)) as Record<string, unknown>;
+    const at = this.host.sent.findLastIndex((m) => m.type === "lre.state.snapshot" && m.chatId === chatId);
+    const snapshot = this.host.sent[at];
+    if (snapshot?.type !== "lre.state.snapshot") return null;
+    let view: unknown = JSON.parse(JSON.stringify(snapshot.view));
+    let rev = snapshot.rev;
+    for (const m of this.host.sent.slice(at + 1)) {
+      if (m.type !== "lre.state.delta" || m.chatId !== chatId || m.base !== rev) continue;
+      view = applyDelta(view, m.ops);
+      rev = m.rev;
     }
-    return null;
+    return view as Record<string, unknown>;
   }
 }

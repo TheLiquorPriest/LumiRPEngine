@@ -61,6 +61,12 @@ describe("chip actions", () => {
     expect(chipIntent(chip("contradiction", ["renarrate", "dismiss"]), "dismiss", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-contradiction", choice: "dismiss" }, regenerate: false });
   });
 
+  test("a failed reply's Retry the reply only regenerates; Re-run the engine drops the kept turn, then regenerates", () => {
+    const failed = chip("reply_failed", ["regenerate", "rerun", "diagnostics"]);
+    expect(chipIntent(failed, "regenerate", "c1")).toEqual({ request: null, regenerate: true });
+    expect(chipIntent(failed, "rerun", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-reply_failed", choice: "rerun" }, regenerate: true });
+  });
+
   test("converting an entry sends its event ref and parent path; markers cannot convert", () => {
     expect(convertRequest({ messageId: "m3", parentPath: "p".repeat(32), ref: { in: "post", seq: 4, index: 1 }, status: "dropped", text: "Paid $12" }, "c1")).toEqual({
       type: "lre.keep",

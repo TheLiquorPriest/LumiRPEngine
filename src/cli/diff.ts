@@ -1,5 +1,5 @@
 // What changed between two versions of a world (its head, its draft or any revision): the
-// collections item by item, every other part whole (the Studio's review), and inside a changed
+// collections item by item, every other part whole, and inside a changed
 // item the JSON Pointers whose values differ, capped so a large change still fits one answer.
 
 import { hasOwn, isRecord } from "../shared/json";

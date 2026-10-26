@@ -60,15 +60,15 @@ describe("the CLI bundles", () => {
     }
   });
 
-  test("the kit bundles the engine through the studio seam, and the docs and schemas it serves", () => {
-    expect(kit.files).toContain("src/studio-api.ts");
-    for (const doc of ["AGENT-GUIDE", "REFERENCE", "EXPRESSIONS", "RECIPES", "DESIGN", "USER-GUIDE", "STUDIO", "PRESETS"]) expect(kit.files).toContain(`docs/${doc}.md`);
+  test("the kit bundles the engine on this machine, and the docs and schemas it serves", () => {
+    expect(kit.files).toContain("src/cli/local-engine.ts");
+    for (const doc of ["AGENT-GUIDE", "REFERENCE", "EXPRESSIONS", "RECIPES", "DESIGN", "USER-GUIDE", "PRESETS"]) expect(kit.files).toContain(`docs/${doc}.md`);
     expect(kit.files).toContain("schemas/lre-world-v1.schema.json");
   });
 
   test("the core bundles no tool, doc, schema or engine: the transport, the sign-in, the connection and the kit loader", () => {
     const { files } = reach(join(SRC, "cli/main.ts"), true);
-    expect(files.filter((f) => /^(docs|schemas)\/|^src\/(engine|packs)\/|^src\/studio-api\.ts$|^src\/cli\/(tools|live|offline|texts|commands|agent-kit)\.ts$/.test(f))).toEqual([]);
+    expect(files.filter((f) => /^(docs|schemas)\/|^src\/(engine|packs)\/|^src\/cli\/(tools|live|offline|texts|commands|agent-kit|local-engine)\.ts$/.test(f))).toEqual([]);
     expect(files).toEqual(expect.arrayContaining(["src/cli/mcp.ts", "src/cli/connection.ts", "src/cli/credentials.ts", "src/cli/follow.ts", "src/cli/serve.ts"]));
   });
 });

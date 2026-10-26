@@ -506,7 +506,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     const level = ctx.levelOf(pov, "money");
     if (level === 0) return [];
     const lines: FeedLine[] = [];
-    if (level === 1 || !hasLedger(ctx, pov)) lines.push({ text: `Money: ${wealthOf(hooks, ctx, pov)}.`, known: "pov" });
+    if (level === 1 || !hasLedger(ctx, pov)) lines.push({ text: `How well off you are: ${wealthOf(hooks, ctx, pov)}.`, known: "pov" });
     else {
       const mine = accountsOf(ctx, pov);
       const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
@@ -516,7 +516,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
         const name = own(ctx.state.entities, id)?.name ?? id;
         return traitsOf(ctx, id)?.liability ? `${name} owes ${formatMoney(-b, ctx.world.currency)}` : `${name} ${formatMoney(b, ctx.world.currency)}`;
       });
-      if (parts.length > 0) lines.push({ text: `Money: ${parts.join("; ")}.`, known: "pov" });
+      if (parts.length > 0) lines.push({ text: `Balances now: ${parts.join("; ")}.`, known: "pov" });
     }
     if (scope === "player") return lines;
     const here = placeOfEntity(ctx.state, pov);

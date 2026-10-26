@@ -54,6 +54,7 @@ export const COVERAGE: Coverage = {
     feed: { tools: ["lre_gm_edit"] },
   },
   "lre.gm": { tools: ["lre_gm", "lre_minds"] },
+  "lre.sections": { tools: ["lre_sections"] },
   "lre.marker": { tools: ["lre_marker", "lre_upgrade"] },
   "lre.keep": { tools: ["lre_keep"] },
   "lre.minds": { run: { tools: ["lre_minds_run"] }, cancel: { tools: ["lre_minds_cancel"] }, status: { tools: ["lre_minds"] } },
@@ -100,7 +101,6 @@ export const COVERAGE: Coverage = {
     fields: { tools: ["lre_lore_fields"] },
     check: { excluded: "Build's World Info entry form checks a gate as it is typed; an agent's lre_lore_fields answers the same problem when it saves." },
   },
-  "lre.studio": { offer: { tools: ["lre_studio_offer"] }, install: { tools: ["lre_studio_install"] } },
   "lre.preset": {
     get: { tools: ["lre_preset", "lre_preset_add_blocks"] },
     add: { tools: ["lre_preset_add_blocks"] },

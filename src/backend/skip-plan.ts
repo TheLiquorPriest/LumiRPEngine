@@ -14,6 +14,7 @@ import type { StepConfig } from "../shared/settings";
 import { firedTimeout, within } from "../shared/timeouts";
 import type { WorldDoc } from "../shared/world";
 import { SKIP_PLAN_ANSWER, SKIP_PLAN_PROMPT } from "../shared/skip-plan";
+import { STEP_LABEL } from "../shared/steps";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
 import { povPlace, unrevealedSecrets } from "../engine/visibility";
@@ -69,7 +70,7 @@ export interface SkipPlanInput {
   /** The engine run's clock, and the call's own limit (`skipPlanMs`). */
   signal: AbortSignal;
   limit: Limit;
-  /** The time-skip step's own settings (connection, model, max tokens, sampling) and the preset's guidance for it: the plan is part of that step. */
+  /** The time-skip step's own settings (connection, model, max tokens, sampling) and the preset's guidance for it: the plan is part of that step. Null when the step is switched off: no call is made. */
   config: StepConfig | null;
   guidance: string;
 }
@@ -81,6 +82,9 @@ export interface SkipPlanDeps {
   /** Where the lore pinned to the `skip` step and the recent chat come from (DESIGN §24.5). */
   host: Pick<HostPort, "books" | "log" | "chats">;
 }
+
+/** Why a skip plan has no blocks when the `skip` step is off, for the GM's view of the people it would have planned. */
+const STEP_OFF_NOTE = `The skip plan wasn't made: the ${STEP_LABEL.skip} step is off (Settings → Steps and connections), so everyone it would have planned keeps to their basic needs.`;
 
 /**
  * The `castlife.skip_plan` a timelapse turn records ahead of its timelapse: null when the timelapse
@@ -101,6 +105,9 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
     .sort()
     .filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && livesPlans(ctx, id) && skipLifeOf(ctx, id) === "model");
   if (people.length === 0) return null;
+  // The `skip` step switched off makes no call: the skip runs on the engine alone, as a failed plan
+  // does, everyone it would have planned keeping to their basic needs, and the GM's view says why.
+  if (!input.config) return { type: ROUTINE_EVENTS.skipPlan, data: { from, to, plans: [], note: STEP_OFF_NOTE } };
   const safe = povSafe(ctx);
   const reply = input.reply.slice(-REPLY_CAP);
   const told = safe(reply) ? reply : "";

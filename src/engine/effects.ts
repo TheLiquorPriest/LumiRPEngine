@@ -7,7 +7,7 @@
 //   set     {entity, field, value}           number fields clamp to min/max (a pool's to its max); enums must match
 //   add     {entity, field, delta}           the result clamps the same way (the delta shrinks)
 //   recover {entity, field, amount?, full?}  a pool rises by `amount`, else its own `recover`, else to its max
-//   award   {entity, progression, amount}    adds to a progression's XP field (the level-up follows)
+//   award   {entity, progression, amount}    adds to a progression's XP field (the level follows)
 //   check   {check, actor, target?, outcomes} anyone rolls a check; its outcome's effects see `roll.*`
 //   move    {entity, to, activity?, told?, with?}  the one move path (`relocate`): leaves any container (`in`), `place` := to, where it then stands is the space pack's (`space.arrival`); `told` is a narrated move's (routes checked under the travel simulation; its activity `activity`, else idle, and a stated one even where they already are); `with` the people who come along; the player character's party follows it, but not someone the same read or edit already put elsewhere
 //   link    {rel, from, to, until?, fields?} unlink {rel, from, to}: the other side of a symmetric
@@ -24,17 +24,18 @@
 //
 // Arguments are evaluated just before the effect resolves; `=` formulas there may call `roll()`,
 // drawing from the effect's own generator, so the event records the result (DESIGN §11). After
-// each effect, every entity whose XP it changed rises to the level its XP has reached
-// (`levelUps`), so an award, a quest reward or a narrated gain levels up the same way.
+// each effect, every entity whose XP it changed has its level follow its XP (`levelsFollowXp`):
+// up a level at a time with `onLevel`, or straight down, so an award, a quest reward, a narrated
+// gain or a correction moves it the same way. Nothing else writes a level (`follows_xp`).
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import type { EntityId, InterruptClass } from "../shared/ids";
+import type { EntityId, InterruptClass, KindId } from "../shared/ids";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import { hashParts } from "../shared/hash";
 import type { LedgerEvent, PostingLine } from "../shared/ledger";
 import { agentOf, spawnTierOf, tierOf } from "../shared/tiers";
-import type { EffectSpec, EntityDef, FieldDef, ProgressionDef, RelationInstance } from "../shared/world";
+import type { EffectSpec, EntityDef, FieldDef, ProgressionDef, RelationInstance, WorldDoc } from "../shared/world";
 import { calendarOf, slotIndexAt } from "./calendar";
 import { checkOf, readyCheck, rollCheck, rollVars } from "./checks";
 import { ENGINE_EVENTS } from "./engine-pack";
@@ -43,7 +44,7 @@ import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { linkEvents, spawnLinks, unlinkEvents } from "./relations";
-import { progressionApplies, progressOf } from "./ruleset";
+import { levelProgression, progressionApplies, progressOf } from "./ruleset";
 import { evalArg, evalArgs, evalExpr, fieldDef, isGone, objects, placeOfEntity, poolMax, scopeEnv } from "./scope";
 import { acts } from "./life";
 import { together } from "./presence";
@@ -126,6 +127,17 @@ export function fieldBounds(reg: Registry, ctx: ReadContext, entity: EntityId, d
 }
 
 /**
+ * Why nothing but XP writes this field (DESIGN §11): a progression's level field follows its XP,
+ * so a write to it is refused, naming the field to change instead. Null for any other field.
+ */
+function followsXp(reg: Registry, world: WorldDoc, kind: KindId, field: string): Rejection | null {
+  const prog = levelProgression(reg, world, kind, field);
+  if (!prog) return null;
+  const label = (id: string): string => fieldDef(reg, world, kind, id)?.label ?? id.replace(/_/g, " ");
+  return reject("follows_xp", `${label(prog.levelField)} follows ${label(prog.xpField)}: change ${label(prog.xpField)} instead`);
+}
+
+/**
  * A change to a number field as events: the result clamped to the field's bounds, as an `add` while
  * the field holds a value, else a `set` (an `add` event starts an absent field from 0, so a field
  * still at its default, or an unset pool, is set instead). None when nothing changes.
@@ -135,6 +147,8 @@ function change(reg: Registry, w: Working, entity: EntityId, field: string, delt
   if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
   const def = fieldDef(reg, w.world, e.kind, field);
   if (def?.derived !== undefined) return reject("derived", `${field} is derived`);
+  const follows = followsXp(reg, w.world, e.kind, field);
+  if (follows) return follows;
   const stored = own(e.fields, field);
   const cur = stored ?? def?.default ?? (def?.pool ? (poolMax(reg, w.ctx, entity, def.pool) ?? 0) : 0);
   if (typeof cur !== "number") return reject("not_numeric", `${e.name}'s ${field.replace(/_/g, " ")} is not a number`);
@@ -157,6 +171,8 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       const def = fieldDef(reg, world, e.kind, field);
       let value: JsonValue = args.value ?? null;
       if (def?.derived !== undefined) return reject("derived", `${field} is derived`);
+      const follows = followsXp(reg, world, e.kind, field);
+      if (follows) return follows;
       if (def && (def.type === "number" || def.type === "money" || def.type === "duration") && typeof value === "number") {
         const b = fieldBounds(reg, w.ctx, entity, def);
         value = clampNumber(value, b.min, b.max);
@@ -231,6 +247,11 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       const id = text(args.id) || `${kind}:${hashParts(rng.seed, "spawn", kind, text(args.name)).slice(0, 10)}`;
       const tier = tierOf(world, text(args.tier)) ? text(args.tier) : spawnTierOf(world);
       const fields: JsonObject = isRecord(args.fields) ? { ...(args.fields as JsonObject) } : {};
+      // A new entity starts at the level its XP reaches (`levelsFollowXp`): a spawn gives XP, never a level.
+      for (const field of Object.keys(fields)) {
+        const follows = followsXp(reg, world, kind, field);
+        if (follows) return follows;
+      }
       if (typeof args.place === "string") fields.place = args.place;
       const relations: RelationInstance[] = objects(args.relations).map((r) => ({ type: text(r.type), to: text(r.to) }));
       const entity: EntityDef = { id, kind, name: text(args.name) || id, tier, fields, relations };
@@ -350,50 +371,65 @@ function applyCheck(reg: Registry, w: Working, spec: EffectSpec, scope: EffectSc
   return out;
 }
 
-/** One entity's level-up on one progression: the level field set a level at a time, each followed by `onLevel`. */
-function levelUp(reg: Registry, w: Working, entity: EntityId, id: string, prog: ProgressionDef, scope: EffectScope): EffectOutcome {
+/**
+ * One entity's level on one progression, brought to the level its XP reaches within the level
+ * field's bounds (DESIGN §11). Rising, the level field is set a level at a time, each followed by
+ * `onLevel` with `level` and `from` (the level before the gain); falling, it is set straight to
+ * that level and nothing runs, so what earlier levels gave stays. Either ends with a Journal line.
+ * A new entity (`spawned`) just starts at its XP's level: no `onLevel`, no line.
+ */
+function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog: ProgressionDef, scope: EffectScope, spawned: boolean): EffectOutcome {
   const out: EffectOutcome = { applied: [], rejected: [] };
-  const p = progressOf(reg, w.ctx, entity, prog);
-  if (!p || p.reached <= p.level) return out;
+  const e = own(w.state.entities, entity);
+  const p = e ? progressOf(reg, w.ctx, entity, prog) : null;
+  if (!e || !p) return out;
+  const bounds = fieldBounds(reg, w.ctx, entity, fieldDef(reg, w.world, e.kind, prog.levelField));
+  const to = clampNumber(p.reached, bounds.min, bounds.max);
   const from = p.level;
-  const depth = scope.depth ?? 0;
-  for (let level = from + 1; level <= p.reached; level++) {
-    const set: LedgerEvent = { type: "set", entity, field: prog.levelField, value: level };
-    if (w.apply(set)) return out;
-    out.applied.push(set);
-    if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP) continue;
-    const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 });
-    out.applied.push(...r.applied);
-    out.rejected.push(...r.rejected);
-  }
-  const who = entity === w.world.pov ? "You" : (own(w.state.entities, entity)?.name ?? entity);
-  const note: LedgerEvent = {
-    type: ENGINE_EVENTS.note,
-    // The POV's level-up is the player's news; anyone else's is the author's and the GM's.
-    data: { text: `${who} reached ${prog.label} ${p.reached}${p.reached - from > 1 ? ` (from ${from})` : ""}.`, entity, ...(entity === w.world.pov ? {} : { visibility: "secret" }) },
+  if (to === from) return out;
+  const applied = (ev: LedgerEvent): boolean => {
+    if (w.apply(ev)) return false;
+    out.applied.push(ev);
+    return true;
   };
-  if (!w.apply(note)) out.applied.push(note);
+  if (spawned || to < from) {
+    if (!applied({ type: "set", entity, field: prog.levelField, value: to }) || spawned) return out;
+  } else {
+    const depth = scope.depth ?? 0;
+    for (let level = from + 1; level <= to; level++) {
+      if (!applied({ type: "set", entity, field: prog.levelField, value: level })) return out;
+      if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP) continue;
+      const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 });
+      out.applied.push(...r.applied);
+      out.rejected.push(...r.rejected);
+    }
+  }
+  const who = entity === w.world.pov ? "You" : e.name;
+  const text = to > from ? `${who} reached ${prog.label} ${to}${to - from > 1 ? ` (from ${from})` : ""}.` : `${who} dropped to ${prog.label} ${to} (from ${from}).`;
+  // The POV's level is the player's news; anyone else's is the author's and the GM's.
+  applied({ type: ENGINE_EVENTS.note, data: { text, entity, ...(entity === w.world.pov ? {} : { visibility: "secret" }) } });
   return out;
 }
 
 /**
- * Progression after events (DESIGN §11): every entity whose XP field the events changed rises to
- * the level its XP has reached, one level at a time. Each level sets the level field, then runs the
- * progression's `onLevel` effects with `level` and `from` (the level before the gain); the gain
- * ends with a Journal line. Levels only rise: less XP leaves the level where it is.
+ * Progression after events (DESIGN §11), one rule both ways: every entity whose XP field the events
+ * changed has its level follow its XP (`followXp`), up with more and down with less, and a new
+ * entity starts at the level its XP reaches. Nothing else moves a level.
  */
-export function levelUps(reg: Registry, w: Working, events: readonly LedgerEvent[], scope: EffectScope): EffectOutcome {
+export function levelsFollowXp(reg: Registry, w: Working, events: readonly LedgerEvent[], scope: EffectScope): EffectOutcome {
   const out: EffectOutcome = { applied: [], rejected: [] };
   const progressions = Object.entries(w.world.ruleset?.progression ?? {});
   if (progressions.length === 0) return out;
   const done = new Set<string>();
   for (const ev of events) {
-    if (ev.type !== "set" && ev.type !== "add") continue;
+    // The entity whose XP may have moved, with the field written; a spawn's every field is new.
+    const moved = ev.type === "set" || ev.type === "add" ? { entity: ev.entity, field: ev.field } : ev.type === "spawn" ? { entity: ev.entity.id, field: null } : null;
+    if (!moved) continue;
     for (const [id, prog] of progressions) {
-      const key = `${ev.entity}\u0000${id}`;
-      if (prog.xpField !== ev.field || done.has(key)) continue;
+      const key = `${moved.entity}\u0000${id}`;
+      if ((moved.field !== null && moved.field !== prog.xpField) || done.has(key)) continue;
       done.add(key);
-      const step = levelUp(reg, w, ev.entity, id, prog, scope);
+      const step = followXp(reg, w, moved.entity, id, prog, scope, moved.field === null);
       out.applied.push(...step.applied);
       out.rejected.push(...step.rejected);
     }
@@ -404,7 +440,7 @@ export function levelUps(reg: Registry, w: Working, events: readonly LedgerEvent
 /**
  * Resolves and applies effects in order; each sees the state after the ones before it. One
  * effect's events are one atomic unit: they share a group (so a rebased view drops or keeps them
- * together) and apply all or none here. A level-up the effect causes follows it.
+ * together) and apply all or none here. A level its XP moves follows it (`levelsFollowXp`).
  */
 export function applyEffects(reg: Registry, w: Working, specs: readonly EffectSpec[], scope: EffectScope): EffectOutcome {
   const out: EffectOutcome = { applied: [], rejected: [] };
@@ -437,7 +473,7 @@ export function applyEffects(reg: Registry, w: Working, specs: readonly EffectSp
       }
     }
     out.applied.push(...events);
-    const ups = levelUps(reg, w, events, { ...scope, rng });
+    const ups = levelsFollowXp(reg, w, events, { ...scope, rng });
     out.applied.push(...ups.applied);
     out.rejected.push(...ups.rejected);
   });

@@ -12,7 +12,8 @@ import { hasOwn, type JsonObject, type JsonValue } from "../../shared/json";
 import { mergeAdjusted, type MergeAdjustment } from "../../shared/json-patch";
 import type { SettingsResult } from "../../shared/protocol";
 import { EXTRACTION_TYPES, stepConfigOf } from "../../shared/settings";
-import type { AdjudicationPresetId, StepPurpose } from "../../shared/world";
+import type { StepPurpose } from "../../shared/world";
+import { ADJUDICATION_PRESET_LABEL } from "../../shared/adjudication";
 import type { SettingsPage } from "../app";
 import { useApp, useUi, useView } from "../app";
 import { Badge, Banner, Button, Empty, HostSwitch, List, ListRow, PageHeader, Section, useBusy, useShowIds } from "../components";
@@ -67,8 +68,6 @@ const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "About", pages: ["caveats", "diagnostics"] },
 ];
 
-const PRESET_LABEL: Record<AdjudicationPresetId, string> = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
-
 const STATIC_CAVEATS = [
   "Lumiverse's World Info works as usual in world chats, but for two cases: an entry LumiRPEngine keeps secret stays off until its gate holds, and an entry whose text a section already carries that turn (such as the lore about where your character is, in the Place section) is left out.",
   "Realism, checks and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat in GM → This chat.",
@@ -95,7 +94,7 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
     case "realism":
       return { subtitle: settings.overrideWorldDefaults ? `${humanize(settings.realism.preset)} for new chats` : `World defaults, then ${humanize(settings.realism.preset)}` };
     case "checks":
-      return { subtitle: settings.overrideWorldAdjudication ? `${PRESET_LABEL[settings.adjudication.preset]} for new chats` : `World rules, then ${PRESET_LABEL[settings.adjudication.preset]}` };
+      return { subtitle: settings.overrideWorldAdjudication ? `${ADJUDICATION_PRESET_LABEL[settings.adjudication.preset]} for new chats` : `World rules, then ${ADJUDICATION_PRESET_LABEL[settings.adjudication.preset]}` };
     case "time":
       return { subtitle: `${settings.time.scale}× scale · montage by ${settings.time.montage === "key" ? "key moments" : settings.time.montage}` };
     case "extraction": {

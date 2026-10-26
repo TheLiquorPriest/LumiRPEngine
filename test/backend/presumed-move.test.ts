@@ -54,10 +54,10 @@ async function povPlace(rig: Rig, chatId: string): Promise<string | null> {
   return placeOfEntity(state, "pov");
 }
 
-/** The chips on the latest reply that move someone: a narrated move's Undo, Apply or decline ("you → Alder Automotive"). */
+/** The chips on the latest reply that move someone: a narrated move's Undo, Apply or decline ("You went to Alder Automotive"). */
 async function moveChips(rig: Rig, chatId: string): Promise<Chip[]> {
   const head = rig.host.head(chatId);
-  return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === head?.id && (c.kind === "undo" || c.kind === "confirm" || c.kind === "decline") && c.label.includes(" → "));
+  return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === head?.id && (c.kind === "undo" || c.kind === "confirm" || c.kind === "decline") && c.label.includes(" went to "));
 }
 
 /** The prompt's Scene lines. */
@@ -210,13 +210,13 @@ describe("a reply that puts the POV somewhere the engine doesn't have them", () 
     expect(await povPlace(rig, chatId)).toBe("alder_market");
     const [apply, ...others] = await moveChips(rig, chatId);
     expect(others).toEqual([]);
-    expect(apply).toMatchObject({ kind: "confirm", label: "you → Alder Automotive" });
+    expect(apply).toMatchObject({ kind: "confirm", label: "You went to Alder Automotive" });
     expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: apply?.id, choice: "confirm" })).applied).toBe(true);
     expect(await povPlace(rig, chatId)).toBe("alder_automotive");
     // A reply that has the POV at the cafe: No keeps them at the shop.
     await rig.turn(chatId, "I look around.", AT_THE_CAFE);
     const [offered] = await moveChips(rig, chatId);
-    expect(offered).toMatchObject({ kind: "confirm", label: "you → Bluebird Coffee" });
+    expect(offered).toMatchObject({ kind: "confirm", label: "You went to Bluebird Coffee" });
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: offered?.id, choice: "reject" }));
     expect(await povPlace(rig, chatId)).toBe("alder_automotive");
     expect(await movesSetting(rig)).toMatchObject({ mode: "auto", accepted: 0, rejected: 0 });
@@ -225,7 +225,7 @@ describe("a reply that puts the POV somewhere the engine doesn't have them", () 
     expect(await povPlace(rig, chatId)).toBe("lakefront_park");
     const [undo, ...more] = await moveChips(rig, chatId);
     expect(more).toEqual([]);
-    expect(undo).toMatchObject({ kind: "undo", label: "you → Lakefront Park" });
+    expect(undo).toMatchObject({ kind: "undo", label: "You went to Lakefront Park" });
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: undo?.id, choice: "undo" }));
     expect(await povPlace(rig, chatId)).toBe("alder_automotive");
     expect(await movesSetting(rig)).toMatchObject({ mode: "auto", accepted: 0, rejected: 1 });
@@ -255,12 +255,12 @@ describe("a reply that puts the POV somewhere the engine doesn't have them", () 
     // A narrated move of the POV's says where they went: it is the only one.
     read = { proposals: [{ type: "location", entity: "pov", place: "lakefront_park" }], where: "bluebird_coffee" };
     await rig.turn(chatId, "I look around.", "You wander down to the lakefront.");
-    expect((await moveChips(rig, chatId)).map((c) => [c.kind, c.label])).toEqual([["undo", "you → Lakefront Park"]]);
+    expect((await moveChips(rig, chatId)).map((c) => [c.kind, c.label])).toEqual([["undo", "You went to Lakefront Park"]]);
     expect(await povPlace(rig, chatId)).toBe("lakefront_park");
     // A reply that has them somewhere else, with no move: the move there, offered.
     read = { proposals: [], where: "bluebird_coffee" };
     await rig.turn(chatId, "I look around.", "You sip a latte at Bluebird Coffee.");
-    expect((await moveChips(rig, chatId)).map((c) => [c.kind, c.label])).toEqual([["confirm", "you → Bluebird Coffee"]]);
+    expect((await moveChips(rig, chatId)).map((c) => [c.kind, c.label])).toEqual([["confirm", "You went to Bluebird Coffee"]]);
     expect(await povPlace(rig, chatId)).toBe("lakefront_park");
     expect(rig.rt.ledger.errors).toEqual([]);
   });

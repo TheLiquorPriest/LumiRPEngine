@@ -3,6 +3,7 @@ import {
   DICE_LIMITS,
   DiceError,
   diceDistribution,
+  meanFloor,
   parseDice,
   probAtLeast,
   probAtMost,
@@ -216,7 +217,8 @@ describe("exact odds", () => {
         expect(d.max - d.min + 1).toBe(d.probs.length);
         expect(d.probs[0]).toBeGreaterThan(0);
         expect(d.probs[d.probs.length - 1]).toBeGreaterThan(0);
-        expect(sum(d.probs.map((p, i) => p * (d.min + i)))).toBeCloseTo(d.mean, 9);
+        // The mean is exact; adding up 10^5 rounded shares in floats drifts by about 10^-9 (100d1000).
+        expect(sum(d.probs.map((p, i) => p * (d.min + i)))).toBeCloseTo(d.mean, 6);
       });
     }
 
@@ -263,6 +265,27 @@ describe("exact odds", () => {
     });
     test("at-least and at-most are complements", () => {
       for (let t = 1; t <= 13; t++) expect(probAtLeast(d, t) + probAtMost(d, t - 1)).toBeCloseTo(1, 12);
+    });
+  });
+
+  describe("counted exactly", () => {
+    test("every total is a whole number of equally likely results, and each share is rounded once", () => {
+      const d = diceDistribution("d20+1d6");
+      expect(d.outcomes).toBe(120n);
+      expect(d.counts.reduce((a, b) => a + b, 0n)).toBe(120n);
+      expect(probEqual(d, 2)).toBe(1 / 120);
+      // A share is the double nearest its fraction: 19 faces of 20 read as the literal 0.95 does.
+      expect(probAtLeast(diceDistribution("d20"), 2)).toBe(0.95);
+      expect(probAtMost(diceDistribution("d20"), 15)).toBe(0.75);
+      expect(probEqual(diceDistribution("2d6"), 7)).toBe(6 / 36);
+    });
+
+    test("means are exact: 2d6 averages 7, d20+1d6 14, and an opposed d20 0, and a passive score's floor of them too", () => {
+      expect(diceDistribution("2d6").mean).toBe(7);
+      expect(diceDistribution("d20+1d6").mean).toBe(14);
+      expect(diceDistribution("1d20-1d20").mean).toBe(0);
+      // Rounded down exactly, never from a float a hair below the whole number (6.999… read as 6).
+      expect(["2d6", "d20+1d6", "1d20-1d20", "d20", "1d4-3"].map((n) => meanFloor(diceDistribution(n)))).toEqual([7, 14, 0, 10, -1]);
     });
   });
 

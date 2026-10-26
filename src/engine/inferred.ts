@@ -27,9 +27,9 @@ import { tableChoices } from "../shared/tables";
 import type { LintIssue } from "../shared/protocol";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { offersAction } from "../shared/world";
-import { passOutcomes, policyOf } from "./adjudication";
+import { passOutcomes } from "./adjudication";
 import { checkOf, readyCheck, rollCheck, type ReadyCheck } from "./checks";
-import { diceDistribution } from "./dice";
+import { diceDistribution, meanFloor } from "./dice";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { acts } from "./life";
 import { materializeAll } from "./materialize";
@@ -246,10 +246,9 @@ function readyFor(reg: Registry, w: Pick<Working, "world" | "ctx">, skill: Skill
   return readyCheck(reg, w.ctx, check, { self: who, actor: who }, { [skill.param]: skill.id, difficulty: dc, params: { [skill.param]: skill.id, difficulty: dc } });
 }
 
-/** A score that sets a difficulty without a roll: the dice's average, rounded down (10 on a d20), plus the modifier. */
+/** A score that sets a difficulty without a roll: the dice's average rounded down, exactly (10 on a d20, 7 on 2d6), plus the modifier. */
 function passiveScore(ready: ReadyCheck): number {
-  const dist = diceDistribution(ready.notation);
-  return Math.floor(dist.probs.reduce((sum, p, i) => sum + p * (dist.min + i), 0)) + ready.modifier;
+  return meanFloor(diceDistribution(ready.notation)) + ready.modifier;
 }
 
 /** An action request whose action is a definition: an inferred check's Try something. */
@@ -312,8 +311,8 @@ export function inferredRead(reg: Registry, world: WorldDoc, state: Readonly<Wor
   const companions = policy.who === "pov" ? [] : read.with.filter((id) => involvable(reg, world, state, id));
   const against = read.against.filter((a) => !companions.includes(a.who) && involvable(reg, world, state, a.who)).map((a) => ({ who: a.who, skill: skillNamed(sources, a.skill)?.id ?? skill.id }));
   if (policy.when === "risky") {
-    const chance = actionOdds(reg, world, state, tryRequest(world, skill, band, against, band.dc)).verdict?.chance ?? null;
-    if (chance !== null && chance >= policyOf(world, state).riskyAt) return { ok: false, why: `it isn't risky (${Math.round(chance * 100)}% to succeed at ${band.label.toLowerCase()})` };
+    const verdict = actionOdds(reg, world, state, tryRequest(world, skill, band, against, band.dc)).verdict;
+    if (verdict?.risky === false && verdict.chance !== null) return { ok: false, why: `it isn't risky (${Math.round(verdict.chance * 100)}% to succeed at ${band.label.toLowerCase()})` };
   }
   const kept: JsonObject = { attempt: read.attempt, skill: skill.id, difficulty: band.id, with: companions, against: against.map((a) => ({ who: a.who, skill: a.skill })), ...(read.tried ? { tried: true } : {}) };
   return { ok: true, params: kept, read: { ...read, skill: skill.id, with: companions, against }, skill, band, policy };

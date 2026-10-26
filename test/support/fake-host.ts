@@ -34,9 +34,7 @@ import type {
   WorldInfoInput,
   WorldInfoVerdict,
 } from "../../src/backend/host";
-import { ENGINE_EXTENSION, STUDIO_EXTENSION } from "../../src/shared/studio-bridge";
 import { decodeEvent } from "../../src/backend/spindle-host";
-import { FakeRpcPool } from "./fake-rpc";
 
 export interface FakeMessage {
   id: MessageId;
@@ -58,6 +56,22 @@ export interface FakeChat {
 }
 
 type Handler = (payload: never, userId: UserId | null) => void;
+
+/** A scripted quiet call's answer: its text, or its text and tool calls. */
+export type QuietScript = string | { content: string; toolCalls?: QuietToolCall[]; finishReason?: string };
+
+/** A scripted answer that takes time, ended as the host ends a call: when its signal aborts, with the signal's reason, which `stopped` hears. */
+function untilAborted<T>(answer: Promise<T>, signal: AbortSignal, stopped: (why: string) => void): Promise<T> {
+  const { promise, resolve, reject } = Promise.withResolvers<T>();
+  const stop = (): void => {
+    stopped(signal.reason instanceof Error ? signal.reason.message : String(signal.reason));
+    reject(signal.reason);
+  };
+  if (signal.aborted) stop();
+  else signal.addEventListener("abort", stop, { once: true });
+  answer.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  return promise;
+}
 
 /** A World Info entry a prompt held: its text and where it sat (position, depth, role, outlet). */
 export interface AssembledEntry {
@@ -154,15 +168,7 @@ export class FakeHost implements HostPort {
 
   constructor(private readonly options: { wiBook: boolean } = { wiBook: true }) {}
 
-  /** The shared RPC pool both extensions use, with each one's manifest permissions granted. */
-  readonly rpcPool = new FakeRpcPool({
-    [ENGINE_EXTENSION]: ["generation", "context_handler", "chats", "chat_mutation", "world_books", "presets", "decisions", "ui_panels"],
-    [STUDIO_EXTENSION]: ["generation", "chats", "chat_mutation", "characters", "world_books", "personas"],
-  });
-
   // ------------------------------------------------------------------ HostPort
-
-  rpc: HostPort["rpc"] = this.rpcPool.port(ENGINE_EXTENSION);
 
   chats: HostPort["chats"] = {
     messages: async (chatId) => this.chat(chatId).messages.map((m) => this.toHost(chatId, m)),
@@ -369,21 +375,25 @@ export class FakeHost implements HostPort {
 
   /**
    * Scripted model replies for tests (a quiet call's text, or its text and tool calls); throwing
-   * plays a failed call. The default refuses: the ledger suite makes no model calls. Live model
-   * behaviour is checked on the real host only.
+   * plays a failed call, and a promise one that takes time, which the call's signal ends as the
+   * host's does. The default refuses: the ledger suite makes no model calls. Live model behaviour is
+   * checked on the real host only.
    */
-  quietReply: ((request: QuietRequest) => string | { content: string; toolCalls?: QuietToolCall[]; finishReason?: string }) | null = null;
+  quietReply: ((request: QuietRequest) => QuietScript | Promise<QuietScript>) | null = null;
   /** Every quiet call made, for assertions. */
   readonly quietCalls: QuietRequest[] = [];
+  /** Why the engine stopped each scripted call that was still taking its time: its signal's reason. */
+  readonly quietStopped: string[] = [];
   /** Scripted Decision API answers; null (the default) means no Decision connection, so steps fall back to the helper. */
   decideReply: ((request: DecideRequest) => Answers) | null = null;
   readonly decideCalls: DecideRequest[] = [];
 
   models: HostPort["models"] = {
-    quiet: async (request) => {
+    quiet: async (request, _userId, signal) => {
       this.quietCalls.push(request);
       if (!this.quietReply) throw new Error("the fake host makes no model calls");
-      const reply = this.quietReply(request);
+      const scripted = this.quietReply(request);
+      const reply = scripted instanceof Promise ? await untilAborted(scripted, signal, (why) => this.quietStopped.push(why)) : scripted;
       return typeof reply === "string" ? { content: reply, finishReason: "stop", tokens: 0 } : { content: reply.content, finishReason: reply.finishReason ?? (reply.toolCalls ? "tool_calls" : "stop"), tokens: 0, ...(reply.toolCalls ? { toolCalls: reply.toolCalls } : {}) };
     },
     decide: async (request) => {
@@ -631,7 +641,6 @@ export class FakeHost implements HostPort {
     this.frontendHandlers.clear();
     this.processHandlers.clear();
     this.lifecycleHandlers.clear();
-    this.rpcPool.dropOwner(ENGINE_EXTENSION);
   }
 
   // ------------------------------------------------------------------ generations
@@ -998,6 +1007,16 @@ export class FakeHost implements HostPort {
       if (!target) {
         // The target was deleted while the reply streamed; the host reports the end without a message.
         this.emit("GENERATION_ENDED", { generationId: g.id, chatId, content: "", generationType: g.type, error: "message deleted" });
+        await this.settle();
+        return;
+      }
+      if (opts.error && g.type === "normal" && text === "") {
+        // A new reply that failed before anything streamed: Lumiverse deletes its staged message
+        // (generate.service.ts `persistPartialContent`) and ends with the error alone.
+        const c = this.chat(chatId);
+        c.messages = c.messages.filter((m) => m.id !== target.id);
+        this.emit("MESSAGE_DELETED", { chatId, messageId: target.id });
+        this.emit("GENERATION_ENDED", { generationId: g.id, chatId, content: "", generationType: g.type, error: opts.error });
         await this.settle();
         return;
       }

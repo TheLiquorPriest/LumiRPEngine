@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import type { CharacterBed, CharacterDTO, CharacterField, CharacterResult, CharacterSection, PlaceRef, ThingRef } from "../../shared/character";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
-import type { WorldDoc } from "../../shared/world";
+import { playedKinds, type WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import { BedPicker, bedValue } from "../character/bed-picker";
 import { PlacePicker } from "../character/place-picker";
@@ -63,7 +63,7 @@ export function CharacterPage(props: EditorProps) {
       live = false;
     };
   }, [app, id, props.world.id, storedKey]);
-  const formDoc: WorldDoc = useMemo(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds }, relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
+  const formDoc: WorldDoc = useMemo(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds), relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
   const identifiers = useMemo(() => worldIdentifiers(props.world), [props.world]);
   const path = `entities.${id}`;
   const ctx: FormCtx = { doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields };

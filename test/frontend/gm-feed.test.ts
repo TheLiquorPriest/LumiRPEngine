@@ -3,7 +3,8 @@
 // ticked by what they tell; ticking just a section's own is no pick at all.
 
 import { describe, expect, test } from "bun:test";
-import { chatFeedOf, feedNotice, feedNoticeStands, feedSummary, ownSources, sourcesMissing, sourcesTaken } from "../../src/frontend/gm/feed";
+import { chatFeedOf, feedNoticeStands, feedSummary, ownSources, sourcesMissing, sourcesTaken } from "../../src/frontend/gm/feed";
+import { feedSentence } from "../../src/shared/words";
 import { SCOPE_LABEL } from "../../src/shared/world";
 
 const SOURCES = [
@@ -53,13 +54,14 @@ describe("the GM's section settings form", () => {
   });
 
   test("a save leaves a notice naming the section and what this chat now sets, and its Undo stands while its chip does", () => {
-    const capped = feedNotice("Outline", { maxTokens: 400 });
+    const capped = feedSentence("Outline", { maxTokens: 400 });
     expect(capped).toContain("Outline");
     expect(capped).toContain("400");
-    // Going back to the world's, switching off and a wider scope each read differently.
-    const notices = [feedNotice("Outline", null), feedNotice("Outline", { enabled: false }), feedNotice("Outline", { scope: "gm" }), capped];
+    // Going back to the world's, switching off, a wider scope and the plain section each read differently.
+    const notices = [feedSentence("Outline", null), feedSentence("Outline", { enabled: false }), feedSentence("Outline", { scope: "gm" }), feedSentence("Outline", { scope: "scene" }), feedSentence("Outline", {}), capped];
     expect(new Set(notices).size).toBe(notices.length);
-    expect(feedNotice("People", { scope: "gm" }).toLowerCase()).toContain(SCOPE_LABEL.gm.toLowerCase());
+    // A sentence, never the section's label glued to a value.
+    for (const notice of notices) expect(notice).not.toMatch(/^Outline:/);
     const notice = { text: capped, undo: ["fix:m4:0:3"] };
     expect(feedNoticeStands(notice, [{ id: "fix:m4:0:3" }, { id: "other" }])).toBe(true);
     expect(feedNoticeStands(notice, [{ id: "other" }])).toBe(false);

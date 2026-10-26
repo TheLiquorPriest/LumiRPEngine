@@ -293,7 +293,9 @@ describe("Port Alder (modern_slice_of_life)", () => {
     const options = () => (p.w.ctx.query("vehicles.travel_options") as (ctx: unknown, from: string) => TravelOption[])(p.w.ctx, "alder_harbor_marina");
     const crossing = options().find((o) => o.to === "gull_island" && o.vehicle === "Your fishing boat");
     expect(crossing?.mode).toBe("water");
-    expect(crossing?.minutes).toBe(25);
+    // The crossing itself is the route's 25 minutes; the row's time adds getting going and tying up.
+    expect(crossing?.parts.find((part) => part.kind === "drive")?.minutes).toBe(25);
+    expect(crossing?.minutes).toBe(crossing?.parts.reduce((sum, part) => sum + part.minutes, 0));
     expect(crossing?.label).toContain("Gull Island");
     expect(crossing?.disabled).toBeUndefined();
     // Dale's pontoon belongs to Dale, so it is not offered to the player.

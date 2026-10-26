@@ -47,6 +47,7 @@ const SHAPES: readonly RequirementShape[] = [
   { shape: /\binvited\(/, needs: "{p} invited you" },
   { shape: /\bcan_fight\(/, needs: "{p} is someone you can fight" },
   { shape: /\breach\(self/, needs: "{p} is within your reach" },
+  { shape: /\bmovable\(/, needs: "{p} can be picked up", fails: "it can't be picked up: it's a vehicle, built in or fixed in place" },
   { shape: /\bdrive_minutes\(/, needs: "a road there from here" },
   { shape: /\bfuel_ok\(/, needs: "enough fuel to get there" },
   { shape: /\bfuel_pct\([^)]*\)\s*<\s*100\b/, needs: "{p} isn't full" },

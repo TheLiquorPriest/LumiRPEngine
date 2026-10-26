@@ -12,16 +12,15 @@ import { routineSettingsOf } from "../shared/routines";
 import type { EventRef, HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { RulesetDef, WorldDoc } from "../shared/world";
-import { formatMoney, WORLD_FORMAT } from "../shared/world";
-import type { StudioOffer } from "../shared/studio-bridge";
-import { isWorldDoc, migrateWorld, previewSheet, previewSkills } from "../engine/authoring";
+import { formatMoney } from "../shared/world";
+import { previewSheet, previewSkills } from "../engine/authoring";
 import { parseEditOps, resolveEdit } from "../engine/edits";
 import { routineChanges, routineGmView, routinePlayerView } from "../packs/castlife/core/view";
 import { ROUTINE_CHANNEL } from "../packs/castlife/core/story";
 import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
-import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, StudioOfferView, UpgradePreview, WorldChatInfo } from "../shared/protocol";
+import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, UpgradePreview, WorldChatInfo } from "../shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
 import { EXTRACTION_TYPES, helperCallOf } from "../shared/settings";
 import { formatMs, TimeoutFired, timerMs } from "../shared/timeouts";
@@ -30,15 +29,17 @@ import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
 import { optionalService } from "../engine/pack-kit";
 import { rulesetFloor } from "../engine/registry-impl";
-import { applyTimeAdvance, clockFix, IN_FIGHT, parseTarget } from "../engine/time";
+import { applyTimeAdvance, clockFix, IN_FIGHT, parseOverrides, parseTarget, resolveTarget } from "../engine/time";
+import { timelapseIntent } from "../engine/turn";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
 import { actionOdds, resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
 import { hashParts } from "../shared/hash";
 import { Working } from "../engine/working";
 import { runRulesOnEvents } from "../engine/rules";
-import { stepTracks } from "../engine/tracks";
-import { canSeeEntity, canSeePlace } from "../engine/visibility";
+import { currentStage, stepTracks } from "../engine/tracks";
+import { canSeeEntity, canSeePlace, playerTrack, shownTrackId } from "../engine/visibility";
+import { ENGINE_EVENTS } from "../engine/engine-pack";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { activeRecord } from "../engine/ledger/path";
 import type { StoredChip } from "./chips";
@@ -58,7 +59,7 @@ import { fixChip, recentLines, TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
 import { buildCharacter } from "../engine/character";
 import type { CharacterResult } from "../shared/character";
-import { type DraftNotice, macroReview, newChatRun, WORLD_COLLECTIONS, WorldError } from "./worlds";
+import { type DraftNotice, newChatRun, WorldError } from "./worlds";
 
 export class RequestError extends Error {
   constructor(
@@ -134,10 +135,8 @@ export class Dispatcher {
     const what = `${raw.type}${isRecord(raw) && typeof raw.op === "string" ? ` ${raw.op}` : ""}`;
     const t0 = performance.now();
     try {
-      // The Studio bridge serves each user from their first request on (DESIGN §15), and the World
-      // Info secrets are read from then on too, so the first prompt that needs them finds them (§6.1).
+      // The World Info secrets are read from each user's first request on, so the first prompt that needs them finds them (§6.1).
       this.rt.warmLore(userId);
-      await this.rt.studio.serve(userId);
       await this.route(raw, userId, session, reply, noted);
     } catch (error) {
       const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
@@ -218,15 +217,17 @@ export class Dispatcher {
         if (session !== undefined && !(r.type === "lre.hello" && r.client !== undefined)) this.rt.ledger.page(session, userId, r.chatId, r.chatId !== null && r.viewing !== false);
         if (r.chatId) {
           const run = await this.rt.runOf(r.chatId, userId);
-          if (run) {
-            await this.rt.ledger.open(r.chatId, userId);
-            this.rt.jsonHiding.seen(r.chatId, run.worldId, userId);
-          }
+          if (run) this.rt.jsonHiding.seen(r.chatId, run.worldId, userId);
+          // The page gets its view, its activity line and a reply waiting for it at once, even while a
+          // turn's step holds the chat's queue (DESIGN §5.1).
           await this.rt.push.snapshot(r.chatId, userId, session);
           // A frontend that opens mid-turn (or after a failed one) shows the activity line at once.
           this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId: r.chatId, activity: this.rt.diag.activityOf(r.chatId) }, userId, session);
           // A reply the engine prepared while this page slept, or that another page held, starts here now.
           this.rt.ledger.askAgain(r.chatId, userId, session);
+          // Restart recovery and the chat's sync wait for that step on the queue; a delta brings what they change.
+          const chatId = r.chatId;
+          if (run) void this.rt.ledger.open(chatId, userId).catch((error: unknown) => this.rt.diag.error({ chatId, userId, turn: null }, "ledger", error, "the chat wasn't opened"));
         }
         return;
       }
@@ -350,7 +351,17 @@ export class Dispatcher {
       case "lre.fix": {
         const { state, world } = await this.head(r.chatId, userId);
         let events: LedgerEvent[];
-        if ("time" in r) {
+        let by: { action: string; label: string } | null = null;
+        if ("hint" in r) {
+          // Show a hint (DESIGN §10): the next one earned at a quest log row, the player's own doing, with its Undo.
+          const id = typeof r.hint === "string" ? Object.keys(world.tracks).find((t) => shownTrackId(world, t) === r.hint) : undefined;
+          const shown = id === undefined ? null : playerTrack(this.rt.registry, world, state, world.pov, id);
+          const stage = id === undefined ? null : currentStage(world, state, id);
+          if (id === undefined || !shown || stage === null) throw new RequestError("validation", "no such quest");
+          if (shown.opened >= shown.hints.length) throw new RequestError("validation", "No hint to show yet.");
+          events = [{ type: ENGINE_EVENTS.hint, data: { track: id, stage } }];
+          by = { action: "hint", label: neutralizeMacros(`Opened a hint: ${shown.label}`) };
+        } else if ("time" in r) {
           // The clock's ✎ (DESIGN §9.2, §12): later runs the time between as an applied advance, earlier sets the clock back (L48).
           if (typeof r.time !== "string") throw new RequestError("bad_request", "a time is a date and time of day, YYYY-MM-DD HH:MM");
           const fixed = clockFix(this.rt.registry, world, state, r.time, this.runSeedOf(r.chatId));
@@ -370,7 +381,7 @@ export class Dispatcher {
           if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
           events = edit.events;
         }
-        const result = events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events } }) : { pending: false };
+        const result = events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events, ...(by ? { by } : {}) } }) : { pending: false };
         reply("lre.fix", { pending: result.pending });
         return;
       }
@@ -394,6 +405,14 @@ export class Dispatcher {
         const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry, (await this.rt.settings.get(userId)).minds) : null;
         if (!view) throw new RequestError("unavailable", "the chat's world revision is not loaded");
         reply("lre.gm", view);
+        return;
+      }
+      case "lre.sections": {
+        // GM → This chat → Sections' preview: behind the GM gate, as `lre.gm` is (marked facts included).
+        await this.requireWorldChat(r.chatId, userId);
+        const core = await this.rt.ledger.core(r.chatId, userId);
+        if (!core) throw new RequestError("unavailable", "the chat's world revision is not loaded");
+        reply("lre.sections", await this.rt.previewSections(r.chatId, userId, core, toChain(await this.rt.host.chats.messages(r.chatId, userId))));
         return;
       }
       case "lre.routine": {
@@ -618,89 +637,12 @@ export class Dispatcher {
         }
         return;
       }
-      case "lre.studio": {
-        reply("lre.studio", await this.studio(r, userId, noted));
-        return;
-      }
       case "lre.agents": {
         // The outside MCP servers (DESIGN §23): a server's own check, and Settings → MCP server.
         reply("lre.agents", await this.rt.agents.request(r, userId, session));
         return;
       }
     }
-  }
-
-  /** LumiRPEngine Studio's offer (DESIGN §15): reviewed on `offer`, installed only on the player's `install`. */
-  private async studio(r: Extract<FrontendToBackend, { type: "lre.studio" }>, userId: UserId, noted: DraftNoted): Promise<ResultBodies["lre.studio"]> {
-    if (r.op === "offer") {
-      const read = await this.rt.studio.offer(userId);
-      return read.offer ? { offer: (await this.reviewOffer(read.offer, read.hash, userId)).view } : { offer: null, message: read.reason };
-    }
-    // One install at a time per user, so an offer is checked and marked installed before another install reads it.
-    return this.rt.studio.installing(userId, async () => {
-      const read = await this.rt.studio.offer(userId);
-      if (!read.offer) throw new RequestError("not_found", read.reason);
-      const offer = read.offer;
-      const { view, world } = await this.reviewOffer(offer, read.hash, userId);
-      // The player confirmed what they reviewed: anything the Studio offered or changed since is reviewed first.
-      if (offer.offerId !== r.offerId || read.hash !== r.hash) throw new RequestError("conflict", "LumiRPEngine Studio offers something else now; review it again.");
-      if (view.installed) throw new RequestError("conflict", "This offer is already installed.");
-      if (view.blocked !== null || world === null) throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
-      if (view.headMoved && r.acceptMovedHead !== true) throw new RequestError("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
-      const store = this.rt.worlds;
-      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId, noted) : await store.create(world.name, world, userId, "studio").then((created) => ({ ...created, lint: macroReview(created.world) }));
-      // Marked before anything else can fail: the world is written, so the offer is installed.
-      await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
-      await this.syncBook(done.world.id, userId);
-      return { installed: { offerId: offer.offerId, mode: offer.mode, worldId: done.world.id, name: done.world.name, revision: done.revision, attachChatId: offer.attachChatId ?? null }, lint: done.lint };
-    });
-  }
-
-  /** An offer as Build reviews it: the document as this engine reads it, its lint and macros, and what keeps it from installing. */
-  private async reviewOffer(offer: StudioOffer, hash: string, userId: UserId): Promise<{ view: StudioOfferView; world: WorldDoc | null }> {
-    const installed = await this.rt.studio.installedAs(userId, offer.offerId);
-    const view: StudioOfferView = {
-      offerId: offer.offerId,
-      mode: offer.mode,
-      name: isRecord(offer.doc) && typeof offer.doc.name === "string" ? offer.doc.name : "(unnamed)",
-      createdAt: offer.createdAt,
-      target: null,
-      counts: {},
-      lint: [],
-      errors: 0,
-      macros: [],
-      attachChatId: offer.attachChatId ?? null,
-      blocked: null,
-      installed: installed ? { worldId: installed.worldId, revision: installed.revision } : null,
-      headMoved: null,
-      hash,
-    };
-    if (!isWorldDoc(offer.doc)) return { view: { ...view, blocked: `It isn't an ${WORLD_FORMAT} document.` }, world: null };
-    let world: WorldDoc;
-    let lint: LintIssue[];
-    try {
-      world = migrateWorld(structuredClone(offer.doc));
-      lint = this.rt.worlds.lint(world);
-    } catch (error) {
-      return { view: { ...view, blocked: `This engine can't read it: ${error instanceof Error ? error.message : String(error)}` }, world: null };
-    }
-    const rank = { error: 0, warning: 1, info: 2 };
-    view.lint = [...lint].sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, 50);
-    view.errors = lint.filter((i) => i.severity === "error").length;
-    view.macros = macroReview(world);
-    for (const [collection, items] of Object.entries(world)) {
-      const count = hasOwn(WORLD_COLLECTIONS, collection) && isRecord(items) ? Object.keys(items).length : 0;
-      if (count > 0) view.counts[collection] = count;
-    }
-    if (view.errors > 0) view.blocked = `It has ${view.errors} error${view.errors === 1 ? "" : "s"}; fix ${view.errors === 1 ? "it" : "them"} in LumiRPEngine Studio first.`;
-    if (offer.mode === "revision" && offer.worldId !== undefined) {
-      const index = pathSafe(offer.worldId) ? await this.rt.worlds.index(offer.worldId, userId) : null;
-      view.target = { worldId: offer.worldId, name: index?.name ?? null };
-      if (!index) view.blocked ??= "The world it's a revision of isn't one of your worlds.";
-      else if (await this.rt.worlds.hasDraft(offer.worldId, userId)) view.blocked ??= `Build has unsaved changes to “${index.name}”: commit or discard them first.`;
-      if (index && offer.baseRevision !== index.head) view.headMoved = { base: offer.baseRevision ?? null, head: index.head };
-    }
-    return { view, world };
   }
 
   private async world(r: Extract<FrontendToBackend, { type: "lre.world" }>, userId: UserId, session: string | undefined, noted: DraftNoted): Promise<ResultBodies["lre.world"]> {
@@ -927,6 +869,14 @@ export class Dispatcher {
       this.rt.setSwipeChoice(chatId, choice);
       return { applied: true, pending: false };
     }
+    if (kind === "reply_failed") {
+      // Re-run the engine (DESIGN §5.1): the kept turn goes, and the Regenerate that follows runs the
+      // engine again. Retry the reply is the page's Regenerate alone, with nothing to send here.
+      if (choice !== "rerun") return { applied: false, pending: false };
+      if (!this.rt.ledger.discardKept(chatId, id.slice("reply_failed:".length))) throw new RequestError("not_found", "the chip has lapsed");
+      this.rt.push.changed(chatId, userId);
+      return { applied: true, pending: false };
+    }
     if (kind === "pause") {
       const w: HeldWrite = choice === "discard" ? { kind: "discard", id: this.nextId(), after: messageId } : { kind: "keep", id: this.nextId(), messageId, parentPath: "", convert: [] };
       const result = await this.write(chatId, userId, w);
@@ -1118,18 +1068,36 @@ export class Dispatcher {
       case "intent_gate":
       case "outline_gate": {
         // A preview gate (DESIGN §5.1): Play and Edit keep the answer with the turn, and the frontend's
-        // Regenerate resumes it; Cancel only takes the chip, so nothing is generated.
-        if (choice === "cancel") return { applied: true, pending: false };
-        if (choice !== "play" && choice !== "edit") throw new RequestError("bad_request", `unknown choice ${choice}`);
+        // Regenerate resumes it; Cancel only takes the chip, so nothing is generated, and stops the minds
+        // its run started. The intent gate's Cancel drops the read too, so the message is read afresh
+        // the next time it plays.
         const text = typeof chip.payload.text === "string" ? chip.payload.text : "";
+        if (choice === "cancel") {
+          this.rt.dropMinds(chatId);
+          if (chip.kind === "intent_gate") this.rt.bridgeOf(chatId)?.forget(text);
+          return { applied: true, pending: false };
+        }
+        if (choice !== "play" && choice !== "edit") throw new RequestError("bad_request", `unknown choice ${choice}`);
         if (chip.kind === "intent_gate") {
           if (choice === "play") return { applied: this.rt.passIntent(chatId, text), pending: false };
-          // Edit plays the action as picked again in the Actions palette: only the action's own
-          // details count, and each must be one the palette offers the player character, so a
-          // hand-made request can't aim it at someone or somewhere the palette never would.
           if (!isRecord(payload?.params)) throw new RequestError("bad_request", "Edit needs the action's details");
           const read = this.rt.bridgeOf(chatId)?.intentOf(text);
           const { world, state } = await this.head(chatId, userId);
+          // A time skip's Edit plays it as set again in the Timelapse sheet: how long it runs or until
+          // when, what may stop it, and whether the player character follows their routine through it.
+          if (read?.action === TIMELAPSE_ACTION) {
+            const target = parseTarget(payload.params.target);
+            if (!target) throw new RequestError("bad_request", "Edit needs how long the time skip runs");
+            const reached = resolveTarget(this.rt.registry, world, state, target);
+            if ("code" in reached) throw new RequestError("validation", `Timelapse: ${reached.reason}`);
+            const overrides: Record<string, string> = {};
+            for (const [k, v] of Object.entries(parseOverrides(payload.params.overrides))) if (typeof v === "string") overrides[k] = v;
+            const follows = typeof payload.params.followRoutine === "boolean" ? payload.params.followRoutine : read.params.povRoutine !== false;
+            return { applied: this.rt.passIntent(chatId, text, timelapseIntent(target, Object.keys(overrides).length > 0 ? overrides : undefined, 1, follows).params), pending: false };
+          }
+          // Edit plays the action as picked again in the Actions palette: only the action's own
+          // details count, and each must be one the palette offers the player character, so a
+          // hand-made request can't aim it at someone or somewhere the palette never would.
           const action = read?.action ? ((hasOwn(world.actions, read.action) ? world.actions[read.action] : undefined) ?? this.rt.registry.actions.get(read.action)) : undefined;
           if (!read || !action) throw new RequestError("not_found", "the read has lapsed");
           const sent = payload.params as JsonObject;

@@ -156,7 +156,7 @@ describe("a narrated time skip, auto or confirm", () => {
       const got = await chat([{ type: "time_advance", minutes: 20 }], { time_advance: { mode } }, { fights: true, ready: fight });
       expect((await got.state()).clock).toBe(got.before);
       expect(got.chips.filter((c) => c.kind === "confirm" || c.kind === "timelapse_offer")).toEqual([]);
-      expectMatch(got.chips.find((c) => c.kind === "decline"), { label: "Didn't apply: +20 min", detail: expect.stringContaining("a fight is under way") });
+      expectMatch(got.chips.find((c) => c.kind === "decline"), { label: "Didn't apply: Skip ahead 20 min", detail: expect.stringContaining("a fight is under way") });
       expect(got.rig.rt.ledger.errors).toEqual([]);
     }
     // A chip offered before the fight: Apply is refused, and the clock stays.
@@ -180,8 +180,8 @@ describe("a reply's regard budget", () => {
     // Each axis is stored to a tenth, so a change spread over the axes rounds a little.
     expect(moved).toBeGreaterThan(9.5);
     expect(moved).toBeLessThanOrEqual(10.5);
-    expect(got.chips.filter((c) => c.kind === "undo").map((c) => c.label)).toEqual(["Danny Okafor → you: trust +8", "Danny Okafor → you: trust +2"]);
-    expect(got.chips.filter((c) => c.kind === "decline").map((c) => c.label)).toEqual(["Didn't apply: Danny Okafor → you: trust +3"]);
+    expect(got.chips.filter((c) => c.kind === "undo").map((c) => c.label)).toEqual(["Danny Okafor's trust toward you rose by 8", "Danny Okafor's trust toward you rose by 2"]);
+    expect(got.chips.filter((c) => c.kind === "decline").map((c) => c.label)).toEqual(["Didn't apply: Danny Okafor's trust toward you rose by 3"]);
     expect(got.rig.rt.ledger.errors).toEqual([]);
   });
 

@@ -10,6 +10,7 @@
 //     flagged `overdue` once the grant has expired.
 
 import type { JsonObject } from "../../../shared/json";
+import { fixedReason, type FixedReason } from "../../../shared/items-build";
 import type { EntityId } from "../../../shared/ids";
 import type { ReadContext } from "../../../engine/registry";
 import { numOf, objOf, strOf, own, rowOf } from "../../../engine/pack-kit";
@@ -89,6 +90,52 @@ export function fitProblem(state: Readonly<WorldState>, item: EntityId, containe
   const load = loadOf(state, container);
   if (load.capacityL !== null && load.usedL + volumeOf(state, item) > load.capacityL + 1e-9) return "doesn't fit";
   if (load.maxKg !== null && load.usedKg + weightOf(state, item) / 1000 > load.maxKg + 1e-9) return "too heavy for it";
+  return null;
+}
+
+// ---------------------------------------------------------------- what holds what
+
+/** Why a thing can't be picked up and carried (`fixedReason`: a vehicle, a built-in part, a fixed thing), or null. */
+export function fixedOf(ctx: ReadContext, id: EntityId): FixedReason | null {
+  const e = own(ctx.state.entities, id);
+  return e ? fixedReason(kindIs(ctx.registry, ctx.world, e.kind, "vehicle"), e.fields, ctx.world.tables) : null;
+}
+
+/** What a thing holds as (DESIGN §7): a person carries, a vehicle and a container (a bag, a safe, a kit) hold; anything else holds nothing. */
+export function holdsAs(ctx: ReadContext, id: EntityId): "person" | "vehicle" | "container" | null {
+  const e = own(ctx.state.entities, id);
+  if (!e) return null;
+  if (kindIs(ctx.registry, ctx.world, e.kind, "person")) return "person";
+  if (kindIs(ctx.registry, ctx.world, e.kind, "vehicle")) return "vehicle";
+  return kindIs(ctx.registry, ctx.world, e.kind, "container") ? "container" : null;
+}
+
+/**
+ * Where a thing may be put (DESIGN §7): inside anything that holds (a thing, or the one money record
+ * a holder carries, a cash account); only in a vehicle (a person riding, a vehicle carried on
+ * another); or nowhere (a built-in part, a fixed thing, and what isn't a thing: a job, a flow, a group).
+ */
+export function goesIn(ctx: ReadContext, id: EntityId): "any" | "vehicle" | "nowhere" {
+  const e = own(ctx.state.entities, id);
+  if (!e) return "nowhere";
+  if (kindIs(ctx.registry, ctx.world, e.kind, "person")) return "vehicle";
+  const fixed = fixedOf(ctx, id);
+  if (fixed === "vehicle") return "vehicle";
+  if (fixed !== null) return "nowhere";
+  return kindIs(ctx.registry, ctx.world, e.kind, "item") || e.kind === "account" ? "any" : "nowhere";
+}
+
+/** Why `holder` can't hold `thing`, in words, or null when it can: what holds and what goes where (`holdsAs`, `goesIn`). */
+export function holdProblem(ctx: ReadContext, thing: EntityId, holder: EntityId): string | null {
+  const e = own(ctx.state.entities, thing);
+  const h = own(ctx.state.entities, holder);
+  if (!e || !h) return null;
+  const as = holdsAs(ctx, holder);
+  if (as === null) return `${h.name} can't hold anything`;
+  const goes = goesIn(ctx, thing);
+  const fixed = fixedOf(ctx, thing);
+  if (goes === "nowhere") return fixed === "part" ? `${e.name} is built into what holds it` : fixed === "fixed" ? `${e.name} is fixed in place` : `${e.name} isn't a thing that goes inside anything`;
+  if (goes === "vehicle" && as !== "vehicle") return fixed === "vehicle" ? `${e.name} is a vehicle: it can only be carried on another vehicle` : `${e.name} can only ride in a vehicle`;
   return null;
 }
 

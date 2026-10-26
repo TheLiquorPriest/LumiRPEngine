@@ -21,7 +21,7 @@ export function AdjudicationSeed(props: { settings: UserSettings; busy: boolean;
         <HostSwitch label="Use my check rules instead of a world's for new chats" checked={mine} disabled={props.busy} onChange={(checked) => props.patch({ overrideWorldAdjudication: checked })} />
         <span class="lre-field-help">{mine ? "New chats decide checks this way, whatever their world sets." : "New chats decide checks as their world sets; these rules apply where a world sets none."}</span>
       </div>
-      {/* The whole policy goes as one value: a named preset reads as its own values. */}
+      {/* The whole policy goes as one value: a named preset as its own values, Custom as edited. */}
       <AdjudicationForm value={props.settings.adjudication} disabled={props.busy} onChange={(next) => props.patch({ adjudication: next as unknown as JsonObject })} />
     </div>
   );

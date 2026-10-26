@@ -49,6 +49,7 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   contradiction: "info",
   read_failed: "alert",
   engine_failed: "alert",
+  reply_failed: "alert",
   claim: "help",
   check: "dice",
   claimed: "sparkle",
@@ -58,6 +59,7 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   refused: "alert",
   intent_gate: "pause",
   outline_gate: "list",
+  untracked: "info",
 };
 
 /** Icons for the actions players reach for most; every button keeps its words. */
@@ -65,9 +67,9 @@ const ACTION_ICON: Partial<Record<string, IconName>> = { undo: "undo", regenerat
 
 /**
  * The receipt's order: what went wrong first, so it never hides behind "n more";
- * then time, money, the roll, the changes and how the message was read.
+ * then time, money, the roll, the changes, how the message was read, and what the engine didn't track.
  */
-const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change"];
+const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change", "untracked"];
 
 /** Segments the receipt line shows before "n more". */
 const RECEIPT_SEGMENTS = 3;
@@ -206,8 +208,8 @@ interface ChipControls {
 
 /**
  * A chip's actions as the player presses them: one that asks for a value opens its form first, one
- * that picks an action again opens the Actions palette at it (the intent gate's Edit), and any
- * other sends at once.
+ * that picks an action again opens the Actions palette at it (the intent gate's Edit), or the
+ * Timelapse sheet for a time skip, and any other sends at once.
  */
 function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
   const app = useApp();
@@ -217,7 +219,7 @@ function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
   const open = chip.actions.find((action) => action.id === asking);
   const press = (action: ChipAction): void => {
     const input = action.input;
-    if (input?.type === "action") void app.overlays.openPalette("actions", { chatId, chip, action: input.action, params: input.params });
+    if (input?.type === "action") void app.overlays.openPalette(input.action === view?.palette?.timelapse?.action ? "timelapse" : "actions", { chatId, chip, action: input.action, params: input.params });
     else if (input) setAsking(asking === action.id ? null : action.id);
     else choose(action.id);
   };

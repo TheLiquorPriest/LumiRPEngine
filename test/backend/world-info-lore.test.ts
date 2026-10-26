@@ -241,13 +241,13 @@ describe("Build's World Info lore editor", () => {
 
   test("two books that share a name read apart in every book picker: a character's copy beside the one imported on its own", async () => {
     const rig = new Rig();
-    const own = rig.host.userBook("TLS - Core", { added: 1792425242 });
-    const copy = rig.host.userBook("TLS - Core", { character: true, added: 1792425595 });
+    const own = rig.host.userBook("Saga - Core", { added: 1792425242 });
+    const copy = rig.host.userBook("Saga - Core", { character: true, added: 1792425595 });
     const other = rig.host.userBook("Harbor lore", { added: 1792425242 });
     const labels = bookLabels(rig.body(await rig.send({ type: "lre.lore", op: "books" })).books as LoreBookView[]);
     expect(new Set([labels[own], labels[copy]]).size).toBe(2);
     // Told apart by where each came from, not by an id the user never sees.
-    for (const id of [own, copy]) expect(labels[id]?.startsWith("TLS - Core") && !labels[id]?.includes(id)).toBe(true);
+    for (const id of [own, copy]) expect(labels[id]?.startsWith("Saga - Core") && !labels[id]?.includes(id)).toBe(true);
     expect(labels[other]).toBe("Harbor lore");
   });
 });
@@ -438,7 +438,7 @@ describe("a secret World Info entry's twins", () => {
 
   test("a turn reads no book of the user's again when none changed since the last", async () => {
     const { rig, chatId } = await bookChat([entry("The ferry", "The ferry crosses to Gull Island twice a day.")]);
-    const pair = [rig.host.userBook("TLS - Core"), rig.host.userBook("TLS - Core", { character: true })];
+    const pair = [rig.host.userBook("Saga - Core"), rig.host.userBook("Saga - Core", { character: true })];
     for (const id of pair) await rig.host.books.createEntry(id, entry("The town", "TOWN-MARK: the town has one road."), rig.host.userId);
     await rig.turn(chatId, "I wait.", "Gulls call.");
     const read: string[] = [];

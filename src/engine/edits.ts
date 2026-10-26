@@ -3,9 +3,10 @@
 // pool's evaluated max, derived and locked fields; a relation type's kinds and fields; a tier, a
 // place, a track's stages; the world's facets and their values) and then resolved through the core
 // effects, so the event validators and pack guards apply, money moves against the outside
-// correction account and a change to XP levels up, as anywhere else. Values are literals: a typed
-// "=1+1" is text, never a formula. A submit applies all or none and is one `fix` post entry on the
-// head (§4.3), so undo, Keep, swipes, Re-narrate and Re-run treat it like any fix.
+// correction account and a change to XP moves the level with it, as anywhere else (a level itself
+// is never written: it follows XP). Values are literals: a typed "=1+1" is text, never a formula.
+// A submit applies all or none and is one `fix` post entry on the head (§4.3), so undo, Keep,
+// swipes, Re-narrate and Re-run treat it like any fix.
 
 import { hashParts } from "../shared/hash";
 import type { EntityId, FieldId } from "../shared/ids";
@@ -26,7 +27,7 @@ import { parseDice } from "./dice";
 import { applyEffects, fieldBounds } from "./effects";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { EXTERNAL_ACCOUNT_PREFIX } from "./events";
-import { labelOf, optionalService, own } from "./pack-kit";
+import { labelOf, optionalQuery, optionalService, own } from "./pack-kit";
 import type { Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import { materializeIfNeeded } from "./materialize";
@@ -34,6 +35,7 @@ import { createRng, type Rng } from "./rng";
 import { fieldDef, GONE_FIELD, kindDef, kindIs, placeOfEntity } from "./scope";
 import { classOf, classProblems, classValues, tagsOf } from "./selector";
 import type { WorldState } from "./state";
+import { moveTrack } from "./tracks";
 import { Working } from "./working";
 
 export interface EditOptions {
@@ -213,6 +215,9 @@ function putOp(reg: Registry, w: Working, entity: EntityId, into: EntityId | nul
     cur = own(w.state.entities, cur)?.relations.find((r) => r.type === "in")?.to;
   }
   if (holders.some((r) => r.to === into)) return reject("already_inside", `${e.name} is already in ${container.name}`);
+  // Only what holds things holds them, and only what can go inside something goes (DESIGN §7): no truck in a wallet, no phone in a bill.
+  const cannot = optionalQuery(w.ctx, "gear.hold_problem")?.(w.ctx, entity, into) ?? null;
+  if (cannot) return reject("cant_hold", cannot);
   // A thing inside something has no place of its own: it is wherever its container is.
   if (typeof e.fields.place === "string") specs.push({ type: "set", args: { entity, field: "place", value: null } });
   specs.push({ type: "link", args: { rel: "in", from: entity, to: into } });
@@ -380,7 +385,8 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
     case "adjust":
       return adjustOp(reg, w, op.account, op.cents, rng);
     case "stage":
-      return run(reg, w, [{ type: "stage", args: { track: op.track, to: op.to } }], rng);
+      // The GM's Stage (DESIGN §10): on to a stage that follows, a real stage entry (effects, rewards, a reveal); back, only the stage.
+      return moveTrack(reg, w, op.track, op.to, hashParts("lre.edit.stage", opts.runSeed, op.track, op.to));
     case "entity":
       return entityOp(w, op);
     case "classify":

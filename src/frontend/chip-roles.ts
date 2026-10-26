@@ -14,6 +14,7 @@ const ROLE: Record<ChipKind, ChipRole> = {
   contradiction: "decision",
   read_failed: "decision",
   engine_failed: "decision",
+  reply_failed: "decision",
   claim: "decision",
   check: "decision",
   routine_ask: "decision",
@@ -40,6 +41,7 @@ const ROLE: Record<ChipKind, ChipRole> = {
   fix: "done",
   pending: "done",
   degraded: "done",
+  untracked: "done",
   // A decline that offers a way out (pay another way, retry) asks; one without actions only reports.
   decline: "done",
 };
@@ -48,6 +50,7 @@ const TONE: Record<ChipKind, ChipTone> = {
   decline: "neg",
   read_failed: "neg",
   engine_failed: "neg",
+  reply_failed: "neg",
   claim: "neutral",
   check: "neutral",
   routine_ask: "neutral",
@@ -77,6 +80,7 @@ const TONE: Record<ChipKind, ChipTone> = {
   not_action: "neutral",
   mode_change: "neutral",
   fix: "neutral",
+  untracked: "neutral",
 };
 
 export function chipRole(chip: Pick<Chip, "kind" | "actions">): ChipRole {

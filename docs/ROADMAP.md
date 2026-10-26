@@ -209,7 +209,7 @@ A character is read and edited as one thing, over the existing entities, with no
   - books that share a name are told apart.
 - **Steps:** every step's prompt says what it does next to its built-in text, and Step templates use the steps' names.
 - **Needs:** one name per need everywhere, and every number in words.
-- **Not built:** a per-section preview of what each section holds now. It needs its own request, its own timeout and a secrecy review of marked lines.
+- **Built in the next round:** a per-section preview of what each section holds now (GM → This chat → Sections).
 
 ## Follow-up fixes after the final review (October 2026)
 
@@ -229,7 +229,47 @@ A character is read and edited as one thing, over the existing entities, with no
   - nothing scrolls above the mode bar;
   - the routine card shows its mix;
   - a Sections save leaves a notice with Undo.
-- **Not built:** reading a meal or a night from the reply. A meal or sleep only the narrator describes meets no need unless the player eats, rests or goes to bed through their own message. The next step is a Cast life reply-reading channel for what the player character is doing, with a confirm chip: about seven files.
+- **Deferred, the owner's call:** reading a meal or a night from the reply. A meal or sleep only the narrator describes meets no need unless the player eats, rests or goes to bed through their own message. The next step is a Cast life reply-reading channel for what the player character is doing, with a confirm chip: about seven files. To be readdressed later.
+
+## The late-October round: fixes and a reassessment (October 2026)
+
+**Dropped:** LumiRPEngine Studio. Its import row and offer card in Build, its MCP tools, the bridge, the package exports and `docs/STUDIO.md` are removed.
+
+**Fixed and shipped:**
+- **What the narrator is told:**
+  - every section opens with what it is and how to use it, and its lines are in words: regard as words, what someone is doing as a sentence, fuel and counts in words;
+  - each Outcome line and engine beat names what the action was about, the places, the time, the amount and what changed, so the reply can't narrate as still to come what the engine already played;
+  - the outline, brief and suggested choices ask for every detail, so the narrator infers nothing;
+  - GM notices and edit chips say what changed in a sentence.
+- **Section preview:** GM → This chat → Sections shows what each section holds now, and **Preview all** shows every section in prompt order, built the way a turn builds them.
+- **A failed reply keeps its turn:** **Retry the reply** reuses the engine's work with no model calls; **Re-run the engine** runs it again.
+- **Pages stay in sync:** a page asks again once Lumiverse confirms its connection or the engine restarts, a resync answers at once even during a turn, and two pages on one chat no longer knock each other out of sync.
+- **Travel times:** a drive fetches the vehicle, takes the fastest way, parks and walks the rest, with the breakdown on the row; speeds and overheads are set per world in Build.
+- **Reading the reply:**
+  - a fact or a thing the engine can't keep gets a **Not tracked** receipt, never a "didn't happen" note;
+  - places are offered by name, nearest first;
+  - a minds failure no longer fails the read;
+  - a reply that arrives after an empty save plays its kept turn.
+- **Intent gate:** the card keeps the player's words and lists the queued actions; a time skip's card gives its length, span and what fills it, with Edit; Cancel drops the read; a time offer counts what the reply already told.
+- **Sheets:** exact check odds, a world's own check rules, a night's rest refilling Modern's Action Points, and XP driving the level both ways.
+- **Quests:**
+  - end-stage rewards pay out, and a stage change reaches the narrator in the same turn;
+  - hints are earned per stage, and only opened hints reach the narrator;
+  - the GM's stage change plays the stage's entry, and a secret's cue shows once;
+  - no action list shows a story step not reached yet, and lint names flags nothing can set.
+- **Entities:** Take never carries a vehicle or a fixed part; **Put inside** offers only what can hold a thing; a business isn't listed as an object; a world kind with an engine kind's id adds to it instead of replacing it; a vehicle part never matches as a bed.
+- **Speed:** the minds start alongside the reading of the message, consolidation runs beside memory, and memory, consolidation and the skip plan run with thinking off. A model step switched off makes no call.
+
+**Assessed, waiting on the owner's decisions before any building:**
+- **Knowledge:** a ledger of who knows, thinks or suspects what, and a section telling the narrator.
+- **Quests:** story beats the reply, the player or the GM can mark met, and one action list everywhere.
+- **The intent scheme:** ordered steps with actors, chaining and checks; out-of-character directives that always win; an editable preview.
+- **Reading the reply:** the end-of-reply state of each person present, then possessions.
+- **Sheets:** the sheet in the narrator's view, and where XP comes from.
+- **A party with tiers, and an agenda.**
+- **One authority** between the story and the engine, one brief, and a bounded director.
+- **Lore secrecy** without writes to the user's books.
+- **A simpler entities model.**
 
 ## Settings for long chats
 

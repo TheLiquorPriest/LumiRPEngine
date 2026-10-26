@@ -11,7 +11,7 @@ import { FEATURE_DEFS } from "../../src/shared/finance";
 import { isRecord, type JsonValue } from "../../src/shared/json";
 import { applyPatch, getAt, parsePointer, readOp } from "../../src/shared/json-patch";
 import type { WorldDoc } from "../../src/shared/world";
-import { checkSchema, lint, load, MAP_SCHEMA, pathText, type Schema } from "../../src/studio-api";
+import { checkSchema, lint, load, MAP_SCHEMA, pathText, type Schema } from "../../src/cli/local-engine";
 import { GUIDE_SECTIONS as SECTIONS, guidePatches as patches, guideSection } from "../support/agent-guide";
 
 // A JSON module's inferred type spells out every node, which `Schema` describes in general.

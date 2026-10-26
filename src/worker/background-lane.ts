@@ -1,6 +1,6 @@
 // The background lane (DESIGN §9.6): a child process for Playtest and Check world. It heartbeats
 // between steps so the host watchdog (15 s) never fires, and reports progress and the result to
-// the parent. The work itself is the pure authoring module the studio seam also uses.
+// the parent. The work itself is the pure authoring module the command line's local engine also uses.
 
 import type { SpindleBackendProcessContext } from "lumiverse-spindle-types";
 import { isRecord } from "../shared/json";

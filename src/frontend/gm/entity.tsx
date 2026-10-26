@@ -20,9 +20,9 @@ import { Icon } from "../icons";
 import { MoneyInput } from "../money-input";
 import { adjustOp, bringOp, classifyOp, entityStateOp, lifeEditOp, partyOf, placesMatching, relationFields } from "../requests";
 import { PARTY_RELATION } from "../../shared/party";
-import { LEVEL_LABEL } from "../settings/realism";
+import { LEVEL_LABEL } from "../../shared/ids";
 import type { Editor } from "./editor";
-import { nameOf } from "./editor";
+import { holdersFor, nameOf } from "./editor";
 import { ActionRow, ActionRows, GmPage } from "./ui";
 import { relationRows } from "./character-ops";
 import { BedPicker } from "./bed-picker";
@@ -98,8 +98,8 @@ export function FieldRow(props: { entity: GmEntity; field: GmField; editor: Edit
     </span>
   );
   if (text === null) {
-    const note = [field.derived ? "Worked out from other values" : field.extra ? "Not in the kind" : null, bounds].filter((part) => part !== null).join(" · ");
-    const edit = field.derived ? undefined : <IconButton icon="edit" label={`Edit ${field.label}`} onClick={() => setText(textOf(field, editor.currency))} />;
+    const note = [field.derived ? "Worked out from other values" : field.follows !== undefined ? `Set from ${field.follows}: edit ${field.follows} to change it` : field.extra ? "Not in the kind" : null, bounds].filter((part) => part !== null).join(" · ");
+    const edit = field.derived || field.follows !== undefined ? undefined : <IconButton icon="edit" label={`Edit ${field.label}`} onClick={() => setText(textOf(field, editor.currency))} />;
     return (
       <ActionRow title={label} subtitle={note === "" ? undefined : note} id={field.id} value={long ? undefined : shown(field, editor)} actions={edit}>
         {long ? <div class="lre-gm-row-long">{shown(field, editor)}</div> : null}
@@ -173,10 +173,10 @@ export function FieldRow(props: { entity: GmEntity; field: GmField; editor: Edit
   );
 }
 
-/** Adds to a number, an amount or a duration; the engine stops it at the field's bounds. */
+/** Adds to a number, an amount or a duration; the engine stops it at the field's bounds. A level that follows XP isn't offered. */
 function AddToValue(props: { entity: GmEntity; editor: Editor }) {
   const { entity, editor } = props;
-  const numbers = entity.fields.filter((f) => !f.derived && (f.type === "number" || f.type === "money" || f.type === "duration"));
+  const numbers = entity.fields.filter((f) => !f.derived && f.follows === undefined && (f.type === "number" || f.type === "money" || f.type === "duration"));
   const [fieldId, setFieldId] = useState(numbers[0]?.id ?? "");
   const [delta, setDelta] = useState("");
   const field = numbers.find((f) => f.id === fieldId) ?? numbers[0];
@@ -289,18 +289,18 @@ function Placement(props: { entity: GmEntity; editor: Editor; children?: Compone
         </select>
       </Field>
       {props.children}
-      <Field label="Put inside" for={put}>
-        <select id={put} class="lre-input" value="" disabled={editor.busy} onChange={(event) => event.currentTarget.value !== "" && void editor.edit([{ op: "put", entity: entity.id, into: event.currentTarget.value }])}>
-          <option value="">Choose what holds it…</option>
-          {editor.gm.entities
-            .filter((e) => e.id !== entity.id)
-            .map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
+      {entity.goes === "nowhere" ? null : (
+        <Field label="Put inside" for={put} help={entity.goes === "vehicle" ? "Only a vehicle can hold this." : undefined}>
+          <select id={put} class="lre-input" value="" disabled={editor.busy} onChange={(event) => event.currentTarget.value !== "" && void editor.edit([{ op: "put", entity: entity.id, into: event.currentTarget.value }])}>
+            <option value="">Choose what holds it…</option>
+            {holdersFor(editor.gm, entity).map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.label}
               </option>
             ))}
-        </select>
-      </Field>
+          </select>
+        </Field>
+      )}
       {entity.balance !== undefined ? (
         <Field label="Correct the balance" help="Money in or out against a correction; its Undo takes it back.">
           <MoneyInput currency={editor.currency} label="Amount" placeholder="Amount" value={amount} invalid={add === null && amount !== ""} onInput={setAmount} />

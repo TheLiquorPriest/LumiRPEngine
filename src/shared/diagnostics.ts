@@ -122,6 +122,7 @@ export const STEP_LABEL: Record<string, string> = {
   choices: "Writing choices…",
   memory: "Updating memory…",
   consolidate: "Updating memory…",
+  minds: "Updating the characters' memories…",
 };
 
 /** The line while `count` calls for `purpose` are under way: minds are counted ("Asking 3 minds…"). */

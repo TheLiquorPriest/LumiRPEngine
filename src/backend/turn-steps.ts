@@ -388,9 +388,14 @@ export function safeVars(vars: Readonly<Record<string, string>>, secrets: readon
   return out;
 }
 
+/** The most outline beats a step's answer gives the narrator, and the longest a beat or the brief may run, checked whole before any cut. */
+export const OUTLINE_BEATS_MAX = 12;
+const BEAT_CHARS = 400;
+export const BRIEF_CHARS = 1200;
+
 const CONTRACT: Record<"brief" | "outline" | "choices" | "effects", string> = {
   brief: 'Output JSON only: {"text": string}.',
-  outline: 'Output JSON only: {"beats": string[]}.',
+  outline: `Output JSON only: {"beats": string[]}, at most ${OUTLINE_BEATS_MAX} beats, in order.`,
   choices: 'Output JSON only: {"choices": string[]}.',
   effects:
     'Propose only concrete state changes the facts or the reply establish. Types: time_advance{minutes} · location{entity,place} · purchase{item,category,payer?,qty?,price?} · transfer{from,to,amount} · give{item,from,to} · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} · regard{from,to,axis,delta} · knows{who,fact} · spawn{kind,name,place?,role?}. Use world ids. Output JSON only: {"proposals": [{"type": ...}]}.',
@@ -440,7 +445,7 @@ export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "
   if (!isRecord(raw)) return null;
   // A brief or an outline beat may run long and is cut, once checked whole. A suggestion is a chip's
   // text and the player's next message: one too long for a chip is dropped rather than cut.
-  return kind === "brief" ? proseLines(raw.text, 1, secrets, 600) : kind === "outline" ? proseLines(raw.beats, 4, secrets) : proseLines(raw.choices, 4, secrets, 120, "drop");
+  return kind === "brief" ? proseLines(raw.text, 1, secrets, BRIEF_CHARS) : kind === "outline" ? proseLines(raw.beats, OUTLINE_BEATS_MAX, secrets, BEAT_CHARS) : proseLines(raw.choices, 4, secrets, 120, "drop");
 }
 
 /** A prompted `effects` step (a world template with `output: "effects"`): proposals, for the caller to validate and bound like extraction. */

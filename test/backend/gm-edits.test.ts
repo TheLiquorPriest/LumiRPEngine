@@ -238,32 +238,33 @@ describe("GM edits", () => {
     const rig = new Rig();
     const chatId = await chat(rig);
     await edit(rig, chatId, { op: "link", rel: "knows", from: POV, to: "dev" });
+    // Lower-cased: a line names a facet mid-sentence ("Dev's side is now Guild").
     const seen = async () => {
       const view = await rig.rt.view(chatId, rig.host.userId);
-      return { journal: view.journal.filter((n) => n.kind === "fix").map((n) => n.text), chip: view.chips.filter((c) => c.kind === "fix").at(-1)?.detail ?? "" };
+      return { journal: view.journal.filter((n) => n.kind === "fix").map((n) => n.text.toLowerCase()), chip: (view.chips.filter((c) => c.kind === "fix").at(-1)?.detail ?? "").toLowerCase() };
     };
-    const hidden = ["Role", "Foe", "traitor"];
+    const hidden = ["role", "foe", "traitor"];
     // A visible facet set: the line names it and its new value.
     await edit(rig, chatId, { op: "classify", entity: "dev", class: { side: ["town"] }, tags: [] });
     let now = await seen();
-    expect(now.chip).toContain("Townsfolk");
+    expect(now.chip).toContain("townsfolk");
     const before = now.journal.length;
     // Only a hidden facet and a tag change: no Journal line, and the Corrected chip names nothing.
     await edit(rig, chatId, { op: "classify", entity: "dev", class: { side: ["town"], role: ["foe"] }, tags: ["traitor"] });
     now = await seen();
     expect(now.journal.length).toBe(before);
-    for (const word of [...hidden, "Townsfolk", "Side"]) expect(now.chip).not.toContain(word);
+    for (const word of [...hidden, "townsfolk", "side"]) expect(now.chip).not.toContain(word);
     // The visible facet cleared: the line says so, and still names nothing hidden.
     await edit(rig, chatId, { op: "classify", entity: "dev", class: { role: ["foe"] }, tags: ["traitor"] });
     now = await seen();
     expect(now.journal.length).toBe(before + 1);
-    expect(now.chip).toContain("Side");
-    for (const word of [...hidden, "Townsfolk"]) expect(now.chip).not.toContain(word);
+    expect(now.chip).toContain("side");
+    for (const word of [...hidden, "townsfolk"]) expect(now.chip).not.toContain(word);
     // Changed from one visible value to another: the new one is named.
     await edit(rig, chatId, { op: "classify", entity: "dev", class: { side: ["guild"] }, tags: [] });
     now = await seen();
-    expect(now.chip).toContain("Guild");
-    for (const word of [...hidden, "Townsfolk"]) expect(now.chip).not.toContain(word);
+    expect(now.chip).toContain("guild");
+    for (const word of [...hidden, "townsfolk"]) expect(now.chip).not.toContain(word);
     for (const line of now.journal) for (const word of hidden) expect(line).not.toContain(word);
   });
 

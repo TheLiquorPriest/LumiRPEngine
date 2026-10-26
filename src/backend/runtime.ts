@@ -3,7 +3,7 @@
 // into the world's book before the reply, extract before the commit, chips after it) and the state push.
 
 import { hashParts } from "../shared/hash";
-import type { ChatId, ChipId, EntityId, InterruptClass, MessageId, RevisionId, UserId, WorldId } from "../shared/ids";
+import type { ActionId, ChatId, ChipId, EntityId, InterruptClass, MessageId, RevisionId, UserId, WorldId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { heldBy } from "../shared/finance";
 import { hasOwn, isRecord } from "../shared/json";
@@ -15,13 +15,14 @@ import { EXTRACTION_TYPES, helperCallOf, recentOf, stepConfigOf, stepLoreOf } fr
 import type { ChipAction, ChipInput, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, LoreEntryDef, ParamDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
+import { fieldNoun } from "../shared/words";
 import { LORE_AUDIENCE } from "../shared/lore";
-import { isMindPurpose, MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEventData } from "../shared/minds";
+import { isMindPurpose, MINDS_EVENTS, MINDS_SLOT, type MindCallTrace, type MindEventData } from "../shared/minds";
 import { firedTimeout, TimeoutFired, TIMEOUTS, timerMs } from "../shared/timeouts";
-import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
+import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type PreMindsInput, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { planSkip } from "./skip-plan";
-import { fitMindLines, mindLines } from "../packs/minds/core/section";
+import { mindLines } from "../packs/minds/core/section";
 import { namedInText } from "../packs/minds/core/fidelity";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
@@ -30,7 +31,7 @@ import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from ".
 import type { EngineTurnPlan, QueueStop } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
 import { checkOf } from "../engine/checks";
-import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, nextDayPart, parseOverrides, parseTarget, typedSpan, type SpanAnchor } from "../engine/time";
+import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, nextDayPart, parseOverrides, parseTarget, resolveTarget, typedSpan, type SpanAnchor } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
 import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
@@ -44,7 +45,8 @@ import { createRng } from "../engine/rng";
 import { readPass } from "../engine/read-pass";
 import { claimsOf } from "../engine/realism";
 import { kindIs, placeOfEntity, placeWithin } from "../engine/scope";
-import type { WorldState } from "../engine/state";
+import { placeMenu, placeSaid } from "../engine/place-names";
+import type { EntityState, WorldState } from "../engine/state";
 import { actionOdds, companionCandidates, findAction, paramCandidates, type Resolution } from "../engine/resolve";
 import { allowedSkills, inferredOf, inferredRead, rolledByTry, skillSources, TRY_ACTION, tryJudged } from "../engine/inferred";
 import type { InterpretOutput, QueuedAction } from "../engine/steps";
@@ -53,15 +55,15 @@ import { secretLoreNames } from "../engine/lore";
 import { pinsFor, type PinnedText } from "../engine/lore-pins";
 import { namesHidden, povMayKnow } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
-import { feedOf, linesOf, MARKED_FACTS_RULE, markedText, renderersOf } from "../engine/feed";
+import { feedOf, MARKED_FACTS_RULE, renderersOf } from "../engine/feed";
 import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { resolveUsualMoves, usualRoutineForExtract } from "../packs/castlife/core/usual";
 import { dayPlan, type DayPlan } from "../packs/castlife/core/index";
 import { Working } from "../engine/working";
-import type { PresetCard, TemplateInfo } from "../shared/protocol";
+import type { PresetCard, ResultBodies, TemplateInfo } from "../shared/protocol";
 import { Agents, type BuildInfo, thisBuild } from "./agents";
-import { DEFAULT_SECTIONS, EngineBook, renderSection, sectionsOf, sectionTokens } from "./book";
+import { DEFAULT_SECTIONS, EngineBook, sectionsOf, sectionTokens } from "./book";
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
@@ -79,9 +81,9 @@ import { worldInfoVerdict, type WorldInfoGate } from "./wi-interceptor";
 import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
 import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
 import { failureWords } from "./requirement-words";
-import { missingSections, withoutMissing } from "./section-refs";
+import { buildSections } from "./sections-build";
 import { routineAsks } from "./routine-ask";
-import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ThingSort } from "./steps";
+import { CallMeter, dedupeProposals, extract, interpret, NotNeeded, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ThingSort } from "./steps";
 import { PlanNotes, type PlanLines } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { StagedActions } from "./staged";
@@ -89,10 +91,10 @@ import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
-import { applyProposals, type EnginePipeline, type PlanProse, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
+import { applyProposals, type EnginePipeline, type PlanProse, type ReadChip, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
 import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, slotVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
-import { actionWords, buildView, clockMinutes, compactSpan, notWorldView, palette, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
-import { StudioBridge } from "./studio";
+import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION } from "./view";
+import { actionWords, compactSpan, spanText } from "../engine/action-words";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
 import { CANNOT_STOP, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
@@ -136,7 +138,22 @@ interface LorePhase {
 }
 
 /** Chips a read stores for its swipe; a read that replaces it (Re-read edit, Retry read) drops them. */
-const READ_CHIP_KINDS: ReadonlySet<string> = new Set(["undo", "confirm", "decline", "choice", "contradiction"]);
+const READ_CHIP_KINDS: ReadonlySet<string> = new Set(["undo", "confirm", "decline", "untracked", "choice", "contradiction"]);
+
+/** The model calls of the minds' post phase (`postMinds`): their diagnostics step takes them as its own, beside the read's. */
+const MINDS_POST_CALLS: readonly StepPurpose[] = ["memory", "consolidate"];
+
+/**
+ * Refusals the world's own rules make of a read's change (DESIGN §9.5): money a payer can't cover or
+ * nothing prices (any purchase's or transfer's refusal is one too), past a bound, a fight holding the
+ * clock, a regard already moved as far as a reply may, no room, a body that doesn't move, no way there
+ * under the travel simulation. What they refuse didn't happen in the world, so the next reply is told
+ * so. Any other refusal is of something the engine has no place for, which the story keeps.
+ */
+const RULED_OUT: ReadonlySet<string> = new Set(["declined", "unpriced", "bound", "over_bound", "no_room", "not_moved", "no_route", "in_fight", "regard_spent"]);
+
+/** Refusals of a change the state already holds (a fact already known, a life state already so): nothing to show or tell. */
+const ALREADY_SO: ReadonlySet<string> = new Set(["already_known", "already"]);
 
 /**
  * The most a host token count may be, as a multiple of the section's padded estimate (which stays at
@@ -163,27 +180,33 @@ function povWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): 
 }
 
 /**
- * The prefix an extraction reads against: only entities and places the POV may know. A thing names
- * who holds it (one the POV may know), so a narrated hand-over reads from the right giver. The 30
- * entities are the scene's people and things first and money accounts last, so a wallet's cards
- * never crowd out who is in the room.
+ * The entities an extraction reads against, only those the POV may know: 30 of them, the scene's
+ * people and things first and money accounts last, so a wallet's cards never crowd out who is in
+ * the room.
  */
-export function prefixSummary(reg: Registry, world: WorldDoc, state: WorldState): JsonValue {
-  const pov = state.entities[world.pov];
+function prefixEntities(reg: Registry, world: WorldDoc, state: WorldState): { id: EntityId; e: EntityState }[] {
   const here = placeOfEntity(state, world.pov);
   const rank = (id: EntityId, kind: string): number => (kind === "account" ? 2 : here !== null && placeOfEntity(state, id) === here ? 0 : 1);
-  const known = Object.entries(state.entities)
+  return Object.entries(state.entities)
     .filter(([id]) => povMayKnow(reg, world, state, id))
     .map(([id, e], i) => ({ id, e, i, rank: rank(id, e.kind) }))
     .sort((a, b) => a.rank - b.rank || a.i - b.i)
     .slice(0, 30);
+}
+
+/**
+ * The prefix an extraction reads against (`prefixEntities`). A thing names who holds it (one the POV
+ * may know), so a narrated hand-over reads from the right giver. Places are offered beside it, by
+ * name (`placeMenu`).
+ */
+export function prefixSummary(reg: Registry, world: WorldDoc, state: WorldState): JsonValue {
+  const pov = state.entities[world.pov];
   const people: JsonObject = {};
-  for (const { id, e } of known) {
+  for (const { id, e } of prefixEntities(reg, world, state)) {
     const holder = holderOf(state, id);
     people[id] = { name: e.name, kind: e.kind, place: typeof e.fields.place === "string" ? e.fields.place : null, ...(holder !== null && povMayKnow(reg, world, state, holder) ? { holder } : {}) };
   }
-  const places = Object.keys(world.places).filter((p) => canSeePlace(reg, world, state, world.pov, p)).slice(0, 40);
-  return { clock: state.clock, pov: world.pov, povName: pov?.name ?? world.pov, cents: state.accounts[world.pov] ?? null, entities: people, places };
+  return { clock: state.clock, pov: world.pov, povName: pov?.name ?? world.pov, cents: state.accounts[world.pov] ?? null, entities: people };
 }
 
 /**
@@ -453,14 +476,13 @@ export function splitAlongBuy(p: JsonObject, pre: readonly LedgerEvent[], ctx: R
  * with Marcus" while the engine has the POV at the market), and no change would say the story and the
  * world have parted. It is a guess, which the read only offers. None when the engine has them there
  * or inside it, when the turn's own events moved them (the engine's outcome wins), or when a narrated
- * move of theirs already says where.
+ * move of theirs already says where. The place is given by id or by name (`placeSaid`).
  */
-function replyPlace(where: string | null, narrated: readonly JsonObject[], context: ReadInput): JsonObject[] {
+function replyPlace(reg: Registry, where: string | null, narrated: readonly JsonObject[], context: ReadInput): JsonObject[] {
   const { world, state } = context;
   const here = placeOfEntity(state, world.pov);
-  const said = where ?? "";
-  const to = hasOwn(world.places, said) ? said : said.toLowerCase();
-  if (here === null || !hasOwn(world.places, to) || placeWithin(world, here, to) || placeOfEntity(context.start, world.pov) !== here) return [];
+  const to = placeSaid(reg, world, state, where ?? "");
+  if (here === null || to === null || placeWithin(world, here, to) || placeOfEntity(context.start, world.pov) !== here) return [];
   if (narrated.some((p) => p.type === "location" && (typeof p.entity !== "string" || p.entity.trim() === world.pov))) return [];
   return [{ type: "location", entity: world.pov, place: to }];
 }
@@ -550,9 +572,27 @@ function lruSet<K, V>(map: Map<K, V>, key: K, value: V, cap: number): void {
 }
 
 /** The minds an engine run got answers from, under the key of what that run was made from. */
+interface AnsweredMinds {
+  key: string;
+  minds: ReadonlyMap<EntityId, MindEventData>;
+}
+
+/**
+ * The minds a later run of the same turn takes instead of asking them again (DESIGN §5.1), under
+ * the key of what they were made from: a failed run's answers, or those a run that waits on the
+ * player started, as they come in, with the stop that ends them once the turn won't take them.
+ */
 interface KeptMinds {
   key: string;
-  minds: Map<EntityId, MindEventData>;
+  minds: Promise<ReadonlyMap<EntityId, MindEventData>>;
+  stop?: AbortController;
+}
+
+/** A run's pre-phase minds under way: whether they are a timelapse's (the round alone), and their own stop. */
+interface ThinkingMinds {
+  timelapse: boolean;
+  task: Promise<RunMindsResult>;
+  stop: AbortController;
 }
 
 /** Each mind that answered, from a run's events: what a Retry of the run keeps (DESIGN §5.1). */
@@ -608,8 +648,6 @@ export class Runtime implements TurnHooks {
   readonly push: StatePush;
   /** Each chat's diagnostics ring and the in-flight activity line (DESIGN §6.9). */
   readonly diag: Diagnostics;
-  /** What LumiRPEngine Studio may read, and its offers (DESIGN §15). */
-  readonly studio: StudioBridge;
   /** The outside MCP servers' check-ins and the update notice (DESIGN §23). */
   readonly agents: Agents;
   readonly templates: Record<string, (id: string, name: string) => WorldDoc>;
@@ -657,8 +695,8 @@ export class Runtime implements TurnHooks {
   /** Each generation's minds calls, with no text (the inspector shows them, DESIGN §24.5). */
   private readonly mindTraces = new Map<string, MindCallTrace[]>();
   /** What minds answered in each engine run, by its turn id; a run that fails keeps them for its Retry (`keptMinds`). */
-  private readonly answeredMinds = new Map<string, KeptMinds>();
-  /** A failed engine run's answered minds, by chat, for the next run of the same turn (DESIGN §5.1). */
+  private readonly answeredMinds = new Map<string, AnsweredMinds>();
+  /** The minds the next run of a chat's turn takes (DESIGN §5.1): a failed run's answers, or those a run that waits on the player started. */
   private readonly keptMinds = new Map<ChatId, KeptMinds>();
   /**
    * What each engine run planned for the narrator, by its turn id (DESIGN §5.1): its prose (`brief`,
@@ -706,16 +744,9 @@ export class Runtime implements TurnHooks {
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }), (chatId) => messages.forget(chatId));
-    this.studio = new StudioBridge(this.host, this.worlds);
-    this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
-    // Every view pushed to a chat also refreshes the summary the Studio reads of it.
-    this.push = new StatePush(this.host, async (chatId, userId) => {
-      // A view slower than a second is kept in the chat's diagnostics (a slow tab says where it went).
-      const view = await this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId));
-      this.studio.seen(userId, view);
-      return view;
-    });
+    // A view slower than a second is kept in the chat's diagnostics (a slow tab says where it went).
+    this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }
 
   start(): void {
@@ -893,6 +924,29 @@ export class Runtime implements TurnHooks {
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION,
       earlier: { messages: earlier, hideJson: settings.hideJsonBlocks },
     };
+    // Character minds (DESIGN §24) start now, beside the rest of the pre phase: separate calls, on the
+    // phase's wall clock, apart from its call count. They think from the state the turn plans from,
+    // the player's message and the reply before it, all known before `interpret` reads the message.
+    // The read can change one thing for them: a timelapse's minds think at its beats (`skip.ts`), so
+    // until the read says, they think as for the turn they most likely are, and give way to the
+    // other kind once it does. A turn whose outline the player let through plays the plan it was
+    // shown, so none start.
+    const shown = bridge.outlineOf(text) !== undefined;
+    const lastReply = before.findLast((m) => !m.isUser);
+    // A Retry of a run that failed keeps the minds it got and asks only the others (DESIGN §5.1), and
+    // a run that waits on the player hands on the minds it started; either while what they think from
+    // is unchanged: the chain and journal, the world revision, the player's message, the minds
+    // settings, the mind step and the preset's mind block. Fixing another step's connection keeps them.
+    const runAt: DiagAt = { chatId: input.chatId, userId: input.userId, turn: p.generationId };
+    const mindsKey = [input.runKey, render.state.revision, text, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\u0000");
+    const kept = this.keptMinds.get(input.chatId);
+    this.keptMinds.delete(input.chatId);
+    if (kept && kept.key !== mindsKey) kept.stop?.abort(new NotNeeded("the turn they were thinking for changed"));
+    const same = kept?.key === mindsKey ? kept : undefined;
+    const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", guidance: preset.guidance.mind ?? "" };
+    const readTimelapse = (): boolean => bridge.intentOf(text)?.action === TIMELAPSE_ACTION;
+    const known = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text);
+    let thinking = shown ? null : this.thinkMinds(asking, known ? readTimelapse() : facts.timelapse, budget.signal, same);
     const at = await this.lorePhase("pre", p.generationId, input.chatId, input.userId, render.world, render.state, budget, text, preset.guidance);
     // What the reply before it left unplayed of the last message, which this one may take as done (DESIGN §5.2).
     const left = text.trim() === "" ? "" : await this.leftUnplayed(input.chatId, input.userId, earlier, text);
@@ -908,9 +962,12 @@ export class Runtime implements TurnHooks {
     // A turn that may wait on a gate (DESIGN §5.1 preview gates) chooses for present agents only once
     // the player lets it play: a choice made before a Cancel would be a call spent for nothing. A turn
     // whose outline the player let through plays the plan it was shown, so it chooses nothing again.
-    const shown = bridge.outlineOf(text) !== undefined;
     const gating = shown || (settings.gates.intent && typed && !bridge.intentPassed(text));
     const [, early] = await Promise.all([intentTask, choose && !gating && budget.take(judging ? 1 : 0) ? choose() : null]);
+    if (thinking && thinking.timelapse !== readTimelapse()) {
+      thinking.stop.abort(new NotNeeded(readTimelapse() ? "the message plays a timelapse, whose minds think at its beats" : "the message plays no timelapse"));
+      thinking = this.thinkMinds(asking, readTimelapse(), budget.signal, same);
+    }
     // A routine the player's message states (DESIGN §9.4) is asked about on that message, with Yes
     // or No; the turn doesn't wait on it. Its turn is the message, which the model can't set.
     const routine = lastUser ? bridge.takeRoutineAsks(text) : [];
@@ -928,45 +985,32 @@ export class Runtime implements TurnHooks {
       const actions: ChipAction[] = asked.kind === "check" ? [{ id: "roll", label: "Roll", style: "primary" }, { id: "drop", label: "No roll" }] : [{ id: "add", label: "Add", style: "primary" }, { id: "drop", label: "Not an action" }];
       await this.chips.add(input.chatId, input.userId, [{ id: `${asked.kind}:${lastUser.id}`, kind: asked.kind, messageId: lastUser.id, label: asked.question, detail: asked.detail, actions, expires: "next_send", payload: { text, index: asked.index } }]);
       this.push.changed(input.chatId, input.userId);
+      this.keepMinds(input.chatId, mindsKey, thinking);
       return { waiting: `waiting for the player's answer: ${asked.question}` };
     }
-    // The intent gate (DESIGN §5.1 preview gates): a typed message's read action waits, nothing
-    // generated, on Play, Edit or Cancel, on the player's message; Play and Edit's Regenerate resume the
-    // turn with the read kept. A palette or chip tap is the action the player picked, so it plays.
+    // The intent gate (DESIGN §5.1 preview gates): a typed message's read waits, nothing generated, on
+    // Play, Edit or Cancel, on the player's message, its card saying what it plays (`intentCard`); Play
+    // and Edit's Regenerate resume the turn with the read kept. A palette or chip tap is the action
+    // the player picked, so it plays.
     const read = bridge.intentOf(text);
     if (settings.gates.intent && typed && lastUser && read?.action && !shown && !bridge.intentPassed(text)) {
-      const def = render.world.actions[read.action] ?? this.registry.actions.get(read.action);
-      const label = def?.label ?? read.action;
-      // The read in words, as the palette names its picks: never an id, and only what the player character may know of.
-      const words = def ? actionWords(this.registry, render.world, render.state, def, read.params) : "";
-      const edit = def ? this.intentEdit(render.world, render.state, def, read.params) : null;
-      const actions: ChipAction[] = [{ id: "play", label: "Play", style: "primary" }, ...(edit ? [{ id: "edit", label: "Edit", input: edit }] : []), { id: "cancel", label: "Cancel" }];
-      await this.chips.add(input.chatId, input.userId, [{ id: `intent_gate:${lastUser.id}`, kind: "intent_gate", messageId: lastUser.id, label: `Play ${label}?`, ...(words !== "" ? { detail: words } : {}), actions, expires: "next_send", payload: { text } }]);
+      const card = this.intentCard(bridge, text, read, render.world, render.state, settings);
+      const actions: ChipAction[] = [{ id: "play", label: "Play", style: "primary" }, ...(card.edit ? [{ id: "edit", label: "Edit", input: card.edit }] : []), { id: "cancel", label: "Cancel" }];
+      await this.chips.add(input.chatId, input.userId, [{ id: `intent_gate:${lastUser.id}`, kind: "intent_gate", messageId: lastUser.id, label: card.label, ...(card.detail !== "" ? { detail: card.detail } : {}), actions, expires: "next_send", payload: { text } }]);
       this.push.changed(input.chatId, input.userId);
-      return { waiting: `waiting for you to play the read action: ${label}` };
+      this.keepMinds(input.chatId, mindsKey, thinking);
+      return { waiting: `waiting for you to play the read action: ${card.what}` };
     }
     this.prePhase.set(p.generationId, { facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
     trimMap(this.prePhase);
     // Let through the outline gate, the turn plays the plan the player was shown (`TurnBridge.plan`):
     // its minds, decisions and skip are that plan's, so nothing more is asked.
-    if (shown) return;
-    // Character minds (DESIGN §24) think beside the judge: separate calls, on the phase's wall clock,
-    // apart from its call count. A timelapse's minds think at its beats instead (`skip.ts`).
-    const lastReply = before.findLast((m) => !m.isUser);
-    // A Retry of a run that failed keeps the minds it got and asks only the others (DESIGN §5.1),
-    // while what they think from is unchanged: the chain and journal, the world revision, the player's
-    // message, the minds settings, the mind step and the preset's mind block. Fixing another step's
-    // connection keeps them.
-    const runAt: DiagAt = { chatId: input.chatId, userId: input.userId, turn: p.generationId };
-    const mindsKey = [input.runKey, render.state.revision, text, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\u0000");
-    const kept = this.keptMinds.get(input.chatId);
-    this.keptMinds.delete(input.chatId);
-    const mindsTask = preMinds(this.minds, { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", timelapse: bridge.intentOf(text)?.action === TIMELAPSE_ACTION, signal: budget.signal, guidance: preset.guidance.mind ?? "", ...(kept?.key === mindsKey ? { kept: kept.minds } : {}) });
+    if (!thinking) return;
     await this.judgeAnswer(bridge, text, render, settings, facts, budget, at);
     if (described) await this.judgeApproach(bridge, text, render, settings, facts, budget, at);
     const decisions = early ?? (choose && budget.take() ? await choose() : []);
     bridge.setDecisions(text, decisions);
-    const minds = await mindsTask;
+    const minds = await thinking.task;
     bridge.setMinds(text, minds.events);
     this.addMindTraces(input.chatId, p.generationId, minds.traces, true);
     lruSet(this.answeredMinds, p.generationId, { key: mindsKey, minds: mindsAnswered(minds.events) }, 64);
@@ -983,7 +1027,8 @@ export class Runtime implements TurnHooks {
         start.applyAll(bridge.prePlan(text));
         const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
         const log = (message: string): void => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
-        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: await this.liveWorld(p.generationId, input.chatId, input.userId, from.world), state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: stepConfigOf(settings.modelUse.steps, "skip"), guidance: preset.guidance.skip ?? "" }));
+        // The step switched off makes no call (`mindsStepConfig` is null): the plan is recorded empty.
+        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: await this.liveWorld(p.generationId, input.chatId, input.userId, from.world), state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs, config: mindsStepConfig(settings.modelUse, "skip"), guidance: preset.guidance.skip ?? "" }));
       }
     }
     // A timelapse with minds on is a time skip (DESIGN §24.7): its beats and the minds at them are
@@ -1023,6 +1068,35 @@ export class Runtime implements TurnHooks {
     // Someone the player doesn't know is "a mind", and why theirs failed says nothing of them.
     const line = (e: (typeof missed)[number]): string => (known.has(e.name) ? `${e.name}'s mind: ${e.reason ?? "it didn't answer"}` : `a mind: ${e.reason?.startsWith("it didn't fit") ? "its answer didn't fit the world as it is now" : (e.reason ?? "it didn't answer")}`);
     this.diag.failed(at, phase, "mind", missed.map(line).join("; "));
+  }
+
+  /**
+   * A run's pre-phase minds (`preMinds`), under way on their own stop inside the phase's signal: for
+   * a timelapse, the round alone, at once; otherwise those the scene, the ladder and the cadence call,
+   * taking a run's before it of the same turn (`kept`) once they are in. A timelapse's minds no
+   * longer need what an earlier run started, so that stops.
+   */
+  private thinkMinds(asking: Omit<PreMindsInput, "timelapse" | "signal" | "kept">, timelapse: boolean, signal: AbortSignal, kept: KeptMinds | undefined): ThinkingMinds {
+    const stop = new AbortController();
+    if (timelapse) kept?.stop?.abort(new NotNeeded("the message plays a timelapse, whose minds think at its beats"));
+    const task = (async () => preMinds(this.minds, { ...asking, timelapse, signal: AbortSignal.any([signal, stop.signal]), ...(kept && !timelapse ? { kept: await kept.minds } : {}) }))();
+    return { timelapse, task, stop };
+  }
+
+  /**
+   * A run that waits on the player (a claim, a suggested check, the intent gate) hands on the minds
+   * it started: the run their Regenerate starts takes each that answered, as they come in, while what
+   * they think from is unchanged (`mindsKey`). Cancel stops them (`dropMinds`).
+   */
+  private keepMinds(chatId: ChatId, key: string, thinking: ThinkingMinds | null): void {
+    if (!thinking || thinking.timelapse) return;
+    lruSet(this.keptMinds, chatId, { key, minds: thinking.task.then((ran) => mindsAnswered(ran.events), () => new Map<EntityId, MindEventData>()), stop: thinking.stop }, 256);
+  }
+
+  /** Cancel on a preview gate (DESIGN §5.1): the minds its run started for the turn are no longer wanted. */
+  dropMinds(chatId: ChatId): void {
+    this.keptMinds.get(chatId)?.stop?.abort(new NotNeeded("you cancelled the turn"));
+    this.keptMinds.delete(chatId);
   }
 
   /**
@@ -1257,7 +1331,8 @@ export class Runtime implements TurnHooks {
     // Interpret's own main action is dropped when it is the staged one, and otherwise queued after
     // it; a time skip it read becomes the time the message lets pass once the actions have played.
     if (staged) {
-      const { thing: _thing, ...read } = result;
+      // The words interpret gave its own first action are that action's, not the staged one's.
+      const { thing: _thing, text: _words, ...read } = result;
       const then = result.then ?? (result.action === TIMELAPSE_ACTION ? result.params : undefined);
       const own = result.action && result.action !== TIMELAPSE_ACTION && result.action !== staged.action ? [{ action: result.action, params: result.params, text: "", ...(result.thing ? { thing: result.thing } : {}) }] : [];
       result = { ...read, action: staged.action, params: staged.params, probabilities: { [staged.action]: 1 }, ...(then ? { then } : {}), queue: [...own, ...(result.queue ?? [])] };
@@ -1284,6 +1359,9 @@ export class Runtime implements TurnHooks {
     // §5.2), each piece only when it may be (`offeredNext`); "" when it may not.
     const chipText = (piece: string): string => offeredNext(this.registry, render.world, render.state, piece, text, secrets) ?? "";
     let next = (result.next ?? []).map(chipText);
+    // The player's own words for the first action, or for what fills a time skip, as the intent
+    // gate's card quotes them (DESIGN §5.1): none when they carry a secret or name anything hidden.
+    const lead = cardWords(this.registry, render.world, render.state, result.text ?? "", secrets) ?? "";
     // A time skip, the timelapse itself or time with no action before it (DESIGN §9.2), plays alone:
     // anything after it is offered in words once it has run. Time after another action ("I head home
     // and sleep until the next morning") is offered once the actions have run. The read names the
@@ -1299,7 +1377,7 @@ export class Runtime implements TurnHooks {
       bridge.setOffer(text, over ? target : null);
       // A span the player's words spend ("for the next two hours, I service the fleet") keeps the POV
       // where the story has it until it's over (DESIGN §8); a run to a routine point follows its routine.
-      bridge.setIntent(text, target && !over ? timelapseIntent(target, undefined, 1, target.type !== "duration") : null, target !== null && !over);
+      bridge.setIntent(text, target && !over ? { ...timelapseIntent(target, undefined, 1, target.type !== "duration"), ...(lead !== "" ? { text: lead } : {}) } : null, target !== null && !over);
       return;
     }
     const chosen = result.action ? all.find((a) => a.id === result.action) : undefined;
@@ -1350,8 +1428,8 @@ export class Runtime implements TurnHooks {
       const asked = verdict.policy.mode === "suggest" ? checkQuestion(verdict, (id) => render.state.entities[id]?.name ?? id) : null;
       steps.push({ action: TRY_ACTION, params: verdict.params, text: words, ...(asked ? { ask: { kind: "check" as const, ...asked } } : {}) });
     };
-    if (chosen) take(chosen, params, "", result.thing, [text]);
-    else if (result.action === TRY_ACTION) takeTry(result.params, "");
+    if (chosen) take(chosen, params, lead, result.thing, [text]);
+    else if (result.action === TRY_ACTION) takeTry(result.params, lead);
     // The further actions (DESIGN §11 action queue), each read as the first is. Time passing is never
     // queued: as the last it is the input's `then`, and earlier it ends the queue and is left in words.
     // One carrying a secret is dropped on its own, as a second action carrying one always was, and
@@ -1686,8 +1764,12 @@ export class Runtime implements TurnHooks {
     const extractRun = runsOf(modelUse, context.world, "extract", facts, { guidance }).find((r) => r.template === null || r.template.output !== "effects");
     // L27: a timelapse or speed-through turn's time passed as its timelapse, so its reply proposes no skip.
     const skipped = facts.timelapse || !!plan?.timelapse;
+    // What extract is offered by name: places, the ones the reply and the player's message name and the
+    // nearest first (DESIGN §9.4), and the kinds a newcomer may be.
+    const places = extractRun ? placeMenu(this.registry, context.world, context.state, [text, pre?.text ?? ""], prefixEntities(this.registry, context.world, context.state).flatMap(({ e }) => (typeof e.fields.place === "string" ? [e.fields.place] : []))) : [];
+    const personKinds = [...new Set([...Object.keys(context.world.kinds), ...this.registry.kinds.keys()])].filter((k) => kindIs(this.registry, context.world, k, "person"));
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "")
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "", places, personKinds)
       : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
@@ -1700,7 +1782,9 @@ export class Runtime implements TurnHooks {
     // The minds' post phase (DESIGN §24.4): who was present, their memory of what was written, and
     // consolidation, beside the reply's other steps, on the phase's wall clock.
     // Their memory and consolidation read pinned lore as the run read it, World Info's secrecy included (DESIGN §4.2).
-    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: live, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
+    // Its calls are a step of their own in diagnostics (DESIGN §6.9): one cut off is the minds'
+    // failure there, never the read's, which commits without what it would have kept either way.
+    const mindsTask = post ? this.diag.step({ chatId, userId, turn: key }, "memory", "minds", () => postMinds(this.minds, { chatId, userId, world: live, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }), undefined, MINDS_POST_CALLS) : Promise.resolve({ events: [], traces: [] });
     const [extracted, effects, decisions, contradicted, choices, minded] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks), mindsTask]);
     this.timeLimits({ chatId, userId, turn: key }, "read", budget);
     this.addMindTraces(chatId, key, minded.traces);
@@ -1730,7 +1814,7 @@ export class Runtime implements TurnHooks {
     // Where the reply leaves the POV when no move says so is a guess (a flashback, a phone call, a look
     // across the street read as being there): whatever the location mode it waits for Apply, and its
     // chip is no outcome for the type's learning (DESIGN §9.4). `never` still ignores it.
-    const guessed = new Set(replyPlace(extracted.where, narrated, context));
+    const guessed = new Set(replyPlace(this.registry, extracted.where, narrated, context));
     const deduped = dedupeProposals(
       [...narrated, ...guessed].flatMap((p) => splitAlongBuy(p, context.pre, ctx, typedItems)),
       context.world.pov,
@@ -1802,18 +1886,20 @@ export class Runtime implements TurnHooks {
     bridge.prepareRead(input.content, { auto, post, events: decisions, minds: minded.events, askBeyond: settings.time.askBeyondMinutes });
     // `choices` and `contradiction` become chips below, with the read's others.
     // Each automatic proposal gets an undo chip; each confirm proposal a confirm chip (DESIGN §11).
-    // An automatic proposal the engine refuses gets a decline chip instead, never silence: a payment
-    // that can't be covered (with Pay another way), or anything else that can't apply (no amount, an
-    // unknown item). The next Outcome slot says it didn't happen (DESIGN §9.5). A purchase's chip
+    // An automatic proposal the engine refuses gets a chip instead, never silence. A refusal by the
+    // world's rules (`RULED_OUT`: a payment that can't be covered, with Pay another way, a bound, a
+    // fight holding the clock) gets a decline chip, and the next Outcome slot says it didn't happen;
+    // anything else refused is something the engine has no place for, which the story keeps: an
+    // untracked receipt, and the next reply hears nothing of it (DESIGN §9.5). A purchase's chip
     // shows what it charges, and one whose narrated price was capped or clamped can be re-priced.
     const w = new Working(this.registry, context.world, context.state);
     const outcomes = applyProposals(this.registry, w, auto.filter((p) => p.type !== "time_advance"), `${context.seed}:preview`, bridge.runSeed);
     const stored: StoredChip[] = [];
-    const declines: { proposal: JsonObject; reason: string; payment: boolean; unpriced: boolean }[] = [...spent.map((proposal) => ({ proposal, reason: REGARD_SPENT, payment: false, unpriced: false })), ...held.map((proposal) => ({ proposal, reason: IN_FIGHT, payment: false, unpriced: false }))];
+    const declines: { proposal: JsonObject; reason: string; code: string; payment: boolean; unpriced: boolean }[] = [...spent.map((proposal) => ({ proposal, reason: REGARD_SPENT, code: "regard_spent", payment: false, unpriced: false })), ...held.map((proposal) => ({ proposal, reason: IN_FIGHT, code: "in_fight", payment: false, unpriced: false }))];
     outcomes.forEach((o, i) => {
       if (o.rejection) {
         if (o.rejection.code !== "declined") this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: ${describeProposal(o.proposal)} didn't apply (${o.rejection.code}: ${o.rejection.reason})`, input.userId);
-        declines.push({ proposal: o.proposal, reason: o.rejection.reason, payment: o.rejection.code === "declined", unpriced: o.rejection.code === "unpriced" });
+        declines.push({ proposal: o.proposal, reason: o.rejection.reason, code: o.rejection.code, payment: o.rejection.code === "declined", unpriced: o.rejection.code === "unpriced" });
         return;
       }
       // A change refused unseen comes back as one that changed nothing: no chip, and the next reply
@@ -1872,15 +1958,15 @@ export class Runtime implements TurnHooks {
         return;
       }
       // A move that can't happen (a body the POV knows of, or no way there under the travel
-      // simulation) is declined in plain words, as under auto; one refused unseen comes back as no
-      // change and is dropped below.
+      // simulation) is declined in plain words, as under auto, and one to a place the engine doesn't
+      // have is untracked; one refused unseen comes back as no change and is dropped below.
       if (check?.rejection && proposal.type === "location") {
-        declines.push({ proposal, reason: check.rejection.reason, payment: false, unpriced: false });
+        declines.push({ proposal, reason: check.rejection.reason, code: check.rejection.code, payment: false, unpriced: false });
         return;
       }
       // One that may be the Buy told again declines into nothing: the Buy itself was paid.
       if (check?.rejection?.code === "declined" && !also) {
-        declines.push({ proposal, reason: check.rejection.reason, payment: true, unpriced: false });
+        declines.push({ proposal, reason: check.rejection.reason, code: check.rejection.code, payment: true, unpriced: false });
         return;
       }
       if (check?.rejection?.code === "unpriced") {
@@ -1901,7 +1987,7 @@ export class Runtime implements TurnHooks {
       // what the POV may know (`proposalKnown` dropped the rest before here), and a refusal unseen came
       // back as no change. One that may be the Buy told again stays silent: the Buy itself was paid.
       if (check?.rejection && !(also && check.rejection.code === "declined")) {
-        declines.push({ proposal, reason: check.rejection.reason, payment: false, unpriced: false });
+        declines.push({ proposal, reason: check.rejection.reason, code: check.rejection.code, payment: false, unpriced: false });
         return;
       }
       if (!check || check.rejection || check.events.length === 0) {
@@ -1929,6 +2015,29 @@ export class Runtime implements TurnHooks {
     // Another swipe of this reply replaces its notes; this swipe's note on its typed action stays.
     const notes = (await this.outcomeNotes.list(chatId, userId)).filter((n) => n.messageId !== messageId || isUnfitId(n.id, messageId, swipeId));
     declines.forEach((d, i) => {
+      // What the engine holds already (a fact already known, a death already so) changed nothing to show.
+      if (ALREADY_SO.has(d.code)) {
+        this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(d.proposal)} (${d.code}: ${d.reason})`, input.userId);
+        return;
+      }
+      // What the engine has no place for (a fact told in prose, a thing as a newcomer, a place it
+      // doesn't have) still happened in the story: a receipt says so, with no decision to make, and
+      // the next reply is never told it didn't happen.
+      if (d.proposal.type !== "purchase" && d.proposal.type !== "transfer" && !RULED_OUT.has(d.code)) {
+        stored.push({
+          id: `untracked:${input.messageId}:${input.generationId}:${i}`,
+          kind: "untracked",
+          messageId: input.messageId,
+          swipeId,
+          label: `Not tracked: ${describeProposal(d.proposal, context.world, context.state)}`,
+          // A fact no world has is refused in the words it was told; the receipt says what the engine keeps instead.
+          detail: `${d.code === "unknown_fact" ? "The engine keeps whom and what you know of, not facts told in words" : d.reason.replace(/[.\s]+$/, "")}. The story stands as told, and the next reply isn't told otherwise.`,
+          actions: [],
+          expires: "next_send",
+          payload: { type: String(d.proposal.type), proposal: d.proposal, reason: d.reason },
+        });
+        return;
+      }
       const id = `decline:${input.messageId}:${input.generationId}:${i}`;
       notes.push({ id, messageId, text: declineNote(d.proposal, d.reason, "accept", context.state, context.world) });
       stored.push({
@@ -2036,19 +2145,33 @@ export class Runtime implements TurnHooks {
     // A span the player's words spent held the POV where the story has it, typed as one or stated to an
     // action the turn sped through ("sleep for eight hours"); its Speed through and Continue keep that (DESIGN §8).
     const hold: JsonObject = bridge.intentOf(userText)?.params.povRoutine === false || plan?.timelapse?.povRoutine === false ? { povRoutine: false } : {};
-    for (const [i, chip] of (plan?.chips ?? []).entries()) {
+    // Time the message asked for that the turn didn't run (DESIGN §9.2): a typed timelapse longer than
+    // a turn runs, offered and never run unasked, or time it lets pass after its actions, never offered
+    // while some of them are left to play.
+    const asked = input.kind === "continue" || plan?.stopped ? undefined : bridge.offerFor(userText);
+    // The time the reply's read already moved the clock, and the time its chips still would (§9.4):
+    // a Timelapse this turn offers counts both, so tapping it never runs the same time twice. Speed
+    // through to an activity's end the clock is already at, or would be, is withdrawn.
+    const told = rec ? clockMinutes(rec.events.slice(rec.pre)) : 0;
+    const pending = asked || (plan?.chips ?? []).some((chip) => chip.kind === "timelapse_offer") ? narratedPending((await this.chips.list(input.chatId, input.userId)).filter((c) => c.messageId === input.messageId && c.swipeId === input.swipeId), bridge.chipsFor(input.content)) : 0;
+    const offers = (plan?.chips ?? []).filter((chip) => !(told + pending > 0 && chip.kind === "timelapse_offer" && chip.target.type === "at" && chip.target.at <= headState.clock + pending));
+    for (const [i, chip] of offers.entries()) {
       // DESIGN §9.2 wording: "Timelapse to 07:00 (8 h 55 min)?"
       const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(chipWorld, headState, chip.target.at)}` : "";
-      const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(chip.remaining)})?` : `Continue timelapse (${compactSpan(chip.remaining)} left)`;
+      // A time the reply's read moved the clock toward is that much nearer.
+      const remaining = told > 0 && chip.target.type === "at" ? chip.target.at - headState.clock : chip.remaining;
+      const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(remaining)})?` : `Continue timelapse (${compactSpan(remaining)} left)`;
       stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue, ...(chip.povRoutine === false ? { povRoutine: false } : chip.kind === "continue_timelapse" ? hold : {}) } });
     }
-    // A typed timelapse longer than a turn runs on its own: offered, never run unasked. Time the
-    // message lets pass after its actions isn't offered while some of them are left to play.
-    const offer = input.kind === "continue" || plan?.stopped ? undefined : bridge.offerFor(userText);
+    // The asked time is offered as what the reply didn't already tell of it (`offerLeft`), or not at all.
+    const offeredTo = offers.reduce<number | null>((m, chip) => (chip.kind === "timelapse_offer" && chip.target.type === "at" ? Math.max(m ?? chip.target.at, chip.target.at) : m), null);
+    const offer = asked && chipWorld ? offerLeft(this.registry, chipWorld, headState, asked, told, pending, offeredTo) : asked;
+    if (asked && !offer) this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId}: the reply told the time the message asked for (${told} min, ${pending} min waiting), so no Timelapse is offered`, input.userId);
     if (offer) {
       const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
       const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(chipWorld, headState, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
-      const detail = offer.type === "duration" && offer.minutes > (await this.settings.get(input.userId)).time.askBeyondMinutes ? "That's longer than a skip runs without asking. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
+      const covered = asked?.type === "duration" && offer.type === "duration" ? asked.minutes - offer.minutes : 0;
+      const detail = asked?.type === "duration" && offer.type === "duration" && covered > 0 ? `The reply already told ${compactSpan(covered)} of the ${compactSpan(asked.minutes)} you asked for. Run the other ${compactSpan(offer.minutes)} as a timelapse?` : offer.type === "duration" && offer.minutes > (await this.settings.get(input.userId)).time.askBeyondMinutes ? "That's longer than a skip runs without asking. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) as JsonValue } });
     }
     // What the turn didn't play of the message (DESIGN §5.2, §11): the queued actions left when the
@@ -2102,8 +2225,13 @@ export class Runtime implements TurnHooks {
   /** The next swipe's mode, chosen on the swipe-option chip; consumed by that swipe. */
   private readonly swipeChoice = new Map<ChatId, "rerun" | "renarrate">();
 
+  /**
+   * A Re-run rolls the turn again, so a turn kept from a failed reply goes and the engine runs; a
+   * Re-narrate keeps the outcome, which the kept turn is (DESIGN §5.1).
+   */
   setSwipeChoice(chatId: ChatId, mode: "rerun" | "renarrate"): void {
     lruSet(this.swipeChoice, chatId, mode, 256);
+    if (mode === "rerun") this.ledger.discardKept(chatId);
   }
 
   /** The player's answer to what a read waits on (DESIGN §9.4 a claim's question, §11 a suggested check): kept with the read, so the Regenerate that follows resumes the turn. */
@@ -2176,6 +2304,83 @@ export class Runtime implements TurnHooks {
       } else picks[name] = value;
     }
     return { type: "action", label: `Change ${action.label}`, action: action.id, params: picks };
+  }
+
+  /**
+   * The intent gate's card (DESIGN §5.1 preview gates): what the read plays, in words. Its label names
+   * the first action and what it acts on, and how many follow; its detail quotes the player's words for
+   * that action, then gives each action queued after it with what it acts on and its words, the time
+   * the message lets pass after them, what was left out and why, and the words no action reads. A time
+   * skip says how long it runs and from when to when, what fills it, and what running it means. Picks
+   * are named as the palette names them, the player's own words where the world has no name for them
+   * (`actionWords`). Edit opens the Actions sheet at the action, or the Timelapse sheet at the skip,
+   * when the sheet can play it.
+   */
+  private intentCard(bridge: TurnBridge, text: string, read: InterpretOutput, world: WorldDoc, state: WorldState, settings: UserSettings): { label: string; detail: string; edit: ChipInput | null; what: string } {
+    const rest = bridge.nextOf(text);
+    if (read.action === TIMELAPSE_ACTION) {
+      const target = parseTarget(read.params.target);
+      const span = target ? skipWords(this.registry, world, state, target, true) : "time passes";
+      const held = read.params.povRoutine === false;
+      const lines = [
+        ...(read.text ? [`Filled with: “${read.text}”`] : []),
+        `Play runs the clock on in one go${mindsOn(settings) ? ", the minds of the people it involves thinking at the moments that matter in it" : ""}; you ${held ? "stay where the story has you" : "follow your routine through it"}, and the reply tells it.`,
+        ...(rest ? [`Left for after it: “${rest}”`] : []),
+      ];
+      const edit: ChipInput | null = target && palette(world, state, this.registry).timelapse?.blocked === null ? { type: "action", label: "Change the timelapse", action: TIMELAPSE_ACTION, params: { target: JSON.parse(JSON.stringify(target)) as JsonValue, followRoutine: !held } } : null;
+      return { label: `Play Timelapse: ${span}?`, detail: lines.join("\n"), edit, what: `Timelapse ${span}` };
+    }
+    const action = read.action ?? "";
+    const head = this.stepWords(world, state, action, read.params, text);
+    const queue = read.queue ?? [];
+    const offer = bridge.offerFor(text);
+    const asks = offer?.type === "duration" && offer.minutes > settings.time.askBeyondMinutes;
+    const lines = [
+      ...(read.text ? [`“${read.text}”`] : []),
+      ...queue.map((q) => `Then ${this.stepWords(world, state, q.action, q.params, text)}${q.text ? ` — “${q.text}”` : ""}`),
+      ...(offer ? [`Then time passes: ${skipWords(this.registry, world, state, offer, false)}. ${asks ? "That's longer than a skip runs without asking, so it's offered once these have played." : "The reply tells it after these."}`] : []),
+      ...bridge.unfitOf(text).map((u) => `Left out: ${u.label}, ${u.reason}.`),
+      ...(rest ? [`Not read as an action: “${rest}”`] : []),
+    ];
+    const def = (hasOwn(world.actions, action) ? world.actions[action] : undefined) ?? this.registry.actions.get(action);
+    return { label: `Play ${head}${queue.length > 0 ? `, then ${queue.length} more` : ""}?`, detail: lines.join("\n"), edit: def ? this.intentEdit(world, state, def, read.params) : null, what: head };
+  }
+
+  /**
+   * One action of a read in words, as the intent gate's card names it (DESIGN §5.1): its label and what
+   * it acts on ("Take: letter", "Go to: Bluebird Coffee, with Danny Okafor"), the player's own words
+   * where the world has no name for a pick (`typed`); an inferred check by its skill, what is attempted,
+   * whom it opposes as the player character may know them, and how it looks.
+   */
+  private stepWords(world: WorldDoc, state: WorldState, action: ActionId, params: JsonObject, typed: string): string {
+    if (action === TRY_ACTION) {
+      const verdict = inferredRead(this.registry, world, state, params);
+      if (!verdict.ok) return "Try something";
+      const against = verdict.read.against.flatMap((a) => (povMayKnow(this.registry, world, state, a.who) ? [own(state.entities, a.who)?.name ?? ""] : [])).filter((n) => n !== "");
+      return `${verdict.skill.label} check${verdict.read.attempt !== "" ? `: “${verdict.read.attempt}”` : ""}${against.length > 0 ? `, against ${against.join(" and ")}` : ""}, looking ${verdict.band.label.toLowerCase()}`;
+    }
+    const def = (hasOwn(world.actions, action) ? world.actions[action] : undefined) ?? this.registry.actions.get(action);
+    if (!def) return "an action";
+    const picks = actionWords(this.registry, world, state, def, params, typed);
+    return picks !== "" ? `${def.label}: ${picks}` : def.label;
+  }
+
+  /**
+   * The Outcome's line for the time a typed message lets pass after its actions (DESIGN §9.2), or
+   * null: when every action played, the reply tells that time after them, and its read moves the
+   * clock by what it tells, so the Timelapse offered after the reply is only what it didn't tell.
+   * None while some of the actions are left to play, for a time skip (which runs the time itself),
+   * and for a span longer than a skip runs without asking, which waits on its Timelapse instead.
+   */
+  private thenLine(chatId: ChatId, said: string, seed: string, world: WorldDoc, state: WorldState, settings: UserSettings, secrets: readonly string[]): string | null {
+    const bridge = this.bridges.get(chatId);
+    const intent = said === "" ? null : bridge?.intentOf(said);
+    const offer = said === "" ? undefined : bridge?.offerFor(said);
+    const turn = bridge?.planFor(seed);
+    if (!intent?.action || intent.action === TIMELAPSE_ACTION || !offer || !turn || turn.stopped) return null;
+    if (offer.type === "duration" && offer.minutes > settings.time.askBeyondMinutes) return null;
+    const words = typeof intent.then?.span === "string" ? cardWords(this.registry, world, state, intent.then.span, secrets) : null;
+    return `After those actions, the player's message lets time pass: ${skipWords(this.registry, world, state, offer, false)}${words ? ` (“${words}”)` : ""}. Tell that time in this reply, after them.`;
   }
 
   /** Play or Edit on the outline gate (DESIGN §5.1 preview gates): the Regenerate that follows plays the plan the player was shown, told `lines`. */
@@ -2276,6 +2481,49 @@ export class Runtime implements TurnHooks {
     return key;
   }
 
+  /** A section's size in tokens: the host's count of that very text when it has one, else the estimate. */
+  private sectionCost(userId: UserId, content: string): number {
+    return this.tokenCounts.get(hashParts("lre.tokens", userId, content)) ?? sectionTokens(content);
+  }
+
+  /**
+   * GM → This chat → Sections' preview (DESIGN §6.11): every section as the next turn would give it
+   * to the narrator, from the chat's head and its lore as it reads now, through the turn's own
+   * builder (`buildSections`), budgets, caps and marks alike. Fast and model-free: before the next
+   * turn plays, Outcome and Montage hold only what is already told to it (a decline), the Outline
+   * nothing, and Scene no elapsed time; the GM page says so.
+   */
+  async previewSections(chatId: ChatId, userId: UserId, core: LedgerCore, observed: ChainMessage[]): Promise<ResultBodies["lre.sections"]> {
+    const render = core.renderState(observed);
+    if (!render) throw new Error("the chat's world revision isn't loaded");
+    const world = await this.readLore(chatId, userId, render.world);
+    const { state } = render;
+    const settings = await this.settings.get(userId);
+    // What a reply's declines leave for the next turn (DESIGN §9.5): told to it in Outcome.
+    const told = (await this.outcomeNotes.list(chatId, userId)).filter((n) => n.toldTo === undefined).map((n) => n.text);
+    const built = buildSections({
+      registry: this.registry,
+      world,
+      state,
+      secrets: unrevealedSecrets(this.registry, world, state),
+      budget: settings.modelUse.tokens.sections,
+      mindsBudget: settings.minds.tokens,
+      said: "",
+      planned: { outcome: told, montage: [] },
+      outline: [],
+      elapsed: null,
+      // The turn makes again any entry the book lacks, so every section has one to fill.
+      hasEntry: () => true,
+      cost: (content) => this.sectionCost(userId, content),
+      seen: () => {},
+      warn: (message) => this.host.log("warn", `[LumiRPEngine] preview ${message}`, userId),
+    });
+    return {
+      sections: built.sections.map((s) => ({ slot: s.slot, label: s.label, status: s.status, scope: s.feed.scope ?? "player", content: s.content, tokens: s.tokens, cut: s.cut, marked: s.marked, hints: s.hints })),
+      budget: { sections: settings.modelUse.tokens.sections, used: built.used, minds: settings.minds.tokens },
+    };
+  }
+
   /**
    * The engine run's last step (DESIGN §5.1, §6.4): the prepared turn's sections, rendered from its
    * plan and the fold on the section budget, written into the world's book. Each goes into its
@@ -2319,169 +2567,60 @@ export class Runtime implements TurnHooks {
     // Declines from the last reply (DESIGN §9.5), for the next turn and its swipes only.
     const target = pending?.messageId ?? null;
     for (const n of await this.outcomeNotes.list(input.chatId, input.userId)) if (n.messageId !== target && (n.toldTo === undefined || n.toldTo === target)) planned.outcome.unshift(n.text);
+    // Time the player's message lets pass after its actions (DESIGN §9.2), when every one of them
+    // played: the reply tells it after them, and its read moves the clock by what it tells.
+    const after = plan ? this.thenLine(input.chatId, this.prePhase.get(input.generationId)?.text ?? "", plan.seed, world, state, settings, secrets) : null;
+    if (after) planned.outcome.push(after);
     const record: InspectorRecord = { id: input.generationId, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [], entries: {} };
     const traces = this.loreTraces.get(input.generationId);
     if (traces) record.lore = structuredClone(traces);
     const minded = this.mindTraces.get(input.generationId);
     if (minded) record.minds = structuredClone(minded);
-    // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2).
-    // The Minds section has its own budget and never spends the shared one (DESIGN §24.3).
-    let budget = settings.modelUse.tokens.sections;
-    const mindsBudget = settings.minds.tokens;
-    const fullMinds = worldMindsOf(world).secrecy === "full";
     const uncounted: string[] = [];
-    // What goes into the book, in rank order: each entry and its text.
-    const fills: { id: string; content: string }[] = [];
-    // Sections with lines that ride once every section has its place: hints (Stance's cues, §6.6) and
-    // facts beyond the POV's that a scope adds (§6.11), neither counted in what the player sees.
-    const hinted: { fill: { id: string; content: string } | null; entryId: string; label: string; template: string; lines: string[]; marked: { text: string; source?: { bookId: string; entryId: string } }[]; hints: string[]; cost: number; maxTokens: number | undefined; maxLines: number | undefined }[] = [];
-    // The World Info entries the delivered lines carry (§6.11): that entry can stay out of the prompt.
-    const sources: { bookId: string; entryId: string }[] = [];
     // The entry a section fills: the preset places the section itself when an enabled block holds
     // `{{outlet::lre_<slot>}}` (DESIGN §6.8), so its outlet twin is filled; else its own entry.
     const entryOf = (section: SectionTemplate): string | null => {
       const twin = entries.twins.get(section.id);
       return twin !== undefined && preset.outlets.has(outletOf(section.id)) ? twin : (entries.slots.get(section.id) ?? null);
     };
-    const sectionCost = (content: string): number => this.tokenCounts.get(hashParts("lre.tokens", input.userId, content)) ?? sectionTokens(content);
-    // The sections all read the head's state, many times over: one read pass (DESIGN §9.6).
-    readPass(() => {
-      // The Minds section on its own budget (DESIGN §24.3): the best on the ladder first, the lowest left
-      // out until it fits. Under `full` the narrator gets each mind whole, to depict and never state;
-      // under `brief` the lines are leak-checked once more after their own screens. Only those it tells
-      // of are out of Stance, which tells of everyone else.
-      const mindsSection = sectionsOf(world).find((s) => s.id === MINDS_SLOT);
-      const read = this.registry.context(world, state);
-      const allMinds = mindsSection && entryOf(mindsSection) ? mindLines(read).filter((l) => fullMinds || findLeaks(l.line, secrets).length === 0) : [];
-      const said = this.prePhase.get(input.generationId)?.text ?? "";
-      const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: said, reply: "" }) ?? []).map((s) => s.entity);
-      const mindsFit = mindsSection ? fitMindLines(allMinds, ladder, mindsBudget, (kept) => sectionCost(renderSection(mindsSection.label, mindsSection.template, kept.map((l) => l.line)))) : [];
-      const ctx = this.registry.context(world, state, { "minds.minded": () => mindsFit.map((l) => l.entity) });
-      // The sections filled so far, in rank order: the Outline points only at those (DESIGN §9.5).
-      const filled = new Set<string>();
-      for (const section of sectionsOf(world)) {
-        // The world's settings for the section, the GM's in this chat over them (§6.11).
-        const feed = feedOf(section, state);
-        if (feed.enabled === false) continue;
-        const entryId = entryOf(section);
-        if (!entryId) continue;
-        const minds = section.id === MINDS_SLOT;
-        const scope = feed.scope ?? "player";
-        const lines: string[] = minds ? mindsFit.map((l) => l.line) : [];
-        const lineSources: ({ bookId: string; entryId: string } | undefined)[] = lines.map(() => undefined);
-        const hints: string[] = [];
-        const marked: { text: string; source?: { bookId: string; entryId: string } }[] = [];
-        for (const r of renderersOf(this.registry.renderers, section, feed)) {
-          if (minds) continue;
-          try {
-            if (r.hint) {
-              hints.push(...r.render(ctx));
-              continue;
-            }
-            for (const l of linesOf(r, ctx, scope)) {
-              if (l.known === "pov") {
-                lines.push(l.text);
-                lineSources.push(l.source);
-                continue;
-              }
-              // A fact beyond the POV's only in the scope that asks for it, marked for the narrator. Only
-              // the GM scope's skip the leak screen, and only here: no player surface reads this copy.
-              if (scope === "player" || (l.known === "gm" && scope !== "gm")) continue;
-              if (scope !== "gm" && findLeaks(l.text, secrets).length > 0) continue;
-              marked.push({ text: markedText(l), ...(l.source ? { source: l.source } : {}) });
-            }
-          } catch (error) {
-            this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
-          }
-        }
-        if (section.id === "outline") lines.push(...withoutMissing(outline, missingSections(sectionsOf(world), section.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && entryOf(mindsSection) !== null)));
-        // DESIGN §9.2: every turn has an elapsed time, and the Scene slot states it.
-        if (section.id === "scene" && plan) {
-          const minutes = clockMinutes(plan.events);
-          lines.push(minutes > 0 ? `This turn took ${spanText(minutes)}.` : "No time passes this turn.");
-        }
-        // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.
-        if (section.id === "outcome") {
-          lines.unshift(...planned.outcome);
-          lineSources.unshift(...planned.outcome.map(() => undefined));
-        }
-        if (section.id === "montage") lines.push(...planned.montage);
-        while (lineSources.length < lines.length) lineSources.push(undefined);
-        const screened = lines.map((text, i) => ({ text, source: lineSources[i] })).filter((l) => minds || findLeaks(l.text, secrets).length === 0);
-        // The section's own caps (§6.11): its first lines, then cut from the end to its tokens.
-        const capped = feed.maxLines !== undefined ? screened.slice(0, feed.maxLines) : [...screened];
-        const markedRoom = feed.maxLines !== undefined ? Math.max(0, feed.maxLines - capped.length) : marked.length;
-        if (feed.maxTokens !== undefined) while (capped.length > 0 && sectionCost(renderSection(section.label, section.template, capped.map((l) => l.text))) > feed.maxTokens) capped.pop();
-        const safe = capped.map((l) => l.text);
-        const facts = marked.slice(0, markedRoom);
-        const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
-        if (safe.length === 0) {
-          // A Minds section whose best line alone is over its budget is left out whole.
-          if (minds && allMinds.length > 0) record.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
-          // Hints alone never make a section: its being there would tell of them. Marked facts may,
-          // in what the budget leaves, with no trace the player sees.
-          if (facts.length > 0) hinted.push({ fill: null, entryId, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
-          continue;
-        }
-        const content = renderSection(section.label, section.template, safe);
-        const key = hashParts("lre.tokens", input.userId, content);
-        const counted = this.tokenCounts.get(key);
-        if (counted === undefined) uncounted.push(content);
-        const cost = counted ?? sectionTokens(content);
-        const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
-        const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - capped.length);
-        // Whether it reached the prompt is known once the reply's World Info activates (`onActivated`).
-        record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(cut > 0 ? { cut } : {}), delivery: "unchecked" });
-        if (clipped) continue;
-        if (!minds) budget -= cost;
-        const fill = { id: entryId, content };
-        fills.push(fill);
-        filled.add(section.id);
-        (record.entries ??= {})[section.id] = entryId;
-        sources.push(...capped.flatMap((l) => (l.source ? [l.source] : [])));
-        if (safeHints.length > 0 || facts.length > 0) hinted.push({ fill, entryId, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
-      }
+    // The sections as the GM's preview builds them too (`buildSections`), on this turn's budgets.
+    const built = buildSections({
+      registry: this.registry,
+      world,
+      state,
+      secrets,
+      budget: settings.modelUse.tokens.sections,
+      mindsBudget: settings.minds.tokens,
+      said: this.prePhase.get(input.generationId)?.text ?? "",
+      planned,
+      outline,
+      elapsed: plan ? clockMinutes(plan.events) : null,
+      hasEntry: (section) => entryOf(section) !== null,
+      cost: (content) => this.sectionCost(input.userId, content),
+      seen: (content) => {
+        if (!this.tokenCounts.has(hashParts("lre.tokens", input.userId, content))) uncounted.push(content);
+      },
+      warn: (message) => this.host.log("warn", `[LumiRPEngine] ${message}`, input.userId),
     });
-    record.budget.used = settings.modelUse.tokens.sections - budget;
-    // Hints follow what the POV doesn't know (a hidden flag, a lore gate), and marked facts go beyond
-    // it, so both ride last, in what the budget has left, and the inspector counts none of them: no
-    // clip, size or total the player sees moves when an off-screen secret changes (§6.2, §6.11).
-    // Marked facts go first, one at a time while they fit; hints still all or none.
-    let markedSent = false;
-    for (const h of hinted) {
-      const fits = (extra: number, total: number): boolean => extra <= budget && (h.maxTokens === undefined || total <= h.maxTokens);
-      const costOf = (body: string[]): number => {
-        const content = renderSection(h.label, h.template, body);
-        const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content));
-        if (counted === undefined) uncounted.push(content);
-        return counted ?? sectionTokens(content);
-      };
-      const body = [...h.lines];
-      let cost = h.cost;
-      const carried: { bookId: string; entryId: string }[] = [];
-      for (const m of h.marked) {
-        const next = costOf([...body, m.text]);
-        if (!fits(next - cost, next)) break;
-        budget -= next - cost;
-        cost = next;
-        body.push(m.text);
-        if (m.source) carried.push(m.source);
-        markedSent = true;
-      }
-      // The section's line cap holds for its hints too: they go in whole or not at all.
-      if (h.hints.length > 0 && (h.maxLines === undefined || body.length + h.hints.length <= h.maxLines)) {
-        const next = costOf([...body, ...h.hints]);
-        if (fits(Math.max(0, next - cost), next)) {
-          budget -= Math.max(0, next - cost);
-          body.push(...h.hints);
-        }
-      }
-      if (body.length === h.lines.length) continue;
-      const content = renderSection(h.label, h.template, body);
-      if (h.fill) h.fill.content = content;
-      else fills.push({ id: h.entryId, content });
-      sources.push(...carried);
+    record.sections = built.record;
+    record.budget.used = built.used;
+    const slots = new Map(sectionsOf(world).map((s) => [s.id, s]));
+    const entryAt = (slot: string): string | null => {
+      const section = slots.get(slot);
+      return section ? entryOf(section) : null;
+    };
+    // What goes into the book, in the order it's written: each entry and its text.
+    const fills = built.fills.flatMap((f) => {
+      const id = entryAt(f.slot);
+      return id ? [{ id, content: f.content }] : [];
+    });
+    for (const slot of built.recorded) {
+      const id = entryAt(slot);
+      if (id) (record.entries ??= {})[slot] = id;
     }
+    // The World Info entries the delivered lines carry (§6.11): that entry can stay out of the prompt.
+    const sources = built.sources;
+    const markedSent = built.markedSent;
     // The narrator rules, for world chats only: at the preset's `{{outlet::lre_narrator}}`, else
     // before the character, apart from the section budget. The preset's own text, led by the
     // engine's rule for marked facts when the turn carries any (§6.11).
@@ -2654,7 +2793,7 @@ export class Runtime implements TurnHooks {
   async failed(input: { chatId: ChatId; userId: UserId; turn: string; step: string; reason: string }): Promise<void> {
     const answered = this.answeredMinds.get(input.turn);
     this.answeredMinds.delete(input.turn);
-    if (answered && answered.minds.size > 0) lruSet(this.keptMinds, input.chatId, answered, 256);
+    if (answered && answered.minds.size > 0) lruSet(this.keptMinds, input.chatId, { key: answered.key, minds: Promise.resolve(answered.minds) }, 256);
     const last = (await this.host.chats.messages(input.chatId, input.userId)).at(-1);
     if (!last) return;
     // "interpret call failed: …" reads as "Reading your action: …"; a mind's record already says whose,
@@ -2889,6 +3028,10 @@ export class Runtime implements TurnHooks {
     await this.meter.ready(userId);
     const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId) });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
+    // A turn kept from a reply that failed waits on the player (DESIGN §5.1): its card shows while it lasts.
+    const kept = this.ledger.keptOf(chatId);
+    const last = observed.at(-1);
+    if (kept && last) view.chips.push(replyFailedChip(kept.turn, kept.failed, last.id));
     const staged = await this.staged.get(chatId, userId);
     view.staged = staged ? { action: staged.action, params: staged.request, source: staged.source, label: staged.label } : null;
     return view;
@@ -3095,6 +3238,84 @@ function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
   return findLeaks(next, secrets).length > 0 || chipNamesHidden(reg, world, state, next) ? null : next;
 }
 
+/**
+ * The player's words for one of the read's actions as the intent gate's card quotes them (DESIGN
+ * §5.1), or null: a placeholder for nothing ("none", "N/A"), and words carrying an unrevealed secret
+ * (`secrets`, less the player's own words) or naming anything hidden, which the card leaves out.
+ */
+function cardWords(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, piece: string, secrets: readonly string[]): string | null {
+  const said = piece.replace(/\s+/g, " ").trim();
+  if (hasOwn(NO_VALUE, said.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim())) return null;
+  return findLeaks(said, secrets).length > 0 || chipNamesHidden(reg, world, state, said) ? null : said;
+}
+
+/**
+ * How long a time skip runs, as the intent gate's card and the narrator are told it (DESIGN §5.1,
+ * §9.2): its length, or what it runs until, and with `clocked` the clock it runs from and the time
+ * its target falls at, as the HUD shows times ("1 h, 10:29 PM to 11:29 PM"; "until evening: 2 h 10
+ * min, 3:50 PM to 6:00 PM"). A target that falls at no time says only what it runs until.
+ */
+function skipWords(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, target: TimelapseTarget, clocked: boolean): string {
+  const part = target.type === "day_part" ? world.calendar.dayParts.find((d) => d.id === target.dayPart)?.label.toLowerCase() : undefined;
+  const what =
+    target.type === "duration"
+      ? compactSpan(target.minutes)
+      : target.type === "at"
+        ? `to ${shortClock(world, state, target.at)}`
+        : target.type === "day_part"
+          ? `until ${part ?? "that part of the day"}`
+          : target.type === "shift"
+            ? "until your next shift"
+            : target.type === "commitment"
+              ? "until your next commitment"
+              : target.type === "arrival"
+                ? "until you arrive"
+                : target.type === "stage"
+                  ? "until the story moves on"
+                  : "until something happens";
+  const reached = clocked ? resolveTarget(reg, world, state, target) : null;
+  if (!reached || "code" in reached) return what;
+  const range = `${shortClock(world, state, state.clock)} to ${shortClock(world, state, reached.to)}`;
+  return target.type === "duration" ? `${what}, ${range}` : `${what}: ${compactSpan(reached.to - state.clock)}, ${range}`;
+}
+
+/**
+ * What is left to offer of the time a typed message asked to pass after its actions, or beyond what
+ * a skip runs without asking (DESIGN §9.2), once the reply has had its say: the read moved the clock
+ * `told` minutes, its chips would move it `pending` more (a narrated span waiting on Apply, or on
+ * its own Timelapse chip), and the turn may offer to run it on to `offeredTo` already (Speed through
+ * an activity). Each counts toward it, so tapping the offer never runs the same time twice: a length
+ * is what the reply left of it; a stated time, a part of the day, a shift or a commitment stays as
+ * it is until the clock gets there. Null when nothing is left. Where the asked span falls is read
+ * from the clock the turn's actions left, before the reply's time.
+ */
+function offerLeft(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, asked: TimelapseTarget, told: number, pending: number, offeredTo: number | null): TimelapseTarget | null {
+  if (told <= 0 && pending <= 0 && offeredTo === null) return asked;
+  const from = state.clock - told;
+  const reached = asked.type === "duration" ? { to: from + asked.minutes } : resolveTarget(reg, world, { ...state, clock: from }, asked);
+  if ("code" in reached) return asked;
+  const runs = state.clock + pending;
+  if (reached.to <= runs || (offeredTo !== null && reached.to <= offeredTo)) return null;
+  return asked.type === "duration" ? { type: "duration", minutes: reached.to - runs } : asked;
+}
+
+/**
+ * The minutes a reply's read would still move the clock, waiting on the player (DESIGN §9.4): a
+ * narrated span on its confirm chip, and one longer than a skip runs without asking on its own
+ * Timelapse chip, stored (`stored`, the reply's) or the read's own (`read`).
+ */
+function narratedPending(stored: readonly StoredChip[], read: readonly ReadChip[]): number {
+  let minutes = 0;
+  for (const chip of stored) {
+    const proposal = chip.kind === "confirm" && chip.payload.type === "time_advance" && isRecord(chip.payload.proposal) ? chip.payload.proposal : null;
+    if (proposal && typeof proposal.minutes === "number" && proposal.minutes > 0) minutes += proposal.minutes;
+    const target = chip.kind === "timelapse_offer" && chip.id.startsWith("adv:") ? parseTarget(chip.payload.target) : null;
+    if (target?.type === "duration") minutes += target.minutes;
+  }
+  for (const chip of read) if (chip.target.type === "duration") minutes += chip.target.minutes;
+  return minutes;
+}
+
 /** Actions in the player's words as one message, in order ("I buy a latte. I sit by the window"); a single one stays exactly as given. Empty pieces are skipped. */
 function joinActions(pieces: readonly string[]): string {
   const said = pieces.map((p) => p.trim()).filter((p) => p !== "");
@@ -3194,15 +3415,18 @@ function planOutline(plan: EngineTurnPlan, prose: PlanProse | undefined): string
 export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Registry): { outcome: string[]; montage: string[] } {
   const outcome: string[] = [];
   for (const res of plan.resolutions) {
-    const label = res.inferred?.label ?? (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
+    // The action as it played, in words (`toldAction`): its picks, where it started, its time and what it changed.
+    const label = res.told?.what ?? res.inferred?.label ?? (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
+    const took = res.told && res.told.minutes > 0 ? `, taking ${spanText(res.told.minutes)}` : "";
+    const changed = res.told && res.told.changes.length > 0 ? ` What changed: ${res.told.changes.join("; ")}.` : "";
     const reasons = res.rejected.slice(0, 3).map((r) => r.rejection.reason);
     if (!res.ok) outcome.push(`${label}: it didn't happen (${res.failed ? playerReason(res.failed).replace(/\.$/, "") : "not possible"}). Narrate the attempt failing.`);
     else if (res.check || res.adjudged) {
       // An inferred check is told with its people and the policy's detail and guidance (DESIGN §11).
-      outcome.push(res.inferred ? inferredOutcome(res, res.inferred) : checkLine(label, res));
+      outcome.push(`${res.inferred ? inferredOutcome(res, res.inferred) : checkLine(label, res)}${changed}`);
       for (const r of reasons) outcome.push(`Not possible: ${r}.`);
     } else if (reasons.length > 0) outcome.push(`${label}: it didn't go through (${reasons.join("; ")}). Narrate it failing; nothing changed hands.`);
-    else outcome.push(`${label}: done.`);
+    else outcome.push(`${label}: done${took}. Narrate it as done.${changed}`);
   }
   // A fight's part of the turn (DESIGN §11): the round in order, then whose turn it is.
   outcome.push(...plan.combat);
@@ -3221,9 +3445,9 @@ export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Regis
   const m = plan.montage;
   if (m) {
     for (const g of m.groups.slice(0, 7)) montage.push(`${g.label}: ${g.lines.slice(0, 6).join("; ")}`);
-    for (const a of m.money.slice(0, 4)) montage.push(`${a.label}: in ${formatMoney(a.in, world.currency)}, out ${formatMoney(a.out, world.currency)}`);
-    for (const b of m.bands.slice(0, 6)) montage.push(`${b.label}: ${b.from ? `${b.from} → ` : "now "}${b.to}`);
-    for (const c of m.changes.slice(0, 4)) montage.push(`${c.label}: ${c.delta > 0 ? "+" : "−"}${c.money ? formatMoney(Math.abs(c.delta), world.currency) : String(Math.round(Math.abs(c.delta) * 100) / 100)}`);
+    for (const a of m.money.slice(0, 4)) montage.push(`${a.label} took in ${formatMoney(a.in, world.currency)} and paid out ${formatMoney(a.out, world.currency)}`);
+    for (const b of m.bands.slice(0, 6)) montage.push(b.from ? `${b.label} went from ${b.from} to ${b.to}` : `${b.label} is now ${b.to}`);
+    for (const c of m.changes.slice(0, 4)) montage.push(`${c.label} went ${c.delta > 0 ? "up" : "down"} by ${c.money ? formatMoney(Math.abs(c.delta), world.currency) : String(Math.round(Math.abs(c.delta) * 100) / 100)}`);
   }
   return { outcome, montage };
 }
@@ -3369,7 +3593,7 @@ function pricingActions(p: JsonObject, ctx: ReadContext): ChipAction[] {
   ];
 }
 
-/** A one-line label for a proposal chip; ids read as names (and money in the world's currency) when the world and state are given. */
+/** A one-line label for a proposal chip, in a sentence; ids read as names (and money in the world's currency) when the world and state are given. */
 export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readonly<WorldState>): string {
   const raw = (k: string): string => (typeof p[k] === "string" || typeof p[k] === "number" ? String(p[k]) : "?");
   const s = (k: string): string => {
@@ -3378,6 +3602,17 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
     if (v === world.pov) return "you";
     return state.entities[v]?.name ?? world.places[v]?.name ?? v;
   };
+  // A sentence's subject: the POV reads "You", and takes "are", "know", "have".
+  const subject = (k: string): string => {
+    const who = s(k);
+    return who === "you" ? "You" : who;
+  };
+  const be = (who: string): string => (who === "You" ? "are" : "is");
+  const whose = (k: string): string => {
+    const who = subject(k);
+    return who === "You" ? "Your" : `${who}'s`;
+  };
+  const change = (delta: number): string => `${delta >= 0 ? "went up" : "went down"} by ${Math.abs(delta)}`;
   switch (p.type) {
     case "purchase":
       return `Bought ${s("item")}`;
@@ -3390,19 +3625,26 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
     case "give":
       return `${s("from")} gave ${s("item")} to ${s("to")}`;
     case "location":
-      return `${s("entity")} → ${s("place")}`;
+      return `${subject("entity")} went to ${s("place")}`;
     case "condition": {
       // Sheets: {who, condition, clear?}; a bare field change (entity, field, delta) otherwise.
-      if (typeof p.condition !== "string") return `${s("entity")} ${s("field")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
-      const who = typeof p.who === "string" && p.who !== "" ? s("who") : "you";
-      return p.clear === true ? `${who}: no longer ${raw("condition")}` : `${who}: ${raw("condition")}`;
+      if (typeof p.condition !== "string") {
+        const kind = state?.entities[raw("entity")]?.kind;
+        const label = kind && world ? own(world.kinds, kind)?.fields[raw("field")]?.label : undefined;
+        return `${whose("entity")} ${fieldNoun(label, raw("field")).noun} ${change(Number(p.delta))}`;
+      }
+      const who = typeof p.who === "string" && p.who !== "" ? subject("who") : "You";
+      return `${who} ${be(who)} ${p.clear === true ? "no longer" : "now"} ${raw("condition").replace(/_/g, " ")}`;
     }
     case "quantity":
-      return `${s("entity")} ${s("item")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
+      return `${whose("entity")} count of ${s("item")} ${change(Number(p.delta))}`;
     case "regard":
-      return `${s("from")} → ${s("to")}: ${s("axis")} ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
-    case "knows":
-      return `${s("who")} learns: ${s("fact")}`;
+      return `${whose("from")} ${s("axis").replace(/_/g, " ")} toward ${s("to")} ${Number(p.delta) >= 0 ? "rose" : "fell"} by ${Math.abs(Number(p.delta))}`;
+    case "knows": {
+      // The channel teaches the player character, which it reads `who` as when left out.
+      const who = typeof p.who === "string" && p.who.trim() !== "" ? subject("who") : "You";
+      return `${who} ${who === "You" ? "learn" : "learns"}: ${s("fact")}`;
+    }
     // The reply's item changes (DESIGN §9.4), each by who and what, as the POV may know them.
     case "take":
       return `${s("entity")} picked up ${s("item")}`;
@@ -3415,25 +3657,27 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
     case "lose":
       return typeof p.by === "string" && p.by !== "" ? `${s("by")} stole ${s("item")} from ${s("entity")}` : `${s("entity")} lost ${s("item")}`;
     case "item_condition":
-      return `${s("item")}: condition ${Number(p.delta) >= 0 ? "+" : ""}${s("delta")}`;
+      return `${s("item")}'s condition ${change(Number(p.delta))}`;
     case "spawn":
-      return `New: ${s("name")}`;
-    case "life":
-      return `${s("entity")}: ${raw("state").replace(/_/g, " ")}`;
+      return `${s("name")} appears`;
+    case "life": {
+      const who = subject("entity");
+      return `${who} ${be(who)} now ${raw("state").replace(/_/g, " ")}`;
+    }
     case "routine": {
       // The reply's own words for it: what changed, and the days and times it gave.
       const you = world !== undefined && p.entity === world.pov;
       const who = you ? "You" : s("entity");
       const what = typeof p.label === "string" && p.label.trim() !== "" ? p.label.trim() : typeof p.place === "string" ? s("place") : "?";
       if (p.change === "move") return `${who} moved to ${s("place")}`;
-      if (p.change === "stop") return `${who} gave up: ${what}`;
+      if (p.change === "stop") return `${who} gave up “${what}”`;
       const days = Array.isArray(p.days) ? p.days.filter((d) => typeof d === "string" || typeof d === "number").join(", ") : typeof p.days === "string" ? p.days : "";
       const time = typeof p.start === "string" && p.start !== "" ? `${p.start}${typeof p.end === "string" && p.end !== "" ? `–${p.end}` : ""}` : "";
       const when = [days, time].filter((x) => x !== "").join(", ");
-      return `${you ? "Your" : `${who}'s`} routine: ${what}${when !== "" ? ` (${when})` : ""}`;
+      return `${you ? "Your" : `${who}'s`} routine now has “${what}”${when !== "" ? ` (${when})` : ""}`;
     }
     case "time_advance":
-      return `+${s("minutes")} min`;
+      return `Skip ahead ${s("minutes")} min`;
     default:
       return String(p.type);
   }

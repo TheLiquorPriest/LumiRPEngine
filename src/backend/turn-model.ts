@@ -207,12 +207,22 @@ export class TurnBridge implements TurnModel {
    */
   begin(userText: string, at: PathHash): void {
     if (this.readAt.get(userText) === at) return;
+    this.forget(userText);
+    this.readAt.set(userText, at);
+    trim(this.readAt);
+  }
+
+  /**
+   * Everything kept for these words goes (DESIGN §5.1): the read, what it holds and what was asked
+   * about it. The intent gate's Cancel drops the read this way, so the message is read afresh the
+   * next time it plays rather than coming back to the card the player cancelled.
+   */
+  forget(userText: string): void {
     for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.ownPlans, this.outlines]) kept.delete(userText);
     this.interpreted.delete(userText);
     this.intentsPassed.delete(userText);
     this.unread.delete(userText);
-    this.readAt.set(userText, at);
-    trim(this.readAt);
+    this.readAt.delete(userText);
   }
 
   setIntent(userText: string, intent: InterpretOutput | null, interpreted = false): void {
@@ -285,7 +295,7 @@ export class TurnBridge implements TurnModel {
     const [first, ...queue] = read.steps.map(({ ask: _ask, ...step }): QueuedAction => step);
     const confidence = read.lead ? (read.probabilities[read.lead] ?? 1) : 1;
     const probabilities = !first || first.action === read.lead ? read.probabilities : { [first.action]: confidence, none: 1 - confidence };
-    const intent: InterpretOutput | null = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...(first?.claim ? { claim: first.claim } : {}), ...(read.then ? { then: read.then } : {}), ...(queue.length > 0 ? { queue } : {}) };
+    const intent: InterpretOutput | null = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...(first?.text ? { text: first.text } : {}), ...(first?.claim ? { claim: first.claim } : {}), ...(read.then ? { then: read.then } : {}), ...(queue.length > 0 ? { queue } : {}) };
     if (read.dropped.length > 0) this.setUnfit(userText, read.dropped, intent);
     else this.setIntent(userText, intent, true);
   }

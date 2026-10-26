@@ -10,7 +10,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
 import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, GateSettings, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { ASK_BEYOND_DEFAULT, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "../shared/settings";
+import { ASK_BEYOND_DEFAULT, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES, UNREASONED_ROUTE, UNREASONED_STEPS } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
@@ -65,7 +65,8 @@ const NO_LOOKUPS: LookupLimits = { calls: 0 };
  * and never looks up; Standard and Full let their decision and JSON steps look lore up on a budget
  * per phase, apart from the phase's calls; prose steps prefetch only. The tokens and lore are sized
  * for reasoning models on long chats with large lorebooks, where a call takes tens of seconds and
- * thinks before it answers. No preset sets a time limit: those are the user's (`UserSettings.timeouts`).
+ * thinks before it answers; memory, consolidation and the time skip's steps don't reason
+ * (`UNREASONED_STEPS`). No preset sets a time limit: those are the user's (`UserSettings.timeouts`).
  */
 export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit<ModelUseSettings, "preset">> = {
   lean: {
@@ -86,9 +87,9 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 1600)),
       // Minds run on their own cadence (`UserSettings.minds`), and what a mind reads, its lore included, is Settings → Minds': these cards set only where they run. The skip step is off until the user turns it on (DESIGN §24.7).
       mind: step(true, ["always"], HELPER),
-      memory: step(true, ["reply"], HELPER),
-      skip: step(false, ["timelapse"], HELPER),
-      consolidate: step(true, ["reply"], HELPER),
+      memory: step(true, ["reply"], UNREASONED_ROUTE),
+      skip: step(false, ["timelapse"], UNREASONED_ROUTE),
+      consolidate: step(true, ["reply"], UNREASONED_ROUTE),
     },
     budgets: { pre: { calls: 2, lookup: { calls: 4 } }, post: { calls: 2, lookup: { calls: 3 } } },
     tokens: { sections: 4000 },
@@ -103,9 +104,9 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 2400)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 2400)),
       mind: step(true, ["always"], HELPER),
-      memory: step(true, ["reply"], HELPER),
-      skip: step(false, ["timelapse"], HELPER),
-      consolidate: step(true, ["reply"], HELPER),
+      memory: step(true, ["reply"], UNREASONED_ROUTE),
+      skip: step(false, ["timelapse"], UNREASONED_ROUTE),
+      consolidate: step(true, ["reply"], UNREASONED_ROUTE),
     },
     budgets: { pre: { calls: 8, lookup: { calls: 6 } }, post: { calls: 4, lookup: { calls: 4 } } },
     tokens: { sections: 8000 },
@@ -152,30 +153,45 @@ const LIFTED = {
 
 /**
  * A settings file read against older defaults, with each value still at an old default lifted to
- * its new one (`LIFTED`). Only plain values are touched; anything malformed is left to `conform`.
+ * its new one. A file from before revision 2 (`defaults` absent) has the values `LIFTED` lists; one
+ * from before revision 3 has the steps that no longer reason (`UNREASONED_STEPS`) set to reasoning
+ * off where it left their effort to a helper model at its default effort (Inherit): an effort the
+ * user chose, the step's or the helper model's, stays. Only plain values are touched; anything
+ * malformed is left to `conform`.
  */
 function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
   const out = JSON.parse(JSON.stringify(raw)) as JsonObject;
-  if (out.defaults === SETTINGS_DEFAULTS_REV) return out;
-  const lift = (map: ReadonlyMap<number, number>, n: number): number => map.get(n) ?? n;
+  const rev = typeof out.defaults === "number" ? out.defaults : 0;
+  if (rev >= SETTINGS_DEFAULTS_REV) return out;
   const mu = isRecord(out.modelUse) ? out.modelUse : null;
-  if (mu && isRecord(mu.steps)) {
-    for (const s of Object.values(mu.steps)) {
-      if (!isRecord(s)) continue;
-      if (s.maxTokens === LIFTED.maxTokens) delete s.maxTokens;
-      if (isRecord(s.lore) && typeof s.lore.tokens === "number") s.lore.tokens = lift(LIFTED.loreTokens, s.lore.tokens);
+  if (rev < 2) {
+    const lift = (map: ReadonlyMap<number, number>, n: number): number => map.get(n) ?? n;
+    if (mu && isRecord(mu.steps)) {
+      for (const s of Object.values(mu.steps)) {
+        if (!isRecord(s)) continue;
+        if (s.maxTokens === LIFTED.maxTokens) delete s.maxTokens;
+        if (isRecord(s.lore) && typeof s.lore.tokens === "number") s.lore.tokens = lift(LIFTED.loreTokens, s.lore.tokens);
+      }
+    }
+    if (mu && isRecord(mu.budgets)) {
+      for (const phase of ["pre", "post"] as const) {
+        const b = mu.budgets[phase];
+        const l = isRecord(b) && isRecord(b.lookup) ? b.lookup : null;
+        const old = l ? LIFTED.lookups[phase].find((x) => x.was === `${String(l.calls)}|${String(l.ms)}`) : undefined;
+        if (l && old) l.calls = MODEL_USE_PRESETS[old.preset].budgets[phase].lookup?.calls ?? l.calls;
+      }
+    }
+    if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number") mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
+    if (isRecord(out.minds) && typeof out.minds.tokens === "number") out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
+  }
+  const helperEffort = isRecord(out.helper) ? out.helper.effort : undefined;
+  if (rev < 3 && mu && isRecord(mu.steps) && (helperEffort === undefined || helperEffort === DEFAULT_HELPER.effort)) {
+    for (const purpose of UNREASONED_STEPS) {
+      const s = mu.steps[purpose];
+      const route = isRecord(s) ? s.route : undefined;
+      if (isRecord(route) && route.provider === "helper" && !hasOwn(route, "effort")) route.effort = "off";
     }
   }
-  if (mu && isRecord(mu.budgets)) {
-    for (const phase of ["pre", "post"] as const) {
-      const b = mu.budgets[phase];
-      const l = isRecord(b) && isRecord(b.lookup) ? b.lookup : null;
-      const old = l ? LIFTED.lookups[phase].find((x) => x.was === `${String(l.calls)}|${String(l.ms)}`) : undefined;
-      if (l && old) l.calls = MODEL_USE_PRESETS[old.preset].budgets[phase].lookup?.calls ?? l.calls;
-    }
-  }
-  if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number") mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
-  if (isRecord(out.minds) && typeof out.minds.tokens === "number") out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
   out.defaults = SETTINGS_DEFAULTS_REV;
   return out;
 }
@@ -235,7 +251,9 @@ export function mergePatch(target: JsonValue, patch: JsonValue): JsonValue {
  * saved before timeouts had their own settings takes them from its old budgets (`migrateTimeouts`),
  * after `lifted` has read the old lookup windows it matches presets by; and one saved before minds
  * had what they read takes the limits its reply allowance and its mind card's lore set
- * (`migrateMindReads`), after `lifted` has raised that lore's old defaults.
+ * (`migrateMindReads`), after `lifted` has raised that lore's old defaults. A step's route is the
+ * file's own where it has one: an effort or sampling parameter it leaves out is the helper model's,
+ * never the preset's (a preset sets the effort of the steps that don't reason).
  */
 function normalize(raw: unknown): UserSettings {
   if (!isRecord(raw)) return defaultSettings();
@@ -251,7 +269,17 @@ function normalize(raw: unknown): UserSettings {
   // A file saved before player claims existed plays them as its named realism preset does.
   const realism = isRecord(raw.realism) ? raw.realism.preset : undefined;
   if (realism === "grounded" || realism === "simulation") fill.realism.claims = { ...CLAIM_PRESETS[realism] };
-  const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, migrateTimeouts(migrateMindReads(lifted(raw))));
+  const own = migrateTimeouts(migrateMindReads(lifted(raw)));
+  const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, own);
+  const ownSteps = isRecord(own.modelUse) && isRecord(own.modelUse.steps) ? own.modelUse.steps : null;
+  const mergedSteps = isRecord(merged) && isRecord(merged.modelUse) && isRecord(merged.modelUse.steps) ? merged.modelUse.steps : null;
+  if (ownSteps && mergedSteps) {
+    for (const purpose of STEP_PURPOSES) {
+      const s = ownSteps[purpose];
+      const step = mergedSteps[purpose];
+      if (isRecord(s) && isRecord(s.route) && isRecord(step)) step.route = s.route;
+    }
+  }
   return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
 
@@ -451,7 +479,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     realism,
     time,
     overrideWorldDefaults: typeof v.overrideWorldDefaults === "boolean" ? v.overrideWorldDefaults : d.overrideWorldDefaults,
-    // A named preset reads as its own values, so choosing one is a whole policy.
+    // Read as a world's policy is: values that differ from its named preset make it Custom.
     adjudication: readAdjudication(v.adjudication) ?? d.adjudication,
     overrideWorldAdjudication: typeof v.overrideWorldAdjudication === "boolean" ? v.overrideWorldAdjudication : d.overrideWorldAdjudication,
     // A policy that names no mode (or none at all) leaves new chats to their realism preset.
@@ -472,9 +500,15 @@ function gatesOf(value: unknown, d: GateSettings): GateSettings {
   return { intent: typeof v.intent === "boolean" ? v.intent : d.intent, outline: typeof v.outline === "boolean" ? v.outline : d.outline };
 }
 
-/** Expands a named preset into its values (the UI sends `custom` with any manual change). */
+/**
+ * Expands a named preset into its values (the UI sends `custom` with any manual change). A named
+ * checks preset is the patch's policy alone: what the patch leaves out comes from that preset, not
+ * from the policy before it, and values the patch sets with it make it Custom.
+ */
 function expandPresets(settings: UserSettings, patch: JsonObject): UserSettings {
   const out = structuredClone(settings);
+  const adjudication = isRecord(patch.adjudication) && patch.adjudication.preset !== "custom" ? readAdjudication(patch.adjudication) : null;
+  if (adjudication) out.adjudication = adjudication;
   const realism = isRecord(patch.realism) ? patch.realism.preset : undefined;
   if (realism === "story" || realism === "grounded" || realism === "simulation") out.realism = { preset: realism, ...structuredClone(REALISM_PRESETS[realism]) };
   const modelUse = isRecord(patch.modelUse) ? patch.modelUse.preset : undefined;

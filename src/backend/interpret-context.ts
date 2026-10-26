@@ -21,14 +21,15 @@ import { companionCandidates, paramCandidates, placeCandidates } from "../engine
 import { evalExpr, isGone, kindIs, placeOfEntity, scopeEnv, truthy } from "../engine/scope";
 import { lastSighting } from "../engine/seen";
 import type { WorldState } from "../engine/state";
-import { canSeeEntity, canSeePlace, namesAny, povPlace } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, namesAny, povPlace, storyLocked } from "../engine/visibility";
 import { fightOffers } from "../packs/combat/core/index";
 import { carriedBy } from "../packs/gear/core/model";
 import { openPuzzles } from "../packs/story/core/index";
 import { tokensOf } from "./book";
 import { readableReply } from "./json-hiding";
 import { gatesOf, needsOf } from "./requirement-words";
-import { spanText, TIMELAPSE_ACTION } from "./view";
+import { TIMELAPSE_ACTION } from "./view";
+import { spanText } from "../engine/action-words";
 
 /** One action of `interpret`'s catalog, as its prompt lists it. */
 export interface CatalogEntry {
@@ -133,10 +134,11 @@ function paramWords(ctx: ReadContext, action: ActionDef, name: string, def: Para
 /**
  * The actions `interpret` may read typed text as, each as the POV can take it now (DESIGN §5.2):
  * those the fight's state allows (as the Combat tab lists them), less one a gate rules out (a level
- * of detail or a money feature this chat doesn't have) and one with a required person, thing or
- * place the POV can't name (as the palette offers no option for it). `mayKnow` keeps a param's
- * candidates to those the POV may be told about; `named` holds every id the entries list, which the
- * scene names (`interpretScene`). Answer lists the open puzzles in its label.
+ * of detail or a money feature this chat doesn't have), one that is a step the story hasn't come to
+ * (`storyLocked`: a quest's later step, a secret's, as the palette leaves out) and one with a
+ * required person, thing or place the POV can't name (as the palette offers no option for it).
+ * `mayKnow` keeps a param's candidates to those the POV may be told about; `named` holds every id
+ * the entries list, which the scene names (`interpretScene`). Answer lists the open puzzles in its label.
  */
 export function interpretCatalog(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, actions: readonly ActionDef[], mayKnow: (id: EntityId) => boolean): { entries: { action: ActionDef; entry: CatalogEntry }[]; named: EntityId[] } {
   const ctx = reg.context(world, state);
@@ -146,7 +148,7 @@ export function interpretCatalog(reg: Registry, world: WorldDoc, state: Readonly
   const named = new Set<EntityId>();
   const entries: { action: ActionDef; entry: CatalogEntry }[] = [];
   for (const action of actions) {
-    if (!fightOffers(world, state, action) || gatesOf(action).some((req) => !truthy(evalExpr(req, env, false)))) continue;
+    if (!fightOffers(world, state, action) || gatesOf(action).some((req) => !truthy(evalExpr(req, env, false))) || storyLocked(env, action)) continue;
     const params: string[] = [];
     const ids = new Set<EntityId>();
     for (const [name, def] of Object.entries(action.params)) {

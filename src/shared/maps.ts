@@ -13,7 +13,7 @@ import type { EntityId, MapId, PlaceId, TravelMode } from "./ids";
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { LintIssue } from "./protocol";
 import { checkSchema, pathText, type JsonPath, type Schema } from "./schema-check";
-import type { GridDef, MapCellDef, MapDoc, MapPlaceDef, MapSettings, PlaceDef, RouteDef, RouteLeg, WorldDoc } from "./world";
+import type { GridDef, MapCellDef, MapDoc, MapPlaceDef, MapSettings, PlaceDef, RouteDef, RouteLeg, TravelTuning, WorldDoc } from "./world";
 
 export const MAP_FORMAT = "lre-map-v1";
 
@@ -118,6 +118,37 @@ export function mapSettingsOf(world: { readonly mapSettings?: unknown }): MapSet
     display: raw.display === "fog" ? "fog" : "knowledge",
     grid: { movement: grid.movement === true, sightRadius: typeof radius === "number" && Number.isFinite(radius) ? Math.min(SIGHT_MAX, Math.max(0, Math.round(radius))) : DEFAULT_SIGHT_RADIUS },
     travelSimulation: raw.travelSimulation === true,
+  };
+}
+
+/** A vehicle trip's overheads when the world doesn't tune them; no speeds, so every route keeps its own minutes. */
+export const DEFAULT_TRAVEL: Readonly<TravelTuning> = Object.freeze({ speeds: {}, vehicleSpeeds: {}, startMinutes: 1, parkMinutes: 1, fetchMinutes: 30 });
+
+const TRAVEL_MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water"];
+
+/** A world's travel tuning (DESIGN §9.1), each part read for itself: one missing or malformed is the default; a speed is kept only when above 0. */
+export function travelTuningOf(world: { readonly mapSettings?: unknown }): TravelTuning {
+  const raw = isRecord(world.mapSettings) && isRecord(world.mapSettings.travel) ? world.mapSettings.travel : {};
+  const speed = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+  const minutes = (v: unknown, fallback: number): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback);
+  const speeds: Partial<Record<TravelMode, number>> = {};
+  const rawSpeeds = isRecord(raw.speeds) ? raw.speeds : {};
+  for (const mode of TRAVEL_MODES) {
+    const s = speed(hasOwn(rawSpeeds, mode) ? rawSpeeds[mode] : undefined);
+    if (s !== null) speeds[mode] = s;
+  }
+  const vehicleSpeeds: Record<string, number> = {};
+  const rawVehicles = isRecord(raw.vehicleSpeeds) ? raw.vehicleSpeeds : {};
+  for (const [cls, v] of Object.entries(rawVehicles)) {
+    const s = speed(v);
+    if (s !== null && safeKey(cls)) vehicleSpeeds[cls] = s;
+  }
+  return {
+    speeds,
+    vehicleSpeeds,
+    startMinutes: minutes(raw.startMinutes, DEFAULT_TRAVEL.startMinutes),
+    parkMinutes: minutes(raw.parkMinutes, DEFAULT_TRAVEL.parkMinutes),
+    fetchMinutes: minutes(raw.fetchMinutes, DEFAULT_TRAVEL.fetchMinutes),
   };
 }
 

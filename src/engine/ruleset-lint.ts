@@ -15,7 +15,7 @@ import { diceDistribution, naturalDie, parseDice } from "./dice";
 import { callsIn, compile, type FormulaCall } from "./expr";
 import { lintInferred } from "./inferred";
 import { rulesetFloor, type Registry } from "./registry-impl";
-import { thresholdsOf } from "./ruleset";
+import { levelFor, progressionApplies, thresholdsOf } from "./ruleset";
 import { fieldDef, kindFields, objects } from "./scope";
 import { own } from "./pack-kit";
 
@@ -390,6 +390,23 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
       if (list.some((x, i) => i > 0 && x < (list[i - 1] ?? x))) err(`${at}.thresholds`, "thresholds", "Thresholds must rise level by level.");
       if (p.maxLevel !== undefined && (typeof p.maxLevel !== "number" || !Number.isInteger(p.maxLevel) || p.maxLevel < 1)) err(`${at}.maxLevel`, "progression", "The top level is a whole number of at least 1.");
       if (p.onLevel !== undefined && !Array.isArray(p.onLevel)) err(`${at}.onLevel`, "progression", "onLevel is a list of effects.");
+      // A level follows its XP: one authored otherwise moves to its XP's level when that XP next changes.
+      const name = typeof p.label === "string" && p.label.trim() !== "" ? p.label : "Level";
+      for (const [eid, e] of Object.entries(world.entities)) {
+        if (!progressionApplies(reg, world, p, e.kind)) continue;
+        const numberOf = (field: string): number | null => {
+          const v = own(e.fields, field) ?? fieldDef(reg, world, e.kind, field)?.default;
+          return typeof v === "number" ? v : null;
+        };
+        const levelDef = fieldDef(reg, world, e.kind, p.levelField);
+        const xp = numberOf(p.xpField) ?? 0;
+        const level = numberOf(p.levelField) ?? levelFor(list, 0, p.maxLevel);
+        const reached = Math.min(Math.max(levelFor(list, xp, p.maxLevel), levelDef?.min ?? -Infinity), levelDef?.max ?? Infinity);
+        if (level === reached) continue;
+        const xpLabel = fieldDef(reg, world, e.kind, p.xpField)?.label ?? p.xpField;
+        const needs = list[level - 1];
+        warn(`entities.${eid}.fields.${p.levelField}`, "progression_level", `${e.name} is at ${name} ${level}, but ${xp} ${xpLabel} reaches ${name} ${reached}. The level follows ${xpLabel}, so it becomes ${name} ${reached} when their ${xpLabel} next changes: ${needs !== undefined ? `give them ${needs} ${xpLabel} for ${name} ${level}, or ` : ""}set the level to ${reached}.`);
+      }
     }
   }
   const sheet = rs.sheet;

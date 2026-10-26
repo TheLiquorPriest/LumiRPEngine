@@ -1,4 +1,4 @@
-// Authoring tools shared by the backend, the background lane and the studio seam (DESIGN §13, §15):
+// Authoring tools shared by the backend, the background lane and the command line's local engine (DESIGN §13):
 // world-document checks and migration, lint, Playtest turns, Check world days and the Sheet
 // Designer's preview. Pure and deterministic: no packages, no host, no clock.
 
@@ -96,7 +96,7 @@ export function blankWorld(id: WorldId, name: string): WorldDoc {
 }
 
 /**
- * A world made from nothing, as Build and the studio make one: the minimal world with every pack's
+ * A world made from nothing, as Build and the command line make one: the minimal world with every pack's
  * default table copied in and pinned at its revision, as the starter templates carry them, so it
  * prices, pays and dresses as a world made from a template does.
  */

@@ -6,8 +6,9 @@
 //   fight's turns around it (`combat.round`), then its time through `advance` (world processes,
 //   schedules, slot rules, tracks; none for an action inside a fight already under way, whose rounds
 //   take no clock time, while the action that starts one keeps its time; the scene tick when no
-//   action ran), until the queue stops at a check, a failure or an interruption → a timelapse
-//   (explicit, or Speed through `auto`; never in a fight) → off-screen catch-up when time moved.
+//   action ran), then the tracks, so a stage this action made true is this turn's (DESIGN §10),
+//   until the queue stops at a check, a failure or an interruption → a timelapse (explicit, or
+//   Speed through `auto`; never in a fight) → off-screen catch-up when time moved.
 // post (after extraction): catch-up when time didn't move in plan, turn rules and tracks.
 //
 // Intents: `interpret`'s answer, or a palette/command intent of the same shape. The built-in
@@ -19,11 +20,13 @@ import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent, TimelapseTarget } from "../shared/ledger";
 import { activitySpanEnd, type WorldDoc } from "../shared/world";
 import type { Judgement } from "./adjudication";
+import { actionWords, toldAction, type BeforeAction } from "./action-words";
 import { outline } from "./beats";
 import { ENGINE_EVENTS, signalOf } from "./engine-pack";
 import { materializeAll } from "./materialize";
 import type { Registry } from "./registry-impl";
 import { findAction, resolveAction, type Resolution } from "./resolve";
+import { IDLE_OPTION } from "./plan-day";
 import { resolveTry, TRY_ACTION } from "./inferred";
 import { createRng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick } from "./rules";
@@ -98,6 +101,9 @@ function povSpan(w: Working): { type: string; until: number } | null {
   const until = activitySpanEnd(fields);
   return until !== null && typeof fields?.activity === "string" ? { type: fields.activity, until } : null;
 }
+
+/** Activities an action's span gives for getting somewhere: arriving, the span's end, ends them. */
+const ENDS_ON_ARRIVAL: Readonly<Record<string, true>> = { travel: true };
 
 /** Which of this turn's resolutions began `span` for `pov` (a queued action's too), or -1 when none did. */
 function spanOwner(resolutions: readonly Resolution[], pov: EntityId, span: { type: string; until: number }): number {
@@ -174,6 +180,8 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   const from = w.state.clock;
   const intent = input.intent;
   const resolutions: Resolution[] = [];
+  // Each played action's picks in words and where the POV stood before it, by its index in `resolutions`, to tell it once the turn has played.
+  const played: BeforeAction[] = [];
   let stopped: EngineTurnPlan["stopped"] = null;
   let timelapse: TimelapseOutcome | null = null;
   const combat: string[] = [];
@@ -210,12 +218,16 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
       let scene = sceneKey(w.world, w.state);
       let made: { entity: EntityId; name: string; events: number } | null = null;
       let ruled = mark;
+      const before: BeforeAction = { picks: "", from: placeOfEntity(w.state, w.world.pov), fields: { ...own(w.state.entities, w.world.pov)?.fields } };
       if (step) {
         // A thing the player said they had comes into being where the action expects it, just
         // before the action, which takes it (DESIGN §9.4 player claims).
         const claimed = step.claim ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
         if (claimed && step.claim) made = { entity: claimed.entity, name: step.claim.name, events: claimed.events };
         const params = claimed && step.claim ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
+        // Its picks in words as the POV knows them now, before the action gives away or uses up what it names.
+        const def = findAction(reg, w.world, step.action);
+        before.picks = def ? actionWords(reg, w.world, w.state, def, params) : "";
         // An inferred check plays as Try something, carrying the world's own check (DESIGN §11).
         resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
         scene = sceneKey(w.world, w.state);
@@ -237,6 +249,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         }
         resolution = { ...resolution, events: w.events.slice(mark, end), ...(made && made.events > 0 ? { claimed: { entity: made.entity, name: made.name, events: w.events.slice(mark, ruled) } } : {}) };
         resolutions.push(resolution);
+        played.push(before);
       }
       // A fight's rounds are seconds long: a turn inside one already under way, that still is, moves no
       // clock, whatever its action took, so no day plan or schedule runs mid-fight (the combat pack also
@@ -285,6 +298,8 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         for (const def of reg.processes) {
           if (def.scope === "agent" && def.ended && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel) met.push(...w.applyAll(def.ended(w.ctx, w.world.pov, span)));
         }
+        // Arriving ends travel: once the walk or the drive is over, the player character isn't travelling.
+        if (ENDS_ON_ARRIVAL[span.type] && own(w.state.entities, w.world.pov)?.fields.activity === span.type) met.push(...w.applyAll([{ type: "set", entity: w.world.pov, field: "activity", value: IDLE_OPTION }]));
         const owner = spanOwner(resolutions, w.world.pov, span);
         const starter = owner >= 0 ? resolutions[owner] : undefined;
         if (starter && met.length > 0) {
@@ -295,6 +310,11 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         // World rules hear what an activity met, as they hear what a turn's own time met.
         if (met.length > 0) runRulesOnEvents(reg, w, met, { seed: hashParts(seed, "ended") });
       }
+      // The story moves on from what this step did (DESIGN §10): a stage its action, its rules or its
+      // time made true is entered now, before the reply, so this turn's narrator is told of it (the
+      // Quest section and the Outline read the plan), and the next action of the message stands where
+      // the story now does. A quest's signal stops the queue as any other may.
+      stepTracks(reg, w, hashParts(seed, "tracks"));
       const left = steps.length - 1 - i;
       const cause = resolution && left > 0 ? queueStop(w, resolution, mark, scene, speeding) : null;
       if (cause) {
@@ -309,15 +329,17 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   const events = timelapse ? coarsen(reg, w.world, input.state, w.events) : [...w.events];
   const montage = timelapse ? buildMontage(reg, w.world, input.state, w.state, events, w.state.time.montage) : null;
   if (timelapse && montage) timelapse = { ...timelapse, montage };
+  // Each action as the narrator is told it, read against the turn's end state as the Journal reads its events.
+  const told = resolutions.map((r, k) => ({ ...r, told: toldAction(reg, w.world, w.state, r, played[k] ?? { picks: "", from: null, fields: {} }) }));
   return {
     events,
     elapsedMinutes: w.state.clock - from,
-    resolutions,
+    resolutions: told,
     stopped,
     timelapse,
     montage,
     chips,
-    outline: outline(reg, w.world, w.state, { resolutions, timelapse, events: w.events }, rng.fork("beats")),
+    outline: outline(reg, w.world, w.state, { resolutions: told, timelapse, events: w.events }, rng.fork("beats")),
     combat,
   };
 }

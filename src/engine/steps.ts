@@ -106,6 +106,12 @@ export interface InterpretOutput {
   action: ActionId | null;
   params: JsonObject;
   probabilities: Record<string, number>;
+  /**
+   * The first action as the player would type it ("I take the letter from Marcus"), or, for a time
+   * skip, what the input says happens in that time ("we catch up with John"): the player's own words
+   * the intent gate's card quotes (DESIGN §5.1). Absent when the read gave none it may show.
+   */
+  text?: string;
   /** Time the input lets pass after its last action ("…and sleep until the next morning"): `minutes` or `until`. */
   then?: JsonObject;
   /** The input's further actions, in order, each played against the state the one before it left until the queue stops (DESIGN §11); none without a first action. */

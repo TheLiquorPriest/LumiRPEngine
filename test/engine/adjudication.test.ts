@@ -320,12 +320,67 @@ describe("where the policy comes from", () => {
     expect(resolveOn(reg, world, state, climb, createRng("m")).resolution.check).not.toBeNull();
   });
 
-  test("a marker body is checked: a named preset is its own values, a custom one is clamped", () => {
+  test("a marker body is checked: the values it sets are its own, a named preset's that differ make it Custom, and a custom one is clamped", () => {
     const state = startState(climbWorld());
     applyMarker(state, { kind: "adjudicate", to: { ...presetAdjudication("crunchy"), preset: "narrative" } });
-    expect(state.adjudication).toEqual(presetAdjudication("narrative"));
+    expect(state.adjudication).toEqual({ ...presetAdjudication("crunchy"), preset: "custom" });
     applyMarker(state, { kind: "adjudicate", to: { ...presetAdjudication("crunchy"), preset: "custom", riskyAt: 7, closeBy: -3 } });
     expect([state.adjudication?.riskyAt, state.adjudication?.closeBy]).toEqual([1, 0]);
+  });
+});
+
+describe("a chance at a policy's line is exactly that percentage", () => {
+  test("19 faces of 20 are a sure thing at 95%, 15 of 20 aren't risky below 75%, and 1 of 20 is hopeless at 5%", () => {
+    // d20 + skill against DC 12: skill s succeeds on (9 + s) faces of 20.
+    const sure = climbWorld({ trivialAt: 0.95 });
+    expect(actionOdds(reg, sure, withSkill(sure, 10), climb).verdict).toMatchObject({ roll: false, why: "trivial", outcome: "success", chance: 0.95 });
+    expect(actionOdds(reg, sure, withSkill(sure, 9), climb).verdict).toMatchObject({ roll: true, chance: 0.9 });
+    const risky = climbWorld({ checks: "risky", riskyAt: 0.75 });
+    expect(actionOdds(reg, risky, withSkill(risky, 6), climb).verdict).toMatchObject({ roll: false, why: "safe", outcome: "success", risky: false });
+    expect(actionOdds(reg, risky, withSkill(risky, 5), climb).verdict).toMatchObject({ roll: true, risky: true });
+    const hopeless = climbWorld({ impossibleAt: 0.05 });
+    expect(actionOdds(reg, hopeless, withSkill(hopeless, -8), climb).verdict).toMatchObject({ roll: false, why: "impossible", outcome: "failure" });
+    expect(actionOdds(reg, hopeless, withSkill(hopeless, -7), climb).verdict?.roll).toBe(true);
+  });
+
+  test("the odds shown are the same fractions: 19 of 20 reads 0.95 and 1 of 20 reads 0.05", () => {
+    const world = climbWorld();
+    expect(actionOdds(reg, world, withSkill(world, 10), climb).odds).toEqual({ failure: 0.05, success: 0.95 });
+    const resolved = resolveOn(reg, world, withSkill(world, 10), climb, createRng("odds")).resolution;
+    expect(resolved.check?.odds).toEqual({ failure: 0.05, success: 0.95 });
+  });
+});
+
+describe("a world's own check rules", () => {
+  /** Balanced as a world may write it: only risky checks, below 85%, and the approach worth up to +3. */
+  const balancedButRisky = (): WorldDoc => {
+    const world = climbWorld();
+    world.ruleset = { adjudication: { ...presetAdjudication("balanced"), checks: "risky", riskyAt: 0.85, description: { weight: "bonus", max: 3, advantageAt: 2 } } };
+    return world;
+  };
+
+  test("values a world sets over a named preset apply, as Custom with the preset's for the rest", () => {
+    const world = balancedButRisky();
+    expect(policyOf(world, startState(world))).toEqual({ ...presetAdjudication("balanced"), preset: "custom", checks: "risky", riskyAt: 0.85, description: { weight: "bonus", max: 3, advantageAt: 2 } });
+    // Skill 6 succeeds 75%: under the 85% line it rolls. Skill 8 (85%) is at it, so it just succeeds.
+    expect(actionOdds(reg, world, withSkill(world, 6), climb).verdict?.roll).toBe(true);
+    expect(actionOdds(reg, world, withSkill(world, 8), climb).verdict).toMatchObject({ roll: false, why: "safe" });
+    // A named preset whose values are its own still reads as that preset.
+    const plain = climbWorld();
+    plain.ruleset = { adjudication: { ...presetAdjudication("balanced") } };
+    expect(policyOf(plain, startState(plain))).toEqual(presetAdjudication("balanced"));
+  });
+
+  test("lint says when a named preset plays as Custom, and names a value no policy can hold", () => {
+    const named = lintAdjudication(balancedButRisky());
+    expect(named.map((i) => `${i.severity} ${i.code}@${i.path}`)).toEqual(["warning adjudication_preset@ruleset.adjudication.preset"]);
+    expect(named[0]?.message).toContain("Balanced");
+    expect(named[0]?.message).toContain("Custom");
+    const broken = climbWorld();
+    broken.ruleset = { adjudication: { ...presetAdjudication("balanced"), closeBy: 99 } };
+    (broken.ruleset.adjudication as unknown as Record<string, unknown>).checks = "sometimes";
+    expect(policyOf(broken, startState(broken))).toEqual({ ...presetAdjudication("balanced"), preset: "custom", closeBy: 20 });
+    expect(lintAdjudication(broken).map((i) => `${i.code}@${i.path}`).sort()).toEqual(["adjudication_preset@ruleset.adjudication.preset", "adjudication_value@ruleset.adjudication.checks", "adjudication_value@ruleset.adjudication.closeBy"].sort());
   });
 });
 

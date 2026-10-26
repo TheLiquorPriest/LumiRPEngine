@@ -1,10 +1,30 @@
 // Build's helpers for authoring things (DESIGN §13): what lies in a container, on someone or at a
 // place; the "Reveal this item" scaffold that hides a thing until it is searched for (§7
-// discoverable things); and the item checks a quest's objectives test (`carries`, `has_item`, `at`).
+// discoverable things); the item checks a quest's objectives test (`carries`, `has_item`, `at`);
+// and what keeps a thing where it is (§7 containment), which the engine and the pickers both read.
 
 import type { JsonObject, JsonValue } from "./json";
 import { hasOwn, isRecord } from "./json";
+import type { DataTable } from "./tables";
 import type { KindDef, WorldDoc } from "./world";
+
+/** Why a thing stays where it is (DESIGN §7): it is a vehicle, a part built into one, or fixed in place. */
+export type FixedReason = "vehicle" | "part" | "fixed";
+
+/**
+ * What keeps a thing where it is, as the world declares it (DESIGN §7): a vehicle (`isVehicle`, from
+ * its kind); a part built into a vehicle, whose catalog row in the world's Containers table is
+ * `vehicle_fixed` (a truck bed, a glovebox, a boat's lockers); or a thing marked `fixed` (a mill
+ * stone, an installed relay). Null for a thing that can be picked up. Never read from its name.
+ */
+export function fixedReason(isVehicle: boolean, fields: JsonObject, tables: Readonly<Record<string, DataTable>>): FixedReason | null {
+  if (isVehicle) return "vehicle";
+  if (fields.fixed === true) return "fixed";
+  const catalog = fields.catalog;
+  const rows = hasOwn(tables, "gear.containers") ? tables["gear.containers"]?.rows : undefined;
+  const row = rows && typeof catalog === "string" && hasOwn(rows, catalog) ? rows[catalog] : undefined;
+  return row?.location === "vehicle_fixed" ? "part" : null;
+}
 
 /** One thing in a container, on someone or lying at a place, as Build's Contents lists it. */
 export interface ContentsRow {

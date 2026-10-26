@@ -360,11 +360,14 @@ The marina, with a waiting list for its slips, is worth four years' profit over 
 
 ## Tracks: quests and secrets
 
-A track is a small state machine: `start` names its first stage, and each stage's `next` lists `{"to": stage, "when": formula}`, taken in order when the formula holds. A stage may carry a `cue` (what the player can know now), `objectives`, `effects` on entering, `rewards` on leaving, a `gate` and a `fail`. A stage with no `next` ends the track. Secrets advance only by their formulas, never by a model.
+A track is a small state machine: `start` names its first stage, and each stage's `next` lists `{"to": stage, "when": formula}`, taken in order when the formula holds. A stage may carry a `cue` (what the player can know now), `objectives`, `effects` on entering, `rewards` on leaving it onward, `hints`, a `gate` and a `fail`. A stage with no `next` ends the track, and an end stage, which is never left, grants its `rewards` as the track reaches it: put a quest's payout there. Secrets advance only by their formulas, never by a model.
 
 - **Quests** start at the stage the story has reached, not at the beginning: `start` is today's stage.
 - **Secrets** keep a `truth` (what is really so, kept from the player) on the stage that reveals it, and a `cue` (what the player can notice) on the stages before. A cue never states the truth.
 - **Puzzles** an action of yours answers take `story.answer`'s `track`: the puzzle's own id, written out, never a formula.
+- **Hints** on a puzzle stage with an `answer` open up one per wrong answer given at that stage; on any other stage they are all there once the track reaches it. The player opens them one at a time, and the narrator is told only the opened ones.
+- **Every flag a track or a secret's gate reads needs a setter**: a `story.flag` effect in an action's outcomes, a rule or a stage's effects. One nothing sets keeps its starting value for good, and lint warns (`story.unset_flag`).
+- **A story step's action stays out of sight until the story reaches it.** An action whose requirement reads `stage(…)`, `since(…)` or `flag(…)` and none of its params isn't listed anywhere (the Actions sheet, interpret's catalog) while that requirement fails, so gate the steps of a quest or a secret that way (`"stage('s_debt') == 'ledger'"`, `"not flag('ledger_read')"`), and the player is never shown what lies ahead. Requirements on where they are or what they carry still show the action, locked.
 
 ### A revealed secret starts one stage earlier
 
@@ -383,7 +386,7 @@ A person's `cues` are what the narrator sees them do while a secret of theirs st
 - Each cue stands for exactly one secret: a `track` (while it keeps something hidden), a secret `lore` entry (until its gate holds) or a story `flag` (until it is set). A cue keyed to none, or to several, never shows.
 - Write behaviour, never the secret: a cue that holds a track's truth or a phrase of secret lore is a lint error, because it gives the secret away.
 - Name no one the player may not know: such a cue is left out while they don't (lint warns).
-- Only people have cues that show; the stage cues of the tracks a person owns reach the narrator the same way.
+- Only people have cues that show; the stage cues of the tracks a person owns reach the narrator the same way, in Stance only, never as a quest row, while the track keeps something hidden.
 
 ## Lore
 
@@ -455,12 +458,11 @@ A world's lore is its document's (`/lore`, and pins at `/lorePins`), written wit
 
 Model jobs spend the user's helper model calls: start one when the user asked for it. `lre_jobs {worldId}` shows each job's status and progress and what it found in counts (with how many proposals have problems); `lre_job {worldId, jobId, pointer}` reads it whole. `/result/proposals/0` is one proposal: collection, key, the value it writes, source, confidence and note, and for routines and schedules the `owner` it is for and the `problems` the draft check found (a clash with their schedules or routine, a place or person that isn't there, company with no ground). A job proposes; nothing changes until `lre_job_apply {worldId, jobId, proposals?, expectVersion}` writes the ones you accept into the draft in one write, as Build's review does (an AI-written entry then counts as reviewed, and accepted lore joins the lookup table). Without `proposals` it applies every proposal but those with problems. Read each proposal before you apply it, then check the draft with `lre_draft`. A proposal's key replaces an item there by that key, and a schedule's `_activity` and `_place` proposals go together. `lre_job_cancel` stops a job; `lre_job_dismiss` forgets one that ended, with its proposals.
 
-### Profiles, the sheet, lint and the Studio
+### Profiles, the sheet and lint
 
 - `lre_profile {worldId, profile, preview: true}` says what a ruleset profile (`modern`, `classic`, `fifth`, `custom`) would add, what is the same already, and where it conflicts with the draft; without `preview` it applies in one write. Each conflict keeps the draft's own unless `take` names its path; `values` are people's stored values a taken field can't hold, and what they become.
 - `lre_sheet {worldId}` previews the character sheet a new chat would start with, from the draft's ruleset or one you pass as `ruleset`, on the point of view or `entity`. Nothing is saved.
 - `lre_lint {worldId}` lints the head on the host; `lre_draft` lints the draft.
-- `lre_studio_offer` reviews what LumiRPEngine Studio offers (a new world, or the next revision of one), with its lint, macros and what blocks it; `lre_studio_install {offerId, hash}` installs the one reviewed. When the target's head moved since the Studio took it, installing drops what was committed since: ask the user before passing `acceptMovedHead`.
 
 ### A chat's map
 

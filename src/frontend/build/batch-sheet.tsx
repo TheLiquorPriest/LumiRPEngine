@@ -19,7 +19,7 @@ import { useApp } from "../app";
 import type { DraftChange } from "../batch";
 import { draftPatch, mixOf, sendInChunks } from "../batch";
 import { Banner, Button, Field, HostSwitch, Section, useBusy } from "../components";
-import { DOMAIN_LABEL, LEVEL_LABEL } from "../settings/realism";
+import { DOMAIN_LABEL, LEVEL_LABEL } from "../../shared/ids";
 import { useSelect } from "../store";
 import { bookLabels } from "./book-lore";
 import { draftSend } from "./draft";

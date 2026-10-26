@@ -125,6 +125,8 @@ export type ChipKind =
   | "price"
   | "confirm"
   | "decline"
+  /** A change the reply told that the engine has no place for (a fact told in prose, a thing as a newcomer, a place it doesn't have): the story stands, nothing is asked, and the next reply isn't told it didn't happen (DESIGN §9.5). */
+  | "untracked"
   | "undo"
   | "retry_read"
   | "not_action"
@@ -147,6 +149,8 @@ export type ChipKind =
   | "read_failed"
   /** The engine run before the reply failed, so nothing was generated; Retry runs the engine and then the reply (DESIGN §5.1). */
   | "engine_failed"
+  /** The reply failed (an error, or it came back empty) and its turn is kept: Retry the reply writes it again from that same turn, Re-run the engine runs the engine first (DESIGN §5.1). */
+  | "reply_failed"
   /** A typed action uses a thing the world doesn't have and the turn waits, nothing generated, on Add or Not an action; either resumes it (DESIGN §9.4 player claims). */
   | "claim"
   /** A thing the player said they had, made real for their action ("Added: a coffee"), with Undo (DESIGN §9.4 player claims). */
@@ -200,7 +204,7 @@ export interface Chip {
  * does. The frontend regenerates after them; an outside client tells the user to.
  */
 export function chipRegenerates(kind: ChipKind, choice: string): boolean {
-  return choice === "regenerate" || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit"));
+  return choice === "regenerate" || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || ((kind === "read_failed" || kind === "reply_failed") && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit"));
 }
 
 /** Detail opened during an in-flight window shows "pending" until it closes (DESIGN §9.2). */
@@ -377,6 +381,8 @@ export interface GmField {
   derived?: true;
   /** Never offered to a model; the GM edits it like any other. */
   locked?: true;
+  /** A progression's level: set from this field (its XP, by label) as that changes, never edited itself. */
+  follows?: string;
   /** A value the kind doesn't declare (a pack's bookkeeping, an authored extra), edited as JSON. */
   extra?: true;
 }
@@ -412,6 +418,10 @@ export interface GmEntity {
   place: PlaceId | null;
   /** What holds it (`in`), if anything. */
   holder: EntityId | null;
+  /** What it holds as (DESIGN §7 containment): a person carries, a vehicle or a container holds; absent, it holds nothing. */
+  holds?: "person" | "vehicle" | "container";
+  /** Where it may be put: only in a vehicle (a person riding, a vehicle carried on another), or nowhere (built in, fixed, or no thing at all); absent, inside anything that holds. */
+  goes?: "vehicle" | "nowhere";
   /** A thing the player said they had, made real for their action (`fields.claimed`, DESIGN §9.4 player claims). */
   claimed: boolean;
   /** The posting total on it, for an account (minor units). */

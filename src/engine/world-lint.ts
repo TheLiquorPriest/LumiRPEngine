@@ -11,7 +11,7 @@ import { hasOwn, isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
 import { DOMAINS } from "../shared/ids";
 import { isBand, tierOf } from "../shared/tiers";
-import type { EffectSpec, FieldDef, WorldDoc } from "../shared/world";
+import type { EffectSpec, FieldDef, KindDef, WorldDoc } from "../shared/world";
 import { ALIVE, BUILTIN_LIFE_STATES, isLifeState, MAX_SPAWN_CAP, objectiveWhen } from "../shared/world";
 import { callsIn, compile } from "./expr";
 import { frozenPredicates } from "./realism";
@@ -103,6 +103,17 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   }
   for (const [id, k] of Object.entries(world.kinds)) {
     if (k.extends && !own(world.kinds, k.extends) && !reg.kinds.has(k.extends)) err(`kinds.${id}.extends`, "refs", `Kind ${id} extends an unknown kind "${k.extends}".`);
+    // A world kind with a pack kind's id lies over it (DESIGN §4.1), keeping the pack's fields; only an
+    // Extends of its own can lose some, the ones the pack's chain gives and the new chain doesn't.
+    const pack = reg.kinds.get(id);
+    if (!pack) continue;
+    const packFields = new Map<string, FieldDef>();
+    for (let cur: KindDef | undefined = pack, guard = 0; cur && guard < 32; cur = cur.extends ? reg.kinds.get(cur.extends) : undefined, guard++) {
+      for (const [field, def] of Object.entries(cur.fields)) if (!packFields.has(field)) packFields.set(field, def);
+    }
+    const kept = kindFields(reg, world, id);
+    const lost = [...packFields].filter(([field]) => !hasOwn(kept, field)).map(([field, def]) => def.label ?? field);
+    if (lost.length > 0) warn(`kinds.${id}`, "kind_shadow", `Kind ${k.label} (${id}) lies over the ${pack.pack ?? "engine"} pack's ${pack.label} but builds on ${k.extends ?? "nothing"} instead of ${pack.extends ?? "nothing"}, so it and every kind built on it lose ${lost.length} of that kind's fields (${lost.slice(0, 6).join(", ")}${lost.length > 6 ? ", …" : ""}): forms show those values as untyped text and the levels that gate them no longer apply. Set its Extends back to ${pack.extends ?? "nothing"}, or give the kind its own id.`);
   }
 
   // Classifications (DESIGN §4.1): each value's parent is a value of the same facet, with no cycle;

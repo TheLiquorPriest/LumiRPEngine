@@ -31,6 +31,7 @@ const ROLES: readonly [ChipKind, ChipRole][] = [
   ["fix", "done"],
   ["pending", "done"],
   ["degraded", "done"],
+  ["untracked", "done"],
 ];
 
 describe("chip roles", () => {

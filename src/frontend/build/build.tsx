@@ -1,6 +1,6 @@
 // Build (DESIGN §13): a stack of pages, Worlds → World → Collection → Item
 // → sub-editor pages, each of them usable on a phone. Worlds lists the worlds (open, Export,
-// Delete) and New world starts one from a template, a file or LumiRPEngine Studio. Inside a world a
+// Delete) and New world starts one from a template or a file. Inside a world a
 // sticky bar keeps Back, the draft's state and Commit in reach, with Discard in its overflow; the
 // world's home groups its parts, its content and its tools; a collection lists its items by name,
 // and + New asks for a name and derives the id. Item and part pages keep Save to draft and Revert
@@ -13,7 +13,7 @@ import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
 import { mapSettingsOf } from "../../shared/maps";
 import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
-import { spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
+import { playedKinds, spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute } from "../app";
 import { LORE_AUDIENCE, lorePinsJson, lorePinsOf } from "../../shared/lore";
 import { KEEP_NOTE, LorePinsSection, PINS_NOTE } from "./lore-pins";
@@ -44,8 +44,6 @@ import { RoutineSettingsEditor } from "./routine-settings";
 import { RulesetEditor } from "./ruleset-editor";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
-import type { StudioOfferState } from "./studio-offer";
-import { StudioOfferReview, useStudioOffer } from "./studio-offer";
 import { TableEditor } from "./table-editor";
 import { TiersEditor } from "./tiers-editor";
 import { isVarsKey, VarsPanel } from "../settings/prompt-editor";
@@ -213,7 +211,6 @@ interface ImportReview {
   worldId: WorldId;
   name: string;
   issues: LintIssue[];
-  from: string;
 }
 
 function Worlds() {
@@ -226,13 +223,6 @@ function Worlds() {
   const fileInput = useRef<HTMLInputElement>(null);
   const refresh = () => void app.request({ type: "lre.world", op: "list" }).then((result) => setWorlds(result?.worlds ?? []));
   useEffect(refresh, []);
-  const studio = useStudioOffer({
-    installed: () => {
-      refresh();
-      setAdding(false);
-    },
-    review: (next) => setReview({ ...next, from: "LumiRPEngine Studio" }),
-  });
   const importFile = (file: File) =>
     run(async () => {
       let parsed: unknown;
@@ -246,7 +236,7 @@ function Worlds() {
       if (result) {
         const issues = result.lint ?? [];
         app.toast(issues.length > 0 ? `Imported “${result.world?.name ?? "world"}”. Review ${issues.length} item(s) below before playing.` : `Imported “${result.world?.name ?? "world"}”.`, "info");
-        setReview(result.world && issues.length > 0 ? { worldId: result.world.id, name: result.world.name, issues, from: "a file" } : null);
+        setReview(result.world && issues.length > 0 ? { worldId: result.world.id, name: result.world.name, issues } : null);
         setAdding(false);
         refresh();
       }
@@ -276,12 +266,11 @@ function Worlds() {
           }
         />
       )}
-      <StudioOfferReview state={studio} />
       {review ? (
         <Section title="Review before playing" aside={<Badge tone="warn">{review.issues.length}</Badge>}>
           <div class="lre-stack" data-lre-import-review>
             <Banner tone="warn">
-              “{review.name}” came from {review.from}. Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play.
+              “{review.name}” came from a file. Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play.
             </Banner>
             <div class="lre-build-issues lre-build-well" role="list">
               {review.issues.map((issue, i) => (
@@ -297,7 +286,7 @@ function Worlds() {
         </Section>
       ) : null}
       {adding ? (
-        <NewWorld studio={studio} importing={busy} onImport={() => fileInput.current?.click()} />
+        <NewWorld importing={busy} onImport={() => fileInput.current?.click()} />
       ) : worlds === null ? (
         <Empty icon="hourglass">Loading…</Empty>
       ) : worlds.length === 0 ? (
@@ -365,9 +354,9 @@ const BLANK: Start = { id: null, name: "Blank", summary: "An empty world with no
 
 /**
  * New world: the starters as cards with their blurbs, a name (a template's own until the user types
- * one), Create; then Import a file and Import from LumiRPEngine Studio.
+ * one), Create; then Import a file.
  */
-function NewWorld(props: { studio: StudioOfferState; importing: boolean; onImport(): void }) {
+function NewWorld(props: { importing: boolean; onImport(): void }) {
   const app = useApp();
   const [starters, setStarters] = useState<Start[] | null>(null);
   const [template, setTemplate] = useState<string | null>(null);
@@ -386,7 +375,6 @@ function NewWorld(props: { studio: StudioOfferState; importing: boolean; onImpor
       if (result?.world) go(app, { view: "world", worldId: result.world.id });
     });
   };
-  const message = props.studio.message && !props.studio.offer ? props.studio.message : null;
   return (
     <>
       <Section title="Start from">
@@ -442,7 +430,6 @@ function NewWorld(props: { studio: StudioOfferState; importing: boolean; onImpor
       <Section title="Or bring one in" flush>
         <List>
           <ListRow icon="upload" title="Import a file" subtitle="An lre-world-v1 file, as Export writes it" chevron disabled={props.importing} onClick={props.onImport} />
-          <ListRow icon="sparkle" title="Import from LumiRPEngine Studio" subtitle={message ?? "Review what the Studio offers, then install it"} chevron disabled={props.studio.busy} onClick={props.studio.load} />
         </List>
       </Section>
     </>
@@ -552,7 +539,7 @@ function CollectionView(props: { collection: WorldCollection }) {
   const shown = items.filter((item) => !q || item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q));
   // Those picked still in the draft (a change elsewhere can remove one), in the list's order.
   const chosen = items.filter((item) => selection.ids.includes(item.id)).map((item) => item.id);
-  const kinds = { ...draft.packKinds, ...doc.kinds };
+  const kinds = playedKinds(draft.packKinds, doc.kinds);
   // Data tables come from packs: a world edits its copy of one and never starts one.
   const canAdd = props.collection !== "tables";
   const detail = (value: unknown): string | undefined => {
@@ -682,7 +669,7 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
   useHeld(value, setValue, initial, `${props.world.id}/${props.collection}/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = useMemo(() => worldIdentifiers(props.world), [props.world]);
   // Pickers and kind-typed fields see the packs' kinds and relation types too (DESIGN §13); the world's own win.
-  const formDoc = useMemo(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds }, relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
+  const formDoc = useMemo(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds), relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
   const path = `${props.collection}.${id}`;
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
   // A pack's entry shows the pack's own config fields, when its ui registers them, above the JSON.
@@ -771,7 +758,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   if (!draft) return null;
   const registered = app.catalog.editors.get(props.collection);
   // A person opens the Character page, never the generic editor (DESIGN §13 characters); a new entity is made in the generic one first.
-  const character = opensCharacterPage({ ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } }, props.collection, props.id);
+  const character = opensCharacterPage({ ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) }, props.collection, props.id);
   const Editor = registered ? registered.component : character ? CharacterPage : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }

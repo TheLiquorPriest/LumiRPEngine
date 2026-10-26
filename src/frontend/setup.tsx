@@ -22,11 +22,10 @@ import { hudCentreX, isMobile } from "./layout";
 import type { OverlaySet } from "./overlays";
 import { UI_PACKS } from "./packs";
 import { ProtocolClient } from "./protocol-client";
+import { watchReconnects } from "./reconnect";
+import { startPreparedReplies } from "./restart";
 import type { FrontendToBackend } from "../shared/protocol";
-import { STATE_EVENT, STATE_REQUEST_EVENT, STUDIO_INBOUND, STUDIO_OFFER_EVENT } from "../shared/studio-bridge";
-import type { StudioState } from "../shared/world";
 import { CannotStopNotice, OPEN_DIAGNOSTICS_EVENT } from "./diagnostics";
-import { ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 import { timeMarker } from "./requests";
 import { createStore } from "./store";
 import { CSS } from "./styles";
@@ -46,24 +45,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(trackJobs(client));
   // Before any component's subscription, so amounts render in the new state's currency.
   cleanups.push(client.subscribe((state) => setCurrency(state.view?.currency ?? null)));
-  // The studio seam (DESIGN §15): announce the engine on load, again whenever the pack set changes,
-  // and again when a studio that loaded later asks.
-  let announced: string | null = null;
-  let packsInPlay: Record<string, number> = {};
-  const announce = (packs: Record<string, number>, again = false) => {
-    const key = JSON.stringify(packs);
-    if (key === announced && !again) return;
-    announced = key;
-    packsInPlay = packs;
-    const detail: StudioState = { engineVersion: ENGINE_VERSION, worldFormat: WORLD_FORMAT, packs, inbound: [...STUDIO_INBOUND] };
-    window.dispatchEvent(new CustomEvent(STATE_EVENT, { detail }));
-  };
-  announce({});
-  cleanups.push(client.subscribe((state) => (state.view ? announce(state.view.packs) : undefined)));
-  const announceAgain = () => announce(packsInPlay, true);
-  window.addEventListener(STATE_REQUEST_EVENT, announceAgain);
-  cleanups.push(() => window.removeEventListener(STATE_REQUEST_EVENT, announceAgain));
-
   // Show ids is a choice for this device: read once here, written back when it changes.
   let showIds = false;
   try {
@@ -93,28 +74,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
   // The engine ran before a reply the guard stopped (DESIGN §5.1): a page showing that chat on screen
-  // starts it again with Lumiverse's own command, once it has claimed the turn (the backend says yes
-  // to one page, once), so a page that wakes with an old ask never starts a second reply; a new
-  // reply after a reply only Send can start.
+  // claims the turn and starts it with Lumiverse's own command (`restart.ts`).
   client.visible = () => document.visibilityState === "visible";
-  const startedTurns = new Set<string>();
-  cleanups.push(
-    client.onGenerate((push) => {
-      if (host.activeChat() !== push.chatId || !client.visible() || startedTurns.has(push.turn)) return;
-      if (push.as === "send") {
-        toast("The engine is ready: press Send for the reply.", "info");
-        return;
-      }
-      startedTurns.add(push.turn);
-      if (startedTurns.size > 64) startedTurns.delete(startedTurns.values().next().value ?? "");
-      const as = push.as;
-      const command = as === "continue" ? "Continue" : "Regenerate";
-      void client.send({ type: "lre.restart", chatId: push.chatId, turn: push.turn }).then(async (claim) => {
-        if (claim.type !== "lre.result" || claim.request !== "lre.restart" || !claim.body.start) return;
-        if (!(await host.generate(as))) toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
-      });
-    }),
-  );
+  cleanups.push(startPreparedReplies(client, { activeChat: host.activeChat, generate: host.generate, toast }));
 
   let overlays: OverlaySet | null = null;
   const app: App = {
@@ -145,11 +107,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(trackDraft(app));
   // The MCP servers and the update notice (DESIGN §23): pushed as servers check in, and to a page's hello while a notice waits.
   cleanups.push(client.onAgents((view) => app.agents.set(view)));
-  // A socket that dropped may have missed a push: Build reads its draft again once the page is back,
-  // and the open chat resyncs, so a reply the engine prepared while it slept starts (DESIGN §5.1).
+  // A page that reconnected, whose engine started again or that comes back into view may have missed
+  // pushes, and what it sent meanwhile may be lost: Build reads its draft again, and the open chat
+  // asks for its view again, so a reply the engine prepared while it slept starts (DESIGN §5.1).
   const recheck = (): void => {
     void recheckDraft(app);
-    client.resync();
+    client.retry();
   };
   // A page going out of view says so, so another page showing the chat can start a waiting reply.
   const visible = (): void => {
@@ -158,7 +121,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   };
   window.addEventListener("online", recheck);
   document.addEventListener("visibilitychange", visible);
-  cleanups.push(ctx.events.on("CONNECTED", recheck), () => window.removeEventListener("online", recheck), () => document.removeEventListener("visibilitychange", visible));
+  cleanups.push(watchReconnects(ctx.events, ctx.host.extensionInstallationId, recheck), () => window.removeEventListener("online", recheck), () => document.removeEventListener("visibilitychange", visible));
 
   // ------------------------------------------------------------ drawer tab
   const tab = host.ui.registerDrawerTab({
@@ -181,13 +144,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     render(null, tab.root);
     tab.destroy();
   });
-  // LumiRPEngine Studio has a world waiting (DESIGN §15): open Build's world list, where it's reviewed before anything installs.
-  const reviewOffer = () => {
-    ui.update((state) => ({ ...state, mode: "build", build: { view: "worlds" }, studioOffer: state.studioOffer + 1 }));
-    tab.activate();
-  };
-  window.addEventListener(STUDIO_OFFER_EVENT, reviewOffer);
-  cleanups.push(() => window.removeEventListener(STUDIO_OFFER_EVENT, reviewOffer));
   // The activity line's and the error banner's way to Diagnostics: the drawer at Settings → Diagnostics.
   const showDiagnostics = () => {
     ui.update((state) => ({ ...state, mode: "settings", settings: { page: "diagnostics" } }));

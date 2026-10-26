@@ -1,8 +1,9 @@
 // Cues for the Stance section (DESIGN §6.6): behaviour the author wrote for someone's secrets,
 // never the secrets themselves, given to the narrator while the secret is kept. Two sources: the
-// current stage's `cue` of the tracks a person owns, and the person's own `cues`, each standing for
-// one secret (a lore entry, a track or a story flag). Read live from the world, so an Upgrade
-// changes them in a running chat. The lint (`castlife.cues`) checks them where they are written.
+// current stage's `cue` of the tracks a person owns (`ownersCue`: Stance is the only place such a cue
+// is told, never the quest log), and the person's own `cues`, each standing for one secret (a lore
+// entry, a track or a story flag). Read live from the world, so an Upgrade changes them in a running
+// chat. The lint (`castlife.cues`) checks them where they are written.
 
 import type { EntityId } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
@@ -11,10 +12,9 @@ import type { LintIssue } from "../../../shared/protocol";
 import type { WorldDoc } from "../../../shared/world";
 import { cuesOf, readCue } from "../../../engine/cues";
 import { optionalQuery, own } from "../../../engine/pack-kit";
-import { trackKeepsSecret } from "../../../engine/player-events";
 import type { ReadContext } from "../../../engine/registry";
 import { currentStage } from "../../../engine/tracks";
-import { loreGateReader, namesAny, visibilityOf } from "../../../engine/visibility";
+import { loreGateReader, namesAny, ownersCue, trackKeepsSecret, visibilityOf } from "../../../engine/visibility";
 
 /**
  * The cues the narrator may play for `who` now, in order: their own, then the current stage's cue of
@@ -50,7 +50,7 @@ export function cuesFor(ctx: ReadContext, who: EntityId, safe: (text: string) =>
     if (t?.owner !== who || (t.kind === "agenda" && visibilityOf(t.visibility) === "public")) continue;
     const stage = currentStage(world, state, id);
     const cue = stage === null ? undefined : own(t.stages, stage)?.cue;
-    if (typeof cue === "string" && cue.trim() !== "" && trackKeepsSecret(reg, world, state, pov, id)) add(cue.trim());
+    if (typeof cue === "string" && cue.trim() !== "" && ownersCue(reg, world, state, pov, id)) add(cue.trim());
   }
   return out;
 }

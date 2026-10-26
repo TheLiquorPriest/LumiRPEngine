@@ -1,14 +1,11 @@
-// Lore, jobs, the rest of Build, the Studio's offer and a chat's map through the agent's tools,
+// Lore, jobs, the rest of Build and a chat's map through the agent's tools,
 // against the real backend.
 
 import { describe, expect, test } from "bun:test";
-import type { JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
-import { channelId, ENGINE_EXTENSION, STUDIO_EXTENSION } from "../../src/shared/studio-bridge";
 import type { WorldDoc } from "../../src/shared/world";
 import { toolsFor } from "../../src/cli/tools";
 import { cliRig } from "../support/cli-rig";
-import { testWorld } from "../support/test-pack";
 import type { Rig } from "../support/rig";
 
 /** The JSON a read tool answers after its header line. */
@@ -138,22 +135,6 @@ describe("the rest of Build through the tools", () => {
     const sheet = body((await raw("lre_sheet", { worldId })).text) as { sheet: { title: string; rows: unknown[] }[] };
     expect(sheet.sheet.length).toBeGreaterThan(0);
   });
-
-  test("the Studio's offer is reviewed, then installed as the reviewed one; its world is there after", async () => {
-    const { rig, call, raw } = await cliRig();
-    const next: WorldDoc = { ...testWorld(), id: "w_offer", name: "Offered town" };
-    rig.host.rpcPool.port(STUDIO_EXTENSION).handle(`offer.${channelId(rig.host.userId)}`, [], async (requester) => {
-      if (requester !== ENGINE_EXTENSION) throw new Error("not for you");
-      return { offerId: "o1", doc: JSON.parse(JSON.stringify(next)) as JsonValue, mode: "new", createdAt: 1 };
-    });
-    const offer = (await call("lre_studio_offer")).offer;
-    if (!isRecord(offer)) throw new Error("no offer");
-    expect(offer).toMatchObject({ offerId: "o1", mode: "new", name: "Offered town", blocked: null });
-    expect((await raw("lre_studio_install", { offerId: "o1", hash: "not-it" })).isError).toBe(true);
-    const installed = (await call("lre_studio_install", { offerId: "o1", hash: offer.hash })).installed as { worldId: string; name: string };
-    expect(installed.name).toBe("Offered town");
-    expect((await rig.rt.worlds.list(rig.host.userId)).map((w) => w.id)).toContain(installed.worldId);
-  });
 });
 
 describe("a chat's map through the tools", () => {
@@ -173,10 +154,10 @@ describe("a chat's map through the tools", () => {
 });
 
 describe("read-only mode", () => {
-  test("hides the lore, job, Build, Studio and map tools that write, and keeps the ones that read", () => {
+  test("hides the lore, job, Build and map tools that write, and keeps the ones that read", () => {
     const listed = toolsFor(true).map((t) => t.name);
-    for (const name of ["lre_lore_save", "lre_job_start", "lre_job_apply", "lre_job_cancel", "lre_job_dismiss", "lre_profile", "lre_studio_install", "lre_map_display"]) expect(listed).not.toContain(name);
-    for (const name of ["lre_lore_books", "lre_lore_entries", "lre_lore_pins", "lre_lore_drift", "lre_jobs", "lre_job", "lre_lint", "lre_sheet", "lre_studio_offer", "lre_map_walk"]) expect(listed).toContain(name);
+    for (const name of ["lre_lore_save", "lre_job_start", "lre_job_apply", "lre_job_cancel", "lre_job_dismiss", "lre_profile", "lre_map_display"]) expect(listed).not.toContain(name);
+    for (const name of ["lre_lore_books", "lre_lore_entries", "lre_lore_pins", "lre_lore_drift", "lre_jobs", "lre_job", "lre_lint", "lre_sheet", "lre_map_walk"]) expect(listed).toContain(name);
   });
 
   test("refuses a write before anything is sent", async () => {

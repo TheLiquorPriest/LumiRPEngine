@@ -10,6 +10,7 @@ import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../shared/ids";
 import type { TimelapseTarget } from "../shared/ledger";
 import type { JsonObject, JsonValue } from "../shared/json";
+import { isRecord } from "../shared/json";
 import { formatMoneyInput, parseMoneyInput } from "../shared/money";
 import type { OutcomeOdds, PaletteEncounter, PaletteEntry, PaletteOption, PaletteView, StateView, TimelapseView } from "../shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney } from "../shared/world";
@@ -40,12 +41,14 @@ export function paletteTabs(palette: PaletteView): { id: PaletteTab; label: stri
 export function PaletteSheet(props: { tab: PaletteTab; edit?: PaletteEdit; desk: boolean; onClose(): void }) {
   const view = useView();
   const palette = view?.palette ?? null;
-  // Opened from an intent gate's Edit (DESIGN §5.1): only the read action's entry, its picks made.
-  const editing = props.edit && palette ? palette.entries.find((entry) => entry.action === props.edit?.action) : undefined;
+  // Opened from an intent gate's Edit (DESIGN §5.1): only the read action's entry, its picks made;
+  // for a time skip, only the Timelapse sheet, at the skip as read.
+  const skip = props.edit && palette?.timelapse && props.edit.action === palette.timelapse.action ? props.edit : undefined;
+  const editing = props.edit && palette && !skip ? palette.entries.find((entry) => entry.action === props.edit?.action) : undefined;
   // Asked for the actions in a fight on the POV's turn, the palette opens on Combat.
-  const [tab, setTab] = useState<PaletteTab>(editing ? GROUP_TAB[editing.group] : props.tab === "actions" && view?.palette?.encounter?.yours ? "combat" : props.tab);
+  const [tab, setTab] = useState<PaletteTab>(skip ? "timelapse" : editing ? GROUP_TAB[editing.group] : props.tab === "actions" && view?.palette?.encounter?.yours ? "combat" : props.tab);
   const panelId = useId();
-  const tabs = palette ? (editing ? paletteTabs(palette).filter((t) => t.id === GROUP_TAB[editing.group]) : paletteTabs(palette)) : [];
+  const tabs = palette ? (skip ? paletteTabs(palette).filter((t) => t.id === "timelapse") : editing ? paletteTabs(palette).filter((t) => t.id === GROUP_TAB[editing.group]) : paletteTabs(palette)) : [];
   const active = tabs.some((entry) => entry.id === tab) ? tab : tabs[0]?.id ?? tab;
   return (
     <div
@@ -62,7 +65,7 @@ export function PaletteSheet(props: { tab: PaletteTab; edit?: PaletteEdit; desk:
     >
       <header>
         <Icon name={active === "timelapse" ? "fast-forward" : "bolt"} />
-        <h2 class="title">{editing ? "Change the action" : active === "timelapse" ? "Timelapse" : "Actions"}</h2>
+        <h2 class="title">{editing ? "Change the action" : skip ? "Change the timelapse" : active === "timelapse" ? "Timelapse" : "Actions"}</h2>
         <ClockToggle view={view} />
         <IconButton icon="close" label="Close actions" onClick={props.onClose} />
       </header>
@@ -80,13 +83,13 @@ export function PaletteSheet(props: { tab: PaletteTab; edit?: PaletteEdit; desk:
         </div>
       ) : (
         <>
-          {editing ? null : (
+          {editing || skip ? null : (
             <div class="lre-chat-tabs">
               <Tabs<PaletteTab> label="Action groups" panelId={panelId} value={active} tabs={tabs} onChange={(id) => setTab(id)} />
             </div>
           )}
           {active === "timelapse" && palette.timelapse && !editing ? (
-            <TimelapsePanel view={view} timelapse={palette.timelapse} panel={tabPanel(panelId, active)} onSent={props.onClose} />
+            <TimelapsePanel view={view} timelapse={palette.timelapse} edit={skip} panel={tabPanel(panelId, active)} onSent={props.onClose} />
           ) : (
             <ActionList
               key={active}
@@ -418,14 +421,17 @@ export function FollowRoutineChoice(props: { value: boolean; disabled: boolean; 
   );
 }
 
-function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; panel: TabPanelProps; onSent(): void }) {
+function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; edit?: PaletteEdit; panel: TabPanelProps; onSent(): void }) {
   const app = useApp();
-  const { timelapse } = props;
-  const [target, setTarget] = useState<TimelapseTarget | null>(null);
+  const { timelapse, edit } = props;
+  // From an intent gate's Edit (DESIGN §5.1): the skip as the message was read, chosen already, and
+  // whether the player character follows their routine through it.
+  const read = edit && isRecord(edit.params.target) && typeof edit.params.target.type === "string" ? (edit.params.target as TimelapseTarget) : null;
+  const [target, setTarget] = useState<TimelapseTarget | null>(read);
   const [custom, setCustom] = useState("");
   const [unit, setUnit] = useState<"min" | "h" | "d" | "w">("h");
   const [overrides, setOverrides] = useState<Partial<Record<InterruptClass, InterruptPolicy>>>({});
-  const [follow, setFollow] = useState(timelapse.followRoutine);
+  const [follow, setFollow] = useState(typeof edit?.params.followRoutine === "boolean" ? edit.params.followRoutine : timelapse.followRoutine);
   const [busy, run] = useBusy();
   const customMinutes = /^\d+(\.\d+)?$/.test(custom.trim()) ? Number(custom) * UNIT_MINUTES[unit] : null;
   const chosen: TimelapseTarget | null = customMinutes !== null && customMinutes > 0 ? { type: "duration", minutes: customMinutes } : target;
@@ -434,6 +440,11 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; pane
   return (
     <>
       <div {...props.panel} class="body" data-lre-timelapse>
+        {edit ? (
+          <p class="lre-chat-hint" data-lre-palette-edit>
+            Change how long your message's time skip runs. It plays this instead of what was read.
+          </p>
+        ) : null}
         {timelapse.blocked ? (
           <Banner tone="warn" icon="pause">
             {timelapse.blocked}
@@ -526,13 +537,14 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; pane
           onClick={() => {
             if (!chosen) return;
             run(async () => {
-              const result = await app.request(timelapseRequest(timelapse, chosen, overrides, props.view.chatId, follow));
-              if (result) props.onSent();
+              const request = timelapseRequest(timelapse, chosen, overrides, props.view.chatId, follow);
+              // From an intent gate's Edit, the skip as set here plays through the chip, in place of the read (DESIGN §5.1).
+              if (edit ? await sendChipChoice(app, edit.chip, "edit", edit.chatId, { params: request.params }) : await app.request(request)) props.onSent();
             });
           }}
         >
           <Icon name="fast-forward" />
-          {chosen ? `Timelapse ${chosen.type === "duration" ? formatMinutes(chosen.minutes) : (timelapse.until.find((entry) => sameTarget(chosen, entry.target))?.label ?? "").toLowerCase()}` : "Choose how long"}
+          {chosen ? `${edit ? "Play " : ""}Timelapse ${chosen.type === "duration" ? formatMinutes(chosen.minutes) : (timelapse.until.find((entry) => sameTarget(chosen, entry.target))?.label ?? (chosen.type === "at" ? "to the time you said" : "")).toLowerCase()}` : "Choose how long"}
         </button>
       </footer>
     </>

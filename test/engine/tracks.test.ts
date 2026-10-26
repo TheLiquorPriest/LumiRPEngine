@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { agendaFor, answerPuzzle, hintsShown, normalizeAnswer, stepTracks } from "../../src/engine/tracks";
-import { findLeaks, playerTrack, unrevealedTruths } from "../../src/engine/visibility";
+import { agendaFor, answerPuzzle, moveTrack, normalizeAnswer, stepTracks } from "../../src/engine/tracks";
+import { findLeaks, hintsEarned, playerTrack, unrevealedTruths } from "../../src/engine/visibility";
 import { Working } from "../../src/engine/working";
 import type { TrackDef } from "../../src/shared/world";
 import { baseWorld, POV, registryOf, startState } from "../packs/support";
@@ -92,13 +92,70 @@ describe("tracks", () => {
     const reg = registryOf();
     const w = new Working(reg, wd, startState(wd));
     expect(answerPuzzle(reg, w, "riddle", "a shadow", "s", 0.2).correct).toBe(false);
-    expect(hintsShown(wd, w.state, "riddle")).toEqual(["It answers back."]);
+    expect(hintsEarned(wd, w.state, "riddle")).toEqual(["It answers back."]);
     expect(answerPuzzle(reg, w, "riddle", "something", "s").needsDecision).toBe(true);
     const right = answerPuzzle(reg, w, "riddle", "echo", "s");
     expect([right.correct, right.via]).toEqual([true, "normalized"]);
     expect(w.state.tracks.riddle?.stage).toBe("solved");
     const w2 = new Working(reg, wd, startState(wd));
     expect(answerPuzzle(reg, w2, "riddle", "the sound that comes back", "s", 0.85).via).toBe("decision");
+  });
+
+  test("an end stage grants its own rewards when the track reaches it, since it is never left", () => {
+    const wd = world();
+    wd.tracks.delivery = { ...quest, stages: { ...quest.stages, done: { label: "Delivered", next: [], rewards: [{ type: "add", args: { entity: POV, field: "cash", delta: 250 } }] } } };
+    const reg = registryOf();
+    const w = new Working(reg, wd, startState(wd));
+    w.apply({ type: "stage", track: "delivery", to: "deliver" });
+    const cash = Number(w.state.entities[POV]?.fields.cash);
+    w.apply({ type: "add", entity: "dev", field: "stress", delta: 5 });
+    expect(stepTracks(reg, w, "s").map((c) => c.to)).toEqual(["done"]);
+    expect(Number(w.state.entities[POV]?.fields.cash) - cash).toBe(250);
+  });
+
+  test("hints are earned stage by stage: one per wrong answer at a puzzle stage, every one at any other stage; opened one at a time", () => {
+    const wd = world();
+    wd.tracks.riddle = { ...riddle, stages: { ask: { ...riddle.stages.ask!, next: [{ to: "second", when: "false" }] }, second: { label: "The second riddle", answer: { expect: ["fog"], normalize: true }, hints: ["It hides the hills."], next: [{ to: "solved", when: "false" }] }, solved: riddle.stages.solved! } };
+    wd.tracks.delivery = { ...quest, stages: { ...quest.stages, start: { ...quest.stages.start!, hints: ["The cafe is on Pier Street."] } } };
+    const reg = registryOf();
+    const w = new Working(reg, wd, startState(wd));
+    const row = (id: string) => playerTrack(reg, wd, w.state, POV, id);
+    expect(row("delivery")?.hints).toEqual(["The cafe is on Pier Street."]);
+    answerPuzzle(reg, w, "riddle", "a shadow", "s", 0.2);
+    answerPuzzle(reg, w, "riddle", "a bell", "s", 0.2);
+    expect(row("riddle")?.hints).toEqual(["It answers back.", "Mountains are full of them."]);
+    expect(answerPuzzle(reg, w, "riddle", "echo", "s").change?.to).toBe("second");
+    // The misses were the first riddle's: the second earns its own.
+    expect(row("riddle")?.hints).toEqual([]);
+    answerPuzzle(reg, w, "riddle", "rain", "s");
+    expect([row("riddle")?.hints, row("riddle")?.opened]).toEqual([["It hides the hills."], 0]);
+    // Opened one at a time, never more than are earned, and only at a stage the track has.
+    expect(w.apply({ type: "engine.hint", data: { track: "riddle", stage: "second" } })).toBeNull();
+    expect(w.apply({ type: "engine.hint", data: { track: "riddle", stage: "second" } })).toBeNull();
+    expect(row("riddle")?.opened).toBe(1);
+    expect(w.apply({ type: "engine.hint", data: { track: "riddle", stage: "nowhere" } })).not.toBeNull();
+  });
+
+  test("the GM's Stage: on to a stage that follows, its entry plays as in the story; back, only the stage is set", () => {
+    const wd = world();
+    const add = (delta: number) => [{ type: "add", args: { entity: POV, field: "cash", delta } }];
+    wd.tracks.delivery = { ...quest, stages: { ...quest.stages, deliver: { ...quest.stages.deliver!, rewards: add(50) }, done: { label: "Delivered", next: [], rewards: add(250) } } };
+    const reg = registryOf();
+    const w = new Working(reg, wd, startState(wd));
+    const cash = () => Number(w.state.entities[POV]?.fields.cash);
+    const start = cash();
+    // From the start past the hand-over to the end: the start's 100 as it is left, the end's 250 as it is reached.
+    expect(moveTrack(reg, w, "delivery", "done", "s")).toBeNull();
+    expect([w.state.tracks.delivery?.stage, cash() - start]).toEqual(["done", 350]);
+    expect(w.events.some((e) => e.type === "engine.signal" && e.data.class === "quest")).toBe(true);
+    // Back: only the stage, so nothing is granted twice.
+    const mark = w.events.length;
+    expect(moveTrack(reg, w, "delivery", "deliver", "s")).toBeNull();
+    expect(w.events.slice(mark).map((e) => e.type)).toEqual(["stage"]);
+    // Failing the hand-over grants nothing of what it rewards on the way on.
+    expect(moveTrack(reg, w, "delivery", "failed", "s")).toBeNull();
+    expect([w.state.tracks.delivery?.stage, cash() - start]).toEqual(["failed", 350]);
+    expect(moveTrack(reg, w, "delivery", "nowhere", "s")?.reason).toContain("nowhere");
   });
 
   test("secret ladders reveal truth only at the reveal stage; nothing leaks before", () => {

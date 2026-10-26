@@ -11,7 +11,7 @@ import type { WorldIndex } from "../../shared/world";
 import type { StateView } from "../../shared/state-view";
 import type { Dest, SheetKind, SheetRoute } from "../app";
 import { playAt, popSheet, pushSheet, useApp, useUi } from "../app";
-import { BottomNav, Button, Empty, List, ListRow, PageHeader, Section, Tabs, tabPanel, useBusy } from "../components";
+import { BottomNav, Button, Empty, List, ListRow, NoView, PageHeader, Section, Tabs, tabPanel, useBusy } from "../components";
 import type { IconName } from "../icons";
 import type { PanelDef } from "../registry";
 import { useSelect } from "../store";
@@ -116,7 +116,7 @@ export function Play() {
   if (!world) {
     return (
       <div class="lre-play" data-lre-section="play">
-        <div class="lre-play-main lre-play-away">{view === null && sync.status !== "closed" ? <Empty icon="hourglass" title="Connecting to the engine…" /> : <NotWorld chatId={view?.chatId ?? sync.chatId} />}</div>
+        <div class="lre-play-main lre-play-away">{view === null && sync.failed !== null ? <NoView failed={sync.failed} /> : view === null && sync.status !== "closed" ? <Empty icon="hourglass" title="Connecting to the engine…" /> : <NotWorld chatId={view?.chatId ?? sync.chatId} />}</div>
       </div>
     );
   }

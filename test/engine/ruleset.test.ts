@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { checkOdds, fixedCheck, NO_BAND, rollCheck } from "../../src/engine/checks";
 import { withAdvantage } from "../../src/engine/dice";
+import { resolveEdit } from "../../src/engine/edits";
 import { applyEffects } from "../../src/engine/effects";
+import { buildGmWorld } from "../../src/engine/gm-view";
 import { actionOdds, resolveOn } from "../../src/engine/resolve";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { createRng } from "../../src/engine/rng";
@@ -11,8 +13,9 @@ import { Working } from "../../src/engine/working";
 import { migrateWorld, previewSheet } from "../../src/engine/authoring";
 import { ALL_PACKS } from "../../src/packs/index";
 import { buildSheetView } from "../../src/packs/sheets/core/index";
+import type { LedgerEvent } from "../../src/shared/ledger";
 import type { CheckDef, WorldDoc } from "../../src/shared/world";
-import { validate } from "../../src/studio-api";
+import { validate } from "../../src/cli/local-engine";
 import { enumerateOutcomes, withoutAmbient } from "./support";
 import { baseWorld, POV, registryOf, startState } from "../packs/support";
 
@@ -205,6 +208,84 @@ describe("progression", () => {
     replay.applyAll(out.applied);
     expect(replay.state).toEqual(w.state);
   });
+
+  /** What the events write to the level and XP fields, and the Journal lines they add. */
+  const progress = (events: readonly LedgerEvent[]): (string | number)[][] => events.flatMap((e) => (e.type === "set" && (e.field === "level" || e.field === "xp") ? [[e.field, Number(e.value)]] : e.type === "engine.note" ? [[String(e.data.text)]] : []));
+
+  test("lowering XP lowers the level straight to the one it reaches, running nothing, and gaining it back levels up again", () => {
+    const world = rulesWorld();
+    const reg = registryOf();
+    const w = new Working(reg, world, startState(world));
+    const scope = { bindings: { self: POV }, rng: createRng("down") };
+    applyEffects(reg, w, [{ type: "award", args: { entity: "self", progression: "character", amount: 1000 } }], scope);
+    expect([w.state.entities[POV]?.fields.level, w.state.entities[POV]?.fields.perks]).toEqual([3, 52]);
+    const down = applyEffects(reg, w, [{ type: "add", args: { entity: "self", field: "xp", delta: -800 } }], scope);
+    expect(down.rejected).toEqual([]);
+    expect(progress(down.applied)).toEqual([["level", 1], ["You dropped to Level 1 (from 3)."]]);
+    // What levels 2 and 3 gave stays: falling runs no onLevel.
+    expect([w.state.entities[POV]?.fields.xp, w.state.entities[POV]?.fields.level, w.state.entities[POV]?.fields.perks]).toEqual([200, 1, 52]);
+    applyEffects(reg, w, [{ type: "add", args: { entity: "self", field: "xp", delta: 100 } }], scope);
+    expect([w.state.entities[POV]?.fields.level, w.state.entities[POV]?.fields.perks]).toEqual([2, 73]);
+  });
+
+  test("only XP moves the level: a fix or a GM edit to XP takes it along, and anything that writes the level is refused", () => {
+    const world = rulesWorld();
+    const reg = registryOf();
+    const state = startState(world);
+    state.entities[POV]!.fields.xp = 1000;
+    state.entities[POV]!.fields.level = 3;
+    for (const gm of [false, true]) {
+      const fixed = resolveEdit(reg, world, state, [{ op: "set", entity: POV, field: "xp", value: 300 }], { gm, runSeed: "r" });
+      expect("events" in fixed ? progress(fixed.events) : fixed.rejection.reason).toEqual([["xp", 300], ["level", 2], ["You dropped to Level 2 (from 3)."]]);
+      for (const write of [{ op: "set", entity: POV, field: "level", value: 5 }, { op: "add", entity: POV, field: "level", delta: 1 }] as const) {
+        const refused = resolveEdit(reg, world, state, [write], { gm, runSeed: "r" });
+        expect("rejection" in refused ? refused.rejection.code : "applied").toBe("follows_xp");
+      }
+    }
+    const w = new Working(reg, world, state);
+    const effect = applyEffects(reg, w, [{ type: "set", args: { entity: "self", field: "level", value: 9 } }], { bindings: { self: POV }, rng: createRng("set") });
+    expect(effect.rejected.map((r) => r.rejection.code)).toEqual(["follows_xp"]);
+    expect(w.state.entities[POV]?.fields.level).toBe(3);
+  });
+
+  test("someone new starts at the level their XP reaches, and a spawn can't name a level", () => {
+    const world = rulesWorld();
+    const reg = registryOf();
+    const w = new Working(reg, world, startState(world));
+    const scope = { bindings: { self: POV }, rng: createRng("spawn") };
+    const vet = applyEffects(reg, w, [{ type: "spawn", args: { id: "vet", kind: "person", name: "Vet", fields: { xp: 1000 } } }], scope);
+    expect(vet.rejected).toEqual([]);
+    // Level 3 from the start: nothing was gained, so no onLevel ran and the Journal says nothing.
+    expect([w.state.entities.vet?.fields.level, w.state.entities.vet?.fields.perks ?? 0]).toEqual([3, 0]);
+    expect(vet.applied.some((e) => e.type === "engine.note")).toBe(false);
+    const boss = applyEffects(reg, w, [{ type: "spawn", args: { id: "boss", kind: "person", name: "Boss", fields: { level: 4 } } }], scope);
+    expect(boss.rejected.map((r) => r.rejection.code)).toEqual(["follows_xp"]);
+    expect(w.state.entities.boss).toBeUndefined();
+  });
+
+  test("the GM view and the sheet show the level as set from XP, with nothing to edit", () => {
+    const world = rulesWorld();
+    world.ruleset!.sheet!.sections[0]!.rows.push({ field: "level" });
+    const reg = registryOf();
+    const state = startState(world);
+    const fields = buildGmWorld(reg, world, state).entities.find((e) => e.id === POV)?.fields ?? [];
+    expect(fields.find((f) => f.id === "level")?.follows).toBe("xp");
+    expect(fields.find((f) => f.id === "xp")?.follows).toBeUndefined();
+    const rows = buildEntitySheet(reg.context(world, state), POV, { fixes: true })?.[0]?.rows ?? [];
+    expect(rows.find((r) => r.label === "Level" && !r.progress)?.fix).toBeUndefined();
+    // The progression's own row corrects XP.
+    expect(rows.find((r) => r.progress)?.fix?.field).toBe("xp");
+  });
+
+  test("lint names a person whose level isn't the one their XP reaches", () => {
+    const world = rulesWorld();
+    world.entities[POV]!.fields.level = 3;
+    world.entities.dev!.fields.xp = 300;
+    world.entities.dev!.fields.level = 2;
+    const issues = lintStructure(world, registryOf()).filter((i) => i.code === "progression_level");
+    expect(issues.map((i) => [i.severity, i.path])).toEqual([["warning", `entities.${POV}.fields.level`]]);
+    expect(issues[0]?.message).toContain("Level 1");
+  });
 });
 
 describe("the sheet and the ruleset container", () => {
@@ -234,7 +315,7 @@ describe("the sheet and the ruleset container", () => {
     expect(floored.modifier).toBe(4);
   });
 
-  test("worlds without a ruleset keep none; lint and the studio contract read it", () => {
+  test("worlds without a ruleset keep none; lint and the local engine's validate read it", () => {
     const world = baseWorld();
     expect("ruleset" in migrateWorld(world)).toBe(false);
     const bad = rulesWorld();

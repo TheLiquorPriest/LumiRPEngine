@@ -10,6 +10,7 @@ import { isRecord } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
 import type { CommitmentStatus, Fidelity, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsCharacter, PlanStatus, WitnessEntry } from "../../../shared/minds";
 import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_APPROACHES, MINDS_EVENTS, MINDS_KEEP, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
+import { listWords } from "../../../shared/words";
 import { own } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
@@ -95,6 +96,12 @@ function person(ctx: ReadContext, data: JsonObject): Rejection | null {
   return str(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: "a minds event names someone who isn't in the world" };
 }
 
+/** A fidelity level as the GM's controls name it ("near" reads "Near"). */
+function fidelityWords(level: JsonValue | undefined): string {
+  const id = typeof level === "string" ? level : "";
+  return `${id.charAt(0).toUpperCase()}${id.slice(1)}`;
+}
+
 function nameOf(ctx: ReadContext, id: EntityId): string {
   return own(ctx.state.entities, id)?.name ?? id;
 }
@@ -122,7 +129,7 @@ const round: EventTypeDef<PackEvent> = {
     const levels = isRecord(e.data.levels) ? e.data.levels : {};
     for (const [id, v] of Object.entries(levels)) if (isRecord(v) && isFidelity(v.level)) writeCharacter(state, id).passed = { at, round: s.round, level: v.level, place: str(v.place) ? v.place : null };
   },
-  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : e.data.on === true ? "Minds round" : "Minds switched off"),
+  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : e.data.on === true ? "A round of character minds ran" : "Character minds are switched off"),
 };
 
 function validMind(data: JsonObject): Rejection | null {
@@ -168,7 +175,7 @@ const mind: EventTypeDef<PackEvent> = {
     c.refresh = false;
     for (const p of plans) putPlan(c, p);
   },
-  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}'s mind (${String(e.data.level)}): ${str(e.data.intent) && e.data.intent !== "" ? e.data.intent : "no intent"}`),
+  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}'s mind, at ${fidelityWords(e.data.level)} fidelity, ${str(e.data.intent) && e.data.intent !== "" ? `means to: ${e.data.intent}` : "has no intent"}`),
 };
 
 function validMemory(data: JsonObject): Rejection | null {
@@ -211,7 +218,7 @@ const memory: EventTypeDef<PackEvent> = {
     if (viewer !== undefined) return "";
     const n = Array.isArray(e.data.notes) ? e.data.notes.length : 0;
     const c = Array.isArray(e.data.commitments) ? e.data.commitments.length : 0;
-    return `${nameOf(ctx, String(e.data.entity))} remembers the turn: ${n} note${n === 1 ? "" : "s"}, ${c} new commitment${c === 1 ? "" : "s"}`;
+    return `${nameOf(ctx, String(e.data.entity))} remembers the turn in ${n} note${n === 1 ? "" : "s"} and ${c} new commitment${c === 1 ? "" : "s"}`;
   },
 };
 
@@ -234,7 +241,11 @@ const presence: EventTypeDef<PackEvent> = {
       for (const what of saw) addWitness(c, { at, what, how: "saw", by: null, place } satisfies WitnessEntry);
     }
   },
-  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `Present: ${ids(e.data.who) && e.data.who.length > 0 ? e.data.who.map((id) => nameOf(ctx, id)).join(", ") : "no one"}`),
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined) return "";
+    const who = ids(e.data.who) ? e.data.who.map((id) => nameOf(ctx, id)) : [];
+    return who.length === 0 ? "No one was present for the minds" : `${listWords(who)} ${who.length === 1 ? "was" : "were"} present for the minds`;
+  },
 };
 
 /** `minds.plan`: a plan's status, from the castlife planner during `advance` or from the GM. */
@@ -258,7 +269,7 @@ const planStatus: EventTypeDef<PackEvent> = {
   describe: (e, ctx, viewer) => {
     if (viewer !== undefined) return "";
     const plan = readCharacter(ctx.state, String(e.data.entity)).plans.find((p) => p.id === e.data.plan);
-    return `${nameOf(ctx, String(e.data.entity))}'s plan ${plan ? `"${plan.what}"` : String(e.data.plan)}: ${String(e.data.status)}`;
+    return `${nameOf(ctx, String(e.data.entity))}'s plan ${plan ? `“${plan.what}”` : "that's gone"} is now ${String(e.data.status)}`;
   },
 };
 
@@ -281,7 +292,7 @@ function editDef(type: PackEvent["type"], key: "plan" | "note" | "commitment", v
       if (d.value === null) remove(state, who, String(d[key]));
       else if (d.value !== undefined && valid(d.value)) put(state, who, d.value, ctx);
     },
-    describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}'s ${key} ${e.data.value === null ? "deleted" : "edited"}`),
+    describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}'s ${key} was ${e.data.value === null ? "deleted" : "edited"}`),
   };
 }
 
@@ -343,7 +354,7 @@ const commitmentStatus: EventTypeDef<PackEvent> = {
     const status = d.status as CommitmentStatus;
     putCommitment(c, { ...x, status, closed: status === "open" ? null : finite(d.at) ? d.at : state.clock });
   },
-  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}'s commitment: ${String(e.data.status)}`),
+  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}'s commitment is now ${String(e.data.status)}`),
 };
 
 /** `minds.consolidated`: notes folded into the summary, and gone. */
@@ -368,7 +379,7 @@ const pin: EventTypeDef<PackEvent> = {
   apply: (e, state) => {
     writeCharacter(state, String(e.data.entity)).pin = isFidelity(e.data.level) ? e.data.level : null;
   },
-  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}: fidelity ${e.data.level === null ? "unpinned" : `pinned at ${String(e.data.level)}`}`),
+  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : e.data.level === null ? `${nameOf(ctx, String(e.data.entity))}'s mind goes by their score again` : `${nameOf(ctx, String(e.data.entity))}'s mind is now pinned at ${fidelityWords(e.data.level)} fidelity`),
 };
 
 /** `minds.refresh`: the GM wants a fresh mind next turn. */
@@ -378,7 +389,7 @@ const refresh: EventTypeDef<PackEvent> = {
   apply: (e, state) => {
     writeCharacter(state, String(e.data.entity)).refresh = true;
   },
-  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}: a fresh mind next turn`),
+  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))} gets a fresh mind next turn`),
 };
 
 /** An intent as the GM sets it: its text, or its approach, or both; one with neither is a clear, written as null. */
@@ -399,7 +410,15 @@ const intent: EventTypeDef<PackEvent> = {
     if (isIntent(v)) c.intent = { text: v.text, approach: v.approach };
     else delete c.intent;
   },
-  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}: intent ${e.data.intent === null ? "cleared" : "set"}`),
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined) return "";
+    const name = nameOf(ctx, String(e.data.entity));
+    const v = e.data.intent;
+    if (!isIntent(v)) return `${name} no longer has your intent`;
+    // "Danny Okafor now means to “find the ledger”, proactively".
+    const how = v.approach === null ? "" : `${v.text !== "" ? ", " : " "}${v.approach}ly`;
+    return v.text !== "" ? `${name} now means to “${v.text}”${how}` : `${name} now goes about things${how}`;
+  },
 };
 
 /** `minds.skip`: a time skip's beats, as recorded for the GM; the skip itself is its own events. */
@@ -408,7 +427,7 @@ const skip: EventTypeDef<PackEvent> = {
   validate: (e) =>
     finite(e.data.from) && finite(e.data.to) && Array.isArray(e.data.beats) && e.data.beats.every((b) => isRecord(b) && finite(b.at) && str(b.reason) && (b.source === "scan" || b.source === "model")) ? null : bad("a skip's beats need their span and each beat's clock, reason and source"),
   apply: () => undefined,
-  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `Time skip beats: ${Array.isArray(e.data.beats) ? e.data.beats.length : 0}`),
+  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `The time skip stopped at ${Array.isArray(e.data.beats) ? e.data.beats.length : 0} beats for the minds`),
 };
 
 export const MINDS_EVENT_DEFS: readonly EventTypeDef<PackEvent>[] = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, intent, skip];

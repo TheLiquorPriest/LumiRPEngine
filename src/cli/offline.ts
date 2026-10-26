@@ -1,6 +1,6 @@
 // The tools that need no Lumiverse: the agent guide and the docs, the published schemas, the
-// starter worlds, and the engine run on this machine through the studio seam
-// (`lumi-rp-engine/studio`): load (shape, migration, lint), Playtest and Check world.
+// starter worlds, and the engine run on this machine (`local-engine.ts`): load (shape, migration,
+// lint), Playtest and Check world.
 
 import worldSchemaJson from "../../schemas/lre-world-v1.schema.json";
 import { macrosIn } from "../engine/authoring";
@@ -8,8 +8,8 @@ import { STARTER_INFO, STARTER_WORLDS } from "../packs/index";
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
-import { checkWorld, ENGINE_VERSION, EXPORT_FORMAT, exportFile, load, MAP_SCHEMA, playtest } from "../studio-api";
-import type { LoadResult, PlaytestTurn, RunResult } from "../studio-api";
+import { checkWorld, ENGINE_VERSION, EXPORT_FORMAT, exportFile, load, MAP_SCHEMA, playtest } from "./local-engine";
+import type { LoadResult, PlaytestTurn, RunResult } from "./local-engine";
 import type { Args } from "./args";
 import { intArg, neededText, textArg, ToolError } from "./args";
 import { BODY_LIMIT, clip, readAt } from "./read";
@@ -87,7 +87,7 @@ export interface Loaded {
   writtenBy: string | null;
 }
 
-/** The studio's `load` (shape, migration, lint); a document the engine throws on is reported as an error, not a crash. */
+/** The local engine's `load` (shape, migration, lint); a document the engine throws on is reported as an error, not a crash. */
 export function loadWorld(value: string | JsonValue): Loaded {
   let raw: unknown = value;
   if (typeof value === "string") {

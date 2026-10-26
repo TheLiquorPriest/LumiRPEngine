@@ -11,7 +11,7 @@ import type { LintIssue, MarkerPreview, WorldChatInfo } from "../../src/shared/p
 import { AGENT_API } from "../../src/shared/protocol";
 import type { RevisionNote, WorldDoc, WorldIndex } from "../../src/shared/world";
 import type { Http, HttpRequest, OpenSocket, SocketEvents } from "../../src/cli/connection";
-import { lint, newWorld, revisionOf } from "../../src/studio-api";
+import { lint, newWorld, revisionOf } from "../../src/cli/local-engine";
 import { applyPatch, PatchError, readOp } from "../../src/shared/json-patch";
 import { HostConnection } from "../../src/cli/connection";
 import { Live } from "../../src/cli/live";

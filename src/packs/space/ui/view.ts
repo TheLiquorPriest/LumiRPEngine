@@ -8,6 +8,7 @@ import { list, num, obj, oneOf, optNum, optStr, str, strings } from "../../../fr
 import type { MapGridView, MapItemView, MapPlaceView, MapRouteView, MapScopeView, MapView } from "../core/view";
 
 export const TRAVEL_MODES = ["walk", "road", "offroad", "water"] as const satisfies readonly TravelMode[];
+const TRIP_PARTS = ["fetch", "start", "drive", "park", "walk"] as const;
 
 function numbers(value: unknown): number[] {
   return Array.isArray(value) ? value.filter((n): n is number => typeof n === "number") : [];
@@ -78,7 +79,7 @@ export function decodeMapView(value: unknown): MapView | null {
     scopes: list(value.scopes, decodeScope),
     travel: list(value.travel, (t) =>
       typeof t.to === "string" && typeof t.action === "string"
-        ? { to: t.to, label: str(t.label, t.action), mode: oneOf(t.mode, TRAVEL_MODES, "walk"), minutes: num(t.minutes), cents: optNum(t.cents), vehicle: optStr(t.vehicle), action: t.action, params: isRecord(t.params) ? (t.params as JsonObject) : {}, disabled: optStr(t.disabled) }
+        ? { to: t.to, label: str(t.label, t.action), mode: oneOf(t.mode, TRAVEL_MODES, "walk"), minutes: num(t.minutes), parts: list(t.parts, (p) => (typeof p.words === "string" ? { kind: oneOf(p.kind, TRIP_PARTS, "drive"), minutes: num(p.minutes), words: p.words } : null)), cents: optNum(t.cents), vehicle: optStr(t.vehicle), action: t.action, params: isRecord(t.params) ? (t.params as JsonObject) : {}, disabled: optStr(t.disabled) }
         : null,
     ),
   };

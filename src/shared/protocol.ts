@@ -18,7 +18,7 @@ import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, 
 import type { ExtractionType, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -28,6 +28,9 @@ export const PROTOCOL_VERSION = 1;
  * `lre.hello` answers with it; a build without them answers without it.
  */
 export const AGENT_API = 2;
+
+/** The engine's extension identifier in Lumiverse (`spindle.json`), by which the command line finds it. */
+export const ENGINE_EXTENSION = "lumi_rp_engine";
 
 interface Envelope<T extends string> {
   lre: typeof PROTOCOL_VERSION;
@@ -128,10 +131,11 @@ export interface ViewOpenRequest extends Request<"lre.view.open"> {
 
 /**
  * A ✎ fix on the head, written as a `post` entry of kind `fix`: one typed `set` of a field
- * (`EditOp`; locked fields are refused), or the clock set to `time`, a date and time of day in the
- * world's calendar (`YYYY-MM-DD HH:MM`) at the POV's place, as the HUD reads it (DESIGN §9.2, §12).
+ * (`EditOp`; locked fields are refused), the clock set to `time`, a date and time of day in the
+ * world's calendar (`YYYY-MM-DD HH:MM`) at the POV's place, as the HUD reads it (DESIGN §9.2, §12),
+ * or the next hint the player has earned at a quest log row opened (`hint`, the row's id: DESIGN §10).
  */
-export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: EntityId; field: FieldId; value: JsonValue } | { time: string });
+export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: EntityId; field: FieldId; value: JsonValue } | { time: string } | { hint: string });
 
 /**
  * One typed edit (DESIGN §7 GM edits, §12 ✎ fixes). Each is checked against what it touches (a
@@ -143,7 +147,7 @@ export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: En
  *  - `move` puts an entity at a place, out of any container; `put` puts it inside another entity
  *    (`in`), or with `into: null` takes it out to where its container is.
  *  - `adjust` moves money into (positive) or out of an account against `economy.external:correction`.
- *  - `stage` sets a track's stage.
+ *  - `stage` moves a track to a stage: on to one that follows, as its entry plays; back, only the stage.
  *  - `entity` sets an entity's tier, agent flag and per-domain level overrides (null follows the tier).
  *  - `classify` sets an entity's classes (facet → values, the world's facets and values only) and
  *    tags, both whole; the chat holds them from then on over the world's definition.
@@ -196,6 +200,33 @@ export const EDIT_OPS_MAX = 64;
 /** The GM view's data (DESIGN §7), asked for when the GM view opens: never in a state push. */
 export interface GmRequest extends Request<"lre.gm"> {
   chatId: ChatId;
+}
+
+/**
+ * GM → This chat → Sections' preview (DESIGN §6.11): every section as the next turn would give it to
+ * the narrator now, built the way a turn builds it. Behind the GM gate: it holds marked facts.
+ */
+export interface SectionsRequest extends Request<"lre.sections"> {
+  chatId: ChatId;
+}
+
+/**
+ * One section in the preview, in prompt order. `status`: `sent` (its text goes to the narrator),
+ * `off` (the world or the GM switched it off), `unplaced` (no book entry to fill), `empty` (nothing
+ * to tell now), `clipped` (over the section budget, or the Minds section's own). `content` is the
+ * text as the narrator reads it, marked facts and hints included; `cut` the lines its caps left out;
+ * `marked` and `hints` how many of those ride in it.
+ */
+export interface SectionPreview {
+  slot: SlotId;
+  label: string;
+  status: "sent" | "off" | "unplaced" | "empty" | "clipped";
+  scope: FeedScope;
+  content: string | null;
+  tokens: number | null;
+  cut: number;
+  marked: number;
+  hints: number;
 }
 
 /**
@@ -324,7 +355,7 @@ export interface UiRequest extends Request<"lre.ui"> {
 export type MapRequest = Request<"lre.map"> & { chatId: ChatId } & ({ op?: "display"; display: MapDisplay } | { op: "walk"; x: number; y: number });
 
 /**
- * Background-lane jobs (DESIGN §13, §15): Import from lore, Build/Refine with AI, Describe a map,
+ * Background-lane jobs (DESIGN §13): Import from lore, Build/Refine with AI, Describe a map,
  * Propose routines from lore, Playtest, Check world, and the lore indexing jobs (§4.2). Input:
  * `import_lore` `{bookIds}`; `refine` `{instructions}`; `describe_map` `{scope, prose, mapId?}`
  * (the place drawn, the author's description, and the map's id, by default `<scope>_map`; its one
@@ -466,9 +497,8 @@ export type JsonPatchOp =
  * one of the world's revisions, which a commit then makes head again (DESIGN §23).
  *
  * `version` names a state of the world's working copy, and is never reused within a world: each
- * write counts one, and so does a discard or commit (which drops the draft) and a Studio install
- * that moves the head while no draft is stored. With no draft stored it is the world's count
- * (`WorldIndex.draftVersion`; 0 for a world never edited), and a new draft starts one above it.
+ * write counts one, and so does a discard or commit (which drops the draft). With no draft stored it
+ * is the world's count (`WorldIndex.draftVersion`; 0 for a world never edited), and a new draft starts one above it.
  * A request that sends `version` is refused with `conflict` when the working copy has moved on
  * from it; one without it is not checked. Every result carries the current one.
  */
@@ -624,49 +654,6 @@ export interface CancelTurnRequest extends Request<"lre.cancel"> {
 }
 
 /**
- * LumiRPEngine Studio's offer (DESIGN §15). `offer` reads the world the Studio offers and reviews
- * it, installing nothing; `install` installs the offer reviewed as `offerId`: a new world, or the
- * next revision of one of the user's worlds.
- */
-export type StudioRequest = Request<"lre.studio"> &
-  (
-    | { op: "offer" }
-    /** `acceptMovedHead`: install a revision though its world's head moved since the Studio took it (`StudioOfferView.headMoved`). */
-    | { op: "install"; offerId: string; hash: string; acceptMovedHead?: boolean }
-  );
-
-/** A Studio offer as Build reviews it before anything is installed. */
-export interface StudioOfferView {
-  offerId: string;
-  mode: "new" | "revision";
-  name: string;
-  createdAt: number;
-  /** A revision's world: its id, and its name (null when the user has no such world). */
-  target: { worldId: WorldId; name: string | null } | null;
-  /** Items per collection, the collections that have any. */
-  counts: Record<string, number>;
-  /** The engine's lint of the document, errors first (at most 50). */
-  lint: LintIssue[];
-  errors: number;
-  /** Macros in its lore and templates, to review before playing it. */
-  macros: LintIssue[];
-  /** The chat the Studio wants it attached to, once installed. */
-  attachChatId: ChatId | null;
-  /** Why it can't be installed as it is (not a world, errors, a missing world, Build's unsaved draft); null when it can. */
-  blocked: string | null;
-  /** The world revision it became, once installed. */
-  installed: { worldId: WorldId; revision: RevisionId } | null;
-  /**
-   * A revision whose world's head isn't the one the Studio took it from: that base (null when the
-   * Studio gave none) and the head now. Installing makes the offer the new head without what was
-   * committed since, so Build warns and Install must confirm it (`acceptMovedHead`).
-   */
-  headMoved: { base: RevisionId | null; head: RevisionId } | null;
-  /** The offer as reviewed (`hashJson` of it): Install names it back, and is refused when the offer has changed since. */
-  hash: string;
-}
-
-/**
  * Settings → Preset (DESIGN §6.8): `get` reads the card of the preset Lumiverse generates with; `add`
  * adds the RPEngine blocks it lacks, then reads it.
  */
@@ -707,6 +694,7 @@ export type FrontendToBackend =
   | FixRequest
   | EditRequest
   | GmRequest
+  | SectionsRequest
   | MarkerRequest
   | KeepRequest
   | SettingsGetRequest
@@ -718,7 +706,6 @@ export type FrontendToBackend =
   | MapRequest
   | JobRequest
   | LoreRequest
-  | StudioRequest
   | PresetRequest
   | DiagRequest
   | MindsRequest
@@ -774,6 +761,8 @@ export interface ResultBodies {
   /** `undo`: the chip that undoes the edit just written (the chat's GM edit chip for it), null while it waits for a reply in flight or when it changed nothing. */
   "lre.edit": { pending: boolean; undo: string | null };
   "lre.gm": GmView;
+  /** Every section in prompt order, and the section budget: the shared one, what the sent sections spend of it, and the Minds section's own. */
+  "lre.sections": { sections: SectionPreview[]; budget: { sections: number; used: number; minds: number } };
   /** The chat's state view now, and its activity line (null when idle). */
   "lre.state.get": { view: StateView; activity: Activity | null };
   "lre.marker": { pending: boolean; preview?: MarkerPreview };
@@ -805,11 +794,6 @@ export interface ResultBodies {
    * `check`: the problem in words (`problem`), null when `fields` would save.
    */
   "lre.lore": { drift?: Record<string, LoreDrift>; worldId?: WorldId; id?: string; books?: LoreBookView[]; entries?: LoreBookEntryView[]; pins?: LorePinsView; problem?: string | null };
-  /**
-   * `offer`: the offer under review, or null and why there is none (`message`). `install`: what it
-   * became, with the macros to review before playing it (`lint`).
-   */
-  "lre.studio": { offer?: StudioOfferView | null; message?: string; installed?: { offerId: string; mode: "new" | "revision"; worldId: WorldId; name: string; revision: RevisionId; attachChatId: ChatId | null }; lint?: LintIssue[] };
   "lre.preset": { card: PresetCard };
   /** `get`: the chat's records, oldest first, and its activity line now. */
   "lre.diag": { records: DiagRecord[]; activity: Activity | null };
@@ -849,9 +833,9 @@ export interface ErrorMessage extends Envelope<"lre.error"> {
 }
 
 /**
- * A world's working copy changed: its draft written, discarded or committed, or its head moved by
- * a Studio install (DESIGN §23). Sent to every session of the user after the reply to the request
- * that changed it, so a Build open on that world reloads what another window or an outside agent did.
+ * A world's working copy changed: its draft written, discarded or committed (DESIGN §23). Sent to
+ * every session of the user after the reply to the request that changed it, so a Build open on that
+ * world reloads what another window or an outside agent did.
  */
 export interface DraftChanged extends Envelope<"lre.draft.changed"> {
   worldId: WorldId;

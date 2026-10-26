@@ -60,7 +60,7 @@ import type { LedgerEvent } from "./ledger";
 
 export const WORLD_FORMAT = "lre-world-v1";
 
-/** The export file a world travels in (`lre.world export`, the studio's `exportFile`): `{format, world}`. */
+/** The export file a world travels in (`lre.world export` writes it, Import reads it): `{format, world}`. */
 export const EXPORT_FORMAT = "lre-world-export-v1";
 
 /** The engine version stamped on documents it writes (`WorldDoc.engineVersion`). */
@@ -158,6 +158,24 @@ export interface KindDef {
   fields: Record<FieldId, FieldDef>;
   /** Owning pack, when a pack defines it. */
   pack?: PackId;
+}
+
+/**
+ * A world kind over the pack kind of the same id (DESIGN §4.1): the world's fields join the pack's,
+ * its own winning a field both define, and its label and Extends win when it gives them.
+ */
+export function overlayKind(pack: KindDef, mine: KindDef): KindDef {
+  return { ...pack, ...mine, fields: { ...pack.fields, ...mine.fields } };
+}
+
+/** Every kind a world plays with: the packs', each under the world's of the same id (`overlayKind`), and the world's own. */
+export function playedKinds(packKinds: Readonly<Record<string, KindDef>> | undefined, kinds: Readonly<Record<string, KindDef>>): Record<string, KindDef> {
+  const out: Record<string, KindDef> = { ...packKinds };
+  for (const [id, mine] of Object.entries(kinds)) {
+    const pack = packKinds && hasOwn(packKinds, id) ? packKinds[id] : undefined;
+    out[id] = pack ? overlayKind(pack, mine) : mine;
+  }
+  return out;
 }
 
 export type Cardinality = "one_one" | "one_many" | "many_one" | "many_many";
@@ -1003,14 +1021,15 @@ export type SuppressedSource =
 
 /**
  * A progression (DESIGN §11): experience in one field, the level in another, and the thresholds
- * between them. After an effect changes an entity's XP, the engine raises its level to the last
- * threshold reached, one level at a time, running `onLevel` for each.
+ * between them. The level follows the XP, both ways: after an effect changes an entity's XP, the
+ * engine raises its level to the last threshold reached one level at a time, running `onLevel` for
+ * each, or lowers it straight there, running nothing. Nothing else writes the level.
  */
 export interface ProgressionDef {
   label: string;
   /** The number field that holds experience. */
   xpField: FieldId;
-  /** The number field that holds the level; the engine sets it. */
+  /** The number field that holds the level; the engine sets it from the XP, and refuses any other write. */
   levelField: FieldId;
   /**
    * The XP each level needs, from level 1 (usually 0): the level is how many thresholds the XP has
@@ -1165,6 +1184,26 @@ export interface MapSettings {
   grid: { movement: boolean; sightRadius: number };
   /** Absent: off. */
   travelSimulation?: boolean;
+  /** Absent, or any part of it: `DEFAULT_TRAVEL` (`shared/maps` `travelTuningOf`). */
+  travel?: Partial<TravelTuning>;
+}
+
+/**
+ * How long travel takes (DESIGN §9.1), tuned per world. Speeds are km/h: a mode's (or a vehicle
+ * class's) speed times every leg it takes by the leg's distance, in place of the route's own
+ * minutes; one not set leaves each route's minutes as authored, and a leg with no distance always
+ * keeps them. The rest are a vehicle trip's overheads.
+ */
+export interface TravelTuning {
+  speeds: Partial<Record<TravelMode, number>>;
+  /** By vehicle class (a `vehicles.classes` row), on every mode it goes by; before the mode's own speed. */
+  vehicleSpeeds: Record<string, number>;
+  /** Getting a vehicle going: in, started and out of its spot. */
+  startMinutes: number;
+  /** Parking it where the trip leaves it. */
+  parkMinutes: number;
+  /** The longest walk to a vehicle parked elsewhere that a trip takes; 0: only a vehicle where you are. */
+  fetchMinutes: number;
 }
 
 export interface WorldDoc {
@@ -1349,24 +1388,13 @@ export function formatMoney(minorUnits: number, currency: WorldCurrency): string
   return currency.format.replace(/\{(sign|symbol|code|amount|major|minor)\}/g, (_, key: string) => values[key] ?? "");
 }
 
-/**
- * The `lre-state-v1` window event payload (DESIGN §15): the frontend announces it so a studio can
- * discover the engine. `inbound` lists the install paths offered (`"file"`, `"rpc:<endpoint>"`).
- */
-export interface StudioState {
-  engineVersion: string;
-  worldFormat: typeof WORLD_FORMAT;
-  packs: Record<string, number>;
-  inbound: string[];
-}
-
 /** How one revision became a world's head (DESIGN §23). */
 export interface RevisionNote {
   revision: string;
   /** When it became head, in ms since the epoch. */
   at: number;
-  /** What made it head: a new world, a commit from Build or from an outside agent, an import, or a Studio install. */
-  source: "create" | "build" | "agent" | "import" | "studio";
+  /** What made it head: a new world, a commit from Build or from an outside agent, or an import. */
+  source: "create" | "build" | "agent" | "import";
   /** The note given with the commit, if any (at most 200 characters). */
   note?: string;
 }
@@ -1380,7 +1408,7 @@ export interface WorldIndex {
   revisions: string[];
   /**
    * The version of the world's working copy while no draft is stored (DESIGN §23): the next one
-   * after the last discard, commit or Studio install. A new draft starts one above it; absent until
+   * after the last discard or commit. A new draft starts one above it; absent until
    * the first. The world's history is kept beside the index (`history.json`), not in it.
    */
   draftVersion?: number;

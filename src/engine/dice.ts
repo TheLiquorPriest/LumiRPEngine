@@ -2,8 +2,9 @@
 //
 // Adapted from Warp's engine/dice.ts (see NOTICE). Every roll the engine makes goes through an
 // Rng from engine/rng, so a roll is reproducible from its seed and never touched by a model.
-// diceDistribution() computes the exact probability of every total by counting, not sampling,
-// so the odds the palette shows are the odds rollDice() really has.
+// diceDistribution() counts every total exactly, in whole numbers of equally likely results, not by
+// sampling or summing probabilities, so the odds the palette shows are the odds rollDice() really
+// has, each rounded once from its exact fraction (`share`).
 //
 // Notation (case-insensitive; spaces allowed only around a + or -):
 //   d20        one twenty-sided die            2d6      two six-sided dice
@@ -180,16 +181,23 @@ export interface DiceDistribution {
   readonly min: number;
   /** Largest possible total (at most `maxExplodeExtra + 1` faces per exploding die). */
   readonly max: number;
-  /** probs[i] is the probability that the total equals min + i. Sums to 1. */
+  /**
+   * counts[i] is how many of the expression's `outcomes` equally likely results total min + i,
+   * counted exactly. An exploding die counts every sequence of its `maxExplodeExtra + 1` rolls.
+   */
+  readonly counts: readonly bigint[];
+  /** How many equally likely results the expression has: the counts' sum. */
+  readonly outcomes: bigint;
+  /** probs[i] is counts[i] / outcomes rounded once: the probability that the total equals min + i. */
   readonly probs: readonly number[];
-  /** Expected total. */
+  /** Expected total, rounded once from its exact fraction. */
   readonly mean: number;
 }
 
-/** A probability table over consecutive integers starting at `lo`. */
+/** Exact counts of equally likely results over consecutive integers starting at `lo`. */
 interface Dist {
   lo: number;
-  p: Float64Array;
+  w: bigint[];
 }
 
 class Work {
@@ -202,94 +210,114 @@ class Work {
   }
 }
 
-function convolve(a: Dist, b: Dist, work: Work): Dist {
-  work.spend(a.p.length * b.p.length);
-  const p = new Float64Array(a.p.length + b.p.length - 1);
-  for (let i = 0; i < a.p.length; i++) {
-    const ai = a.p[i];
-    if (ai === 0) continue;
-    for (let j = 0; j < b.p.length; j++) p[i + j] += ai * b.p[j];
-  }
-  return { lo: a.lo + b.lo, p };
-}
-
-/** The value distribution of one die: a plain face, or the sum of an exploding chain. */
-function dieDist(sides: number, explode: boolean): Dist {
-  if (!explode) return { lo: 1, p: new Float64Array(sides).fill(1 / sides) };
-  const maxValue = (DICE_LIMITS.maxExplodeExtra + 1) * sides;
-  const p = new Float64Array(maxValue);
-  // m maximum faces in a row, then a face below the maximum; or the whole chain of
-  // maxExplodeExtra + 1 faces all at the maximum.
-  for (let m = 0; m <= DICE_LIMITS.maxExplodeExtra; m++) {
-    const pm = (1 / sides) ** m / sides;
-    for (let f = 1; f < sides; f++) p[m * sides + f - 1] = pm;
-  }
-  p[maxValue - 1] = (1 / sides) ** (DICE_LIMITS.maxExplodeExtra + 1);
-  return { lo: 1, p };
-}
-
-/** Direct convolution is used for plain sums while it costs at most this many operations. */
-const DIRECT_SUM_WORK = 3_000_000;
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 
 /**
- * Sum of `count` plain dice with `sides` faces. Small sums are convolved directly, which keeps
- * the far tails accurate to the last digit (the probability of rolling all ones is exactly
- * sides^-count). Large sums use a sliding window, O(count × support), whose subtractions leave
- * rounding dust of about 1e-16 in the extreme tails: totals whose true probability is below
- * that are only approximate there.
+ * `num / den` as a number, rounded once (`den` is positive). Within 2^53 both are exact doubles and
+ * one division rounds the fraction to its nearest double: the double a decimal of the same value
+ * reads as, so 19 / 20 is 0.95, exactly as `0.95` is. Past 2^53 the quotient is first taken to 64
+ * significant bits, which keeps it within one unit in the last place.
+ */
+export function share(num: bigint, den: bigint): number {
+  if (num === 0n) return 0;
+  const negative = num < 0n;
+  const n = negative ? -num : num;
+  let q: number;
+  if (n <= MAX_SAFE && den <= MAX_SAFE) q = Number(n) / Number(den);
+  else {
+    const shift = Math.max(0, 64 + den.toString(2).length - n.toString(2).length);
+    q = Number((n << BigInt(shift)) / den);
+    // Scaled back a power of two at a time, so no single step overflows or underflows.
+    for (let left = shift; left > 0; left -= 1000) q *= 2 ** -Math.min(left, 1000);
+  }
+  return negative ? -q : q;
+}
+
+function convolve(a: Dist, b: Dist, work: Work): Dist {
+  work.spend(a.w.length * b.w.length);
+  const w = new Array<bigint>(a.w.length + b.w.length - 1).fill(0n);
+  for (let i = 0; i < a.w.length; i++) {
+    const ai = a.w[i];
+    if (ai === 0n) continue;
+    for (let j = 0; j < b.w.length; j++) w[i + j] += ai * b.w[j];
+  }
+  return { lo: a.lo + b.lo, w };
+}
+
+/**
+ * The value counts of one die: each face once; or an exploding die's chains, counted over every
+ * sequence of its `maxExplodeExtra + 1` rolls. A chain of m maximums and then a lower face leaves
+ * the rest of the sequence free, so it stands for sides^(maxExplodeExtra − m) sequences; the whole
+ * chain at the maximum stands for one.
+ */
+function dieDist(sides: number, explode: boolean): Dist {
+  if (!explode) return { lo: 1, w: new Array<bigint>(sides).fill(1n) };
+  const rolls = DICE_LIMITS.maxExplodeExtra + 1;
+  const s = BigInt(sides);
+  const w = new Array<bigint>(rolls * sides).fill(0n);
+  for (let m = 0; m < rolls; m++) {
+    const sequences = s ** BigInt(rolls - 1 - m);
+    for (let f = 1; f < sides; f++) w[m * sides + f - 1] = sequences;
+  }
+  w[rolls * sides - 1] = 1n;
+  return { lo: 1, w };
+}
+
+/**
+ * Sum of `count` plain dice with `sides` faces, by a sliding window, O(count × support). It counts
+ * exactly, so even the far tails are exact (all ones is one result of sides^count). A plain sum's
+ * counts read the same from either end, so each step runs the window to the middle and mirrors it.
  */
 function plainSumDist(count: number, sides: number, work: Work): Dist {
-  let cur: Dist = { lo: 0, p: Float64Array.of(1) };
-  if (((count * (count + 1)) / 2) * sides * sides <= DIRECT_SUM_WORK) {
-    const die = dieDist(sides, false);
-    for (let d = 0; d < count; d++) cur = convolve(cur, die, work);
-    return cur;
-  }
+  let cur: Dist = { lo: 0, w: [1n] };
   for (let d = 0; d < count; d++) {
-    const len = cur.p.length;
+    const len = cur.w.length;
+    const size = len + sides - 1;
     work.spend(len + sides);
-    const next = new Float64Array(len + sides - 1);
-    let window = 0;
-    for (let k = 0; k < next.length; k++) {
-      if (k < len) window += cur.p[k];
-      if (k >= sides) window -= cur.p[k - sides];
-      next[k] = Math.max(0, window) / sides;
+    const next = new Array<bigint>(size);
+    const half = Math.ceil(size / 2);
+    let window = 0n;
+    for (let k = 0; k < half; k++) {
+      if (k < len) window += cur.w[k];
+      if (k >= sides) window -= cur.w[k - sides];
+      next[k] = window;
     }
-    cur = { lo: cur.lo + 1, p: next };
+    for (let k = half; k < size; k++) next[k] = next[size - 1 - k];
+    cur = { lo: cur.lo + 1, w: next };
   }
   return cur;
 }
 
 /**
- * The sum of the `keep` highest (or lowest) of `count` independent dice with value table `die`.
+ * The sum of the `keep` highest (or lowest) of `count` independent dice with value counts `die`.
  * Walks the values from the kept end; the state is (dice placed so far, sum of kept dice), and
- * placing c dice on a value has weight C(remaining, c) × q^c, which is the multinomial law.
+ * placing c dice on a value counts C(remaining, c) × q^c results, which is the multinomial law.
  */
 function keepSumDist(die: Dist, count: number, keep: number, mode: "kh" | "kl", work: Work): Dist {
   const values: number[] = [];
-  for (let i = 0; i < die.p.length; i++) if (die.p[i] > 0) values.push(die.lo + i);
+  for (let i = 0; i < die.w.length; i++) if (die.w[i] > 0n) values.push(die.lo + i);
   if (mode === "kh") values.reverse();
   const top = values.reduce((a, v) => Math.max(a, v), 0);
   const width = keep * top + 1;
   work.spend(values.length * ((count + 1) * (count + 2) / 2) * width);
 
-  const binom: number[][] = [];
+  const binom: bigint[][] = [];
   for (let n = 0; n <= count; n++) {
     binom[n] = [];
-    for (let k = 0; k <= n; k++) binom[n][k] = k === 0 || k === n ? 1 : binom[n - 1][k - 1] + binom[n - 1][k];
+    for (let k = 0; k <= n; k++) binom[n][k] = k === 0 || k === n ? 1n : binom[n - 1][k - 1] + binom[n - 1][k];
   }
 
-  let cur = new Float64Array((count + 1) * width);
-  cur[0] = 1;
+  let cur = new Array<bigint>((count + 1) * width).fill(0n);
+  cur[0] = 1n;
   for (const v of values) {
-    const q = die.p[v - die.lo];
-    const pw: number[] = [1];
+    const q = die.w[v - die.lo];
+    const pw: bigint[] = [1n];
     for (let c = 1; c <= count; c++) pw[c] = pw[c - 1] * q;
-    const next = new Float64Array(cur.length);
+    const next = new Array<bigint>(cur.length).fill(0n);
     for (let j = 0; j <= count; j++) {
       for (let s = 0; s < width; s++) {
         const w = cur[j * width + s];
-        if (w === 0) continue;
+        if (w === 0n) continue;
         const room = Math.max(0, keep - j);
         for (let c = 0; c <= count - j; c++) {
           const kept = Math.min(c, room);
@@ -299,12 +327,11 @@ function keepSumDist(die: Dist, count: number, keep: number, mode: "kh" | "kl", 
     }
     cur = next;
   }
-  const p = cur.slice(count * width, (count + 1) * width);
-  return { lo: 0, p };
+  return { lo: 0, w: cur.slice(count * width, (count + 1) * width) };
 }
 
 function negate(d: Dist): Dist {
-  return { lo: -(d.lo + d.p.length - 1), p: Float64Array.from(d.p).reverse() };
+  return { lo: -(d.lo + d.w.length - 1), w: [...d.w].reverse() };
 }
 
 function groupDist(g: DiceGroup, work: Work): Dist {
@@ -315,40 +342,53 @@ function groupDist(g: DiceGroup, work: Work): Dist {
   } else if (!g.explode) {
     dist = plainSumDist(g.count, g.sides, work);
   } else {
-    dist = { lo: 0, p: Float64Array.of(1) };
+    dist = { lo: 0, w: [1n] };
     for (let i = 0; i < g.count; i++) dist = convolve(dist, die, work);
   }
   return g.sign === -1 ? negate(dist) : dist;
 }
 
-/** Drops zero tails, clamps float dust and renormalises so the table sums to 1. */
+/** The sum of every total times its count: the mean's numerator over `outcomes`. */
+function totalOf(min: number, counts: readonly bigint[]): bigint {
+  let total = 0n;
+  for (let i = 0; i < counts.length; i++) total += counts[i] * BigInt(min + i);
+  return total;
+}
+
+/** Drops the zero tails; each share and the mean are rounded once from their exact fractions. */
 function finish(dist: Dist): DiceDistribution {
   let first = 0;
-  let last = dist.p.length - 1;
-  while (first < last && dist.p[first] <= 0) first++;
-  while (last > first && dist.p[last] <= 0) last--;
-  const probs = Array.from(dist.p.subarray(first, last + 1), (x) => Math.max(0, x));
-  const sum = probs.reduce((a, b) => a + b, 0);
-  let mean = 0;
-  for (let i = 0; i < probs.length; i++) {
-    probs[i] /= sum;
-    mean += probs[i] * (dist.lo + first + i);
-  }
-  return { min: dist.lo + first, max: dist.lo + last, probs, mean };
+  let last = dist.w.length - 1;
+  while (first < last && dist.w[first] === 0n) first++;
+  while (last > first && dist.w[last] === 0n) last--;
+  const counts = dist.w.slice(first, last + 1);
+  const min = dist.lo + first;
+  const outcomes = counts.reduce((a, b) => a + b, 0n);
+  return { min, max: dist.lo + last, counts, outcomes, probs: counts.map((c) => share(c, outcomes)), mean: share(totalOf(min, counts), outcomes) };
 }
 
 /**
- * The exact probability of every total of a notation, including keep/drop and exploding dice
- * (with the same 21-face chain cap rollDice uses). Throws DiceError for invalid notation and for
- * expressions too large to count (DICE_LIMITS.maxExactWork), e.g. 100d1000kh50; rolling those is
- * still fine.
+ * The exact counts of every total of a notation, including keep/drop and exploding dice (with the
+ * same 21-face chain cap rollDice uses). Throws DiceError for invalid notation and for expressions
+ * too large to count (DICE_LIMITS.maxExactWork), e.g. 100d1000kh50; rolling those is still fine.
  */
 export function diceDistribution(notation: string): DiceDistribution {
   const parsed = parseDice(notation);
   const work = new Work();
-  let dist: Dist = { lo: parsed.flat, p: Float64Array.of(1) };
+  let dist: Dist = { lo: parsed.flat, w: [1n] };
   for (const g of parsed.groups) dist = convolve(dist, groupDist(g, work), work);
   return finish(dist);
+}
+
+/**
+ * The expected total rounded down, exactly: the dice's average as a passive score reads it (10 on
+ * a d20, 7 on 2d6, 0 on an opposed d20), never a float a hair below a whole number.
+ */
+export function meanFloor(d: DiceDistribution): number {
+  const total = totalOf(d.min, d.counts);
+  const q = total / d.outcomes;
+  // BigInt division truncates toward zero; a negative total with a remainder floors one lower.
+  return Number(total < 0n && q * d.outcomes !== total ? q - 1n : q);
 }
 
 // ───────────────────────────── the natural die, advantage, opposed rolls ─────────────────────────────
@@ -412,38 +452,39 @@ export function opposedDice(a: string, b: string): string {
 
 /**
  * The exact joint law of a notation's natural die and the rest of its total. The natural face and
- * the sum of the other terms plus the flat part are independent, so P(natural = n, total = t) is
- * `natural(n) × rest(t − sign·n)`. Null when the notation has no natural die.
+ * the sum of the other terms plus the flat part are independent, so the results with natural = n
+ * and total = t number `natural(n) × rest(t − sign·n)`, out of `natural.outcomes × rest.outcomes`.
+ * Null when the notation has no natural die.
  */
 export function naturalSplit(notation: string): { sign: 1 | -1; natural: DiceDistribution; rest: DiceDistribution } | null {
   const parsed = parseDice(notation);
   const die = naturalDie(parsed);
   if (!die) return null;
   const work = new Work();
-  let rest: Dist = { lo: parsed.flat, p: Float64Array.of(1) };
+  let rest: Dist = { lo: parsed.flat, w: [1n] };
   for (const g of parsed.groups.slice(1)) rest = convolve(rest, groupDist(g, work), work);
   return { sign: die.sign, natural: finish(groupDist({ ...die, sign: 1 }, work)), rest: finish(rest) };
 }
 
 /** P(total = t). */
 export function probEqual(d: DiceDistribution, t: number): number {
-  return t < d.min || t > d.max ? 0 : d.probs[t - d.min] ?? 0;
+  return t < d.min || t > d.max ? 0 : share(d.counts[t - d.min] ?? 0n, d.outcomes);
 }
 
-/** P(total >= t): the success chance of "roll at least t". */
+/** P(total >= t): the success chance of "roll at least t", counted, then rounded once. */
 export function probAtLeast(d: DiceDistribution, t: number): number {
   if (t <= d.min) return 1;
   if (t > d.max) return 0;
-  let s = 0;
-  for (let i = d.probs.length - 1; i >= t - d.min; i--) s += d.probs[i];
-  return Math.min(1, s);
+  let made = 0n;
+  for (let i = t - d.min; i < d.counts.length; i++) made += d.counts[i];
+  return share(made, d.outcomes);
 }
 
-/** P(total <= t). */
+/** P(total <= t), counted, then rounded once. */
 export function probAtMost(d: DiceDistribution, t: number): number {
   if (t >= d.max) return 1;
   if (t < d.min) return 0;
-  let s = 0;
-  for (let i = 0; i <= t - d.min; i++) s += d.probs[i];
-  return Math.min(1, s);
+  let made = 0n;
+  for (let i = 0; i <= t - d.min; i++) made += d.counts[i];
+  return share(made, d.outcomes);
 }

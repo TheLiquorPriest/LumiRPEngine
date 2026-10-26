@@ -10,7 +10,7 @@ import { isRecord, type JsonValue } from "../../src/shared/json";
 import { MAP_SCHEMA } from "../../src/shared/maps";
 import { checkSchema, pathText, type JsonPath, type Schema } from "../../src/shared/schema-check";
 import type { WorldDoc } from "../../src/shared/world";
-import { migrate, newWorld } from "../../src/studio-api";
+import { migrate, newWorld } from "../../src/cli/local-engine";
 
 // A JSON module's inferred type spells out every node, which `Schema` describes in general.
 const WORLD_SCHEMA = schemaJson as unknown as Schema;
@@ -94,5 +94,11 @@ describe("world schema", () => {
   test("a world's recall for minds may take any whole number of tokens, or have no limit", () => {
     for (const tokens of [20_000, 0, "none"]) expect(problems(withValue(world, ["minds"], { memory: { recall: { tokens } } }))).toEqual([]);
     for (const tokens of [-1, 2.5, "lots"]) expect(problems(withValue(world, ["minds"], { memory: { recall: { tokens } } })).map((p) => p.split(": ")[0])).toEqual(["minds.memory.recall.tokens"]);
+  });
+
+  test("a world's travel times: speeds by way and by vehicle class, and a trip's overheads", () => {
+    const settings = (travel: JsonValue): JsonValue => ({ display: "knowledge", grid: { movement: false, sightRadius: 3 }, travel });
+    expect(problems(withValue(world, ["mapSettings"], settings({ speeds: { walk: 4.5, road: 40 }, vehicleSpeeds: { atv_utility: 30 }, startMinutes: 2, parkMinutes: 0, fetchMinutes: 20 })))).toEqual([]);
+    expect(problems(withValue(world, ["mapSettings"], settings({ speeds: { walk: 0, flight: 800 } }))).map((p) => p.split(": ")[0])).toEqual(["mapSettings.travel.speeds.walk", "mapSettings.travel.speeds.flight"]);
   });
 });

@@ -125,6 +125,11 @@ export function timeFixRequest(time: string, chatId: ChatId): Req<"lre.fix"> {
   return { type: "lre.fix", chatId, time };
 }
 
+/** "Show a hint" on a quest sheet (DESIGN §10): the next hint earned at the row `track` (its id in the quest log) opened, with its Undo; the narrator is told only opened ones. */
+export function hintRequest(track: string, chatId: ChatId): Req<"lre.fix"> {
+  return { type: "lre.fix", chatId, hint: track };
+}
+
 /** A GM edit: the operations in order, applied all or none as one fix with its own Undo (DESIGN §7). */
 export function editRequest(chatId: ChatId, ops: EditOp[]): Req<"lre.edit"> {
   return { type: "lre.edit", chatId, ops };

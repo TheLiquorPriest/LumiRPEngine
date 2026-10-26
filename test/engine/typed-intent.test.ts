@@ -8,7 +8,7 @@ import { planTurn, postTurn } from "../../src/engine/turn";
 import { typedIntent } from "../../src/engine/typed-intent";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
-import { checkWorld, playtest } from "../../src/studio-api";
+import { checkWorld, playtest } from "../../src/cli/local-engine";
 
 const reg = createRegistry(ALL_PACKS);
 const portAlder = (): WorldDoc => (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("w", "Port Alder");
@@ -26,7 +26,7 @@ describe("typed intent (Playtest, no model)", () => {
     const run = playtest(portAlder(), ["I walk to the marina"]);
     const turn = run.turns[0];
     expect(turn?.notes).toContain("read as Go to");
-    expect(turn?.reply).toContain("You → Alder Harbor Marina");
+    expect(turn?.reply).toContain("You are now at Alder Harbor Marina");
     expect(turn?.reply).not.toMatch(/alder_harbor_marina|pov money detail/);
   });
 
@@ -95,7 +95,7 @@ describe("typed intent (Playtest, no model)", () => {
     const first = playtestTurn(reg, { plan: planTurn, post: postTurn }, world, start, "I walk down to Bluebird Coffee.", "run", 0);
     expect(placeOfEntity(first.state, world.pov)).toBe("bluebird_coffee");
     expect(first.turn.notes).toContain("read as Go to");
-    expect(first.turn.reply).toContain("You → Bluebird Coffee");
+    expect(first.turn.reply).toContain("You are now at Bluebird Coffee");
     const second = playtestTurn(reg, { plan: planTurn, post: postTurn }, world, first.state, "I walk over to Alder Market.", "run", 1);
     expect(placeOfEntity(second.state, world.pov)).toBe("alder_market");
     expect(second.turn.notes).toContain("read as Go to");

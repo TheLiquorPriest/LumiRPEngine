@@ -15,7 +15,7 @@
 // (`positions.ts`).
 
 import { FILING_STATUSES } from "../../../shared/finance";
-import type { JsonValue } from "../../../shared/json";
+import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
 import { cellIndex, findPath, gridMinutes, gridOf, SIGHT_MAX, standingGrid, type GridPath } from "../../../shared/grid";
 import { mapLint, mapSettingsOf } from "../../../shared/maps";
@@ -28,13 +28,15 @@ import { GRID_SPACE_FLOOR } from "../../../engine/registry-impl";
 import { acts, lifeOf, povLife } from "../../../engine/life";
 import { placeOfEntity, placeWithin } from "../../../engine/scope";
 import { relocate } from "../../../engine/relocate";
+import { placeSaid } from "../../../engine/place-names";
 import { PARTY_RELATION } from "../../../shared/party";
 import { observeCells } from "../../../engine/seen";
 import { canSeeEntity, canSeePlace, knownBySelector } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
-import { closedRoutes, goMinutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
+import { closedRoutes, goMinutes, nominalRoute, routeAt, vehicleTrips } from "./travel";
+import type { TravelPlan, VehicleTrip, VehicleTripAsk } from "../../../shared/travel";
 import { buildMapView } from "./view";
 import { placeLines, sceneLines } from "./feed";
 import { placeLoreLines } from "../../../engine/place-lore";
@@ -56,6 +58,8 @@ declare module "../../../engine/registry" {
     "space.route": RouteQuery;
     /** Whether `to` can be reached from `from` by any one travel mode (always below Space 2). */
     "space.reachable": (ctx: ReadContext, from: PlaceId, to: PlaceId) => boolean;
+    /** Vehicle trips from a driver and a vehicle to each of some places: fetching it, the drive, parking and the walk from it (DESIGN §9.1). */
+    "space.vehicle_trips": (ctx: ReadContext, ask: VehicleTripAsk, targets: readonly PlaceId[]) => Map<PlaceId, VehicleTrip>;
     /** Whether an event steps someone into a grid trigger's zone or onto its cell (rules, DESIGN §10). */
     "space.entered": (ctx: ReadContext, trigger: GridTrigger, e: LedgerEvent) => boolean;
   }
@@ -92,6 +96,24 @@ function gridLint(world: WorldDoc): LintIssue[] {
     const radius = isRecord(grid) ? grid.sightRadius : undefined;
     if (radius !== undefined && (typeof radius !== "number" || !Number.isInteger(radius) || radius < 0 || radius > SIGHT_MAX)) err("mapSettings.grid.sightRadius", `The sight radius is a whole number of cells from 0 to ${SIGHT_MAX}.`);
     if (raw.travelSimulation !== undefined && typeof raw.travelSimulation !== "boolean") err("mapSettings.travelSimulation", "The travel simulation is on (true) or off (false).");
+    const travel = raw.travel;
+    if (travel !== undefined && !isRecord(travel)) err("mapSettings.travel", "Travel times are an object: speeds, vehicleSpeeds, startMinutes, parkMinutes and fetchMinutes.");
+    else if (isRecord(travel)) {
+      const speed = (path: string, v: unknown): void => {
+        if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0)) err(path, "A speed is km/h, above 0.");
+      };
+      for (const [key, v] of Object.entries(isRecord(travel.speeds) ? travel.speeds : {})) {
+        if (!(MODES as readonly string[]).includes(key)) err(`mapSettings.travel.speeds.${key}`, `"${key}" isn't a way of travel: walk, road, offroad or water.`);
+        else speed(`mapSettings.travel.speeds.${key}`, v);
+      }
+      if (travel.speeds !== undefined && !isRecord(travel.speeds)) err("mapSettings.travel.speeds", "Speeds are km/h by way of travel: walk, road, offroad, water.");
+      if (travel.vehicleSpeeds !== undefined && !isRecord(travel.vehicleSpeeds)) err("mapSettings.travel.vehicleSpeeds", "Vehicle speeds are km/h by vehicle class.");
+      for (const [cls, v] of Object.entries(isRecord(travel.vehicleSpeeds) ? travel.vehicleSpeeds : {})) speed(`mapSettings.travel.vehicleSpeeds.${cls}`, v);
+      for (const key of ["startMinutes", "parkMinutes", "fetchMinutes"] as const) {
+        const v = travel[key];
+        if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v < 0)) err(`mapSettings.travel.${key}`, "Minutes are a number, 0 or more.");
+      }
+    }
   }
   const movement = mapSettingsOf(world).grid.movement;
   if (movement && world.realism.levels.space < GRID_SPACE_FLOOR) issues.push({ severity: "info", path: "mapSettings.grid.movement", code: "level_floor", message: `The realism defaults put space at ${world.realism.levels.space}; the grid system plays it at ${GRID_SPACE_FLOOR}, for positions.` });
@@ -196,6 +218,7 @@ export const spacePack: PackDef = {
     r.service("space.arrival", arrivalEvents);
     r.service("space.lay", layEvents);
     r.query("space.route", routeAt);
+    r.query("space.vehicle_trips", vehicleTrips);
     r.query("space.reachable", reachable);
     r.query("space.entered", entered);
 
@@ -317,12 +340,18 @@ export const spacePack: PackDef = {
 
     r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay) as unknown as JsonValue });
 
+    // A reply's move names its place by id, or by its name as the read was offered it: the place the
+    // POV can see by that name, the nearest when several share it (DESIGN §9.4).
+    const placeOf = (p: JsonObject, ctx: ReadContext): string => {
+      const said = typeof p.place === "string" ? p.place : "";
+      return placeSaid(ctx.registry, ctx.world, ctx.state, said) ?? said;
+    };
     r.proposal({
       type: "location",
       boundField: "ref",
       validate(p, ctx) {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
-        const place = typeof p.place === "string" ? p.place : "";
+        const place = placeOf(p, ctx);
         if (!own(ctx.state.entities, entity)) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
         if (!own(ctx.world.places, place)) return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
         // Someone who doesn't act walks nowhere: the body stays where it lies. What the POV knows decides
@@ -350,7 +379,7 @@ export const spacePack: PackDef = {
       // already are (the party brought them first).
       toEffects: (p, ctx) => {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
-        const to = typeof p.place === "string" ? p.place : "";
+        const to = placeOf(p, ctx);
         const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : null;
         return [{ type: "move", args: { entity, to, told: true, ...(activity !== null ? { activity } : {}) } }];
       },

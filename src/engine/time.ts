@@ -23,6 +23,7 @@ import { playerEventVisible, playerKnows } from "./player-events";
 import { canSeeField } from "./visibility";
 import { Working } from "./working";
 import { clampScale, clampThreshold, clampTick, clampUnitCap, TIME_LIMITS } from "./time-limits";
+import { fieldNoun, possessive } from "../shared/words";
 
 export const DEFAULT_SCENE_TYPE = "conversation";
 
@@ -689,9 +690,9 @@ export interface Montage {
   groups: { label: string; lines: string[] }[];
   /** Money in and out per POV-owned account over the interval. */
   money: { account: EntityId; label: string; in: number; out: number }[];
-  /** Net numeric changes on the POV and what it owns; a banded field is left to `bands`, which words it, and `money` says the delta is in minor units. */
+  /** Net numeric changes on the POV and what it owns; a banded field is left to `bands`, which words it, and `money` says the delta is in minor units. `label` is whose field and what it is ("Sam Rivera's fitness"). */
   changes: { entity: EntityId; field: string; label: string; delta: number; money: boolean }[];
-  /** Band crossings the POV can see (regard, sheets, needs). */
+  /** Band crossings the POV can see (regard, sheets, needs); `label` as `changes`' is. */
   bands: { entity: EntityId; field: string; label: string; from: string; to: string }[];
 }
 
@@ -763,7 +764,7 @@ export function buildMontage(reg: Registry, world: WorldDoc, before: Readonly<Wo
       const old = own(prev.fields, field);
       const from = bandOf(def.bands, typeof old === "number" ? old : 0)?.label ?? "";
       const to = bandOf(def.bands, v)?.label ?? "";
-      if (from !== to) bands.push({ entity: id, field, label: `${e.name} ${def.label ?? field}`, from, to });
+      if (from !== to) bands.push({ entity: id, field, label: `${possessive(e.name)} ${fieldNoun(def.label, field).noun}`, from, to });
     }
   }
   return {
@@ -774,7 +775,7 @@ export function buildMontage(reg: Registry, world: WorldDoc, before: Readonly<Wo
       .filter((c) => c.delta !== 0)
       .flatMap((c) => {
         const def = fieldDef(reg, world, own(after.entities, c.entity)?.kind ?? "", c.field);
-        return def?.bands ? [] : [{ ...c, label: `${own(after.entities, c.entity)?.name ?? c.entity} ${def?.label ?? c.field.replace(/_/g, " ")}`, money: def?.type === "money" }];
+        return def?.bands ? [] : [{ ...c, label: `${possessive(own(after.entities, c.entity)?.name ?? c.entity)} ${fieldNoun(def?.label, c.field).noun}`, money: def?.type === "money" }];
       }),
     bands,
   };

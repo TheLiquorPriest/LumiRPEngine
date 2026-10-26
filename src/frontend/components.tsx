@@ -145,6 +145,24 @@ export function Empty(props: { icon?: IconName; title?: ComponentChildren; actio
   );
 }
 
+/** A chat whose view never came (its sync failed: the engine's error, or no view within the Engine requests limit): why, and Try again. */
+export function NoView(props: { failed: string }) {
+  const { client } = useApp();
+  return (
+    <Empty
+      icon="alert"
+      title="No view of this chat from the engine"
+      action={
+        <Button icon="refresh" onClick={() => client.retry()}>
+          Try again
+        </Button>
+      }
+    >
+      {props.failed}
+    </Empty>
+  );
+}
+
 /**
  * The series each outcome is painted in: the engine's default outcomes (a DC's `success` and
  * `failure`) take the success and danger series, so no bar paints a failure green; other outcomes

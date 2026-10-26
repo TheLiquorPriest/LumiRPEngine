@@ -269,6 +269,19 @@ describe("a profile in an authored world", () => {
     expect([heroic.check, heroic.adjudged?.why, ap(hard)]).toEqual([null, "impossible", full]);
   });
 
+  test("Rest for the night refills the Action Points pushing a skill spent, as each new level does", () => {
+    const make = STARTER_WORLDS.modern_slice_of_life;
+    if (!make) throw new Error("no starter");
+    const world = applyProfile(make("s", "s"), PROFILES.modern, packKinds);
+    const w = new Working(reg, world, initialState(world, hashJson(world), reg));
+    const ap = (): unknown => read(world, w.state, world.pov, "action_points");
+    const full = ap();
+    expect(applyEffects(reg, w, [{ type: "add", args: { entity: world.pov, field: "action_points", delta: -3 } }], { bindings: { self: world.pov }, rng: createRng("spend") }).rejected).toEqual([]);
+    expect(ap()).toBe(Number(full) - 3);
+    const rest = resolveAction(reg, w, { action: "long_rest", params: {} }, createRng("rest"));
+    expect([rest.ok, ap()]).toEqual([true, full]);
+  });
+
   test("a push whose roll totals exactly 0 still spends its Action Point; one settled without a roll doesn't", () => {
     const delta = PROFILES.modern.actions?.push_skill?.outcomes.failure?.[0]?.args.delta;
     if (typeof delta !== "string" || !delta.startsWith("=")) throw new Error("no Action Point charge");

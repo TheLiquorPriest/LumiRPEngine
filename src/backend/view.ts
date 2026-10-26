@@ -1,9 +1,10 @@
 // The state view (ARCHITECTURE §4; DESIGN §12): everything the frontend renders for one chat,
 // computed from the fold. Pack panels come from the registry's views (POV-filtered by the packs),
 // drawn as the player chose to see the chat (the map's display); chips are the stored ones plus
-// those derived from records (Re-read edit, Retry, Keep report).
+// those derived from records (Re-read edit, Retry, Keep report) and the card for a turn kept from a
+// reply that failed.
 
-import type { ChatId, EntityId, PackId, PanelId } from "../shared/ids";
+import type { ChatId, EntityId, MessageId, PackId, PanelId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { formatMoney } from "../shared/world";
@@ -11,6 +12,7 @@ import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
 import { chatFeed, sourceOf, worldFeed } from "../engine/feed";
+import { compactSpan, paramLabel, spanText } from "../engine/action-words";
 import { sectionsOf } from "./book";
 import type { ActionDef, MapDisplay, WorldDoc } from "../shared/world";
 import { tableChoices } from "../shared/tables";
@@ -31,14 +33,15 @@ import { claimsOf, presetOf } from "../engine/realism";
 import { inferredOf, worldSkills } from "../engine/inferred";
 import { levelFloors, type Registry } from "../engine/registry-impl";
 import { actionOdds, companionCandidates, paramCandidates } from "../engine/resolve";
-import { isGone, kindIs, placeOfEntity } from "../engine/scope";
+import { isGone, kindIs, placeOfEntity, scopeEnv } from "../engine/scope";
 import { povLife } from "../engine/life";
 import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
-import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, storyLocked, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
 import { knownPlaceRefs } from "../engine/character";
 import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import type { StoredChip } from "./chips";
+import type { ReplyFailure } from "./ledger-io";
 
 /** The palette's timelapse action; its params are `{target, overrides}`. */
 export const TIMELAPSE_ACTION = "timelapse";
@@ -60,17 +63,6 @@ export function clockMinutes(events: readonly LedgerEvent[]): number {
   let m = 0;
   for (const e of events) if (e.type === "clock") m += e.minutes;
   return m;
-}
-
-/** A game-time span, compact: "45 min", "8 h 55 min", "3 d 4 h" (chip labels). */
-export function compactSpan(minutes: number): string {
-  const total = Math.max(0, Math.round(minutes));
-  if (total < 60) return `${total} min`;
-  const days = Math.floor(total / 1440);
-  const hours = Math.floor((total % 1440) / 60);
-  const rest = total % 60;
-  if (days > 0) return hours > 0 ? `${days} d ${hours} h` : `${days} d`;
-  return rest > 0 ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
 /**
@@ -163,67 +155,6 @@ function unavailable(failed: { code: string; reason: string } | null | undefined
   return failed.code === "requirement" ? "Not possible here and now" : failed.reason;
 }
 
-/** A param's label for a palette step: its own, else its ref kind's ("Person"), else its name in words ("Days"). */
-function paramLabel(action: ActionDef, name: string, world: WorldDoc, registry: Registry): string {
-  const def = action.params[name];
-  if (def?.label) return def.label;
-  const kind = def?.ref ? (world.kinds[def.ref] ?? registry.kinds.get(def.ref)) : undefined;
-  if (kind?.label) return kind.label;
-  const words = name.replace(/_/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-/**
- * An action's picks in words, as the palette names them ("Bluebird Coffee, with Danny Okafor"):
- * each place or person by name, a list of people after "with", an amount in the world's currency, a
- * number with its label, a table row, a stat or a quest by the label the palette and the quest log
- * give it, and other text as written. Never an id: a pick the player character may not know of (a
- * hidden place, someone it hasn't met) is left out, as is text naming a secret, and text written as
- * an id that names nothing the player has words for.
- */
-export function actionWords(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject): string {
-  const secrets = unrevealedSecrets(registry, world, state);
-  const nameOf = (value: JsonValue | undefined): string | null => {
-    if (typeof value !== "string" || value === "") return null;
-    const entity = own(state.entities, value);
-    if (entity) return povMayKnow(registry, world, state, value) ? entity.name : null;
-    const place = own(world.places, value);
-    if (place) return canSeePlace(registry, world, state, world.pov, value) ? place.name : null;
-    return null;
-  };
-  // A text pick as the palette and the quest log label it: a table row, a stat, a quest row (by the id its row goes by, a stand-in included).
-  const labelOf = (table: string | undefined, value: string): string | null => {
-    if (table !== undefined) return tableChoices(own(world.tables, table)).find((row) => row.key === value)?.label ?? null;
-    const ctx = registry.context(world, state);
-    const stat = (optionalQuery(ctx, "sheets.stats")?.(ctx) ?? []).find((s) => s.id === value);
-    if (stat) return stat.label;
-    for (const id of Object.keys(world.tracks)) {
-      const shown = playerTrack(registry, world, state, world.pov, id);
-      if (shown?.id === value) return shown.label;
-    }
-    if (hasOwn(state.entities, value) || hasOwn(world.places, value)) return nameOf(value);
-    // Written as an id (one word with `_` or `~`), it names nothing the player has words for.
-    return /^\S+$/.test(value) && /[_~]/.test(value) ? null : value;
-  };
-  const parts: string[] = [];
-  for (const [name, def] of Object.entries(action.params)) {
-    const value = params[name];
-    if (value === undefined || value === null || value === "") continue;
-    if (def.type === "ref") {
-      const named = nameOf(value);
-      if (named) parts.push(named);
-    } else if (def.type === "list" && def.ref !== undefined) {
-      const names = (Array.isArray(value) ? value : []).map(nameOf).filter((n): n is string => n !== null);
-      if (names.length > 0) parts.push(`with ${names.join(" and ")}`);
-    } else if (def.type === "money" && typeof value === "number") parts.push(formatMoney(value, world.currency));
-    else if (def.type === "number" && typeof value === "number") parts.push(`${value} ${paramLabel(action, name, world, registry).toLowerCase()}`);
-    else if (typeof value === "string") {
-      const text = labelOf(def.table, value);
-      if (text && findLeaks(text, secrets).length === 0) parts.push(text);
-    }
-  }
-  return parts.join(", ");
-}
 
 export function palette(world: WorldDoc, state: WorldState, registry: Registry): PaletteView {
   const actions = new Map<string, ActionDef>();
@@ -231,10 +162,13 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
   for (const [id, a] of Object.entries(world.actions)) actions.set(id, a);
   const entries: PaletteEntry[] = [];
   const ctx = registry.context(world, state);
+  const env = scopeEnv({ reg: registry, ctx, bindings: { self: world.pov, actor: world.pov } });
   const retry = policyOf(world, state).retry;
   for (const action of actions.values()) {
     // Combat actions are the combat pack's Combat tab (below), and only where the world's ruleset has combat.
     if (action.id === TIMELAPSE_ACTION || action.combat) continue;
+    // A step the story hasn't come to isn't an option yet (DESIGN §11): listed, even locked, it would tell what lies ahead.
+    if (storyLocked(env, action)) continue;
     const refParam = Object.entries(action.params).find(([, p]) => p.type === "ref" && !p.optional)?.[0];
     const amountParam = Object.entries(action.params).find(([, p]) => p.type === "money")?.[0];
     const options: PaletteEntry["options"] = [];
@@ -504,13 +438,6 @@ export function recentLines(core: LedgerCore, observed: readonly ChainMessage[],
     .map((n) => n.text);
 }
 
-/** A game-time span in words: "45 min", "2.5 hours", "30 days". */
-export function spanText(minutes: number): string {
-  if (minutes >= 1440) return `${Math.round((minutes / 1440) * 10) / 10} ${minutes === 1440 ? "day" : "days"}`;
-  if (minutes >= 60) return `${Math.round((minutes / 60) * 10) / 10} ${minutes === 60 ? "hour" : "hours"}`;
-  return `${minutes} min`;
-}
-
 /**
  * Overdue use grants the POV is party to (DESIGN §8 Gear: "on expiry the thing stays where it is, is
  * flagged overdue"): lent out, with Take back; or borrowed, with Give back. From the head state.
@@ -607,6 +534,28 @@ export function playerDrops(registry: Registry, world: WorldDoc, state: Readonly
 /** What a refused held write was, for its notice (post entries are worded by their kind). */
 const REFUSED_WHAT: Record<Exclude<HeldWrite["kind"], "post">, string> = { marker: "A settings change", keep: "Keep", discard: "Discard", reread: "A re-read", retry_read: "A re-read", undo: "An undo" };
 
+/**
+ * The card for a turn kept from a reply that failed (DESIGN §5.1), on the chat's last message while
+ * the turn lasts: Retry the reply is Lumiverse's Regenerate, which takes the turn as it is; Re-run
+ * the engine drops it first, so the engine runs again. The provider's error stays in Diagnostics.
+ */
+export function replyFailedChip(turn: string, failed: ReplyFailure, messageId: MessageId): Chip {
+  const why = failed === "error" ? " Diagnostics says why it failed." : "";
+  return {
+    id: `reply_failed:${turn}`,
+    kind: "reply_failed",
+    messageId,
+    label: failed === "error" ? "The reply failed" : "The reply came back empty",
+    detail: `The engine's work for this turn is kept. Retry the reply writes it again from that same turn: the same reading, plan, minds and sections, with no engine calls first. Re-run the engine runs the turn again, then the reply.${why}`,
+    actions: [
+      { id: "regenerate", label: "Retry the reply", style: "primary" },
+      { id: "rerun", label: "Re-run the engine" },
+      { id: "diagnostics", label: "Diagnostics" },
+    ],
+    expires: "next_send",
+  };
+}
+
 /** Chips derived from the records: Re-read edit, Retry read, Retry (empty reply), degraded, Keep report, what changed, elapsed, overdue, a correction's Undo, a refused write's notice. */
 function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepReport: readonly KeepLine[], core: LedgerCore, registry: Registry, world: WorldDoc): Chip[] {
   const chips: Chip[] = [];
@@ -640,8 +589,10 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     // doings are never worded for the player, and a mind or a section's settings has no player line.
     for (const fix of applied.fixes) {
       const fixed = fixLines(registry, world, state, fix.events);
-      // A mechanical action of the player's (DESIGN §11) is named as theirs, never as a correction.
-      chips.push({ id: fixChip(m.id, m.swipeId, fix.seq), kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), detail: fixed.length > 0 ? fixed.join(" · ") : unseenFixLine(registry, world, state, fix.events), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+      // A mechanical action of the player's (DESIGN §11), or a hint they opened, is named as theirs,
+      // never as a correction: its label says what they did, so nothing they can't see is summed up.
+      const detail = fixed.length > 0 ? fixed.join(" · ") : fix.by ? null : unseenFixLine(registry, world, state, fix.events);
+      chips.push({ id: fixChip(m.id, m.swipeId, fix.seq), kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), ...(detail !== null ? { detail } : {}), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
     }
     chips.push(...overdueChips(m.id, ctx, state, world));
   });

@@ -13,9 +13,9 @@ import { checkView, policyFor } from "../../../engine/adjudication";
 import { labelOf, optionalQuery, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { actionOdds, paramCandidates } from "../../../engine/resolve";
-import { isGone } from "../../../engine/scope";
+import { isGone, scopeEnv } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
-import { canSeeEntity } from "../../../engine/visibility";
+import { canSeeEntity, storyLocked } from "../../../engine/visibility";
 import { combatActions, hpSeen, targetParam } from "./flow";
 import { budgetCount, DOWN_CONDITION, encounterOf, fighterOf, povLeft, rulesOf, standing, type Encounter, type Side } from "./model";
 
@@ -86,16 +86,18 @@ export function fightOffers(world: Pick<WorldDoc, "pov">, state: Readonly<WorldS
  * The POV's combat actions (DESIGN §11), grouped "combat" for the palette: in a fight, each one but
  * a starting one, against each standing participant the POV can see (or none); outside a fight,
  * the ones that start one, against whoever the action's own filters offer. An action the fight's
- * state rules out (`fightOffers`: a start in a fight, an attack outside one) isn't listed.
+ * state rules out (`fightOffers`: a start in a fight, an attack outside one) isn't listed, nor one
+ * that is a step the story hasn't come to (`storyLocked`), as anywhere actions are listed.
  */
 export function combatEntries(ctx: ReadContext): PaletteEntry[] {
   const found = encounterOf(ctx.state);
   // A fight the POV has left is over for it: the tab offers what it offers outside one.
   const enc = found && !povLeft(ctx.state, ctx.world, found) ? found : null;
+  const env = scopeEnv({ reg: ctx.registry, ctx, bindings: { self: ctx.world.pov, actor: ctx.world.pov } });
   const entries: PaletteEntry[] = [];
   for (const action of combatActions(ctx.registry, ctx.world)) {
     const param = targetParam(action);
-    if (!fightOffers(ctx.world, ctx.state, action) || param === undefined) continue;
+    if (!fightOffers(ctx.world, ctx.state, action) || param === undefined || storyLocked(env, action)) continue;
     const targets = param === null ? [null] : enc ? enc.order.filter((f) => f.id !== ctx.world.pov && standing(ctx, enc, f) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, f.id)).map((f) => f.id) : paramCandidates(ctx.registry, ctx.world, ctx.state, action, param).slice(0, 24);
     const options = targets.map((t) => optionOf(ctx, action, param !== null && t !== null ? { [param]: t } : {}, t !== null ? labelOf(ctx, t) : action.label));
     if (options.length > 0) entries.push({ action: action.id, label: action.label, group: "combat", options });

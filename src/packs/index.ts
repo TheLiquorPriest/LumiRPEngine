@@ -1,6 +1,6 @@
 // Every pack core, in registration order (requirements first), and the starter worlds.
 // Zone `pack-index`: the one module that may import every pack's core by value; the backend,
-// worker and studio build registries from ALL_PACKS (the engine pack always first).
+// worker and the command line's local engine build registries from ALL_PACKS (the engine pack always first).
 
 import type { DataTable } from "../shared/tables";
 import type { PackDef } from "../engine/registry";

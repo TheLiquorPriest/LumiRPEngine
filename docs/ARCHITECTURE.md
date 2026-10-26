@@ -14,19 +14,18 @@ This is the contract between the modules. Behavior is specified in [DESIGN.md](D
 | `schemas/lre-world-v1.schema.json` | The published JSON Schema of a whole world document, written by hand from `shared/world.ts`; its `maps` refer to the map schema by `$id`. `test/shared/world-schema.test.ts` holds it to the starters and the preview world |
 | `src/shared/schema-check.ts` | A small JSON Schema reader (the keywords the published schemas use, and `$ref` to another schema by its `$id`) with plain-language problems at JSON paths |
 | `src/shared/maps.ts` | Maps: the schema check, the compiler (`compileMaps`: a map's places, grid and routes, marked as its own), the map lint, the JSON layout and the templates |
+| `src/shared/travel.ts` | Travel plans and vehicle trips as the Space pack's route and trip queries answer them, and a trip's parts as its Getting there row tells them |
 | `src/shared/tables.ts` | Pinned data tables and the build-time mapping |
 | `src/shared/ledger.ts` | Events, `Rec`, `post` entries, markers, `MessageLedger`, `ChatRun`, the journal, fold outputs |
 | `src/shared/state-view.ts` | The state view the frontend renders |
 | `src/shared/settings.ts` | User settings, the D4 cold-start extraction modes and per-connection learning (`ExtractionLearning`, `userStorage/extraction-learning.json`) |
 | `src/shared/protocol.ts` | Frontend ↔ backend messages |
-| `src/shared/studio-bridge.ts` | The Studio bridge ([STUDIO.md](STUDIO.md#the-studio-bridge)): endpoint names, payloads, the offer and the window events LumiRPEngine Studio shares |
 | `src/engine/state.ts` | The folded `WorldState` |
 | `src/engine/registry.ts` | `PackDef`, `CoreRegistry` and the pure contexts packs receive |
 | `src/engine/steps.ts` | `StepPort` and the model-step shapes |
 | `src/frontend/registry.ts` | `UiPackDef`, `UiRegistry`, panel, editor, chip and proposal-preview props |
 | `src/backend/host.ts` | `HostPort`, the only door to Lumiverse, with the host's observed event payloads |
 | `src/spindle-augment.ts` | Local types where the host differs from `lumiverse-spindle-types` 0.6.49 |
-| `src/studio-api.ts` | The studio seam ([STUDIO.md](STUDIO.md)) |
 
 Modules adapted from Warp (D1; credited in `NOTICE`):
 
@@ -49,11 +48,11 @@ Modules adapted from Warp (D1; credited in `NOTICE`):
 | backend | `src/backend/*` | engine, shared, pack cores, `spindle-augment` (type) | `lumiverse-spindle-types` (type) |
 | worker | `src/worker/*` | engine, shared, pack cores | `lumiverse-spindle-types` (type) |
 | frontend | `src/frontend/*` | shared, pack uis, frontend, `spindle-augment` (type) | `preact`, `preact/hooks`, `lumiverse-spindle-types` (type) |
-| studio | `src/studio-api.ts` | engine, shared, pack cores | none |
+| cli | `src/cli/*` | engine, shared, the pack index, cli | none; only `src/cli/main.ts` uses `node:` modules |
 | entries | `src/backend.ts`, `src/frontend.ts`, `src/worker/*-lane.ts` | their zone, shared | as their zone |
 
 Rules, all enforced by `test/boundaries.test.ts`:
-- **Pure zones** (shared, engine, pack cores, studio) import no packages and no `node:`/`bun:` modules. Randomness comes only from an `Rng` passed in; time only from game minutes.
+- **Pure zones** (shared, engine, pack cores) import no packages and no `node:`/`bun:` modules. Randomness comes only from an `Rng` passed in; time only from game minutes.
 - **The `spindle` global** is touched only in `src/backend.ts` and `src/backend/spindle-host.ts`. Everything else in the backend talks to `HostPort`.
 - **Packs** never import another pack's internals. Cross-pack behavior goes through registered services and queries (§5).
 - **Nothing** in `src/` imports `data-src/` (the raw table sources) or any local reference copy.
@@ -71,7 +70,7 @@ Engine layout (pure):
 - `engine/gm-view.ts`: the GM view's world part (`buildGmWorld`): every entity, removed and spawned ones included, with its fields, relations, placement, levels and designed sheet; places; tracks with their truths; relation types.
 - `engine/lore.ts`: the lore search RPEngine's helpers read (DESIGN §5.4): `loreSearch`, `loreGet`, `loreList` and `readableLore`, ranked deterministically over the folded state and the world, with snippets cut by the caller's token counter and visibility enforced inside (a secret's audience and gate, `known_by`, the GM); `visibility.ts` adds `loreGateReader` and `unrevealedSecrets`, the leak check's list of unrevealed truths and gated secret lore.
 - `engine/scope.ts`: the formula environment (bindings, `pov`, `here`, stages, levels, the clock, entities and places by id), the engine's own formula functions with their parameters (`BUILTIN_FUNCTIONS`), `formulaFunctions` (every function a formula may call, the expression editor's list) and the evaluation of effect arguments.
-- `engine/checks.ts`, `engine/ruleset.ts`, `engine/ruleset-lint.ts`: the one check mechanism (a check made ready from the state before the roll, its exact odds, the roll and `roll.*`); progression and the designed sheet (`buildEntitySheet`); the lint of the ruleset primitives (`roll()` outside effect arguments, table reads, checks, pools, progressions and the sheet).
+- `engine/checks.ts`, `engine/ruleset.ts`, `engine/ruleset-lint.ts`: the one check mechanism (a check made ready from the state before the roll, its outcomes counted exactly over the dice's equally likely results (`checkCounts`) and the odds shown from them, the roll and `roll.*`); progression (a level following its XP, `levelProgression`) and the designed sheet (`buildEntitySheet`); the lint of the ruleset primitives (`roll()` outside effect arguments, table reads, checks, pools, progressions, levels their XP doesn't reach, and the sheet).
 - `shared/profiles/`: the ruleset profiles as data (`modern.ts`, `classic.ts`, `fifth.ts`, `custom.ts`, built from `parts.ts`) and `planProfile` / `applyProfile`, which the backend (`lre.editor profile`) and Build's picker share, with the packs' kinds passed in as data.
 - `engine/selector.ts`, `engine/relations.ts`: selectors and the taxonomy reads behind them; relation integrity (kinds, cardinality, symmetric and inverse pairs kept two-sided) and its lint.
 - `engine/calendar.ts`: calendar arithmetic over game minutes: dates, day parts, holidays, time zones and the next time of day.
@@ -79,6 +78,7 @@ Engine layout (pure):
 - `engine/world-state.ts`: the state a chat starts from (`initialState`): relations completed two-sided, things laid in their cells, the POV on its cell.
 - `engine/upgrade.ts`, `engine/touched.ts`: the Upgrade merge, a deterministic fold step of the `migrate` marker with the owner's picks; and the touched record of what play wrote, which sets each change's default pick.
 - `engine/engine-pack.ts`: the built-in `engine` pack: bookkeeping events (rule firings, signals, notes, rolled checks, adjudged attempts, observations), GM edits of tier, agent flag and levels, the `knows` and `spawn` channels and the taxonomy formulas.
+- `engine/place-names.ts`: places as a reply's read names them (DESIGN §9.4): the places `extract` is offered by name (`placeMenu`: those the reply and the player's message name, then the POV's place and the places holding it, then the rest nearest first) and the one place a name given back stands for (`placeSaid`, the nearest when several share it); the `location` channel, the read's `where` and the `knows` channel's place names compare names its way.
 - `engine/pack-kit.ts`: the small pure readers pack cores share: typed values from JSON fields and table rows, optional services, labels.
 
 Backend layout:
@@ -101,7 +101,6 @@ Backend layout:
 - `backend/start-markers.ts`: a new chat's starting markers (the revision, every domain level and band cap, every time control and the adjudication policy), written with the first record that holds events.
 - `backend/upgrade-preview.ts`: the Upgrade preview (`lre.marker` with `preview`): the plan the fold would apply, entity by entity, each change with its default pick and why, and `secret` on the rows, changes and track lines that would give a secret away, for Settings' spoiler gate.
 - `backend/chat-prefs.ts`: the player's choices for how a chat looks (`prefs.json`: the map display), kept beside the chat and out of its ledger.
-- `backend/studio.ts`: the Studio bridge's engine side: per-user shared RPC endpoints only LumiRPEngine Studio may read (the worlds, each world's head and revisions, the world chats' summaries from what their views were pushed), the read of the Studio's offer, and the offers installed (`studio/installed.json`).
 
 Shared helpers (pure, beside the contract files):
 - `shared/grid.ts`: cells, A* with a hard cap, walking minutes, line of sight, and where someone stands on a grid.
@@ -109,10 +108,12 @@ Shared helpers (pure, beside the contract files):
 - `shared/money.ts`: money as people type it in a world's currency (`parseMoneyInput`, `formatMoneyInput`), read by `frontend/money-input.tsx`, the one input every typed amount goes through.
 - `shared/macros.ts`: the host's macro hazards, and neutralizing everything the engine inserts.
 - `shared/steps.ts`: the step vocabulary: signals, template placeholders and the outputs each purpose may declare.
+- `shared/words.ts`: how a change reads in a sentence (DESIGN §7): a field's noun and unit from its label (`fieldNoun`), a possessive, a list of words, and a section's settings in a chat (`feedSentence`), for the engine's event lines, the packs' describers and the GM view's notices alike.
 
 Frontend layout:
-- `frontend/setup.tsx`, `frontend/app.ts`, `frontend/store.ts`: the entry (protocol client, UI registry, drawer, HUD, chips, palette, overlays, the `lre-state-v1` announcement), the app object every Preact tree shares, and the small observable store for UI state.
-- `frontend/protocol-client.ts`, `frontend/delta.ts`, `frontend/requests.ts`, `frontend/decode.ts`: requests and the state view (a snapshot, then copy-on-write deltas, resync on a gap), one request per interaction, and defensive readers for panel view models.
+- `frontend/setup.tsx`, `frontend/app.ts`, `frontend/store.ts`: the entry (protocol client, UI registry, drawer, HUD, chips, palette, overlays), the app object every Preact tree shares, and the small observable store for UI state.
+- `frontend/protocol-client.ts`, `frontend/delta.ts`, `frontend/requests.ts`, `frontend/decode.ts`: requests and the state view (a snapshot, then copy-on-write deltas, resync on a gap; a hello or resync lasts until its view, and `retry` asks again), one request per interaction, and defensive readers for panel view models.
+- `frontend/reconnect.ts`, `frontend/restart.ts`: when a page asks the engine again (Lumiverse acknowledged its socket, or its engine started again), and how a page starts a reply the engine prepared (claim, then Lumiverse's Regenerate or Continue, once).
 - `frontend/ui-registry.ts`, `frontend/packs.ts`: the `UiRegistry` implementation, and every UI pack in registration order.
 - `frontend/drawer.tsx` and its sections: `frontend/play/*` (the running chat: Scene, Journal with Save to lore, Context, and the GM view with its editor), `frontend/settings/*` (model use and steps, realism, checks, Pins and upgrade with the Upgrade preview) and `frontend/build/*` (worlds, the form descriptors and the schema-driven form, the draft and the forms held over its changes, Problems, jobs, and the editors for expressions, effect arguments, selectors, classifications, tiers, data tables, lore, the lookup table, and the ruleset with the Sheet Designer).
 - `frontend/hud.tsx`, `frontend/hud-float.ts`, `frontend/fix-editor.tsx`, `frontend/money-input.tsx`: the HUD pill and its geometry across layouts, the ✎ fix editor, and the money input.
@@ -128,7 +129,7 @@ Space pack layout (`packs/space`): `core/travel.ts` (routes and A*), `core/map-s
 
 ### 3.1 World document (`lre-world-v1`, `shared/world.ts`)
 
-One JSON document per revision; the revision id is its `hashJson`. Collections are keyed by id: `packs` (each `{version, config}`), `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `lore`, `classifications`, `tiers`. Parts: `calendar`, `realism`, `time`, `pins`, `start`, `currency`, `loreIndex` (the lore lookup table: `terms` and `topics`), and the optional `ruleset` and `mapSettings`. Scalars: `format`, `id`, `name`, `engineVersion`, `pov`, `seedMode`, `lenientPricing`, the optional `spawnTier` and `spawnCap`, and `suppressed`. `schemas/lre-world-v1.schema.json` describes every part; the studio's `validate` checks the collections and parts before anything reads them.
+One JSON document per revision; the revision id is its `hashJson`. Collections are keyed by id: `packs` (each `{version, config}`), `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `lore`, `classifications`, `tiers`. Parts: `calendar`, `realism`, `time`, `pins`, `start`, `currency`, `loreIndex` (the lore lookup table: `terms` and `topics`), and the optional `ruleset` and `mapSettings`. Scalars: `format`, `id`, `name`, `engineVersion`, `pov`, `seedMode`, `lenientPricing`, the optional `spawnTier` and `spawnCap`, and `suppressed`. `schemas/lre-world-v1.schema.json` describes every part; the engine's shape checks (`shapeIssues`) check the collections and parts before anything reads them.
 
 - **Maps** (`lre-map-v1`) are the source of truth for the places, grids and routes they draw. `migrateWorld` compiles them whenever a document is read (`shared/maps.ts`), clearing what an earlier compile made (items marked `map`, and a scope's link to a grid a map made) and making it again, so the compiled items stored in a revision or an export always match their maps. Build's editors show them read-only and `lre.editor` refuses writes to them.
 - **Formulas** are expression-language strings (`Expr`); **dice** are notation strings.
@@ -248,15 +249,15 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.world` | `list` \| `get` \| `create` \| `delete` \| `commit{note?, version?}` \| `import` \| `export` \| `lint` \| `attach` \| `upgrade{chatId, to, merge?}` \| `sheet{worldId, ruleset, entity?}` \| `templates` \| `chats{worldId?, chatId?}` | `{worlds?, world?, revision?, lint?, file?, history?, pending?, packKinds?, packRelations?, functions?, sheet?, templates?, chats?}`; `get` adds the world's `history` (from `history.json`), the packs' kinds and relation types and `functions`, every function a formula may call outside an effect argument (the expression editor's list); `commit` notes the new head in `history.json` (who: `build`, or `agent` for an outside client's session, and the `note`), and refuses a `version` the working copy has moved past and a draft begun on an earlier head; `upgrade` writes the `migrate` marker, with `merge` the owner's picks for the definition merge (DESIGN §4.3), and says `pending` when the chat is mid-turn; `sheet` is the Sheet Designer's preview, the draft with the unsaved ruleset read on the POV (or `entity`); `templates` lists the starters `create` takes; `chats` lists the chats of the user's worlds (or one world's, or one chat), each at the revision it plays now and whether that is behind the head, or with `revision: null` and the `reason` when its ledger can't be read |
 | `lre.job` | `start{kind, worldId, input}` \| `cancel{jobId}` \| `list{worldId}` \| `dismiss{jobId}` | `{jobId}`; `list`: `{jobs}` (`JobSummary[]`, oldest first). Updates arrive as `lre.job.update {jobId, kind, status, progress, message?, result?}` |
 | `lre.lore` | `drift{worldId, id?}` \| `save{chatId, text?}` | `drift`: `{drift}`, the draft's book-sourced entries whose book entry changed (with its text and hash now) or is gone; `save`: `{worldId, id}` of the lore entry saved to the draft of the chat's world |
-| `lre.studio` | `offer` \| `install{offerId}` | `offer`: `{offer}`, LumiRPEngine Studio's offer as Build reviews it (counts, lint, macros, what blocks it), or `{offer: null, message}`; nothing is installed. `install`: `{installed, lint}`, the reviewed offer as a new world, or as the next revision of its world under the world's id, with its macros to review |
 | `lre.ui` | `close_drawer` | `{done}`; the frontend has no API to close the drawer, so the backend asks the host (the map opening on a narrow viewport) |
 
-**State push.** The backend keeps a push counter `rev` per (user, chat).
-- On `hello`, `resync` and chat open it sends `lre.state.snapshot {chatId, rev, view}`.
+**State push.** The backend keeps a push counter `rev` per (user, chat), shared by all of the user's pages.
+- On `hello`, `resync` and chat open it sends `lre.state.snapshot {chatId, rev, view}` to that page at once: the last view pushed, at its `rev`, which the other pages' deltas build on too, then a delta with what changed since. A chat that has pushed nothing yet builds its view first. The answer, the snapshot, the activity line and a waiting reply's ask go out before the chat's restart recovery and sync, which wait on its queue behind a turn's step.
 - After a change it sends `lre.state.delta {chatId, base, rev, ops}`, where ops set or delete values at paths.
 - A frontend whose `rev` ≠ `base` discards the delta and sends `lre.state.resync`.
 - Pushes are coalesced per chat.
-- `lre.activity {chatId, activity}` is the chat's activity line (DESIGN §6.9): pushed as a turn's steps and model calls start and end, and after each hello; `activity` is `{chatId, turn, state: running | failed, label, since}` or null when idle.
+- A frontend's hello or resync lasts until a view of its chat arrives, not just its answer: Lumiverse drops what a page sends while its socket is down, before it has authenticated the socket, and while the worker restarts, and a view that failed to build or went to a dropped socket never comes. It ends with the view, with an `lre.error` naming it (even after its answer), or at the Engine requests limit; the page then shows why with Try again (`SyncState.failed`). The page asks again, even while one waits, when Lumiverse acknowledges its socket (the `CONNECTED` naming the user, not the one a socket emits as it opens), when its own worker starts again (`SPINDLE_EXTENSION_LOADED` naming its installation), when it comes back into view or online, and on Try again: a hello while none was answered and no view came, else a resync.
+- `lre.activity {chatId, activity}` is the chat's activity line (DESIGN §6.9): pushed as a turn's steps and model calls start and end, and after each hello and resync; `activity` is `{chatId, turn, state: running | failed, label, since}` or null when idle.
 
 **Errors.** `lre.error {reqId | null, code, message, lint?}`. Codes:
 - `bad_request`, `not_found`, `not_world_chat`;
@@ -323,7 +324,7 @@ Raw sources in `data-src/us/*.json` are never imported. `scripts/tables/build.ts
 
 - **Conventions carried over:** money is integer cents; percentages are `pct` units; bands are `{min, typical, max}`; every source table keeps `approximate: true` and its `basis` in `source`.
 - **Regional scaling** (`cost_of_living_multiplier`) is applied by the economy pack at pricing time, never baked into rows.
-- **World creation:** the starter templates carry every enabled pack's default tables (`scripts/templates/build.ts` copies `defaultTables()` into each) and record `pins.tables[id] = revision`. A Blank world (`blankWorld`) and the studio's `newWorld` start with no tables: tables are read only from the world document, so a world that needs one adds it, as a recipe's fragment does, or starts from a template. Authors may edit their copies; edits produce new revisions.
+- **World creation:** the starter templates carry every enabled pack's default tables (`scripts/templates/build.ts` copies `defaultTables()` into each) and record `pins.tables[id] = revision`. A Blank world (`blankWorld`) and the command line's `newWorld` start with no tables: tables are read only from the world document, so a world that needs one adds it, as a recipe's fragment does, or starts from a template. Authors may edit their copies; edits produce new revisions.
 
 ## 7. Host port and fake host (`backend/host.ts`)
 
@@ -339,10 +340,7 @@ Raw sources in `data-src/us/*.json` are never imported. `scripts/tables/build.ts
 - the active preset and the default connection;
 - Lumiverse's MCP server profiles, read only: whether `mcp_servers` is granted, the stdio profiles by id and name, and each one's connection and the tools Lumiverse's client holds for it (`backend/lumiverse-mcp.ts` matches lumirpengine's; DESIGN §23);
 - the background lane's child process (spawn, messages, lifecycle);
-- frontend messaging, closing the drawer, and logging;
-- the shared RPC pool: serving this extension's endpoints (with the reader's id and a read policy) and reading another extension's.
-
-`test/support/fake-rpc.ts` plays the host's pool for both extensions: endpoint names checked as the host checks them, a read of an unregistered endpoint rejected, the read policy's permissions held by both sides, and every value structured-cloned to the reader.
+- frontend messaging, closing the drawer, and logging.
 
 Event payloads are exactly those the host emits (DESIGN §14). `userId` arrives as the handler's second argument.
 

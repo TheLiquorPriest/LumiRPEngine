@@ -10,6 +10,7 @@ import { neutralizeMacros } from "../shared/macros";
 import type { JobProposal, WorldCollection } from "../shared/protocol";
 import type { DataTable } from "../shared/tables";
 import { spawnTierOf, tierOf, tiersInOrder } from "../shared/tiers";
+import { overlayKind } from "../shared/world";
 import type { FieldDef, KindDef, WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 
@@ -40,9 +41,12 @@ export const PROPOSAL_STRICT_RULES = [
   "confidence is 0..1: 0.9+ only when the text states it outright; add a short note when you are unsure.",
 ].join("\n- ");
 
+/** A kind as the world plays it: its own over the pack's of the same id (`overlayKind`), else whichever defines it. */
 function kindOf(world: WorldDoc, registry: Registry, id: string): KindDef | undefined {
   // Own keys only: a proposed "constructor", "__proto__" or "toString" is no kind.
-  return (hasOwn(world.kinds, id) ? world.kinds[id] : undefined) ?? registry.kinds.get(id);
+  const mine = hasOwn(world.kinds, id) ? world.kinds[id] : undefined;
+  const pack = registry.kinds.get(id);
+  return mine && pack ? overlayKind(pack, mine) : (mine ?? pack);
 }
 
 /** A kind's fields, inherited ones included (nearest definition wins). */
@@ -157,22 +161,32 @@ function words(text: string): string[] {
  * id and its title or name; ties go to the row id first in order. Null when no word is shared.
  */
 export function matchRow(table: DataTable, text: string): string | null {
+  return matchRowIn([table], text);
+}
+
+/** `matchRow` over several tables at once: a tie goes to the earlier table, then to the row id first in order. */
+function matchRowIn(tables: readonly DataTable[], text: string): string | null {
   const wanted = new Set(words(text));
   if (wanted.size === 0) return null;
   let best: string | null = null;
   let score = 0;
-  for (const id of Object.keys(table.rows).sort()) {
-    const row = table.rows[id] ?? {};
-    const label = [row.title, row.name, row.label].find((v): v is string => typeof v === "string") ?? "";
-    const have = new Set([...words(id.replace(/_/g, " ")), ...words(label)]);
-    const shared = [...wanted].filter((w) => have.has(w)).length;
-    if (shared > score) {
-      best = id;
-      score = shared;
+  for (const table of tables) {
+    for (const id of Object.keys(table.rows).sort()) {
+      const row = table.rows[id] ?? {};
+      const label = [row.title, row.name, row.label].find((v): v is string => typeof v === "string") ?? "";
+      const have = new Set([...words(id.replace(/_/g, " ")), ...words(label)]);
+      const shared = [...wanted].filter((w) => have.has(w)).length;
+      if (shared > score) {
+        best = id;
+        score = shared;
+      }
     }
   }
   return best;
 }
+
+/** The gear tables, which say what a thing is (its weight, its slot, whether it is a part built into a vehicle), before the price catalog says what it costs. */
+const THING_TABLES = ["gear.items", "gear.containers", "gear.kits"] as const;
 
 /** Proposal checks for Import: resolving a proposal's cited source to a `bookId/entryId` back-link. */
 export interface ImportSources {
@@ -353,9 +367,12 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
       for (const [f, def] of Object.entries(defs)) {
         const table = def.table && hasOwn(world.tables, def.table) ? world.tables[def.table] : undefined;
         if (!table || def.type !== "text" || def.derived) continue;
+        // A thing's catalog row names what it is first (DESIGN §9.7): "Truck bed" is the pickup bed the
+        // gear tables declare a part built into a vehicle, never the price catalog's bed sheet set.
+        const from = def.table === "economy.catalog" ? [...THING_TABLES.flatMap((t) => (hasOwn(world.tables, t) && world.tables[t] ? [world.tables[t]] : [])), table] : [table];
         const given = fields[f];
-        if (typeof given === "string" && hasOwn(table.rows, given)) continue;
-        const row = matchRow(table, typeof given === "string" && given.trim() !== "" ? given : name);
+        if (typeof given === "string" && from.some((t) => hasOwn(t.rows, given))) continue;
+        const row = matchRowIn(from, typeof given === "string" && given.trim() !== "" ? given : name);
         if (!row) {
           if (given !== undefined) notes.push(`${f} "${String(given)}" matches no ${table.label} row`);
           continue;

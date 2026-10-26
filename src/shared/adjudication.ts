@@ -1,11 +1,13 @@
 // The adjudication policy's presets and its reader (DESIGN §11): when checks roll and who settles
 // them. The engine applies it, the backend keeps it in settings and markers, and Build and Settings
-// edit it. A named preset is always its own values; `custom` keeps the values as edited.
+// edit it. A policy's values are its own: a named preset fills in what it leaves out, and one whose
+// values differ from its preset plays as Custom with them, as editing any value makes it Custom.
 
 import { isRecord } from "./json";
 import type { AdjudicationDef, AdjudicationPresetId, CheckAuthority, CheckTiming, DescriptionWeight, RetryRule } from "./world";
 
 export const ADJUDICATION_PRESET_IDS: readonly AdjudicationPresetId[] = ["narrative", "balanced", "crunchy", "custom"];
+export const ADJUDICATION_PRESET_LABEL: Readonly<Record<AdjudicationPresetId, string>> = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 export const CHECK_TIMINGS: readonly CheckTiming[] = ["every", "risky", "marked", "never"];
 export const DESCRIPTION_WEIGHTS: readonly DescriptionWeight[] = ["none", "bonus", "advantage", "dc"];
 export const CHECK_AUTHORITIES: readonly CheckAuthority[] = ["mechanics", "hybrid", "narrative"];
@@ -93,21 +95,39 @@ function oneOf<T extends string>(v: unknown, values: readonly T[], fallback: T):
   return values.find((x) => x === v) ?? fallback;
 }
 
+/** Whether two policies play alike: every value the same, the preset's name aside. */
+function samePlay(a: AdjudicationDef, b: AdjudicationDef): boolean {
+  return (
+    a.checks === b.checks &&
+    a.riskyAt === b.riskyAt &&
+    a.trivialAt === b.trivialAt &&
+    a.impossibleAt === b.impossibleAt &&
+    a.description.weight === b.description.weight &&
+    a.description.max === b.description.max &&
+    a.description.advantageAt === b.description.advantageAt &&
+    a.authority === b.authority &&
+    a.closeBy === b.closeBy &&
+    a.retry === b.retry &&
+    a.retryAfter === b.retryAfter
+  );
+}
+
 /**
- * A policy from outside data (a world document, settings, a marker), or null when it isn't one. A
- * named preset is its own values whatever else the object says; a custom one keeps each valid value,
- * clamped into its range, and takes Crunchy's for the rest.
+ * A policy from outside data (a world document, settings, a marker), or null when it isn't one.
+ * Each value it sets that a policy can hold is kept, clamped into its range; the rest come from its
+ * named preset, or Crunchy for `custom`. A named preset whose values all stay its own reads as that
+ * preset; one that sets any of them otherwise plays as Custom with them, so a world's own rules
+ * apply as written (lint names both, `lintAdjudication`).
  */
 export function readAdjudication(raw: unknown): AdjudicationDef | null {
   if (!isRecord(raw)) return null;
   const preset = ADJUDICATION_PRESET_IDS.find((p) => p === raw.preset);
   if (!preset) return null;
-  if (preset !== "custom") return presetAdjudication(preset);
-  const base = ADJUDICATION_PRESETS.crunchy;
+  const base = ADJUDICATION_PRESETS[preset === "custom" ? "crunchy" : preset];
   const d = isRecord(raw.description) ? raw.description : {};
   const max = whole(d.max, ADJUDICATION_BOUNDS.descriptionMax, base.description.max);
-  return {
-    preset,
+  const read: AdjudicationDef = {
+    preset: "custom",
     checks: oneOf(raw.checks, CHECK_TIMINGS, base.checks),
     riskyAt: threshold(raw.riskyAt, base.riskyAt) ?? base.riskyAt,
     trivialAt: threshold(raw.trivialAt, base.trivialAt),
@@ -118,4 +138,5 @@ export function readAdjudication(raw: unknown): AdjudicationDef | null {
     retry: oneOf(raw.retry, RETRY_RULES, base.retry),
     retryAfter: whole(raw.retryAfter, ADJUDICATION_BOUNDS.retryAfter, base.retryAfter),
   };
+  return preset !== "custom" && samePlay(read, base) ? presetAdjudication(preset) : read;
 }

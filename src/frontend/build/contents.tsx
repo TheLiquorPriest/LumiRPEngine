@@ -5,7 +5,7 @@
 import { useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { authoredContents, isItemKind, itemObjective, itemObjectiveLabel, revealScaffold, type ItemCheck } from "../../shared/items-build";
-import type { KindDef, WorldDoc } from "../../shared/world";
+import { playedKinds, type KindDef, type WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import { useSelect } from "../store";
 import { Badge, Button, Section, Seg } from "../components";
@@ -71,7 +71,7 @@ export function ItemObjectivePicker(props: { world: WorldDoc; onAdd(objective: {
   const app = useApp();
   const packKinds = useSelect(app.drafts, (d) => d?.packKinds);
   // The packs' kinds count too (a gear item, container or kit), the world's own winning.
-  const kinds = useMemo(() => ({ ...packKinds, ...props.world.kinds }), [packKinds, props.world.kinds]);
+  const kinds = useMemo(() => (playedKinds(packKinds, props.world.kinds)), [packKinds, props.world.kinds]);
   const [check, setCheck] = useState<ItemCheck>("carries");
   const [item, setItem] = useState("");
   const [place, setPlace] = useState("");

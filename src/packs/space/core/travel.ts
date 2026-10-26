@@ -3,10 +3,11 @@
 
 import type { PlaceId, TravelMode } from "../../../shared/ids";
 import type { RouteLeg, WorldDoc } from "../../../shared/world";
+import type { TravelLeg, TravelPlan, VehicleTrip, VehicleTripAsk } from "../../../shared/travel";
 import { objOf, optionalQuery, sliceOf, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { passMemo } from "../../../engine/read-pass";
-import { mapSettingsOf } from "../../../shared/maps";
+import { mapSettingsOf, travelTuningOf } from "../../../shared/maps";
 
 /** A move at Space level 1 (named places only). */
 export const NOMINAL_MOVE_MINUTES = 15;
@@ -30,21 +31,6 @@ export const TERRAIN_FACTORS: Readonly<Record<string, number>> = Object.freeze({
 
 /** Walking between places that share a parent, when no route is authored. */
 export const SIBLING_WALK_MINUTES = 5;
-
-export interface TravelLeg {
-  from: PlaceId;
-  to: PlaceId;
-  minutes: number;
-  distanceKm: number;
-  terrain: string | null;
-}
-
-export interface TravelPlan {
-  mode: TravelMode;
-  legs: TravelLeg[];
-  minutes: number;
-  distanceKm: number;
-}
 
 interface Edge {
   to: PlaceId;
@@ -131,52 +117,101 @@ function buildEdges(world: WorldDoc, mode: TravelMode, closed: ReadonlySet<strin
   return out;
 }
 
+/** How a search costs a leg of a mode: its distance at a set speed, else its own minutes; then terrain and weather. */
+interface Costing {
+  /** km/h for a mode, when the world (or the vehicle's class) sets one. */
+  speed(mode: TravelMode): number | undefined;
+  terrain: boolean;
+  /** Weather and other microclimate effects on a mode. */
+  factor(mode: TravelMode): number;
+}
+
+function legCost(costing: Costing, mode: TravelMode, leg: RouteLeg): number {
+  const speed = costing.speed(mode);
+  const base = speed !== undefined && (leg.distanceKm ?? 0) > 0 ? ((leg.distanceKm ?? 0) / speed) * 60 : leg.minutes;
+  return base * (costing.terrain ? (own(TERRAIN_FACTORS, leg.terrain ?? "") ?? 1) : 1) * costing.factor(mode);
+}
+
+/** A step a search took into a node: from where, by which leg of which mode. */
+interface Step {
+  from: PlaceId;
+  leg: RouteLeg;
+  mode: TravelMode;
+}
+
+/** What a search reached: each node's least minutes, and the step that got there. */
+interface Tree {
+  dist: Map<PlaceId, number>;
+  prev: Map<PlaceId, Step>;
+}
+
 /**
- * The fastest route between two places for a mode (Dijkstra by minutes; ties broken by place id),
- * or null when unreachable. `terrain` applies the terrain multipliers (Space level 4) and
- * `factor` scales every leg (weather and other microclimate effects).
+ * Dijkstra by minutes over the union of some modes' graphs, from `starts` (ties broken by node id),
+ * until `stop` says a node ends it or 10,000 nodes are taken.
  */
-export function findRoute(world: WorldDoc, from: PlaceId, to: PlaceId, mode: TravelMode, opts: { terrain?: boolean; factor?: number; closed?: ReadonlySet<string> } = {}): TravelPlan | null {
-  if (from === to) return { mode, legs: [], minutes: 0, distanceKm: 0 };
-  if (!own(world.places, from) || !own(world.places, to)) return null;
-  const graph = edges(world, mode, opts.closed ?? new Set());
-  const factor = opts.factor ?? 1;
-  const cost = (leg: RouteLeg): number => leg.minutes * (opts.terrain ? (own(TERRAIN_FACTORS, leg.terrain ?? "") ?? 1) : 1) * factor;
-  const dist = new Map<PlaceId, number>([[from, 0]]);
-  const prev = new Map<PlaceId, { from: PlaceId; leg: RouteLeg }>();
+function grow(graphs: readonly { mode: TravelMode; graph: Map<PlaceId, Edge[]> }[], starts: readonly PlaceId[], costing: Costing, stop: (node: PlaceId) => boolean = () => false): Tree {
+  const dist = new Map<PlaceId, number>(starts.map((s) => [s, 0]));
+  const prev = new Map<PlaceId, Step>();
   const done = new Set<PlaceId>();
   const frontier = new Frontier();
-  frontier.push(0, from);
+  for (const s of starts) frontier.push(0, s);
   for (let taken = 0; taken < 10_000; ) {
     const next = frontier.pop();
-    if (!next) return null;
+    if (!next) break;
     const best = next.place;
     // A node reached again more cheaply, or taken already, is passed over.
     if (done.has(best) || next.minutes !== dist.get(best)) continue;
     taken++;
-    if (best === to || best === `${to}${EXIT}`) break;
+    if (stop(best)) break;
     done.add(best);
-    for (const e of graph.get(best) ?? []) {
-      const nd = next.minutes + cost(e.leg);
-      if (nd < (dist.get(e.to) ?? Infinity)) {
-        dist.set(e.to, nd);
-        prev.set(e.to, { from: best, leg: e.leg });
-        frontier.push(nd, e.to);
+    for (const { mode, graph } of graphs) {
+      for (const e of graph.get(best) ?? []) {
+        const nd = next.minutes + legCost(costing, mode, e.leg);
+        if (nd < (dist.get(e.to) ?? Infinity)) {
+          dist.set(e.to, nd);
+          prev.set(e.to, { from: best, leg: e.leg, mode });
+          frontier.push(nd, e.to);
+        }
       }
     }
   }
-  const ends = [to, `${to}${EXIT}`].filter((n) => prev.has(n)).sort((a, b) => (dist.get(a) ?? Infinity) - (dist.get(b) ?? Infinity));
-  const end = ends[0] ?? null;
-  if (end === null) return null;
-  const plain = (node: PlaceId): PlaceId => (node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node);
-  const legs: TravelLeg[] = [];
+  return { dist, prev };
+}
+
+const plain = (node: PlaceId): PlaceId => (node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node);
+
+/** The legs a forward search took to `end`, each rounded to the minute, with the mode it took. */
+function legsTo(tree: Tree, costing: Costing, from: PlaceId, end: PlaceId): { leg: TravelLeg; mode: TravelMode }[] | null {
+  const legs: { leg: TravelLeg; mode: TravelMode }[] = [];
   for (let cur: PlaceId = end; cur !== from; ) {
-    const p = prev.get(cur);
+    const p = tree.prev.get(cur);
     if (!p) return null;
-    legs.unshift({ from: plain(p.from), to: plain(cur), minutes: Math.round(cost(p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null });
+    legs.unshift({ leg: { from: plain(p.from), to: plain(cur), minutes: Math.round(legCost(costing, p.mode, p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null }, mode: p.mode });
     cur = p.from;
   }
+  return legs;
+}
+
+function planOf(mode: TravelMode, legs: TravelLeg[]): TravelPlan {
   return { mode, legs, minutes: legs.reduce((a, l) => a + l.minutes, 0), distanceKm: legs.reduce((a, l) => a + l.distanceKm, 0) };
+}
+
+/**
+ * The fastest route between two places for a mode (Dijkstra by minutes; ties broken by place id),
+ * or null when unreachable. `terrain` applies the terrain multipliers (Space level 4), `factor`
+ * scales every leg (weather and other microclimate effects) and `speed` (km/h) times a leg with a
+ * distance by it in place of its own minutes.
+ */
+export function findRoute(world: WorldDoc, from: PlaceId, to: PlaceId, mode: TravelMode, opts: { terrain?: boolean; factor?: number; closed?: ReadonlySet<string>; speed?: number } = {}): TravelPlan | null {
+  if (from === to) return { mode, legs: [], minutes: 0, distanceKm: 0 };
+  if (!own(world.places, from) || !own(world.places, to)) return null;
+  const costing: Costing = { speed: () => opts.speed, terrain: opts.terrain === true, factor: () => opts.factor ?? 1 };
+  const tree = grow([{ mode, graph: edges(world, mode, opts.closed ?? new Set()) }], [from], costing, (node) => node === to || node === `${to}${EXIT}`);
+  const ends = [to, `${to}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity));
+  const end = ends[0] ?? null;
+  if (end === null) return null;
+  const legs = legsTo(tree, costing, from, end);
+  return legs ? planOf(mode, legs.map((l) => l.leg)) : null;
 }
 
 /** A node a route search reached, by how far it is. */
@@ -245,7 +280,7 @@ export function closedRoutes(ctx: Pick<ReadContext, "world" | "state">): Set<str
   return out;
 }
 
-/** The route a mode takes at the current level: closed routes from level 2; terrain and weather (factors, closed modes) from level 4. */
+/** The route a mode takes at the current level: closed routes from level 2; terrain and weather (factors, closed modes) from level 4; the world's speed for the mode, when it sets one (`mapSettings.travel`). */
 export function routeAt(ctx: ReadContext, from: PlaceId, to: PlaceId, mode: TravelMode): TravelPlan | null {
   const level = ctx.levelOf(ctx.world.pov, "space");
   if (level <= 1) return nominalRoute(ctx, from, to, mode);
@@ -253,7 +288,8 @@ export function routeAt(ctx: ReadContext, from: PlaceId, to: PlaceId, mode: Trav
   const closes = level >= 4 ? optionalQuery(ctx, "weather.closed_modes") : null;
   if (closes && (closes(ctx, from).includes(mode) || closes(ctx, to).includes(mode))) return null;
   const factor = weather ? Math.max(weather(ctx, from, mode), weather(ctx, to, mode)) : 1;
-  return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx) });
+  const speed = travelTuningOf(ctx.world).speeds[mode];
+  return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx), ...(speed !== undefined ? { speed } : {}) });
 }
 
 /** Level 0–1 movement: any known place, instantly (0) or in a nominal move (1). */
@@ -278,4 +314,107 @@ export function goMinutes(ctx: ReadContext, from: PlaceId, to: PlaceId): number 
   if (mapSettingsOf(ctx.world).travelSimulation === true) return null;
   const times = GO_MODES.flatMap((m) => routeAt(ctx, from, to, m)?.minutes ?? []);
   return times.length > 0 ? Math.min(...times) : NOMINAL_MOVE_MINUTES;
+}
+
+/** The walk graph run backwards: who reaches each node, by which leg. */
+function reverseEdges(world: WorldDoc, closed: ReadonlySet<string>): Map<PlaceId, Edge[]> {
+  return passMemo([world], `space.redges\u0000${[...closed].sort().join("\u0000")}`, () => {
+    const out = new Map<PlaceId, Edge[]>();
+    for (const [from, list] of edges(world, "walk", closed)) {
+      for (const e of list) {
+        const back = out.get(e.to) ?? [];
+        back.push({ to: from, leg: e.leg });
+        out.set(e.to, back);
+      }
+    }
+    return out;
+  });
+}
+
+/** The places a place lies within, nearest first. */
+function aroundOf(world: WorldDoc, place: PlaceId): PlaceId[] {
+  const out: PlaceId[] = [];
+  let cur = own(world.places, place)?.parent;
+  for (let guard = 0; cur && guard < 64; guard++) {
+    out.push(cur);
+    cur = own(world.places, cur)?.parent;
+  }
+  return out;
+}
+
+/**
+ * Vehicle trips from one driver and vehicle to each of `targets` (DESIGN §9.1). Below Space 2 a
+ * trip is the nominal move from where both are, with no overheads. From 2, the driver walks to the
+ * vehicle (up to the world's `fetchMinutes`), gets it going, drives over the modes it goes by,
+ * parks, and walks the rest: the vehicle is left at the destination, else wherever the drive and
+ * the walk from it take least time. A destination it can't get nearer has no trip.
+ */
+export function vehicleTrips(ctx: ReadContext, ask: VehicleTripAsk, targets: readonly PlaceId[]): Map<PlaceId, VehicleTrip> {
+  const out = new Map<PlaceId, VehicleTrip>();
+  const level = ctx.levelOf(ctx.world.pov, "space");
+  const first = ask.modes[0];
+  if (level <= 1 || first === undefined) {
+    if (ask.at !== ask.from || first === undefined) return out;
+    for (const to of targets) {
+      const drive = nominalRoute(ctx, ask.at, to, first);
+      if (drive) out.set(to, { fetch: null, startMinutes: 0, drive, park: to, parkMinutes: 0, walk: null, minutes: drive.minutes });
+    }
+    return out;
+  }
+  const tuning = travelTuningOf(ctx.world);
+  const fetch = ask.at === ask.from ? null : routeAt(ctx, ask.from, ask.at, "walk");
+  if (ask.at !== ask.from && (!fetch || fetch.minutes > tuning.fetchMinutes)) return out;
+  const weather = level >= 4 ? optionalQuery(ctx, "weather.travel_factor") : null;
+  const closes = level >= 4 ? optionalQuery(ctx, "weather.closed_modes") : null;
+  const closed = closedRoutes(ctx);
+  const startMinutes = Math.round(tuning.startMinutes);
+  const parkMinutes = Math.round(tuning.parkMinutes);
+  // A search per set of open modes and weather, shared by the targets that have the same.
+  const searches = new Map<string, { tree: Tree; costing: Costing }>();
+  for (const to of targets) {
+    if (to === ask.from || !own(ctx.world.places, to)) continue;
+    const modes = ask.modes.filter((m) => !(closes && (closes(ctx, ask.at).includes(m) || closes(ctx, to).includes(m))));
+    if (modes.length === 0) continue;
+    const factors = new Map(modes.map((m) => [m, weather ? Math.max(weather(ctx, ask.at, m), weather(ctx, to, m)) : 1]));
+    const key = modes.map((m) => `${m}:${factors.get(m)}`).join(",");
+    let search = searches.get(key);
+    if (!search) {
+      const costing: Costing = { speed: (m) => ask.speed ?? tuning.speeds[m], terrain: level >= 4, factor: (m) => factors.get(m) ?? 1 };
+      search = { costing, tree: grow(modes.map((mode) => ({ mode, graph: edges(ctx.world, mode, closed) })), [ask.at], costing) };
+      searches.set(key, search);
+    }
+    const { tree, costing } = search;
+    // The walk from each place to the destination, run back from it; the walk the trip takes is
+    // then the place's own route, so it reads exactly as a Go from there would.
+    const walkClosed = closes ? closes(ctx, to).includes("walk") : false;
+    const back = walkClosed ? null : grow([{ mode: "walk", graph: reverseEdges(ctx.world, closed) }], [to, `${to}${EXIT}`], { speed: (m) => tuning.speeds[m], terrain: level >= 4, factor: () => 1 });
+    const arrive = (p: PlaceId): { node: PlaceId; minutes: number } | null => {
+      const nodes = [p, `${p}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity));
+      const node = nodes[0];
+      return node === undefined ? null : { node, minutes: tree.dist.get(node) ?? Infinity };
+    };
+    let best: { park: PlaceId; node: PlaceId; minutes: number } | null = null;
+    const around = new Set([...aroundOf(ctx.world, ask.at), ...aroundOf(ctx.world, to)]);
+    for (const p of [to, ...Object.keys(ctx.world.places).sort()]) {
+      // A place around the start or the destination is no place to leave it: the trip is inside it already.
+      if (p === ask.at || (p !== to && (!ask.canPark(p) || around.has(p)))) continue;
+      const there = arrive(p);
+      if (!there) continue;
+      const walkWeather = weather ? Math.max(weather(ctx, p, "walk"), weather(ctx, to, "walk")) : 1;
+      const rest = p === to ? 0 : (back?.dist.get(p) ?? Infinity) * walkWeather;
+      const minutes = there.minutes + rest;
+      // The destination itself first, then by id: the order the places are taken in.
+      if (Number.isFinite(minutes) && (best === null || minutes < best.minutes)) best = { park: p, node: there.node, minutes };
+    }
+    if (!best) continue;
+    const legs = legsTo(tree, costing, ask.at, best.node);
+    const walk = best.park === to ? null : routeAt(ctx, best.park, to, "walk");
+    if (!legs || (best.park !== to && !walk)) continue;
+    const byMode = new Map<TravelMode, number>();
+    for (const l of legs) byMode.set(l.mode, (byMode.get(l.mode) ?? 0) + l.leg.minutes);
+    const main = [...byMode].sort(([a, x], [b, y]) => y - x || modes.indexOf(a) - modes.indexOf(b))[0]?.[0] ?? first;
+    const drive = planOf(main, legs.map((l) => l.leg));
+    out.set(to, { fetch, startMinutes, drive, park: best.park, parkMinutes, walk, minutes: (fetch?.minutes ?? 0) + startMinutes + drive.minutes + parkMinutes + (walk?.minutes ?? 0) });
+  }
+  return out;
 }

@@ -1,6 +1,6 @@
 // The built-in `engine` pack: bookkeeping events the runtime records (rule firings, interrupt
 // signals, agent catch-up cursors, the clock set back by a ✎ fix and how far it had run, recorded
-// choices, puzzle attempts, reveals, the paused scene, checks rolled by the `check` effect), GM
+// choices, puzzle attempts, reveals, the hints the player opened, the paused scene, checks rolled by the `check` effect), GM
 // edits of an entity's tier, agent flag and levels and of its classes and tags, life states
 // (`engine/life`: the events, the `life` effect, the `life` channel and `life_of`), the engine's
 // narration channels (`knows`, `spawn`) and the taxonomy formulas (`kind_is`, `in_class`,
@@ -12,8 +12,9 @@ import { isLifeState, lifeStateOf, type FacetDef } from "../shared/world";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
 import type { EntityId, InterruptClass, Level, Visibility } from "../shared/ids";
-import { DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
+import { DOMAIN_LABEL, DOMAINS, INTERRUPT_CLASSES, LEVEL_LABEL } from "../shared/ids";
 import { isBand, tierBand, tierLabel, tierOf } from "../shared/tiers";
+import { fieldNoun, listWords, possessive } from "../shared/words";
 import type { PackEvent } from "../shared/ledger";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "./registry";
 import type { Value } from "./expr";
@@ -28,6 +29,8 @@ import { own } from "./pack-kit";
 import { minutesBetween } from "./world-state";
 import { feedEvent } from "./feed";
 
+const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
+
 export const ENGINE_PACK = "engine";
 
 /** Event types the runtime emits. */
@@ -41,6 +44,8 @@ export const ENGINE_EVENTS = {
   choice: "engine.choice",
   attempt: "engine.attempt",
   revealed: "engine.revealed",
+  /** A hint the player opened at a track's stage (DESIGN §10): the narrator is told the hints opened, never the rest. */
+  hint: "engine.hint",
   pause: "engine.pause",
   /** A check the `check` effect rolled, with its final values (the outcome's effects follow it). */
   check: "engine.check",
@@ -80,9 +85,13 @@ export interface TryRecord {
 export interface EngineSlice {
   fired: Record<string, { n: number; last: number }>;
   attempts: Record<string, number>;
+  /** Wrong answers to a puzzle by track and stage (`engine.attempt`): a stage's hints come one per wrong answer given there (DESIGN §10). */
+  missed: Record<string, Record<string, number>>;
   /** Puzzle tracks answered correctly, with the stage the answer was for. */
   solved: Record<string, string>;
   revealed: Record<string, string[]>;
+  /** How many of a stage's hints the player has opened, by track and stage (`engine.hint`). */
+  hints: Record<string, Record<string, number>>;
   /** Last slot index each LOD1 agent has been stepped through. */
   agents: Record<string, number>;
   /** Round-robin position of the off-screen catch-up queue. */
@@ -110,6 +119,16 @@ export function readEngineSlice(state: Readonly<WorldState>): EngineSlice {
   for (const [k, v] of Object.entries(rec(s.solved))) if (typeof v === "string") solved[k] = v;
   const revealed: Record<string, string[]> = {};
   for (const [k, v] of Object.entries(rec(s.revealed))) if (Array.isArray(v)) revealed[k] = v.filter((x): x is string => typeof x === "string");
+  // A count by track and by stage: a row that isn't a record, or a count that isn't a number, counts none.
+  const byStage = (v: JsonValue | undefined): Record<string, Record<string, number>> => {
+    const out: Record<string, Record<string, number>> = {};
+    for (const [track, row] of Object.entries(rec(v))) {
+      const counts: Record<string, number> = {};
+      for (const [stage, n] of Object.entries(rec(row))) if (typeof n === "number") counts[stage] = n;
+      out[track] = counts;
+    }
+    return out;
+  };
   const agents: Record<string, number> = {};
   for (const [k, v] of Object.entries(rec(s.agents))) if (typeof v === "number") agents[k] = v;
   const tries: Record<string, TryRecord> = {};
@@ -119,8 +138,10 @@ export function readEngineSlice(state: Readonly<WorldState>): EngineSlice {
   return {
     fired,
     attempts,
+    missed: byStage(s.missed),
     solved,
     revealed,
+    hints: byStage(s.hints),
     agents,
     rr: typeof s.rr === "number" ? s.rr : 0,
     pauseScene: typeof s.pauseScene === "string" ? s.pauseScene : null,
@@ -148,6 +169,15 @@ function sub(state: WorldState, key: string): JsonObject {
   const fresh: JsonObject = {};
   s[key] = fresh;
   return fresh;
+}
+
+/** Counts one more at a track's stage in a by-stage count of the slice (`missed`, `hints`). */
+function bumpStage(state: WorldState, key: string, track: string, stage: string): void {
+  if (!safeKey(track) || !safeKey(stage)) return;
+  const all = sub(state, key);
+  const row = isRecord(all[track]) ? (all[track] as JsonObject) : {};
+  const n = row[stage];
+  all[track] = { ...row, [stage]: (typeof n === "number" ? n : 0) + 1 };
 }
 
 function str(e: PackEvent, key: string): string {
@@ -246,9 +276,22 @@ const events: EventTypeDef<PackEvent>[] = [
         const attempts = sub(state, "attempts");
         const n = own(attempts, track);
         attempts[track] = (typeof n === "number" ? n : 0) + 1;
+        // The stage's own count: a later stage's hints don't come from the wrong answers given before it.
+        bumpStage(state, "missed", track, str(e, "stage"));
       }
     },
     describe: (e) => `attempt on ${str(e, "track")}`,
+  },
+  {
+    type: ENGINE_EVENTS.hint,
+    validate: (e, ctx) => {
+      const missing = need(e, "track", "stage");
+      if (missing) return missing;
+      const t = own(ctx.world.tracks, str(e, "track"));
+      return t && own(t.stages, str(e, "stage")) ? null : { code: "missing_track", reason: `no stage ${str(e, "stage")} of track ${str(e, "track")}` };
+    },
+    apply: (e, state) => bumpStage(state, "hints", str(e, "track"), str(e, "stage")),
+    describe: (e) => `hint opened on ${str(e, "track")}`,
   },
   {
     type: ENGINE_EVENTS.revealed,
@@ -327,12 +370,20 @@ const events: EventTypeDef<PackEvent>[] = [
       return (["tier", "agent", "levels"] as const).filter((aspect) => e.data[aspect] !== undefined).map((aspect) => ({ entity, aspect }));
     },
     describe: (e, ctx) => {
-      const parts: string[] = [];
-      if (typeof e.data.tier === "string") parts.push(tierLabel(ctx.world, e.data.tier));
-      if (typeof e.data.agent === "boolean") parts.push(e.data.agent ? "lives off-screen" : "no longer lives off-screen");
+      // One sentence for all of it: "Danny Okafor is now in the Supporting tier and has Money detail at level 2".
+      const clauses: string[] = [];
+      if (typeof e.data.tier === "string") clauses.push(`is now in the ${tierLabel(ctx.world, e.data.tier)} tier`);
+      if (typeof e.data.agent === "boolean") clauses.push(e.data.agent ? "now lives their own life off-screen" : "no longer lives their own life off-screen");
       const levels = e.data.levels;
-      if (isRecord(levels)) for (const [d, v] of Object.entries(levels)) parts.push(`${d} level ${v === null ? "from the tier" : String(v)}`);
-      return `${own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity")}: ${parts.join(", ")}`;
+      if (isRecord(levels))
+        for (const [d, v] of Object.entries(levels)) {
+          // An area and a level as Settings → Realism names them: "Money detail at level 2 (Simple)".
+          const domain = DOMAINS.find((x) => x === d);
+          const area = domain ? DOMAIN_LABEL[domain] : d;
+          const level = LEVELS.find((n) => n === v);
+          clauses.push(v === null ? `has ${area} detail from their tier again` : `now has ${area} detail at level ${String(v)}${level !== undefined ? ` (${LEVEL_LABEL[level]})` : ""}`);
+        }
+      return `${own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity")} ${listWords(clauses)}`;
     },
   },
   {
@@ -358,7 +409,9 @@ const events: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx, viewer) => {
       const classes = classOf(e.data.class) ?? {};
       const name = own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity");
-      const valuesOf = (f: FacetDef, values: readonly string[]): string => (values.length > 0 ? values.map((v) => own(f.values, v)?.label ?? v).join(", ") : "none");
+      const valuesOf = (f: FacetDef, values: readonly string[]): string => (values.length > 0 ? listWords(values.map((v) => own(f.values, v)?.label ?? v)) : "none");
+      // "Danny Okafor's trade is now mechanic": each facet as what it is, then its values.
+      const facetLine = (f: FacetDef, values: readonly string[]): string => `${possessive(name)} ${fieldNoun(f.label, "").noun} is now ${valuesOf(f, values)}`;
       if (viewer !== undefined) {
         // A player's line says only what changed on the facets players can see, a cleared one
         // included, and never tags (DESIGN §4.1), so an edit to a hidden facet or a tag has no line.
@@ -368,16 +421,16 @@ const events: EventTypeDef<PackEvent>[] = [
         const same = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x) => b.includes(x));
         const changed = facetsInOrder(ctx.world)
           .filter(([id, f]) => f.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? []))
-          .map(([id, f]) => `${f.label} ${valuesOf(f, own(classes, id) ?? [])}`);
-        return changed.length > 0 ? `${name}: ${changed.join("; ")}` : "";
+          .map(([id, f]) => facetLine(f, own(classes, id) ?? []));
+        return changed.join("; ");
       }
       const parts = facetsInOrder(ctx.world).flatMap(([id, f]) => {
         const values = own(classes, id) ?? [];
-        return values.length > 0 ? [`${f.label} ${valuesOf(f, values)}`] : [];
+        return values.length > 0 ? [facetLine(f, values)] : [];
       });
       const tags = tagList(e.data.tags) ?? [];
-      if (tags.length > 0) parts.push(`tags ${tags.join(", ")}`);
-      return parts.length > 0 ? `${name}: ${parts.join("; ")}` : `${name}: no classification or tags`;
+      if (tags.length > 0) parts.push(`${possessive(name)} tags are now ${listWords(tags)}`);
+      return parts.length > 0 ? parts.join("; ") : `${name} now has no classes and no tags`;
     },
   },
   {
@@ -414,8 +467,9 @@ const events: EventTypeDef<PackEvent>[] = [
       const id = str(e, "entity");
       const def = lifeStateOf(ctx.world, str(e, "to"));
       const name = own(ctx.state.entities, id)?.name ?? id;
-      if (viewer === undefined) return `${name}: ${def.label}`;
-      if (id === viewer) return `You: ${def.label}`;
+      const state = def.label.toLowerCase();
+      if (viewer === undefined) return `${name} is now ${state}`;
+      if (id === viewer) return `You are now ${state}`;
       // A player's line only for one who saw it change: one learned of later is the telling's news
       // (`engine.told`), so the turn it happened on never dates it.
       return witnessesOf(e)?.includes(viewer) === true ? `${name} ${def.reads}` : "";
@@ -433,7 +487,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const id = str(e, "entity");
       const name = own(ctx.state.entities, id)?.name ?? id;
       const who = Array.isArray(e.data.who) ? e.data.who.filter((x): x is string => typeof x === "string") : [];
-      if (viewer === undefined) return `${who.map((w) => own(ctx.state.entities, w)?.name ?? w).join(", ")} learn: ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
+      if (viewer === undefined) return `${listWords(who.map((w) => own(ctx.state.entities, w)?.name ?? w))} now ${who.length === 1 ? "knows" : "know"} that ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
       // Someone else being told is nobody's news; the POV hears what it now takes to be so.
       return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
     },

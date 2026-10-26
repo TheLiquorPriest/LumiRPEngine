@@ -112,7 +112,7 @@ describe("Make it real", () => {
     expect(shown.find((c) => c.kind === "claimed")).toMatchObject({ label: "Added: a coffee", actions: [{ id: "undo", label: "Undo" }] });
     expect(shown.some((c) => c.kind === "decline")).toBe(false);
     const outcome = rig.host.section("Outcome");
-    expect(outcome).toContain("Give: done.");
+    expect(outcome.split("\n").some((line) => line.startsWith("- Give") && line.includes("coffee"))).toBe(true);
     expect(outcome).not.toMatch(/didn't happen/);
     expect(rig.rt.ledger.errors).toEqual([]);
   });

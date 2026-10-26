@@ -5,7 +5,7 @@
 
 import type { StateView } from "../../shared/state-view";
 import { INFER_MODE_LABEL } from "../../shared/inferred";
-import { ADJUDICATION_PRESET_LABEL } from "../adjudication-form";
+import { ADJUDICATION_PRESET_LABEL } from "../../shared/adjudication";
 import { useApp, useUi } from "../app";
 import { Empty, List, ListRow, Section, useBusy } from "../components";
 import { humanize } from "../format";

@@ -1,7 +1,8 @@
 // The Modern profile (DESIGN §11): present-day adventure on a d20. Six abilities with their
 // modifiers; Defense from Dexterity, a level bonus and equipment; a modern skill list with ranks;
-// three saves; Action Points to push a skill; HP; and levels from XP on the triangular scale. An
-// original implementation of common tabletop mechanics: no rules text.
+// three saves; Action Points to push a skill, back in full after a night's rest and at each new
+// level; HP; and levels from XP on the triangular scale. An original implementation of common
+// tabletop mechanics: no rules text.
 
 import { presetAdjudication } from "../adjudication";
 import type { FieldDef } from "../world";
@@ -38,7 +39,7 @@ for (const s of SAVES) saves[s.id] = { type: "number", label: s.label, derived: 
 export const MODERN: ProfileDef = {
   id: "modern",
   label: "Modern",
-  summary: "Present-day adventure on a d20: six abilities, a Defense score, a modern skill list with ranks, points to spend pushing a skill, HP, and levels from XP.",
+  summary: "Present-day adventure on a d20: six abilities, a Defense score, a modern skill list with ranks, points to spend pushing a skill that a night's rest refills, HP, and levels from XP.",
   fields: {
     ...abilityFields(),
     ...levelFields(20),
@@ -46,6 +47,7 @@ export const MODERN: ProfileDef = {
     // A night's rest heals a point per level.
     hp: { type: "number", label: "HP", pool: { max: "max_hp", recover: "max(1, self.level)" } },
     ap_max: { type: "number", label: "Action Points max", derived: "5 + floor(self.level / 2)" },
+    // Spent pushing a skill; a night's rest and each new level refill them.
     action_points: { type: "number", label: "Action Points", pool: { max: "ap_max" } },
     attack_bonus: { type: "number", label: "Attack bonus", derived: "table('modern.levels', self.level, 'attack') + max(self.str_mod, self.dex_mod)" },
     armor: { type: "number", label: "Equipment bonus", default: 0, min: 0 },
@@ -81,7 +83,7 @@ export const MODERN: ProfileDef = {
     save_check: saveAction("modern.saves"),
     attack: attackAction("roll(self.damage) + self.str_mod", "roll(self.damage) + roll(self.damage) + self.str_mod"),
     total_defense: stanceAction("total_defense", "Total defense", "defend"),
-    long_rest: restAction("Rest for the night"),
+    long_rest: restAction("Rest for the night", [{ type: "recover", args: { entity: "self", field: "action_points", full: true } }]),
   },
   tables: {
     "modern.levels": profileTable(
@@ -102,7 +104,7 @@ export const MODERN: ProfileDef = {
         {
           id: "vitals",
           label: "Vitals",
-          rows: [{ pool: "hp" }, { pool: "action_points" }, { progression: "level" }, { formula: "self.defense", label: "Defense" }, { formula: signed("self.attack_bonus"), label: "Attack" }, { formula: signed("self.dex_mod"), label: "Initiative" }, { field: "reputation" }],
+          rows: [{ pool: "hp" }, { pool: "action_points", label: "Action Points (a night's rest or a new level refills them)" }, { progression: "level" }, { formula: "self.defense", label: "Defense" }, { formula: signed("self.attack_bonus"), label: "Attack" }, { formula: signed("self.dex_mod"), label: "Initiative" }, { field: "reputation" }],
         },
         { id: "abilities", label: "Abilities", rows: abilityRows() },
         { id: "saves", label: "Saves", rows: SAVES.map((s) => ({ formula: signed(`self.${s.id}`), label: s.label })) },

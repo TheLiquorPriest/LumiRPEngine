@@ -13,7 +13,7 @@ import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonValue } from "../../shared/json";
 import type { JobProposal, RoutineJobInput } from "../../shared/protocol";
 import { BLOCK_KIND_LABEL, isOff, routineShapeProblems, type RoutineDef, type RoutineEntry } from "../../shared/routines";
-import type { ScheduleDef, WorldDoc } from "../../shared/world";
+import { playedKinds, type ScheduleDef, type WorldDoc } from "../../shared/world";
 import type { App } from "../app";
 import { useApp } from "../app";
 import type { SegOption } from "../components";
@@ -58,7 +58,7 @@ export function RoutineJobStart(props: { busy: boolean; onStart(input: RoutineJo
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   // Owners as Build's forms read them: the packs' kinds merged in, the world's own winning.
-  const doc = useMemo(() => (draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } } : null), [draft]);
+  const doc = useMemo(() => (draft ? { ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) } : null), [draft]);
   const [who, setWho] = useState<"all" | "some">("all");
   const [picked, setPicked] = useState<string[]>([]);
   const [find, setFind] = useState("");
@@ -351,7 +351,7 @@ function ProposalEditor(props: { p: JobProposal; doc: WorldDoc; owner: string; o
 export function RoutineProposalReview(props: { app: App; worldId: string; jobId: string; proposals: readonly JobProposal[] }) {
   const draft = useSelect(props.app.drafts, (d) => (d?.worldId === props.worldId ? d : null));
   // The draft as Build's forms read it: the packs' kinds merged in, the world's own winning.
-  const doc = useMemo(() => (draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } } : null), [draft]);
+  const doc = useMemo(() => (draft ? { ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) } : null), [draft]);
   const offered = useMemo(() => offeredProposals(props.proposals), [props.proposals]);
   // Untouched, a review ticks what nothing was found against, as the draft stands; its first change keeps it.
   const kept = useSelect(reviews, (all) => all[props.jobId]);

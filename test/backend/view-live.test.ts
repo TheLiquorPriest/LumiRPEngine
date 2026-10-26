@@ -140,7 +140,8 @@ describe("change chip and Journal list what applied", () => {
     if ("code" in lapse) throw new Error(lapse.reason);
     const lines = turnLines(reg, world, w.state, coarsen(reg, world, s0, w.events));
     expect(lines).toHaveLength(8);
-    for (const line of ["Payday:", "Payroll:", "Statement:"]) expect(lines.some((l) => l.startsWith(line))).toBe(true);
+    for (const line of ["Payday:", "Payroll:"]) expect(lines.some((l) => l.startsWith(line))).toBe(true);
+    expect(lines.some((l) => /statement/i.test(l))).toBe(true);
   });
 });
 

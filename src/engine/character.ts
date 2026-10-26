@@ -7,6 +7,7 @@ import type { CharacterBed, CharacterDTO, CharacterField, CharacterNow, Characte
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { EntityId, PlaceId } from "../shared/ids";
+import { fixedReason } from "../shared/items-build";
 import { PARTY_RELATION } from "../shared/party";
 import { activitySpanEnd, ALIVE, ENGINE_FIELDS, lifeStateOf, type FieldDef, type Recurrence, type RelationInstance, type RelationTypeDef, type ScheduleDef, type ScheduleSlot, type WorldDoc } from "../shared/world";
 import { calendarOf, formatStamp, formatTimeOfDay, placeOffset, weekdayName } from "./calendar";
@@ -15,7 +16,7 @@ import { optionalQuery, own } from "./pack-kit";
 import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { allSchedules, scheduleOwners } from "./schedules";
-import { isGone, kindDef, kindFields, kindIs } from "./scope";
+import { isGone, kindDef, kindFields, kindIs, kindParent } from "./scope";
 import type { WorldState } from "./state";
 import { initialState } from "./world-state";
 
@@ -146,8 +147,9 @@ export function buildCharacter(reg: Registry, world: WorldDoc, id: EntityId, sta
     return t ? { id: thing, name: t.name, kind: t.kind, place: placeRef(placeOf(bodies, thing)) } : null;
   };
   // A thing one can sleep in or on is an item (furniture, a sleeping bag, a van): never an account,
-  // a job or a property deed, which the world also files as things.
-  const isItem = (thing: Body): boolean => kindIs(reg, world, thing.kind, "item");
+  // a job or a property deed, which the world also files as things, nor a part built into a vehicle
+  // (a truck bed, a glovebox), which the world's Containers table marks `vehicle_fixed` (DESIGN §7).
+  const isItem = (thing: Body): boolean => kindIs(reg, world, thing.kind, "item") && fixedReason(kindIs(reg, world, thing.kind, "vehicle"), thing.fields, world.tables) !== "part";
   const things: ThingRef[] = Object.keys(bodies)
     .sort()
     .flatMap((thing) => {
@@ -356,10 +358,10 @@ function sectionsOf(reg: Registry, world: WorldDoc, e: Body): CharacterSection[]
   const authored = new Set<string>();
   const sheet = new Set<string>();
   for (let id: string | undefined = e.kind, guard = 0; id && guard < 32; guard++) {
-    const k = kindDef(reg, world, id);
-    if (k && own(world.kinds, id) && k.pack === undefined) for (const f of Object.keys(k.fields)) authored.add(f);
-    for (const [f, d] of Object.entries(k?.fields ?? {})) if (d.domain === "sheets" && d.type === "number") sheet.add(f);
-    id = k?.extends;
+    const mine = own(world.kinds, id);
+    if (mine && mine.pack === undefined) for (const f of Object.keys(mine.fields)) authored.add(f);
+    for (const level of [reg.kinds.get(id), mine]) for (const [f, d] of Object.entries(level?.fields ?? {})) if (d.domain === "sheets" && d.type === "number") sheet.add(f);
+    id = kindParent(reg, world, id);
   }
   const sections = new Map<CharacterSection["id"], CharacterField[]>(SECTION_ORDER.map((s) => [s, []]));
   // The engine's own records of a span are never fields of theirs.

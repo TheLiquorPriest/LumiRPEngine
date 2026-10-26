@@ -13,7 +13,7 @@ import { spanRecords, type ActionDef, type CheckDef, type EffectSpec, type Expr,
 import { tableRowKey } from "../shared/tables";
 import { plainRolling } from "../shared/adjudication";
 import { approachShift, closeCall, fightRound, judgedOutcome, oddsSignature, outcomeChoices, passOutcome, policyFor, ratingOf, tryKey, verdictOf, type Adjudged, type Judgement, type Verdict } from "./adjudication";
-import { checkOdds, checkOf, readyCheck, rollCheck, rollVars, type CheckRoll } from "./checks";
+import { checkCounts, checkOdds, checkOf, oddsOf, readyCheck, rollCheck, rollVars, type CheckRoll } from "./checks";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { applyEffects } from "./effects";
 import type { EnvVars, ExprEnv, Value } from "./expr";
@@ -31,6 +31,7 @@ import { acts } from "./life";
 import { together } from "./presence";
 import { labelOf, optionalService, own } from "./pack-kit";
 import type { InferredResult } from "./inferred";
+import type { ToldAction } from "./action-words";
 
 export interface ActionRequest {
   action: ActionId | ActionDef;
@@ -77,6 +78,8 @@ export interface Resolution {
   claimed?: { entity: EntityId; name: string; events: LedgerEvent[] };
   /** An inferred check's people and wording (DESIGN §11), when the action was Try something: the plan's, never recorded. */
   inferred?: InferredResult;
+  /** The action as the narrator is told it (`toldAction`): set by the turn's plan once the turn has played, never recorded. */
+  told?: ToldAction;
 }
 
 export function findAction(reg: Registry, world: WorldDoc, id: ActionId): ActionDef | undefined {
@@ -189,7 +192,8 @@ export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<World
   const def = checkOf(world, p.action.check);
   const ready = def ? readyCheck(reg, ctx, def, p.bindings, p.vars) : null;
   const usable = ready && !("code" in ready) ? ready : null;
-  const odds = usable ? checkOdds(usable) : null;
+  const counts = usable ? checkCounts(usable) : null;
+  const odds = counts ? oddsOf(counts) : null;
   const spend = combatSpend(ctx, p.actor, p.action);
   const refused = Array.isArray(spend) ? null : spend;
   return {
@@ -199,7 +203,7 @@ export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<World
     modifier: usable?.modifier ?? 0,
     check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
-    verdict: usable && odds ? verdictOf(policyFor(world, state, p.action, p.actor), { registry: reg, world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null,
+    verdict: usable && counts ? verdictOf(policyFor(world, state, p.action, p.actor), { registry: reg, world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, counts }) : null,
   };
 }
 
@@ -263,9 +267,10 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
   let vars = p.vars;
   let adjudged: Adjudged | null = null;
   if (checkDef && ready) {
-    const odds = checkOdds(ready);
+    const counts = checkCounts(ready);
+    const odds = oddsOf(counts);
     const policy = policyFor(w.world, w.state, p.action, p.actor);
-    const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });
+    const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, counts });
     const judgement = opts.judgement ?? null;
     const place = placeOfEntity(w.state, p.actor);
     let close: Adjudged["close"] = null;
@@ -287,7 +292,7 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
       vars = { ...p.vars, roll: rollVars(rolling, rolled) };
       if (policy.authority === "hybrid") close = closeCall(rolling, rolled, rolled.outcome, policy.closeBy);
     } else {
-      outcome = story ?? verdict.outcome ?? passOutcome(p.action, ready, odds, verdict.pass);
+      outcome = story ?? verdict.outcome ?? passOutcome(p.action, ready, counts, verdict.pass);
       vars = { ...p.vars, roll: { natural: null, total: null, modifier: ready.modifier, dc: ready.dc, margin: null, outcome } };
     }
     if (!plainRolling(policy)) {

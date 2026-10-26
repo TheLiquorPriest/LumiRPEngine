@@ -95,8 +95,8 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_docs",
-    description: "Look things up in LumiRPEngine's docs, best-matching sections first: the reference (every kind and field, relation type, effect, formula function, action, event and lint code), the expression language, the recipes, the design, the user guide, the Studio contract and presets.",
-    inputSchema: object({ query: { type: "string", description: 'A few words: a kind, field, effect, function or lint code, or a question ("account opening", "stage formula").' }, doc: { type: "string", enum: ["reference", "expressions", "recipes", "design", "user-guide", "studio", "presets"], description: "Only this doc." } }, ["query"]),
+    description: "Look things up in LumiRPEngine's docs, best-matching sections first: the reference (every kind and field, relation type, effect, formula function, action, event and lint code), the expression language, the recipes, the design, the user guide and presets.",
+    inputSchema: object({ query: { type: "string", description: 'A few words: a kind, field, effect, function or lint code, or a question ("account opening", "stage formula").' }, doc: { type: "string", enum: ["reference", "expressions", "recipes", "design", "user-guide", "presets"], description: "Only this doc." } }, ["query"]),
     write: false,
   },
   {
@@ -221,7 +221,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_history",
-    description: "A world's revisions, and how each became head (a new world, Build, an agent, an import, the Studio), when, with its commit note.",
+    description: "A world's revisions, and how each became head (a new world, Build, an agent, an import), when, with its commit note.",
     inputSchema: object({ worldId: WORLD_ID }, ["worldId"]),
     write: false,
   },

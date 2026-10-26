@@ -8,6 +8,7 @@
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import { isRecord, type JsonValue } from "../../../shared/json";
 import { neutralizeMacros } from "../../../shared/macros";
+import { activityPhrase } from "../../../shared/activity";
 import { BASIC_BLOCKS, type SkipBlock } from "../../../shared/routines";
 import { calendarOf, clockOfStamp, formatStamp } from "../../../engine/calendar";
 import { own } from "../../../engine/pack-kit";
@@ -96,7 +97,7 @@ export function skipPlanText(ctx: ReadContext, brief: SkipPlanBrief, reply: stri
   const cal = calendarOf(ctx.world);
   const person = (p: SkipPlanPerson): string =>
     [
-      `- ${p.name} (id ${p.id}): ${p.place ? `at ${p.place.name} (${p.place.id})` : "somewhere of their own"}${p.activity ? `, ${p.activity.replace(/_/g, " ")}` : ""}.`,
+      `- ${p.name} (id ${p.id}): ${p.place ? `at ${p.place.name} (${p.place.id})` : "somewhere of their own"}${p.activity && activityPhrase(p.activity) ? `, ${activityPhrase(p.activity)}` : ""}.`,
       p.usual.length > 0 ? `  Usually: ${p.usual.join("; ")}.` : "",
       p.story.length > 0 ? `  Already set by the story: ${p.story.join("; ")}.` : "",
     ]

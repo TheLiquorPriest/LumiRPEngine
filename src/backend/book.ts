@@ -18,23 +18,27 @@ import type { HostBookEntry, HostEntryPlacement, HostPort } from "./host";
 import { NARRATOR_OUTLET, outletOf } from "./preset-binding";
 import type { WorldStore } from "./worlds";
 
-/** Sections a world gets when it defines none (DESIGN §4.2 slot list); lower rank is kept first. */
+/**
+ * Sections a world gets when it defines none (DESIGN §4.2 slot list); lower rank is kept first. Each
+ * opens with what it is and how the narrator uses it, so the narrator writes from the sections
+ * without inferring what they mean.
+ */
 export const DEFAULT_SECTIONS: Record<SlotId, SectionTemplate> = {
-  outcome: { id: "outcome", label: "Outcome", rank: 0, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  montage: { id: "montage", label: "Montage", rank: 1, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  scene: { id: "scene", label: "Scene", rank: 2, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  people: { id: "people", label: "People", rank: 3, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  money: { id: "money", label: "Money", rank: 4, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  gear: { id: "gear", label: "Gear", rank: 5, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  quest: { id: "quest", label: "Quest", rank: 7, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
-  outline: { id: "outline", label: "Outline", rank: 8, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  outcome: { id: "outcome", label: "Outcome", rank: 0, template: "What the player character's actions did this turn, in the order they played, as the engine settled them. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences (\"you\" is the player character). These have already happened, and their results, rolls and amounts are final: narrate exactly them, never as still to come, and never change, soften or reroll them.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  montage: { id: "montage", label: "Montage", rank: 1, template: "What happened while time passed, in order, as the engine played it out. Narrate the interval as a summary of these lines, keeping their facts and their order; add no events.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  scene: { id: "scene", label: "Scene", rank: 2, template: "Where the player character is now, when, and what they can perceive there. Describe the scene from these facts and never contradict them.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  people: { id: "people", label: "People", rank: 3, template: "The people with the player character, as the player character knows them, and what each is doing. Only these people are here; call them by these names.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  money: { id: "money", label: "Money", rank: 4, template: "The player character's money as it stands now. Use these amounts; never invent a price, a balance or a payment.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  gear: { id: "gear", label: "Gear", rank: 5, template: "What the player character carries, wears and has to hand. Only these things are at hand; invent no others.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: "The player character's vehicles, where they are and their state. Use these facts whenever a vehicle comes up.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  quest: { id: "quest", label: "Quest", rank: 7, template: "The player character's quests and goals, as far as they know them. Let the reply follow from these; never reveal a step they haven't reached.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  outline: { id: "outline", label: "Outline", rank: 8, template: "The turn as the engine planned it, beat by beat. Write the reply from these beats in this order and cover each one; what a beat leaves open is yours to describe, never to decide. Add no events of your own.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
   stance: { id: "stance", label: "Stance", rank: 9, template: "The narrator knows only what the player character knows. These lines say how the people here behave; never state what a cue only hints at.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   // Character minds (DESIGN §24.3): on their own token budget, apart from the section budget.
   [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: MINDS_SECTION_TEMPLATE, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   // Where the POV is and what it owns (DESIGN §6.11): ranked after the other facts, so the first left out on a small budget.
-  place: { id: "place", label: "Place", rank: 11, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  property: { id: "property", label: "Property", rank: 12, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  place: { id: "place", label: "Place", rank: 11, template: "The place the player character is in: what it is like, what is here and where it leads. Describe it from these lines.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  property: { id: "property", label: "Property", rank: 12, template: "Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says \"yours\"; otherwise they only use, keep or benefit from it. Use these facts whenever it comes up.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
 };
 
 /** A world's sections in rank order: its own, else the defaults. The Minds section is every world's, so a world with sections of its own gets the default one when it has none. */

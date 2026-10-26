@@ -99,6 +99,17 @@ export function helperCallOf(config: Pick<StepConfig, "route" | "maxTokens"> | n
   };
 }
 
+/**
+ * The steps that don't reason unless the user sets an effort on their cards (DESIGN §5.3): a
+ * character's memory of the turn, the consolidation that folds their notes into a summary, and a
+ * time skip's plan and beats. Their answers are short records of what happened or is due; a
+ * reasoning model spent its whole max tokens thinking through them and wrote nothing.
+ */
+export const UNREASONED_STEPS: readonly StepPurpose[] = ["memory", "consolidate", "skip"];
+
+/** Those steps' route while unsaved, and in the presets: the helper model, reasoning off. */
+export const UNREASONED_ROUTE: Readonly<StepRoute> = Object.freeze({ provider: "helper", connectionId: null, model: null, effort: "off" });
+
 /** What a step does with the world's lore (DESIGN §5.4): nothing; a prefetch from its own inputs, at no extra call; lookups the model asks for, on the phase's lookup budget; or both. */
 export type LorePolicy = "none" | "prefetch" | "lookup" | "prefetch+lookup";
 export const LORE_POLICIES: readonly LorePolicy[] = ["none", "prefetch", "lookup", "prefetch+lookup"];
@@ -127,14 +138,15 @@ export function stepLoreOf(config: StepConfig | null | undefined): Readonly<Step
  * A step's saved settings, else what it runs with while none are saved: `puzzle.answer` is the
  * author's opt-in, so it runs on every Answer unless the user turns it off; the minds steps run
  * whenever Settings → Minds is on (DESIGN §24.6), except the `skip` step, which is off until the
- * user turns it on (§24.7); any other is off. The turn, the minds and Settings → Steps all read
- * this, so the card shows what runs and its switch flips it.
+ * user turns it on (§24.7), and those of them that don't reason (`UNREASONED_STEPS`) run with
+ * reasoning off; any other is off. The turn, the minds and Settings → Steps all read this, so the
+ * card shows what runs and its switch flips it.
  * Puzzle answers with no signals saved reads its own: an older card saved Enabled with an empty
  * list, which showed On and never ran, and Enabled is what turns it off.
  */
 export function stepConfigOf(steps: Partial<Record<StepPurpose, StepConfig>>, purpose: StepPurpose): StepConfig {
   const saved = steps[purpose];
-  if (isMindPurpose(purpose)) return saved ?? { enabled: purpose !== "skip", signals: [] };
+  if (isMindPurpose(purpose)) return saved ?? { enabled: purpose !== "skip", signals: [], ...(UNREASONED_STEPS.includes(purpose) ? { route: { ...UNREASONED_ROUTE } } : {}) };
   if (purpose !== "puzzle.answer") return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
   return saved ? (saved.signals.length > 0 ? saved : { ...saved, signals }) : { enabled: true, signals };
@@ -319,7 +331,9 @@ export interface UserSettings {
   v: 1;
   /**
    * Which shipped defaults the file was last read against: a file from before the defaults rose
-   * for reasoning models (absent) has every value still at an old default lifted to the new one.
+   * for reasoning models (absent) has every value still at an old default lifted to the new one,
+   * and one from before memory, consolidation and the time skip's steps stopped reasoning (2) has
+   * those steps lifted to reasoning off where they were left to the helper model's.
    */
   defaults: typeof SETTINGS_DEFAULTS_REV;
   /** The helper model, apart from the presets: picking one never changes it. */
@@ -354,7 +368,7 @@ export interface UserSettings {
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */
-export const SETTINGS_DEFAULTS_REV = 2;
+export const SETTINGS_DEFAULTS_REV = 3;
 
 /** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
 export interface JobSettings {

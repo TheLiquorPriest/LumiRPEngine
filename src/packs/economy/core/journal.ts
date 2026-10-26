@@ -8,7 +8,7 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { PackEvent } from "../../../shared/ledger";
-import { ACCOUNT_STATUSES, DELINQUENCY_STAGES, FINANCE_EVENTS, isCredit, type AccountStatus, type CycleState, type DelinquencyStage, type FlowRunState, type JournalEntry } from "../../../shared/finance";
+import { ACCOUNT_STATUSES, DELINQUENCY_STAGES, FINANCE_EVENTS, isCredit, type AccountStatus, type CreditEntry, type CycleState, type DelinquencyStage, type FlowRunState, type JournalEntry } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, dateAt } from "../../../engine/calendar";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
@@ -179,6 +179,21 @@ function isCreditAccount(ctx: ReadContext, account: EntityId): boolean {
   return c !== null && isCredit(c);
 }
 
+/** What a delinquency stage, an account's status and a credit history entry say, as the Journal words them. */
+const STAGE_WORDS: Record<DelinquencyStage, string> = { current: "up to date", late: "late", "30": "30 days past due", "60": "60 days past due", "90": "90 days past due", "120": "120 days past due", collections: "in collections", charged_off: "charged off" };
+const STATUS_WORDS: Record<AccountStatus, string> = { open: "open", frozen: "frozen", collections: "in collections", charged_off: "charged off", closed: "closed", paid_off: "paid off", matured: "matured" };
+const CREDIT_WORDS: Record<CreditEntry["kind"], string> = { inquiry: "a credit inquiry", opened: "a new account", on_time: "a payment on time", late: "a late payment", collections: "an account in collections", charged_off: "an account charged off", closed: "a closed account", paid_off: "an account paid off", declined: "a declined application" };
+
+/** Whose a person's line is: "Your" for the person it is for, else their name's. */
+function whoseFor(ctx: ReadContext, viewer: EntityId | undefined, person: string): string {
+  return viewer === person ? "Your" : `${own(ctx.state.entities, person)?.name ?? person}'s`;
+}
+
+/** A finance word by its id, else the id in words. */
+function wordsOf(words: Readonly<Record<string, string>>, id: string): string {
+  return own(words, id) ?? id.replace(/_/g, " ");
+}
+
 export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     type: FINANCE_EVENTS.anchor,
@@ -264,7 +279,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       cycles[account] = cycle;
       sliceRecord(state, "economy", "adb")[account] = { from: at, at, sum: 0, spent: 0 };
     },
-    describe: (e, ctx) => `Statement: ${formatMoney(numOf(e.data.closing), ctx.world.currency)}, minimum ${formatMoney(numOf(e.data.minimum), ctx.world.currency)}`,
+    describe: (e, ctx) => `The statement closed at ${formatMoney(numOf(e.data.closing), ctx.world.currency)}, with at least ${formatMoney(numOf(e.data.minimum), ctx.world.currency)} due`,
   },
   {
     // A payment toward a credit account's statement.
@@ -276,7 +291,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const cur = objOf(cycles[account]);
       if (Object.keys(cur).length > 0) cycles[account] = { ...cur, paid: numOf(cur.paid) + numOf(e.data.cents) };
     },
-    describe: (e, ctx) => `Payment ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`,
+    describe: (e, ctx) => `A card payment of ${formatMoney(numOf(e.data.cents), ctx.world.currency)} was made`,
   },
   {
     // A credit account moves to a delinquency stage, or back to current.
@@ -290,7 +305,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       for (const k of ["streak", "ontime", "late30", "late60", "late90"] as const) if (typeof e.data[k] === "number") next[k] = e.data[k];
       cycles[account] = next;
     },
-    describe: (e) => `Payment status: ${str(e, "stage")}`,
+    describe: (e, ctx) => `${own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account")}'s payments are now ${wordsOf(STAGE_WORDS, str(e, "stage"))}`,
     coarsen: { key: (e) => str(e, "account"), merge: (_a, b) => b },
   },
   {
@@ -372,7 +387,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       credit[person] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
     },
     // A credit report is its person's alone: the player reads their own, never anyone else's.
-    describe: (e, _ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : `Credit report: ${str(e, "kind")}`),
+    describe: (e, ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : `${whoseFor(ctx, viewer, str(e, "person"))} credit report now shows ${wordsOf(CREDIT_WORDS, str(e, "kind"))}`),
   },
   {
     // A person's monthly score.
@@ -385,7 +400,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const at = typeof e.data.at === "number" ? e.data.at : state.clock;
       credit[person] = { ...cur, score: numOf(e.data.score), factors: objOf(e.data.factors), at, history: pushCapped(cur.history, { at, score: numOf(e.data.score) }, SCORES_KEPT) };
     },
-    describe: (e, _ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : `Credit score ${numOf(e.data.score)}`),
+    describe: (e, ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : `${whoseFor(ctx, viewer, str(e, "person"))} credit score is now ${numOf(e.data.score)}`),
   },
   {
     // A card's spending today: its new totals (an assignment, so a record keeps only the last).
@@ -421,7 +436,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       sliceRecord(state, "economy", "status")[str(e, "account")] = str(e, "status") as AccountStatus;
     },
-    describe: (e, ctx) => `${own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account")}: ${str(e, "status").replace(/_/g, " ")}`,
+    describe: (e, ctx) => `${own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account")} is now ${wordsOf(STATUS_WORDS, str(e, "status"))}`,
     coarsen: { key: (e) => str(e, "account"), merge: (_a, b) => b },
   },
   {
@@ -435,5 +450,5 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     describe: () => "Interest period",
   },
   // A decline recorded by an older build: it moves nothing.
-  { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => undefined, describe: (e) => `Declined: ${str(e, "memo")}` },
+  { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => undefined, describe: (e) => `${str(e, "memo")} was declined` },
 ];

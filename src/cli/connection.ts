@@ -9,8 +9,7 @@
 import type { AgentCheckIn, HelloClient } from "../shared/agents";
 import { isRecord } from "../shared/json";
 import type { ErrorCode, FrontendToBackend, LintIssue, ResultBodies } from "../shared/protocol";
-import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
-import { ENGINE_EXTENSION } from "../shared/studio-bridge";
+import { AGENT_API, ENGINE_EXTENSION, PROTOCOL_VERSION } from "../shared/protocol";
 import { formatMs } from "../shared/timeouts";
 import { inClear } from "./credentials";
 

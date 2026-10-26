@@ -12,13 +12,14 @@ import { heldBy } from "../shared/finance";
 import type { LedgerEvent } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
 import { formatMoney, formatTemperature } from "../shared/world";
-import { ENGINE_EVENTS, readEngineSlice } from "./engine-pack";
+import { fieldNoun, listWords, possessive } from "../shared/words";
+import { ENGINE_EVENTS } from "./engine-pack";
 import { passMemo } from "./read-pass";
 import type { Registry } from "./registry-impl";
 import { bandOf, fieldDef, GONE_FIELD, kindIs, placeOfEntity } from "./scope";
 import type { WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
-import { canSeeEntity, canSeePlace, eventVisible, findLeaks, knows, namesAny, secretLoreTitles, trackKnown, unrevealedSecrets, unseenPlaceNames, visibilityOf } from "./visibility";
+import { canSeeEntity, canSeePlace, eventVisible, findLeaks, knows, namesAny, secretLoreTitles, trackShown, unrevealedSecrets, unseenPlaceNames } from "./visibility";
 
 /**
  * Event types that are engine or pack bookkeeping: never player-facing lines. Built on first use:
@@ -36,6 +37,8 @@ function bookkeeping(type: string): boolean {
     [ENGINE_EVENTS.cursor]: true,
     [ENGINE_EVENTS.choice]: true,
     [ENGINE_EVENTS.attempt]: true,
+    // The receipt's chip for the player's own opening of a hint names it; the event is the count.
+    [ENGINE_EVENTS.hint]: true,
     [ENGINE_EVENTS.pause]: true,
     [ENGINE_EVENTS.beat]: true,
     [ENGINE_EVENTS.observed]: true,
@@ -79,9 +82,13 @@ function bookkeeping(type: string): boolean {
   return hasOwn(bookkeepingTypes, type);
 }
 
-/** A posting as the POV sees it: the memo with what moved between its own accounts. */
-function postLine(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, memo: string, lines: readonly { account: string; amount: number }[]): string | null {
-  const mine = lines.filter((l) => heldBy(state.entities, l.account, pov));
+/**
+ * A posting as a line: the memo with what moved, between the POV's own accounts on a player's line,
+ * and between any accounts in the world on the GM's or the author's (`player` false), so a GM's
+ * correction to someone else's account says how much and where.
+ */
+function postLine(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, memo: string, lines: readonly { account: string; amount: number }[], player: boolean): string | null {
+  const mine = lines.filter((l) => (player ? heldBy(state.entities, l.account, pov) : hasOwn(state.entities, l.account)));
   const label = memo !== "" ? memo : "Money moved";
   if (mine.length === 0) return memo !== "" ? memo : null;
   const money = (cents: number): string => formatMoney(Math.abs(cents), world.currency);
@@ -92,7 +99,7 @@ function postLine(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, m
   const to = into[0];
   if (out.length === 1 && into.length === 1 && from && to) return `${label}: ${money(to.amount)} from ${name(from.account)} to ${name(to.account)}`;
   const only = mine[0];
-  if (mine.length === 1 && only) return `${label}: ${only.amount < 0 ? "−" : "+"}${money(only.amount)} (${name(only.account)})`;
+  if (mine.length === 1 && only) return `${label}: ${money(only.amount)} ${only.amount < 0 ? "out of" : "into"} ${name(only.account)}`;
   const net = mine.reduce((a, l) => a + l.amount, 0);
   return net === 0 ? label : `${label}: ${net < 0 ? "−" : "+"}${money(net)}`;
 }
@@ -161,28 +168,6 @@ export function povMayKnow(reg: Registry, world: WorldDoc, state: Readonly<World
   if (heldBy(state.entities, id, pov)) return true;
   const here = placeOfEntity(state, pov);
   return here === undefined || placeOfEntity(state, id) === here;
-}
-
-/** Whether a track may be named to the POV: public, revealed, or `known_by` and known (`trackKnown`). */
-export function trackShown(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
-  const t = own(world.tracks, id);
-  if (!t) return false;
-  const visibility = visibilityOf(t.visibility);
-  if (visibility === "public") return true;
-  if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0) return true;
-  return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
-}
-
-/**
- * Whether a track still keeps something from the POV: a stage truth not yet revealed, or the track
- * itself, which may not be named to it (`trackShown`). Its cue is a hint the narrator may play while
- * this holds (DESIGN §6.6); after that there is nothing left for the cue to hint at.
- */
-export function trackKeepsSecret(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
-  const t = own(world.tracks, id);
-  if (!t) return false;
-  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
-  return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
 }
 
 type Ref = { kind: "entity" | "place" | "track"; id: string };
@@ -263,11 +248,60 @@ function humanize(field: string): string {
   return field.replace(/_/g, " ");
 }
 
-function valueText(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, kind: string, field: string, v: JsonValue, you: string): string | null {
-  if (v === null) return "cleared";
-  if (typeof v === "boolean") return v ? "yes" : "no";
+/** Whether a line's subject takes a plural verb: the POV, named "You" or "you". */
+function plural(name: string): boolean {
+  return name === "You" || name === "you";
+}
+
+/**
+ * How a line names what a value points at. A place by name with the places around it, outermost
+ * first ("Alder Automotive (Lakeshore County › Port Alder)"); a thing by name with where it is
+ * ("Camper van (at Alder Automotive)", "Toolbox (carried by Danny Okafor)"); anyone else by name.
+ * On a player's line only the places and holders the POV may know are named.
+ */
+interface Words {
+  /** The subject, by name; the POV as the line's `you`. */
+  name(id: string): string;
+  /** The same, mid-sentence: the POV as "you" rather than "You". */
+  object(id: string): string;
+  place(id: string): string;
+  thing(id: string): string;
+  isPerson(id: string): boolean;
+}
+
+function wordsFor(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, player: boolean, you: string): Words {
+  const name = (id: string): string => nameOf(world, state, pov, id, you);
+  const object = (id: string): string => (id === pov && you === "You" ? "you" : name(id));
+  const placeShown = (id: string): boolean => !player || canSeePlace(reg, world, state, pov, id);
+  const place = (id: string): string => {
+    const p = own(world.places, id);
+    if (!p) return object(id);
+    const around: string[] = [];
+    for (let cur = p.parent, guard = 0; cur !== undefined && guard < HOLD_DEPTH * 4; guard++) {
+      const up: WorldDoc["places"][string] | undefined = own(world.places, cur);
+      if (!up) break;
+      if (placeShown(cur)) around.unshift(up.name);
+      cur = up.parent;
+    }
+    return around.length > 0 ? `${p.name} (${around.join(" › ")})` : p.name;
+  };
+  const isPerson = (id: string): boolean => id === pov || kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person");
+  const thing = (id: string): string => {
+    const e = own(state.entities, id);
+    if (!e || isPerson(id)) return object(id);
+    const holder = e.relations.find((r) => r.type === "in")?.to;
+    if (holder !== undefined && hasOwn(state.entities, holder) && (!player || playerKnows(reg, world, state, pov, holder))) return `${e.name} (${isPerson(holder) ? "carried by" : "in"} ${object(holder)})`;
+    const at = typeof e.fields.place === "string" ? e.fields.place : null;
+    return at !== null && hasOwn(world.places, at) && placeShown(at) ? `${e.name} (at ${own(world.places, at)?.name ?? at})` : e.name;
+  };
+  return { name, object, place, thing, isPerson };
+}
+
+/** A value in words: a place or a thing as `Words` names them, an enum or a code-like word as words, a number by its band, as money or with its unit. */
+function valueText(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, words: Words, kind: string, field: string, v: JsonValue): string | null {
   if (typeof v === "string") {
-    if (hasOwn(state.entities, v) || hasOwn(world.places, v)) return nameOf(world, state, pov, v, you);
+    if (hasOwn(world.places, v)) return words.place(v);
+    if (hasOwn(state.entities, v)) return words.thing(v);
     // An enum value or a code-like word (`needs_service`) reads as words ("needs service").
     if (fieldDef(reg, world, kind, field)?.type === "enum" || /^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(v)) return humanize(v);
     return v.length > 80 ? `${v.slice(0, 79)}…` : v;
@@ -276,23 +310,88 @@ function valueText(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, 
     const def = fieldDef(reg, world, kind, field);
     if (def?.type === "money") return formatMoney(v, world.currency);
     const band = def?.bands ? bandOf(def.bands, v) : null;
-    return band ? band.label : String(Math.round(v * 100) / 100);
+    return band ? band.label : `${Math.round(v * 100) / 100}${fieldNoun(def?.label, field).unit}`;
   }
   return null;
 }
 
-function relationLine(rel: string, from: string, to: string, linked: boolean): string {
+/**
+ * A field's change in a sentence (DESIGN §7, Player-facing wording): who, what the field is and the
+ * value in words, never the form's label glued to a value. A place and a bed, a home and an owner
+ * read as what they mean ("Danny Okafor now sleeps at Alder Automotive (Lakeshore County › Port
+ * Alder)"); any other field as itself ("Festival clipboard's condition is now worn").
+ */
+function setLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, words: Words, entity: EntityId, field: string, value: JsonValue): string | null {
+  const who = words.name(entity);
+  const many = plural(who);
+  const ref = (v: string): string => (hasOwn(world.places, v) ? words.place(v) : words.thing(v));
+  const target = typeof value === "string" && (hasOwn(world.places, value) || hasOwn(state.entities, value)) ? value : null;
+  switch (field) {
+    case "place":
+      if (target !== null) return `${who} ${many ? "are" : "is"} now at ${words.place(target)}`;
+      break;
+    case "bed": {
+      // No bed is sleeping at home (DESIGN §8); a thing that holds things (a van, a tent) is slept in, any other on.
+      if (value === null) return `${who} now ${many ? "sleep" : "sleeps"} at home`;
+      if (target === null) break;
+      const bedKind = own(state.entities, target)?.kind ?? "";
+      const at = hasOwn(world.places, target) ? "at" : kindIs(reg, world, bedKind, "container") || kindIs(reg, world, bedKind, "vehicle") ? "in" : "on";
+      return `${who} now ${many ? "sleep" : "sleeps"} ${at} ${ref(target)}`;
+    }
+    case "home":
+      if (value === null) return `${who} no longer ${many ? "have" : "has"} a home`;
+      if (target !== null) return `${who} now ${many ? "live" : "lives"} ${hasOwn(world.places, target) ? "at" : "in"} ${ref(target)}`;
+      break;
+    case "owner":
+      if (value === null) return `${who} no longer ${many ? "belong" : "belongs"} to anyone`;
+      if (target !== null) return `${who} now ${many ? "belong" : "belongs"} to ${words.object(target)}`;
+      break;
+  }
+  const kind = own(state.entities, entity)?.kind ?? "";
+  const def = fieldDef(reg, world, kind, field);
+  const { noun } = fieldNoun(def?.label, field);
+  const whose = possessive(who);
+  if (value === null) return `${whose} ${noun} is no longer set`;
+  if (typeof value === "boolean") return `${who} ${many ? "are" : "is"} ${value ? "now" : "no longer"} marked “${noun}”`;
+  if (Array.isArray(value)) {
+    const items = value.map((x) => (typeof x === "string" ? (hasOwn(world.places, x) || hasOwn(state.entities, x) ? ref(x) : humanize(x)) : typeof x === "number" ? String(x) : null));
+    if (items.some((x) => x === null)) return `${whose} ${noun} changed`;
+    const shown = items.filter((x): x is string => x !== null);
+    return shown.length === 0 ? `${whose} ${noun} are now none` : `${whose} ${noun} are now ${listWords(shown)}`;
+  }
+  const v = field === "temp_c" && typeof value === "number" ? formatTemperature(value) : valueText(reg, world, state, words, kind, field, value);
+  return v === null ? null : `${whose} ${noun} is now ${v}`;
+}
+
+/** A relation's change in a sentence: who now knows, carries, holds, owns, wears or belongs to whom. */
+function relationLine(reg: Registry, world: WorldDoc, words: Words, rel: string, fromId: string, toId: string, linked: boolean): string {
+  const from = words.name(fromId);
+  // Someone may know a place (`knows` to a place): it reads with the places around it.
+  const to = hasOwn(world.places, toId) ? words.place(toId) : words.object(toId);
+  const many = plural(from);
+  const is = many ? "are" : "is";
+  const now = linked ? "now" : "no longer";
   switch (rel) {
     case "knows":
-      return linked ? `${from} now know ${to}` : `${from} no longer know ${to}`;
+      return `${from} ${now} ${many ? "know" : "knows"} ${to}`;
     case "in":
-      return linked ? `${from} → ${to}` : `${from} out of ${to}`;
+      return words.isPerson(toId) ? `${from} ${is} ${now} carried by ${to}` : `${from} ${is} ${now} in ${to}`;
     case "uses":
-      return linked ? `${from} borrows ${to}` : `${from} gives back ${to}`;
+      return linked ? `${from} now ${many ? "borrow" : "borrows"} ${to}` : `${from} gave back ${to}`;
     case "owns":
-      return linked ? `${from} owns ${to}` : `${from} no longer owns ${to}`;
-    default:
-      return linked ? `${from} ${humanize(rel)} ${to}` : `${from} no longer ${humanize(rel)} ${to}`;
+      return `${from} ${now} ${many ? "own" : "owns"} ${to}`;
+    case "worn_by":
+      return `${from} ${is} ${now} worn by ${to}`;
+    case "equipped":
+      return `${from} ${is} ${now} equipped by ${to}`;
+    case "member_of":
+      return `${from} ${is} ${now} a member of ${to}`;
+    case "regard":
+      return linked ? `${possessive(from)} regard for ${to} changed` : `${from} no longer ${many ? "hold" : "holds"} any regard for ${to}`;
+    default: {
+      const label = (own(world.relations, rel) ?? reg.relations.get(rel))?.label ?? humanize(rel);
+      return `${from} ${linked ? "now" : "no longer"} ${many ? "have" : "has"} a “${fieldNoun(label, rel).noun}” link to ${to}`;
+    }
   }
 }
 
@@ -358,44 +457,37 @@ export function namesHidden(reg: Registry, world: WorldDoc, state: Readonly<Worl
 
 /** An event's line, worded for `pov` when it is a player's (`player`), else for the GM or the author; the POV is named `you`. */
 function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, e: LedgerEvent, player: boolean, you: string): string | null {
-  const name = (id: string): string => nameOf(world, state, pov, id, you);
+  const words = wordsFor(reg, world, state, pov, player, you);
   switch (e.type) {
     case "set": {
       if (INTERNAL_FIELD.test(e.field)) return null;
       // A GM's Remove and Restore read as such, never as a field.
-      if (e.field === GONE_FIELD) return `${name(e.entity)} ${e.value === true ? "is gone" : "is back"}`;
-      const kind = own(state.entities, e.entity)?.kind ?? "";
-      if (e.field === "place" && typeof e.value === "string") return `${name(e.entity)} → ${name(e.value)}`;
-      // The weather's temperature is kept in °C; the Journal and the Montage read it in °F, as its label does.
-      if (e.field === "temp_c" && typeof e.value === "number") return `${name(e.entity)}: Temperature ${formatTemperature(e.value)}`;
+      if (e.field === GONE_FIELD) return `${words.name(e.entity)} ${e.value === true ? "is gone" : "is back"}`;
       // A player's line words an activity as the castlife pack does for the player (an agenda's step
       // the player may not know of reads "busy", `castlife.activity`).
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
-      const v = valueText(reg, world, state, pov, kind, e.field, value, you);
-      if (v === null) return null;
-      if (e.field === "activity") return `${name(e.entity)}: ${v}`;
-      return `${name(e.entity)}: ${fieldDef(reg, world, kind, e.field)?.label ?? humanize(e.field)} ${v}`;
+      return setLine(reg, world, state, words, e.entity, e.field, value);
     }
     case "add": {
       if (INTERNAL_FIELD.test(e.field)) return null;
-      const kind = own(state.entities, e.entity)?.kind ?? "";
-      const def = fieldDef(reg, world, kind, e.field);
-      const amount = def?.type === "money" ? formatMoney(Math.abs(e.delta), world.currency) : String(Math.round(Math.abs(e.delta) * 100) / 100);
-      return `${name(e.entity)}: ${def?.label ?? humanize(e.field)} ${e.delta < 0 ? "−" : "+"}${amount}`;
+      const def = fieldDef(reg, world, own(state.entities, e.entity)?.kind ?? "", e.field);
+      const { noun, unit } = fieldNoun(def?.label, e.field);
+      const amount = def?.type === "money" ? formatMoney(Math.abs(e.delta), world.currency) : `${Math.round(Math.abs(e.delta) * 100) / 100}${unit}`;
+      return `${possessive(words.name(e.entity))} ${noun} went ${e.delta < 0 ? "down" : "up"} by ${amount}`;
     }
     case "link":
     case "unlink":
-      return relationLine(e.rel, name(e.from), name(e.to), e.type === "link");
+      return relationLine(reg, world, words, e.rel, e.from, e.to, e.type === "link");
     case "spawn":
       return `${e.entity.name} appears`;
     case "stage": {
       const t = own(world.tracks, e.track);
-      return t ? `${t.label}: ${own(t.stages, e.to)?.label ?? e.to}` : null;
+      return t ? `${t.label} is now at “${own(t.stages, e.to)?.label ?? e.to}”` : null;
     }
     case "post":
-      return postLine(world, state, pov, e.memo, e.lines);
+      return postLine(world, state, pov, e.memo, e.lines, player);
     default: {
       const def = reg.get(e.type);
       if (!def) return null;

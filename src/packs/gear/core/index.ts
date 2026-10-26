@@ -24,7 +24,7 @@ import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
-import { carriedBy, contentsOf, findPiece, fitProblem, grants, hasItem, holderOf, isInside, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
+import { carriedBy, contentsOf, findPiece, fitProblem, fixedOf, goesIn, grants, hasItem, holderOf, holdProblem, holdsAs, isInside, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
 import { canSeeEntity, isDiscoverable, knows } from "../../../engine/visibility";
 import { together } from "../../../engine/presence";
 import type { FeedScope } from "../../../shared/world";
@@ -41,7 +41,7 @@ function gearLabel(ctx: ReadContext, id: EntityId, level: number): string {
   if (!e) return id;
   const qty = numOf(e.fields.qty, 1);
   const kit = level >= 3 ? kitStatus(ctx, id) : null;
-  return `${e.name}${qty > 1 ? ` ×${qty}` : ""}${kit ? ` (${kit.present}/${kit.total})` : ""}`;
+  return `${e.name}${qty > 1 ? ` ×${qty}` : ""}${kit ? ` (${kit.present} of its ${kit.total} pieces)` : ""}`;
 }
 
 /** What a holder wears or has equipped. */
@@ -50,6 +50,16 @@ function wornBy(ctx: ReadContext, who: EntityId): EntityId[] {
     .sort()
     .filter((id) => own(ctx.state.entities, id)?.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who));
 }
+
+/** Where a worn or equipped thing is on its holder, as a gear line groups it: a pocket isn't something worn. */
+function wornAs(ctx: ReadContext, id: EntityId, who: EntityId): "pockets" | "hand" | "worn" {
+  const r = own(ctx.state.entities, id)?.relations.find((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who);
+  const slot = typeof r?.fields?.slot === "string" ? r.fields.slot : "";
+  return slot === "pocket" || slot === "pocket_or_bag" ? "pockets" : r?.type === "equipped" || slot === "hand_held" ? "hand" : "worn";
+}
+
+/** The lead of each group of worn or equipped things in a Gear line. */
+const WORN_LEAD: Record<"pockets" | "hand" | "worn", string> = { pockets: "In your pockets", hand: "In your hands", worn: "Wearing" };
 
 /**
  * The Gear section (DESIGN §6, §6.11): what the POV carries (only notable things at Gear 1), from
@@ -62,17 +72,19 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   if (level === 0) return [];
   const see = (id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
   const carried = carriedBy(ctx.state, pov).filter((id) => own(ctx.state.entities, id)?.kind !== "account");
-  const shown = carried.filter((id) => see(id) && (level >= 2 || own(ctx.state.entities, id)?.fields.notable === true));
+  // From Gear 3, what is worn, in a pocket or in hand is told where it is, and not again as carried.
+  const worn = level >= 3 ? wornBy(ctx, pov).filter(see) : [];
+  const shown = carried.filter((id) => see(id) && !worn.includes(id) && (level >= 2 || own(ctx.state.entities, id)?.fields.notable === true));
   const lines: FeedLine[] = [];
-  if (shown.length > 0) lines.push({ text: `Carrying: ${shown.slice(0, 12).map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
-  if (level >= 3) {
-    const worn = wornBy(ctx, pov).filter(see);
-    if (worn.length > 0) lines.push({ text: `Wearing: ${worn.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+  for (const as of ["worn", "pockets", "hand"] as const) {
+    const here = worn.filter((id) => wornAs(ctx, id, pov) === as);
+    if (here.length > 0) lines.push({ text: `${WORN_LEAD[as]}: ${here.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
   }
+  if (shown.length > 0) lines.push({ text: `${worn.length > 0 ? "Also carrying" : "Carrying"}: ${shown.slice(0, 12).map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
   for (const g of grants(ctx.state)) {
     if (!see(g.thing)) continue;
-    if (g.owner === pov) lines.push({ text: `Lent: ${own(ctx.state.entities, g.thing)?.name ?? g.thing} to ${see(g.borrower) ? (own(ctx.state.entities, g.borrower)?.name ?? g.borrower) : "someone"}${g.overdue ? " (overdue)" : ""}.`, known: "pov" });
-    else if (g.borrower === pov) lines.push({ text: `Borrowed: ${own(ctx.state.entities, g.thing)?.name ?? g.thing}${g.overdue ? " (overdue — should go back)" : ""}.`, known: "pov" });
+    if (g.owner === pov) lines.push({ text: `You lent ${own(ctx.state.entities, g.thing)?.name ?? g.thing} to ${see(g.borrower) ? (own(ctx.state.entities, g.borrower)?.name ?? g.borrower) : "someone"}${g.overdue ? " (overdue: it should have come back by now)" : ""}.`, known: "pov" });
+    else if (g.borrower === pov) lines.push({ text: `You borrowed ${own(ctx.state.entities, g.thing)?.name ?? g.thing}${g.overdue ? " (overdue: it should go back)" : ""}.`, known: "pov" });
   }
   if (scope === "gm") {
     const unknown = [...carried, ...wornBy(ctx, pov)].filter((id) => !see(id));
@@ -177,6 +189,10 @@ declare module "../../../engine/registry" {
     has_item: (ctx: ReadContext, holder: EntityId, what: string) => boolean;
     "gear.kit_status": (ctx: ReadContext, kit: EntityId) => KitStatus | null;
     "gear.overdue": (ctx: ReadContext, owner: EntityId) => Grant[];
+    /** Why `holder` can't hold `thing` (DESIGN §7 containment), in words, or null when it can. */
+    "gear.hold_problem": (ctx: ReadContext, thing: EntityId, holder: EntityId) => string | null;
+    /** What a thing holds as, and where it may be put (DESIGN §7 containment). */
+    "gear.containment": (ctx: ReadContext, id: EntityId) => { holds: "person" | "vehicle" | "container" | null; goes: "any" | "vehicle" | "nowhere" };
   }
 }
 
@@ -199,6 +215,8 @@ export const ITEM: KindDef = {
     overdue: { type: "bool", label: "Overdue", locked: true },
     piece: { type: "text", label: "Kit piece", locked: true },
     from_kit: { type: "ref", label: "From kit", locked: true },
+    // Something built in or too big to lift (a mill stone, an installed relay): nobody picks it up or puts it anywhere (DESIGN §7).
+    fixed: { type: "bool", label: "Fixed in place (can't be picked up)", locked: true },
   },
 };
 
@@ -285,6 +303,9 @@ const transfer = (ctx: ReadContext, item: EntityId, to: EntityId): Events => {
   if (level === 0) return [];
   if (holderOf(ctx.state, item) === to) return [];
   if (item === to || isInside(ctx.state, to, item)) return reject("cycle", "can't put something inside itself");
+  // Nobody carries a vehicle, a part built into one or a fixed thing, and only what holds things holds them (DESIGN §7).
+  const cannot = holdProblem(ctx, item, to);
+  if (cannot) return reject(fixedOf(ctx, item) === null ? "cant_hold" : "fixed", cannot);
   const target = own(ctx.state.entities, to);
   if (level >= 2 && target && !kindIs(ctx.registry, ctx.world, target.kind, "person")) {
     const problem = fitProblem(ctx.state, item, to);
@@ -601,9 +622,13 @@ export const gearPack: PackDef = {
     r.query("has_item", hasItem);
     r.query("gear.kit_status", kitStatus);
     r.query("gear.overdue", (ctx, owner) => overdueFor(ctx.state, owner));
+    r.query("gear.hold_problem", holdProblem);
+    r.query("gear.containment", (ctx, id) => ({ holds: holdsAs(ctx, id), goes: goesIn(ctx, id) }));
 
     r.formula("has_item", (ctx, holder, what) => hasItem(ctx, String(holder ?? ""), String(what ?? "")));
     r.formula("carries", (ctx, holder, item) => isInside(ctx.state, String(item ?? ""), String(holder ?? "")));
+    // Whether it can be picked up at all: not a vehicle, a part built into one, or a fixed thing (DESIGN §7).
+    r.formula("movable", (ctx, thing) => fixedOf(ctx, String(thing ?? "")) === null);
     r.formula("carried_kg", (ctx, holder) => carriedBy(ctx.state, String(holder ?? "")).filter((id) => holderOf(ctx.state, id) === holder).reduce((a, id) => a + weightOf(ctx.state, id), 0) / 1000);
     r.formula("kit_present", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.present ?? 0);
     r.formula("kit_complete", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.complete ?? false);
@@ -668,7 +693,8 @@ export const gearPack: PackDef = {
 
     // Things in cells (DESIGN §11): with the grid system on, taking or using one lying in a cell
     // needs you on or next to it (`reach`); off, `reach` is being at the same place.
-    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "here" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
+    // Never a vehicle, a part built into one or a fixed thing (`movable`, DESIGN §7): only what can be lifted is offered or taken.
+    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "here" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)", "movable(item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
     // Losing something: it leaves its holder and the world (whereabouts unknown); cash inside goes with it.
     r.effect({
       type: "gear.lose",
@@ -702,7 +728,7 @@ export const gearPack: PackDef = {
     // the palette always sends days.
     r.action({ id: "lend", label: "Lend", description: "Lend something of yours to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
-    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
+    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3", "movable(item)"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
     r.action({ id: "remove", label: "Take off", description: "Take off something you wear or have equipped.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
     r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
     r.action({ id: "take_piece", label: "Take from a kit", description: "Take one piece, such as a tool or a part, out of a kit.", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
@@ -808,6 +834,8 @@ export const gearPack: PackDef = {
         if (isInside(ctx.state, found.id, who)) return reject("already_held", `${labelOf(ctx, who)} already has ${found.e.name}`);
         // Picked up where they are, and not out of someone else's hands: that is a give or a theft.
         if (placeOfEntity(ctx.state, found.id) !== placeOfEntity(ctx.state, who) || heldByPerson(ctx, found.id)) return reject("not_here", `${found.e.name} isn't lying where ${labelOf(ctx, who)} is`);
+        const cannot = holdProblem(ctx, found.id, who);
+        if (cannot) return reject("fixed", cannot);
         return null;
       },
       toEffects: (p, ctx) => {

@@ -8,7 +8,8 @@ import type { HostBookEntryInput } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import { describeProposal, playerReason } from "../../src/backend/runtime";
 import { defaultSettings } from "../../src/backend/settings-store";
-import { compactSpan, keepSummary, playerDrops, spanText, TIMELAPSE_ACTION } from "../../src/backend/view";
+import { keepSummary, playerDrops, TIMELAPSE_ACTION } from "../../src/backend/view";
+import { compactSpan, spanText } from "../../src/engine/action-words";
 import { UNSEEN_DROP } from "../../src/engine/player-events";
 import type { Rec } from "../../src/shared/ledger";
 import { initialState } from "../../src/engine/world-state";
@@ -619,11 +620,11 @@ describe("Keep report chip", () => {
 });
 
 describe("proposal labels", () => {
-  test("a sheets condition reads 'who: condition' (the undo chip once said '? ? ?')", () => {
+  test("a sheets condition reads as a sentence about who has it (the undo chip once said '? ? ?')", () => {
     const world = testWorld();
     const state = initialState(world, "r", registryOf());
-    expect(describeProposal({ type: "condition", who: "dev", condition: "injured" }, world, state)).toBe("Dev: injured");
-    expect(describeProposal({ type: "condition", condition: "tired", clear: true }, world, state)).toBe("you: no longer tired");
+    expect(describeProposal({ type: "condition", who: "dev", condition: "injured" }, world, state)).toBe("Dev is now injured");
+    expect(describeProposal({ type: "condition", condition: "tired", clear: true }, world, state)).toBe("You are no longer tired");
   });
 
   test("a transfer chip states the sum the transfer moves: cents as minor units, else the converted amount", () => {

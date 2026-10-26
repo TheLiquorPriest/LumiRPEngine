@@ -1,13 +1,11 @@
 // How checks are decided (DESIGN §11), one form for Build's Ruleset part, Settings → Checks and GM →
 // This chat → Checks: a preset (Narrative-first, Balanced, Crunchy, Custom) told in plain lines, and
 // under Custom every value with a plain label and a short help. Shares go in as whole percentages;
-// a named preset is always its own values, so changing any value makes the policy Custom.
+// changing any value makes the policy Custom, as a named preset with values of its own reads.
 
-import { presetAdjudication } from "../shared/adjudication";
+import { ADJUDICATION_PRESET_LABEL, presetAdjudication } from "../shared/adjudication";
 import type { AdjudicationDef, AdjudicationPresetId, CheckAuthority, CheckTiming, DescriptionWeight, RetryRule } from "../shared/world";
 import { HostSwitch, NumberStepper, Seg } from "./components";
-
-export const ADJUDICATION_PRESET_LABEL: Record<AdjudicationPresetId, string> = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 
 const PRESETS = (["narrative", "balanced", "crunchy", "custom"] as const).map((value) => ({ value, label: ADJUDICATION_PRESET_LABEL[value] }));
 

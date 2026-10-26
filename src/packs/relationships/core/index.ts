@@ -29,6 +29,7 @@ import { bandOf } from "../../../engine/scope";
 import { GROUP_KIND, MEMBER_OF, membersOf } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { CONVERSATION, STATED_MINUTES } from "../../../shared/needs";
+import { listWords, possessive } from "../../../shared/words";
 
 export interface Axis {
   id: string;
@@ -242,11 +243,16 @@ const regardEvent: EventTypeDef<PackEvent> = {
   describe: (e, ctx) => {
     const pov = ctx.world.pov;
     const name = (id: string, subject: boolean): string => (id === pov ? (subject ? "You" : "you") : (own(ctx.state.entities, id)?.name ?? id));
-    const head = `${name(strOf(e.data.from), true)} → ${name(strOf(e.data.to), false)}`;
+    const from = name(strOf(e.data.from), true);
+    const to = name(strOf(e.data.to), false);
+    // One axis: "Danny Okafor's trust toward you rose by 8"; several: "Maya Chen's regard for Jordan Price
+    // changed: warmth rose by 5 and trust fell by 2".
     const parts = Object.entries(objOf(e.data.deltas))
       .filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] !== 0)
-      .map(([axis, d]) => `${(axesOf(ctx).find((a) => a.id === axis)?.label ?? axis.replace(/_/g, " ")).toLowerCase()} ${d > 0 ? "+" : "−"}${Math.round(Math.abs(d) * 10) / 10}`);
-    return parts.length > 0 ? `${head}: ${parts.join(", ")}` : `${head}: regard settles`;
+      .map(([axis, d]) => ({ axis: (axesOf(ctx).find((a) => a.id === axis)?.label ?? axis.replace(/_/g, " ")).toLowerCase(), moved: `${d > 0 ? "rose" : "fell"} by ${Math.round(Math.abs(d) * 10) / 10}` }));
+    const [only] = parts;
+    if (parts.length === 1 && only) return `${possessive(from)} ${only.axis} toward ${to} ${only.moved}`;
+    return parts.length > 0 ? `${possessive(from)} regard for ${to} changed: ${listWords(parts.map((p) => `${p.axis} ${p.moved}`))}` : `${possessive(from)} regard for ${to} settles`;
   },
 };
 
@@ -285,17 +291,14 @@ function reject(code: string, reason: string): Rejection {
   return { code, reason };
 }
 
-/** The voice line for one person in the POV's scene: the band words the narrator uses. */
+/**
+ * The voice line for one person in the POV's scene: how they feel toward the POV in the world's band
+ * words, never numbers the narrator can't read (`regardWords`: from level 3, each axis apart from the band).
+ */
 export function voiceLine(ctx: ReadContext, who: EntityId): string | null {
-  const pov = ctx.world.pov;
-  const level = ctx.levelOf(who, "relationships");
-  if (level === 0 || !relationOf(ctx.state, who, pov)) return null;
-  const name = own(ctx.state.entities, who)?.name ?? who;
-  const band = regardBand(ctx, who, pov);
-  if (level <= 2) return `${name} is ${band} toward you.`;
-  const axes = regardAxes(ctx, who, pov);
-  const detail = axesOf(ctx).map((a) => `${a.label.toLowerCase()} ${Math.round(axes[a.id] ?? 0)}`).join(", ");
-  return `${name} is ${band} toward you (${detail}).`;
+  const words = regardWords(ctx, who, ctx.world.pov);
+  if (words === null) return null;
+  return `${own(ctx.state.entities, who)?.name ?? who} is ${words} toward you.`;
 }
 
 /**

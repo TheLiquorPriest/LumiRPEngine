@@ -1,6 +1,6 @@
 // The texts an agent looks things up in, bundled into dist/lumirpengine.js as strings: the agent
 // guide (docs/AGENT-GUIDE.md) and the engine's docs. A lookup returns the sections that best match
-// a query, headings counting most (the Studio's lookup), with long sections cut into parts first,
+// a query, headings counting most, with long sections cut into parts first,
 // so a match deep in DESIGN.md comes back as the paragraphs around it, not as the section's start.
 
 import guideText from "../../docs/AGENT-GUIDE.md" with { type: "text" };
@@ -9,7 +9,6 @@ import expressionsText from "../../docs/EXPRESSIONS.md" with { type: "text" };
 import presetsText from "../../docs/PRESETS.md" with { type: "text" };
 import recipesText from "../../docs/RECIPES.md" with { type: "text" };
 import referenceText from "../../docs/REFERENCE.md" with { type: "text" };
-import studioText from "../../docs/STUDIO.md" with { type: "text" };
 import userGuideText from "../../docs/USER-GUIDE.md" with { type: "text" };
 import { hasOwn } from "../shared/json";
 import { ANSWER_LIMIT, BODY_LIMIT, count } from "./read";
@@ -23,7 +22,6 @@ export const DOCS: Readonly<Record<string, { file: string; text: string }>> = {
   recipes: { file: "RECIPES.md", text: recipesText },
   design: { file: "DESIGN.md", text: designText },
   "user-guide": { file: "USER-GUIDE.md", text: userGuideText },
-  studio: { file: "STUDIO.md", text: studioText },
   presets: { file: "PRESETS.md", text: presetsText },
 };
 

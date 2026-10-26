@@ -1,7 +1,7 @@
 // Problems (DESIGN §13): the backend's full lint of the world, filtered by
 // severity, each issue saying where it is by name and opening the item or the world part it points
-// at. `IssueRow` is Build's one problem row: Problems, a playtest's findings, an import's review and
-// a Studio offer's problems all use it.
+// at. `IssueRow` is Build's one problem row: Problems, a playtest's findings and an import's review
+// all use it.
 
 import { useEffect, useState } from "preact/hooks";
 import type { WorldId } from "../../shared/ids";

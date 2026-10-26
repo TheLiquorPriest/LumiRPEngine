@@ -114,7 +114,7 @@ describe("an attempt read as a check", () => {
     const his = hidden.find((d) => d.actor === "bouncer");
     expect(his?.outcome).toBe("opposed");
     expect(hidden.map((d) => d.actor)).toEqual(["bouncer", "danny_okafor"]);
-    expect(rig.host.section("Outcome")).toMatch(/^\[Outcome\]\n- Persuasion check for "talk the bouncer into letting me in", Jordan Ellis with Danny Okafor against the bouncer: Jordan Ellis \w+; Danny Okafor \w+\./);
+    expect(rig.host.section("Outcome")).toMatch(/^\[Outcome\]\n(?:.*\n)*- Persuasion check for "talk the bouncer into letting me in", Jordan Ellis with Danny Okafor against the bouncer: Jordan Ellis \w+; Danny Okafor \w+\./);
     // Opening the inspector checks the prompt on a dry run: every panel the player's view carries, then.
     rig.body(await rig.send({ type: "lre.view.open", chatId, panel: "core.context", entity: null }));
     const view = await rig.rt.view(chatId, rig.host.userId);

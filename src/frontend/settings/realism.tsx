@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { ClaimsPolicy } from "../../shared/claims";
 import { CLAIM_MODE_LABEL, CLAIM_MODES } from "../../shared/claims";
 import type { JsonObject } from "../../shared/json";
-import { BANDS, DOMAINS } from "../../shared/ids";
+import { BANDS, DOMAIN_LABEL, DOMAINS, LEVEL_LABEL } from "../../shared/ids";
 import type { Band, DomainId, Level, RealismPresetId } from "../../shared/ids";
 import type { ResolveScope } from "../../shared/ledger";
 import type { MarkerPreview } from "../../shared/protocol";
@@ -22,20 +22,6 @@ import type { IconName } from "../icons";
 import { Icon } from "../icons";
 import { claimsMarker, resolveMarker, type Req } from "../requests";
 import { revealInScroller } from "../scroll";
-
-export const DOMAIN_LABEL: Record<DomainId, string> = {
-  money: "Money",
-  gear: "Gear",
-  vehicles: "Vehicles",
-  castlife: "Cast life",
-  relationships: "Relationships",
-  space: "Space & travel",
-  calendar: "Calendar & time",
-  weather: "Weather",
-  sheets: "Sheets & checks",
-};
-
-export const LEVEL_LABEL: Record<Level, string> = { 0: "Off", 1: "Narrative", 2: "Simple", 3: "Detailed", 4: "Simulation" };
 
 const PRESETS: { value: RealismPresetId; label: string }[] = [
   { value: "story", label: "Story" },

@@ -8,7 +8,7 @@ import { useState } from "preact/hooks";
 import { isRecord } from "../../../shared/json";
 import { pushSheet, useApp } from "../../../frontend/app";
 import { Empty, JsonView, List, ListRow, Section, Seg } from "../../../frontend/components";
-import { list, oneOf, optStr, str, strings } from "../../../frontend/decode";
+import { list, num, oneOf, optStr, str, strings } from "../../../frontend/decode";
 import type { IconName } from "../../../frontend/icons";
 import type { PanelProps } from "../../../frontend/registry";
 import { GlanceCard } from "../../../frontend/play/glance";
@@ -30,7 +30,9 @@ export interface QuestTrack {
   cue?: string;
   truths: string[];
   objectives: { label: string; done: boolean }[];
+  /** The hints earned at this stage, in order; the first `opened` of them the player has opened. */
   hints: string[];
+  opened: number;
   status: Status;
 }
 
@@ -49,6 +51,7 @@ export function decodeQuestsView(value: unknown): { tracks: QuestTrack[] } | nul
               truths: strings(t.truths),
               objectives: list(t.objectives, (o) => ({ label: str(o.label), done: o.done === true })),
               hints: strings(t.hints),
+              opened: num(t.opened),
               status,
             }
           : null,

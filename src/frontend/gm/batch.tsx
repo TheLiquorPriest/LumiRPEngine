@@ -10,6 +10,7 @@
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
 import type { DomainId, EntityId, Level, PlaceId, TierId } from "../../shared/ids";
+import { LEVEL_LABEL } from "../../shared/ids";
 import type { Fidelity, MindApproach } from "../../shared/minds";
 import { FIDELITIES, MIND_APPROACHES, MIND_TEXT_CAPS } from "../../shared/minds";
 import type { RoutineRole } from "../../shared/routines";
@@ -19,7 +20,6 @@ import { APPROACH_LABEL, FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 import type { BulkChange } from "../batch";
 import { bulkOps, forCharacters, mixOf } from "../batch";
 import { Banner, Button, Field, HostSwitch, Section } from "../components";
-import { LEVEL_LABEL } from "../settings/realism";
 import type { BulkEditor, Editor } from "./editor";
 import { GmPage } from "./ui";
 
@@ -86,23 +86,41 @@ export function routineStanding(gm: Pick<GmView, "routineRoles">, entity: Entity
   return gm.routineRoles.find((r) => r.entity === entity)?.role ?? "world";
 }
 
-/** What a change did, for the notice it leaves: "Pinned 3 to Near", "Moved 2 to The Rusty Anchor". */
+/** What a routine role makes of someone's usual day, for the notice a bulk change leaves. */
+const ROLE_DOES: Record<RoutineRole, string> = { informative: "only context", enforced: "lived as written", off: "ignored" };
+
+/** A place by name with the places around it, outermost first: "Rusty Anchor (Port Alder › Harbor Street)". */
+function placeWords(gm: Pick<GmView, "places">, id: string): string {
+  const place = gm.places.find((p) => p.id === id);
+  if (!place) return id;
+  const around: string[] = [];
+  for (let up = gm.places.find((p) => p.id === place.parent); up && around.length < 32; up = gm.places.find((p) => p.id === up?.parent)) around.unshift(up.name);
+  return around.length > 0 ? `${place.name} (${around.join(" › ")})` : place.name;
+}
+
+/**
+ * What a change did, for the notice it leaves, in a sentence that says what the setting means and
+ * its value: "3 minds are now pinned at Near fidelity", "2 are now at Rusty Anchor (Port Alder ›
+ * Harbor Street)".
+ */
 export function bulkDone(gm: Pick<GmView, "tiers" | "domains" | "places">, change: BulkChange, count: number): string {
+  const are = count === 1 ? "is" : "are";
+  const have = count === 1 ? "has" : "have";
   switch (change.kind) {
     case "tier":
-      return `Set ${count} to ${gm.tiers.find((t) => t.id === change.tier)?.label ?? change.tier}`;
+      return `${count} ${are} now in the ${gm.tiers.find((t) => t.id === change.tier)?.label ?? change.tier} tier`;
     case "level": {
       const area = gm.domains.find((d) => d.id === change.domain)?.label ?? change.domain;
-      return change.level === null ? `${area} back to the tier for ${count}` : `${area} set to ${change.level} · ${LEVEL_LABEL[change.level]} for ${count}`;
+      return change.level === null ? `${count} ${have} ${area} detail from their tier again` : `${count} now ${have} ${area} detail at level ${change.level} (${LEVEL_LABEL[change.level]})`;
     }
     case "role":
-      return change.role === null ? `Routine back to the world's for ${count}` : `Routine set to ${ROUTINE_ROLE_LABEL[change.role]} for ${count}`;
+      return change.role === null ? `${count} ${have} their routine as the world sets it again` : `For ${count}, their routine is now ${ROLE_DOES[change.role]} (${ROUTINE_ROLE_LABEL[change.role]})`;
     case "pin":
-      return change.level === null ? `Unpinned ${count}` : `Pinned ${count} to ${FIDELITY_LABEL[change.level]}`;
+      return change.level === null ? `${count} ${count === 1 ? "mind goes" : "minds go"} by their score again` : `${count} ${count === 1 ? "mind is" : "minds are"} now pinned at ${FIDELITY_LABEL[change.level]} fidelity`;
     case "intent":
-      return change.text.trim() === "" && change.approach === null ? `Cleared the intent of ${count}` : `Gave ${count} your intent`;
+      return change.text.trim() === "" && change.approach === null ? `${count} no longer ${have} your intent` : `${count} now ${have} your intent${change.text.trim() === "" ? "" : `: “${change.text.trim()}”`}`;
     case "move":
-      return `Moved ${count} to ${gm.places.find((p) => p.id === change.to)?.name ?? change.to}`;
+      return `${count} ${are} now at ${placeWords(gm, change.to)}`;
   }
 }
 

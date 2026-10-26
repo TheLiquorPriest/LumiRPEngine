@@ -1,6 +1,8 @@
 // State push (ARCHITECTURE §4): a snapshot on hello, resync and chat open; afterwards deltas
 // against the last view sent, with a strictly increasing `rev` per (user, chat). Pushes are
-// coalesced per chat.
+// coalesced per chat. Every page of the user shares one rev: a page that asks for a snapshot gets
+// the view the others hold, at their rev, so it never moves anyone's base, and a delta brings all of
+// them up to date.
 
 import type { ChatId, UserId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
@@ -57,14 +59,23 @@ export class StatePush {
     return c;
   }
 
-  /** A full snapshot (hello, resync, chat open). Its view is built after the messages already waiting (`giveWay`). */
+  /**
+   * A full snapshot for one page (hello, resync, chat open), at once: the last view pushed, at its
+   * rev, which every other page's deltas build on too; a delta follows with what changed since. A chat
+   * that has pushed nothing yet builds its view first, after the messages already waiting (`giveWay`).
+   */
   async snapshot(chatId: ChatId, userId: UserId, frontendSessionId?: string): Promise<void> {
     const c = this.channel(chatId, userId);
-    await giveWay();
-    const view = await this.build(chatId, userId);
-    c.rev++;
-    c.last = asJson(view);
-    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.snapshot", chatId, rev: c.rev, view }, userId, frontendSessionId);
+    if (c.last === null) {
+      await giveWay();
+      const view = asJson(await this.build(chatId, userId));
+      // Another snapshot or push set the base while this one was built: that one stands, and a delta follows.
+      if (c.last === null) {
+        c.rev++;
+        c.last = view;
+      } else this.changed(chatId, userId);
+    } else this.changed(chatId, userId);
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.snapshot", chatId, rev: c.rev, view: c.last as unknown as StateView }, userId, frontendSessionId);
   }
 
   /** Schedules a delta push for the chat (coalesced). */

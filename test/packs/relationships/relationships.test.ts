@@ -63,10 +63,10 @@ describe("relationships", () => {
     const maya = gm.entities.find((e) => e.id === "maya");
     expect(maya?.relations.some((r) => r.type === "regard" && r.to === "jordan" && typeof r.value === "number")).toBe(true);
     const ev = w.events.find((e) => e.type === "relationships.regard");
-    expect(ev ? reg.get(ev.type)?.describe(ev, w.ctx) : "").toBe(`${w.state.entities.maya?.name} → ${w.state.entities.jordan?.name}: warmth +5, trust +5, respect +3`);
+    expect(ev ? reg.get(ev.type)?.describe(ev, w.ctx) : "").toBe(`${w.state.entities.maya?.name}'s regard for ${w.state.entities.jordan?.name} changed: warmth rose by 5, trust rose by 5 and respect rose by 3`);
     appraise(w, "maya", "you", "help");
     const toYou = w.events.filter((e) => e.type === "relationships.regard").at(-1);
-    expect(toYou ? reg.get(toYou.type)?.describe(toYou, w.ctx) : "").toBe(`${w.state.entities.maya?.name} → you: warmth +5, trust +5, respect +3`);
+    expect(toYou ? reg.get(toYou.type)?.describe(toYou, w.ctx) : "").toBe(`${w.state.entities.maya?.name}'s regard for you changed: warmth rose by 5, trust rose by 5 and respect rose by 3`);
   });
 
   test("faction regard is the members' mean unless the faction has its own; the narrator voice uses bands", () => {
@@ -78,7 +78,10 @@ describe("relationships", () => {
     applyEffects(reg, w, [{ type: "relationships.adjust", args: { from: "maya", to: "you", delta: 50 } }], { bindings: {}, rng: createRng("f") });
     expect(w.ctx.query("relationships.faction_regard")(w.ctx, "crew", "you")).toBe(25);
     w.state.entities.you!.fields.place = "cafe";
-    expect(voiceLine(w.ctx, "maya")).toBe("Maya Chen is warm toward you (warmth 50, trust 50, respect 50).");
+    // The narrator reads the world's band words, never the numbers behind them.
+    const voice = voiceLine(w.ctx, "maya") ?? "";
+    expect(voice).toContain(regardBand(w.ctx, "maya", "you"));
+    expect(voice).not.toMatch(/\d/);
   });
 
   test("the regard channel is capped per proposal; level 0 makes appraisals no-ops", () => {

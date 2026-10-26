@@ -7,8 +7,8 @@ import { macrosIn } from "../engine/authoring";
 import { isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
-import { checkSchema, MAP_SCHEMA, pathText } from "../studio-api";
-import type { Schema } from "../studio-api";
+import { checkSchema, MAP_SCHEMA, pathText } from "./local-engine";
+import type { Schema } from "./local-engine";
 import { isCollection } from "./diff";
 
 // A JSON module's inferred type spells out every node, which `Schema` describes in general.

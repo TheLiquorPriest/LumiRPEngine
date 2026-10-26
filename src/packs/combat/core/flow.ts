@@ -162,7 +162,7 @@ export function hpLine(ctx: ReadContext, e: LedgerEvent): string | null | undefi
   const who = labelOf(ctx, e.entity);
   if (e.type === "add") return `${who} ${e.delta < 0 ? "takes damage" : "recovers"}`;
   const band = typeof e.value === "number" ? woundOf(rules, e.value, hpMaxOf(ctx, rules, e.entity)) : "";
-  return band !== "" ? `${who}: ${band}` : null;
+  return band !== "" ? `${who} is now ${band}` : null;
 }
 
 /** The HP field's name for lines: its label on the POV's kind, else the field id in words. */
