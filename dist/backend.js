@@ -69604,7 +69604,7 @@ function timelapseEntry(world, state2) {
   return {
     id: TIMELAPSE_ACTION2,
     label: "Let time pass",
-    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it), except input that first gets up or goes somewhere with another action ("I get out of bed and make coffee. (OOC: skip an hour.)"), which is that action with the time as its then. span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state2)})`,
+    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it), except in-character input before the instruction that gets up from bed or a rest, or goes somewhere, with a catalog action ("I get out of bed and make coffee. (OOC: skip an hour.)"), which is that action with the time as its then; what the instruction itself says ("OOC: over the next two hours, I walk to the gym") still fills the skip. span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state2)})`,
     params: ["span (text: the input's words for how long or until when)", "minutes? (number)", "until? (text)", "at? (text)"],
     needs: [],
     lexicon: TIMELAPSE_LEXICON
@@ -70493,7 +70493,7 @@ async function interpret(steps, text5, context, actions, config3, userId, signal
     `Only the player character's own deliberate actions count, whether said in the first person ("I", "we"), as a stage direction ("[${pov.name} heads to the roof]") or as narration about ${pov.name} in the third person. "I'll \u2026" about what the player character does now is an action.`,
     `No action ("action": null) for speech alone, out-of-character text ("OOC:", "((\u2026))") that doesn't say time passes, questions, requests to others, what someone else does, hypotheticals, plans for another time, recaps or feelings.`,
     ...actions.some((a) => a.id === TIMELAPSE_ACTION) ? [
-      `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then". The one exception is input that first has the player character get up or go somewhere with a catalog action, before the time passes ("I get out of bed and make coffee. (OOC: skip an hour.)", "I head down to the docks. OOC: two hours later."): read that action, and any actions after it, as usual, and the time as their "then".`
+      `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then". The one exception is in-character input that, before the out-of-character instruction, has the player character get up from bed or a rest, or go somewhere, with a catalog action ("I get out of bed and make coffee. (OOC: skip an hour.)", "I head down to the docks. OOC: two hours later."): read that action, and any actions after it, as usual, and the time as their "then". What the out-of-character instruction itself says happens ("OOC: over the next two hours, I walk to the gym and work out") still fills the time.`
     ] : [],
     `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null. An incidental action that fits none, or names someone or somewhere nothing lists, is left out: it never hides the actions after it.`,
     `An action on a thing the player says they have that nothing lists ("I pour Theresa a coffee" with no coffee listed) is still read, in order with the rest: its param holds the thing in the input's own words ("coffee"), and "thing" says what sort of thing it is: "food", "drink", "weapon", "key", "document", "money" or "other".`,
@@ -72777,9 +72777,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "f600ddfd0877cf5017991664a6f0badd222016db7a561586c9ce2618628fc12e";
+  const sha256 = "fd1af1c5c710b55aabc52360182e52e35430024425eeddfd1de7484d046cdb73";
   const tools = ["3363864e19637152d71e37196938c410", "21566d9a8cef394277c636eb45e09b64"].filter((f) => f !== undefined);
-  return { id: "3cd0efe2", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "2ed0a206", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -75930,7 +75930,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "3cd0efe2" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "2ed0a206" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
