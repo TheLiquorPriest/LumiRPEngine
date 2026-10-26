@@ -35089,7 +35089,7 @@ var events = [
     },
     apply: (e3, state) => {
       const n2 = e3.data.n;
-      countStage(state, "hints", str2(e3, "track"), str2(e3, "stage"), (open) => typeof n2 === "number" ? Math.max(open, n2) : open + 1);
+      countStage(state, "hints", str2(e3, "track"), str2(e3, "stage"), (open) => typeof n2 === "number" ? open < n2 ? open + 1 : open : open + 1);
     },
     describe: (e3) => `hint opened on ${str2(e3, "track")}`
   },

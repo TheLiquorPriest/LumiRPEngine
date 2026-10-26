@@ -4596,6 +4596,13 @@ function canSeeEntity(reg, world, state, pov, id) {
     return true;
   if (!own(state.entities, id) || isGone(state, id))
     return false;
+  return couldSeeEntity(reg, world, state, pov, id);
+}
+function couldSeeEntity(reg, world, state, pov, id) {
+  if (id === pov)
+    return true;
+  if (!own(state.entities, id))
+    return false;
   const v = isDiscoverable(world, state, id) ? "known_by" : entityVisibility(world, state, id);
   if (v !== "known_by")
     return v === "public";
@@ -4891,6 +4898,9 @@ var PLAIN_LETTERS = { \u{f8}: "o", \u{e6}: "ae", \u{153}: "oe", \u{df}: "ss", \u
 function unaccented(text) {
   return text.normalize("NFD").replace(ACCENTS, "").normalize("NFC");
 }
+function plainLetters(word) {
+  return unaccented(word).replace(/[\u00F8\u00E6\u0153\u00DF\u0111\u0142\u0131\u00F0\u00FE]/g, (c) => PLAIN_LETTERS[c] ?? c);
+}
 function spellings(text) {
   if (text.length > SPELT_LENGTH)
     return spell(text);
@@ -4904,7 +4914,7 @@ function spellings(text) {
   return words;
 }
 function spell(text) {
-  return (text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []).map((written) => ({ written, plain: unaccented(written).replace(/[\u00F8\u00E6\u0153\u00DF\u0111\u0142\u0131\u00F0\u00FE]/g, (c) => PLAIN_LETTERS[c] ?? c) }));
+  return (text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []).map((written) => ({ written, plain: plainLetters(written) }));
 }
 var SPELT_LENGTH = 160;
 var KEPT = 8192;
@@ -5415,7 +5425,7 @@ function valueText(reg, world, state, words, kind, field, v) {
   }
   return null;
 }
-function setLine(reg, world, state, words, entity, field, value) {
+function setLine(reg, world, state, words, entity, field, value, atMost) {
   const who = words.name(entity);
   const many = plural(who);
   const ref = (v2) => hasOwn3(world.places, v2) ? words.place(v2) : words.thing(v2);
@@ -5463,7 +5473,7 @@ function setLine(reg, world, state, words, entity, field, value) {
     return shown.length === 0 ? `${whose} ${noun} are now none` : `${whose} ${noun} are now ${listWords(shown)}`;
   }
   const v = field === "temp_c" && typeof value === "number" ? formatTemperature(value) : valueText(reg, world, state, words, kind, field, value);
-  return v === null ? null : `${whose} ${noun} is now ${v}`;
+  return v === null ? null : `${whose} ${noun} is now ${atMost ? "at most " : ""}${v}`;
 }
 function relationLine(reg, world, words, rel, fromId, toId, linked) {
   const from = words.name(fromId);
@@ -5505,22 +5515,24 @@ function relabel(line2, refs, world, state, pov, you) {
   }
   return out;
 }
-function hiddenTrackLabels(reg, world, state, pov) {
+function hiddenTrackLabels(reg, world, state, pov, stages = true) {
   const out = [];
   for (const [id, t] of Object.entries(world.tracks)) {
     if (trackShown(reg, world, state, pov, id))
       continue;
     out.push(t.label);
-    for (const s of Object.values(t.stages))
-      if (s.label.length >= 6)
-        out.push(s.label);
+    if (stages) {
+      for (const s of Object.values(t.stages))
+        if (s.label.length >= 6)
+          out.push(s.label);
+    }
   }
   return out;
 }
 function hiddenEntityNames(reg, world, state, pov) {
   const out = { people: [], things: [] };
   for (const [id, e] of Object.entries(state.entities))
-    if (!canSeeEntity(reg, world, state, pov, id))
+    if (!couldSeeEntity(reg, world, state, pov, id))
       (kindIs(reg, world, e.kind, "person") ? out.people : out.things).push(e.name);
   return out;
 }
@@ -5528,10 +5540,11 @@ function hiddenNames(reg, world, state, pov) {
   const { people, things } = hiddenEntityNames(reg, world, state, pov);
   return [...hiddenTrackLabels(reg, world, state, pov), ...people, ...things];
 }
-function hiddenNameCheck(reg, world, state, pov) {
-  return passMemo([state, world, reg], `visibility.hidden_names\x00${pov}`, () => {
+function hiddenNameCheck(reg, world, state, pov, opts = {}) {
+  const stages = opts.stages ?? true;
+  return passMemo([state, world, reg], `visibility.hidden_names\x00${pov}\x00${stages}`, () => {
     const hidden = hiddenEntityNames(reg, world, state, pov);
-    const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
+    const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov, stages), ...secretLoreTitles(reg, world, state)];
     return (text, heard = "") => namesAny(text, hidden.people, labels, heard);
   });
 }
@@ -5549,7 +5562,7 @@ function rawLine(reg, world, state, pov, e, player, you) {
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
-      return setLine(reg, world, state, words, e.entity, e.field, value);
+      return setLine(reg, world, state, words, e.entity, e.field, value, e.atMost === true);
     }
     case "add": {
       if (INTERNAL_FIELD.test(e.field))
@@ -6530,7 +6543,7 @@ var events = [
     },
     apply: (e, state) => {
       const n = e.data.n;
-      countStage(state, "hints", str2(e, "track"), str2(e, "stage"), (open) => typeof n === "number" ? Math.max(open, n) : open + 1);
+      countStage(state, "hints", str2(e, "track"), str2(e, "stage"), (open) => typeof n === "number" ? open < n ? open + 1 : open : open + 1);
     },
     describe: (e) => `hint opened on ${str2(e, "track")}`
   },
@@ -6942,14 +6955,24 @@ function nameOf2(ctx, id) {
 }
 var setDef = {
   type: "set",
-  validate: (e, ctx) => !hasEntity(ctx.state, e.entity) ? reject3("missing_entity", `no entity ${e.entity}`) : safeKey(e.field) ? null : reject3("bad_field", "not a field name"),
+  validate: (e, ctx) => {
+    if (!hasEntity(ctx.state, e.entity))
+      return reject3("missing_entity", `no entity ${e.entity}`);
+    if (!safeKey(e.field))
+      return reject3("bad_field", "not a field name");
+    return e.atMost && (typeof e.value !== "number" || !Number.isFinite(e.value)) ? reject3("bad_value", "a cap is a finite number") : null;
+  },
   apply: (e, state) => {
     const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
-    if (entity && safeKey(e.field))
-      entity.fields[e.field] = e.value;
+    if (!entity || !safeKey(e.field))
+      return;
+    const current = entity.fields[e.field];
+    if (e.atMost && typeof current === "number" && typeof e.value === "number" && current <= e.value)
+      return;
+    entity.fields[e.field] = e.value;
   },
   touches: (e) => [{ entity: e.entity, field: e.field }],
-  describe: (e, ctx) => `${nameOf2(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? `is now ${String(e.value)}` : "changed"}`
+  describe: (e, ctx) => `${nameOf2(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? `is ${e.atMost ? "at most" : "now"} ${String(e.value)}` : "changed"}`
 };
 var addDef = {
   type: "add",
@@ -8510,7 +8533,7 @@ function followXp(reg, w, entity, id, prog, scope, spawned) {
       const value = own(own(w.state.entities, entity)?.fields ?? {}, field) ?? def.default;
       const max = fieldBounds(reg, w.ctx, entity, def).max;
       if (typeof value === "number" && max !== undefined && value > max)
-        whole4 = landed({ type: "set", entity, field, value: max });
+        whole4 = landed({ type: "set", entity, field, value: max, atMost: true });
     }
     if (whole4 && landed(line2(`${who} dropped to ${prog.label} ${to} (from ${from}).`)))
       out.applied.push(...unit);
@@ -9157,7 +9180,7 @@ function resolveTry(reg, w, params, rng, opts = {}) {
     w.apply({ type: ENGINE_EVENTS.check, data: { check: ready.check.id ?? "", skill: skill.id, actor: id, notation: ready.notation, natural: roll.natural, total: roll.total, dc: ready.dc, outcome: roll.outcome, npc: true } });
     rolled.push({ who: id, name: nameOf3(id), outcome: roll.outcome, pass: pass.includes(roll.outcome), notation: ready.notation, modifier: base.modifier, total: roll.roll.total + base.modifier });
   }
-  const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: namesHiddenOrSecretLore(reg, world, w.state, read.attempt) ? "" : read.attempt, pov: nameOf3(pov), band, dc, against, companions: rolled, share: share2, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
+  const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: namesHiddenOrSecretLore(reg, world, w.state, read.attempt, opts.heard ?? "") ? "" : read.attempt, pov: nameOf3(pov), band, dc, against, companions: rolled, share: share2, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
   return { ...res, events: w.events.slice(start), inferred };
 }
 
@@ -12264,10 +12287,10 @@ function paramLabel(action, name, world, registry) {
   const words4 = name.replace(/_/g, " ");
   return words4.charAt(0).toUpperCase() + words4.slice(1);
 }
-function actionWords(registry, world, state, action, params, typed = "") {
-  const said = typed.toLowerCase();
+function pickReader(registry, world, state, typed, heard) {
+  const said = heard.toLowerCase();
   const secrets = unrevealedSecrets(registry, world, state).filter((s) => !said.includes(s.toLowerCase()));
-  const screened = (words4) => findLeaks(words4, secrets).length > 0 || namesHiddenOrSecretLore(registry, world, state, words4, typed) ? null : words4;
+  const screened = (words4) => findLeaks(words4, secrets).length > 0 || namesHiddenOrSecretLore(registry, world, state, words4, heard) ? null : words4;
   const nameOf3 = (value) => {
     if (typeof value !== "string" || value === "")
       return null;
@@ -12281,7 +12304,7 @@ function actionWords(registry, world, state, action, params, typed = "") {
   };
   const asTyped = (value) => {
     const words4 = value.replace(/[_~]/g, " ").trim();
-    if (said === "" || words4 === "")
+    if (typed === "" || words4 === "")
       return null;
     const found = new RegExp(words4.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s_~]+"), "iu").exec(typed);
     return found ? screened(found[0]) : null;
@@ -12300,6 +12323,17 @@ function actionWords(registry, world, state, action, params, typed = "") {
     }
     return nameOf3(value);
   };
+  const text3 = (def, value) => {
+    const label = labelOf2(def.table, value);
+    if (label !== null)
+      return findLeaks(label, secrets).length === 0 ? { words: label, label: true } : null;
+    const words4 = (def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null) ?? asTyped(value);
+    return words4 === null ? null : { words: words4, label: false };
+  };
+  return { nameOf: nameOf3, asTyped, text: text3 };
+}
+function actionWords(registry, world, state, action, params, typed = "", heard = typed) {
+  const read = pickReader(registry, world, state, typed, heard);
   const count = action.params[COUNT_PARAM]?.type === "number" && typeof params[COUNT_PARAM] === "number" ? params[COUNT_PARAM] : null;
   const counted = count === null ? undefined : Object.keys(action.params).find((name) => name !== COUNT_PARAM && (action.params[name]?.type === "ref" || action.params[name]?.type === "text"));
   const parts = [];
@@ -12310,9 +12344,9 @@ function actionWords(registry, world, state, action, params, typed = "") {
       continue;
     let word = null;
     if (def.type === "ref")
-      word = nameOf3(value) ?? (typeof value === "string" ? asTyped(value) : null);
+      word = read.nameOf(value) ?? (typeof value === "string" ? read.asTyped(value) : null);
     else if (def.type === "list" && def.ref !== undefined) {
-      const names = (Array.isArray(value) ? value : []).map(nameOf3).filter((n) => n !== null);
+      const names = (Array.isArray(value) ? value : []).map(read.nameOf).filter((n) => n !== null);
       if (names.length > 0)
         word = `with ${names.join(" and ")}`;
     } else if (def.type === "money" && typeof value === "number")
@@ -12321,11 +12355,8 @@ function actionWords(registry, world, state, action, params, typed = "") {
       word = `${value} ${paramLabel(action, name, world, registry).toLowerCase()}`;
     else if (def.type === "duration" && typeof value === "number" && value > 0)
       word = compactSpan(value);
-    else if (typeof value === "string") {
-      const label = labelOf2(def.table, value);
-      const written = label === null && def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null;
-      word = label !== null ? findLeaks(label, secrets).length === 0 ? label : null : written ?? asTyped(value);
-    }
+    else if (typeof value === "string")
+      word = read.text(def, value)?.words ?? null;
     if (word === null)
       continue;
     if (name === counted && count !== null && count !== 1) {
@@ -12661,6 +12692,8 @@ function planTurn(input) {
       timelapse = outcome;
   } else {
     const steps = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null }))] : [];
+    const heard = input.userTexts.join(`
+`);
     for (let i = 0;i < Math.max(1, steps.length); i++) {
       const step = steps[i] ?? null;
       const draws = i === 0 ? rng : rng.fork(`queue:${i}`);
@@ -12679,8 +12712,8 @@ function planTurn(input) {
           made = { entity: claimed.entity, name: step.claim.name, events: claimed.events };
         const params = claimed && step.claim ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
         const def = findAction(reg, w.world, step.action);
-        before.picks = def ? actionWords(reg, w.world, w.state, def, params) : "";
-        resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
+        before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard) : "";
+        resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
         scene = sceneKey(w.world, w.state);
         const done = w.events.slice(mark, mark + (made?.events ?? 0) + resolution.events.length);
         if (done.length > 0)
@@ -25538,7 +25571,27 @@ function gearLines(ctx, scope) {
   return lines;
 }
 var PRESENT_GEAR_CAP = 6;
-var MOVES = { "gear.transfer": { thing: "item", into: "to" }, "gear.give": { thing: "item", into: "to" }, "gear.take_piece": { into: "to" } };
+var MOVES = {
+  "gear.transfer": { thing: "item", into: "to" },
+  "gear.give": { thing: "item", into: "to" },
+  "gear.take_piece": { into: "to" },
+  "gear.receive": { into: "to" },
+  "gear.lend": { thing: "item", into: "to", carried: "item" }
+};
+var BOUND = { self: true, actor: true, target: true, owner: true };
+var FORMULA_NAMES = { ...BOUND, here: true, event: true, track: true, level: true, from: true, roll: true, params: true, difficulty: true, clock: true, minute: true, hour: true, day: true, weekday: true, date: true, month: true, year: true, daypart: true };
+function argName(arg) {
+  if (typeof arg !== "string")
+    return null;
+  if (!arg.startsWith("="))
+    return arg === "" ? null : { name: arg, formula: false, param: false };
+  const m = /^\s*(params\.)?([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(arg.slice(1));
+  return m?.[2] === undefined ? null : { name: m[2], formula: true, param: m[1] !== undefined };
+}
+var CARRIES = /^\s*carries\(\s*(?:self|actor)\s*,\s*(?:params\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*$/;
+function requiresCarried(action, name) {
+  return action.requires.some((req) => typeof req === "string" && CARRIES.exec(req)?.[1] === name);
+}
 function authoredMoves(world) {
   const things = new Map;
   const holders = new Map;
@@ -25558,18 +25611,26 @@ function authoredMoves(world) {
   for (const { path, effects } of effectLists(world)) {
     const action = path.startsWith("actions.") ? own(world.actions, path.split(".")[1] ?? "") : undefined;
     const named = (arg) => {
-      if (typeof arg !== "string" || arg.startsWith("="))
+      const at = argName(arg);
+      if (!at)
         return null;
-      const param = action ? own(action.params, arg) : undefined;
+      const param = action ? own(action.params, at.name) : undefined;
       if (param)
-        return { kind: param.type === "ref" ? param.ref : undefined, words: `its ${param.label ?? arg}` };
-      const e = own(world.entities, arg);
-      return { kind: e?.kind, words: e?.name ?? arg };
+        return { kind: param.type === "ref" ? param.ref : undefined, words: `its ${param.label ?? at.name}` };
+      if (at.param || hasOwn(at.formula ? FORMULA_NAMES : BOUND, at.name))
+        return null;
+      const e = own(world.entities, at.formula && at.name === "pov" ? world.pov : at.name);
+      return e ? { kind: e.kind, words: e.name } : null;
     };
     for (const spec of effects) {
       const move2 = hasOwn(MOVES, spec.type) ? MOVES[spec.type] : undefined;
       if (!move2)
         continue;
+      if (move2.carried !== undefined) {
+        const carried = argName(spec.args?.[move2.carried]);
+        if (!action || !carried || !requiresCarried(action, carried.name))
+          continue;
+      }
       const by = action?.label ?? path;
       const into = named(spec.args?.[move2.into]);
       if (into)
@@ -26385,7 +26446,7 @@ var gearPack = {
           severity: "warning",
           code: "gear.holders",
           path: `kinds.${kind}`,
-          message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) holds things in this world (${why}) but isn't a container, a vehicle or a person, so nothing can be put in it: a transfer, a gift or a GM's Put inside into it is refused. Set its Extends to container, or to a kind built on one.`
+          message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) holds things in this world (${why}) but isn't a container, a vehicle or a person, so a transfer, a gift or a GM's Put inside into it is refused. Set its Extends to container, or to a kind built on one.`
         }));
       }
     });
@@ -31142,6 +31203,8 @@ function puzzlesFor(ctx, ref) {
     return open.map((p) => p.id);
   return want.size === 0 ? open.map((p) => p.id) : [];
 }
+var UNSPACED = String.raw`\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}`;
+var ANSWER_WORD = new RegExp(String.raw`[${UNSPACED}]\p{M}*|(?:(?![${UNSPACED}])[\p{L}\p{M}\p{N}])+(?:['\u2019]s(?![\p{L}\p{M}\p{N}]))?`, "gu");
 function askedFor(ctx, ref) {
   const id = Object.keys(ctx.world.tracks).find((t) => shownTrackId(ctx.world, t) === ref);
   const shown3 = id === undefined ? null : playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
@@ -31158,7 +31221,8 @@ function askedForGm(ctx, ref) {
 }
 function answerTo(ctx, track, a) {
   const decision = typeof a.decision === "number" ? a.decision : undefined;
-  const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
+  const answer = typeof a.answer === "number" && Number.isFinite(a.answer) ? String(a.answer) : strOf(a.answer);
+  const check = checkAnswer(ctx.world, ctx.state, track, answer, decision);
   if (check.needsDecision)
     return reject14("needs_decision", "this answer needs a judgement");
   return check.event ? [check.event] : reject14("no_answer", "there is nothing to answer here");
@@ -31535,6 +31599,8 @@ function hpLine(ctx, e) {
   const who = labelOf(ctx, e.entity);
   if (e.type === "add")
     return `${who} ${e.delta < 0 ? "takes damage" : "recovers"}`;
+  if (e.atMost)
+    return null;
   const band = typeof e.value === "number" ? woundOf(rules, e.value, hpMaxOf(ctx, rules, e.entity)) : "";
   return band !== "" ? `${who} is now ${band}` : null;
 }
@@ -32973,6 +33039,9 @@ var NAME_FILLER = { mr: true, mrs: true, ms: true, miss: true, dr: true, sir: tr
 function words4(text5) {
   return text5.toLowerCase().replace(/['\u2019]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
 }
+function singlesOut(word) {
+  return word.length >= 3 && !NAME_FILLER[word];
+}
 function namedIn(name, said2) {
   const own2 = words4(name);
   if (own2.length === 0 || said2.length === 0)
@@ -32982,7 +33051,7 @@ function namedIn(name, said2) {
   if (joined3.includes(` ${whole4} `))
     return true;
   const present2 = new Set(said2);
-  return own2.some((w) => w.length >= 3 && !NAME_FILLER[w] && present2.has(w));
+  return own2.some((w) => singlesOut(w) && present2.has(w));
 }
 function namesIn(value, ids2, out) {
   if (typeof value === "string") {
