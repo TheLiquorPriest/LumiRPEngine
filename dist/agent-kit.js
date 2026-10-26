@@ -62607,12 +62607,14 @@ I then re-measured with the engine's own \`extract\` step as shipped (strict rul
 - **Turn-critical work** (simulation, catch-up and timelapse segments) runs in the backend process, inside the engine run, bounded by the deterministic unit caps (§9.2). A default-cap segment took 38 ms on a child process and 2.5 ms in process, far inside the host's 15 s watchdog, so a second process and a per-chat registry copy would have bought nothing (D9).
 - **Dense routine worlds** stop a timelapse sooner: every block the POV could meet is lived at its minute (§8), so the unit cap's events run out before its agent-days (the dense record-size world, where everyone shares the POV's café, park and office, stops after 22 days, the needs the POV lives counted among its events), and the player presses Continue for the rest, which keeps a typed span's hold on the POV; caching \`dayPlan\` per state is the known way to win back the timing, and with it the room to give a segment more events and so more days.
 - **One worker.** The backend runs one task at a time, so a request or a step that holds it holds everything else, a generation's guard and the engine run included. Every synchronous stretch stays well under a second. I measured on a large private world (257 places, 521 entities, an 844-message chat), with the host's reads simulated: the longest stretch was about 0.2–0.35 s, either one GM view or one read of the chat.
-  - **Chat reads.** The host reads a chat only whole: every message, with all its reasoning (174 MB on that chat). The backend keeps a copy of each chat's messages (eight chats at most) and patches it from the host's message events (sent, edited, swiped, deleted) and from its own metadata writes. It reads the chat afresh:
-    - after each generation that saved text, because the host saves the reply and its reasoning itself (the guard's stop saves none, so the engine run reads the copy);
-    - when an event can't be applied in place;
-    - when a chat's ledger starts over (\`forget\`).
+  - **Chat reads.** The host reads a chat only whole: every message, with all its reasoning (174 MB on that chat). The backend reads a chat whole once, when it is first used, and keeps a copy per chat and user (eight at most), patched from the host's message events (sent, edited, swiped, deleted: each carries the message as saved) and from its own metadata writes, once the host has taken them. A generation changes the chat only through those events: Lumiverse saves the reply, and whatever a stop or an error leaves, with message writes that each send their event before \`GENERATION_ENDED\` or \`GENERATION_STOPPED\`, and what it writes beside them (reasoning, usage, metrics) is in \`extra\`, which the copy doesn't hold; the engine's helper calls (\`generate.quiet\`) send no events. A read under way takes every change seen while it reads, replayed in order. The chat is read whole again only:
+    - when a change can't be applied in place (an event for a message the copy doesn't hold, or a reply \`GENERATION_ENDED\` names that it doesn't);
+    - when the host renames the chat's user messages for a persona, which it tells only by \`CHAT_CHANGED\` with \`reattributedUserMessages\` (a change of the chat's own record reads nothing). Its rename across every chat (\`bulkReattributeByPersonaName\`) tells nothing at all, so a copy keeps the old names until it is next read;
+    - when a chat's ledger starts over (\`forget\`);
+    - after the memory budget let its copy go.
 
-    Once a chat is open, a drawer request reads none of its messages and a turn reads them once.
+    Once a chat is open, no drawer request, turn, reply or helper call reads it again (\`scripts/perf/chat-reads.ts\`, on an 870-message chat whose rows carry 185 KB of reasoning each: one read at the open, none in a typed turn or a Send after a reply, where every turn read it once before).
+  - **Memory budget.** The host gives an extension no sign of memory pressure, and a whole read of such a chat raises this process's RSS by about 520 MB at once (the allocator keeps those pages). Each whole read's garbage is collected once it has landed, so the next read reuses its pages (the second of two such chats peaks 120–160 MB lower). Past 768 MB of RSS (\`MEMORY_LIMIT_BYTES\`: above the about 710 MB two such reads take with the backend's own 48 MB), looked at after each whole read and every minute, the engine lets go of what it builds again for every chat not in use (no page shows it on screen, it holds no turn or operation, and it isn't its user's latest read): its copy of the messages, its open ledger with the revisions that pins, and its last pushed view; then it collects. It does so again only once the RSS has grown another 64 MB or fallen back below the limit.
   - **Read passes.** A view, the GM view, the fact lines and the engine run's sections are each built in a read pass (\`readPass\`), after the folds, with synchronous reads only. Within a pass, each of these is gathered once (\`passMemo\`), keyed by the state and world it reads:
     - each travel mode's route graph;
     - the economy's flows, account holders, pass-through shares and contract work;
@@ -66424,7 +66426,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "e65ce14a";
+var BUILD = "cb3f0dbb";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

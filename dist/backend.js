@@ -10349,8 +10349,8 @@ class Working {
 }
 
 // src/engine/simulate.ts
-function processSeed(runSeed, process, entity, slotIndex) {
-  return hashParts(runSeed, process, entity, slotIndex);
+function processSeed(runSeed, process2, entity, slotIndex) {
+  return hashParts(runSeed, process2, entity, slotIndex);
 }
 function lod1Agents(world, state) {
   return Object.keys(state.entities).filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id) && acts(world, state, id)).sort();
@@ -10376,8 +10376,8 @@ function interruptPolicy(state, overrides = {}) {
   return out;
 }
 var ALL_NOTE = Object.fromEntries(INTERRUPT_CLASSES.map((c) => [c, "note"]));
-function rngFactory(runSeed, process, slot) {
-  return (entity) => createRng(processSeed(runSeed, process, entity, slot));
+function rngFactory(runSeed, process2, slot) {
+  return (entity) => createRng(processSeed(runSeed, process2, entity, slot));
 }
 function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse, run) {
   const applied = [];
@@ -64735,6 +64735,30 @@ class LedgerService {
     if (gate && p)
       this.drop(chatId, gate.userId, p);
   }
+  busy(chatId) {
+    const slot = this.chats.get(chatId);
+    const gate = this.gates.get(chatId);
+    if (slot && (slot.ops > 0 || slot.core.inFlight))
+      return true;
+    return gate !== undefined && (gate.prepared !== null || gate.halt !== null || gate.taken !== null || gate.running !== null || gate.reading !== null);
+  }
+  viewed() {
+    const out = new Set;
+    for (const page of this.pages.values())
+      if (page.chatId !== null && page.viewing)
+        out.add(page.chatId);
+    return out;
+  }
+  trim(keep) {
+    const gone = [];
+    for (const id of [...this.chats.keys()]) {
+      if (keep(id) || this.busy(id))
+        continue;
+      this.chats.delete(id);
+      gone.push(id);
+    }
+    return gone;
+  }
   preparedOf(chatId) {
     const p = this.gates.get(chatId)?.prepared;
     return p ? { id: p.id, generationId: p.generationId } : null;
@@ -64821,11 +64845,10 @@ class LedgerService {
       const slot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset ? null : raw, ops: 0, snapshots, reasserts: new Map, leftOpen: new Set([...journal.windows, ...Object.keys(journal.pending)]) };
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);
-      for (const [id, s] of this.chats) {
+      for (const id of this.chats.keys()) {
         if (this.chats.size <= OPEN_CHATS_CAP)
           break;
-        const gate = this.gates.get(id);
-        if (id !== chatId && s.ops === 0 && !s.core.inFlight && !gate?.prepared && !gate?.halt && !gate?.taken && !gate?.running && !gate?.reading)
+        if (id !== chatId && !this.busy(id))
           this.chats.delete(id);
       }
       return slot;
@@ -74322,9 +74345,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "ff8635eb9a4131360406b37ec440905db79cff3b9bd6cdf8dcbc48741870aa28";
+  const sha256 = "bc8c42f20f074d783916da4c39c22ace4aa6ae6514607725928e581d8fb80924";
   const tools = ["d7ea5d8f68714fbde356a1b99c522de6", "3a95a1966944ca155e67ff625d472024"].filter((f) => f !== undefined);
-  return { id: "e65ce14a", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "cb3f0dbb", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -74912,23 +74935,29 @@ var CHATS_KEPT = 8;
 class MessageCache {
   inner;
   host;
-  kept = new Map;
-  changes = new Map;
+  copies = new Map;
   reading = new Map;
+  onRead = null;
   constructor(inner) {
     this.inner = inner;
     inner.on("MESSAGE_SENT", (e) => this.change(e.chatId, (list2) => sent(list2, e.message)));
     inner.on("MESSAGE_EDITED", (e) => this.change(e.chatId, (list2) => replaced(list2, e.message)));
     inner.on("MESSAGE_SWIPED", (e) => this.change(e.chatId, (list2) => replaced(list2, e.message)));
     inner.on("MESSAGE_DELETED", (e) => this.change(e.chatId, (list2) => deleted(list2, e.messageId)));
-    inner.on("GENERATION_ENDED", (e) => this.change(e.chatId, () => false));
-    inner.on("GENERATION_STOPPED", (e) => this.change(e.chatId, () => e.content === ""));
+    inner.on("GENERATION_ENDED", (e) => {
+      const saved = e.messageId;
+      if (saved !== undefined)
+        this.change(e.chatId, (list2) => list2.some((m) => m.id === saved));
+    });
     inner.on("CHAT_DELETED", (e) => this.change(e.chatId, () => false));
+    inner.on("CHAT_CHANGED", (e) => {
+      if (e.renamed)
+        this.change(e.chatId, () => false);
+    });
     const chats = {
       ...inner.chats,
       messages: (chatId, userId) => this.messages(chatId, userId),
-      writeMetadata: (chatId, messageId, bag, userId) => this.writeMetadata(chatId, messageId, bag, userId),
-      appendUserMessage: (chatId, content, metadata, triggerGeneration, userId) => this.append(chatId, content, metadata, triggerGeneration, userId)
+      writeMetadata: (chatId, messageId, bag, userId) => this.writeMetadata(chatId, messageId, bag, userId)
     };
     this.host = new Proxy(inner, {
       get: (target, prop) => {
@@ -74940,86 +74969,94 @@ class MessageCache {
     });
   }
   async messages(chatId, userId) {
-    const kept2 = this.kept.get(chatId);
-    if (kept2) {
-      if (kept2.userId !== userId)
-        return this.inner.chats.messages(chatId, userId);
-      this.keep(chatId, kept2);
-      return [...kept2.messages];
+    const key = `${userId}\x00${chatId}`;
+    const copy = this.copies.get(key);
+    if (copy) {
+      this.keep(key, copy);
+      return [...copy.messages];
     }
-    const since = this.count(chatId);
-    let reading = this.reading.get(chatId);
-    if (!reading || reading.since !== since || reading.userId !== userId) {
-      const started = { userId, since, messages: this.inner.chats.messages(chatId, userId) };
-      this.reading.set(chatId, started);
-      started.messages.then((read) => {
-        if (this.count(chatId) === since)
-          this.keep(chatId, { userId, messages: [...read] });
-      }, () => {
-        return;
-      }).finally(() => {
-        if (this.reading.get(chatId) === started)
-          this.reading.delete(chatId);
-      });
-      reading = started;
-    }
+    const reading = this.reading.get(key) ?? this.read(key, chatId, userId);
     return [...await reading.messages];
   }
+  read(key, chatId, userId) {
+    const reading = { chatId, userId, changes: [], forgotten: false, messages: Promise.resolve([]) };
+    reading.messages = this.inner.chats.messages(chatId, userId).then((read) => {
+      if (this.reading.get(key) === reading)
+        this.reading.delete(key);
+      const list2 = [...read];
+      const whole4 = !reading.forgotten && reading.changes.every((change2) => change2(list2));
+      reading.changes.length = 0;
+      if (whole4)
+        this.keep(key, { chatId, userId, messages: list2 });
+      this.onRead?.(chatId);
+      return whole4 ? list2 : read;
+    }, (error) => {
+      if (this.reading.get(key) === reading)
+        this.reading.delete(key);
+      throw error;
+    });
+    this.reading.set(key, reading);
+    return reading;
+  }
   async writeMetadata(chatId, messageId, bag, userId) {
-    const before = this.bump(chatId);
     try {
       await this.inner.chats.writeMetadata(chatId, messageId, bag, userId);
     } catch (error) {
       this.forget(chatId);
       throw error;
     }
-    const after = this.count(chatId);
-    this.bump(chatId);
-    const kept2 = this.kept.get(chatId);
-    const at = kept2 ? kept2.messages.findIndex((m) => m.id === messageId) : -1;
-    const now = kept2?.messages[at];
-    if (!kept2 || !now) {
-      this.kept.delete(chatId);
-      return;
-    }
-    if (after === before)
-      kept2.messages[at] = { ...now, metadata: structuredClone(bag) };
-    else if (JSON.stringify(now.metadata) !== JSON.stringify(bag))
-      this.kept.delete(chatId);
-  }
-  async append(chatId, content, metadata, triggerGeneration, userId) {
-    this.bump(chatId);
-    const id = await this.inner.chats.appendUserMessage(chatId, content, metadata, triggerGeneration, userId).finally(() => this.bump(chatId));
-    if (!this.kept.get(chatId)?.messages.some((m) => m.id === id))
-      this.kept.delete(chatId);
-    return id;
+    this.change(chatId, (list2) => {
+      const at = list2.findIndex((m) => m.id === messageId);
+      const now = list2[at];
+      if (!now)
+        return false;
+      list2[at] = { ...now, metadata: structuredClone(bag) };
+      return true;
+    });
   }
   change(chatId, apply) {
-    this.bump(chatId);
-    const kept2 = this.kept.get(chatId);
-    if (kept2 && !apply(kept2.messages))
-      this.kept.delete(chatId);
+    for (const [key, copy] of this.copies)
+      if (copy.chatId === chatId && !apply(copy.messages))
+        this.copies.delete(key);
+    for (const reading of this.reading.values())
+      if (reading.chatId === chatId)
+        reading.changes.push(apply);
   }
   forget(chatId) {
-    this.kept.delete(chatId);
-    this.bump(chatId);
-  }
-  keep(chatId, kept2) {
-    this.kept.delete(chatId);
-    this.kept.set(chatId, kept2);
-    for (const id of this.kept.keys()) {
-      if (this.kept.size <= CHATS_KEPT)
-        break;
-      this.kept.delete(id);
+    for (const [key, copy] of this.copies)
+      if (copy.chatId === chatId)
+        this.copies.delete(key);
+    for (const [key, reading] of this.reading) {
+      if (reading.chatId !== chatId)
+        continue;
+      reading.forgotten = true;
+      this.reading.delete(key);
     }
   }
-  count(chatId) {
-    return this.changes.get(chatId) ?? 0;
+  trim(inUse) {
+    let dropped = 0;
+    for (const [key, copy] of this.copies) {
+      if (inUse(copy.chatId))
+        continue;
+      this.copies.delete(key);
+      dropped++;
+    }
+    return dropped;
   }
-  bump(chatId) {
-    const next = this.count(chatId) + 1;
-    this.changes.set(chatId, next);
-    return next;
+  latest() {
+    const last = new Map;
+    for (const copy of this.copies.values())
+      last.set(copy.userId, copy.chatId);
+    return new Set(last.values());
+  }
+  keep(key, copy) {
+    this.copies.delete(key);
+    this.copies.set(key, copy);
+    for (const old of this.copies.keys()) {
+      if (this.copies.size <= CHATS_KEPT)
+        break;
+      this.copies.delete(old);
+    }
   }
 }
 function sent(list2, message2) {
@@ -75102,6 +75139,16 @@ class StatePush {
   }
   kept() {
     return this.channels.size;
+  }
+  trim(inUse) {
+    let gone = 0;
+    for (const [key, c] of this.channels) {
+      if (inUse(key.slice(key.indexOf("\x00") + 1)) || c.timer !== null || c.queued || c.building > 0)
+        continue;
+      this.channels.delete(key);
+      gone++;
+    }
+    return gone;
   }
   async snapshot(chatId, userId, frontendSessionId) {
     const c = this.channel(chatId, userId);
@@ -77445,6 +77492,7 @@ function rekey(map, from, to) {
 }
 class Runtime {
   host;
+  messages;
   registry;
   worlds;
   settings;
@@ -77492,8 +77540,8 @@ class Runtime {
   minds;
   beatMinds = (input) => runMinds(this.minds, input);
   constructor(options) {
-    const messages = new MessageCache(options.host);
-    this.host = messages.host;
+    this.messages = new MessageCache(options.host);
+    this.host = this.messages.host;
     this.registry = createRegistry(options.packs);
     this.pipeline = options.pipeline;
     this.templates = options.templates ?? {};
@@ -77519,7 +77567,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "e65ce14a" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "cb3f0dbb" }), (chatId) => this.messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }
@@ -77575,6 +77623,19 @@ class Runtime {
         this.runs.delete(key);
     this.bridges.delete(chatId);
     this.ledger.forget(chatId);
+  }
+  onChatRead(listener) {
+    this.messages.onRead = listener;
+  }
+  trimIdle() {
+    const viewed = this.ledger.viewed();
+    const latest = this.messages.latest();
+    const inUse = (chatId) => viewed.has(chatId) || latest.has(chatId) || this.ledger.busy(chatId);
+    const ledgers = new Set(this.ledger.trim(inUse));
+    for (const key of [...this.pins.keys()])
+      if (ledgers.has(key.slice(key.indexOf("\x00") + 1)))
+        this.pins.delete(key);
+    return { messages: this.messages.trim(inUse), ledgers: ledgers.size, views: this.push.trim(inUse) };
   }
   async resolveEnv(chatId, userId) {
     const run2 = await this.runOf(chatId, userId);
@@ -81218,6 +81279,60 @@ function targetLabel(t) {
   }
 }
 
+// src/backend/memory-budget.ts
+var MEMORY_LIMIT_BYTES = 768 * 1024 * 1024;
+var MEMORY_CHECK_MS = 60000;
+var MEMORY_REGROWTH_BYTES = 64 * 1024 * 1024;
+var MB = 1024 * 1024;
+
+class MemoryBudget {
+  probe;
+  trim;
+  log;
+  limit;
+  trimmedAt = null;
+  timer = null;
+  constructor(probe, trim2, log, limit = MEMORY_LIMIT_BYTES) {
+    this.probe = probe;
+    this.trim = trim2;
+    this.log = log;
+    this.limit = limit;
+  }
+  check() {
+    const rss = this.probe.rss();
+    if (rss <= this.limit) {
+      this.trimmedAt = null;
+      return false;
+    }
+    if (this.trimmedAt !== null && rss < this.trimmedAt + MEMORY_REGROWTH_BYTES)
+      return false;
+    this.trimmedAt = rss;
+    const gone = this.trim();
+    this.probe.collect();
+    this.log(`memory: RSS ${Math.round(rss / MB)} MB is past the ${Math.round(this.limit / MB)} MB budget; let go of the copies of ${gone.messages} chats' messages, ${gone.ledgers} open ledgers and ${gone.views} views of chats not in use`);
+    return true;
+  }
+  start() {
+    if (this.timer)
+      return;
+    this.timer = setInterval(() => this.check(), MEMORY_CHECK_MS);
+    this.timer.unref();
+  }
+  stop() {
+    clearInterval(this.timer ?? undefined);
+    this.timer = null;
+  }
+}
+function watchMemory(runtime, probe, log, limit = MEMORY_LIMIT_BYTES) {
+  const budget = new MemoryBudget(probe, () => runtime.trimIdle(), log, limit);
+  runtime.onChatRead(() => {
+    if (!budget.check())
+      probe.collect();
+  });
+  budget.start();
+  return budget;
+}
+
 // src/backend/spindle-host.ts
 function toJson(value) {
   if (value === null || typeof value === "string" || typeof value === "boolean")
@@ -81274,10 +81389,12 @@ function decodeMessage(raw, chatId) {
   if (!id)
     return null;
   const swipes = Array.isArray(raw.swipes) ? raw.swipes.map((s) => typeof s === "string" ? s : "") : [];
-  const content = str18(raw, "content") ?? "";
+  const stored = str18(raw, "content") ?? "";
   const swipeId = num6(raw, "swipe_id") ?? 0;
   if (swipes.length === 0)
-    swipes.push(content);
+    swipes.push(stored);
+  const shown4 = swipes[swipeId];
+  const content = shown4 === stored ? shown4 : stored;
   const extra = isRecord(raw.extra) ? raw.extra : {};
   const metadata = isRecord(raw.metadata) ? raw.metadata : isRecord(extra.spindle_metadata) ? extra.spindle_metadata : {};
   const role = str18(raw, "role");
@@ -81368,6 +81485,8 @@ function decodeEvent(event, p) {
     }
     case "CHAT_DELETED":
       return { chatId };
+    case "CHAT_CHANGED":
+      return { chatId, renamed: (num6(p, "reattributedUserMessages") ?? 0) > 0 };
     case "MESSAGE_DELETED": {
       const messageId = str18(p, "messageId");
       return messageId ? { chatId, messageId } : null;
@@ -81499,9 +81618,8 @@ function createSpindleHost() {
   return {
     chats: {
       async messages(chatId) {
-        const rows = await spindle.chat.getMessages(chatId);
         const out = [];
-        for (const row of rows) {
+        for (const row of await spindle.chat.getMessages(chatId)) {
           const m = decodeMessage(row, chatId);
           if (m)
             out.push(m);
@@ -81905,6 +82023,13 @@ function startBackend() {
   runtime.start();
   new Dispatcher(runtime, jobs).start();
   host.processes.onMessage((event) => jobs.onLane(event.payload));
+  const probe = {
+    rss: () => process.memoryUsage.rss(),
+    collect: () => {
+      setTimeout(() => Bun.gc(true), 0);
+    }
+  };
+  watchMemory(runtime, probe, (line2) => host.log("info", `[LumiRPEngine] ${line2}`));
   host.log("info", `[LumiRPEngine] backend started with ${ALL_PACKS.length} packs`);
   return runtime;
 }
