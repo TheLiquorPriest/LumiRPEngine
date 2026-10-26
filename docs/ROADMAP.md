@@ -229,6 +229,7 @@ A character is read and edited as one thing, over the existing entities, with no
   - nothing scrolls above the mode bar;
   - the routine card shows its mix;
   - a Sections save leaves a notice with Undo.
+- **Not built:** reading a meal or a night from the reply. A meal or sleep only the narrator describes meets no need unless the player eats, rests or goes to bed through their own message. The next step is a Cast life reply-reading channel for what the player character is doing, with a confirm chip: about seven files.
 
 ## Settings for long chats
 
