@@ -62076,8 +62076,11 @@ var CONTENT_IDS = new Map;
 var CONTENT_IDS_KEPT = 4096;
 function contentId(text5) {
   const known = CONTENT_IDS.get(text5);
-  if (known)
+  if (known) {
+    CONTENT_IDS.delete(text5);
+    CONTENT_IDS.set(text5, known);
     return { ...known };
+  }
   const id = { len: text5.length, hash: hashParts("lre.content", text5) };
   if (CONTENT_IDS.size >= CONTENT_IDS_KEPT)
     CONTENT_IDS.delete(CONTENT_IDS.keys().next().value ?? "");
@@ -63723,6 +63726,9 @@ var KIND = {
 function journalPath(chatId) {
   return `${runDir(chatId)}journal.json`;
 }
+function journalHash(text5) {
+  return hashParts("lre.journal", text5);
+}
 var METADATA_CAP_BYTES = 32 * 1024;
 var METADATA_CHUNK_CHARS = 1e4;
 var CHUNK_PREFIX = `${LEDGER_NAMESPACE}:`;
@@ -63788,6 +63794,7 @@ function toChain(messages, damaged) {
 }
 var REASSERTS_PER_LEDGER = 3;
 var OPEN_CHATS_CAP = 16;
+var OPEN_CHATS_CHARS = 24000000;
 var SNAPSHOTS_PER_CHAT = 6;
 function snapshotsPath(chatId) {
   return `${runDir(chatId)}snapshots.json`;
@@ -64814,8 +64821,13 @@ class LedgerService {
   notWorld = new Set;
   async slot(chatId, userId) {
     const known = this.chats.get(chatId);
-    if (known)
-      return userId === null || known.userId === userId ? known : null;
+    if (known) {
+      if (userId !== null && known.userId !== userId)
+        return null;
+      this.chats.delete(chatId);
+      this.chats.set(chatId, known);
+      return known;
+    }
     if (!userId || this.notWorld.has(`${userId}\x00${chatId}`))
       return null;
     const pending = this.opening.get(chatId);
@@ -64841,15 +64853,21 @@ class LedgerService {
           this.resets.delete(this.resets.keys().next().value ?? "");
       } else if (reset)
         this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its journal was ${reset}; starting a fresh one (the chat's records still fold)`, userId);
-      const snapshots = ChatSnapshots.parse(await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null));
-      const slot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset ? null : raw, ops: 0, snapshots, reasserts: new Map, leftOpen: new Set([...journal.windows, ...Object.keys(journal.pending)]) };
+      const stored = await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null);
+      const snapshots = ChatSnapshots.parse(stored);
+      const slot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, reasserts: new Map, leftOpen: new Set([...journal.windows, ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 } };
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);
-      for (const id of this.chats.keys()) {
-        if (this.chats.size <= OPEN_CHATS_CAP)
+      let chars = 0;
+      for (const s of this.chats.values())
+        chars += s.chars.journal + s.chars.snapshots;
+      for (const [id, s] of this.chats) {
+        if (this.chats.size <= OPEN_CHATS_CAP && chars <= OPEN_CHATS_CHARS)
           break;
-        if (id !== chatId && !this.busy(id))
-          this.chats.delete(id);
+        if (id === chatId || this.busy(id))
+          continue;
+        this.chats.delete(id);
+        chars -= s.chars.journal + s.chars.snapshots;
       }
       return slot;
     })();
@@ -64898,16 +64916,20 @@ class LedgerService {
     if (slot.snapshots.dirty) {
       slot.snapshots.dirty = false;
       const at = snapshotsPath(chatId);
-      await this.host.storage.write(`${at}.tmp`, JSON.stringify(slot.snapshots), slot.userId);
+      const stored = JSON.stringify(slot.snapshots);
+      await this.host.storage.write(`${at}.tmp`, stored, slot.userId);
       await this.host.storage.move(`${at}.tmp`, at, slot.userId);
+      slot.chars.snapshots = stored.length;
     }
     const text5 = JSON.stringify(slot.core.journal);
-    if (text5 === slot.written)
+    const hash = journalHash(text5);
+    if (hash === slot.written)
       return;
     const path = journalPath(chatId);
     await this.host.storage.write(`${path}.tmp`, text5, slot.userId);
     await this.host.storage.move(`${path}.tmp`, path, slot.userId);
-    slot.written = text5;
+    slot.written = hash;
+    slot.chars.journal = text5.length;
   }
   async flush(chatId, slot) {
     if (slot.core.inFlight)
@@ -67583,7 +67605,7 @@ function heldAsSource(disabled, own2, gate, was) {
   return disabled && own2 !== null && loreIsSecret(own2) && (own2.gate === gate || was === undefined || own2.gate !== was);
 }
 function indexedEntry(entry, e, parts) {
-  return heldTo(e.content.trim() === "" ? entry : { ...entry, content: e.content }, parts);
+  return heldTo(e.content.trim() === "" || e.content === entry.content ? entry : { ...entry, content: e.content }, parts);
 }
 function bookLoreEntry(e, parts) {
   if (engineWroteEntry(e.extensions) || e.content.trim() === "")
@@ -73922,6 +73944,9 @@ function refEq(a, b) {
 }
 var dependentNote = (n) => n.kind === "dropped" || n.kind === "note";
 var dependentKeep = (k) => k.status === "dropped" || k.status === "converted";
+var TAILS_KEPT = 8;
+var CHECKPOINTS_KEPT = 16;
+var KEPT_LIMIT = { checkpoint: CHECKPOINTS_KEPT, tail: TAILS_KEPT };
 
 class LedgerFold {
   types;
@@ -73930,8 +73955,8 @@ class LedgerFold {
   every;
   fingerprint;
   capacity;
-  tails = [];
-  digests = { content: new Map, record: new Map, markers: new Map, folds: new Map, key: new Map };
+  kept = { checkpoint: new Map, tail: new Map };
+  digests = { record: new Map, markers: new Map, folds: new Map, key: new Map };
   constructor(types, options = {}) {
     this.types = types;
     this.every = Math.max(1, options.snapshotEvery ?? 200);
@@ -73943,8 +73968,7 @@ class LedgerFold {
     const stored = m.ledger?.swipes[String(m.swipeId)];
     const recKey = stored ? `${rec ? "r" : "t"}${this.digest(this.digests.record, JSON.stringify(stored), () => hashJson(stored))}` : "";
     const markers = m.ledger ? this.digest(this.digests.markers, JSON.stringify(m.ledger.markers), () => hashJson(m.ledger?.markers)) : "";
-    const text5 = activeText(m);
-    const content = this.digest(this.digests.content, text5, () => contentId(text5).hash);
+    const content = contentId(activeText(m)).hash;
     const flags = `${m.isUser ? "u" : "a"}${paused ? "p" : ""}${pausesHere ? "P" : ""}`;
     const memo = `${prev}\x00${flags}\x00${m.swipeId}\x00${content}\x00${recKey}\x00${markers}\x00${m.id}`;
     return this.digest(this.digests.key, memo, () => hashParts("lre.fold", prev, m.id, m.isUser ? "u" : "a", String(m.swipeId), content, recKey, markers, paused ? "p" : "", pausesHere ? "P" : ""));
@@ -73987,6 +74011,8 @@ class LedgerFold {
         base = i;
     }
     const from = base >= 0 ? steps[base] : undefined;
+    if (base >= 0)
+      this.used(keys[base]);
     let shared = from?.state ?? null;
     let state2 = shared ?? initialState(startWorld, input.revision, this.types);
     steps.length = base + 1;
@@ -74032,7 +74058,7 @@ class LedgerFold {
           const f = frames[i - base - 1];
           const k2 = frameKeys[i - base - 1];
           const step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...notes.get(i) ?? []], keep: [...f.keep, ...keep.get(i) ?? []], violations: violations.get(i) ?? [], paused: false };
-          this.remember(k2, i === best ? { ...step, state: snapshot.state } : step, i === best, false);
+          this.remember(k2, i === best ? { ...step, state: snapshot.state } : step, i === best ? "checkpoint" : null, true);
           steps.push(step);
           keys.push(k2);
         }
@@ -74044,23 +74070,23 @@ class LedgerFold {
         paused = false;
       }
     }
-    if (shared && base < n - 1) {
-      state2 = structuredClone(shared);
-      shared = null;
-    }
     for (let i = base + 1;i < n; i++) {
       const m = input.chain[i];
       key = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
       const f = this.frame(input, m, parent, paused, pausedAfter.has(m.id));
-      const step = this.step(input, m, f, state2);
+      if (shared && !(m.isUser || f.result.fold === "paused" || !f.rec && f.liveMarkers.length === 0)) {
+        state2 = structuredClone(shared);
+        shared = null;
+      }
+      const step = this.step(input, m, f, shared ?? state2);
       const checkpoint = (i + 1) % this.every === 0;
-      this.remember(key, step, checkpoint || i === n - 1, !checkpoint && i === n - 1);
+      const kept2 = this.remember(key, step, checkpoint ? "checkpoint" : i === n - 1 ? "tail" : null, shared !== null);
       steps.push(step);
       keys.push(key);
       parent = step.result.path;
       paused = step.paused;
-      if (checkpoint && input.snapshots && input.pauses.length === 0)
-        input.snapshots.put(this.snapshotOf(hashParts(context, parent), steps, state2));
+      if (kept2 && checkpoint && input.snapshots && input.pauses.length === 0)
+        input.snapshots.put(this.snapshotOf(hashParts(context, parent), steps, kept2));
     }
     const out = { state: shared ? structuredClone(shared) : state2, notes: [], keepReport: [], messages: [], violations: [] };
     for (const s of steps) {
@@ -74073,7 +74099,7 @@ class LedgerFold {
   }
   snapshotOf(key, steps, state2) {
     const clocks = [];
-    const snap = { key, state: structuredClone(state2), notes: [], keep: [], violations: [], clocks };
+    const snap = { key, state: state2, notes: [], keep: [], violations: [], clocks };
     steps.forEach((s, i) => {
       for (const x of s.notes)
         if (dependentNote(x))
@@ -74088,24 +74114,42 @@ class LedgerFold {
     });
     return snap;
   }
-  remember(key, step, withState, tail2) {
-    const entry = { ...step, state: withState && step.state ? structuredClone(step.state) : null };
-    this.cache.set(key, entry);
-    if (tail2) {
-      this.tails.push(key);
-      while (this.tails.length > 64) {
-        const old = this.tails.shift();
-        const e = old === undefined ? undefined : this.cache.get(old);
-        if (e && old !== key)
-          e.state = null;
-      }
-    }
+  remember(key, step, kept2, shared) {
+    const state2 = kept2 && step.state ? shared ? step.state : structuredClone(step.state) : null;
+    this.cache.set(key, { ...step, state: state2 });
+    this.kept.checkpoint.delete(key);
+    this.kept.tail.delete(key);
+    if (kept2 && state2)
+      this.keep(kept2, key);
     while (this.cache.size > this.capacity) {
       const oldest = this.cache.keys().next().value;
       if (oldest === undefined)
         break;
       this.cache.delete(oldest);
+      this.kept.checkpoint.delete(oldest);
+      this.kept.tail.delete(oldest);
     }
+    return state2;
+  }
+  keep(kind, key) {
+    const kept2 = this.kept[kind];
+    kept2.delete(key);
+    kept2.set(key, true);
+    while (kept2.size > KEPT_LIMIT[kind]) {
+      const oldest = kept2.keys().next().value;
+      if (oldest === undefined)
+        break;
+      kept2.delete(oldest);
+      const entry = this.cache.get(oldest);
+      if (entry)
+        entry.state = null;
+    }
+  }
+  used(key) {
+    if (this.kept.tail.has(key))
+      this.keep("tail", key);
+    else if (this.kept.checkpoint.has(key))
+      this.keep("checkpoint", key);
   }
   step(input, m, f, state2) {
     const notes = [...f.notes];
@@ -74345,9 +74389,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "bc8c42f20f074d783916da4c39c22ace4aa6ae6514607725928e581d8fb80924";
+  const sha256 = "36273d17ff3547bf7d4b541a0c306d3c108e4a8c59de630705b16fdecc0edc11";
   const tools = ["d7ea5d8f68714fbde356a1b99c522de6", "3a95a1966944ca155e67ff625d472024"].filter((f) => f !== undefined);
-  return { id: "cb3f0dbb", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "c29417cd", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -77567,7 +77611,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "cb3f0dbb" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "c29417cd" }), (chatId) => this.messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }
@@ -77725,7 +77769,7 @@ class Runtime {
       tieZone: ties.present.length > 0,
       invitation: (before.findLast((m) => !m.isUser)?.ledger?.swipes[String(before.findLast((m) => !m.isUser)?.swipeId ?? 0)]?.events ?? []).some((e) => e.type === "castlife.invitation"),
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION2,
-      earlier: { messages: earlier, hideJson: settings.hideJsonBlocks }
+      earlier: { messages: this.keptEarlier(input.chatId, earlier), hideJson: settings.hideJsonBlocks }
     };
     const shown4 = bridge.outlineOf(text6) !== undefined;
     const lastReply = before.findLast((m) => !m.isUser);
@@ -77776,7 +77820,7 @@ class Runtime {
       this.keepMinds(input.chatId, mindsKey, thinking);
       return { waiting: `waiting for you to play the read action: ${card.what}` };
     }
-    this.prePhase.set(p.generationId, { facts, text: text6, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
+    this.prePhase.set(p.generationId, { chatId: input.chatId, facts, text: text6, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
     trimMap(this.prePhase);
     if (!thinking)
       return;
@@ -79153,6 +79197,21 @@ ${rules.join(`
     this.carriedEntries.delete(chatId);
     if (bookId)
       await this.book.vacate(bookId, userId);
+  }
+  keptEarlier(chatId, earlier) {
+    let kept2 = [];
+    for (const pre of this.prePhase.values())
+      if (pre.chatId === chatId)
+        kept2 = pre.facts.earlier.messages;
+    const known = new Map(kept2.map((m) => [m.id, m]));
+    return earlier.map((m) => {
+      const text6 = m.swipes[m.swipeId] ?? "";
+      const was = known.get(m.id);
+      if (!was || was.isUser !== m.isUser || was.swipes[0] !== text6)
+        return { id: m.id, isUser: m.isUser, swipes: [text6], swipeId: 0 };
+      was.swipes[0] = text6;
+      return was;
+    });
   }
   async liveWorld(key, chatId, userId, world) {
     const kept2 = this.liveLores.get(key);
