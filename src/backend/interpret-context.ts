@@ -166,8 +166,9 @@ export function interpretCatalog(reg: Registry, world: WorldDoc, state: Readonly
  * Letting time pass, always in the catalog, so a world without actions still interprets ("I sleep
  * until the next morning", "skip ahead to Friday at 6 PM"). An out-of-character instruction that
  * time passes is always it, whatever else the input says (DESIGN §5.2): what happens in that time
- * fills it. The one exception is input that first gets up or goes somewhere: that is doing something
- * else (§9.2), which ends a night or a rest, so the action plays and the time is its `then`. Its
+ * fills it. The one exception is in-character input before the instruction that gets up from bed or
+ * a rest, or goes somewhere: that is doing something else (§9.2), which ends a night or a rest, so the
+ * action plays and the time is its `then`; what the instruction itself says still fills the skip. Its
  * `span` is required, the input's own words for how long or until when, which the engine reads the
  * same way every time (`typedSpan`), so a read that picks it always says how long. It tells the
  * model the day and time as the HUD shows them (the place's time zone), so a stated day and time can
@@ -178,7 +179,7 @@ export function timelapseEntry(world: WorldDoc, state: Readonly<WorldState>): Ca
   return {
     id: TIMELAPSE_ACTION,
     label: "Let time pass",
-    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it), except input that first gets up or goes somewhere with another action ("I get out of bed and make coffee. (OOC: skip an hour.)"), which is that action with the time as its then. span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state)})`,
+    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it), except in-character input before the instruction that gets up from bed or a rest, or goes somewhere, with a catalog action ("I get out of bed and make coffee. (OOC: skip an hour.)"), which is that action with the time as its then; what the instruction itself says ("OOC: over the next two hours, I walk to the gym") still fills the skip. span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state)})`,
     params: ["span (text: the input's words for how long or until when)", "minutes? (number)", "until? (text)", "at? (text)"],
     needs: [],
     lexicon: TIMELAPSE_LEXICON,
