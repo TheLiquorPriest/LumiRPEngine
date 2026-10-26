@@ -147,8 +147,12 @@ interface ChatSlot {
   leftOpen: Set<string>;
 }
 
-/** Open chats kept in memory; the least recently opened idle ones are evicted past this. */
-export const OPEN_CHATS_CAP = 128;
+/**
+ * Open chats kept in memory; the least recently opened idle ones are evicted past this. A chat's slot
+ * holds its fold's states and pins its world revisions (several MB each for a large world), and opens
+ * again from its journal and snapshots, so few are kept: a player plays a handful of chats at a time.
+ */
+export const OPEN_CHATS_CAP = 16;
 
 /** Fold snapshots kept per chat (the newest; older chain positions fold from the nearest kept one). */
 export const SNAPSHOTS_PER_CHAT = 6;
@@ -1553,7 +1557,9 @@ export class LedgerService {
       this.chats.set(chatId, slot);
       for (const [id, s] of this.chats) {
         if (this.chats.size <= OPEN_CHATS_CAP) break;
-        if (id !== chatId && s.ops === 0 && !s.core.inFlight) this.chats.delete(id);
+        // A chat whose turn the engine prepared, or whose generation the guard stopped, keeps its slot: that turn lives only in memory.
+        const gate = this.gates.get(id);
+        if (id !== chatId && s.ops === 0 && !s.core.inFlight && !gate?.prepared && !gate?.halt) this.chats.delete(id);
       }
       return slot;
     })();

@@ -131,8 +131,13 @@ export const WORLD_COLLECTIONS: Record<WorldCollection, true> = {
   routines: true,
 };
 
-/** Loaded revisions kept across chats; an open chat pins the ones its ledger references, so eviction never breaks a fold. */
-const REVISION_CACHE_CAP = 128;
+/**
+ * Loaded revisions kept across chats, least recently used first. A revision is several MB once parsed
+ * (a 1.7 MB world is ~7 MB), so few are kept; an open chat pins the ones its ledger references, so
+ * eviction never breaks a fold, and a revision evicted while a chat still pins it is found again
+ * (`alive`) rather than read a second time.
+ */
+export const REVISION_CACHE_CAP = 8;
 
 export class WorldStore {
   /**
@@ -178,25 +183,40 @@ export class WorldStore {
     return `${userId}\u0000${worldId}\u0000${revision}`;
   }
 
+  /** Revisions evicted from `revisions` that something (an open chat's pins) still holds: one object per revision, never two. */
+  private readonly alive = new Map<string, WeakRef<WorldDoc>>();
+  private readonly gone = new FinalizationRegistry<string>((key) => {
+    if (this.alive.get(key)?.deref() === undefined) this.alive.delete(key);
+  });
+
   private remember(key: string, doc: WorldDoc): void {
     if (this.revisions.has(key)) return;
     this.revisions.set(key, doc);
     while (this.revisions.size > REVISION_CACHE_CAP) {
-      const oldest = this.revisions.keys().next();
+      const oldest = this.revisions.entries().next();
       if (oldest.done) break;
-      this.revisions.delete(oldest.value);
+      const [evicted, held] = oldest.value;
+      this.revisions.delete(evicted);
+      this.alive.set(evicted, new WeakRef(held));
+      this.gone.register(held, evicted);
     }
   }
 
-  /** The user's cached revision of the world, if loaded. */
+  /** The user's cached revision of the world, if loaded (and still held, when evicted). */
   cached(userId: UserId, worldId: WorldId, revision: RevisionId): WorldDoc | undefined {
     const key = WorldStore.key(userId, worldId, revision);
-    const doc = this.revisions.get(key);
+    const doc = this.revisions.get(key) ?? this.alive.get(key)?.deref();
     if (doc) {
       this.revisions.delete(key);
-      this.revisions.set(key, doc);
+      this.alive.delete(key);
+      this.remember(key, doc);
     }
     return doc;
+  }
+
+  /** How many revisions are kept loaded, and how many evicted ones something still holds (diagnostics, tests). */
+  loaded(): { kept: number; held: number } {
+    return { kept: this.revisions.size, held: [...this.alive.values()].filter((ref) => ref.deref() !== undefined).length };
   }
 
   async index(worldId: WorldId, userId: UserId): Promise<WorldIndex | null> {

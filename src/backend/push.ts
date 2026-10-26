@@ -41,8 +41,17 @@ interface Channel {
   queued: boolean;
 }
 
+/**
+ * Chats whose last pushed view is kept (the base every page's deltas build on). A view is the size of
+ * a chat's state view (hundreds of kB for a large world), so a chat pushed longer ago than the newest
+ * `VIEWS_KEPT` is built afresh when next pushed: its pages get a snapshot, and deltas after it.
+ */
+export const VIEWS_KEPT = 32;
+
 export class StatePush {
   private readonly channels = new Map<string, Channel>();
+  /** Every rev is new across chats and evictions, so a delta never matches a view another channel sent. */
+  private revs = 0;
 
   constructor(
     private readonly host: HostPort,
@@ -59,6 +68,24 @@ export class StatePush {
     return c;
   }
 
+  /** The channel just pushed `view` at a new rev: it becomes the newest, and the views of the chats pushed longest ago go past `VIEWS_KEPT`. */
+  private pushed(chatId: ChatId, userId: UserId, c: Channel, view: JsonValue): void {
+    c.rev = ++this.revs;
+    c.last = view;
+    const key = `${userId}\u0000${chatId}`;
+    this.channels.delete(key);
+    this.channels.set(key, c);
+    for (const [other, o] of this.channels) {
+      if (this.channels.size <= VIEWS_KEPT) break;
+      if (other !== key && o.timer === null && !o.queued) this.channels.delete(other);
+    }
+  }
+
+  /** How many chats' views are kept (tests). */
+  kept(): number {
+    return this.channels.size;
+  }
+
   /**
    * A full snapshot for one page (hello, resync, chat open), at once: the last view pushed, at its
    * rev, which every other page's deltas build on too; a delta follows with what changed since. A chat
@@ -70,10 +97,8 @@ export class StatePush {
       await giveWay();
       const view = asJson(await this.build(chatId, userId));
       // Another snapshot or push set the base while this one was built: that one stands, and a delta follows.
-      if (c.last === null) {
-        c.rev++;
-        c.last = view;
-      } else this.changed(chatId, userId);
+      if (c.last === null) this.pushed(chatId, userId, c, view);
+      else this.changed(chatId, userId);
     } else this.changed(chatId, userId);
     this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.snapshot", chatId, rev: c.rev, view: c.last as unknown as StateView }, userId, frontendSessionId);
   }
@@ -125,8 +150,7 @@ export class StatePush {
     const ops = diff(c.last, next);
     if (ops.length === 0) return;
     const base = c.rev;
-    c.rev++;
-    c.last = next;
+    this.pushed(chatId, userId, c, next);
     this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.delta", chatId, base, rev: c.rev, ops }, userId);
   }
 }

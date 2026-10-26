@@ -67,7 +67,7 @@ import { DEFAULT_SECTIONS, EngineBook, sectionsOf, sectionTokens } from "./book"
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
-import { LedgerService, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks, type TurnInputs } from "./ledger-io";
+import { LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks, type TurnInputs } from "./ledger-io";
 import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
@@ -160,6 +160,12 @@ const ALREADY_SO: ReadonlySet<string> = new Set(["already_known", "already"]);
  * or above the real tokenizers); a larger count is ignored and the estimate stands in.
  */
 const TOKEN_COUNT_CAP = 4;
+/**
+ * Engine runs whose lore, read live from their World Info books, is kept (`liveLores`): only a run's
+ * own phases read it again, and a world's lore is its largest part (a 1.7 MB world's is 0.74 MB), so
+ * a few runs' are kept and an older run's lore is read from the books again if asked for.
+ */
+export const LIVE_LORES_KEPT = 8;
 /** What Settings → Caveats' timer gives when the Preset check timeout (`caveatsMs`) fires first. */
 const LATE: unique symbol = Symbol("late");
 
@@ -816,7 +822,8 @@ export class Runtime implements TurnHooks {
     // loaded as its core asks for them; every other revision lives in the store's bounded LRU.
     const pinned = new Map<RevisionId, WorldDoc>();
     const missing = new Set<RevisionId>();
-    lruSet(this.pins, `${userId}\u0000${chatId}`, pinned, 256);
+    // Pins follow the open chats: a chat's ledger holds its own, and this map keeps them no longer than it does.
+    lruSet(this.pins, `${userId}\u0000${chatId}`, pinned, OPEN_CHATS_CAP);
     let world: WorldDoc;
     try {
       world = (await this.worlds.get(run.worldId, userId, run.revision)).world;
@@ -2683,7 +2690,7 @@ export class Runtime implements TurnHooks {
     const kept = this.liveLores.get(key);
     if (kept) return kept === world.lore ? world : { ...world, lore: kept };
     const live = await this.readLore(chatId, userId, world);
-    lruSet(this.liveLores, key, live.lore, 64);
+    lruSet(this.liveLores, key, live.lore, LIVE_LORES_KEPT);
     return live;
   }
 
