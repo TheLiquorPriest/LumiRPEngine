@@ -5532,8 +5532,11 @@ function hiddenNameCheck(reg, world, state, pov) {
   return passMemo([state, world, reg], `visibility.hidden_names\x00${pov}`, () => {
     const hidden = hiddenEntityNames(reg, world, state, pov);
     const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
-    return (text) => namesAny(text, hidden.people, labels);
+    return (text, heard = "") => namesAny(text, hidden.people, labels, heard);
   });
+}
+function namesHidden(reg, world, state, text, heard = "") {
+  return hiddenNameCheck(reg, world, state, world.pov)(text, heard);
 }
 function rawLine(reg, world, state, pov, e, player, you) {
   const words = wordsFor(reg, world, state, pov, player, you);
@@ -5679,6 +5682,32 @@ function loreReadable(reg, world, state, entry, purpose, effects = false, open =
   const reader = as ?? world.pov;
   const links = listOf(entry.links);
   return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
+}
+function secretLoreNames(reg, world, state) {
+  const open = loreGateReader(reg, world, state);
+  const secret = Object.entries(world.lore).filter(([, entry]) => loreIsSecret(entry) && !open(entry));
+  const ids = new Set(secret.map(([id]) => id));
+  const names = new Set;
+  const add = (name) => {
+    if (typeof name === "string" && name.trim().length >= MIN_TERM)
+      names.add(name.trim());
+  };
+  for (const [id, entry] of secret)
+    for (const name of [id, entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), ...listOf(entry.topics)])
+      add(name);
+  for (const [term, leads] of Object.entries(world.loreIndex.terms))
+    if (listOf(leads).some((id) => ids.has(id)))
+      add(term);
+  for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
+    if (!isRecord(topic) || !listOf(topic.entries).some((entry) => ids.has(entry)))
+      continue;
+    add(id);
+    add(topic.label);
+  }
+  return [...names];
+}
+function namesHiddenOrSecretLore(reg, world, state, text, heard = "") {
+  return namesHidden(reg, world, state, text, heard) || namesAny(text, [], secretLoreNames(reg, world, state), heard);
 }
 function loreSnippet(tokens, entry, budget, keep = "start") {
   const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
@@ -6384,13 +6413,13 @@ function sub(state, key) {
   s[key] = fresh;
   return fresh;
 }
-function bumpStage(state, key, track, stage) {
+function countStage(state, key, track, stage, next) {
   if (!safeKey(track) || !safeKey(stage))
     return;
   const all = sub(state, key);
   const row = isRecord(all[track]) ? all[track] : {};
   const n = row[stage];
-  all[track] = { ...row, [stage]: (typeof n === "number" ? n : 0) + 1 };
+  all[track] = { ...row, [stage]: next(typeof n === "number" ? n : 0) };
 }
 function str2(e, key) {
   const v = e.data[key];
@@ -6482,7 +6511,7 @@ var events = [
         const attempts = sub(state, "attempts");
         const n = own(attempts, track);
         attempts[track] = (typeof n === "number" ? n : 0) + 1;
-        bumpStage(state, "missed", track, str2(e, "stage"));
+        countStage(state, "missed", track, str2(e, "stage"), (count) => count + 1);
       }
     },
     describe: (e) => `attempt on ${str2(e, "track")}`
@@ -6493,10 +6522,16 @@ var events = [
       const missing = need(e, "track", "stage");
       if (missing)
         return missing;
+      const n = e.data.n;
+      if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1))
+        return { code: "bad_event", reason: `${e.type} needs n, a whole number from 1` };
       const t = own(ctx.world.tracks, str2(e, "track"));
       return t && own(t.stages, str2(e, "stage")) ? null : { code: "missing_track", reason: `no stage ${str2(e, "stage")} of track ${str2(e, "track")}` };
     },
-    apply: (e, state) => bumpStage(state, "hints", str2(e, "track"), str2(e, "stage")),
+    apply: (e, state) => {
+      const n = e.data.n;
+      countStage(state, "hints", str2(e, "track"), str2(e, "stage"), (open) => typeof n === "number" ? Math.max(open, n) : open + 1);
+    },
     describe: (e) => `hint opened on ${str2(e, "track")}`
   },
   {
@@ -7019,7 +7054,15 @@ var stageDef = {
     const track = safeKey(e.track) && hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
     if (!track)
       return reject3("missing_track", `no track ${e.track}`);
-    return safeKey(e.to) && hasOwn(track.stages, e.to) ? null : reject3("missing_stage", `no stage ${e.to} in ${e.track}`);
+    if (!safeKey(e.to) || !hasOwn(track.stages, e.to))
+      return reject3("missing_stage", `no stage ${e.to} in ${e.track}`);
+    if (e.from === undefined)
+      return null;
+    const at = (hasOwn(ctx.state.tracks, e.track) ? ctx.state.tracks[e.track]?.stage : undefined) ?? track.start;
+    if (at === e.from)
+      return null;
+    const label = (stage) => (hasOwn(track.stages, stage) ? track.stages[stage]?.label : undefined) ?? stage;
+    return reject3("stage_moved", `${track.label} is at ${label(at)} now, no longer at ${label(e.from)}, where this move began`);
   },
   apply: (e, state) => {
     if (safeKey(e.track))
@@ -8441,24 +8484,51 @@ function followXp(reg, w, entity, id, prog, scope, spawned) {
     out.applied.push(ev);
     return true;
   };
-  if (spawned || to < from) {
-    if (!applied({ type: "set", entity, field: prog.levelField, value: to }) || spawned)
-      return out;
-  } else {
-    const depth = scope.depth ?? 0;
-    for (let level = from + 1;level <= to; level++) {
-      if (!applied({ type: "set", entity, field: prog.levelField, value: level }))
-        return out;
-      if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP)
-        continue;
-      const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 });
-      out.applied.push(...r.applied);
-      out.rejected.push(...r.rejected);
-    }
-  }
   const who = entity === w.world.pov ? "You" : e.name;
-  const text3 = to > from ? `${who} reached ${prog.label} ${to}${to - from > 1 ? ` (from ${from})` : ""}.` : `${who} dropped to ${prog.label} ${to} (from ${from}).`;
-  applied({ type: ENGINE_EVENTS.note, data: { text: text3, entity, ...entity === w.world.pov ? {} : { visibility: "secret" } } });
+  const line2 = (text3) => ({ type: ENGINE_EVENTS.note, data: { text: text3, entity, ...entity === w.world.pov ? {} : { visibility: "secret" } } });
+  if (spawned) {
+    applied({ type: "set", entity, field: prog.levelField, value: to });
+    return out;
+  }
+  if (to < from) {
+    const group = `fx:${hashParts(scope.rng.seed, "level", id, entity).slice(0, 10)}`;
+    const mark = w.mark();
+    const unit = [];
+    const landed = (ev) => {
+      const member = { ...ev, group };
+      if (w.apply(member))
+        return false;
+      unit.push(member);
+      return true;
+    };
+    let whole4 = landed({ type: "set", entity, field: prog.levelField, value: to });
+    for (const [field, def] of Object.entries(kindFields(reg, w.world, e.kind))) {
+      if (!whole4)
+        break;
+      if (!def.pool || def.derived !== undefined)
+        continue;
+      const value = own(own(w.state.entities, entity)?.fields ?? {}, field) ?? def.default;
+      const max = fieldBounds(reg, w.ctx, entity, def).max;
+      if (typeof value === "number" && max !== undefined && value > max)
+        whole4 = landed({ type: "set", entity, field, value: max });
+    }
+    if (whole4 && landed(line2(`${who} dropped to ${prog.label} ${to} (from ${from}).`)))
+      out.applied.push(...unit);
+    else
+      w.restore(mark);
+    return out;
+  }
+  const depth = scope.depth ?? 0;
+  for (let level = from + 1;level <= to; level++) {
+    if (!applied({ type: "set", entity, field: prog.levelField, value: level }))
+      return out;
+    if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP)
+      continue;
+    const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 });
+    out.applied.push(...r.applied);
+    out.rejected.push(...r.rejected);
+  }
+  applied(line2(`${who} reached ${prog.label} ${to}${to - from > 1 ? ` (from ${from})` : ""}.`));
   return out;
 }
 function levelsFollowXp(reg, w, events2, scope) {
@@ -8552,6 +8622,15 @@ class Working {
       if (!this.apply(e))
         out.push(e);
     return out;
+  }
+  unite(from, group) {
+    if (this.events.length - from < 2)
+      return;
+    for (let i = from;i < this.events.length; i++) {
+      const e = this.events[i];
+      if (e)
+        this.events[i] = { ...e, group };
+    }
   }
   mark() {
     return { state: structuredClone(this.state), events: this.events.length, dropped: this.dropped.length };
@@ -9078,7 +9157,7 @@ function resolveTry(reg, w, params, rng, opts = {}) {
     w.apply({ type: ENGINE_EVENTS.check, data: { check: ready.check.id ?? "", skill: skill.id, actor: id, notation: ready.notation, natural: roll.natural, total: roll.total, dc: ready.dc, outcome: roll.outcome, npc: true } });
     rolled.push({ who: id, name: nameOf3(id), outcome: roll.outcome, pass: pass.includes(roll.outcome), notation: ready.notation, modifier: base.modifier, total: roll.roll.total + base.modifier });
   }
-  const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: read.attempt, pov: nameOf3(pov), band, dc, against, companions: rolled, share: share2, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
+  const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: namesHiddenOrSecretLore(reg, world, w.state, read.attempt) ? "" : read.attempt, pov: nameOf3(pov), band, dc, against, companions: rolled, share: share2, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
   return { ...res, events: w.events.slice(start), inferred };
 }
 
@@ -10151,18 +10230,50 @@ function typeProblem(f, v, world) {
       return null;
   }
 }
+function ownFields(reg, world, kind) {
+  const chain = [];
+  for (let def = kindDef(reg, world, kind), guard = 0;def && guard < 32; def = def.extends ? kindDef(reg, world, def.extends) : undefined, guard++)
+    chain.unshift(def);
+  const out = {};
+  for (const def of chain)
+    Object.assign(out, def.fields);
+  return out;
+}
+function overlayOf(reg, world, kind) {
+  for (let id = kind, guard = 0;id && guard < 32; id = kindParent(reg, world, id), guard++) {
+    const mine = own(world.kinds, id);
+    const pack = reg.kinds.get(id);
+    if (mine && pack)
+      return { mine, pack };
+  }
+  return null;
+}
 function lintStructure(world, reg) {
   const issues = [];
   const err = (path, code, message) => void issues.push({ severity: "error", path, code, message });
   const warn = (path, code, message) => void issues.push({ severity: "warning", path, code, message });
   const known = (id) => !!own(world.entities, id) || !!own(world.places, id);
+  const typed = new Map;
   for (const [id, e] of Object.entries(world.entities)) {
-    const fields = kindFields(reg, world, e.kind);
+    let kind = typed.get(e.kind);
+    if (!kind)
+      typed.set(e.kind, kind = { fields: kindFields(reg, world, e.kind), mine: ownFields(reg, world, e.kind), overlay: overlayOf(reg, world, e.kind) });
     for (const [name, v] of Object.entries(e.fields)) {
-      const f = own(fields, name);
+      const f = own(kind.fields, name);
       const problem = f ? typeProblem(f, v, world) : null;
-      if (problem)
-        (f?.type === "ref" ? err : warn)(`entities.${id}.fields.${name}`, f?.type === "ref" ? "refs" : "types", `${e.name}'s ${f?.label ?? name} ${problem}.`);
+      if (!f || problem === null)
+        continue;
+      const at = `entities.${id}.fields.${name}`;
+      const mine = own(kind.mine, name);
+      const mineProblem = mine === f ? problem : mine ? typeProblem(mine, v, world) : null;
+      if (mine && mineProblem !== null) {
+        (mine.type === "ref" ? err : warn)(at, mine.type === "ref" ? "refs" : "types", `${e.name}'s ${mine.label ?? name} ${mineProblem}.`);
+        continue;
+      }
+      const label = f.label ?? name;
+      const o = kind.overlay;
+      const from = o ? `Your ${o.mine.label} kind doesn't define ${label}: it has it from the packs' ${o.pack.label}, which it lies over, so the value is read as theirs.` : `None of your kinds defines ${label}: it is a pack's field, read as theirs.`;
+      warn(at, f.type === "ref" ? "refs" : "types", `${e.name}'s ${label} ${problem}. ${from} ${f.type === "ref" ? "Name something in the world there" : "Give it a value that fits"}, or define ${label} on your ${o ? o.mine.label : "own"} kind to keep your own.`);
     }
     for (const r of e.relations)
       if (!known(r.to))
@@ -10214,7 +10325,7 @@ function lintStructure(world, reg) {
     if (k.extends && !own(world.kinds, k.extends) && !reg.kinds.has(k.extends))
       err(`kinds.${id}.extends`, "refs", `Kind ${id} extends an unknown kind "${k.extends}".`);
     const pack = reg.kinds.get(id);
-    if (!pack)
+    if (!pack || k.extends === undefined || k.extends === pack.extends)
       continue;
     const packFields = new Map;
     for (let cur = pack, guard = 0;cur && guard < 32; cur = cur.extends ? reg.kinds.get(cur.extends) : undefined, guard++) {
@@ -10225,7 +10336,7 @@ function lintStructure(world, reg) {
     const kept2 = kindFields(reg, world, id);
     const lost = [...packFields].filter(([field]) => !hasOwn(kept2, field)).map(([field, def]) => def.label ?? field);
     if (lost.length > 0)
-      warn(`kinds.${id}`, "kind_shadow", `Kind ${k.label} (${id}) lies over the ${pack.pack ?? "engine"} pack's ${pack.label} but builds on ${k.extends ?? "nothing"} instead of ${pack.extends ?? "nothing"}, so it and every kind built on it lose ${lost.length} of that kind's fields (${lost.slice(0, 6).join(", ")}${lost.length > 6 ? ", \u2026" : ""}): forms show those values as untyped text and the levels that gate them no longer apply. Set its Extends back to ${pack.extends ?? "nothing"}, or give the kind its own id.`);
+      warn(`kinds.${id}`, "kind_shadow", `Kind ${k.label} (${id}) lies over the ${pack.pack ?? "engine"} pack's ${pack.label} but builds on ${k.extends || "nothing"} instead of ${pack.extends ?? "nothing"}, so it and every kind built on it lose ${lost.length} of that kind's fields (${lost.slice(0, 6).join(", ")}${lost.length > 6 ? ", \u2026" : ""}): forms show those values as untyped text and the levels that gate them no longer apply. ${pack.extends ? `Set its Extends back to ${pack.extends}` : "Clear its Extends"}, or give the kind its own id.`);
   }
   for (const [id, f] of Object.entries(isRecord(world.classifications) ? world.classifications : {})) {
     if (f.id !== id)
@@ -10629,11 +10740,12 @@ function trackEnv(reg, w, track, trackId) {
 function enter(reg, w, trackId, track, from, to, via, seed) {
   const start = w.events.length;
   const leaving = own(track.stages, from);
-  const rng = createRng(hashParts(seed, "track", trackId, from, to, w.state.clock));
+  const key = hashParts(seed, "track", trackId, from, to, w.state.clock);
+  const rng = createRng(key);
   const bindings = track.owner ? { self: track.owner, owner: track.owner } : {};
   if (via !== "fail" && leaving?.rewards && leaving.rewards.length > 0)
     applyEffects(reg, w, leaving.rewards, { bindings, rng: rng.fork("rewards") });
-  if (w.apply({ type: "stage", track: trackId, to }))
+  if (w.apply({ type: "stage", track: trackId, to, from }))
     return null;
   const entering = own(track.stages, to);
   if (entering?.effects && entering.effects.length > 0)
@@ -10647,6 +10759,7 @@ function enter(reg, w, trackId, track, from, to, via, seed) {
     const text3 = cue ?? `${track.label}: ${entering?.label ?? to}`;
     w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text: text3, visibility: track.visibility } });
   }
+  w.unite(start, `stage:${key.slice(0, 10)}`);
   return { track: trackId, from, to, via, events: w.events.slice(start) };
 }
 function gateOpen(reg, w, track, trackId, to) {
@@ -11040,11 +11153,18 @@ function catchUp(reg, w, opts) {
 var FIELD_TRANSPARENT = new Set(["clock", "post", "timelapse", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught, ENGINE_EVENTS.fired]);
 var CLOCK_TRANSPARENT = new Set(["set", "add", "post", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught]);
 var COLLAPSED_SIGNALS = new Set(["arrival", "needs", "weather", "overdue", "invitation"]);
-function coarsenRuns(events2) {
+function coarsenRuns(events2, held2) {
   const out = [];
   let keys = new Map;
   let lastClock = null;
   for (const ev of events2) {
+    if (held2(ev)) {
+      keys = new Map;
+      if (!CLOCK_TRANSPARENT.has(ev.type))
+        lastClock = null;
+      out.push(ev);
+      continue;
+    }
     if (ev.type === "set" || ev.type === "add") {
       const key = `${ev.entity}\x00${ev.field}`;
       const slot = keys.get(key) ?? {};
@@ -11127,8 +11247,8 @@ function collapseField(start, group) {
 function creditOnly(e) {
   return e.type === "post" && e.lines.every((l) => l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX) || l.amount >= 0);
 }
-function collapse(reg, start, events2) {
-  const keys = events2.map((e) => groupKey(reg, e));
+function collapse(reg, start, events2, held2) {
+  const keys = events2.map((e) => held2(e) ? null : groupKey(reg, e));
   const first = new Map;
   const last = new Map;
   const members = new Map;
@@ -11194,7 +11314,9 @@ function coarsen(reg, world, start, events2) {
     return hashJson(copy);
   };
   const expected = worldOnly(full);
-  for (const candidate of [collapse(reg, start, events2), coarsenRuns(events2)]) {
+  const entries2 = new Set(events2.flatMap((e) => e.type === "stage" && e.group !== undefined ? [e.group] : []));
+  const held2 = (e) => e.group !== undefined && entries2.has(e.group);
+  for (const candidate of [collapse(reg, start, events2, held2), coarsenRuns(events2, held2)]) {
     const coarse = foldOf(reg, world, start, candidate);
     if (coarse === null || worldOnly(coarse) !== expected)
       continue;
@@ -12145,6 +12267,7 @@ function paramLabel(action, name, world, registry) {
 function actionWords(registry, world, state, action, params, typed = "") {
   const said = typed.toLowerCase();
   const secrets = unrevealedSecrets(registry, world, state).filter((s) => !said.includes(s.toLowerCase()));
+  const screened = (words4) => findLeaks(words4, secrets).length > 0 || namesHiddenOrSecretLore(registry, world, state, words4, typed) ? null : words4;
   const nameOf3 = (value) => {
     if (typeof value !== "string" || value === "")
       return null;
@@ -12157,15 +12280,11 @@ function actionWords(registry, world, state, action, params, typed = "") {
     return null;
   };
   const asTyped = (value) => {
-    if (said === "" || hasOwn(state.entities, value) || hasOwn(world.places, value))
+    const words4 = value.replace(/[_~]/g, " ").trim();
+    if (said === "" || words4 === "")
       return null;
-    const [plainValue = "", typedPlain = ""] = [value, typed].map((s) => s.toLowerCase().replace(/[_~]/g, " "));
-    const wanted = plainValue.trim();
-    const at = wanted === "" ? -1 : typedPlain.indexOf(wanted);
-    if (at < 0)
-      return null;
-    const words4 = typedPlain.length === typed.length ? typed.slice(at, at + wanted.length) : value;
-    return findLeaks(words4, secrets).length === 0 ? words4 : null;
+    const found = new RegExp(words4.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s_~]+"), "iu").exec(typed);
+    return found ? screened(found[0]) : null;
   };
   const labelOf2 = (table, value) => {
     if (table !== undefined)
@@ -12179,9 +12298,7 @@ function actionWords(registry, world, state, action, params, typed = "") {
       if (shown2?.id === value)
         return shown2.label;
     }
-    if (hasOwn(state.entities, value) || hasOwn(world.places, value))
-      return nameOf3(value);
-    return /^\S+$/.test(value) && /[_~]/.test(value) ? null : value;
+    return nameOf3(value);
   };
   const count = action.params[COUNT_PARAM]?.type === "number" && typeof params[COUNT_PARAM] === "number" ? params[COUNT_PARAM] : null;
   const counted = count === null ? undefined : Object.keys(action.params).find((name) => name !== COUNT_PARAM && (action.params[name]?.type === "ref" || action.params[name]?.type === "text"));
@@ -12205,9 +12322,9 @@ function actionWords(registry, world, state, action, params, typed = "") {
     else if (def.type === "duration" && typeof value === "number" && value > 0)
       word = compactSpan(value);
     else if (typeof value === "string") {
-      const text3 = labelOf2(def.table, value) ?? asTyped(value);
-      if (text3 && findLeaks(text3, secrets).length === 0)
-        word = text3;
+      const label = labelOf2(def.table, value);
+      const written = label === null && def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null;
+      word = label !== null ? findLeaks(label, secrets).length === 0 ? label : null : written ?? asTyped(value);
     }
     if (word === null)
       continue;
@@ -13623,6 +13740,8 @@ function vehicleTrips(ctx, ask, targets) {
     if (ask.at !== ask.from || first === undefined)
       return out;
     for (const to of targets) {
+      if (to === ask.at)
+        continue;
       const drive = nominalRoute(ctx, ask.at, to, first);
       if (drive)
         out.set(to, { fetch: null, startMinutes: 0, drive, park: to, parkMinutes: 0, walk: null, minutes: drive.minutes });
@@ -13640,7 +13759,7 @@ function vehicleTrips(ctx, ask, targets) {
   const parkMinutes = Math.round(tuning.parkMinutes);
   const searches = new Map;
   for (const to of targets) {
-    if (to === ask.from || !own(ctx.world.places, to))
+    if (to === ask.from || to === ask.at || !own(ctx.world.places, to))
       continue;
     const modes = ask.modes.filter((m) => !(closes && (closes(ctx, ask.at).includes(m) || closes(ctx, to).includes(m))));
     if (modes.length === 0)
@@ -24941,28 +25060,28 @@ function fixedOf(ctx, id) {
   const e = own(ctx.state.entities, id);
   return e ? fixedReason(kindIs(ctx.registry, ctx.world, e.kind, "vehicle"), e.fields, ctx.world.tables) : null;
 }
+function kindHoldsAs(reg, world, kind) {
+  if (kindIs(reg, world, kind, "person"))
+    return "person";
+  if (kindIs(reg, world, kind, "vehicle"))
+    return "vehicle";
+  return kindIs(reg, world, kind, "container") ? "container" : null;
+}
 function holdsAs(ctx, id) {
   const e = own(ctx.state.entities, id);
-  if (!e)
-    return null;
-  if (kindIs(ctx.registry, ctx.world, e.kind, "person"))
-    return "person";
-  if (kindIs(ctx.registry, ctx.world, e.kind, "vehicle"))
+  return e ? kindHoldsAs(ctx.registry, ctx.world, e.kind) : null;
+}
+function kindGoesIn(reg, world, kind) {
+  if (kindIs(reg, world, kind, "person") || kindIs(reg, world, kind, "vehicle"))
     return "vehicle";
-  return kindIs(ctx.registry, ctx.world, e.kind, "container") ? "container" : null;
+  return kindIs(reg, world, kind, "item") || kind === "account" ? "any" : "nowhere";
 }
 function goesIn(ctx, id) {
   const e = own(ctx.state.entities, id);
   if (!e)
     return "nowhere";
-  if (kindIs(ctx.registry, ctx.world, e.kind, "person"))
-    return "vehicle";
-  const fixed = fixedOf(ctx, id);
-  if (fixed === "vehicle")
-    return "vehicle";
-  if (fixed !== null)
-    return "nowhere";
-  return kindIs(ctx.registry, ctx.world, e.kind, "item") || e.kind === "account" ? "any" : "nowhere";
+  const goes = kindGoesIn(ctx.registry, ctx.world, e.kind);
+  return goes === "any" && fixedOf(ctx, id) !== null ? "nowhere" : goes;
 }
 function holdProblem(ctx, thing, holder) {
   const e = own(ctx.state.entities, thing);
@@ -25419,6 +25538,49 @@ function gearLines(ctx, scope) {
   return lines;
 }
 var PRESENT_GEAR_CAP = 6;
+var MOVES = { "gear.transfer": { thing: "item", into: "to" }, "gear.give": { thing: "item", into: "to" }, "gear.take_piece": { into: "to" } };
+function authoredMoves(world) {
+  const things = new Map;
+  const holders = new Map;
+  const note = (into, kind, why) => {
+    if (kind !== undefined && own(world.kinds, kind) && !into.has(kind))
+      into.set(kind, why);
+  };
+  for (const e of Object.values(world.entities)) {
+    for (const rel of e.relations) {
+      const holder = rel.type === "in" ? own(world.entities, rel.to) : undefined;
+      if (!holder)
+        continue;
+      note(holders, holder.kind, `${holder.name} holds ${e.name}`);
+      note(things, e.kind, `${holder.name} holds ${e.name}`);
+    }
+  }
+  for (const { path, effects } of effectLists(world)) {
+    const action = path.startsWith("actions.") ? own(world.actions, path.split(".")[1] ?? "") : undefined;
+    const named = (arg) => {
+      if (typeof arg !== "string" || arg.startsWith("="))
+        return null;
+      const param = action ? own(action.params, arg) : undefined;
+      if (param)
+        return { kind: param.type === "ref" ? param.ref : undefined, words: `its ${param.label ?? arg}` };
+      const e = own(world.entities, arg);
+      return { kind: e?.kind, words: e?.name ?? arg };
+    };
+    for (const spec of effects) {
+      const move2 = hasOwn(MOVES, spec.type) ? MOVES[spec.type] : undefined;
+      if (!move2)
+        continue;
+      const by = action?.label ?? path;
+      const into = named(spec.args?.[move2.into]);
+      if (into)
+        note(holders, into.kind, `${by} gives things to ${into.words}`);
+      const thing = move2.thing === undefined ? null : named(spec.args?.[move2.thing]);
+      if (thing)
+        note(things, thing.kind, `${by} moves ${thing.words}`);
+    }
+  }
+  return { things, holders };
+}
 function presentGearLines(ctx, scope) {
   const pov = ctx.world.pov;
   if (ctx.levelOf(pov, "gear") === 0)
@@ -26214,6 +26376,32 @@ var gearPack = {
         return issues;
       }
     });
+    r.lint({
+      code: "gear.holders",
+      check(world, registry) {
+        if (!registry)
+          return [];
+        return [...authoredMoves(world).holders].filter(([kind]) => kindHoldsAs(registry, world, kind) === null).map(([kind, why]) => ({
+          severity: "warning",
+          code: "gear.holders",
+          path: `kinds.${kind}`,
+          message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) holds things in this world (${why}) but isn't a container, a vehicle or a person, so nothing can be put in it: a transfer, a gift or a GM's Put inside into it is refused. Set its Extends to container, or to a kind built on one.`
+        }));
+      }
+    });
+    r.lint({
+      code: "gear.contents",
+      check(world, registry) {
+        if (!registry)
+          return [];
+        return [...authoredMoves(world).things].filter(([kind]) => kindGoesIn(registry, world, kind) === "nowhere").map(([kind, why]) => ({
+          severity: "warning",
+          code: "gear.contents",
+          path: `kinds.${kind}`,
+          message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) is moved in this world (${why}) but isn't built on Item (nor is it a person, a vehicle or a cash account), so nothing can take it, give it or put it in anything: Take never offers it, and a transfer, a gift or a GM's Put inside of it is refused. Set its Extends to item, or to a kind built on one.`
+        }));
+      }
+    });
   }
 };
 var core_default4 = gearPack;
@@ -26681,6 +26869,8 @@ var vehiclesPack = {
           return reject10("broken", `${e.name} has broken down`);
         const driverAt = placeOfEntity(ctx.state, driver);
         const vehicleAt = placeOfEntity(ctx.state, v);
+        if (vehicleAt === to)
+          return reject10("already_there", `${e.name} is at ${labelOf(ctx, to)} already: walk there`);
         const trip = (driverAt ? tripFor(ctx, v, driverAt, to) : null) ?? (vehicleAt && vehicleAt !== driverAt ? tripFor(ctx, v, vehicleAt, to) : null);
         if (!trip)
           return reject10("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
@@ -26758,7 +26948,7 @@ var vehiclesPack = {
       description: "Drive, ride or sail a vehicle you own or may use to another place.",
       pack: "vehicles",
       params: { vehicle: { type: "ref", ref: "vehicle" }, to: { type: "ref", ref: "place", label: "Destination" } },
-      requires: ["vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "drive_minutes(vehicle, to, here) > 0", "fuel_ok(vehicle, to, here)"],
+      requires: ["vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "place(vehicle) != to", "drive_minutes(vehicle, to, here) > 0", "fuel_ok(vehicle, to, here)"],
       outcomes: { default: [{ type: "vehicles.drive", args: { vehicle: "vehicle", to: "=to", driver: "self" } }] },
       duration: "drive_minutes(vehicle, to, here)",
       activity: { type: "travel", until: "clock + drive_minutes(vehicle, to, here)" },
@@ -29065,8 +29255,8 @@ function presentUsual(ctx, place) {
 function povSafe(ctx) {
   const { registry: reg, world, state: state2 } = ctx;
   const secrets = unrevealedSecrets(reg, world, state2);
-  const namesHidden = hiddenNameCheck(reg, world, state2, world.pov);
-  return (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
+  const namesHidden2 = hiddenNameCheck(reg, world, state2, world.pov);
+  return (t) => findLeaks(t, secrets).length === 0 && !namesHidden2(t);
 }
 function knownUsual(ctx, who, place, safe) {
   const { registry: reg, world, state: state2 } = ctx;
@@ -30220,8 +30410,8 @@ function stanceCast(ctx) {
   const safe = (text4) => {
     if (!check) {
       const secrets = unrevealedSecrets(reg, world, state2);
-      const namesHidden = hiddenNameCheck(reg, world, state2, pov);
-      check = (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
+      const namesHidden2 = hiddenNameCheck(reg, world, state2, pov);
+      check = (t) => findLeaks(t, secrets).length === 0 && !namesHidden2(t);
     }
     return check(text4);
   };

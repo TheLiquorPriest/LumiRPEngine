@@ -4427,13 +4427,13 @@ var PART_SPECS = {
               label: "Speed by way of travel (km/h)",
               optional: true,
               fields: [
-                { kind: "number", key: "walk", label: "On foot", min: 0, step: 0.5, optional: true, hint: "Unset: each route's own minutes. Set: every leg with a distance takes that distance at this speed" },
-                { kind: "number", key: "road", label: "By road", min: 0, step: 1, optional: true },
-                { kind: "number", key: "offroad", label: "Off road", min: 0, step: 1, optional: true },
-                { kind: "number", key: "water", label: "On water", min: 0, step: 1, optional: true }
+                { kind: "number", key: "walk", label: "On foot", min: 0.5, step: 0.5, optional: true, hint: "Unset: each route's own minutes. Set: every leg with a distance takes that distance at this speed" },
+                { kind: "number", key: "road", label: "By road", min: 1, step: 1, optional: true },
+                { kind: "number", key: "offroad", label: "Off road", min: 1, step: 1, optional: true },
+                { kind: "number", key: "water", label: "On water", min: 1, step: 1, optional: true }
               ]
             },
-            { kind: "record", key: "vehicleSpeeds", label: "Speed by vehicle class (km/h)", keyLabel: "Vehicle class", item: { kind: "number", key: "", label: "km/h", min: 0, step: 1 }, hint: "A class of the vehicles table (atv_utility, pickup_midsize…): its vehicles take every leg with a distance at this speed, whatever the way" },
+            { kind: "record", key: "vehicleSpeeds", label: "Speed by vehicle class (km/h)", keyLabel: "Vehicle class", item: { kind: "number", key: "", label: "km/h", min: 1, step: 1 }, hint: "A class of the vehicles table (atv_utility, pickup_midsize…): its vehicles take every leg with a distance at this speed, whatever the way" },
             { kind: "number", key: "startMinutes", label: "Getting a vehicle going (minutes)", min: 0, step: 1, optional: true, hint: "Default 1: in, started and out of its spot" },
             { kind: "number", key: "parkMinutes", label: "Parking it (minutes)", min: 0, step: 1, optional: true, hint: "Default 1" },
             { kind: "number", key: "fetchMinutes", label: "Longest walk to fetch a vehicle (minutes)", min: 0, step: 1, optional: true, hint: "Default 30: a vehicle parked further away isn't offered; 0 offers only one where you are" }
@@ -4606,8 +4606,12 @@ function MoneyInput(props) {
 }
 
 // src/shared/state-view.ts
-function chipRegenerates(kind, choice) {
-  return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || (kind === "read_failed" || kind === "reply_failed") && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop") || (kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit");
+function chipStarts(chip, choice) {
+  if (choice === "regenerate" || choice === "continue")
+    return choice;
+  const kind = chip.kind;
+  const starts = kind === "reply_failed" && choice === "rerun" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop") || (kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit");
+  return starts ? chip.as ?? "regenerate" : null;
 }
 
 // src/shared/party.ts
@@ -4639,10 +4643,11 @@ function upgradeRequest(chatId, preview, choices) {
   return { type: "lre.world", op: "upgrade", chatId, to: preview.to, merge };
 }
 function chipIntent(chip, choice, chatId, payload) {
-  if (choice === "regenerate")
-    return { request: null, regenerate: true };
+  const start = chipStarts(chip, choice);
+  if (choice === "regenerate" || choice === "continue")
+    return { request: null, start };
   const request = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
-  return { request, regenerate: chipRegenerates(chip.kind, choice) };
+  return { request, start };
 }
 function convertRequest(line, chatId) {
   if ("marker" in line.ref)
@@ -14063,11 +14068,15 @@ async function sendChipChoice(app, chip, choice, chatId, payload) {
       app.toast(message.message, "error");
       return false;
     }
-    if (message.request === "lre.chip" && message.body.pending && !intent.regenerate)
+    if (message.request === "lre.chip" && message.body.pending && intent.start === null)
       app.toast("Saved — it applies when the reply finishes.", "info");
   }
-  if (intent.regenerate && !await app.host.generate("regenerate"))
-    app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
+  if (intent.start === "send")
+    app.toast("Press Send, with nothing typed, for the reply.", "info");
+  else if (intent.start !== null && !await app.host.generate(intent.start)) {
+    const command = intent.start === "continue" ? "Continue" : "Regenerate";
+    app.toast(`Couldn't start ${command} here; use the message's ${command} button.`, "error");
+  }
   return true;
 }
 function useChipAction(chip, chatId) {
@@ -22547,7 +22556,7 @@ function ProgressionEditor(props) {
     children: [
       /* @__PURE__ */ u3("span", {
         class: "lre-small lre-muted",
-        children: "A progression's level follows its XP, both ways: after each change, an entity whose XP reached the next threshold goes up a level at a time, each level gained running its effects, and one whose XP fell below its level's threshold goes straight down. Change XP to change a level."
+        children: "A progression's level follows its XP, both ways: after each change, an entity whose XP reached the next threshold goes up a level at a time, each level gained running its effects, and one whose XP fell below its level's threshold goes straight down, any pool above its lower max coming down to it. Change XP to change a level."
       }, undefined, false, undefined, this),
       Object.keys(props.value).length === 0 ? /* @__PURE__ */ u3("span", {
         class: "lre-small lre-muted",
@@ -34963,13 +34972,13 @@ function sub(state, key) {
   s3[key] = fresh;
   return fresh;
 }
-function bumpStage(state, key, track2, stage) {
+function countStage(state, key, track2, stage, next) {
   if (!safeKey(track2) || !safeKey(stage))
     return;
   const all = sub(state, key);
   const row = isRecord(all[track2]) ? all[track2] : {};
   const n2 = row[stage];
-  all[track2] = { ...row, [stage]: (typeof n2 === "number" ? n2 : 0) + 1 };
+  all[track2] = { ...row, [stage]: next(typeof n2 === "number" ? n2 : 0) };
 }
 function str2(e3, key) {
   const v3 = e3.data[key];
@@ -35061,7 +35070,7 @@ var events = [
         const attempts = sub(state, "attempts");
         const n2 = own(attempts, track2);
         attempts[track2] = (typeof n2 === "number" ? n2 : 0) + 1;
-        bumpStage(state, "missed", track2, str2(e3, "stage"));
+        countStage(state, "missed", track2, str2(e3, "stage"), (count) => count + 1);
       }
     },
     describe: (e3) => `attempt on ${str2(e3, "track")}`
@@ -35072,10 +35081,16 @@ var events = [
       const missing = need(e3, "track", "stage");
       if (missing)
         return missing;
+      const n2 = e3.data.n;
+      if (n2 !== undefined && !(typeof n2 === "number" && Number.isInteger(n2) && n2 >= 1))
+        return { code: "bad_event", reason: `${e3.type} needs n, a whole number from 1` };
       const t3 = own(ctx.world.tracks, str2(e3, "track"));
       return t3 && own(t3.stages, str2(e3, "stage")) ? null : { code: "missing_track", reason: `no stage ${str2(e3, "stage")} of track ${str2(e3, "track")}` };
     },
-    apply: (e3, state) => bumpStage(state, "hints", str2(e3, "track"), str2(e3, "stage")),
+    apply: (e3, state) => {
+      const n2 = e3.data.n;
+      countStage(state, "hints", str2(e3, "track"), str2(e3, "stage"), (open) => typeof n2 === "number" ? Math.max(open, n2) : open + 1);
+    },
     describe: (e3) => `hint opened on ${str2(e3, "track")}`
   },
   {
