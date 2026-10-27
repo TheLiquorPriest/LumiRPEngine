@@ -59980,6 +59980,7 @@ var SOON = 60;
 var TIMELAPSE_ACTION = "timelapse";
 var AGENTS_PER_TURN = 4;
 var TURN_AGENT_DAYS = 30;
+var UNPAID_CODES = new Set(["declined", "unpriced"]);
 function onScreen(w) {
   const here = placeOfEntity(w.state, w.world.pov);
   if (!here)
@@ -60105,10 +60106,10 @@ function planTurn(input) {
         resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement, ...step.needs ? { needs: step.needs } : {} });
         if (typed && missedPlainRequirement(resolution))
           resolution = { ...resolution, roleplay: true };
-        const uncovered = typed && resolution.ok ? resolution.rejected.find((r) => r.rejection.code === "declined") : undefined;
-        if (uncovered) {
+        const unpaid = typed && resolution.ok ? resolution.rejected.find((r) => UNPAID_CODES.has(r.rejection.code)) : undefined;
+        if (unpaid) {
           w.restore(acting);
-          resolution = { ...resolution, ok: false, failed: { code: "declined", reason: uncovered.rejection.reason }, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, adjudged: null, roleplay: true };
+          resolution = { ...resolution, ok: false, failed: { code: unpaid.rejection.code, reason: unpaid.rejection.reason }, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, adjudged: null, roleplay: true };
         }
         scene = sceneKey(w.world, w.state);
         const done = w.events.slice(mark2, mark2 + (made?.events ?? 0) + resolution.events.length);
@@ -74720,9 +74721,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "d4c5890d8a9985a34a0e26ce8f58a27c2496ee7d6a34d8904cdd6a650303b534";
+  const sha256 = "1023da181e7a73d6b0bb1588d88946798538f2cb3e374cfc9b84def7c14ec89e";
   const tools = ["d7ea5d8f68714fbde356a1b99c522de6", "3a95a1966944ca155e67ff625d472024"].filter((f) => f !== undefined);
-  return { id: "274d4ea3", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "cf064c05", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -77930,7 +77931,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "274d4ea3" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "cf064c05" }), (chatId) => this.messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }
@@ -80264,6 +80265,8 @@ function describeProposal(p, view) {
     const who = subject(k);
     return who === "You" ? "Your" : `${who}'s`;
   };
+  const named = (k) => typeof p[k] === "string" && p[k].trim() !== "";
+  const actor2 = (k) => named(k) ? subject(k) : "You";
   const change2 = (delta) => `${delta >= 0 ? "went up" : "went down"} by ${Math.abs(delta)}`;
   switch (p.type) {
     case "purchase":
@@ -80276,7 +80279,7 @@ function describeProposal(p, view) {
     case "give":
       return `${s("from")} gave ${s("item")} to ${s("to")}`;
     case "location":
-      return `${subject("entity")} went to ${s("place")}`;
+      return `${actor2("entity")} went to ${s("place")}`;
     case "condition": {
       if (typeof p.condition !== "string") {
         const known = view && typeof p.entity === "string" ? knownRef(view, "person", p.entity) : null;
@@ -80288,7 +80291,7 @@ function describeProposal(p, view) {
       return `${who} ${be(who)} ${p.clear === true ? "no longer" : "now"} ${raw("condition").replace(/_/g, " ")}`;
     }
     case "quantity":
-      return `${whose("entity")} count of ${s("item")} ${change2(Number(p.delta))}`;
+      return `${named("entity") ? `${whose("entity")} count of` : "The count of"} ${s("item")} ${change2(Number(p.delta))}`;
     case "regard":
       return `${whose("from")} ${s("axis").replace(/_/g, " ")} toward ${s("to")} ${Number(p.delta) >= 0 ? "rose" : "fell"} by ${Math.abs(Number(p.delta))}`;
     case "knows": {
@@ -80296,15 +80299,15 @@ function describeProposal(p, view) {
       return `${who} ${who === "You" ? "learn" : "learns"}: ${s("fact")}`;
     }
     case "take":
-      return `${s("entity")} picked up ${s("item")}`;
+      return `${actor2("entity")} picked up ${s("item")}`;
     case "drop":
-      return `${s("entity")} put down ${s("item")}`;
+      return `${actor2("entity")} put down ${s("item")}`;
     case "use_up":
-      return `${s("entity")} used up ${s("item")}${typeof p.qty === "number" && p.qty > 1 ? ` \xD7${p.qty}` : ""}`;
+      return `${actor2("entity")} used up ${s("item")}${typeof p.qty === "number" && p.qty > 1 ? ` \xD7${p.qty}` : ""}`;
     case "wear":
-      return `${s("entity")} ${p.off === true ? "took off" : "put on"} ${s("item")}`;
+      return `${actor2("entity")} ${p.off === true ? "took off" : "put on"} ${s("item")}`;
     case "lose":
-      return typeof p.by === "string" && p.by !== "" ? `${s("by")} stole ${s("item")} from ${s("entity")}` : `${s("entity")} lost ${s("item")}`;
+      return named("by") ? `${subject("by")} stole ${s("item")} from ${named("entity") ? s("entity") : "you"}` : `${actor2("entity")} lost ${s("item")}`;
     case "item_condition":
       return `${s("item")}'s condition ${change2(Number(p.delta))}`;
     case "spawn":

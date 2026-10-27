@@ -12654,6 +12654,7 @@ function planDay(input) {
 var TIMELAPSE_ACTION = "timelapse";
 var AGENTS_PER_TURN = 4;
 var TURN_AGENT_DAYS = 30;
+var UNPAID_CODES = new Set(["declined", "unpriced"]);
 function onScreen(w) {
   const here = placeOfEntity(w.state, w.world.pov);
   if (!here)
@@ -12779,10 +12780,10 @@ function planTurn(input) {
         resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement, ...step.needs ? { needs: step.needs } : {} });
         if (typed && missedPlainRequirement(resolution))
           resolution = { ...resolution, roleplay: true };
-        const uncovered = typed && resolution.ok ? resolution.rejected.find((r) => r.rejection.code === "declined") : undefined;
-        if (uncovered) {
+        const unpaid = typed && resolution.ok ? resolution.rejected.find((r) => UNPAID_CODES.has(r.rejection.code)) : undefined;
+        if (unpaid) {
           w.restore(acting);
-          resolution = { ...resolution, ok: false, failed: { code: "declined", reason: uncovered.rejection.reason }, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, adjudged: null, roleplay: true };
+          resolution = { ...resolution, ok: false, failed: { code: unpaid.rejection.code, reason: unpaid.rejection.reason }, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, adjudged: null, roleplay: true };
         }
         scene = sceneKey(w.world, w.state);
         const done = w.events.slice(mark, mark + (made?.events ?? 0) + resolution.events.length);
