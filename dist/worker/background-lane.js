@@ -2043,6 +2043,9 @@ function dropPassMemo(owner) {
 
 // src/shared/ledger.ts
 var APART_GROUP = "apart:";
+function apartOf(group) {
+  return `${APART_GROUP}${group}`;
+}
 
 // src/shared/classes.ts
 var NESTING_DEPTH = 16;
@@ -8602,7 +8605,7 @@ function applyEffects(reg, w, specs, scope) {
       return;
     }
     const group = result.length > 1 ? `fx:${hashParts(rng.seed).slice(0, 10)}` : undefined;
-    const events2 = group ? result.map((ev) => ev.group?.startsWith(APART_GROUP) ? ev : { ...ev, group }) : result;
+    const events2 = group ? result.map((ev) => ({ ...ev, group: ev.group?.startsWith(APART_GROUP) ? apartOf(group) : group })) : result;
     const mark = group ? w.mark() : null;
     for (const ev of events2) {
       const failure = w.apply(ev);
@@ -8750,14 +8753,20 @@ function firstUnmet(action, env) {
   }
   return plain2 === null ? null : { code: "requirement", reason: `requires ${plain2}`, requirement: plain2 };
 }
-function unmetNeeds(reg, world, state, needs) {
+function unmetNeeds(reg, world, state, needs, params) {
   const named = findAction(reg, world, needs.action);
   if (!named)
     return null;
-  const given = (name) => Object.prototype.hasOwnProperty.call(needs.params, name);
+  const picks = { ...needs.params };
+  for (const [name, from] of Object.entries(needs.shared)) {
+    const value = params[from];
+    if (value !== undefined)
+      picks[name] = value;
+  }
+  const given = (name) => Object.prototype.hasOwnProperty.call(picks, name);
   const reads = (req) => identifiers(req).filter((name) => Object.prototype.hasOwnProperty.call(named.params, name));
   const action = { ...named, params: Object.fromEntries(Object.entries(named.params).filter(([name]) => given(name))), requires: named.requires.filter((req) => reads(requirementExpr(req)).every(given)) };
-  const p = prepare(reg, world, state, { action, params: needs.params });
+  const p = prepare(reg, world, state, { action, params: picks });
   return "code" in p ? p : firstUnmet(action, scopeEnv({ reg, ctx: reg.context(world, state), bindings: p.bindings, vars: p.vars }));
 }
 function playsAsRoleplay(res) {
@@ -8820,7 +8829,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
   }
   const env = scopeEnv({ reg, ctx: w.ctx, bindings: p.bindings, vars: p.vars });
   const itself = firstUnmet(p.action, env);
-  const named = opts.needs ? unmetNeeds(reg, w.world, w.state, opts.needs) : null;
+  const named = opts.needs ? unmetNeeds(reg, w.world, w.state, opts.needs, req.params ?? {}) : null;
   const unmet = itself?.hard ? itself : named?.hard ? named : itself ?? named;
   if (unmet !== null)
     return { ...base, actor: p.actor, failed: unmet, events: w.events.slice(start) };
@@ -12709,10 +12718,16 @@ function skipPastFight(w, runSeed) {
     return [];
   return optionalService(w.ctx, "combat.break_off")?.(w, hashParts(runSeed, "skip", "fight")) ?? [];
 }
-function claimThing(w, claim, salt) {
-  const lacking = claim.cents === undefined ? undefined : claim.cents - Math.max(0, optionalQuery(w.ctx, "economy.carried_cash")?.(w.ctx, w.world.pov) ?? 0);
-  if (lacking !== undefined && lacking <= 0)
-    return null;
+function claimThing(w, claim, salt, params) {
+  let lacking;
+  if (claim.cents !== undefined) {
+    const pays = claim.amountParam === undefined ? claim.cents : params[claim.amountParam];
+    if (typeof pays !== "number" || pays > claim.cents)
+      return null;
+    lacking = pays - Math.max(0, optionalQuery(w.ctx, "economy.carried_cash")?.(w.ctx, w.world.pov) ?? 0);
+    if (lacking <= 0)
+      return null;
+  }
   const made = lacking !== undefined ? optionalService(w.ctx, "economy.claim_cash")?.(w.ctx, w.world.pov, lacking) : optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim, by: w.world.pov, salt });
   if (!made || !("entity" in made))
     return null;
@@ -12769,8 +12784,8 @@ function planTurn(input) {
       const before = { picks: "", from: placeOfEntity(w.state, w.world.pov), fields: { ...own(w.state.entities, w.world.pov)?.fields } };
       if (step) {
         const typed = i > 0 || intent?.picked !== true;
-        const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs) : null;
-        const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
+        const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs, step.params) : null;
+        const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim"), step.params) : null;
         if (claimed && step.claim)
           made = { entity: claimed.entity, name: claimed.cents !== undefined ? formatMoney(claimed.cents, w.world.currency) : step.claim.name, events: claimed.events, ...claimed.cents !== undefined ? { cents: claimed.cents } : {} };
         const params = claimed && step.claim && step.claim.cents === undefined ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
@@ -20761,6 +20776,8 @@ function txn(lines, meta) {
     data.named = meta.named;
   if (meta.unpaid !== undefined)
     data.unpaid = meta.unpaid;
+  if (meta.story)
+    data.story = true;
   if (meta.at !== undefined)
     data.at = meta.at;
   return { type: FINANCE_EVENTS.txn, data };
@@ -20768,11 +20785,15 @@ function txn(lines, meta) {
 function posting(lines, meta) {
   return [{ type: "post", lines, memo: meta.memo }, txn(lines, meta)];
 }
-function asUnit(events2, apart = false) {
+function asUnit(events2) {
   if (events2.length < 2)
     return events2;
-  const group = `${apart ? APART_GROUP : "pay:"}${hashParts(JSON.stringify(events2)).slice(0, 10)}`;
+  const group = `pay:${hashParts(JSON.stringify(events2)).slice(0, 10)}`;
   return events2.map((e) => ({ ...e, group }));
+}
+function apartFrom(events2, unit3) {
+  const group = unit3[0]?.group;
+  return group === undefined ? events2 : events2.map((e) => ({ ...e, group: apartOf(group) }));
 }
 function merged(lines) {
   const out = [];
@@ -20874,15 +20895,16 @@ function charge(hooks, ctx, payer, rawCents, memo, opts = {}) {
   const holds = picked?.card !== undefined && featureFor(ctx, payer, "holds");
   const outside = opts.counterparty === undefined ? undefined : own(ctx.state.entities, opts.counterparty) ? opts.counterparty : opts.counterparty.replace(/_/g, " ");
   const counterparty = terms?.seller ?? opts.payee ?? outside;
-  const meta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...opts.category ? { category: opts.category } : {}, ...counterparty ? { counterparty } : {}, payer, ...picked?.card ? { card: picked.card } : {}, ...opts.flow ? { flow: opts.flow } : {}, ...holds ? { pending: at + 1440 } : {}, ...opts.narrated ? { narrated: opts.narrated } : {}, ...picked?.named ? { named: picked.named } : {}, ...opts.at !== undefined ? { at: opts.at } : {} };
+  const meta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...opts.category ? { category: opts.category } : {}, ...counterparty ? { counterparty } : {}, payer, ...picked?.card ? { card: picked.card } : {}, ...opts.flow ? { flow: opts.flow } : {}, ...holds ? { pending: at + 1440 } : {}, ...opts.narrated ? { narrated: opts.narrated } : {}, ...picked?.named ? { named: picked.named } : {}, ...opts.story === true ? { story: true } : {}, ...opts.at !== undefined ? { at: opts.at } : {} };
   const spend = [];
   if (picked?.card && opts.sale && Number.isFinite(cardRoom(ctx, picked.card, "purchase"))) {
     const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
     const s = spendOf(ctx.state, picked.card, day);
     spend.push({ type: FINANCE_EVENTS.spend, data: { card: picked.card, day, purchase: s.purchase + cents + tax, atm: s.atm } });
   }
-  const paid = [{ type: "post", lines, memo, ...opts.story === true ? { overdraw: true } : {} }, ...out, ...dest.extra, txn(lines, meta), ...terms?.extra ?? [], ...od.after, ...spend];
-  return opts.story === true ? [...asUnit(od.before, true), ...asUnit(paid)] : asUnit([...od.before, ...paid]);
+  const overdraw = opts.story === true && picked !== null && runsDebt(ctx, source);
+  const paid = asUnit([{ type: "post", lines, memo, ...overdraw ? { overdraw: true } : {} }, ...out, ...dest.extra, txn(lines, meta), ...terms?.extra ?? [], ...od.after, ...spend]);
+  return opts.story === true ? [...apartFrom(od.before, paid), ...paid] : asUnit([...od.before, ...paid]);
 }
 function moverOf(ctx, from, to) {
   return holdersOf(ctx.state, from).find((p) => canSpend(ctx.state, from, p) && rightsOf(ctx.state, to, p) !== null) ?? null;
@@ -20942,7 +20964,8 @@ function move(ctx, from, to, cents, memo, opts = {}) {
   }
   const advance2 = fromTraits.revolving && !toTraits.liability;
   const fee = advance2 ? cashAdvanceFee(ctx, from, c) : 0;
-  if (!opts.unchecked && !(opts.story && runsDebt(ctx, from)) && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee)
+  const debt = opts.story === true && runsDebt(ctx, from);
+  if (!opts.unchecked && !debt && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee)
     return reject6("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
   const lines = [
     { account: from, amount: -c },
@@ -20950,10 +20973,10 @@ function move(ctx, from, to, cents, memo, opts = {}) {
   ];
   const p = productOf(ctx, from);
   const charged = fee > 0 ? posting([{ account: from, amount: -fee }, { account: bankSide(p?.institution ?? ""), amount: fee }], { memo: "Cash advance fee", kind: "fee", category: "cash_advance", ...opts.at !== undefined ? { at: opts.at } : {} }) : [];
-  const out = [...charged, { type: "post", lines, memo, ...opts.story ? { overdraw: true } : {} }];
+  const out = [...charged, { type: "post", lines, memo, ...debt ? { overdraw: true } : {} }];
   if (toTraits.liability)
     out.push({ type: FINANCE_EVENTS.cardPaid, data: { account: to, cents: c } });
-  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance2 ? "cash_advance" : "transfer", ...opts.flow ? { flow: opts.flow } : {}, ...opts.named ? { named: opts.named } : {}, ...opts.at !== undefined ? { at: opts.at } : {} }));
+  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance2 ? "cash_advance" : "transfer", ...opts.flow ? { flow: opts.flow } : {}, ...opts.named ? { named: opts.named } : {}, ...opts.story ? { story: true } : {}, ...opts.at !== undefined ? { at: opts.at } : {} }));
   return asUnit(out);
 }
 function transferParty(ctx, id, side) {
@@ -21116,7 +21139,7 @@ function reprice(ctx, events2, cents) {
   const total = Math.round(cents);
   if (!Number.isSafeInteger(total) || total <= 0)
     return reject6("bad_amount", "the amount must be positive");
-  const diff = total - got.amount;
+  const diff = total - post.lines.reduce((sum, l) => sum + Math.max(0, l.amount), 0);
   if (diff === 0)
     return [];
   const note = `${post.memo}: price corrected`;
@@ -21126,15 +21149,16 @@ function reprice(ctx, events2, cents) {
   ];
   const seller = strOf(was?.counterparty);
   const buyer = strOf(was?.payer);
-  return asUnit([{ type: "post", lines, memo: note, ...post.overdraw ? { overdraw: true } : {} }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
+  const overdraw = post.overdraw === true && diff > 0 && runsDebt(ctx, paid.account);
+  return asUnit([{ type: "post", lines, memo: note, ...overdraw ? { overdraw: true } : {} }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
 }
 function storyPayment(ctx, events2) {
-  const post = events2.find((e) => e.type === "post" && e.overdraw === true);
+  const line2 = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.story === true);
+  const data = line2 && "data" in line2 ? line2.data : {};
+  const post = events2.find((e) => e.type === "post" && e.memo === strOf(data.memo));
   const paid = post?.lines.filter((l) => l.amount < 0 && traitsOf(ctx, l.account) !== null).sort((a, b) => a.amount - b.amount)[0];
   if (!post || !paid)
     return null;
-  const line2 = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.memo === post.memo);
-  const data = line2 && "data" in line2 ? line2.data : {};
   const party = strOf(data.payer);
   const payer = isParty(ctx, party) ? party : holdersOf(ctx.state, paid.account).find((h) => canSpend(ctx.state, paid.account, h)) ?? "";
   if (payer === "")
@@ -25875,7 +25899,7 @@ var ITEM = {
   pack: "gear",
   fields: {
     notable: { type: "bool", label: "Notable", domain: "gear", level: 1 },
-    qty: { type: "number", label: "Quantity", default: 1, min: 0, domain: "gear", level: 2, bound: { mode: "confirm" } },
+    qty: { type: "number", label: "Quantity", default: 1, min: 0, domain: "gear", level: 2 },
     weight_g: { type: "number", label: "Weight (g)", min: 0, domain: "gear", level: 2 },
     volume_l: { type: "number", label: "Volume (l)", min: 0, domain: "gear", level: 2 },
     catalog: { type: "text", label: "Catalog item", table: "economy.catalog" },
@@ -26091,11 +26115,6 @@ function heldItem(ctx, item, from) {
   const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
   const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
-}
-function toldStep(ctx, id, field, delta) {
-  const e = own(ctx.state.entities, id);
-  const cap = e ? fieldDef(ctx.registry, ctx.world, e.kind, field)?.bound?.maxDelta : undefined;
-  return cap === undefined ? delta : Math.sign(delta) * Math.min(Math.abs(delta), Math.abs(cap));
 }
 function lyingNamed(ctx, item, who) {
   const place = placeOfEntity(ctx.state, who);
@@ -26599,7 +26618,11 @@ var gearPack = {
       },
       toEffects: (p, ctx) => {
         const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
-        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: toldStep(ctx, found.id, "condition", numOf(p.delta, 0)) } }];
+        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: numOf(p.delta, 0) } }];
+      },
+      boundTarget: (p, ctx) => {
+        const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
+        return "code" in found ? null : { entity: found.id, field: "condition" };
       }
     });
     r.proposal({
@@ -26618,7 +26641,8 @@ var gearPack = {
           return reject9("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
         return null;
       },
-      toEffects: (p, ctx) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: toldStep(ctx, strOf(p.item), "qty", numOf(p.delta)) } }]
+      toEffects: (p) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: numOf(p.delta) } }],
+      boundTarget: (p, ctx) => own(ctx.state.entities, strOf(p.item)) ? { entity: strOf(p.item), field: "qty" } : null
     });
     r.lint({
       code: "gear.kits",

@@ -3916,6 +3916,9 @@ function hashJson(value) {
 var LEDGER_NAMESPACE = "lumi_rp_engine";
 var ROOT_PATH = "00000000000000000000000000000000";
 var APART_GROUP = "apart:";
+function apartOf(group) {
+  return `${APART_GROUP}${group}`;
+}
 var UPGRADE_ASPECTS = ["kind", "name", "tier", "agent", "levels", "class", "life"];
 
 // src/shared/steps.ts
@@ -8810,25 +8813,55 @@ function eventUnits(events2) {
   }
   return out;
 }
+function apartHost(events2, [from, to]) {
+  const group = events2[from]?.group;
+  if (group === undefined || !group.startsWith(APART_GROUP) || events2[to]?.group !== group.slice(APART_GROUP.length))
+    return null;
+  let end = to + 1;
+  while (end < events2.length && events2[end]?.group === events2[to]?.group)
+    end++;
+  return [to, end];
+}
 function applyValidUnits(types, events2, state, context) {
   const out = [];
-  for (const [from, to] of eventUnits(events2)) {
+  const fits = (unit) => {
+    const scratch = structuredClone(state);
+    return unit.every((ev) => {
+      const ctx = context(scratch);
+      if (validateEvent(types, ev, ctx))
+        return false;
+      applyEvent(types, ev, scratch, ctx);
+      return true;
+    });
+  };
+  const apply = (unit) => {
+    for (const ev of unit) {
+      applyEvent(types, ev, state, context(state));
+      out.push(ev);
+    }
+  };
+  const units = eventUnits(events2);
+  for (let u = 0;u < units.length; u++) {
+    const [from, to] = units[u] ?? [0, 0];
     const unit = events2.slice(from, to);
+    const host = apartHost(events2, [from, to]);
+    if (host) {
+      const hosted = events2.slice(host[0], host[1]);
+      if (fits([...unit, ...hosted]))
+        apply([...unit, ...hosted]);
+      else if (fits(hosted))
+        apply(hosted);
+      u++;
+      continue;
+    }
     if (unit.length > 1) {
-      const scratch = structuredClone(state);
-      const fits = unit.every((ev) => {
-        const ctx = context(scratch);
-        if (validateEvent(types, ev, ctx))
-          return false;
-        applyEvent(types, ev, scratch, ctx);
-        return true;
-      });
-      if (!fits)
-        continue;
+      if (fits(unit))
+        apply(unit);
+      continue;
     }
     for (const ev of unit) {
       const ctx = context(state);
-      if (unit.length === 1 && validateEvent(types, ev, ctx))
+      if (validateEvent(types, ev, ctx))
         break;
       applyEvent(types, ev, state, ctx);
       out.push(ev);
@@ -9954,7 +9987,7 @@ function applyEffects(reg, w, specs, scope) {
       return;
     }
     const group = result.length > 1 ? `fx:${hashParts(rng.seed).slice(0, 10)}` : undefined;
-    const events2 = group ? result.map((ev) => ev.group?.startsWith(APART_GROUP) ? ev : { ...ev, group }) : result;
+    const events2 = group ? result.map((ev) => ({ ...ev, group: ev.group?.startsWith(APART_GROUP) ? apartOf(group) : group })) : result;
     const mark = group ? w.mark() : null;
     for (const ev of events2) {
       const failure = w.apply(ev);
@@ -19333,6 +19366,8 @@ function txn(lines, meta) {
     data.named = meta.named;
   if (meta.unpaid !== undefined)
     data.unpaid = meta.unpaid;
+  if (meta.story)
+    data.story = true;
   if (meta.at !== undefined)
     data.at = meta.at;
   return { type: FINANCE_EVENTS.txn, data };
@@ -19340,11 +19375,15 @@ function txn(lines, meta) {
 function posting(lines, meta) {
   return [{ type: "post", lines, memo: meta.memo }, txn(lines, meta)];
 }
-function asUnit(events2, apart = false) {
+function asUnit(events2) {
   if (events2.length < 2)
     return events2;
-  const group = `${apart ? APART_GROUP : "pay:"}${hashParts(JSON.stringify(events2)).slice(0, 10)}`;
+  const group = `pay:${hashParts(JSON.stringify(events2)).slice(0, 10)}`;
   return events2.map((e) => ({ ...e, group }));
+}
+function apartFrom(events2, unit3) {
+  const group = unit3[0]?.group;
+  return group === undefined ? events2 : events2.map((e) => ({ ...e, group: apartOf(group) }));
 }
 function merged(lines) {
   const out = [];
@@ -19446,15 +19485,16 @@ function charge(hooks, ctx, payer, rawCents, memo, opts = {}) {
   const holds = picked?.card !== undefined && featureFor(ctx, payer, "holds");
   const outside = opts.counterparty === undefined ? undefined : own(ctx.state.entities, opts.counterparty) ? opts.counterparty : opts.counterparty.replace(/_/g, " ");
   const counterparty = terms?.seller ?? opts.payee ?? outside;
-  const meta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...opts.category ? { category: opts.category } : {}, ...counterparty ? { counterparty } : {}, payer, ...picked?.card ? { card: picked.card } : {}, ...opts.flow ? { flow: opts.flow } : {}, ...holds ? { pending: at + 1440 } : {}, ...opts.narrated ? { narrated: opts.narrated } : {}, ...picked?.named ? { named: picked.named } : {}, ...opts.at !== undefined ? { at: opts.at } : {} };
+  const meta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...opts.category ? { category: opts.category } : {}, ...counterparty ? { counterparty } : {}, payer, ...picked?.card ? { card: picked.card } : {}, ...opts.flow ? { flow: opts.flow } : {}, ...holds ? { pending: at + 1440 } : {}, ...opts.narrated ? { narrated: opts.narrated } : {}, ...picked?.named ? { named: picked.named } : {}, ...opts.story === true ? { story: true } : {}, ...opts.at !== undefined ? { at: opts.at } : {} };
   const spend = [];
   if (picked?.card && opts.sale && Number.isFinite(cardRoom(ctx, picked.card, "purchase"))) {
     const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
     const s = spendOf(ctx.state, picked.card, day);
     spend.push({ type: FINANCE_EVENTS.spend, data: { card: picked.card, day, purchase: s.purchase + cents + tax, atm: s.atm } });
   }
-  const paid = [{ type: "post", lines, memo, ...opts.story === true ? { overdraw: true } : {} }, ...out, ...dest.extra, txn(lines, meta), ...terms?.extra ?? [], ...od.after, ...spend];
-  return opts.story === true ? [...asUnit(od.before, true), ...asUnit(paid)] : asUnit([...od.before, ...paid]);
+  const overdraw = opts.story === true && picked !== null && runsDebt(ctx, source);
+  const paid = asUnit([{ type: "post", lines, memo, ...overdraw ? { overdraw: true } : {} }, ...out, ...dest.extra, txn(lines, meta), ...terms?.extra ?? [], ...od.after, ...spend]);
+  return opts.story === true ? [...apartFrom(od.before, paid), ...paid] : asUnit([...od.before, ...paid]);
 }
 function moverOf(ctx, from, to) {
   return holdersOf(ctx.state, from).find((p) => canSpend(ctx.state, from, p) && rightsOf(ctx.state, to, p) !== null) ?? null;
@@ -19514,7 +19554,8 @@ function move(ctx, from, to, cents, memo, opts = {}) {
   }
   const advance2 = fromTraits.revolving && !toTraits.liability;
   const fee = advance2 ? cashAdvanceFee(ctx, from, c) : 0;
-  if (!opts.unchecked && !(opts.story && runsDebt(ctx, from)) && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee)
+  const debt = opts.story === true && runsDebt(ctx, from);
+  if (!opts.unchecked && !debt && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee)
     return reject6("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
   const lines = [
     { account: from, amount: -c },
@@ -19522,10 +19563,10 @@ function move(ctx, from, to, cents, memo, opts = {}) {
   ];
   const p = productOf(ctx, from);
   const charged = fee > 0 ? posting([{ account: from, amount: -fee }, { account: bankSide(p?.institution ?? ""), amount: fee }], { memo: "Cash advance fee", kind: "fee", category: "cash_advance", ...opts.at !== undefined ? { at: opts.at } : {} }) : [];
-  const out = [...charged, { type: "post", lines, memo, ...opts.story ? { overdraw: true } : {} }];
+  const out = [...charged, { type: "post", lines, memo, ...debt ? { overdraw: true } : {} }];
   if (toTraits.liability)
     out.push({ type: FINANCE_EVENTS.cardPaid, data: { account: to, cents: c } });
-  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance2 ? "cash_advance" : "transfer", ...opts.flow ? { flow: opts.flow } : {}, ...opts.named ? { named: opts.named } : {}, ...opts.at !== undefined ? { at: opts.at } : {} }));
+  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance2 ? "cash_advance" : "transfer", ...opts.flow ? { flow: opts.flow } : {}, ...opts.named ? { named: opts.named } : {}, ...opts.story ? { story: true } : {}, ...opts.at !== undefined ? { at: opts.at } : {} }));
   return asUnit(out);
 }
 function transferParty(ctx, id, side) {
@@ -19688,7 +19729,7 @@ function reprice(ctx, events2, cents) {
   const total = Math.round(cents);
   if (!Number.isSafeInteger(total) || total <= 0)
     return reject6("bad_amount", "the amount must be positive");
-  const diff = total - got.amount;
+  const diff = total - post.lines.reduce((sum, l) => sum + Math.max(0, l.amount), 0);
   if (diff === 0)
     return [];
   const note = `${post.memo}: price corrected`;
@@ -19698,15 +19739,16 @@ function reprice(ctx, events2, cents) {
   ];
   const seller = strOf(was?.counterparty);
   const buyer = strOf(was?.payer);
-  return asUnit([{ type: "post", lines, memo: note, ...post.overdraw ? { overdraw: true } : {} }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
+  const overdraw = post.overdraw === true && diff > 0 && runsDebt(ctx, paid.account);
+  return asUnit([{ type: "post", lines, memo: note, ...overdraw ? { overdraw: true } : {} }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
 }
 function storyPayment(ctx, events2) {
-  const post = events2.find((e) => e.type === "post" && e.overdraw === true);
+  const line2 = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.story === true);
+  const data = line2 && "data" in line2 ? line2.data : {};
+  const post = events2.find((e) => e.type === "post" && e.memo === strOf(data.memo));
   const paid = post?.lines.filter((l) => l.amount < 0 && traitsOf(ctx, l.account) !== null).sort((a, b) => a.amount - b.amount)[0];
   if (!post || !paid)
     return null;
-  const line2 = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.memo === post.memo);
-  const data = line2 && "data" in line2 ? line2.data : {};
   const party = strOf(data.payer);
   const payer = isParty(ctx, party) ? party : holdersOf(ctx.state, paid.account).find((h) => canSpend(ctx.state, paid.account, h)) ?? "";
   if (payer === "")
@@ -24180,14 +24222,20 @@ function firstUnmet(action, env) {
   }
   return plain4 === null ? null : { code: "requirement", reason: `requires ${plain4}`, requirement: plain4 };
 }
-function unmetNeeds(reg, world, state, needs) {
+function unmetNeeds(reg, world, state, needs, params) {
   const named = findAction(reg, world, needs.action);
   if (!named)
     return null;
-  const given = (name) => Object.prototype.hasOwnProperty.call(needs.params, name);
+  const picks = { ...needs.params };
+  for (const [name, from] of Object.entries(needs.shared)) {
+    const value = params[from];
+    if (value !== undefined)
+      picks[name] = value;
+  }
+  const given = (name) => Object.prototype.hasOwnProperty.call(picks, name);
   const reads = (req) => identifiers(req).filter((name) => Object.prototype.hasOwnProperty.call(named.params, name));
   const action = { ...named, params: Object.fromEntries(Object.entries(named.params).filter(([name]) => given(name))), requires: named.requires.filter((req) => reads(requirementExpr(req)).every(given)) };
-  const p = prepare(reg, world, state, { action, params: needs.params });
+  const p = prepare(reg, world, state, { action, params: picks });
   return "code" in p ? p : firstUnmet(action, scopeEnv({ reg, ctx: reg.context(world, state), bindings: p.bindings, vars: p.vars }));
 }
 function playsAsRoleplay(res) {
@@ -24250,7 +24298,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
   }
   const env = scopeEnv({ reg, ctx: w.ctx, bindings: p.bindings, vars: p.vars });
   const itself = firstUnmet(p.action, env);
-  const named = opts.needs ? unmetNeeds(reg, w.world, w.state, opts.needs) : null;
+  const named = opts.needs ? unmetNeeds(reg, w.world, w.state, opts.needs, req.params ?? {}) : null;
   const unmet = itself?.hard ? itself : named?.hard ? named : itself ?? named;
   if (unmet !== null)
     return { ...base, actor: p.actor, failed: unmet, events: w.events.slice(start) };
@@ -25869,7 +25917,7 @@ var ITEM = {
   pack: "gear",
   fields: {
     notable: { type: "bool", label: "Notable", domain: "gear", level: 1 },
-    qty: { type: "number", label: "Quantity", default: 1, min: 0, domain: "gear", level: 2, bound: { mode: "confirm" } },
+    qty: { type: "number", label: "Quantity", default: 1, min: 0, domain: "gear", level: 2 },
     weight_g: { type: "number", label: "Weight (g)", min: 0, domain: "gear", level: 2 },
     volume_l: { type: "number", label: "Volume (l)", min: 0, domain: "gear", level: 2 },
     catalog: { type: "text", label: "Catalog item", table: "economy.catalog" },
@@ -26085,11 +26133,6 @@ function heldItem(ctx, item, from) {
   const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
   const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
-}
-function toldStep(ctx, id, field, delta) {
-  const e = own(ctx.state.entities, id);
-  const cap = e ? fieldDef(ctx.registry, ctx.world, e.kind, field)?.bound?.maxDelta : undefined;
-  return cap === undefined ? delta : Math.sign(delta) * Math.min(Math.abs(delta), Math.abs(cap));
 }
 function lyingNamed(ctx, item, who) {
   const place = placeOfEntity(ctx.state, who);
@@ -26593,7 +26636,11 @@ var gearPack = {
       },
       toEffects: (p, ctx) => {
         const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
-        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: toldStep(ctx, found.id, "condition", numOf(p.delta, 0)) } }];
+        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: numOf(p.delta, 0) } }];
+      },
+      boundTarget: (p, ctx) => {
+        const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
+        return "code" in found ? null : { entity: found.id, field: "condition" };
       }
     });
     r.proposal({
@@ -26612,7 +26659,8 @@ var gearPack = {
           return reject9("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
         return null;
       },
-      toEffects: (p, ctx) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: toldStep(ctx, strOf(p.item), "qty", numOf(p.delta)) } }]
+      toEffects: (p) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: numOf(p.delta) } }],
+      boundTarget: (p, ctx) => own(ctx.state.entities, strOf(p.item)) ? { entity: strOf(p.item), field: "qty" } : null
     });
     r.lint({
       code: "gear.kits",
@@ -60035,10 +60083,16 @@ function skipPastFight(w, runSeed) {
     return [];
   return optionalService(w.ctx, "combat.break_off")?.(w, hashParts(runSeed, "skip", "fight")) ?? [];
 }
-function claimThing(w, claim2, salt) {
-  const lacking = claim2.cents === undefined ? undefined : claim2.cents - Math.max(0, optionalQuery(w.ctx, "economy.carried_cash")?.(w.ctx, w.world.pov) ?? 0);
-  if (lacking !== undefined && lacking <= 0)
-    return null;
+function claimThing(w, claim2, salt, params) {
+  let lacking;
+  if (claim2.cents !== undefined) {
+    const pays = claim2.amountParam === undefined ? claim2.cents : params[claim2.amountParam];
+    if (typeof pays !== "number" || pays > claim2.cents)
+      return null;
+    lacking = pays - Math.max(0, optionalQuery(w.ctx, "economy.carried_cash")?.(w.ctx, w.world.pov) ?? 0);
+    if (lacking <= 0)
+      return null;
+  }
   const made = lacking !== undefined ? optionalService(w.ctx, "economy.claim_cash")?.(w.ctx, w.world.pov, lacking) : optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim2, by: w.world.pov, salt });
   if (!made || !("entity" in made))
     return null;
@@ -60095,8 +60149,8 @@ function planTurn(input) {
       const before = { picks: "", from: placeOfEntity(w.state, w.world.pov), fields: { ...own(w.state.entities, w.world.pov)?.fields } };
       if (step) {
         const typed = i > 0 || intent2?.picked !== true;
-        const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs) : null;
-        const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
+        const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs, step.params) : null;
+        const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim"), step.params) : null;
         if (claimed && step.claim)
           made = { entity: claimed.entity, name: claimed.cents !== undefined ? formatMoney(claimed.cents, w.world.currency) : step.claim.name, events: claimed.events, ...claimed.cents !== undefined ? { cents: claimed.cents } : {} };
         const params = claimed && step.claim && step.claim.cents === undefined ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
@@ -62926,7 +62980,7 @@ class LedgerCore {
     Object.assign(p, { seed: source.seed, markersApplied: source.markersApplied, events: structuredClone(pre), copies, undone, startMarkers: [] });
     return true;
   }
-  carry(state2, world, entries2, undone, markers) {
+  carry(state2, world, entries2, undone, markers, from = -Infinity) {
     const off = (seq, index) => undone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
     const later = [...markers.map((mk) => ({ seq: mk.seq, marker: mk })), ...entries2.map((e) => ({ seq: e.seq, entry: e }))].sort((a, b) => a.seq - b.seq);
     const out = { kept: [], undone: [], dropped: [] };
@@ -62936,7 +62990,7 @@ class LedgerCore {
         continue;
       }
       const { entry } = item;
-      const asked = entry.kind === "fix" && entry.edit !== undefined && !undone.some((u) => u.in === "post" && u.seq === entry.seq);
+      const asked = entry.kind === "fix" && entry.edit !== undefined && entry.seq > from && !undone.some((u) => u.in === "post" && u.seq === entry.seq);
       if (!asked && entry.events.every((_, i) => off(entry.seq, i)))
         continue;
       const scratch = structuredClone(state2);
@@ -63381,7 +63435,13 @@ class LedgerCore {
         if (events3.length === 0 && recorded !== null && !again)
           return recorded;
         const key = String(head.swipeId);
-        let rec = ledger.swipes[key];
+        const kept2 = ledger.swipes[key];
+        if (again && events3.length === 0 && kept2) {
+          const same2 = hashJson([w.entry.kind, w.entry.gm === true, w.entry.by ?? null, w.entry.edit ?? null]);
+          if (kept2.post.some((p) => hashJson([p.kind, p.gm === true, p.by ?? null, p.edit ?? null]) === same2 && isLive(p.at, parent, turnPath(kept2)) && !kept2.undone.some((u) => u.in === "post" && u.seq === p.seq)))
+            return;
+        }
+        let rec = kept2;
         if (!rec) {
           rec = this.bareRecord(contentId(activeText(head)), undefined);
           ledger.swipes[key] = rec;
@@ -63433,12 +63493,27 @@ class LedgerCore {
           return readElsewhereRefusal(index === headIndex);
         if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH))
           return "You've swiped away from the timeline this reply was made on. Switch back to undo it.";
-        const before = [...rec.undone];
-        for (const ref of w.refs)
-          if (!rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref)))
-            rec.undone.push(ref);
-        if (this.fold(observed).violations.length > out.violations.length) {
-          rec.undone = before;
+        const before = { undone: [...rec.undone], post: rec.post, dropped: rec.dropped };
+        const added = [];
+        for (const ref of w.refs) {
+          if (rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref)))
+            continue;
+          rec.undone.push(ref);
+          added.push(ref);
+        }
+        const from = added.some((u) => u.in === "events") ? -Infinity : Math.min(...added.map((u) => u.in === "post" ? u.seq : Infinity));
+        const prefix = added.length > 0 ? this.prefixState(this.fold(observed.slice(0, index)), this.chain(observed.slice(index, index + 1))[0], rec) : null;
+        if (prefix) {
+          const read = rec.events.slice(rec.pre).filter((_, i) => !rec.undone.some((u) => u.in === "events" && u.index === rec.pre + i));
+          applyValidUnits(this.env.types, read, prefix.state, (s) => this.env.types.context(prefix.world, s));
+        }
+        if (prefix && this.keepAfter(rec, m, prefix, from) > 0 || this.fold(observed).violations.length > out.violations.length) {
+          rec.undone = before.undone;
+          rec.post = before.post;
+          if (before.dropped)
+            rec.dropped = before.dropped;
+          else
+            delete rec.dropped;
           return "later events depend on it";
         }
         return;
@@ -63463,7 +63538,7 @@ class LedgerCore {
             return "unknown revision";
           rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, readSeed(rec.seed), text5)];
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
-          this.keepAfterRead(rec, m, prefix);
+          this.keepAfter(rec, m, prefix);
           rec.undone = plannedUndos(rec);
           rec.status = "ok";
           rec.swipeHash = contentId(text5);
@@ -63484,7 +63559,7 @@ class LedgerCore {
             return "unknown revision";
           rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, readSeed(rec.seed), text5)];
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
-          this.keepAfterRead(rec, m, prefix);
+          this.keepAfter(rec, m, prefix);
           rec.undone = plannedUndos(rec);
           if (rec.status === "stopped")
             rec.status = "ok";
@@ -63495,16 +63570,17 @@ class LedgerCore {
       }
     }
   }
-  keepAfterRead(rec, target, prefix) {
+  keepAfter(rec, target, prefix, from = -Infinity) {
     const live = rec.post.filter((p) => isLive(p.at, prefix.parent, turnPath(rec)));
     const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, turnPath(rec)));
-    const carried = this.carry(prefix.state, prefix.world, live, rec.undone, markers);
+    const carried = this.carry(prefix.state, prefix.world, live, rec.undone, markers, from);
     const kept2 = new Map(carried.kept.map((p) => [p.seq, p]));
     const gone = new Set(carried.dropped.map((d) => d.seq));
     rec.post = rec.post.flatMap((p) => gone.has(p.seq) ? [] : [kept2.get(p.seq) ?? p]);
     rec.undone = [...rec.undone.filter((u) => u.in !== "post" || !kept2.has(u.seq)), ...carried.undone];
     if (carried.dropped.length > 0)
       rec.dropped = [...rec.dropped ?? [], ...carried.dropped];
+    return carried.dropped.length;
   }
   readRefusal(w, observed) {
     if (this.journal.pauses.length > 0)
@@ -64220,6 +64296,11 @@ function decodeJournal(text5, chatId, run2) {
     Reflect.deleteProperty(p, "slotHeld");
   return { journal: { ...raw, run: stamp }, reset: null };
 }
+function heldLanded(before, journal) {
+  const still = new Set(journal.held.map((h) => h.write.id));
+  const refused = new Set((journal.refused ?? []).map((r) => r.write.id));
+  return before.filter((w) => !still.has(w.id) && !refused.has(w.id));
+}
 var TURN_INPUTS = {
   revision: "the chat's world revision changed",
   settings: "your RPEngine settings changed"
@@ -64524,22 +64605,24 @@ class LedgerService {
     const diag = at && turn ? this.diag : null;
     if (at && diag)
       diag.begin(at, STEP_LABEL2.read);
+    const text5 = p?.kind === "continue" ? p.captured && content.length >= p.captured.len ? content.slice(p.captured.len) : "" : content;
     try {
       if (this.hooks && turn && p && p.kind !== "impersonate") {
         const hooks = this.hooks;
-        const text5 = p.kind === "continue" ? p.captured && content.length >= p.captured.len ? content.slice(p.captured.len) : "" : content;
         if (text5 !== "")
           await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text5 })) : hooks.beforeCommit({ ...turn, content: text5 }));
         else if (at && diag)
           diag.skipped(at, "read", "read", "the reply had no new text to read");
       }
-      if (flight.signal.aborted)
+      if (flight.signal.aborted) {
         core.stopped({ generationId, content }, observed);
-      else {
+        if (this.hooks && turn)
+          await this.hooks.readStopped({ ...turn, content: text5 });
+      } else {
         core.ended({ generationId, ...messageId ? { messageId } : {}, content }, observed);
         if (this.hooks && turn) {
           const hooks = this.hooks;
-          await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content })) : hooks.afterCommit({ ...turn, content }));
+          await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: text5 })) : hooks.afterCommit({ ...turn, content: text5 }));
         }
       }
     } finally {
@@ -64981,9 +65064,11 @@ class LedgerService {
       this.dropIfStale(chatId);
     }
     let result = { applied: false, pending: false, reason: "not a world chat" };
-    await this.run(chatId, userId, (core, observed) => {
+    await this.run(chatId, userId, async (core, observed) => {
       core.sync(observed);
       result = core.write(w, observed);
+      if (result.applied)
+        await this.hooks?.writesLanded({ chatId, userId, core, observed, writes: [w] });
     }, w);
     return result;
   }
@@ -65170,7 +65255,11 @@ class LedgerService {
         await giveWay();
         const observed = this.observe(chatId, slot.userId, await this.host.chats.messages(chatId, slot.userId));
         await slot.core.prepareWorlds(observed, write);
+        const held3 = slot.core.journal.held.map((h) => h.write);
         await op(slot.core, observed);
+        const landed = held3.length > 0 ? heldLanded(held3, slot.core.journal) : [];
+        if (landed.length > 0)
+          await this.hooks?.writesLanded({ chatId, userId: slot.userId, core: slot.core, observed, writes: landed });
         await this.persist(chatId, slot);
         await this.flush(chatId, slot);
         this.hooks?.changed(chatId, slot.userId);
@@ -74201,13 +74290,13 @@ function combineBounds(...bounds) {
   }
   return maxDelta === undefined ? { mode: strictest(...modes) } : { mode: strictest(...modes), maxDelta };
 }
-function clampToField(def, current2, delta) {
-  let next = current2 + delta;
-  if (def?.min !== undefined)
-    next = Math.max(def.min, next);
-  if (def?.max !== undefined)
-    next = Math.min(def.max, next);
-  return next - current2;
+function clampToRange(range, start, delta) {
+  let next = start + delta;
+  if (range.min !== undefined)
+    next = Math.max(range.min, next);
+  if (range.max !== undefined)
+    next = Math.min(range.max, next);
+  return next - start;
 }
 function boundProposal(reg, world, state2, input, policy) {
   const e = input.entity ? own(state2.entities, input.entity) : undefined;
@@ -74221,11 +74310,15 @@ function boundProposal(reg, world, state2, input, policy) {
       delta = Math.sign(delta) * bound.maxDelta;
       capped = true;
     }
-    const current2 = e && input.field ? own(e.fields, input.field) : undefined;
-    const clamped = clampToField(def, typeof current2 === "number" ? current2 : 0, delta);
-    if (clamped !== delta)
-      capped = true;
-    delta = clamped;
+    if (e && input.entity && input.field) {
+      const ctx = reg.context(world, state2);
+      const stored = own(e.fields, input.field);
+      const start = typeof stored === "number" ? stored : typeof def?.default === "number" ? def.default : def?.pool ? poolMax(reg, ctx, input.entity, def.pool) ?? 0 : 0;
+      const clamped = clampToRange(fieldBounds(reg, ctx, input.entity, def), start, delta);
+      if (clamped !== delta)
+        capped = true;
+      delta = clamped;
+    }
   }
   let value = input.value;
   if (typeof value === "number" && def) {
@@ -74520,7 +74613,7 @@ class LedgerFold {
         applyEvent(types, ev, state2, ctx());
       };
       const run2 = (list2, refOf) => {
-        for (let i = 0;i < list2.length; ) {
+        const unitAt = (i) => {
           const group = list2[i]?.group;
           let end = i + 1;
           if (group !== undefined)
@@ -74533,17 +74626,14 @@ class LedgerFold {
             if (ev && !record3.undone.some((u) => refEq(u, ref)))
               unit3.push({ ev, ref });
           }
-          i = end;
-          if (unit3.length < 2 || !view || converged) {
-            for (const u of unit3)
-              event(u.ev, u.ref);
-            continue;
-          }
+          return { end, unit: unit3 };
+        };
+        const trial = (unit3) => {
           const world = input.worlds(state2.revision);
           if (!world)
             throw new FoldError(`unknown revision ${state2.revision}`);
           const scratch = structuredClone(state2);
-          const failure = unit3.map((u) => u.ev).reduce((found, ev) => {
+          return unit3.map((u) => u.ev).reduce((found, ev) => {
             if (found)
               return found;
             const c = types.context(world, scratch);
@@ -74552,22 +74642,54 @@ class LedgerFold {
               applyEvent(types, ev, scratch, c);
             return rejection;
           }, null);
+        };
+        const drop2 = (unit3, reason2) => {
+          for (const u of unit3) {
+            notes.push({ kind: "dropped", messageId: m.id, ref: u.ref, text: reason2 });
+            keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "dropped", text: reason2 });
+          }
+        };
+        const isConverted = (unit3) => unit3.some((u) => converted.some((c) => refEq(c, u.ref)));
+        for (let i = 0;i < list2.length; ) {
+          const { end, unit: unit3 } = unitAt(i);
+          const host = view && !converged ? apartHost(list2, [i, end]) : null;
+          const hosted = host ? unitAt(host[0]).unit : [];
+          if (host && !isConverted(unit3) && !isConverted(hosted)) {
+            i = host[1];
+            const together2 = trial([...unit3, ...hosted]);
+            if (together2 === null) {
+              for (const u of [...unit3, ...hosted])
+                applyEvent(types, u.ev, state2, ctx());
+              continue;
+            }
+            const alone = trial(hosted);
+            drop2(unit3, together2.reason);
+            if (alone === null)
+              for (const u of hosted)
+                applyEvent(types, u.ev, state2, ctx());
+            else
+              drop2(hosted, alone.reason);
+            continue;
+          }
+          i = end;
+          if (unit3.length < 2 || !view || converged) {
+            for (const u of unit3)
+              event(u.ev, u.ref);
+            continue;
+          }
+          const failure = trial(unit3);
           if (failure === null) {
             for (const u of unit3)
               applyEvent(types, u.ev, state2, ctx());
-          } else if (unit3.some((u) => converted.some((c) => refEq(c, u.ref)))) {
+          } else if (isConverted(unit3)) {
             for (const u of unit3) {
               const own2 = validateEvent(types, u.ev, ctx());
               if (own2)
                 keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "converted", text: own2.reason });
               applyEvent(types, u.ev, state2, ctx());
             }
-          } else {
-            for (const u of unit3) {
-              notes.push({ kind: "dropped", messageId: m.id, ref: u.ref, text: failure.reason });
-              keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "dropped", text: failure.reason });
-            }
-          }
+          } else
+            drop2(unit3, failure.reason);
         }
       };
       const post = (p) => {
@@ -74721,9 +74843,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "1023da181e7a73d6b0bb1588d88946798538f2cb3e374cfc9b84def7c14ec89e";
+  const sha256 = "fb4675d041635a65b3fb4251b8c31a83d5bdddc9524e711014a4edc8b35cf1e6";
   const tools = ["d7ea5d8f68714fbde356a1b99c522de6", "3a95a1966944ca155e67ff625d472024"].filter((f) => f !== undefined);
-  return { id: "cf064c05", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "d2c6d3c4", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -76373,9 +76495,9 @@ function moneyClaim(input, at2, kind, amount, verb) {
   const to = Object.entries(action.params).find(([name, def]) => name !== unfit.param && def.type === "ref" && def.ref !== undefined && kindIs(registry, world, def.ref, "person"))?.[0];
   const recipient = to === undefined ? undefined : input.params[to];
   const cents = amount === null ? 0 : Math.round(amount * 10 ** world.currency.decimals);
-  if (!pay || typeof recipient !== "string" || !(cents > 0) || !optionalService(ctx, "economy.claim_cash") || ctx.levelOf(world.pov, "money") === 0)
+  if (!pay || to === undefined || typeof recipient !== "string" || !(cents > 0) || !optionalService(ctx, "economy.claim_cash") || ctx.levelOf(world.pov, "money") === 0)
     return { kind: "hold" };
-  const needs = { action: action.id, params: Object.fromEntries(Object.entries(input.params).filter(([name]) => name !== unfit.param)) };
+  const needs = { action: action.id, params: Object.fromEntries(Object.entries(input.params).filter(([name]) => name !== unfit.param && name !== to)), shared: { [to]: "to" } };
   const play = { action: pay.id, params: { to: recipient, amount: cents, method: "cash" }, needs };
   const carried = Math.max(0, optionalQuery(ctx, "economy.carried_cash")?.(ctx, world.pov) ?? 0);
   if (carried >= cents)
@@ -76386,7 +76508,7 @@ function moneyClaim(input, at2, kind, amount, verb) {
   const added = formatMoney(cents - carried, world.currency);
   return {
     kind: "ask",
-    claim: { param: unfit.param, name: added, at: at2, kind, consumable: false, cents },
+    claim: { param: unfit.param, name: added, at: at2, kind, consumable: false, cents, amountParam: "amount" },
     question: carried > 0 ? `Only ${formatMoney(carried, world.currency)} of the ${money4} is with you as far as the world knows. Add the other ${added} and ${verb} it?` : `${money4} in cash isn't with you as far as the world knows. Add it and ${verb} it?`,
     detail: "Money you say you have and don't carry always asks first.",
     play
@@ -77525,7 +77647,6 @@ function trim(map, cap = 64) {
 
 // src/backend/runtime.ts
 var ACTIVE_CONNECTION = "active";
-var READ_CHIP_KINDS = new Set(["undo", "confirm", "decline", "untracked", "choice"]);
 var MINDS_POST_CALLS = ["memory", "consolidate"];
 var ALREADY_SO2 = new Set(["already_known", "already"]);
 var REF_ROLES = {
@@ -77931,7 +78052,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "cf064c05" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "d2c6d3c4" }), (chatId) => this.messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }
@@ -78756,7 +78877,7 @@ ${answer}`, links: owner ? [owner] : [] }));
     const settings = await this.settings.get(userId);
     const text6 = readableReply(before + content, settings.hideJsonBlocks, before.length);
     if (replace)
-      await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && (READ_CHIP_KINDS.has(c.kind) || c.id.startsWith(`adv:${messageId}:${swipeId}:`)) && !isUnfitId(c.id, messageId, swipeId));
+      await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && isReadChip(c.id));
     if (replace)
       this.liveLores.delete(key);
     const bridge = this.bridges.get(chatId);
@@ -78851,11 +78972,16 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       if (!type)
         continue;
       const { mode: typeMode } = effectiveMode(settings, learning, connection, type);
-      const entity = typeof p.entity === "string" ? p.entity : typeof p.who === "string" ? p.who : typeof p.from === "string" ? p.from : undefined;
-      const field = typeof p.field === "string" ? p.field : undefined;
+      const target = this.registry.proposals.get(type)?.boundTarget?.(p, ctx) ?? null;
+      const entity = target?.entity ?? (typeof p.entity === "string" ? p.entity : typeof p.who === "string" ? p.who : typeof p.from === "string" ? p.from : undefined);
+      const field = target?.field ?? (typeof p.field === "string" ? p.field : undefined);
       const bounded = boundProposal(this.registry, context.world, context.state, { type, ...entity ? { entity } : {}, ...field ? { field } : {}, ...typeof p.delta === "number" ? { delta: p.delta } : {} }, { typeMode, ...settings.extraction[type]?.maxDelta !== undefined ? { typeMaxDelta: settings.extraction[type]?.maxDelta } : {} });
       if (bounded.mode === "never")
         continue;
+      if (bounded.delta === 0 && typeof p.delta === "number" && p.delta !== 0) {
+        this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (its field goes no further)`, userId);
+        continue;
+      }
       if (type === "time_advance" && skipped) {
         this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (a timelapse turn's time passed as its timelapse)`, userId);
         continue;
@@ -79002,13 +79128,15 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       stored.push({ id: `choice:${messageId}:${key}:${i}`, kind: "choice", messageId, swipeId, label: choice, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: choice } });
     });
     await this.chips.add(input.chatId, input.userId, stored);
+    this.readStored.set(key, stored.map((c) => c.id));
+    if (this.readStored.size > 64)
+      this.readStored.delete(this.readStored.keys().next().value ?? "");
   }
   async afterCommit(input) {
     this.meter.close(input.userId);
     const bridge = this.bridges.get(input.chatId);
     if (!bridge)
       return;
-    await this.heldReadsLanded(input);
     const rec = input.core.chain(input.observed).find((x) => x.id === input.messageId)?.ledger?.swipes[String(input.swipeId)] ?? input.core.journal.messages[input.messageId]?.ledger.swipes[String(input.swipeId)];
     const stored = [];
     const at2 = `${input.messageId}:${input.swipeId}`;
@@ -79054,12 +79182,76 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       const reason2 = `${u.reason.charAt(0).toUpperCase()}${u.reason.slice(1)}`;
       stored.push({ id: unfitId(input.messageId, input.swipeId, i), kind: "untracked", ...base, label: `${u.label}: played as roleplay`, detail: `${reason2}. ${what} played as plain roleplay.`, actions: [], expires: "next_send", payload: {} });
     });
+    const hold = holdOf(bridge, userText, plan2);
+    stored.push(...await this.turnOffers({ chatId: input.chatId, userId: input.userId, messageId: input.messageId, swipeId: input.swipeId, kind: input.kind, core: input.core, observed: input.observed, bridge, rec, plan: plan2, userText, hold, read: bridge.chipsFor(input.content) }));
+    const left = plan2?.stopped ? (bridge.intentOf(userText)?.queue ?? []).slice(-plan2.stopped.left).map((q) => q.text) : [];
+    const next = input.kind === "continue" ? "" : joinActions([...left, bridge.nextOf(userText) ?? ""]);
+    if (next !== "")
+      stored.push({ id: restChipId(input.messageId, input.swipeId), kind: "choice", ...base, label: next, detail: `The rest of your message${plan2?.stopped ? `: ${STOPPED[plan2.stopped.cause]}` : ""}. Send plays it as its own turn.`, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: next } });
+    const summary = plan2?.timelapse?.summary;
+    if (summary?.stoppedBy && !(plan2?.chips ?? []).some((c) => c.kind === "continue_timelapse")) {
+      const elapsed = summary.to - summary.from;
+      const rest = summary.target.type === "duration" ? { type: "duration", minutes: Math.max(1, summary.target.minutes - elapsed) } : summary.target;
+      const left2 = rest.type === "duration" ? ` (${compactSpan(rest.minutes)} left)` : "";
+      stored.push({ id: `tl:${at2}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? plan2?.timelapse?.mindName ?? "someone" : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left2}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)), ...hold, ...plan2?.fill ? { fill: plan2.fill } : {} } });
+    }
+    for (const [i, chip] of bridge.chipsFor(input.content).entries())
+      stored.push(skipAheadChip(`adv:${at2}:${i}`, base, chip.target, chip.reason));
+    await this.chips.add(input.chatId, input.userId, stored);
+  }
+  async swipeDeleted(chatId, userId, messageId, deleted2) {
+    await this.chips.shiftSwipes(chatId, userId, messageId, deleted2);
+    this.changed(chatId, userId);
+  }
+  readStored = new Map;
+  async readStopped(input) {
+    const ids2 = new Set(this.readStored.get(input.generationId) ?? []);
+    this.readStored.delete(input.generationId);
+    if (ids2.size === 0)
+      return;
+    await this.chips.removeWhere(input.chatId, input.userId, (c) => ids2.has(c.id));
+    this.changed(input.chatId, input.userId);
+  }
+  async writesLanded(input) {
+    const reads = new Map;
+    for (const w of input.writes)
+      if (w.kind === "reread" || w.kind === "retry_read")
+        reads.set(`${w.messageId}:${w.swipeId}`, { messageId: w.messageId, swipeId: w.swipeId });
+    for (const r of reads.values())
+      await this.readLanded(input, r.messageId, r.swipeId);
+  }
+  async readLanded(at2, messageId, swipeId) {
+    const bridge = this.bridges.get(at2.chatId);
+    const chain = at2.core.chain(at2.observed);
+    const m = chain.find((x) => x.id === messageId);
+    if (!bridge || !m)
+      return;
+    const read = bridge.chipsFor(activeText(m));
+    const chips = [];
+    const rec = m.ledger?.swipes[String(swipeId)] ?? at2.core.journal.messages[messageId]?.ledger.swipes[String(swipeId)];
+    const plan2 = rec ? bridge.planFor(rec.seed) : undefined;
+    if (plan2 && chain.at(-1)?.id === messageId) {
+      const idx = at2.observed.findIndex((x) => x.id === messageId);
+      const user = ownMessage(at2.observed.slice(0, idx < 0 ? at2.observed.length : idx));
+      const userText = user ? user.swipes[user.swipeId] ?? "" : "";
+      const own2 = `${messageId}:${swipeId}`;
+      await this.chips.removeWhere(at2.chatId, at2.userId, (c) => c.messageId === messageId && c.swipeId === swipeId && (c.id === `tlo:${own2}` || c.id.startsWith(`tl:${own2}:`) && /^\d+$/.test(c.id.slice(`tl:${own2}:`.length))));
+      chips.push(...await this.turnOffers({ ...at2, messageId, swipeId, kind: "normal", bridge, rec, plan: plan2, userText, hold: holdOf(bridge, userText, plan2), read }));
+    }
+    chips.push(...read.map((chip, i) => skipAheadChip(`adv:${messageId}:${swipeId}:${i}`, { messageId, swipeId }, chip.target, chip.reason)));
+    await this.chips.add(at2.chatId, at2.userId, chips);
+    this.changed(at2.chatId, at2.userId);
+  }
+  async turnOffers(input) {
+    const { bridge, rec, plan: plan2, userText, hold, read } = input;
+    const stored = [];
+    const at2 = `${input.messageId}:${input.swipeId}`;
+    const base = { messageId: input.messageId, swipeId: input.swipeId };
     const headState = input.core.fold(input.observed).state;
     const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
-    const hold = bridge.intentOf(userText)?.params.povRoutine === false || plan2?.timelapse?.povRoutine === false ? { povRoutine: false } : {};
     const asked = input.kind === "continue" || plan2?.stopped ? undefined : bridge.offerFor(userText);
     const told = rec ? clockMinutes(rec.events.slice(rec.pre)) : 0;
-    const pending = asked || (plan2?.chips ?? []).some((chip) => chip.kind === "timelapse_offer") ? narratedPending((await this.chips.list(input.chatId, input.userId)).filter((c) => c.messageId === input.messageId && c.swipeId === input.swipeId), bridge.chipsFor(input.content)) : 0;
+    const pending = asked || (plan2?.chips ?? []).some((chip) => chip.kind === "timelapse_offer") ? narratedPending((await this.chips.list(input.chatId, input.userId)).filter((c) => c.messageId === input.messageId && c.swipeId === input.swipeId), read) : 0;
     const offers = (plan2?.chips ?? []).filter((chip) => !(told + pending > 0 && chip.kind === "timelapse_offer" && chip.target.type === "at" && chip.target.at <= headState.clock + pending));
     for (const [i, chip] of offers.entries()) {
       const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(chipWorld, headState, chip.target.at)}` : "";
@@ -79080,50 +79272,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       const spent = bridge.offerSpent(userText);
       stored.push({ id: `tlo:${at2}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)), ...spent.fill !== "" ? { fill: spent.fill } : {}, ...spent.hold ? { povRoutine: false } : {} } });
     }
-    const left = plan2?.stopped ? (bridge.intentOf(userText)?.queue ?? []).slice(-plan2.stopped.left).map((q) => q.text) : [];
-    const next = input.kind === "continue" ? "" : joinActions([...left, bridge.nextOf(userText) ?? ""]);
-    if (next !== "")
-      stored.push({ id: restChipId(input.messageId, input.swipeId), kind: "choice", ...base, label: next, detail: `The rest of your message${plan2?.stopped ? `: ${STOPPED[plan2.stopped.cause]}` : ""}. Send plays it as its own turn.`, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: next } });
-    const summary = plan2?.timelapse?.summary;
-    if (summary?.stoppedBy && !(plan2?.chips ?? []).some((c) => c.kind === "continue_timelapse")) {
-      const elapsed = summary.to - summary.from;
-      const rest = summary.target.type === "duration" ? { type: "duration", minutes: Math.max(1, summary.target.minutes - elapsed) } : summary.target;
-      const left2 = rest.type === "duration" ? ` (${compactSpan(rest.minutes)} left)` : "";
-      stored.push({ id: `tl:${at2}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? plan2?.timelapse?.mindName ?? "someone" : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left2}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)), ...hold, ...plan2?.fill ? { fill: plan2.fill } : {} } });
-    }
-    for (const [i, chip] of bridge.chipsFor(input.content).entries())
-      stored.push(skipAheadChip(`adv:${at2}:${i}`, base, chip.target, chip.reason));
-    await this.chips.add(input.chatId, input.userId, stored);
-  }
-  async swipeDeleted(chatId, userId, messageId, deleted2) {
-    await this.chips.shiftSwipes(chatId, userId, messageId, deleted2);
-    this.changed(chatId, userId);
-  }
-  heldReads = new Map;
-  async readLanded(chatId, userId, messageId, swipeId, text6) {
-    const bridge = this.bridges.get(chatId);
-    if (!bridge)
-      return;
-    await this.chips.add(chatId, userId, bridge.chipsFor(text6).map((chip, i) => skipAheadChip(`adv:${messageId}:${swipeId}:${i}`, { messageId, swipeId }, chip.target, chip.reason)));
-    this.changed(chatId, userId);
-  }
-  readHeld(chatId, read) {
-    this.heldReads.set(chatId, [...this.heldReads.get(chatId) ?? [], read].slice(-8));
-  }
-  async heldReadsLanded(input) {
-    const waiting = this.heldReads.get(input.chatId);
-    if (!waiting)
-      return;
-    const { held: held3, refused = [] } = input.core.journal;
-    const still = (r) => held3.some((h) => h.write.id === r.writeId);
-    const kept2 = waiting.filter(still);
-    if (kept2.length > 0)
-      this.heldReads.set(input.chatId, kept2);
-    else
-      this.heldReads.delete(input.chatId);
-    for (const r of waiting)
-      if (!still(r) && !refused.some((x) => x.write.id === r.writeId))
-        await this.readLanded(input.chatId, r.userId, r.messageId, r.swipeId, r.text);
+    return stored;
   }
   changed(chatId, userId) {
     this.push.changed(chatId, userId);
@@ -79876,9 +80025,12 @@ function playerReason(failed) {
 function unfitId(messageId, swipeId, index) {
   return index === 0 ? `unfit:${messageId}:${swipeId}` : `unfit:${messageId}:${swipeId}:${index}`;
 }
-function isUnfitId(id, messageId, swipeId) {
-  const head = unfitId(messageId, swipeId, 0);
-  return id === head || id.startsWith(`${head}:`);
+var READ_CHIP_PREFIXES = ["undo:", "confirm:", "untracked:", "choice:", "unpriced:", "adv:"];
+function isReadChip(id) {
+  return READ_CHIP_PREFIXES.some((p) => id.startsWith(p));
+}
+function holdOf(bridge, userText, plan2) {
+  return bridge.intentOf(userText)?.params.povRoutine === false || plan2?.timelapse?.povRoutine === false ? { povRoutine: false } : {};
 }
 function restChipId(messageId, swipeId) {
   return `next:${messageId}:${swipeId}`;
@@ -80624,6 +80776,19 @@ class Dispatcher {
     const entry = rec.post.findLast((p) => p.kind === "confirm" && JSON.stringify(p.events) === wanted);
     return entry ? entry.events.flatMap((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index) ? [] : [{ in: "post", seq: entry.seq, index }]) : [];
   }
+  static folded(core, observed, messageId, rec, events3, refs) {
+    const key = (r) => r.in === "events" ? `e:${r.index}` : `p:${r.seq}:${r.index}`;
+    const gone = new Set(rec.undone.map(key));
+    if (refs.length === events3.length) {
+      for (const n of core.fold(observed).notes)
+        if (n.kind === "dropped" && n.messageId === messageId && n.ref && "in" in n.ref)
+          gone.add(key(n.ref));
+    }
+    return events3.flatMap((e, i) => {
+      const ref = refs.length === events3.length ? refs[i] : undefined;
+      return isRecord(e) && !(ref && gone.has(key(ref))) ? [e] : [];
+    });
+  }
   async route(r, userId, session, reply, noted2) {
     switch (r.type) {
       case "lre.hello":
@@ -81255,13 +81420,7 @@ class Dispatcher {
         const context = core.readContext(messageId, now);
         if (context)
           await this.rt.prepareRead(chatId, userId, messageId, m.swipeId, `${kind}:${messageId}:${m.swipeId}`, m.swipes[m.swipeId] ?? "", { ...context, recent: recentLines(core, now, now.findIndex((x) => x.id === messageId), this.rt.registry) }, true, true);
-        const writeId = this.nextId();
-        const result = await this.write(chatId, userId, { kind, id: writeId, messageId, swipeId: Number(swipe) });
-        const read = { userId, writeId, messageId, swipeId: m.swipeId, text: m.swipes[m.swipeId] ?? "" };
-        if (result.applied)
-          await this.rt.readLanded(chatId, userId, read.messageId, read.swipeId, read.text);
-        else if (result.pending)
-          this.rt.readHeld(chatId, read);
+        const result = await this.write(chatId, userId, { kind, id: this.nextId(), messageId, swipeId: Number(swipe) });
         return { applied: result.applied, pending: result.pending };
       });
     }
@@ -81430,20 +81589,26 @@ class Dispatcher {
         const m = core?.chain(observed).find((x) => x.id === chip.messageId);
         const rec = m?.ledger?.swipes[String(m.swipeId)];
         const events3 = Array.isArray(chip.payload.events) ? chip.payload.events : [];
-        if (!m || !rec)
+        if (!core || !m || !rec)
           throw new RequestError("not_found", "the turn is gone");
+        if (choice === "price" || choice === "item") {
+          const result2 = await this.pricePurchase(chatId, userId, id, chip, choice, payload, true);
+          await settle4("accepted");
+          return result2;
+        }
+        const refs = Dispatcher.refsTo(rec, events3);
         if (choice === "amount") {
           const cents = chipValue(chip, choice, payload);
           if (typeof cents !== "number")
             throw new RequestError("bad_request", "the amount isn't a positive amount of money");
+          const live = Dispatcher.folded(core, observed, m.id, rec, events3, refs);
           const { state: state2, world } = await this.head(chatId, userId);
           const w = new Working(this.rt.registry, world, state2);
-          const postings = events3.flatMap((e) => isRecord(e) && e.type === "post" && typeof e.memo === "string" && Array.isArray(e.lines) ? [{ type: "post", memo: e.memo, lines: e.lines.flatMap((l) => isRecord(l) && typeof l.account === "string" && typeof l.amount === "number" ? [{ account: l.account, amount: l.amount }] : []), ...e.overdraw === true ? { overdraw: true } : {} }] : []);
-          const repriced = optionalService(w.ctx, "economy.reprice")?.(w.ctx, postings, cents);
+          const repriced = optionalService(w.ctx, "economy.reprice")?.(w.ctx, live, cents);
           if (!repriced)
             throw new RequestError("bad_request", "there's no purchase to reprice");
           if (!Array.isArray(repriced))
-            throw new RequestError("validation", repriced.reason);
+            throw new RequestError("validation", live.length < events3.length ? "This purchase was dropped from this version of the story, so there's nothing to reprice." : repriced.reason);
           for (const e of repriced) {
             const rejection = w.apply(e);
             if (rejection)
@@ -81453,18 +81618,15 @@ class Dispatcher {
           await settle4("accepted");
           return { applied: result2.applied, pending: result2.pending };
         }
-        if (choice === "price" || choice === "item") {
-          const result2 = await this.pricePurchase(chatId, userId, id, chip, choice, payload, true);
-          await settle4("accepted");
-          return result2;
-        }
-        const refs = Dispatcher.refsTo(rec, events3);
         if (choice === "other") {
           if (refs.length === 0)
             throw new RequestError("not_found", "the payment is gone");
+          const live = Dispatcher.folded(core, observed, m.id, rec, events3, refs);
           const { state: state2, world } = await this.head(chatId, userId);
           const w = new Working(this.rt.registry, world, state2);
-          const way = optionalService(w.ctx, "economy.other_way")?.(w.ctx, events3.filter(isRecord));
+          const way = optionalService(w.ctx, "economy.other_way")?.(w.ctx, live);
+          if (way && "code" in way && way.code === "not_a_payment" && live.length < events3.length)
+            throw new RequestError("validation", "This payment was dropped from this version of the story, so there's nothing to pay another way.");
           if (!way || "code" in way)
             throw new RequestError("validation", way?.reason ?? "No other way to pay covers it.");
           for (const e of way.repay) {
