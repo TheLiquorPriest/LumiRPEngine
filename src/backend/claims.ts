@@ -187,7 +187,9 @@ export function claimFor(input: ClaimInput): ClaimVerdict | null {
  * first, in every mode but Hold me to the world, as a key is, since it buys anything: Add puts what
  * their carried cash lacks of the amount in it as the Pay plays (`economy.claim_cash`), and the Pay
  * hands the whole amount over. Money said without an amount or given to no one, or in a world that
- * keeps no money for the player character, has nothing to carry it, and plays as plain roleplay.
+ * keeps no money for the player character, has nothing to carry it, and plays as plain roleplay. The
+ * recipient and the amount live only in the Pay's params, which the needs and the claim read as it
+ * plays (`shared`, `amountParam`), so the intent gate's Edit of either is what they hold it to.
  */
 function moneyClaim(input: ClaimInput, at: ClaimPlace, kind: string, amount: number | null, verb: string): ClaimVerdict {
   const { registry, world, state, action, unfit } = input;
@@ -196,8 +198,8 @@ function moneyClaim(input: ClaimInput, at: ClaimPlace, kind: string, amount: num
   const to = Object.entries(action.params).find(([name, def]) => name !== unfit.param && def.type === "ref" && def.ref !== undefined && kindIs(registry, world, def.ref, "person"))?.[0];
   const recipient = to === undefined ? undefined : input.params[to];
   const cents = amount === null ? 0 : Math.round(amount * 10 ** world.currency.decimals);
-  if (!pay || typeof recipient !== "string" || !(cents > 0) || !optionalService(ctx, "economy.claim_cash") || ctx.levelOf(world.pov, "money") === 0) return { kind: "hold" };
-  const needs: Needs = { action: action.id, params: Object.fromEntries(Object.entries(input.params).filter(([name]) => name !== unfit.param)) };
+  if (!pay || to === undefined || typeof recipient !== "string" || !(cents > 0) || !optionalService(ctx, "economy.claim_cash") || ctx.levelOf(world.pov, "money") === 0) return { kind: "hold" };
+  const needs: Needs = { action: action.id, params: Object.fromEntries(Object.entries(input.params).filter(([name]) => name !== unfit.param && name !== to)), shared: { [to]: "to" } };
   const play: InPlace = { action: pay.id, params: { to: recipient, amount: cents, method: "cash" }, needs };
   const carried = Math.max(0, optionalQuery(ctx, "economy.carried_cash")?.(ctx, world.pov) ?? 0);
   if (carried >= cents) return { kind: "play", play };
@@ -206,7 +208,7 @@ function moneyClaim(input: ClaimInput, at: ClaimPlace, kind: string, amount: num
   const added = formatMoney(cents - carried, world.currency);
   return {
     kind: "ask",
-    claim: { param: unfit.param, name: added, at, kind, consumable: false, cents },
+    claim: { param: unfit.param, name: added, at, kind, consumable: false, cents, amountParam: "amount" },
     question: carried > 0 ? `Only ${formatMoney(carried, world.currency)} of the ${money} is with you as far as the world knows. Add the other ${added} and ${verb} it?` : `${money} in cash isn't with you as far as the world knows. Add it and ${verb} it?`,
     detail: "Money you say you have and don't carry always asks first.",
     play,

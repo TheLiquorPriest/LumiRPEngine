@@ -173,15 +173,21 @@ export function skipPastFight(w: Working, runSeed: string): string[] {
 /**
  * Makes a claim real (DESIGN §9.4 player claims), all or nothing: a thing through the gear pack's
  * `gear.claim`, money through the economy's `economy.claim_cash` (into the claimer's carried cash):
- * only what that cash lacks of the amount as the action plays, so what they carry is never made
- * again. The entity the action takes, or the cash account money went into, how many events made it
- * and the cash added. Null when nothing needs making (the claimer already holds the thing, made by
- * an earlier action of the turn, or carries the money by then) or it can't be made, and the action
- * then plays without it.
+ * only what that cash lacks, as the action plays, of what the action pays (`params`, the pick
+ * `amountParam` names, which the intent gate's Edit may have changed), so what they carry is never
+ * made again. The entity the action takes, or the cash account money went into, how many events made
+ * it and the cash added. Null when nothing needs making (the claimer already holds the thing, made by
+ * an earlier action of the turn, or carries the money by then), when the action pays more than the
+ * player agreed to have added for (`cents`), or when it can't be made; the action then plays without it.
  */
-function claimThing(w: Working, claim: Claim, salt: string): { entity: EntityId; events: number; cents?: number } | null {
-  const lacking = claim.cents === undefined ? undefined : claim.cents - Math.max(0, optionalQuery(w.ctx, "economy.carried_cash")?.(w.ctx, w.world.pov) ?? 0);
-  if (lacking !== undefined && lacking <= 0) return null;
+function claimThing(w: Working, claim: Claim, salt: string, params: JsonObject): { entity: EntityId; events: number; cents?: number } | null {
+  let lacking: number | undefined;
+  if (claim.cents !== undefined) {
+    const pays = claim.amountParam === undefined ? claim.cents : params[claim.amountParam];
+    if (typeof pays !== "number" || pays > claim.cents) return null;
+    lacking = pays - Math.max(0, optionalQuery(w.ctx, "economy.carried_cash")?.(w.ctx, w.world.pov) ?? 0);
+    if (lacking <= 0) return null;
+  }
   const made = lacking !== undefined ? optionalService(w.ctx, "economy.claim_cash")?.(w.ctx, w.world.pov, lacking) : optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim, by: w.world.pov, salt });
   if (!made || !("entity" in made)) return null;
   const before = w.mark();
@@ -253,11 +259,11 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         const typed = i > 0 || intent?.picked !== true;
         // An action played in the place of the one the player's words named (money handed over, as
         // Pay) is held to that one's needs too; when they don't hold, nothing is made for it.
-        const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs) : null;
+        const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs, step.params) : null;
         // A thing the player said they had comes into being where the action expects it, just
         // before the action, which takes it; money goes into their cash, which the action pays over
         // (DESIGN §9.4 player claims).
-        const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
+        const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim"), step.params) : null;
         if (claimed && step.claim) made = { entity: claimed.entity, name: claimed.cents !== undefined ? formatMoney(claimed.cents, w.world.currency) : step.claim.name, events: claimed.events, ...(claimed.cents !== undefined ? { cents: claimed.cents } : {}) };
         const params = claimed && step.claim && step.claim.cents === undefined ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
         // Its picks in words as the POV knows them now, before the action gives away or uses up what it

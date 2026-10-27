@@ -503,7 +503,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   });
   r.query("economy.purchaser", (ctx, p) => purchaser(p, ctx).payer);
 
-  // Ledger 1.10: a posting folds only if the accounts it draws on can pay it, or the story made it (`overdraw`).
+  // Ledger 1.10: a posting folds only if the accounts it draws on can pay it, or the story made it on an account that can run a debt (`overdraw`).
   r.guard({ type: "post", validate: (e, ctx) => (e.type === "post" ? postGuard(ctx, e.lines, e.overdraw === true) : null) });
   r.formula("wealth", (ctx, who) => wealthOf(hooks, ctx, String(who ?? ctx.world.pov)));
   r.formula("can_afford", (ctx, who, cents) => ctx.query("can_afford")(ctx, String(who ?? ctx.world.pov), Number(cents ?? 0)));

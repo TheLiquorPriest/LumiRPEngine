@@ -33,7 +33,7 @@ import type {
   UpgradePick,
   UpgradePicks,
 } from "../shared/ledger";
-import { UPGRADE_ASPECTS } from "../shared/ledger";
+import { APART_GROUP, UPGRADE_ASPECTS } from "../shared/ledger";
 import { unpinPause } from "./engine-pack";
 import type { EventTypeDef, ReadContext, Rejection } from "./registry";
 import type { WorldState } from "./state";
@@ -273,26 +273,59 @@ export function eventUnits(events: readonly LedgerEvent[]): [number, number][] {
 }
 
 /**
+ * The unit a unit kept apart stands with (`APART_GROUP`): the one right after it whose group it
+ * names, as `[from, to)`; null for any other unit.
+ */
+export function apartHost(events: readonly (LedgerEvent | undefined)[], [from, to]: [number, number]): [number, number] | null {
+  const group = events[from]?.group;
+  if (group === undefined || !group.startsWith(APART_GROUP) || events[to]?.group !== group.slice(APART_GROUP.length)) return null;
+  let end = to + 1;
+  while (end < events.length && events[end]?.group === events[to]?.group) end++;
+  return [to, end];
+}
+
+/**
  * Applies, in order, each unit whose events all validate; a unit with any failing member is
- * skipped whole. Returns the events applied. Plans, reads and prefix replays use it.
+ * skipped whole. A unit kept apart (`APART_GROUP`) is tried with the unit it stands with: both
+ * apply if both fit, else that unit is tried alone and the one kept apart is skipped. Returns the
+ * events applied. Plans, reads and prefix replays use it.
  */
 export function applyValidUnits(types: EventTypes, events: readonly LedgerEvent[], state: WorldState, context: (state: Readonly<WorldState>) => ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
-  for (const [from, to] of eventUnits(events)) {
+  const fits = (unit: readonly LedgerEvent[]): boolean => {
+    const scratch = structuredClone(state);
+    return unit.every((ev) => {
+      const ctx = context(scratch);
+      if (validateEvent(types, ev, ctx)) return false;
+      applyEvent(types, ev, scratch, ctx);
+      return true;
+    });
+  };
+  const apply = (unit: readonly LedgerEvent[]): void => {
+    for (const ev of unit) {
+      applyEvent(types, ev, state, context(state));
+      out.push(ev);
+    }
+  };
+  const units = eventUnits(events);
+  for (let u = 0; u < units.length; u++) {
+    const [from, to] = units[u] ?? [0, 0];
     const unit = events.slice(from, to);
+    const host = apartHost(events, [from, to]);
+    if (host) {
+      const hosted = events.slice(host[0], host[1]);
+      if (fits([...unit, ...hosted])) apply([...unit, ...hosted]);
+      else if (fits(hosted)) apply(hosted);
+      u++;
+      continue;
+    }
     if (unit.length > 1) {
-      const scratch = structuredClone(state);
-      const fits = unit.every((ev) => {
-        const ctx = context(scratch);
-        if (validateEvent(types, ev, ctx)) return false;
-        applyEvent(types, ev, scratch, ctx);
-        return true;
-      });
-      if (!fits) continue;
+      if (fits(unit)) apply(unit);
+      continue;
     }
     for (const ev of unit) {
       const ctx = context(state);
-      if (unit.length === 1 && validateEvent(types, ev, ctx)) break;
+      if (validateEvent(types, ev, ctx)) break;
       applyEvent(types, ev, state, ctx);
       out.push(ev);
     }

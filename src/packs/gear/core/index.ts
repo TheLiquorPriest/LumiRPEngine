@@ -24,7 +24,7 @@ import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { effectLists } from "../../../engine/ruleset-lint";
-import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
+import { GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { carriedBy, contentsOf, findPiece, fitProblem, fixedOf, goesIn, grants, hasItem, holderOf, holdProblem, holdsAs, isInside, kindGoesIn, kindHoldsAs, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
 import { canSeeEntity, isDiscoverable, knows } from "../../../engine/visibility";
 import { together } from "../../../engine/presence";
@@ -291,7 +291,7 @@ export const ITEM: KindDef = {
   pack: "gear",
   fields: {
     notable: { type: "bool", label: "Notable", domain: "gear", level: 1 },
-    qty: { type: "number", label: "Quantity", default: 1, min: 0, domain: "gear", level: 2, bound: { mode: "confirm" } },
+    qty: { type: "number", label: "Quantity", default: 1, min: 0, domain: "gear", level: 2 },
     weight_g: { type: "number", label: "Weight (g)", min: 0, domain: "gear", level: 2 },
     volume_l: { type: "number", label: "Volume (l)", min: 0, domain: "gear", level: 2 },
     catalog: { type: "text", label: "Catalog item", table: "economy.catalog" },
@@ -538,18 +538,6 @@ function heldItem(ctx: ReadContext, item: string, from: EntityId): string {
   // Only what the player character can see: a hidden thing by that name is none, so it neither hides a visible one nor tells of itself.
   const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
-}
-
-/**
- * A reply's step of a thing's number field (DESIGN §11): as far as the story tells, cut only to the
- * step the world's author set on the field (its bound's `maxDelta` in Build; no pack sets one).
- * The `add` it goes into keeps the result inside the field's range, from its value or, unset, its
- * default.
- */
-function toldStep(ctx: ReadContext, id: EntityId, field: string, delta: number): number {
-  const e = own(ctx.state.entities, id);
-  const cap = e ? fieldDef(ctx.registry, ctx.world, e.kind, field)?.bound?.maxDelta : undefined;
-  return cap === undefined ? delta : Math.sign(delta) * Math.min(Math.abs(delta), Math.abs(cap));
 }
 
 /** The one thing lying loose where `who` is by that name (any case, no leading article), as `heldItem` reads a held one; the name itself when none or several fit. */
@@ -1042,10 +1030,14 @@ export const gearPack: PackDef = {
         if (typeof p.delta !== "number" || !Number.isInteger(p.delta) || p.delta === 0) return reject("bad_amount", "an item's condition moves by a whole, non-zero number");
         return null;
       },
-      // As far as the story says, inside the condition's range and any step the author set.
+      // As far as the story says, inside the condition's range; its bound in Build applies (`boundTarget`).
       toEffects: (p, ctx) => {
         const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
-        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: toldStep(ctx, found.id, "condition", numOf(p.delta, 0)) } }];
+        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: numOf(p.delta, 0) } }];
+      },
+      boundTarget: (p, ctx) => {
+        const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
+        return "code" in found ? null : { entity: found.id, field: "condition" };
       },
     });
     r.proposal({
@@ -1061,8 +1053,9 @@ export const gearPack: PackDef = {
         if (who !== "" && who !== e.fields.owner && !isInside(ctx.state, item, who)) return reject("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
         return null;
       },
-      // As far as the story says, never below none, and no further than a step the author set.
-      toEffects: (p, ctx) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: toldStep(ctx, strOf(p.item), "qty", numOf(p.delta)) } }],
+      // As far as the story says, never below none; its bound in Build applies (`boundTarget`).
+      toEffects: (p) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: numOf(p.delta) } }],
+      boundTarget: (p, ctx) => (own(ctx.state.entities, strOf(p.item)) ? { entity: strOf(p.item), field: "qty" } : null),
     });
 
     r.lint({

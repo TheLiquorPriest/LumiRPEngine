@@ -86,25 +86,4 @@ describe("the reply's item channels", () => {
     expect(play(w, { type: "quantity", entity: "you", item: "candle", delta: -1 })).toBeNull();
     expect(w.state.entities.candle?.fields.qty).toBe(0);
   });
-
-  test("a step the world's author set on a thing's count or condition caps how far one reply moves it", () => {
-    const world = modernUsWorld("w", "Riverton");
-    world.kinds.item = {
-      id: "item",
-      label: "Item",
-      fields: {
-        qty: { type: "number", default: 1, min: 0, bound: { mode: "auto", maxDelta: 5 } },
-        condition: { type: "number", default: 100, min: 0, max: 100, bound: { mode: "auto", maxDelta: 10 } },
-      },
-    };
-    world.entities.apples = { id: "apples", kind: "item", name: "Apples", tier: "background", fields: { owner: "you", qty: 12 }, relations: [{ type: "in", to: "you" }] };
-    world.entities.coat = { id: "coat", kind: "item", name: "Coat", tier: "background", fields: { owner: "you", condition: 80 }, relations: [{ type: "in", to: "you" }] };
-    const w = new Working(reg, world, startState(world));
-    expect(play(w, { type: "quantity", entity: "you", item: "apples", delta: -9 })).toBeNull();
-    expect(w.state.entities.apples?.fields.qty).toBe(7);
-    expect(play(w, { type: "quantity", entity: "you", item: "apples", delta: 20 })).toBeNull();
-    expect(w.state.entities.apples?.fields.qty).toBe(12);
-    expect(play(w, { type: "item_condition", item: "coat", delta: -40 })).toBeNull();
-    expect(w.state.entities.coat?.fields.condition).toBe(70);
-  });
 });

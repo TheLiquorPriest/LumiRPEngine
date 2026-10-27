@@ -16,7 +16,7 @@
 import { hashJson, hashParts } from "../../shared/hash";
 import type { EventRef, JournalNote, KeepLine, LedgerEvent, Marker, MarkerBody, PathHash, PostEntry, Rec } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
-import { applyEvent, applyMarker, validateEvent } from "../events";
+import { apartHost, applyEvent, applyMarker, validateEvent } from "../events";
 import type { WorldState } from "../state";
 import { initialState } from "../world-state";
 import { FoldError, type ChainMessage, type FoldInput, type FoldOutput, type FoldSnapshot, type MessageResult, type ResolvedFix } from "./chain";
@@ -374,9 +374,11 @@ export class LedgerFold {
         }
         applyEvent(types, ev, state, ctx());
       };
-      // Groups on a rebased view land whole or not at all (the reference fold's rule, written apart).
+      // Groups on a rebased view land whole or not at all (the reference fold's rule, written apart),
+      // and a unit kept apart (`APART_GROUP`) lands only with the unit it stands with: both if both
+      // fit, else that unit alone, else neither; where either has a Keep conversion each folds alone.
       const run = (list: readonly LedgerEvent[], refOf: (index: number) => EventRef): void => {
-        for (let i = 0; i < list.length; ) {
+        const unitAt = (i: number): { end: number; unit: { ev: LedgerEvent; ref: EventRef }[] } => {
           const group = list[i]?.group;
           let end = i + 1;
           if (group !== undefined) while (end < list.length && list[end]?.group === group) end++;
@@ -386,38 +388,61 @@ export class LedgerFold {
             const ref = refOf(k);
             if (ev && !record.undone.some((u) => refEq(u, ref))) unit.push({ ev, ref });
           }
+          return { end, unit };
+        };
+        const trial = (unit: readonly { ev: LedgerEvent }[]): { reason: string } | null => {
+          const world = input.worlds(state.revision);
+          if (!world) throw new FoldError(`unknown revision ${state.revision}`);
+          const scratch = structuredClone(state);
+          return unit
+            .map((u) => u.ev)
+            .reduce<{ reason: string } | null>((found, ev) => {
+              if (found) return found;
+              const c = types.context(world, scratch);
+              const rejection = validateEvent(types, ev, c);
+              if (!rejection) applyEvent(types, ev, scratch, c);
+              return rejection;
+            }, null);
+        };
+        const drop = (unit: readonly { ref: EventRef }[], reason: string): void => {
+          for (const u of unit) {
+            notes.push({ kind: "dropped", messageId: m.id, ref: u.ref, text: reason });
+            keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "dropped", text: reason });
+          }
+        };
+        const isConverted = (unit: readonly { ref: EventRef }[]): boolean => unit.some((u) => converted.some((c) => refEq(c, u.ref)));
+        for (let i = 0; i < list.length; ) {
+          const { end, unit } = unitAt(i);
+          const host = view && !converged ? apartHost(list, [i, end]) : null;
+          const hosted = host ? unitAt(host[0]).unit : [];
+          if (host && !isConverted(unit) && !isConverted(hosted)) {
+            i = host[1];
+            const together = trial([...unit, ...hosted]);
+            if (together === null) {
+              for (const u of [...unit, ...hosted]) applyEvent(types, u.ev, state, ctx());
+              continue;
+            }
+            const alone = trial(hosted);
+            drop(unit, together.reason);
+            if (alone === null) for (const u of hosted) applyEvent(types, u.ev, state, ctx());
+            else drop(hosted, alone.reason);
+            continue;
+          }
           i = end;
           if (unit.length < 2 || !view || converged) {
             for (const u of unit) event(u.ev, u.ref);
             continue;
           }
-          const world = input.worlds(state.revision);
-          if (!world) throw new FoldError(`unknown revision ${state.revision}`);
-          const scratch = structuredClone(state);
-          const failure =
-            unit
-              .map((u) => u.ev)
-              .reduce<{ reason: string } | null>((found, ev) => {
-                if (found) return found;
-                const c = types.context(world, scratch);
-                const rejection = validateEvent(types, ev, c);
-                if (!rejection) applyEvent(types, ev, scratch, c);
-                return rejection;
-              }, null);
+          const failure = trial(unit);
           if (failure === null) {
             for (const u of unit) applyEvent(types, u.ev, state, ctx());
-          } else if (unit.some((u) => converted.some((c) => refEq(c, u.ref)))) {
+          } else if (isConverted(unit)) {
             for (const u of unit) {
               const own = validateEvent(types, u.ev, ctx());
               if (own) keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "converted", text: own.reason });
               applyEvent(types, u.ev, state, ctx());
             }
-          } else {
-            for (const u of unit) {
-              notes.push({ kind: "dropped", messageId: m.id, ref: u.ref, text: failure.reason });
-              keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "dropped", text: failure.reason });
-            }
-          }
+          } else drop(unit, failure.reason);
         }
       };
       // On a view, a GM edit or ✎ fix that keeps what it asked for folds as that request worked out

@@ -7,7 +7,7 @@
 import { hashJson, hashParts } from "../../shared/hash";
 import type { EventRef, JournalNote, KeepLine, LedgerEvent, Marker, PathHash, PostEntry, Rec } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
-import { applyEvent, applyMarker, validateEvent } from "../events";
+import { apartHost, applyEvent, applyMarker, validateEvent } from "../events";
 import type { ReadContext } from "../registry";
 import type { MarkerEnv, UpgradeTypes } from "../upgrade";
 import { initialState } from "../world-state";
@@ -128,37 +128,71 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
       };
       // A group (contiguous events sharing `group`) on a rebased view lands whole or not at all:
       // tried on a copy first; one failure drops every member, unless Keep converted one of them.
+      // A unit kept apart (`APART_GROUP`) is tried with the unit after it that it stands with: both
+      // land if both fit; else that unit is tried alone, and the one kept apart drops whatever it
+      // does. With a Keep conversion in either, each is a group like any other.
       const run = (list: readonly LedgerEvent[], refOf: (index: number) => EventRef): void => {
+        const membersOf = (from: number, to: number): { ev: LedgerEvent; ref: EventRef }[] => {
+          const members: { ev: LedgerEvent; ref: EventRef }[] = [];
+          for (let k = from; k < to; k++) {
+            const ev = list[k];
+            const ref = refOf(k);
+            if (ev && !record.undone.some((u) => sameRef(u, ref))) members.push({ ev, ref });
+          }
+          return members;
+        };
+        const tryOn = (members: readonly { ev: LedgerEvent }[]): { reason: string } | null => {
+          const trial = structuredClone(state);
+          const world = input.worlds(trial.revision);
+          if (!world) throw new FoldError(`unknown revision ${trial.revision}`);
+          for (const x of members) {
+            const failure = validateEvent(types, x.ev, types.context(world, trial));
+            if (failure) return failure;
+            applyEvent(types, x.ev, trial, types.context(world, trial));
+          }
+          return null;
+        };
+        const dropAll = (members: readonly { ref: EventRef }[], reason: string): void => {
+          for (const x of members) {
+            notes.push({ kind: "dropped", messageId: m.id, ref: x.ref, text: reason });
+            keepReport.push({ messageId: m.id, parentPath: parent, ref: x.ref, status: "dropped", text: reason });
+          }
+        };
+        const anyConverted = (members: readonly { ref: EventRef }[]): boolean => members.some((x) => converted.some((c) => sameRef(c, x.ref)));
         let i = 0;
         while (i < list.length) {
           const group = list[i]?.group;
           let j = i + 1;
           while (group !== undefined && j < list.length && list[j]?.group === group) j++;
-          const members: { ev: LedgerEvent; ref: EventRef }[] = [];
-          for (let k = i; k < j; k++) {
-            const ev = list[k];
-            const ref = refOf(k);
-            if (ev && !record.undone.some((u) => sameRef(u, ref))) members.push({ ev, ref });
+          const members = membersOf(i, j);
+          const host = view ? apartHost(list, [i, j]) : null;
+          if (host) {
+            const hosted = membersOf(host[0], host[1]);
+            if (!anyConverted(members) && !anyConverted(hosted)) {
+              i = host[1];
+              const together = tryOn([...members, ...hosted]);
+              if (!together) {
+                for (const x of [...members, ...hosted]) applyEvent(types, x.ev, state, ctx());
+                continue;
+              }
+              dropAll(members, together.reason);
+              const alone = tryOn(hosted);
+              if (alone) dropAll(hosted, alone.reason);
+              else for (const x of hosted) applyEvent(types, x.ev, state, ctx());
+              continue;
+            }
           }
           i = j;
           if (members.length <= 1 || !view) {
             for (const x of members) event(x.ev, x.ref);
             continue;
           }
-          const trial = structuredClone(state);
-          const world = input.worlds(trial.revision);
-          if (!world) throw new FoldError(`unknown revision ${trial.revision}`);
-          let failure: { reason: string } | null = null;
-          for (const x of members) {
-            failure = validateEvent(types, x.ev, types.context(world, trial));
-            if (failure) break;
-            applyEvent(types, x.ev, trial, types.context(world, trial));
-          }
+          const failure = tryOn(members);
           if (!failure) {
             for (const x of members) applyEvent(types, x.ev, state, ctx());
             continue;
           }
-          if (members.some((x) => converted.some((c) => sameRef(c, x.ref)))) {
+          if (anyConverted(members)) {
             for (const x of members) {
               const own = validateEvent(types, x.ev, ctx());
               if (own) keepReport.push({ messageId: m.id, parentPath: parent, ref: x.ref, status: "converted", text: own.reason });
@@ -166,10 +200,7 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
             }
             continue;
           }
-          for (const x of members) {
-            notes.push({ kind: "dropped", messageId: m.id, ref: x.ref, text: failure.reason });
-            keepReport.push({ messageId: m.id, parentPath: parent, ref: x.ref, status: "dropped", text: failure.reason });
-          }
+          dropAll(members, failure.reason);
         }
       };
       // On a view, a GM edit or ✎ fix that keeps what it asked for folds as that request worked out

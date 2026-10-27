@@ -1079,6 +1079,8 @@ export interface TxnData {
   named?: EntityId;
   /** A purchase the story made that nothing its payer has could pay: what it would have cost. Nothing was charged, so `lines` is empty. */
   unpaid?: number;
+  /** A payment the story made (DESIGN §9.5): what its chip and Pay another way find it by. */
+  story?: true;
   /** When it happened, when that isn't the time it folds (a flow at its own instant inside a slot). */
   at?: number;
 }

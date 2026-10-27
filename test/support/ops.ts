@@ -10,7 +10,8 @@
 // L20 starting markers after every operation; L2 switch-and-back (excursion), L3 no pause on a switch
 // or removal, L5 off-path commit, L6 P4 re-render, L8 held writes, L13/L14 Continue, L15 stopped
 // Continue, L19 deletion, L34 dry run, L38 assistant edits, L39 user-edit pause, L43 a Re-run
-// carries its fixes, L45 a branch or import folds as its source (an earlier build's chat included), L46 detail materialized once, per
+// carries its fixes, L45 a branch or import folds as its source (an earlier build's chat included), L46 detail materialized once, L49 a
+// request holds on its own path, per
 // operation; L31 determinism in properties.test.ts. L4 is the classification these exercise; L10 and
 // L12 are in scenarios.test.ts and reference.test.ts. Pack-dependent invariants arrive with the packs.
 
@@ -25,10 +26,10 @@ import type { EditOp } from "../../src/shared/protocol";
 import { decodeLedger, encodeLedger, toChain } from "../../src/backend/ledger-io";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { startMarkersFrom } from "../../src/backend/start-markers";
-import { applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, validateEvent, validMarkerBody } from "../../src/engine/events";
+import { apartHost, applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, validateEvent, validMarkerBody } from "../../src/engine/events";
 import { touchedField } from "../../src/engine/touched";
-import type { FoldOutput } from "../../src/engine/ledger/chain";
-import { isLive, isTombstoned } from "../../src/engine/ledger/path";
+import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
+import { activeRecord, isLive, isTombstoned } from "../../src/engine/ledger/path";
 import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRng, type Rng } from "../../src/engine/rng";
 import type { FakeMessage, Generation } from "./fake-host";
@@ -76,7 +77,9 @@ export type Op =
    * Re-read: the head folds behind the changed reply, as a rebased view, where the edit is worked out
    * again from its request (DESIGN §7).
    */
-  | { op: "askedEarlier"; asked: number; a: number; at: number; text: number };
+  | { op: "askedEarlier"; asked: number; a: number; at: number; text: number }
+  /** The Undo on a GM edit's chip on the head (picked by `a` among those it shows), as the player presses it: every event of the entry. */
+  | { op: "undoAsked"; a: number };
 
 const USER_TEXTS = ["buy:map:30", "buy:lamp:20", "buy:rope:90", "use:map", "use:lamp", "use:rope", "earn:15", "roll", "look around"];
 const REPLIES = ["Okay.", "You find coins. [found:5]", "The lamp slips away. [lose:lamp]", "A windfall! [found:40]", "You drop the map. [lose:map]", "Nothing happens."];
@@ -307,9 +310,16 @@ function generateAsked(rng: Rng, length: number): Op[] {
     // Keep (with a conversion when something dropped) or Discard.
     else if (roll < 0.94) ops.push({ op: "write", kind: 0.62 + r() * 0.23, a: r(), b: r() });
     else {
-      // The same edit twice while a reply streams, at times: the second lands already so, kept with its request alone.
-      const asked: Op = { op: "write", kind: r(), a: r(), b: r(), asked: r() };
-      ops.push({ op: "inFlight", type: r(), inner: [asked, ...(r() < 0.5 ? [asked] : []), ...generateInner(rng, Math.floor(r() * 2), opens, removals)], stop: r() < 0.25, reply: r() });
+      // Two edits while a reply streams, at times: the same one again, which adds nothing, or an
+      // acquaintance begun just before ended with a mood and then ended alone, which the first has
+      // already done, so it is kept with its request alone; then at times the first's Undo, after
+      // which the second still says what it said.
+      const first: Op = { op: "write", kind: r(), a: r(), b: r(), asked: r() };
+      const twice = r();
+      if (twice >= 0.25 && twice < 0.75) ops.push({ ...first, asked: 0.25 + r() * 0.25 });
+      const pair: Op[] = twice < 0.25 ? [first, first] : twice < 0.75 ? [{ ...first, asked: 0.75 + r() * 0.25 }, { ...first, asked: 0.5 + r() * 0.25 }] : [first];
+      ops.push({ op: "inFlight", type: r(), inner: [...pair, ...generateInner(rng, Math.floor(r() * 2), opens, removals)], stop: r() < 0.25, reply: r() });
+      if (r() < 0.4) ops.push({ op: "undoAsked", a: r() * 0.5 });
     }
   }
   return ops;
@@ -707,6 +717,16 @@ export class Runner {
         const w = await this.writeFor(op);
         if (!w) return;
         await this.h.write(chat, w);
+        return;
+      }
+      case "undoAsked": {
+        const head = this.head();
+        const core = await this.h.core(chat);
+        const rec = head ? core.journal.messages[head.id]?.ledger.swipes[String(head.swipeId)] : undefined;
+        const shown = (rec?.post ?? []).filter((p) => p.kind === "fix" && p.edit !== undefined && p.events.length > 0 && !rec?.undone.some((u) => u.in === "post" && u.seq === p.seq));
+        if (!head || !rec || shown.length === 0) return;
+        const entry = pick(shown, op.a);
+        await this.h.write(chat, { kind: "undo", id: `w${++this.ids}`, messageId: head.id, swipeId: head.swipeId, refs: entry.events.map((_, index): EventRef => ({ in: "post", seq: entry.seq, index })) });
         return;
       }
       case "fixRerun": {
@@ -1182,6 +1202,15 @@ export class Runner {
       if (hashJson(optimized.resolved) !== hashJson(reference.resolved)) throw new InvariantError("L1", `${chatId}: the GM edits and ✎ fixes a view worked out again differ`);
       // L7: on-path entries re-validate.
       if (reference.violations.length > 0) throw new InvariantError("L7", reference.violations.join("; "));
+      // L49: a GM edit or ✎ fix that keeps its request holds on its own path what that request works
+      // out to there, an Undo of what it leaned on included, so folding every record as a view (each
+      // request worked out again) ends where the chat does.
+      const input = core.foldInput(toChain(await this.h.host.chats.messages(chatId, this.h.host.userId)));
+      const views = input.chain.map((m): ChainMessage => {
+        const rec = activeRecord(m, input.tombstones);
+        return rec && rec.path !== "" && m.ledger ? { ...m, ledger: { ...m.ledger, swipes: { ...m.ledger.swipes, [String(m.swipeId)]: { ...rec, readElsewhere: true } } } } : m;
+      });
+      if (hashJson(referenceFold({ ...input, chain: views }, this.h.registry).state) !== hashJson(reference.state)) throw new InvariantError("L49", `${chatId}: folding every record as a view ends elsewhere than the chat`);
       // L40: no own account folds below zero, on any path; a rebased view drops what
       // fails against its new parent, and every drop has its Keep line (and its note).
       // A Keep "convert to manual adjustment" is the player's explicit override, so only it may leave an account short.
@@ -1197,9 +1226,11 @@ export class Runner {
       if ([...droppedNotes].some((k) => !droppedKeep.has(k)) || [...droppedKeep].some((k) => !droppedNotes.has(k))) throw new InvariantError("L40", `${chatId}: dropped notes and Keep lines differ`);
       if (reference.keepReport.some((k) => k.status === "dropped" && k.text.includes("can't cover"))) this.coverage.fundsDrops++;
       // L41: a group lands whole: within one record list, a unit of grouped events is dropped
-      // entirely or not at all on a rebased view.
+      // entirely or not at all on a rebased view, and a unit kept apart (`APART_GROUP`) is dropped
+      // whenever the unit it stands with is, unless Keep converted part of either.
       const chain = await this.h.chain(chatId);
       const droppedRefs = new Set(reference.keepReport.filter((k) => k.status === "dropped").map((k) => `${k.messageId}:${JSON.stringify(k.ref)}`));
+      const convertedRefs = new Set(reference.keepReport.filter((k) => k.status === "converted").map((k) => `${k.messageId}:${JSON.stringify(k.ref)}`));
       for (const m of chain) {
         const rec = m.ledger?.swipes[String(m.swipeId)];
         if (m.isUser || !rec) continue;
@@ -1215,12 +1246,18 @@ export class Runner {
         }
         const lists: { events: LedgerEvent[]; ref: (index: number) => EventRef }[] = [{ events: rec.events, ref: (index) => ({ in: "events", index }) }, ...rec.post.map((p) => ({ events: p.events, ref: (index: number): EventRef => ({ in: "post", seq: p.seq, index }) }))];
         for (const list of lists) {
+          const live = (from: number, to: number): EventRef[] => Array.from({ length: to - from }, (_, k) => list.ref(from + k)).filter((ref) => !rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref)));
+          const isDropped = (ref: EventRef): boolean => droppedRefs.has(`${m.id}:${JSON.stringify(ref)}`);
           for (const [from, to] of eventUnits(list.events)) {
             if (to - from < 2) continue;
-            const members = Array.from({ length: to - from }, (_, k) => list.ref(from + k)).filter((ref) => !rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref)));
-            const dropped = members.filter((ref) => droppedRefs.has(`${m.id}:${JSON.stringify(ref)}`)).length;
+            const members = live(from, to);
+            const dropped = members.filter(isDropped).length;
             if (dropped > 0 && dropped < members.length) throw new InvariantError("L41", `${chatId}/${m.id}: a group was partly dropped`);
             if (dropped > 0) this.coverage.groupDrops++;
+            const host = apartHost(list.events, [from, to]);
+            const hosted = host ? live(host[0], host[1]) : [];
+            const overridden = [...members, ...hosted].some((ref) => convertedRefs.has(`${m.id}:${JSON.stringify(ref)}`));
+            if (!overridden && hosted.some(isDropped) && dropped < members.length) throw new InvariantError("L41", `${chatId}/${m.id}: a unit kept apart stood without the unit it stands with`);
           }
         }
       }

@@ -234,4 +234,26 @@ describe("Cancel while the reply is read", () => {
     expect(state ? placeOfEntity(state, "pov") : null).not.toBe("alder_market");
     expect(kinds).not.toContain("change");
   });
+
+  test("pressed once the read has found its changes, keeps none of its chips: no Undo for a move that never applied", async () => {
+    const rig = new Rig({ shipped: true });
+    rig.host.quietReply = () => "{}";
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const reply = await send(rig, chatId, "I look around.");
+    rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes("propose concrete state changes") ? JSON.stringify({ proposals: [{ type: "location", entity: "pov", place: "alder_market" }] }) : "{}");
+    const press: { answered: boolean | null } = { answered: null };
+    const prepare = rig.rt.prepareRead.bind(rig.rt);
+    rig.rt.prepareRead = async (...args: Parameters<typeof prepare>) => {
+      await prepare(...args);
+      press.answered ??= rig.rt.ledger.cancel(chatId, rig.host.userId);
+    };
+    await rig.host.finish(reply, "You walk to the market.");
+    expect(press.answered).toBe(true);
+    const kinds = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === reply.messageId).map((c) => c.kind);
+    expect(kinds).toContain("retry_read");
+    expect(kinds).not.toContain("undo");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });

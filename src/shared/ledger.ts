@@ -57,12 +57,19 @@ export interface EventBase {
 }
 
 /**
- * A group an effect keeps apart from its own unit (`applyEffects` makes the rest of an effect's
- * events one unit, never this one): a rebased view keeps or drops it on its own, and the rest of the
- * effect stands without it. The transfer a payment the story made draws from its account's
- * overdraft link is one (DESIGN §25.10).
+ * A unit kept apart from the unit it comes with: its group is `APART_GROUP` followed by that unit's
+ * group (`apartOf`), and it sits just before it in its list. It stands only with that unit: a fold,
+ * a plan or a read that drops that unit drops it too (its notes and Keep lines with it), and a
+ * rebased view that keeps that unit may still drop it alone. `applyEffects` makes the rest of an
+ * effect's events one unit and leaves it apart, renamed after the unit it makes. The transfer a
+ * payment the story made draws from its account's overdraft link is one (DESIGN §25.10).
  */
 export const APART_GROUP = "apart:";
+
+/** The group a unit kept apart from `group` takes (`APART_GROUP`). */
+export function apartOf(group: string): string {
+  return `${APART_GROUP}${group}`;
+}
 
 /** Assignment: carries the final value (location, status, owner, flags, equipped). */
 export interface SetEvent extends EventBase {
@@ -101,11 +108,11 @@ export interface PostEvent extends EventBase {
   lines: PostingLine[];
   memo: string;
   /**
-   * A payment the story made (a narrated purchase or transfer, DESIGN §9.5): it stands on any path
-   * whatever its accounts cover, so a pack's funds guard lets it take the account it draws on past
-   * what it allows, into overdraft or over its credit limit. The engine only ever puts it past cover
-   * on an account that can run a debt (§25.10). Events recorded before it existed have none: their
-   * funds are checked as ever.
+   * A payment the story made (a narrated purchase or transfer, DESIGN §9.5) on an account that can
+   * run a debt (§25.10): it stands on any path whatever that account covers, so a pack's funds guard
+   * lets it take the account past what it allows, into overdraft or over its credit limit. One the
+   * story paid from cash or savings has none, and its funds are checked as ever, as are those of
+   * events recorded before it existed.
    */
   overdraw?: true;
 }

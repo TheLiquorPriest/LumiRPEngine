@@ -11,6 +11,7 @@ import type { GmView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/backend/ledger-io";
 import { referenceFold } from "../../src/engine/ledger/reference";
+import { lifeOf } from "../../src/engine/life";
 import { paramCandidates } from "../../src/engine/resolve";
 import { scheduleOwners } from "../../src/engine/schedules";
 import { lod1Agents } from "../../src/engine/simulate";
@@ -295,6 +296,58 @@ describe("GM edits", () => {
     await reread(rig, chatId, earlier.id, "Nobody waves back.");
     expect(await knowsDanny(rig, chatId)).toBe(false);
     expect(await shown()).toEqual({ chips: 0, journal: 0 });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("the same edit sent twice while a reply streams is one, so its Undo takes it back for good: no later read makes it again", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await portAlder(rig);
+    rig.host.quietReply = meetsDanny;
+    await rig.turn(chatId, "I wave at the mechanic.", "Danny waves back and tells you his name.");
+    rig.host.quietReply = () => "{}";
+    rig.host.sendUser(chatId, "I wait.");
+    await rig.host.settle();
+    const streaming = await rig.host.start(chatId, { type: "normal" });
+    for (let i = 0; i < 2; i++) expect(rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "unlink", rel: "knows", from: "pov", to: "danny_okafor" }] })).pending).toBe(true);
+    await rig.host.finish(streaming, "Nothing much happens.");
+    expect(await knowsDanny(rig, chatId)).toBe(false);
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "fix");
+    expect(chips).toHaveLength(1);
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chips[0]?.id ?? "", choice: "undo" }));
+    expect(await knowsDanny(rig, chatId)).toBe(true);
+    // A Re-read of the reply works out again what keeps its request: nothing asks for the unlink now.
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    await reread(rig, chatId, reply.id, "Nothing much happens at all.");
+    expect(await knowsDanny(rig, chatId)).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("an edit a Re-read already made so still says what it said once that read's change is undone, and shows again with its own Undo", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await portAlder(rig);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { life: { mode: "auto" } } } }));
+    await rig.turn(chatId, "I look around.", "The street is quiet.");
+    await edit(rig, chatId, { op: "life", entity: "danny_okafor", to: "dead" });
+    const dead = async (): Promise<boolean> => lifeOf(await bothFolds(rig, chatId), "danny_okafor") === "dead";
+    const fixChips = async () => (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "fix");
+    expect(await dead()).toBe(true);
+    // The reply, edited so that it tells of the death and read again: the GM's edit is already so.
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes("propose concrete state changes") ? JSON.stringify({ proposals: [{ type: "life", entity: "danny_okafor", state: "dead" }] }) : "{}");
+    await reread(rig, chatId, reply.id, "Danny collapses in the street and dies.");
+    expect(await dead()).toBe(true);
+    expect(await fixChips()).toHaveLength(0);
+    // Undo the read's change: the GM's edit, made after it, still holds, with its chip and Undo back.
+    const read = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "undo" && c.messageId === reply.id);
+    if (!read) throw new Error("no undo chip for the read");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: read.id, choice: "undo" }));
+    expect(await dead()).toBe(true);
+    const chips = await fixChips();
+    expect(chips).toHaveLength(1);
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chips[0]?.id ?? "", choice: "undo" }));
+    expect(await dead()).toBe(false);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

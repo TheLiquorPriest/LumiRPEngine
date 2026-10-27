@@ -7,7 +7,7 @@ import type { ActionId, ChatId, ChipId, EntityId, InterruptClass, MessageId, Rev
 import type { JsonObject, JsonValue } from "../shared/json";
 import { heldBy } from "../shared/finance";
 import { hasOwn, isRecord } from "../shared/json";
-import type { ChatRun, EventRef, GenerationKind, LedgerEvent, PostEvent, TimelapseTarget } from "../shared/ledger";
+import type { ChatRun, EventRef, GenerationKind, HeldWrite, LedgerEvent, PostEvent, Rec, TimelapseTarget } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, StepConfig, UserSettings } from "../shared/settings";
@@ -39,7 +39,7 @@ import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatTimeOf
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
-import { ownMessage } from "../engine/ledger/path";
+import { activeText, ownMessage } from "../engine/ledger/path";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
@@ -138,9 +138,6 @@ interface LorePhase {
   /** The lore pinned to each helper step (§24.5), read once for the phase: each of its calls reads it first, whatever its lore policy. */
   steps: Partial<Record<StepPurpose, PinnedText[]>>;
 }
-
-/** Chips a read stores for its swipe; a read that replaces it (Re-read edit, Retry read) drops them. */
-const READ_CHIP_KINDS: ReadonlySet<string> = new Set(["undo", "confirm", "decline", "untracked", "choice"]);
 
 /** The model calls of the minds' post phase (`postMinds`): their diagnostics step takes them as its own, beside the read's. */
 const MINDS_POST_CALLS: readonly StepPurpose[] = ["memory", "consolidate"];
@@ -584,16 +581,24 @@ export interface ReadInput {
   recent: string[];
 }
 
-/**
- * A Re-read or Retry read held behind a reply in flight (P2): the write's id, and the swipe and
- * text it reads.
- */
-export interface HeldRead {
+/** What a turn's Timelapse offers are sized from (`turnOffers`). */
+interface TurnOffersInput {
+  chatId: ChatId;
   userId: UserId;
-  writeId: string;
   messageId: MessageId;
   swipeId: number;
-  text: string;
+  kind: GenerationKind;
+  core: LedgerCore;
+  observed: ChainMessage[];
+  bridge: TurnBridge;
+  rec: Rec | undefined;
+  plan: EngineTurnPlan | undefined;
+  /** The words of the turn's own message (`ownMessage`), "" when it has none. */
+  userText: string;
+  /** The POV's hold a span the player's words spent keeps (`holdOf`). */
+  hold: JsonObject;
+  /** The chips the reply's read made itself, beside the swipe's stored ones. */
+  read: readonly ReadChip[];
 }
 
 /** The Timelapse chip for a narrated time skip that can't apply inside the turn (DESIGN §9.4), with every interrupt class at `note`. */
@@ -1900,18 +1905,18 @@ export class Runtime implements TurnHooks {
    * The post phase (DESIGN §5.2, §5.3), before the read commits: `extract` (or world `effects`
    * templates), off-screen `npc.choose` and `choices`, side by side on the post
    * budget. Proposals are sorted by mode (D4 precedence, then bounds); the automatic ones and the
-   * decisions are prepared for the core's read; undo, confirm, decline and choice
-   * chips are stored. With `replace` (a Re-read edit), the read replaces the swipe's earlier one, so
-   * that read's chips go first, the Timelapse offers of the skips it read among them (`readLanded`
-   * makes the new read's). The receipt for a typed action that named nothing (`unfitId`) is about
-   * the player's message, not the reply, so any read of the swipe keeps it.
+   * decisions are prepared for the core's read; undo, confirm, Not tracked and choice chips are
+   * stored. With `replace` (a Re-read edit, a Retry read), the read replaces the swipe's earlier one,
+   * so that read's chips go first (`isReadChip`), the Timelapse offers of the skips it read among
+   * them (`readLanded` makes the new read's). What the turn said of the player's message (a roll, a
+   * receipt for an action played as roleplay or declined, the rest of the message) stays.
    */
   async prepareRead(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, key: string, content: string, context: ReadInput, post: boolean, replace = false, before = "", signal?: AbortSignal): Promise<void> {
     const settings = await this.settings.get(userId);
     // What the engine reads of the reply: none of the JSON blocks the display hides, matched against the
     // whole message when `before` holds the text a Continue went on from (DESIGN §6.7).
     const text = readableReply(before + content, settings.hideJsonBlocks, before.length);
-    if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && (READ_CHIP_KINDS.has(c.kind) || c.id.startsWith(`adv:${messageId}:${swipeId}:`)) && !isUnfitId(c.id, messageId, swipeId));
+    if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && isReadChip(c.id));
     // A read that replaces an earlier one (Re-read, Retry read) reads World Info as it is now, not as that read did under the same key.
     if (replace) this.liveLores.delete(key);
     const bridge = this.bridges.get(chatId);
@@ -2044,10 +2049,19 @@ export class Runtime implements TurnHooks {
       const type = EXTRACTION_TYPES.find((t) => t === p.type);
       if (!type) continue;
       const { mode: typeMode } = effectiveMode(settings, learning, connection, type);
-      const entity = typeof p.entity === "string" ? p.entity : typeof p.who === "string" ? p.who : typeof p.from === "string" ? p.from : undefined;
-      const field = typeof p.field === "string" ? p.field : undefined;
+      // What the change lands on: the entity and field its channel names (a thing's count or
+      // condition, whose bound in Build applies), else the person it names and the field it gives.
+      const target = this.registry.proposals.get(type)?.boundTarget?.(p, ctx) ?? null;
+      const entity = target?.entity ?? (typeof p.entity === "string" ? p.entity : typeof p.who === "string" ? p.who : typeof p.from === "string" ? p.from : undefined);
+      const field = target?.field ?? (typeof p.field === "string" ? p.field : undefined);
       const bounded = boundProposal(this.registry, context.world, context.state, { type, ...(entity ? { entity } : {}), ...(field ? { field } : {}), ...(typeof p.delta === "number" ? { delta: p.delta } : {}) }, { typeMode, ...(settings.extraction[type]?.maxDelta !== undefined ? { typeMaxDelta: settings.extraction[type]?.maxDelta } : {}) });
       if (bounded.mode === "never") continue;
+      // A change its field's range leaves nothing of (a thing at none used up, one mended past new)
+      // changes nothing: no chip, as an automatic change that changes nothing has none.
+      if (bounded.delta === 0 && typeof p.delta === "number" && p.delta !== 0) {
+        this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (its field goes no further)`, userId);
+        continue;
+      }
       // L27: whichever step proposed it (extraction or a world's effects step), on a Re-read too.
       if (type === "time_advance" && skipped) {
         this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (a timelapse turn's time passed as its timelapse)`, userId);
@@ -2227,13 +2241,15 @@ export class Runtime implements TurnHooks {
       stored.push({ id: `choice:${messageId}:${key}:${i}`, kind: "choice", messageId, swipeId, label: choice, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: choice } });
     });
     await this.chips.add(input.chatId, input.userId, stored);
+    // Kept by the read's key, so a read cancelled before its turn commits takes them back (`readStopped`).
+    this.readStored.set(key, stored.map((c) => c.id));
+    if (this.readStored.size > 64) this.readStored.delete(this.readStored.keys().next().value ?? "");
   }
 
   async afterCommit(input: TurnContext): Promise<void> {
     this.meter.close(input.userId);
     const bridge = this.bridges.get(input.chatId);
     if (!bridge) return;
-    await this.heldReadsLanded(input);
     const rec = input.core.chain(input.observed).find((x) => x.id === input.messageId)?.ledger?.swipes[String(input.swipeId)] ?? input.core.journal.messages[input.messageId]?.ledger.swipes[String(input.swipeId)];
     const stored: StoredChip[] = [];
     const at = `${input.messageId}:${input.swipeId}`;
@@ -2292,44 +2308,8 @@ export class Runtime implements TurnHooks {
       const reason = `${u.reason.charAt(0).toUpperCase()}${u.reason.slice(1)}`;
       stored.push({ id: unfitId(input.messageId, input.swipeId, i), kind: "untracked", ...base, label: `${u.label}: played as roleplay`, detail: `${reason}. ${what} played as plain roleplay.`, actions: [], expires: "next_send", payload: {} });
     });
-    const headState = input.core.fold(input.observed).state;
-    const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
-    // A span the player's words spent held the POV where the story has it, typed as one or stated to an
-    // action the turn sped through ("sleep for eight hours"); its Speed through and Continue keep that (DESIGN §8).
-    const hold: JsonObject = bridge.intentOf(userText)?.params.povRoutine === false || plan?.timelapse?.povRoutine === false ? { povRoutine: false } : {};
-    // Time the message asked for that the turn didn't run (DESIGN §9.2): a typed timelapse longer than
-    // a turn runs, offered and never run unasked, or time it lets pass after its actions, never offered
-    // while some of them are left to play.
-    const asked = input.kind === "continue" || plan?.stopped ? undefined : bridge.offerFor(userText);
-    // The time the reply's read already moved the clock, and the time its chips still would (§9.4):
-    // a Timelapse this turn offers counts both, so tapping it never runs the same time twice. Speed
-    // through to an activity's end the clock is already at, or would be, is withdrawn.
-    const told = rec ? clockMinutes(rec.events.slice(rec.pre)) : 0;
-    const pending = asked || (plan?.chips ?? []).some((chip) => chip.kind === "timelapse_offer") ? narratedPending((await this.chips.list(input.chatId, input.userId)).filter((c) => c.messageId === input.messageId && c.swipeId === input.swipeId), bridge.chipsFor(input.content)) : 0;
-    const offers = (plan?.chips ?? []).filter((chip) => !(told + pending > 0 && chip.kind === "timelapse_offer" && chip.target.type === "at" && chip.target.at <= headState.clock + pending));
-    for (const [i, chip] of offers.entries()) {
-      // DESIGN §9.2 wording: "Timelapse to 07:00 (8 h 55 min)?"
-      const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(chipWorld, headState, chip.target.at)}` : "";
-      // A time the reply's read moved the clock toward is that much nearer.
-      const remaining = told > 0 && chip.target.type === "at" ? chip.target.at - headState.clock : chip.remaining;
-      const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(remaining)})?` : `Continue timelapse (${compactSpan(remaining)} left)`;
-      // A Continue of a span the player's message filled keeps its words, as it keeps its hold.
-      const fill: JsonObject = chip.kind === "continue_timelapse" && plan?.fill ? { fill: plan.fill } : {};
-      stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue, ...(chip.povRoutine === false ? { povRoutine: false } : chip.kind === "continue_timelapse" ? hold : {}), ...fill } });
-    }
-    // The asked time is offered as what the reply didn't already tell of it (`offerLeft`), or not at all.
-    const offeredTo = offers.reduce<number | null>((m, chip) => (chip.kind === "timelapse_offer" && chip.target.type === "at" ? Math.max(m ?? chip.target.at, chip.target.at) : m), null);
-    const offer = asked && chipWorld ? offerLeft(this.registry, chipWorld, headState, asked, told, pending, offeredTo) : asked;
-    if (asked && !offer) this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId}: the reply told the time the message asked for (${told} min, ${pending} min waiting), so no Timelapse is offered`, input.userId);
-    if (offer) {
-      const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
-      const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(chipWorld, headState, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
-      const covered = asked?.type === "duration" && offer.type === "duration" ? asked.minutes - offer.minutes : 0;
-      const detail = asked?.type === "duration" && offer.type === "duration" && covered > 0 ? `The reply already told ${compactSpan(covered)} of the ${compactSpan(asked.minutes)} you asked for. Run the other ${compactSpan(offer.minutes)} as a timelapse?` : offer.type === "duration" && offer.minutes > (await this.settings.get(input.userId)).time.askBeyondMinutes ? "That's longer than a skip runs without asking. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
-      // The span as the message spent it: its fill and its hold travel on the chip, so its Timelapse runs as the inline skip would (DESIGN §9.2).
-      const spent = bridge.offerSpent(userText);
-      stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) as JsonValue, ...(spent.fill !== "" ? { fill: spent.fill } : {}), ...(spent.hold ? { povRoutine: false } : {}) } });
-    }
+    const hold = holdOf(bridge, userText, plan);
+    stored.push(...(await this.turnOffers({ chatId: input.chatId, userId: input.userId, messageId: input.messageId, swipeId: input.swipeId, kind: input.kind, core: input.core, observed: input.observed, bridge, rec, plan, userText, hold, read: bridge.chipsFor(input.content) })));
     // What the turn didn't play of the message (DESIGN §5.2, §11): the queued actions left when the
     // queue stopped, then the words no action reads. One tap sends it as the next message, as a
     // suggested choice does, and it plays as the next turn, with its own prices, time and checks.
@@ -2359,39 +2339,106 @@ export class Runtime implements TurnHooks {
     this.changed(chatId, userId);
   }
 
-  /** Re-reads and Retry reads held behind a reply in flight (P2), by chat, until they land. */
-  private readonly heldReads = new Map<ChatId, HeldRead[]>();
+  /** The chip ids each read stored (`prepareRead`), by its key: a read cancelled midway takes them back. */
+  private readonly readStored = new Map<string, string[]>();
 
   /**
-   * A Re-read or Retry read landed (DESIGN §9.4): a narrated time skip it read that runs longer than
-   * a skip may without asking is offered as a Timelapse, as a turn's commit offers its own read's
-   * (`afterCommit`).
+   * The reply's read was cancelled: its turn commits stopped and unread (DESIGN §5.1 step 6), so
+   * the chips the read stored for it go, and its Retry read reads it again.
    */
-  async readLanded(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, text: string): Promise<void> {
-    const bridge = this.bridges.get(chatId);
-    if (!bridge) return;
-    await this.chips.add(chatId, userId, bridge.chipsFor(text).map((chip, i) => skipAheadChip(`adv:${messageId}:${swipeId}:${i}`, { messageId, swipeId }, chip.target, chip.reason)));
-    this.changed(chatId, userId);
-  }
-
-  /** A Re-read or Retry read held behind the reply in flight (P2): its offers wait until it lands. */
-  readHeld(chatId: ChatId, read: HeldRead): void {
-    this.heldReads.set(chatId, [...(this.heldReads.get(chatId) ?? []), read].slice(-8));
+  async readStopped(input: TurnContext): Promise<void> {
+    const ids = new Set(this.readStored.get(input.generationId) ?? []);
+    this.readStored.delete(input.generationId);
+    if (ids.size === 0) return;
+    await this.chips.removeWhere(input.chatId, input.userId, (c) => ids.has(c.id));
+    this.changed(input.chatId, input.userId);
   }
 
   /**
-   * The held reads that landed as a reply's window closed, with its commit (P2): their offers come
-   * now, and one the core refused has none.
+   * Writes that landed (P2): a Re-read or Retry read offers what its read found (`readLanded`),
+   * whether it landed at once or behind a reply, however that reply's window closed. Of a swipe's
+   * reads that landed together, the last is the one that stands.
    */
-  private async heldReadsLanded(input: TurnContext): Promise<void> {
-    const waiting = this.heldReads.get(input.chatId);
-    if (!waiting) return;
-    const { held, refused = [] } = input.core.journal;
-    const still = (r: HeldRead): boolean => held.some((h) => h.write.id === r.writeId);
-    const kept = waiting.filter(still);
-    if (kept.length > 0) this.heldReads.set(input.chatId, kept);
-    else this.heldReads.delete(input.chatId);
-    for (const r of waiting) if (!still(r) && !refused.some((x) => x.write.id === r.writeId)) await this.readLanded(input.chatId, r.userId, r.messageId, r.swipeId, r.text);
+  async writesLanded(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; writes: HeldWrite[] }): Promise<void> {
+    const reads = new Map<string, { messageId: MessageId; swipeId: number }>();
+    for (const w of input.writes) if (w.kind === "reread" || w.kind === "retry_read") reads.set(`${w.messageId}:${w.swipeId}`, { messageId: w.messageId, swipeId: w.swipeId });
+    for (const r of reads.values()) await this.readLanded(input, r.messageId, r.swipeId);
+  }
+
+  /**
+   * A Re-read or Retry read landed (DESIGN §9.4): a narrated skip it read that runs longer than a
+   * skip may without asking is offered as a Timelapse, as a turn's commit offers its own read's
+   * (`afterCommit`). While the reply is still the latest, so its turn's offers stand, those are
+   * sized again against the new read: the time the player's message asked for, and the plan's.
+   */
+  private async readLanded(at: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[] }, messageId: MessageId, swipeId: number): Promise<void> {
+    const bridge = this.bridges.get(at.chatId);
+    const chain = at.core.chain(at.observed);
+    const m = chain.find((x) => x.id === messageId);
+    if (!bridge || !m) return;
+    const read = bridge.chipsFor(activeText(m));
+    const chips: StoredChip[] = [];
+    const rec = m.ledger?.swipes[String(swipeId)] ?? at.core.journal.messages[messageId]?.ledger.swipes[String(swipeId)];
+    const plan = rec ? bridge.planFor(rec.seed) : undefined;
+    if (plan && chain.at(-1)?.id === messageId) {
+      const idx = at.observed.findIndex((x) => x.id === messageId);
+      const user = ownMessage(at.observed.slice(0, idx < 0 ? at.observed.length : idx));
+      const userText = user ? (user.swipes[user.swipeId] ?? "") : "";
+      const own = `${messageId}:${swipeId}`;
+      await this.chips.removeWhere(at.chatId, at.userId, (c) => c.messageId === messageId && c.swipeId === swipeId && (c.id === `tlo:${own}` || (c.id.startsWith(`tl:${own}:`) && /^\d+$/.test(c.id.slice(`tl:${own}:`.length)))));
+      chips.push(...(await this.turnOffers({ ...at, messageId, swipeId, kind: "normal", bridge, rec, plan, userText, hold: holdOf(bridge, userText, plan), read })));
+    }
+    chips.push(...read.map((chip, i) => skipAheadChip(`adv:${messageId}:${swipeId}:${i}`, { messageId, swipeId }, chip.target, chip.reason)));
+    await this.chips.add(at.chatId, at.userId, chips);
+    this.changed(at.chatId, at.userId);
+  }
+
+  /**
+   * The turn's Timelapse offers, sized against what its reply's read told (DESIGN §9.2, §9.4): the
+   * plan's own (a Speed through, a Continue timelapse), and the time the player's message asked for,
+   * as what the reply didn't already tell of it (`offerLeft`).
+   */
+  private async turnOffers(input: TurnOffersInput): Promise<StoredChip[]> {
+    const { bridge, rec, plan, userText, hold, read } = input;
+    const stored: StoredChip[] = [];
+    const at = `${input.messageId}:${input.swipeId}`;
+    const base = { messageId: input.messageId, swipeId: input.swipeId };
+    const headState = input.core.fold(input.observed).state;
+    const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
+    // Time the message asked for that the turn didn't run (DESIGN §9.2): a typed timelapse longer than
+    // a turn runs, offered and never run unasked, or time it lets pass after its actions, never offered
+    // while some of them are left to play.
+    const asked = input.kind === "continue" || plan?.stopped ? undefined : bridge.offerFor(userText);
+    // The time the reply's read already moved the clock, and the time its chips still would (§9.4):
+    // a Timelapse this turn offers counts both, so tapping it never runs the same time twice. Speed
+    // through to an activity's end the clock is already at, or would be, is withdrawn.
+    const told = rec ? clockMinutes(rec.events.slice(rec.pre)) : 0;
+    const pending = asked || (plan?.chips ?? []).some((chip) => chip.kind === "timelapse_offer") ? narratedPending((await this.chips.list(input.chatId, input.userId)).filter((c) => c.messageId === input.messageId && c.swipeId === input.swipeId), read) : 0;
+    const offers = (plan?.chips ?? []).filter((chip) => !(told + pending > 0 && chip.kind === "timelapse_offer" && chip.target.type === "at" && chip.target.at <= headState.clock + pending));
+    for (const [i, chip] of offers.entries()) {
+      // DESIGN §9.2 wording: "Timelapse to 07:00 (8 h 55 min)?"
+      const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(chipWorld, headState, chip.target.at)}` : "";
+      // A time the reply's read moved the clock toward is that much nearer.
+      const remaining = told > 0 && chip.target.type === "at" ? chip.target.at - headState.clock : chip.remaining;
+      const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(remaining)})?` : `Continue timelapse (${compactSpan(remaining)} left)`;
+      // A Continue of a span the player's message filled keeps its words, as it keeps its hold.
+      const fill: JsonObject = chip.kind === "continue_timelapse" && plan?.fill ? { fill: plan.fill } : {};
+      stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue, ...(chip.povRoutine === false ? { povRoutine: false } : chip.kind === "continue_timelapse" ? hold : {}), ...fill } });
+    }
+    // The asked time is offered as what the reply didn't already tell of it (`offerLeft`), or not at all.
+    const offeredTo = offers.reduce<number | null>((m, chip) => (chip.kind === "timelapse_offer" && chip.target.type === "at" ? Math.max(m ?? chip.target.at, chip.target.at) : m), null);
+    const offer = asked && chipWorld ? offerLeft(this.registry, chipWorld, headState, asked, told, pending, offeredTo) : asked;
+    if (asked && !offer) this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId}: the reply told the time the message asked for (${told} min, ${pending} min waiting), so no Timelapse is offered`, input.userId);
+    if (offer) {
+      const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
+      const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(chipWorld, headState, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
+      const covered = asked?.type === "duration" && offer.type === "duration" ? asked.minutes - offer.minutes : 0;
+      const detail = asked?.type === "duration" && offer.type === "duration" && covered > 0 ? `The reply already told ${compactSpan(covered)} of the ${compactSpan(asked.minutes)} you asked for. Run the other ${compactSpan(offer.minutes)} as a timelapse?` : offer.type === "duration" && offer.minutes > (await this.settings.get(input.userId)).time.askBeyondMinutes ? "That's longer than a skip runs without asking. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
+      // The span as the message spent it: its fill and its hold travel on the chip, so its Timelapse runs as the inline skip would (DESIGN §9.2).
+      const spent = bridge.offerSpent(userText);
+      stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) as JsonValue, ...(spent.fill !== "" ? { fill: spent.fill } : {}), ...(spent.hold ? { povRoutine: false } : {}) } });
+    }
+    return stored;
   }
 
   changed(chatId: ChatId, userId: UserId): void {
@@ -3398,10 +3445,25 @@ function unfitId(messageId: MessageId, swipeId: number, index: number): string {
   return index === 0 ? `unfit:${messageId}:${swipeId}` : `unfit:${messageId}:${swipeId}:${index}`;
 }
 
-/** Whether a chip's id is one of a swipe's dropped-action receipts (`unfitId`). */
-function isUnfitId(id: string, messageId: MessageId, swipeId: number): boolean {
-  const head = unfitId(messageId, swipeId, 0);
-  return id === head || id.startsWith(`${head}:`);
+/** The id prefixes of the chips a reply's read stores (`prepareRead`) or offers (`readLanded`). */
+const READ_CHIP_PREFIXES = ["undo:", "confirm:", "untracked:", "choice:", "unpriced:", "adv:"] as const;
+
+/**
+ * Whether a chip is the reply's read's: its undo, confirm, Not tracked and choice chips, an unpriced
+ * purchase's, and the Timelapse offers of the skips it read. A read that replaces it drops them; the
+ * turn's own chips about the player's message are none of them.
+ */
+function isReadChip(id: string): boolean {
+  return READ_CHIP_PREFIXES.some((p) => id.startsWith(p));
+}
+
+/**
+ * The POV's hold a span the player's words spent keeps: typed as one, or stated to an action the turn
+ * sped through ("sleep for eight hours"), its Speed through and Continue keep the POV where the story
+ * has it (DESIGN §8).
+ */
+function holdOf(bridge: TurnBridge, userText: string, plan: EngineTurnPlan | undefined): JsonObject {
+  return bridge.intentOf(userText)?.params.povRoutine === false || plan?.timelapse?.povRoutine === false ? { povRoutine: false } : {};
 }
 
 /** A swipe's Send chip holding the rest of the message its turn didn't play (DESIGN §5.2, §11). */

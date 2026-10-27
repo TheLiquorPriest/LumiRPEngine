@@ -90,21 +90,34 @@ export interface Claim {
   /** The player character's own thing the world had elsewhere: brought to hand (or here) rather than made (DESIGN §9.4). Absent in older records. */
   existing?: string;
   /**
-   * Money the player said they had, in minor units: what the action pays over in cash. As it plays,
-   * only what the claimer's carried cash lacks of it is added (DESIGN §9.4), and nothing when they
-   * carry that much by then.
+   * Money the player said they had, in minor units: the amount they agreed to have added for. As the
+   * action plays, only what the claimer's carried cash lacks of what it pays is added (DESIGN §9.4),
+   * and nothing when they carry that much by then, or when it pays more than this (raised on the
+   * intent gate's Edit), which no one asked them about.
    */
   cents?: number;
+  /**
+   * Money's: the param of the action that plays (the economy Pay's `amount`) holding what it pays.
+   * Read as it plays, so an edit of that pick is what the claim covers; without it, `cents`.
+   */
+  amountParam?: string;
 }
 
 /**
  * The action the player's words named, when another plays in its place (money handed over plays as
- * the economy's Pay, DESIGN §9.4), with the picks the two share: its requirements on those picks
- * still hold the one that plays (Give's `at(to, here)`: cash goes only to someone here).
+ * the economy's Pay, DESIGN §9.4): its requirements on the picks it was given still hold the one
+ * that plays (Give's `at(to, here)`: cash goes only to someone here).
  */
 export interface Needs {
   action: ActionId;
+  /** Its picks the action that plays doesn't carry, as the read gave them. */
   params: JsonObject;
+  /**
+   * Its picks the action that plays carries, each by that action's param (Give's `to` is Pay's
+   * `to`): read from that action's params as it plays, so an edit of them (the intent gate's Edit)
+   * holds it to what it now names.
+   */
+  shared: Record<string, string>;
 }
 
 /** One of the input's actions after the first, as `interpret` read it: an engine action, its params, and its words. */

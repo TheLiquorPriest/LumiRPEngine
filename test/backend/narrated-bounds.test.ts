@@ -1,9 +1,11 @@
 // Narrated-change channels and their bounds (DESIGN §9.4, §11): a time skip under `confirm` waits on
 // a confirm chip and applies whole on Apply, as auto applies it, paused clock or not, and a fight
-// holds none of it back; a reply's regard moves as far as the story tells, each axis inside its range.
+// holds none of it back; a reply's regard moves as far as the story tells, each axis inside its range;
+// a thing's count and condition answer to the bound the world's author set on them in Build.
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
+import type { WorldState } from "../../src/engine/state";
 import { regardAxes } from "../../src/packs/relationships/core/index";
 import type { JsonObject } from "../../src/shared/json";
 import { Rig } from "../support/rig";
@@ -259,5 +261,46 @@ describe("a reply's regard", () => {
   test("an axis stays inside its range however far the story moves it", async () => {
     const got = await chat([{ type: "regard", from: "danny_okafor", to: "pov", axis: "trust", delta: 500 }], { regard: { mode: "auto" } });
     expect((await got.axes()).trust).toBe(100);
+  });
+});
+
+describe("a thing's count and condition under the bound its world's author set in Build", () => {
+  /** The item kind's count and condition, bounded by the world's author as `bound`. */
+  const authored = (bound: JsonObject) => async (rig: Rig, worldId: string) => {
+    const fields = { qty: { type: "number", default: 1, min: 0, bound }, condition: { type: "number", default: 100, min: 0, max: 100, bound } };
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "kinds", id: "item", value: { id: "item", label: "Item", fields } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+  };
+  // Two more phones, and a crack across this one; both types apply without asking on their own.
+  const told = [
+    { type: "quantity", entity: "pov", item: "pov_phone", delta: 2 },
+    { type: "item_condition", entity: "pov", item: "pov_phone", delta: -40 },
+  ];
+  const auto = { quantity: { mode: "auto" }, item_condition: { mode: "auto" } };
+  /** The phone's count and condition as stored; null where nothing is. */
+  const phone = async (state: () => Promise<WorldState>) => {
+    const fields = (await state()).entities.pov_phone?.fields;
+    return { qty: fields?.qty ?? null, condition: fields?.condition ?? null };
+  };
+
+  test("never: the reply's change to either is left alone, with no chip", async () => {
+    const got = await chat(told, auto, { world: authored({ mode: "never" }) });
+    expect(await phone(got.state)).toEqual({ qty: null, condition: null });
+    expect(got.chips.filter((c) => c.kind === "undo" || c.kind === "confirm" || c.kind === "untracked")).toEqual([]);
+    expect(got.rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("confirm: each waits on Apply though its type applies without asking", async () => {
+    const got = await chat(told, auto, { world: authored({ mode: "confirm" }) });
+    expect(await phone(got.state)).toEqual({ qty: null, condition: null });
+    const confirms = got.chips.filter((c) => c.kind === "confirm");
+    expect(confirms).toHaveLength(2);
+    for (const c of confirms) got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: c.id, choice: "confirm" }));
+    expect(await phone(got.state)).toEqual({ qty: 3, condition: 60 });
+  });
+
+  test("a largest change per turn cuts each to it, from the field's default when nothing is stored", async () => {
+    const got = await chat(told, auto, { world: authored({ mode: "auto", maxDelta: 1 }) });
+    expect(await phone(got.state)).toEqual({ qty: 2, condition: 99 });
   });
 });

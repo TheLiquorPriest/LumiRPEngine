@@ -318,6 +318,13 @@ export function decodeJournal(text: string | null, chatId: ChatId, run: Pick<Cha
 
 type Op = (core: LedgerCore, observed: ChainMessage[]) => void | Promise<void>;
 
+/** Of the writes held before an operation, those it landed: no longer held, and not refused (P2). */
+function heldLanded(before: readonly HeldWrite[], journal: Journal): HeldWrite[] {
+  const still = new Set(journal.held.map((h) => h.write.id));
+  const refused = new Set((journal.refused ?? []).map((r) => r.write.id));
+  return before.filter((w) => !still.has(w.id) && !refused.has(w.id));
+}
+
 export interface TurnContext {
   chatId: ChatId;
   userId: UserId;
@@ -328,7 +335,7 @@ export interface TurnContext {
   /** The swipe the turn wrote (a Continue: the head's displayed swipe). */
   swipeId: number;
   kind: GenerationKind;
-  /** For `beforeCommit`, the text the core will read (a Continue's suffix); for `afterCommit`, the saved content. */
+  /** The text the reply's read reads: the whole reply, or a Continue's suffix (L13). */
   content: string;
   /** The reply read's signal: Cancel on the activity line aborts it, and the reads still waiting are skipped. */
   signal: AbortSignal;
@@ -405,6 +412,16 @@ export interface TurnHooks {
   inputs(chatId: ChatId, userId: UserId): TurnInputs;
   beforeCommit(input: TurnContext): Promise<void>;
   afterCommit(input: TurnContext): Promise<void>;
+  /**
+   * The reply's read was cancelled, so its turn commits stopped and unread, with Retry read
+   * (DESIGN §5.1 step 6): nothing the read prepared stands for it.
+   */
+  readStopped(input: TurnContext): Promise<void>;
+  /**
+   * Writes that landed, in order (P2): one made at once, or those held behind a reply that landed
+   * as its window closed, however it closed. One the core refused is not among them.
+   */
+  writesLanded(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; writes: HeldWrite[] }): Promise<void>;
   changed(chatId: ChatId, userId: UserId): void;
   /** A swipe or regenerate is a Re-run or a Re-narrate (P3; `settings.swipeDefault` or a one-shot choice). */
   kindOf(input: { chatId: ChatId; userId: UserId; kind: GenerationKind }): Promise<GenerationKind>;
@@ -924,19 +941,22 @@ export class LedgerService {
     const turn = p && messageId && userId ? { chatId, userId, core, observed, generationId, messageId, swipeId, kind: p.kind, signal: flight.signal } : null;
     const diag = at && turn ? this.diag : null;
     if (at && diag) diag.begin(at, STEP_LABEL.read);
+    // What the reply's read reads: a Continue only what it added (L13), else the whole reply.
+    const text = p?.kind === "continue" ? (p.captured && content.length >= p.captured.len ? content.slice(p.captured.len) : "") : content;
     try {
       if (this.hooks && turn && p && p.kind !== "impersonate") {
         const hooks = this.hooks;
-        const text = p.kind === "continue" ? (p.captured && content.length >= p.captured.len ? content.slice(p.captured.len) : "") : content;
         if (text !== "") await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
         else if (at && diag) diag.skipped(at, "read", "read", "the reply had no new text to read");
       }
-      if (flight.signal.aborted) core.stopped({ generationId, content }, observed);
-      else {
+      if (flight.signal.aborted) {
+        core.stopped({ generationId, content }, observed);
+        if (this.hooks && turn) await this.hooks.readStopped({ ...turn, content: text });
+      } else {
         core.ended({ generationId, ...(messageId ? { messageId } : {}), content }, observed);
         if (this.hooks && turn) {
           const hooks = this.hooks;
-          await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content })) : hooks.afterCommit({ ...turn, content }));
+          await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: text })) : hooks.afterCommit({ ...turn, content: text }));
         }
       }
     } finally {
@@ -1497,9 +1517,10 @@ export class LedgerService {
     await this.run(
       chatId,
       userId,
-      (core, observed) => {
+      async (core, observed) => {
         core.sync(observed);
         result = core.write(w, observed);
+        if (result.applied) await this.hooks?.writesLanded({ chatId, userId, core, observed, writes: [w] });
       },
       w,
     );
@@ -1720,7 +1741,11 @@ export class LedgerService {
           await giveWay();
           const observed = this.observe(chatId, slot.userId, await this.host.chats.messages(chatId, slot.userId));
           await slot.core.prepareWorlds(observed, write);
+          // Writes held behind a reply land as its window closes, whichever op closes it (P2).
+          const held = slot.core.journal.held.map((h) => h.write);
           await op(slot.core, observed);
+          const landed = held.length > 0 ? heldLanded(held, slot.core.journal) : [];
+          if (landed.length > 0) await this.hooks?.writesLanded({ chatId, userId: slot.userId, core: slot.core, observed, writes: landed });
           await this.persist(chatId, slot);
           await this.flush(chatId, slot);
           this.hooks?.changed(chatId, slot.userId);

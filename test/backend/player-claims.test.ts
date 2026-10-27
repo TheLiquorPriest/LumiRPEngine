@@ -273,6 +273,45 @@ describe("limits in every mode", () => {
     expect((await journal(rig, chatId)).filter((l) => l.counterparty === DANNY || l.cents > 0)).toEqual([]);
   });
 
+  describe("the intent gate's Edit of the handover", () => {
+    const MARCUS = "marcus_delgado";
+    /** "I hand Danny $100" with $85 on them, Add on the claim's question, then the intent gate's Edit with `edit`, and the reply. */
+    async function edited(edit: JsonObject): Promise<{ rig: Rig; chatId: string }> {
+      const { rig, chatId } = await chat({ mode: "real", capped: false });
+      for (const patch of [{ gates: { intent: true } }, { minds: { enabled: false } }]) rig.body(await rig.send({ type: "lre.settings.set", patch }));
+      reading(rig, give("$100", "money"));
+      expect((await send(rig, chatId, "I hand Danny $100.")).halted).toBe("cancelled");
+      const ask = (await chips(rig, chatId)).find((c) => c.kind === "claim");
+      expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: ask?.id, choice: "add" })).applied).toBe(true);
+      expect((await rig.host.start(chatId, { type: "regenerate" })).halted).toBe("cancelled");
+      const gate = (await chips(rig, chatId)).find((c) => c.kind === "intent_gate");
+      expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "edit", payload: { params: { to: DANNY, amount: 10000, method: "cash", ...edit } } })).applied).toBe(true);
+      await rig.host.finish(await rig.host.start(chatId, { type: "regenerate" }), "You count out the money.");
+      return { rig, chatId };
+    }
+    /** What came into the player character's accounts and went to `to`, as the journal shows it. */
+    const moved = async (rig: Rig, chatId: string, to: string): Promise<number[][]> => (await journal(rig, chatId)).filter((l) => l.cents > 0 || l.counterparty === to).map((l) => [l.cents, l.counterparty === to ? 1 : 0]);
+
+    test("to someone who isn't there it plays as plain roleplay, as the give would: nothing is added and nothing moves", async () => {
+      const { rig, chatId } = await edited({ to: MARCUS });
+      expect(await moved(rig, chatId, MARCUS)).toEqual([]);
+      expect(await moved(rig, chatId, DANNY)).toEqual([]);
+      const shown = await chips(rig, chatId);
+      expect(shown.some((c) => c.kind === "claimed")).toBe(false);
+      expect(shown.filter((c) => c.kind === "untracked").map((c) => c.label)).toEqual([expect.stringMatching(/^Pay\b/)]);
+    });
+
+    test("a lower amount adds only what the cash lacks of it; a higher one adds nothing the player wasn't asked about", async () => {
+      const lower = await edited({ amount: 9000 });
+      expect(await moved(lower.rig, lower.chatId, DANNY)).toEqual(expect.arrayContaining([[500, 0], [-9000, 1]]));
+      expect((await moved(lower.rig, lower.chatId, DANNY)).filter(([cents]) => cents !== undefined && cents > 0)).toEqual([[500, 0]]);
+      expect((await chips(lower.rig, lower.chatId)).find((c) => c.kind === "claimed")?.label).toContain("$5.00");
+      const higher = await edited({ amount: 12000 });
+      expect((await moved(higher.rig, higher.chatId, DANNY)).filter(([cents]) => cents !== undefined && cents > 0)).toEqual([]);
+      expect((await chips(higher.rig, higher.chatId)).some((c) => c.kind === "claimed")).toBe(false);
+    });
+  });
+
   test("capped Make it real asks for a thing over the cap and makes one under it", async () => {
     const capped = { mode: "real", capped: true } as const;
     const over = await chat(capped);

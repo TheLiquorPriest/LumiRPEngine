@@ -143,6 +143,8 @@ export class Harness {
       inputs: () => ({ revision: "", settings: "", preset: "", presetWrites: "" }),
       beforeCommit: noop,
       afterCommit: noop,
+      readStopped: noop,
+      writesLanded: noop,
       changed: () => undefined,
       kindOf: async ({ kind }) => {
         const renarrate = this.renarrateNext && (kind === "swipe" || kind === "regenerate");

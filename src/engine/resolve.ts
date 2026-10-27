@@ -190,16 +190,22 @@ function firstUnmet(action: ActionDef, env: ExprEnv): Failure | null {
 /**
  * What keeps the action the player's words named (`needs`) from holding one that plays in its place
  * (DESIGN §9.4): the first of its requirements on the picks it was given that doesn't hold, a hard
- * lock first; its requirements on anything else (the money it never was) are left out. Null when
- * they all hold, or the action is gone.
+ * lock first; its requirements on anything else (the money it never was) are left out. The picks the
+ * two share are the playing action's `params`, as it plays now. Null when they all hold, or the
+ * action is gone.
  */
-export function unmetNeeds(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, needs: Needs): Failure | null {
+export function unmetNeeds(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, needs: Needs, params: JsonObject): Failure | null {
   const named = findAction(reg, world, needs.action);
   if (!named) return null;
-  const given = (name: string): boolean => Object.prototype.hasOwnProperty.call(needs.params, name);
+  const picks: JsonObject = { ...needs.params };
+  for (const [name, from] of Object.entries(needs.shared)) {
+    const value = params[from];
+    if (value !== undefined) picks[name] = value;
+  }
+  const given = (name: string): boolean => Object.prototype.hasOwnProperty.call(picks, name);
   const reads = (req: Expr): string[] => identifiers(req).filter((name) => Object.prototype.hasOwnProperty.call(named.params, name));
   const action: ActionDef = { ...named, params: Object.fromEntries(Object.entries(named.params).filter(([name]) => given(name))), requires: named.requires.filter((req) => reads(requirementExpr(req)).every(given)) };
-  const p = prepare(reg, world, state, { action, params: needs.params });
+  const p = prepare(reg, world, state, { action, params: picks });
   return "code" in p ? p : firstUnmet(action, scopeEnv({ reg, ctx: reg.context(world, state), bindings: p.bindings, vars: p.vars }));
 }
 
@@ -304,7 +310,7 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
 
   const env = scopeEnv({ reg, ctx: w.ctx, bindings: p.bindings, vars: p.vars });
   const itself = firstUnmet(p.action, env);
-  const named = opts.needs ? unmetNeeds(reg, w.world, w.state, opts.needs) : null;
+  const named = opts.needs ? unmetNeeds(reg, w.world, w.state, opts.needs, req.params ?? {}) : null;
   // A hard lock vetoes first, whichever action's it is.
   const unmet = itself?.hard ? itself : named?.hard ? named : (itself ?? named);
   if (unmet !== null) return { ...base, actor: p.actor, failed: unmet, events: w.events.slice(start) };

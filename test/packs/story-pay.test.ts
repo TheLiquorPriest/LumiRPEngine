@@ -4,7 +4,9 @@
 // transfer moves nothing. The way the prose names takes the payment when it can run a debt, and Pay
 // another way can move it back there. Pay another way puts the whole payment right, its overdraft
 // fee and linked transfer included, and a fee alone past the limit doesn't read as nothing covering
-// the payment. A rebased view never drops the payment for its overdraft link.
+// the payment. On a rebased view only a payment that runs a debt stands past what its account covers:
+// one from cash or savings drops whole, and the overdraft transfer a payment brought stands only
+// with it. Edit amount never takes cash or savings below zero either.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
@@ -16,6 +18,7 @@ import { materializeAll } from "../../src/engine/materialize";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { createRng } from "../../src/engine/rng";
 import { Working } from "../../src/engine/working";
+import { journalOf } from "../../src/packs/economy/core/journal";
 import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "./riverton";
 import { startState } from "./support";
@@ -225,5 +228,83 @@ describe("a rebased view", () => {
     expect(applied).toEqual(bought.applied.filter((e) => !apart.includes(e)));
     expect([branch.state.accounts.checking, branch.state.accounts.savings]).toEqual([2000 - total, 1000]);
     expect(owned(branch)).toBe(true);
+  });
+
+  test("where the payment itself can't land, the overdraft transfer it brought drops with it: savings and checking stay as they were, and no compass", () => {
+    const w = setup((world) => {
+      frozen("card")(world);
+      overdraft({ overdraft: "linked", overdraft_link: "savings" })(world);
+    });
+    holding(w, { cash: 1000, checking: 2000, savings: 50000 });
+    const before = structuredClone(w.state);
+    const bought = narrated(w, COMPASS);
+    expect(bought.rejected).toEqual([]);
+    const total = drawn(bought.applied, "checking");
+    // On its own path the link moves what checking lacks.
+    expect([w.state.accounts.checking, w.state.accounts.savings]).toEqual([0, 50000 - (total - 2000)]);
+    // The other branch: checking was frozen before the reply.
+    const branch = new Working(reg, w.world, before);
+    expect(branch.apply({ type: "economy.status", data: { account: "checking", status: "frozen" } })).toBeNull();
+    expect(applyValidUnits(reg, bought.applied, branch.state, (s) => reg.context(branch.world, s))).toEqual([]);
+    expect([branch.state.accounts.checking, branch.state.accounts.savings]).toEqual([2000, 50000]);
+    expect(owned(branch)).toBe(false);
+  });
+
+  test("a cash purchase the story made, on a branch whose wallet can't cover it, drops whole: no negative wallet, no history line, no compass", () => {
+    const w = setup();
+    holding(w, { cash: 20000 });
+    const before = structuredClone(w.state);
+    const bought = narrated(w, { ...COMPASS, method: "cash" });
+    expect(bought.rejected).toEqual([]);
+    const total = drawn(bought.applied, "cash");
+    expect(w.state.accounts.cash).toBe(20000 - total);
+    // The other branch: the wallet holds $50.00.
+    const branch = new Working(reg, w.world, before);
+    holding(branch, { cash: 5000 });
+    const lines = journalOf(branch.state, "cash").length;
+    expect(applyValidUnits(reg, bought.applied, branch.state, (s) => reg.context(branch.world, s))).toEqual([]);
+    expect(branch.state.accounts.cash).toBe(5000);
+    expect(journalOf(branch.state, "cash")).toHaveLength(lines);
+    expect(owned(branch)).toBe(false);
+  });
+
+  test("a payment the story took from savings, nothing else covering it or able to run a debt, drops whole on a branch whose savings can't cover it", () => {
+    const w = setup(frozen("checking", "card"));
+    holding(w, { cash: 1000, savings: 60000 });
+    const before = structuredClone(w.state);
+    const paid = narrated(w, { type: "transfer", from: "you", to: "maya", cents: 50000 });
+    expect(paid.rejected).toEqual([]);
+    expect(w.state.accounts.savings).toBe(10000);
+    // The other branch: savings holds $200.00.
+    const branch = new Working(reg, w.world, before);
+    holding(branch, { savings: 20000 });
+    expect(applyValidUnits(reg, paid.applied, branch.state, (s) => reg.context(branch.world, s))).toEqual([]);
+    expect(branch.state.accounts.savings).toBe(20000);
+  });
+});
+
+describe("Edit amount on a purchase the story made", () => {
+  test("from cash, a price the wallet can't cover is refused and the wallet never goes below zero", () => {
+    const w = setup();
+    holding(w, { cash: 20000 });
+    const bought = narrated(w, { ...COMPASS, method: "cash" });
+    const total = drawn(bought.applied, "cash");
+    const left = 20000 - total;
+    expect(w.state.accounts.cash).toBe(left);
+    const repriced = w.ctx.service("economy.reprice")(w.ctx, bought.applied, total + left + 10000);
+    if (!Array.isArray(repriced)) throw new Error(repriced.reason);
+    expect(applyValidUnits(reg, repriced, w.state, (s) => reg.context(w.world, s))).toEqual([]);
+    expect(w.state.accounts.cash).toBe(left);
+  });
+
+  test("past the card's limit, the player's price stands as the story's payment did", () => {
+    const w = setup();
+    holding(w, { cash: 1000, checking: 2000, card: -397000 });
+    const bought = narrated(w, COMPASS);
+    const total = drawn(bought.applied, "card");
+    const repriced = w.ctx.service("economy.reprice")(w.ctx, bought.applied, total + 10000);
+    if (!Array.isArray(repriced)) throw new Error(repriced.reason);
+    expect(applyValidUnits(reg, repriced, w.state, (s) => reg.context(w.world, s))).toHaveLength(repriced.length);
+    expect(w.state.accounts.card).toBe(-397000 - total - 10000);
   });
 });

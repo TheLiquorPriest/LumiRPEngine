@@ -273,6 +273,12 @@ export interface ProposalChannelDef {
   boundField: FieldType | "spawn" | "knows" | "life" | "routine";
   validate(proposal: JsonObject, ctx: ReadContext): Rejection | null;
   toEffects(proposal: JsonObject, ctx: ReadContext): EffectSpec[];
+  /**
+   * The entity and field the proposal changes, when that isn't its own `entity` and `field` (a
+   * thing's count, its condition): their bound in Build and their range apply to it (DESIGN §11).
+   * Null when the proposal names nothing that is there.
+   */
+  boundTarget?(proposal: JsonObject, ctx: ReadContext): { entity: EntityId; field: FieldId } | null;
 }
 
 export interface LintRule {

@@ -713,7 +713,7 @@ Extends `thing`.
 | `notable` | Notable | bool |  |  |  |  | live from gear 1 |
 | `overdue` | Overdue | bool |  |  |  |  | locked |
 | `piece` | Kit piece | text |  |  |  |  | locked |
-| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2; bound confirm |
+| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2 |
 | `slot` | Equip slot | text |  |  |  |  | live from gear 3 |
 | `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |
 | `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |

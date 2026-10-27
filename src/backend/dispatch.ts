@@ -41,6 +41,7 @@ import { currentStage, stepTracks } from "../engine/tracks";
 import { canSeeEntity, canSeePlace, playerTrack, shownTrackId } from "../engine/visibility";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import type { ChainMessage } from "../engine/ledger/chain";
+import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord } from "../engine/ledger/path";
 import type { StoredChip } from "./chips";
 import { toChain } from "./ledger-io";
@@ -237,6 +238,22 @@ export class Dispatcher {
     const wanted = JSON.stringify(events);
     const entry = rec.post.findLast((p) => p.kind === "confirm" && JSON.stringify(p.events) === wanted);
     return entry ? entry.events.flatMap((_, index) => (rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index) ? [] : [{ in: "post" as const, seq: entry.seq, index }])) : [];
+  }
+
+  /**
+   * A chip's events as the story stands folds them (DESIGN §4.3): less what was undone and what a
+   * rebased view dropped there (an overdraft transfer whose link can't spare it, or the payment
+   * itself), by `refs`, where they are in `rec` (`refsTo`), one each in order. With refs that don't
+   * line up one each, all of them.
+   */
+  private static folded(core: LedgerCore, observed: readonly ChainMessage[], messageId: string, rec: Rec, events: readonly JsonValue[], refs: readonly EventRef[]): LedgerEvent[] {
+    const key = (r: EventRef): string => (r.in === "events" ? `e:${r.index}` : `p:${r.seq}:${r.index}`);
+    const gone = new Set(rec.undone.map(key));
+    if (refs.length === events.length) for (const n of core.fold(observed).notes) if (n.kind === "dropped" && n.messageId === messageId && n.ref && "in" in n.ref) gone.add(key(n.ref));
+    return events.flatMap((e, i) => {
+      const ref = refs.length === events.length ? refs[i] : undefined;
+      return isRecord(e) && !(ref && gone.has(key(ref))) ? [e as unknown as LedgerEvent] : [];
+    });
   }
 
   private async route(r: FrontendToBackend, userId: UserId, session: string | undefined, reply: <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]) => void, noted: DraftNoted): Promise<void> {
@@ -891,13 +908,8 @@ export class Dispatcher {
         // Both read the whole text and replace the swipe's earlier read, so that read's chips go first.
         const context = core.readContext(messageId, now);
         if (context) await this.rt.prepareRead(chatId, userId, messageId, m.swipeId, `${kind}:${messageId}:${m.swipeId}`, m.swipes[m.swipeId] ?? "", { ...context, recent: recentLines(core, now, now.findIndex((x) => x.id === messageId), this.rt.registry) }, true, true);
-        const writeId = this.nextId();
-        const result = await this.write(chatId, userId, { kind, id: writeId, messageId, swipeId: Number(swipe) });
-        // A skip it read too long to run unasked is offered as a Timelapse once the read lands: now,
-        // or, held behind a reply in flight, when that reply's commit lands it.
-        const read = { userId, writeId, messageId, swipeId: m.swipeId, text: m.swipes[m.swipeId] ?? "" };
-        if (result.applied) await this.rt.readLanded(chatId, userId, read.messageId, read.swipeId, read.text);
-        else if (result.pending) this.rt.readHeld(chatId, read);
+        // What it read is offered once it lands, at once or behind a reply in flight (`writesLanded`).
+        const result = await this.write(chatId, userId, { kind, id: this.nextId(), messageId, swipeId: Number(swipe) });
         return { applied: result.applied, pending: result.pending };
       });
     }
@@ -1069,18 +1081,26 @@ export class Dispatcher {
         const m = core?.chain(observed).find((x) => x.id === chip.messageId);
         const rec = m?.ledger?.swipes[String(m.swipeId)];
         const events = Array.isArray(chip.payload.events) ? chip.payload.events : [];
-        if (!m || !rec) throw new RequestError("not_found", "the turn is gone");
+        if (!core || !m || !rec) throw new RequestError("not_found", "the turn is gone");
+        // A purchase nothing priced, now the payer's: priced here, only its charge is made.
+        if (choice === "price" || choice === "item") {
+          const result = await this.pricePurchase(chatId, userId, id, chip, choice, payload, true);
+          await settle("accepted");
+          return result;
+        }
+        const refs = Dispatcher.refsTo(rec, events);
         if (choice === "amount") {
-          // Edit amount on a purchase that applied by itself: the difference to what it charged moves
-          // between the same two accounts, as a correction beside it.
+          // Edit amount on a purchase that applied by itself: the difference to what it charged in all
+          // moves between the same two accounts, as a correction beside it; one this version of the
+          // story dropped has nothing to reprice.
           const cents = chipValue(chip, choice, payload);
           if (typeof cents !== "number") throw new RequestError("bad_request", "the amount isn't a positive amount of money");
+          const live = Dispatcher.folded(core, observed, m.id, rec, events, refs);
           const { state, world } = await this.head(chatId, userId);
           const w = new Working(this.rt.registry, world, state);
-          const postings = events.flatMap((e): LedgerEvent[] => (isRecord(e) && e.type === "post" && typeof e.memo === "string" && Array.isArray(e.lines) ? [{ type: "post", memo: e.memo, lines: e.lines.flatMap((l) => (isRecord(l) && typeof l.account === "string" && typeof l.amount === "number" ? [{ account: l.account, amount: l.amount }] : [])), ...(e.overdraw === true ? { overdraw: true as const } : {}) }] : []));
-          const repriced = optionalService(w.ctx, "economy.reprice")?.(w.ctx, postings, cents);
+          const repriced = optionalService(w.ctx, "economy.reprice")?.(w.ctx, live, cents);
           if (!repriced) throw new RequestError("bad_request", "there's no purchase to reprice");
-          if (!Array.isArray(repriced)) throw new RequestError("validation", repriced.reason);
+          if (!Array.isArray(repriced)) throw new RequestError("validation", live.length < events.length ? "This purchase was dropped from this version of the story, so there's nothing to reprice." : repriced.reason);
           for (const e of repriced) {
             const rejection = w.apply(e);
             if (rejection) throw new RequestError("validation", rejection.reason);
@@ -1089,20 +1109,16 @@ export class Dispatcher {
           await settle("accepted");
           return { applied: result.applied, pending: result.pending };
         }
-        // A purchase nothing priced, now the payer's: priced here, only its charge is made.
-        if (choice === "price" || choice === "item") {
-          const result = await this.pricePurchase(chatId, userId, id, chip, choice, payload, true);
-          await settle("accepted");
-          return result;
-        }
-        const refs = Dispatcher.refsTo(rec, events);
         if (choice === "other") {
           // Pay another way on a payment that applied (DESIGN §9.5): what it drew goes back to the
-          // account it came from and leaves the first other way that covers it, as one correction.
+          // account it came from and leaves the first other way that covers it, as one correction,
+          // with only what folded on this version of the story put right; one it dropped is refused.
           if (refs.length === 0) throw new RequestError("not_found", "the payment is gone");
+          const live = Dispatcher.folded(core, observed, m.id, rec, events, refs);
           const { state, world } = await this.head(chatId, userId);
           const w = new Working(this.rt.registry, world, state);
-          const way = optionalService(w.ctx, "economy.other_way")?.(w.ctx, events.filter(isRecord) as unknown as LedgerEvent[]);
+          const way = optionalService(w.ctx, "economy.other_way")?.(w.ctx, live);
+          if (way && "code" in way && way.code === "not_a_payment" && live.length < events.length) throw new RequestError("validation", "This payment was dropped from this version of the story, so there's nothing to pay another way.");
           if (!way || "code" in way) throw new RequestError("validation", way?.reason ?? "No other way to pay covers it.");
           for (const e of way.repay) {
             const rejection = w.apply(e);

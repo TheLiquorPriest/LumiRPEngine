@@ -679,18 +679,18 @@ export class LedgerCore {
 
   /**
    * Carries post entries onto a record's prefix (a Re-narrate's copies, a Re-run's fixes, what a
-   * Re-read keeps), after its events: each, in fold order with the message's later live markers, is
-   * re-validated event by event against `state` (the prefix after the record's events, advanced in
-   * place) and kept or dropped whole. A GM edit or ✎ fix is first resolved again from what it asked
-   * for, so it still lands over whatever the story now does before it (DESIGN §7): one whose every
-   * operation is already so is kept with no events of its own, its request still standing, so a later
-   * read or swipe that changes what is so works it out again; only one that can't be made at all is
-   * dropped. Events `undone` names stay undone: they neither validate nor apply, an entry left with
-   * none is not carried, and the refs of those that travel come back with them; an entry undone in
-   * any part keeps its own events. A materialization of detail the prefix already records leaves the
-   * entry (DESIGN §9.2).
+   * Re-read or an Undo keeps), after its events: each, in fold order with the message's later live
+   * markers, is re-validated event by event against `state` (the prefix after the record's events,
+   * advanced in place) and kept or dropped whole. A GM edit or ✎ fix after `from` (a seq; all of them
+   * by default) is first resolved again from what it asked for, so it still lands over whatever the
+   * story now does before it (DESIGN §7): one whose every operation is already so is kept with no
+   * events of its own, its request still standing, so a later read or swipe that changes what is so
+   * works it out again; only one that can't be made at all is dropped. Events `undone` names stay
+   * undone: they neither validate nor apply, an entry left with none is not carried, and the refs of
+   * those that travel come back with them; an entry undone in any part keeps its own events. A
+   * materialization of detail the prefix already records leaves the entry (DESIGN §9.2).
    */
-  private carry(state: WorldState, world: WorldDoc, entries: readonly PostEntry[], undone: readonly EventRef[], markers: readonly Marker[]): { kept: PostEntry[]; undone: EventRef[]; dropped: CarryDrop[] } {
+  private carry(state: WorldState, world: WorldDoc, entries: readonly PostEntry[], undone: readonly EventRef[], markers: readonly Marker[], from = -Infinity): { kept: PostEntry[]; undone: EventRef[]; dropped: CarryDrop[] } {
     const off = (seq: number, index: number): boolean => undone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
     const later: ({ seq: number; marker: Marker } | { seq: number; entry: PostEntry })[] = [...markers.map((mk) => ({ seq: mk.seq, marker: mk })), ...entries.map((e) => ({ seq: e.seq, entry: e }))].sort((a, b) => a.seq - b.seq);
     const out: { kept: PostEntry[]; undone: EventRef[]; dropped: CarryDrop[] } = { kept: [], undone: [], dropped: [] };
@@ -701,7 +701,7 @@ export class LedgerCore {
       }
       const { entry } = item;
       // Worked out again even with no events of its own: it was already so where it was made.
-      const asked = entry.kind === "fix" && entry.edit !== undefined && !undone.some((u) => u.in === "post" && u.seq === entry.seq);
+      const asked = entry.kind === "fix" && entry.edit !== undefined && entry.seq > from && !undone.some((u) => u.in === "post" && u.seq === entry.seq);
       if (!asked && entry.events.every((_, i) => off(entry.seq, i))) continue;
       const scratch = structuredClone(state);
       const doc = this.env.worlds(scratch.revision) ?? world;
@@ -1240,7 +1240,15 @@ export class LedgerCore {
         }
         if (events.length === 0 && recorded !== null && !again) return recorded;
         const key = String(head.swipeId);
-        let rec = ledger.swipes[key];
+        const kept = ledger.swipes[key];
+        // The same request twice (tapped again while the reply streamed) is one: already so only because
+        // an entry here that stands asks exactly the same, it adds nothing, so one Undo takes the
+        // request back whole (DESIGN §7).
+        if (again && events.length === 0 && kept) {
+          const same = hashJson([w.entry.kind, w.entry.gm === true, w.entry.by ?? null, w.entry.edit ?? null]);
+          if (kept.post.some((p) => hashJson([p.kind, p.gm === true, p.by ?? null, p.edit ?? null]) === same && isLive(p.at, parent, turnPath(kept)) && !kept.undone.some((u) => u.in === "post" && u.seq === p.seq))) return undefined;
+        }
+        let rec = kept;
         if (!rec) {
           rec = this.bareRecord(contentId(activeText(head)), undefined);
           ledger.swipes[key] = rec;
@@ -1287,12 +1295,29 @@ export class LedgerCore {
         // which one read elsewhere never does.
         if (rec.readElsewhere) return readElsewhereRefusal(index === headIndex);
         if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH)) return "You've swiped away from the timeline this reply was made on. Switch back to undo it.";
-        const before = [...rec.undone];
-        for (const ref of w.refs) if (!rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref))) rec.undone.push(ref);
-        // Later on-path events that need the undone one (using an item it bought) would stop
-        // validating, so such an undo is refused rather than silently cascading (L7).
-        if (this.fold(observed).violations.length > out.violations.length) {
-          rec.undone = before;
+        const before = { undone: [...rec.undone], post: rec.post, dropped: rec.dropped };
+        const added: EventRef[] = [];
+        for (const ref of w.refs) {
+          if (rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref))) continue;
+          rec.undone.push(ref);
+          added.push(ref);
+        }
+        // What folds after what the Undo takes back is worked out again as if that had never been made
+        // (DESIGN §7): a GM edit or ✎ fix that keeps its request still says what it said, so its own
+        // path agrees with every later read and view of it, and one the undone events had made so
+        // stands on its own again. One that can't be made any more, or a later event that needed the
+        // undone one (using an item it bought), refuses the Undo rather than silently cascading (L7).
+        const from = added.some((u) => u.in === "events") ? -Infinity : Math.min(...added.map((u) => (u.in === "post" ? u.seq : Infinity)));
+        const prefix = added.length > 0 ? this.prefixState(this.fold(observed.slice(0, index)), this.chain(observed.slice(index, index + 1))[0], rec) : null;
+        if (prefix) {
+          const read = rec.events.slice(rec.pre).filter((_, i) => !rec.undone.some((u) => u.in === "events" && u.index === rec.pre + i));
+          applyValidUnits(this.env.types, read, prefix.state, (s) => this.env.types.context(prefix.world, s));
+        }
+        if ((prefix && this.keepAfter(rec, m, prefix, from) > 0) || this.fold(observed).violations.length > out.violations.length) {
+          rec.undone = before.undone;
+          rec.post = before.post;
+          if (before.dropped) rec.dropped = before.dropped;
+          else delete rec.dropped;
           return "later events depend on it";
         }
         return undefined;
@@ -1316,7 +1341,7 @@ export class LedgerCore {
           if (!prefix) return "unknown revision";
           rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, readSeed(rec.seed), text)];
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
-          this.keepAfterRead(rec, m, prefix);
+          this.keepAfter(rec, m, prefix);
           rec.undone = plannedUndos(rec);
           rec.status = "ok";
           rec.swipeHash = contentId(text);
@@ -1338,7 +1363,7 @@ export class LedgerCore {
           // detail are not the read's, so they stay. Its new chips offer anything still narrated. A
           // stopped reply is now read, so it no longer offers a Retry read.
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
-          this.keepAfterRead(rec, m, prefix);
+          this.keepAfter(rec, m, prefix);
           rec.undone = plannedUndos(rec);
           if (rec.status === "stopped") rec.status = "ok";
         }
@@ -1350,17 +1375,18 @@ export class LedgerCore {
   }
 
   /**
-   * After a read replaced a record's events, its remaining live entries (fixes, materialized detail,
-   * a Re-narrate's narration) are re-validated after them, a GM edit or ✎ fix resolved again first
-   * (`carry`), so the read never undoes it: one that can't be made is dropped with a Journal note
-   * rather than failing on its own path (L7), one the read already made so stays with its request
-   * and no events of its own, and one the read already made detail for stays without that
-   * materialization, its undos moved with its events.
+   * After a read replaced a record's events, or an Undo took some back, its remaining live entries
+   * (fixes, materialized detail, a Re-narrate's narration) are re-validated after them, each GM edit
+   * or ✎ fix after `from` (a seq; all of them by default) resolved again first (`carry`), so neither
+   * undoes it: one that can't be made is dropped with a Journal note rather than failing on its own
+   * path (L7), one already so stays with its request and no events of its own, and one the read
+   * already made detail for stays without that materialization, its undos moved with its events.
+   * Answers how many it dropped.
    */
-  private keepAfterRead(rec: Rec, target: ChainMessage, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }): void {
+  private keepAfter(rec: Rec, target: ChainMessage, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }, from = -Infinity): number {
     const live = rec.post.filter((p) => isLive(p.at, prefix.parent, turnPath(rec)));
     const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, turnPath(rec)));
-    const carried = this.carry(prefix.state, prefix.world, live, rec.undone, markers);
+    const carried = this.carry(prefix.state, prefix.world, live, rec.undone, markers, from);
     const kept = new Map(carried.kept.map((p) => [p.seq, p]));
     // A dropped entry goes with a Journal note.
     const gone = new Set(carried.dropped.map((d) => d.seq));
@@ -1368,6 +1394,7 @@ export class LedgerCore {
     // A kept entry's undos come back from `carry`, moved past what it left out; every other undo stays.
     rec.undone = [...rec.undone.filter((u) => u.in !== "post" || !kept.has(u.seq)), ...carried.undone];
     if (carried.dropped.length > 0) rec.dropped = [...(rec.dropped ?? []), ...carried.dropped];
+    return carried.dropped.length;
   }
 
   /**

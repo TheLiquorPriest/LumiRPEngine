@@ -7,7 +7,7 @@
 
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
-import { APART_GROUP, type LedgerEvent, type PostEvent, type PostingLine } from "../../../shared/ledger";
+import { apartOf, type LedgerEvent, type PostEvent, type PostingLine } from "../../../shared/ledger";
 import { FINANCE_EVENTS, featureOn, type ClassTraits, type FinanceFeature, type PayTier, type TxnKind } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { hashParts } from "../../../shared/hash";
@@ -97,10 +97,11 @@ export interface ChargeOptions {
    * A payment the story made (a narrated purchase or transfer, DESIGN §9.5): it never fails for
    * cover, and from level 2 it never takes cash or savings below zero (`chooseSource`). The way it
    * names takes it when that way covers it or can run a debt; else the payer's order, then the last
-   * way that can run a debt, then a savings account that covers it. Its posting carries `overdraw`,
-   * which the funds guard lets through. A purchase nothing of the payer's can pay is theirs with
-   * nothing charged: its journal line, on no account, says what it would have cost (`unpaid`). A
-   * payer whose money is a band alone moves down their band, as level 1 does.
+   * way that can run a debt, then a savings account that covers it. Its journal line says it was the
+   * story's (`story`); its posting carries `overdraw`, which the funds guard lets through, only from
+   * an account that can run a debt. A purchase nothing of the payer's can pay is theirs with nothing
+   * charged: its journal line, on no account, says what it would have cost (`unpaid`). A payer whose
+   * money is a band alone moves down their band, as level 1 does.
    */
   story?: boolean;
 }
@@ -504,6 +505,8 @@ export interface TxnMeta {
   named?: EntityId;
   /** A purchase the story made that nothing its payer has could pay, so nothing was charged: what it would have cost. Its journal line has no lines. */
   unpaid?: number;
+  /** A payment the story made (DESIGN §9.5): Pay another way and its chip find it by this. */
+  story?: boolean;
   at?: number;
 }
 
@@ -537,6 +540,7 @@ export function txn(lines: readonly PostingLine[], meta: TxnMeta): LedgerEvent {
   }
   if (meta.named) data.named = meta.named;
   if (meta.unpaid !== undefined) data.unpaid = meta.unpaid;
+  if (meta.story) data.story = true;
   if (meta.at !== undefined) data.at = meta.at;
   return { type: FINANCE_EVENTS.txn, data };
 }
@@ -548,14 +552,21 @@ export function posting(lines: PostingLine[], meta: TxnMeta): LedgerEvent[] {
 
 /**
  * One payment as an atomic unit (ledger 1.10): its posting, its journal lines and any bookkeeping
- * beside it share a group, so a rebased view that can't afford the posting drops all of them. One
- * kept `apart` (`APART_GROUP`) stays out of the unit of the effect it comes with, so a rebased view
- * keeps or drops it alone.
+ * beside it share a group, so a rebased view that can't afford the posting drops all of them.
  */
-export function asUnit(events: LedgerEvent[], apart = false): LedgerEvent[] {
+export function asUnit(events: LedgerEvent[]): LedgerEvent[] {
   if (events.length < 2) return events;
-  const group = `${apart ? APART_GROUP : "pay:"}${hashParts(JSON.stringify(events)).slice(0, 10)}`;
+  const group = `pay:${hashParts(JSON.stringify(events)).slice(0, 10)}`;
   return events.map((e) => ({ ...e, group }));
+}
+
+/**
+ * What a payment brought, kept apart from the payment's own unit `unit` (`APART_GROUP`), before it:
+ * a rebased view keeps it only with the payment, and may drop it alone.
+ */
+function apartFrom(events: LedgerEvent[], unit: readonly LedgerEvent[]): LedgerEvent[] {
+  const group = unit[0]?.group;
+  return group === undefined ? events : events.map((e) => ({ ...e, group: apartOf(group) }));
 }
 
 /** Folds lines on the same account into one line each (a sale's tax landing with its price). */
@@ -619,7 +630,9 @@ function saleTermsOf(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, cen
  * Pay `cents`: a no-op at level 0, a band check plus adjustment at 1, a posting (with declines) from
  * 2. A payment the story made (`story`) never declines for cover; a purchase nothing of the payer's
  * can pay (`NO_WAY_TO_PAY`) charges nothing, and its journal line, on no account, says what it would
- * have cost (`unpaid`), so it is still theirs (DESIGN §9.5).
+ * have cost (`unpaid`), so it is still theirs (DESIGN §9.5). Its journal line says it was the story's
+ * (`story`), and its posting carries `overdraw` only from an account that can run a debt, so one from
+ * cash or savings drops whole on a rebased view that can't cover it.
  */
 export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, rawCents: number, memo: string, opts: ChargeOptions = {}): LedgerEvent[] | Rejection {
   if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
@@ -662,18 +675,19 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
   // The other side by id when it's someone in the world (a view names it, or masks it), else the outside party's name.
   const outside = opts.counterparty === undefined ? undefined : own(ctx.state.entities, opts.counterparty) ? opts.counterparty : opts.counterparty.replace(/_/g, " ");
   const counterparty = terms?.seller ?? opts.payee ?? outside;
-  const meta: TxnMeta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty } : {}), payer, ...(picked?.card ? { card: picked.card } : {}), ...(opts.flow ? { flow: opts.flow } : {}), ...(holds ? { pending: at + 1440 } : {}), ...(opts.narrated ? { narrated: opts.narrated } : {}), ...(picked?.named ? { named: picked.named } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) };
+  const meta: TxnMeta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty } : {}), payer, ...(picked?.card ? { card: picked.card } : {}), ...(opts.flow ? { flow: opts.flow } : {}), ...(holds ? { pending: at + 1440 } : {}), ...(opts.narrated ? { narrated: opts.narrated } : {}), ...(picked?.named ? { named: picked.named } : {}), ...(opts.story === true ? { story: true } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) };
   const spend: LedgerEvent[] = [];
   if (picked?.card && opts.sale && Number.isFinite(cardRoom(ctx, picked.card, "purchase"))) {
     const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
     const s = spendOf(ctx.state, picked.card, day);
     spend.push({ type: FINANCE_EVENTS.spend, data: { card: picked.card, day, purchase: s.purchase + cents + tax, atm: s.atm } });
   }
-  const paid: LedgerEvent[] = [{ type: "post", lines, memo, ...(opts.story === true ? { overdraw: true as const } : {}) }, ...out, ...dest.extra, txn(lines, meta), ...(terms?.extra ?? []), ...od.after, ...spend];
-  // A payment the story made stands on any path, and its overdraft link's transfer is its own unit
+  const overdraw = opts.story === true && picked !== null && runsDebt(ctx, source);
+  const paid = asUnit([{ type: "post", lines, memo, ...(overdraw ? { overdraw: true as const } : {}) }, ...out, ...dest.extra, txn(lines, meta), ...(terms?.extra ?? []), ...od.after, ...spend]);
+  // A payment the story made runs a debt on any path, and its overdraft link's transfer is kept apart
   // (DESIGN §25.10): a rebased view whose link can't spare it drops the transfer alone, and the
   // payment takes the account the further into overdraft, never the link below zero.
-  return opts.story === true ? [...asUnit(od.before, true), ...asUnit(paid)] : asUnit([...od.before, ...paid]);
+  return opts.story === true ? [...apartFrom(od.before, paid), ...paid] : asUnit([...od.before, ...paid]);
 }
 
 // ---------------------------------------------------------------- moving money
@@ -717,8 +731,9 @@ export function cashAdvanceFee(ctx: ReadContext, account: EntityId, cents: numbe
  * or retirement account doesn't move out here, and nothing moves into a closed account or a CD.
  * Money moved from a credit card into an account is a cash advance, with its fee posted first. A move
  * the story made (`story`, DESIGN §9.5) from an account that can run a debt (`runsDebt`) isn't
- * refused for cover, and its posting carries `overdraw`; one that went another way than the account
- * it named records that account (`named`), for Pay another way.
+ * refused for cover, and its posting carries `overdraw`; from any other account it is checked as
+ * ever. Its journal line says it was the story's, and one that went another way than the account it
+ * named records that account (`named`), for Pay another way.
  */
 export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, opts: { cap?: boolean; flow?: string; at?: number; unchecked?: boolean; story?: boolean; named?: EntityId } = {}): LedgerEvent[] | Rejection {
   const s = ctx.state;
@@ -743,16 +758,17 @@ export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: numb
   }
   const advance = fromTraits.revolving && !toTraits.liability;
   const fee = advance ? cashAdvanceFee(ctx, from, c) : 0;
-  if (!opts.unchecked && !(opts.story && runsDebt(ctx, from)) && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee) return reject("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
+  const debt = opts.story === true && runsDebt(ctx, from);
+  if (!opts.unchecked && !debt && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee) return reject("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
   const lines: PostingLine[] = [
     { account: from, amount: -c },
     { account: to, amount: c },
   ];
   const p = productOf(ctx, from);
   const charged = fee > 0 ? posting([{ account: from, amount: -fee }, { account: bankSide(p?.institution ?? ""), amount: fee }], { memo: "Cash advance fee", kind: "fee", category: "cash_advance", ...(opts.at !== undefined ? { at: opts.at } : {}) }) : [];
-  const out: LedgerEvent[] = [...charged, { type: "post", lines, memo, ...(opts.story ? { overdraw: true as const } : {}) }];
+  const out: LedgerEvent[] = [...charged, { type: "post", lines, memo, ...(debt ? { overdraw: true as const } : {}) }];
   if (toTraits.liability) out.push({ type: FINANCE_EVENTS.cardPaid, data: { account: to, cents: c } });
-  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance ? "cash_advance" : "transfer", ...(opts.flow ? { flow: opts.flow } : {}), ...(opts.named ? { named: opts.named } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) }));
+  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance ? "cash_advance" : "transfer", ...(opts.flow ? { flow: opts.flow } : {}), ...(opts.named ? { named: opts.named } : {}), ...(opts.story ? { story: true } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) }));
   return asUnit(out);
 }
 
@@ -823,8 +839,9 @@ export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, 
  * Ledger 1.10: a posting folds only if the accounts it draws on can pay it (the fold-time twin of the
  * choices above): an open account, within its balance less holds, its credit, or the overdraft its
  * policy allows. What a bank posts itself (interest, fees) and what posts against a holder's own
- * outside account (openings, level-1 moves) isn't checked. A payment the story made (`overdraw`,
- * DESIGN §9.5) needs only open accounts: it stands past what they cover, on any path.
+ * outside account (openings, level-1 moves) isn't checked. A payment the story made on an account
+ * that can run a debt (`overdraw`, DESIGN §9.5) needs only open accounts: it stands past what they
+ * cover, on any path. One it made from cash or savings carries none and is checked as any payment.
  */
 export function postGuard(ctx: ReadContext, lines: readonly PostingLine[], overdraw = false): Rejection | null {
   const s = ctx.state;
@@ -924,10 +941,12 @@ export function carriedCash(ctx: ReadContext, holder: EntityId): number | null {
 }
 
 /**
- * A purchase that applied, repriced to `cents` in all: the difference moves between the account that
- * paid and the account that was paid. The purchase is its unit's posting with a purchase journal
- * line, or (a purchase an older build recorded) its unit's one two-line posting. One the story made
- * (`overdraw`) stands at the player's price as it stood at its own, whatever its account covers.
+ * A purchase that applied, repriced to `cents` in all: the difference to what its posting charged in
+ * all (its price and any tax on it) moves between the account that paid and the account that was
+ * paid. The purchase is its unit's posting with a purchase journal line, or (a purchase an older
+ * build recorded) its unit's one two-line posting. One the story put on an account that runs a debt
+ * (`overdraw`) stands at the player's price as it stood at its own, whatever that account covers;
+ * from any other account the difference is checked as any payment is.
  */
 export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents: number): LedgerEvent[] | Rejection {
   const posts = events.filter((e): e is PostEvent => e.type === "post");
@@ -940,7 +959,7 @@ export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents:
   if (!post || !paid || !got) return reject("not_a_purchase", "there's no purchase to reprice");
   const total = Math.round(cents);
   if (!Number.isSafeInteger(total) || total <= 0) return reject("bad_amount", "the amount must be positive");
-  const diff = total - got.amount;
+  const diff = total - post.lines.reduce((sum, l) => sum + Math.max(0, l.amount), 0);
   if (diff === 0) return [];
   const note = `${post.memo}: price corrected`;
   const lines: PostingLine[] = [
@@ -950,16 +969,18 @@ export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents:
   // The purchase's own sides, the other way round for money given back.
   const seller = strOf(was?.counterparty);
   const buyer = strOf(was?.payer);
-  return asUnit([{ type: "post", lines, memo: note, ...(post.overdraw ? { overdraw: true as const } : {}) }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
+  const overdraw = post.overdraw === true && diff > 0 && runsDebt(ctx, paid.account);
+  return asUnit([{ type: "post", lines, memo: note, ...(overdraw ? { overdraw: true as const } : {}) }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
 }
 
 // ---------------------------------------------------------------- what the story paid
 
 /**
- * A payment the story made among a change's events (DESIGN §9.5): its posting, the account it drew
- * on and how much, who paid, the account its words named when it went elsewhere, and what it brought
- * on that account in its own unit (§25.10): the transfer the account's overdraft link made into it,
- * and the fees its bank charged for it (an overdraft fee, a cash advance's fee), `fees` in all.
+ * A payment the story made among a change's events (DESIGN §9.5), found by its journal line's
+ * `story`: its posting, the account it drew on and how much, who paid, the account its words named
+ * when it went elsewhere, and what it brought on that account (§25.10): the transfer the account's
+ * overdraft link made into it, and the fees its bank charged for it (an overdraft fee, a cash
+ * advance's fee), `fees` in all.
  */
 interface StoryPayment {
   post: PostEvent;
@@ -972,12 +993,12 @@ interface StoryPayment {
 }
 
 function storyPayment(ctx: ReadContext, events: readonly LedgerEvent[]): StoryPayment | null {
-  const post = events.find((e): e is PostEvent => e.type === "post" && e.overdraw === true);
+  const line = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.story === true);
+  const data = line && "data" in line ? line.data : {};
+  const post = events.find((e): e is PostEvent => e.type === "post" && e.memo === strOf(data.memo));
   // The line it paid from: its biggest draw on an account in the world.
   const paid = post?.lines.filter((l) => l.amount < 0 && traitsOf(ctx, l.account) !== null).sort((a, b) => a.amount - b.amount)[0];
   if (!post || !paid) return null;
-  const line = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.memo === post.memo);
-  const data = line && "data" in line ? line.data : {};
   const party = strOf(data.payer);
   const payer = isParty(ctx, party) ? party : (holdersOf(ctx.state, paid.account).find((h) => canSpend(ctx.state, paid.account, h)) ?? "");
   if (payer === "") return null;

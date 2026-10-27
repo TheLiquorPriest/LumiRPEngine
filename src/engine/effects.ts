@@ -34,7 +34,7 @@ import { isRecord } from "../shared/json";
 import type { EntityId, InterruptClass, KindId } from "../shared/ids";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import { hashParts } from "../shared/hash";
-import { APART_GROUP, type LedgerEvent, type PostingLine } from "../shared/ledger";
+import { APART_GROUP, apartOf, type LedgerEvent, type PostingLine } from "../shared/ledger";
 import { agentOf, spawnTierOf, tierOf } from "../shared/tiers";
 import type { EffectSpec, EntityDef, FieldDef, ProgressionDef, RelationInstance, WorldDoc } from "../shared/world";
 import { calendarOf, slotIndexAt } from "./calendar";
@@ -468,8 +468,9 @@ export function levelsFollowXp(reg: Registry, w: Working, events: readonly Ledge
 /**
  * Resolves and applies effects in order; each sees the state after the ones before it. One
  * effect's events are one atomic unit: they share a group (so a rebased view drops or keeps them
- * together) and apply all or none here. A unit the effect keeps apart (`APART_GROUP`) keeps its own
- * group, so a rebased view keeps or drops it alone. A level its XP moves follows it (`levelsFollowXp`).
+ * together) and apply all or none here. A unit the effect keeps apart (`APART_GROUP`) stays apart,
+ * named after the effect's unit (`apartOf`), so a rebased view keeps it only with that unit. A level
+ * its XP moves follows it (`levelsFollowXp`).
  */
 export function applyEffects(reg: Registry, w: Working, specs: readonly EffectSpec[], scope: EffectScope): EffectOutcome {
   const out: EffectOutcome = { applied: [], rejected: [] };
@@ -490,7 +491,7 @@ export function applyEffects(reg: Registry, w: Working, specs: readonly EffectSp
       return;
     }
     const group = result.length > 1 ? `fx:${hashParts(rng.seed).slice(0, 10)}` : undefined;
-    const events = group ? result.map((ev) => (ev.group?.startsWith(APART_GROUP) ? ev : { ...ev, group })) : result;
+    const events = group ? result.map((ev) => ({ ...ev, group: ev.group?.startsWith(APART_GROUP) ? apartOf(group) : group })) : result;
     // A single event needs no rollback; a unit is applied all-or-nothing.
     const mark = group ? w.mark() : null;
     for (const ev of events) {

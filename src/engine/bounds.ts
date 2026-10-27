@@ -10,9 +10,10 @@
 
 import type { JsonValue } from "../shared/json";
 import type { BoundMode, EntityId } from "../shared/ids";
-import type { FieldBound, FieldDef, WorldDoc } from "../shared/world";
+import type { FieldBound, WorldDoc } from "../shared/world";
+import { fieldBounds } from "./effects";
 import type { Registry } from "./registry-impl";
-import { fieldDef } from "./scope";
+import { fieldDef, poolMax } from "./scope";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 
@@ -62,11 +63,12 @@ export interface BoundedProposal {
   bound: FieldBound;
 }
 
-function clampToField(def: FieldDef | undefined, current: number, delta: number): number {
-  let next = current + delta;
-  if (def?.min !== undefined) next = Math.max(def.min, next);
-  if (def?.max !== undefined) next = Math.min(def.max, next);
-  return next - current;
+/** The delta that keeps `start + delta` inside `range`. */
+function clampToRange(range: { min?: number; max?: number }, start: number, delta: number): number {
+  let next = start + delta;
+  if (range.min !== undefined) next = Math.max(range.min, next);
+  if (range.max !== undefined) next = Math.min(range.max, next);
+  return next - start;
 }
 
 /** Bounds one proposed change: the mode it applies under and the delta or value it may apply. */
@@ -86,10 +88,16 @@ export function boundProposal(reg: Registry, world: WorldDoc, state: Readonly<Wo
       delta = Math.sign(delta) * bound.maxDelta;
       capped = true;
     }
-    const current = e && input.field ? own(e.fields, input.field) : undefined;
-    const clamped = clampToField(def, typeof current === "number" ? current : 0, delta);
-    if (clamped !== delta) capped = true;
-    delta = clamped;
+    if (e && input.entity && input.field) {
+      // From where a change starts the field (`add`): its value, else its default, else a pool's
+      // evaluated max (an unset pool is full), kept inside its range, a pool's evaluated one included.
+      const ctx = reg.context(world, state);
+      const stored = own(e.fields, input.field);
+      const start = typeof stored === "number" ? stored : typeof def?.default === "number" ? def.default : def?.pool ? (poolMax(reg, ctx, input.entity, def.pool) ?? 0) : 0;
+      const clamped = clampToRange(fieldBounds(reg, ctx, input.entity, def), start, delta);
+      if (clamped !== delta) capped = true;
+      delta = clamped;
+    }
   }
   let value = input.value;
   if (typeof value === "number" && def) {

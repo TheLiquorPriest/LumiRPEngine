@@ -2,19 +2,25 @@
 // §25.10): with nothing that covers it and no way that can run a debt, a purchase is the payer's
 // with nothing charged and its chip says so, never a charge that wasn't made, and a payment moves
 // nothing and is a Not tracked receipt. A purchase nothing prices that someone else made is
-// theirs on its chip, never the player character's.
+// theirs on its chip, never the player character's. On a rebased view the overdraft transfer a
+// payment brought stands only with it, in both folds, and Pay another way puts right only what
+// folded there. Edit amount charges what's typed on a taxed purchase too.
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
 import { keepSummary } from "../../src/backend/view";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
+import { referenceFold } from "../../src/engine/ledger/reference";
 import { heldBy } from "../../src/shared/finance";
-import type { JsonObject } from "../../src/shared/json";
+import { hashJson } from "../../src/shared/hash";
+import { isRecord, type JsonObject } from "../../src/shared/json";
+import type { EditOp } from "../../src/shared/protocol";
 import type { Chip } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 
 const EXTRACT_MARK = "propose concrete state changes";
 const DANNY = "danny_okafor";
+const COMPASS: JsonObject = { type: "purchase", payer: "pov", item: "brass ship's compass", price: 165 };
 
 /** The chat's state as it folds now. */
 async function folded(rig: Rig, chatId: string) {
@@ -24,16 +30,66 @@ async function folded(rig: Rig, chatId: string) {
   return state;
 }
 
-/** Port Alder after one turn, purchases and payments applied as `mode` says. */
-async function alder(mode: "auto" | "confirm"): Promise<{ rig: Rig; chatId: string }> {
+/** The chat as both folds read it, which must agree (L1): the reference fold's output. */
+async function bothFolds(rig: Rig, chatId: string) {
+  const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+  if (!core) throw new Error("no ledger");
+  const observed = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
+  const optimized = core.fold(observed);
+  const reference = referenceFold(core.foldInput(observed), rig.rt.registry);
+  expect(hashJson(optimized.state)).toBe(hashJson(reference.state));
+  expect(optimized.messages).toEqual(reference.messages);
+  expect(optimized.notes).toEqual(reference.notes);
+  expect(optimized.keepReport).toEqual(reference.keepReport);
+  expect(reference.violations).toEqual([]);
+  return reference;
+}
+
+/** Port Alder after one turn, purchases and payments applied as `mode` says; with `cap`, the world's narrated-price cap in minor units. */
+async function alder(mode: "auto" | "confirm", cap?: number): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+  if (cap !== undefined) {
+    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
+    const packs = isRecord(draft.draft) && isRecord(draft.draft.packs) ? draft.draft.packs : {};
+    const economy = isRecord(packs.economy) ? packs.economy : {};
+    const config = isRecord(economy.config) ? economy.config : {};
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "packs", id: "economy", value: { ...economy, config: { ...config, unpricedCap: cap } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
+  }
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { purchase: { mode }, transfer: { mode } } } }));
   await rig.turn(chatId, "I look around.", "The street wakes up.");
   return { rig, chatId };
 }
+
+/** The player character's accounts brought to these balances (minor units) by one GM edit, with `ops` before them. */
+async function balances(rig: Rig, chatId: string, to: Record<string, number>, ops: EditOp[] = []): Promise<void> {
+  const now = await folded(rig, chatId);
+  rig.body(await rig.send({ type: "lre.edit", chatId, ops: [...ops, ...Object.entries(to).map(([account, cents]): EditOp => ({ op: "adjust", account, cents: cents - (now.accounts[account] ?? 0) }))] }));
+}
+
+/**
+ * A quiet reply on two swipes: `edits` are GM edits made after its first; its second, written
+ * instead, has none. On the second, the next reply narrates `proposals`. The quiet reply's id and
+ * the next one's; going back to the first swipe makes the next one's turn a rebased view.
+ */
+async function branched(rig: Rig, chatId: string, edits: EditOp[], proposals: JsonObject[], reply: string): Promise<{ earlier: string; later: string }> {
+  await rig.turn(chatId, "I wait a while.", "A quiet hour passes.");
+  const earlier = rig.host.head(chatId)?.id ?? "";
+  rig.body(await rig.send({ type: "lre.edit", chatId, ops: edits }));
+  rig.host.addSwipe(chatId, earlier, "A quieter hour passes.");
+  await rig.host.settle();
+  await narrate(rig, chatId, proposals, reply);
+  return { earlier, later: rig.host.head(chatId)?.id ?? "" };
+}
+
+/** Checking drawing on savings when it runs short (§25.10). */
+const LINKED: EditOp[] = [
+  { op: "set", entity: "acct_pov_checking", field: "overdraft", value: "linked" },
+  { op: "set", entity: "acct_pov_checking", field: "overdraft_link", value: "acct_pov_savings" },
+];
 
 /**
  * Port Alder with nothing of the player character's that can run a debt: checking and the credit
@@ -76,8 +132,8 @@ async function holdings(rig: Rig, chatId: string) {
   return { accounts: { ...state.accounts }, owners: Object.fromEntries(Object.values(state.entities).flatMap((e) => (typeof e.fields.owner === "string" ? [[e.name, e.fields.owner]] : []))) };
 }
 
-async function tap(rig: Rig, chatId: string, chip: Chip | undefined, choice: string): Promise<Record<string, unknown>> {
-  return rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id ?? "", choice }));
+async function tap(rig: Rig, chatId: string, chip: Chip | undefined, choice: string, payload?: JsonObject): Promise<Record<string, unknown>> {
+  return rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id ?? "", choice, ...(payload ? { payload } : {}) }));
 }
 
 describe("a narrated payment with nothing that covers it or can run a debt", () => {
@@ -187,6 +243,103 @@ describe("a narrated purchase its checking's overdraft covers", () => {
       expect(line.text).not.toContain("compass");
     }
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("a narrated purchase on a rebased view", () => {
+  test("where checking was frozen, the purchase and the overdraft transfer it brought drop together, alike in both folds", async () => {
+    const { rig, chatId } = await alder("auto");
+    // $20.00 in checking, which draws on savings' $500.00 when it runs short.
+    await balances(rig, chatId, { acct_pov_checking: 2000, acct_pov_savings: 50000 }, LINKED);
+    // On the first swipe checking was frozen.
+    const { earlier, later } = await branched(rig, chatId, [{ op: "effect", effect: "economy.set_status", args: { account: "acct_pov_checking", status: "frozen" } }], [{ ...COMPASS, method: "debit card" }], "You pay with your debit card and the clerk wraps the compass.");
+    // On its own path savings covers what checking lacks.
+    const own = await bothFolds(rig, chatId);
+    expect([own.state.accounts.acct_pov_checking, own.state.accounts.acct_pov_savings]).toEqual([0, 50000 - (17490 - 2000)]);
+    rig.host.navigate(chatId, earlier, 0);
+    await rig.host.settle();
+    const view = await bothFolds(rig, chatId);
+    expect(view.messages.find((m) => m.id === later)?.fold).toBe("view");
+    expect([view.state.accounts.acct_pov_checking, view.state.accounts.acct_pov_savings]).toEqual([2000, 50000]);
+    expect(Object.values(view.state.entities).some((e) => e.name === "brass ship's compass")).toBe(false);
+    const lines = view.keepReport.filter((k) => k.messageId === later);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((k) => k.status === "dropped")).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("Pay another way where the overdraft transfer didn't land moves the payment alone, and gives savings nothing it didn't lose", async () => {
+    const { rig, chatId } = await alder("auto");
+    await balances(rig, chatId, { acct_pov_checking: 2000, acct_pov_savings: 5000 }, LINKED);
+    // On the first swipe $40.00 left savings, which then can't spare the $50.00 transfer.
+    const { earlier } = await branched(rig, chatId, [{ op: "adjust", account: "acct_pov_savings", cents: -4000 }], [{ ...COMPASS, method: "debit card" }], "You pay with your debit card and the clerk wraps the compass.");
+    const [chip] = await chipsOf(rig, chatId, "undo");
+    expect(chip?.actions.map((a) => a.id)).toContain("other");
+    rig.host.navigate(chatId, earlier, 0);
+    await rig.host.settle();
+    const before = await folded(rig, chatId);
+    expect([before.accounts.acct_pov_checking, before.accounts.acct_pov_savings]).toEqual([2000 - 17490, 1000]);
+    expect((await tap(rig, chatId, chip, "other")).applied).toBe(true);
+    const after = await folded(rig, chatId);
+    expect([after.accounts.acct_pov_checking, after.accounts.acct_pov_savings]).toEqual([2000, 1000]);
+    expect(after.accounts.acct_pov_card).toBe((before.accounts.acct_pov_card ?? 0) - 17490);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("Pay another way where the payment itself didn't land is refused, and nothing moves", async () => {
+    const { rig, chatId } = await alder("auto");
+    rig.body(await rig.send({ type: "lre.fix", chatId, entity: "pov", field: "cash", value: 7800 }));
+    // $50.00 in checking and $50.00 left on the card: the compass goes on the card past its limit.
+    await balances(rig, chatId, { acct_pov_checking: 5000, acct_pov_card: -445000 });
+    // On the first swipe the card was frozen.
+    const { earlier } = await branched(rig, chatId, [{ op: "effect", effect: "economy.set_status", args: { account: "acct_pov_card", status: "frozen" } }], [COMPASS], "The clerk wraps the compass.");
+    const [chip] = await chipsOf(rig, chatId, "undo");
+    expect(chip?.actions.map((a) => a.id)).toContain("other");
+    rig.host.navigate(chatId, earlier, 0);
+    await rig.host.settle();
+    const before = await holdings(rig, chatId);
+    expect(before.owners["brass ship's compass"]).toBeUndefined();
+    const refused = await rig.send({ type: "lre.chip", chatId, chip: chip?.id ?? "", choice: "other" });
+    expect(refused.type).toBe("lre.error");
+    expect((await holdings(rig, chatId)).accounts).toEqual(before.accounts);
+  });
+});
+
+describe("Edit amount on a purchase that applied by itself", () => {
+  test("a taxed purchase whose narrated price was capped is charged what's typed, in all", async () => {
+    const { rig, chatId } = await alder("auto", 2000);
+    const paid = async (): Promise<number> => {
+      const a = (await folded(rig, chatId)).accounts;
+      return ["acct_pov_cash", "acct_pov_checking", "acct_pov_savings", "acct_pov_card"].reduce((sum, id) => sum + (a[id] ?? 0), 0);
+    };
+    const start = await paid();
+    await narrate(rig, chatId, [{ type: "purchase", payer: "pov", item: "tin whistle", price: 30 }], "You pay thirty dollars for a tin whistle.");
+    const [chip] = await chipsOf(rig, chatId, "undo");
+    expect(chip?.label).toContain("narrated $30.00, capped at");
+    expect(chip?.actions.map((a) => a.id)).toContain("amount");
+    // $20.00, the cap, and Michigan's sales tax on it.
+    expect(start - (await paid())).toBe(2120);
+    expect((await tap(rig, chatId, chip, "amount", { cents: 3000 })).applied).toBe(true);
+    expect(start - (await paid())).toBe(3000);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("where the purchase itself didn't land, Edit amount is refused, and nothing moves", async () => {
+    const { rig, chatId } = await alder("auto", 2000);
+    const cash = (await folded(rig, chatId)).accounts.acct_pov_cash ?? 0;
+    // Paid in cash; on the first swipe the wallet came down to $10.00, short of the whistle's $21.20.
+    const { earlier } = await branched(rig, chatId, [{ op: "adjust", account: "acct_pov_cash", cents: 1000 - cash }], [{ type: "purchase", payer: "pov", item: "tin whistle", price: 30, method: "cash" }], "You pay thirty dollars in cash for a tin whistle.");
+    const [chip] = await chipsOf(rig, chatId, "undo");
+    expect(chip?.actions.map((a) => a.id)).toContain("amount");
+    expect((await folded(rig, chatId)).accounts.acct_pov_cash).toBe(cash - 2120);
+    rig.host.navigate(chatId, earlier, 0);
+    await rig.host.settle();
+    const before = await holdings(rig, chatId);
+    expect(before.owners["tin whistle"]).toBeUndefined();
+    expect(before.accounts.acct_pov_cash).toBe(1000);
+    const refused = await rig.send({ type: "lre.chip", chatId, chip: chip?.id ?? "", choice: "amount", payload: { cents: 3000 } });
+    expect(refused.type).toBe("lre.error");
+    expect((await holdings(rig, chatId)).accounts).toEqual(before.accounts);
   });
 });
 
