@@ -12,17 +12,18 @@ import type { SheetSkill } from "../shared/inferred";
 import { currentSignals, hasRetiredSignal, knownSignal, PURPOSE_PLACEHOLDERS, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
 import { MIND_PURPOSES } from "../shared/minds";
 import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
-import type { WorldCurrency, WorldDoc } from "../shared/world";
+import type { ActionDef, WorldCurrency, WorldDoc } from "../shared/world";
 import type { DataTable } from "../shared/tables";
 import { compileMaps } from "../shared/maps";
-import { DEFAULT_CURRENCY, ENGINE_VERSION, readSectionFeed, SECTION_FEED_KEYS, WORLD_FORMAT } from "../shared/world";
+import { DEFAULT_CURRENCY, ENGINE_VERSION, isHardLock, readSectionFeed, requirementExpr, SECTION_FEED_KEYS, WORLD_FORMAT } from "../shared/world";
 import { applyEvent, validateEvent } from "./events";
+import { identifiers } from "./expr";
 import type { Registry } from "./registry-impl";
 import { worldSkills } from "./inferred";
 import { buildEntitySheet } from "./ruleset";
 import type { InterpretOutput, TurnPipeline } from "./steps";
 import type { WorldState } from "./state";
-import { findLeaks, unrevealedSecrets } from "./visibility";
+import { findLeaks, readsStory, unrevealedSecrets } from "./visibility";
 import { lintLore } from "./lore-lint";
 import { lintStructure } from "./world-lint";
 import { initialState } from "./world-state";
@@ -171,21 +172,25 @@ export function currencyOf(v: unknown): WorldCurrency | null {
   return isCurrency(v) ? { code: v.code, symbol: v.symbol, minorUnit: v.minorUnit, decimals: v.decimals, format: v.format } : null;
 }
 
+/** Step purposes earlier builds had: `select` (lore selection) and `contradiction` (the check of a reply against the engine's facts, retired when the story and the user's directives came to win, DESIGN D36). */
+const RETIRED_PURPOSES: readonly string[] = ["select", "contradiction"];
+
 /**
  * Brings an older `lre-world-v1` document up to this engine: documents written before `currency`,
  * `lore`, `loreIndex`, `classifications`, `maps` or `tiers` existed (and templates without them) get
  * Modern US money, no lore, an empty lookup table (a malformed one keeps its well-formed half), no
  * classifications, no maps and the three default tiers, whose ids are the band ids their entities
  * already name; a POV still on the legacy `pov` tier moves to the lead tier (the POV is `pov`, never
- * capped whatever its tier); step templates for the retired `select` purpose are dropped, and a
- * template's retired signal reads as the one that stands for it (`classifier` as `typed_input`); and
- * the economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor units; a set
- * `unpricedCap` wins). A world without a `ruleset` keeps none: every part of one is optional, and
- * nothing reads a missing one; one without a `spawnCap` keeps none too and plays at the default 24.
- * Lore entries need nothing: their new fields are optional, and one
- * without a source was authored. Last, the maps compile into the places, grids and routes they own
- * (`compileMaps`). Revisions are immutable, so this runs whenever one is read. Returns the same
- * object when nothing changes.
+ * capped whatever its tier); step templates for a retired purpose (`RETIRED_PURPOSES`) are dropped,
+ * and so is a retired purpose a secret lore entry's audience or the step lore pins name, which
+ * nothing reads or edits any more; a template's retired signal reads as the one that stands for it
+ * (`classifier` as `typed_input`); and the economy pack's old `unpricedCapCents` becomes
+ * `unpricedCap` (the same minor units; a set `unpricedCap` wins). A world
+ * without a `ruleset` keeps none: every part of one is optional, and nothing reads a missing one;
+ * one without a `spawnCap` keeps none too and plays at the default 24. Lore entries need nothing
+ * else: their new fields are optional, and one without a source was authored. Last, the maps
+ * compile into the places, grids and routes they own (`compileMaps`). Revisions are immutable, so
+ * this runs whenever one is read. Returns the same object when nothing changes.
  */
 export function migrateWorld(stored: WorldDoc): WorldDoc {
   const doc = migrateMoney(stored);
@@ -198,14 +203,18 @@ export function migrateWorld(stored: WorldDoc): WorldDoc {
   const steps: unknown = doc.steps;
   const hasTiers = isRecord(doc.tiers);
   const tiers = hasTiers ? doc.tiers : defaultTiers();
-  const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && t.purpose === "select" ? [id] : [])) : [];
-  const resignaled = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && t.purpose !== "select" && Array.isArray(t.signals) && hasRetiredSignal(t.signals.filter((s): s is string => typeof s === "string")) ? [id] : [])) : [];
+  const retiredPurpose = (purpose: unknown): boolean => typeof purpose === "string" && RETIRED_PURPOSES.includes(purpose);
+  const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && retiredPurpose(t.purpose) ? [id] : [])) : [];
+  const resignaled = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && !retiredPurpose(t.purpose) && Array.isArray(t.signals) && hasRetiredSignal(t.signals.filter((s): s is string => typeof s === "string")) ? [id] : [])) : [];
+  const readers = isRecord(lore) ? Object.entries(lore).flatMap(([id, l]) => (isRecord(l) && Array.isArray(l.audience) && l.audience.some(retiredPurpose) ? [id] : [])) : [];
+  const lorePins: unknown = doc.lorePins;
+  const pinned = isRecord(lorePins) && isRecord(lorePins.steps) && Object.keys(lorePins.steps).some(retiredPurpose);
   const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
   const legacyPov = pov?.tier === "pov" && !tierOf({ tiers }, "pov");
   const economy: unknown = isRecord(doc.packs) ? doc.packs.economy : undefined;
   const config = isRecord(economy) && isRecord(economy.config) ? economy.config : null;
   const oldCap = config !== null && "unpricedCapCents" in config;
-  if (isCurrency(currency) && isRecord(lore) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && resignaled.length === 0 && !legacyPov && !oldCap) return compileMaps(doc);
+  if (isCurrency(currency) && isRecord(lore) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && resignaled.length === 0 && readers.length === 0 && !pinned && !legacyPov && !oldCap) return compileMaps(doc);
   const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, maps: isRecord(maps) ? doc.maps : {}, tiers };
   if (!indexed) out.loreIndex = { terms: isRecord(loreIndex) && isRecord(loreIndex.terms) ? doc.loreIndex.terms : {}, topics: isRecord(loreIndex) && isRecord(loreIndex.topics) ? doc.loreIndex.topics : {} };
   if (retired.length > 0 || resignaled.length > 0) {
@@ -216,6 +225,14 @@ export function migrateWorld(stored: WorldDoc): WorldDoc {
       if (t) out.steps[id] = { ...t, signals: currentSignals(t.signals) };
     }
   }
+  if (readers.length > 0) {
+    out.lore = { ...out.lore };
+    for (const id of readers) {
+      const l = out.lore[id];
+      if (l) out.lore[id] = { ...l, audience: (l.audience ?? []).filter((p) => !retiredPurpose(p)) };
+    }
+  }
+  if (pinned && doc.lorePins) out.lorePins = { ...doc.lorePins, steps: Object.fromEntries(Object.entries(doc.lorePins.steps).filter(([p]) => !retiredPurpose(p))) };
   if (pov && legacyPov) out.entities = { ...doc.entities, [doc.pov]: { ...pov, tier: leadTierOf(out) } };
   const pack = out.packs.economy;
   if (oldCap && config !== null && pack) {
@@ -227,6 +244,35 @@ export function migrateWorld(stored: WorldDoc): WorldDoc {
 
 /** Sections the turn itself fills, besides the packs' renderers: the Outcome, the Montage, the Outline, Scene's elapsed time and the minds. */
 const TURN_FED_SECTIONS: Record<string, true> = { outcome: true, montage: true, outline: true, scene: true, [MINDS_SLOT]: true };
+
+/** What an action about a door or a container says it does, in its label, description or ways of saying it. */
+const LOCK_WORDS = /\b(?:open|unlock\w*|unbolt|unseal|lock(?:ed|s)?|doors?|gates?|hatch|trapdoor|safe|vault|chest|strongbox|lockbox|locker|cabinet|trunk|drawer|case|box)\b/i;
+
+/** A requirement that the actor carry something, with what it names: a key's shape when that is a thing's id, not a param. */
+const CARRIES = /\bcarries\(\s*(?:self|actor|pov)\s*,\s*'?([A-Za-z_][A-Za-z0-9_]*)'?\s*\)/;
+
+/**
+ * A requirement that reads like a lock but isn't marked hard (DESIGN §11): on an action about a door
+ * or a container, one that the actor carries one named thing, or that the story has come somewhere
+ * (`stage`, `flag`, `since`) reading one of the action's params. A typed attempt that misses a plain
+ * requirement plays as plain roleplay, so such a lock opens to anyone who types it. A suggestion
+ * only: the author knows what is locked, and a `not …` guard (a step not taken yet) is no lock. A
+ * story step that reads none of the params hides its action until the story gets there
+ * (`storyLocked`), so it is never suggested: a hard lock would list the action, locked, and tell the
+ * player the step exists.
+ */
+function softLocks(id: string, action: ActionDef): LintIssue[] {
+  if (!LOCK_WORDS.test([action.label, action.description ?? "", ...(action.lexicon ?? [])].join(" "))) return [];
+  return action.requires.flatMap((req, i): LintIssue[] => {
+    const expr = requirementExpr(req);
+    const key = CARRIES.exec(expr)?.[1];
+    const keyed = key !== undefined && !hasOwn(action.params, key);
+    const story = readsStory(expr);
+    const hides = story && identifiers(expr).every((name) => !hasOwn(action.params, name));
+    if (isHardLock(req) || /^\s*not\b/.test(expr) || hides || !(story || keyed)) return [];
+    return [{ severity: "info", path: `actions.${id}.requires.${i}`, code: "soft_lock", message: `"${action.label}" reads like a lock, but this requirement isn't marked hard: a typed attempt that misses it plays as plain roleplay, and the reply can tell it working. Mark it a hard lock if the attempt should fail instead.` }];
+  });
+}
 
 /** Structural checks every world must pass, plus the registry's lint rules. */
 export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
@@ -256,6 +302,7 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   };
   for (const [id, a] of Object.entries(world.actions)) {
     if (!a.check && Object.keys(a.outcomes).some((o) => o !== "default")) warn(`actions.${id}.check`, "no_check", `"${a.label}" has outcomes other than default but no check, so only "default" ever applies`);
+    issues.push(...softLocks(id, a));
   }
   issues.push(...lintLore(world));
   // Section templates wrap engine values: the only macro they may hold is the engine's `{{lines}}`;
@@ -281,8 +328,6 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   for (const [id, t] of Object.entries(world.steps)) {
     if (t.id !== id) err(`steps.${id}.id`, "id_mismatch", "the id must match its key");
     if (!(STEP_OUTPUTS[t.purpose] ?? []).includes(t.output)) warn(`steps.${id}.output`, "step_output", `a ${t.purpose} template can't produce ${t.output}; it would never run`);
-    // Any contradiction template takes the built-in check's place, and only a decision one is a check.
-    else if (t.purpose === "contradiction" && t.output !== "decision") warn(`steps.${id}.output`, "step_contradiction_output", `a contradiction template with output ${t.output} takes the place of the built-in contradiction check, so no reply is checked against the facts; make it a decision to keep the check`);
     for (const s of t.signals) if (!knownSignal(s)) warn(`steps.${id}.signals`, "unknown_signal", `unknown signal "${s}"`);
     if (t.template.trim() === "" && !(MIND_PURPOSES as readonly string[]).includes(t.purpose)) warn(`steps.${id}.template`, "step_blank", `this ${t.purpose} template is blank: it takes the place of the built-in instructions with none`);
     const known: readonly string[] = [...STEP_PLACEHOLDERS, ...(PURPOSE_PLACEHOLDERS[t.purpose] ?? [])];

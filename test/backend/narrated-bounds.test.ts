@@ -1,14 +1,11 @@
-// Narrated-change channels and their bounds (DESIGN §9.4): a time skip under `confirm` waits on a
-// confirm chip and applies whole on Apply, as auto applies it, paused clock or not; none applies
-// during a fight; a reply's regard moves each axis of a pair by at most 10 in all, the later
-// proposals cut down or refused in order.
+// Narrated-change channels and their bounds (DESIGN §9.4, §11): a time skip under `confirm` waits on
+// a confirm chip and applies whole on Apply, as auto applies it, paused clock or not, and a fight
+// holds none of it back; a reply's regard moves as far as the story tells, each axis inside its range.
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
-import { regardBudget } from "../../src/backend/runtime";
 import { regardAxes } from "../../src/packs/relationships/core/index";
 import type { JsonObject } from "../../src/shared/json";
-import { expectMatch } from "../support/match";
 import { Rig } from "../support/rig";
 
 const EXTRACT_MARK = "propose concrete state changes";
@@ -40,12 +37,12 @@ async function chat(
     if (!s) throw new Error("no state");
     return s;
   };
-  /** The sum of Danny's regard axes toward the player now, as the relationships pack reads them (decayed to the clock). */
-  const danny = async () => {
+  /** Danny's regard axes toward the player now, as the relationships pack reads them (decayed). */
+  const axes = async () => {
     const s = await state();
     const world = (await rig.rt.ledger.core(chatId, rig.host.userId))?.worldAt(s.revision);
     if (!world) throw new Error("no world");
-    return Object.values(regardAxes(rig.rt.registry.context(world, s), "danny_okafor", "pov")).reduce((a, b) => a + b, 0);
+    return regardAxes(rig.rt.registry.context(world, s), "danny_okafor", "pov");
   };
   // A first turn reads nothing, so the clock and regard start from a played turn.
   rig.host.quietReply = () => "{}";
@@ -55,7 +52,7 @@ async function chat(
   rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes(EXTRACT_MARK) ? JSON.stringify({ proposals }) : "{}");
   await (opts.play ? opts.play(rig, chatId) : rig.turn(chatId, "I sit with Danny.", "An hour later, Danny trusts you a good deal more."));
   const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
-  return { rig, chatId, state, danny, chips, before };
+  return { rig, chatId, state, axes, chips, before };
 }
 
 /** Pauses the chat's clock, as the HUD's Pause clock does. */
@@ -151,70 +148,116 @@ describe("a narrated time skip, auto or confirm", () => {
     expect(got.rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("during a fight none applies, in either mode: it is declined with a note, and Apply on an earlier chip is refused", async () => {
-    for (const mode of ["auto", "confirm"]) {
-      const got = await chat([{ type: "time_advance", minutes: 20 }], { time_advance: { mode } }, { fights: true, ready: fight });
-      expect((await got.state()).clock).toBe(got.before);
-      expect(got.chips.filter((c) => c.kind === "confirm" || c.kind === "timelapse_offer")).toEqual([]);
-      expectMatch(got.chips.find((c) => c.kind === "decline"), { label: "Didn't apply: Skip ahead 20 min", detail: expect.stringContaining("a fight is under way") });
+  test("during a fight it applies all the same, in either mode, and Apply on an earlier chip applies it too", async () => {
+    const auto = await chat([{ type: "time_advance", minutes: 20 }], { time_advance: { mode: "auto" } }, { fights: true, ready: fight });
+    expect((await auto.state()).clock - auto.before).toBe(20);
+    const asked = await chat([{ type: "time_advance", minutes: 20 }], { time_advance: { mode: "confirm" } }, { fights: true, ready: fight });
+    const confirm = asked.chips.find((c) => c.kind === "confirm");
+    if (!confirm) throw new Error("no confirm chip");
+    asked.rig.body(await asked.rig.send({ type: "lre.chip", chatId: asked.chatId, chip: confirm.id, choice: "confirm" }));
+    expect((await asked.state()).clock - asked.before).toBe(20);
+    for (const got of [auto, asked]) {
+      expect(got.chips.filter((c) => c.kind === "decline")).toEqual([]);
       expect(got.rig.rt.ledger.errors).toEqual([]);
     }
-    // A chip offered before the fight: Apply is refused, and the clock stays.
+    // A chip offered before the fight: Apply moves the clock.
     const got = await chat([], { time_advance: { mode: "confirm" } }, { fights: true, ready: fight });
     const head = got.rig.host.head(got.chatId);
     if (!head) throw new Error("no reply");
     const proposal = { type: "time_advance", minutes: 45 };
     await got.rig.rt.chips.add(got.chatId, got.rig.host.userId, [{ id: "confirm:earlier", kind: "confirm", messageId: head.id, swipeId: head.swipeId, label: "+45 min", actions: [{ id: "confirm", label: "Apply" }], expires: "next_send", payload: { type: "time_advance", connection: "active", proposal } }]);
-    const reply = await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: "confirm:earlier", choice: "confirm" });
-    expectMatch(reply, { type: "lre.error", message: expect.stringContaining("a fight is under way") });
-    expect((await got.state()).clock).toBe(got.before);
+    got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: "confirm:earlier", choice: "confirm" }));
+    expect((await got.state()).clock - got.before).toBe(45);
+  });
+
+  test("a skip farther than a timelapse reaches is offered as a Timelapse, never dropped", async () => {
+    // Two years later: past the 366 days one timelapse reaches. The turn keeps only its own tick, as a
+    // turn whose reply skips nothing does.
+    const none = await chat([], { time_advance: { mode: "auto" } });
+    const got = await chat([{ type: "time_advance", minutes: 2 * 365 * 24 * 60 }], { time_advance: { mode: "auto" } });
+    expect((await got.state()).clock - got.before).toBe((await none.state()).clock - none.before);
+    const offer = got.chips.find((c) => c.kind === "timelapse_offer" && c.label.includes("skipped ahead"));
+    if (!offer) throw new Error("no Timelapse chip");
+    expect(offer.actions.map((a) => a.id)).toEqual(["timelapse"]);
   });
 });
 
-describe("a reply's regard budget", () => {
-  test("auto: in order, the later proposals for a pair are cut down, then refused with a decline chip", async () => {
-    const proposals = [8, 6, 3].map((delta) => ({ type: "regard", from: "danny_okafor", to: "pov", axis: "trust", delta }));
-    const none = await chat([], { regard: { mode: "auto" } });
-    const got = await chat(proposals, { regard: { mode: "auto" } });
-    const moved = (await got.danny()) - (await none.danny());
-    // Each axis is stored to a tenth, so a change spread over the axes rounds a little.
-    expect(moved).toBeGreaterThan(9.5);
-    expect(moved).toBeLessThanOrEqual(10.5);
-    expect(got.chips.filter((c) => c.kind === "undo").map((c) => c.label)).toEqual(["Danny Okafor's trust toward you rose by 8", "Danny Okafor's trust toward you rose by 2"]);
-    expect(got.chips.filter((c) => c.kind === "decline").map((c) => c.label)).toEqual(["Didn't apply: Danny Okafor's trust toward you rose by 3"]);
+describe("a narrated time skip a Re-read reads", () => {
+  /** The reply's offers to run what it skipped as a Timelapse. */
+  const offers = async (rig: Rig, chatId: string, messageId: string) => (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "timelapse_offer" && c.label.includes("skipped ahead") && c.messageId === messageId);
+  /** The extractor reads the next reply as `proposals`. */
+  const reads = (rig: Rig, proposals: JsonObject[]) => {
+    rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes(EXTRACT_MARK) ? JSON.stringify({ proposals }) : "{}");
+  };
+  /** Edits the reply to `text`; its Re-read chip. */
+  const edit = async (rig: Rig, chatId: string, messageId: string, text: string) => {
+    rig.host.editMessage(chatId, messageId, text);
+    await rig.host.settle();
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "reread");
+    if (!chip) throw new Error("no reread chip");
+    return chip.id;
+  };
+  // Two days later: past the default of a day.
+  const twoDays = [{ type: "time_advance", minutes: 2 * 24 * 60 }];
+
+  test("past how long a skip runs without asking, is offered as a Timelapse, in place of what its earlier read offered", async () => {
+    const got = await chat([], { time_advance: { mode: "auto" } });
+    const head = got.rig.host.head(got.chatId);
+    if (!head) throw new Error("no reply");
+    expect(await offers(got.rig, got.chatId, head.id)).toEqual([]);
+    const told = await edit(got.rig, got.chatId, head.id, "Two days later, Danny calls.");
+    reads(got.rig, twoDays);
+    got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: told, choice: "reread" }));
+    expect((await offers(got.rig, got.chatId, head.id)).map((c) => c.actions.map((a) => a.id))).toEqual([["timelapse"]]);
+    // Edited again to skip nothing: the offer goes with the read that made it.
+    const untold = await edit(got.rig, got.chatId, head.id, "Danny calls.");
+    reads(got.rig, []);
+    got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: untold, choice: "reread" }));
+    expect(await offers(got.rig, got.chatId, head.id)).toEqual([]);
     expect(got.rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("confirm: the chips together never move the pair past the cap", async () => {
+  test("held behind the next reply in flight, is offered once that reply lands the read", async () => {
+    const got = await chat([], { time_advance: { mode: "auto" } });
+    const head = got.rig.host.head(got.chatId);
+    if (!head) throw new Error("no reply");
+    const told = await edit(got.rig, got.chatId, head.id, "Two days later, Danny calls.");
+    got.rig.host.sendUser(got.chatId, "I pick up.");
+    await got.rig.host.settle();
+    const g = await got.rig.host.start(got.chatId, { type: "normal" });
+    reads(got.rig, twoDays);
+    expect(got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: told, choice: "reread" }))).toEqual({ applied: false, pending: true });
+    expect(await offers(got.rig, got.chatId, head.id)).toEqual([]);
+    reads(got.rig, []);
+    await got.rig.host.finish(g, "Danny asks how you've been.");
+    expect((await offers(got.rig, got.chatId, head.id)).map((c) => c.actions.map((a) => a.id))).toEqual([["timelapse"]]);
+    expect(got.rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("a reply's regard", () => {
+  test("auto: each change applies as far as the story tells", async () => {
+    const proposals = [8, 6, 3].map((delta) => ({ type: "regard", from: "danny_okafor", to: "pov", axis: "trust", delta }));
+    const none = await chat([], { regard: { mode: "auto" } });
+    const got = await chat(proposals, { regard: { mode: "auto" } });
+    expect((await got.axes()).trust - (await none.axes()).trust).toBeCloseTo(17, 9);
+    expect(got.chips.filter((c) => c.kind === "undo").map((c) => c.label)).toEqual(["Danny Okafor's trust toward you rose by 8", "Danny Okafor's trust toward you rose by 6", "Danny Okafor's trust toward you rose by 3"]);
+    expect(got.chips.filter((c) => c.kind === "decline" || c.kind === "untracked")).toEqual([]);
+    expect(got.rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("confirm: each chip applies whole", async () => {
     const proposals = [8, 6, 3].map((delta) => ({ type: "regard", from: "danny_okafor", to: "pov", axis: "trust", delta }));
     const none = await chat([], { regard: { mode: "confirm" } });
     const got = await chat(proposals, { regard: { mode: "confirm" } });
     const confirms = got.chips.filter((c) => c.kind === "confirm");
-    expect(confirms).toHaveLength(2);
+    expect(confirms).toHaveLength(3);
     for (const c of confirms) got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: c.id, choice: "confirm" }));
-    const moved = (await got.danny()) - (await none.danny());
-    expect(moved).toBeGreaterThan(9.5);
-    expect(moved).toBeLessThanOrEqual(10.5);
+    expect((await got.axes()).trust - (await none.axes()).trust).toBeCloseTo(17, 9);
   });
 
-  test("the budget is net per pair and axis; an axis-less change counts against every axis", () => {
-    const fit = regardBudget();
-    const r = (from: string, to: string, delta: number, axis?: string): JsonObject => ({ type: "regard", from, to, delta, ...(axis ? { axis } : {}) });
-    expect(fit(r("a", "b", 7, "trust"))?.delta).toBe(7);
-    // Another axis of the same pair, and the other direction, have their own room.
-    expect(fit(r("a", "b", 10, "warmth"))?.delta).toBe(10);
-    expect(fit(r("b", "a", 10, "trust"))?.delta).toBe(10);
-    // Every axis moves with an axis-less change: warmth has nothing left.
-    expect(fit(r("a", "b", 2))).toBeNull();
-    // Moving back is room again, net.
-    expect(fit(r("a", "b", -4, "warmth"))?.delta).toBe(-4);
-    expect(fit(r("a", "b", 5))?.delta).toBe(3);
-    expect(fit(r("a", "b", 1, "trust"))).toBeNull();
-    // A single proposal never moves more than the cap, nor does a fall.
-    expect(regardBudget()(r("a", "b", 25, "trust"))?.delta).toBe(10);
-    expect(regardBudget()(r("a", "b", -25, "trust"))?.delta).toBe(-10);
-    // Anything else passes as it is.
-    const move = { type: "location", entity: "a", place: "x" };
-    expect(fit(move)).toBe(move);
+  test("an axis stays inside its range however far the story moves it", async () => {
+    const got = await chat([{ type: "regard", from: "danny_okafor", to: "pov", axis: "trust", delta: 500 }], { regard: { mode: "auto" } });
+    expect((await got.axes()).trust).toBe(100);
   });
 });

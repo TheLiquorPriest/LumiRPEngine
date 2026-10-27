@@ -1075,6 +1075,10 @@ export interface TxnData {
   /** A narrated price the charge doesn't match. */
   narrated?: number;
   limited?: "cap" | "band";
+  /** A payment the story made that went another way than the one it named: the account it named, which Pay another way tries first (DESIGN §9.5). */
+  named?: EntityId;
+  /** A purchase the story made that nothing its payer has could pay: what it would have cost. Nothing was charged, so `lines` is empty. */
+  unpaid?: number;
   /** When it happened, when that isn't the time it folds (a flow at its own instant inside a slot). */
   at?: number;
 }

@@ -3,9 +3,9 @@
 // outlet for the generation, through the section's outlet twin in the world's book, and
 // `{{outlet::lre_narrator}}` the narrator rules. Switched-off blocks named "RPEngine · <step>" give
 // that helper style and rules, appended to its prompt after the world's step template or the built-in
-// one, and "RPEngine · narrator" gives the narrator rules for world chats only. The engine reads them as
-// text: it resolves no host macro in them (their braces are neutralized), skips their `//` note lines
-// and bounds their length. Each preset revision is read once.
+// one, and "RPEngine · narrator" adds the preset's own narrator rules after the engine's, for world
+// chats only. The engine reads them as text: it resolves no host macro in them (their braces are
+// neutralized), skips their `//` note lines and bounds their length. Each preset revision is read once.
 //
 // The preset is the one the host generates the chat with, by its own resolution (`presets.getActive`,
 // as prompt assembly makes it: the selected Loom preset, else the chat's connection's, then the
@@ -22,7 +22,7 @@ import type { HostPort, HostPresetBlock } from "./host";
 export type GuidanceTarget = StepPurpose | "narrator";
 
 /** In the order Settings lists them. */
-export const GUIDANCE_TARGETS: readonly GuidanceTarget[] = ["interpret", "extract", "brief", "outline", "choices", "npc.choose", "judge", "contradiction", "puzzle.answer", "mind", "memory", "skip", "consolidate", "narrator"];
+export const GUIDANCE_TARGETS: readonly GuidanceTarget[] = ["interpret", "extract", "brief", "outline", "choices", "npc.choose", "judge", "puzzle.answer", "mind", "memory", "skip", "consolidate", "narrator"];
 
 /** A guidance block's name is this and its target: "RPEngine · extract". */
 export const GUIDANCE_PREFIX = "RPEngine · ";
@@ -129,14 +129,13 @@ const STARTER: Record<GuidanceTarget, string> = {
   choices: "It suggests a few things the player could do next. Say their tone, length and person (\"I go…\", \"You go…\").",
   "npc.choose": "It picks what NPCs do on close calls. Say how this preset's characters behave: how bold or kind, what they would never do.",
   judge: "It rates how well the player's described approach suits the action. Say how generous to be, and what a good plan looks like in this preset's genre.",
-  contradiction: "It checks the reply against the engine's facts. Say what this preset's narrator may add without it counting (weather, small talk, inner thoughts).",
   "puzzle.answer": "It judges whether a typed answer matches a puzzle's. Say how loose to be about wording and spelling.",
   mind: "It thinks as one character at a time, from only what that character knows, and gives the narrator their mind. Say how this preset's characters think: how candid, how scheming, how far ahead they plan.",
   memory: "It writes down, as each character, what they will remember of a reply. Say what this preset's characters hold on to: slights, kindnesses, money, promises.",
   skip: "It finds the moments worth stopping at inside a time skip. Say how often this preset wants a skip interrupted.",
   consolidate: "It folds a character's older notes into their summary. Say what a summary should keep in this preset's story.",
   narrator:
-    "In world chats the engine gives this to the narrator with its sections, before the character, or where an enabled block holds {{outlet::lre_narrator}}. Write rules for using the sections: trust the Outcome and narrate the result it states, invent no prices or events.",
+    "In world chats the engine gives this to the narrator before the character, or where an enabled block holds {{outlet::lre_narrator}}, after its own rules: secrecy first, which nothing here lifts, then the player's instructions, then what the story has established, then the engine's sections. Write how this preset's narrator uses the sections: what to show of them, what to stress, what to leave in the background.",
 };
 
 function starterText(target: GuidanceTarget): string {

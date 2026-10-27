@@ -18,7 +18,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import { hashParts } from "../../../shared/hash";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable } from "../../../shared/tables";
-import type { ActionDef, EffectSpec, EntityDef, KindDef, WorldCurrency, WorldDoc } from "../../../shared/world";
+import { requirementExpr, type ActionDef, type EffectSpec, type EntityDef, type KindDef, type WorldCurrency, type WorldDoc } from "../../../shared/world";
 import { calendarOf, clockOfPhrase } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
@@ -135,7 +135,7 @@ const CARRIES = /^\s*carries\(\s*(?:self|actor)\s*,\s*(?:params\.)?([A-Za-z_][A-
 
 /** Whether an action requires its actor to carry what `name` names, so a lend of it certainly hands it over (`lend`: a carried thing changes hands). */
 function requiresCarried(action: ActionDef, name: string): boolean {
-  return action.requires.some((req) => typeof req === "string" && CARRIES.exec(req)?.[1] === name);
+  return action.requires.some((req) => CARRIES.exec(requirementExpr(req))?.[1] === name);
 }
 
 /**
@@ -225,9 +225,6 @@ export function presentGearLines(ctx: ReadContext, scope: FeedScope): FeedLine[]
 
 const TABLES: DataTable[] = [items, containers, kits, slots] as unknown as DataTable[];
 
-/** A narrated quantity change's largest step when the item kind's `qty` field has no bound. */
-const QTY_MAX_DELTA = 10;
-
 export interface GearSpawn {
   name: string;
   owner: EntityId | null;
@@ -294,13 +291,13 @@ export const ITEM: KindDef = {
   pack: "gear",
   fields: {
     notable: { type: "bool", label: "Notable", domain: "gear", level: 1 },
-    qty: { type: "number", label: "Quantity", default: 1, min: 0, domain: "gear", level: 2, bound: { mode: "confirm", maxDelta: 10 } },
+    qty: { type: "number", label: "Quantity", default: 1, min: 0, domain: "gear", level: 2, bound: { mode: "confirm" } },
     weight_g: { type: "number", label: "Weight (g)", min: 0, domain: "gear", level: 2 },
     volume_l: { type: "number", label: "Volume (l)", min: 0, domain: "gear", level: 2 },
     catalog: { type: "text", label: "Catalog item", table: "economy.catalog" },
     category: { type: "text", label: "Category" },
     slot: { type: "text", label: "Equip slot", domain: "gear", level: 3 },
-    condition: { type: "number", label: "Condition", default: 100, min: 0, max: 100, domain: "gear", level: 3, bands: [{ label: "broken", max: 10 }, { label: "worn", min: 10, max: 50 }, { label: "good", min: 50, max: 90 }, { label: "like new", min: 90 }], bound: { mode: "auto", maxDelta: 25 } },
+    condition: { type: "number", label: "Condition", default: 100, min: 0, max: 100, domain: "gear", level: 3, bands: [{ label: "broken", max: 10 }, { label: "worn", min: 10, max: 50 }, { label: "good", min: 50, max: 90 }, { label: "like new", min: 90 }], bound: { mode: "auto" } },
     consumable: { type: "bool", label: "Consumable", domain: "gear", level: 4 },
     uses: { type: "number", label: "Uses left", min: 0, domain: "gear", level: 4 },
     overdue: { type: "bool", label: "Overdue", locked: true },
@@ -387,7 +384,12 @@ function detach(ctx: ReadContext, thing: EntityId): LedgerEvent[] {
   return out;
 }
 
-const transfer = (ctx: ReadContext, item: EntityId, to: EntityId): Events => {
+/**
+ * Events that put `item` into `to`'s hands or into a container. What can't hold it never does; a
+ * container's room counts for an action, while a reply's handover (`told`) lands as the story told it
+ * (DESIGN §11).
+ */
+const transfer = (ctx: ReadContext, item: EntityId, to: EntityId, told = false): Events => {
   if (!own(ctx.state.entities, item)) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
   if (!own(ctx.state.entities, to)) return reject("missing_entity", `no holder ${labelOf(ctx, to)}`);
   const level = gearLevel(ctx, item, to);
@@ -398,7 +400,7 @@ const transfer = (ctx: ReadContext, item: EntityId, to: EntityId): Events => {
   const cannot = holdProblem(ctx, item, to);
   if (cannot) return reject(fixedOf(ctx, item) === null ? "cant_hold" : "fixed", cannot);
   const target = own(ctx.state.entities, to);
-  if (level >= 2 && target && !kindIs(ctx.registry, ctx.world, target.kind, "person")) {
+  if (!told && level >= 2 && target && !kindIs(ctx.registry, ctx.world, target.kind, "person")) {
     const problem = fitProblem(ctx.state, item, to);
     if (problem) return reject("no_room", `${labelOf(ctx, item)} ${problem}`);
   }
@@ -431,12 +433,12 @@ function endLoans(ctx: ReadContext, thing: EntityId): LedgerEvent[] {
   return out;
 }
 
-const give = (ctx: ReadContext, item: EntityId, from: EntityId, to: EntityId): Events => {
+const give = (ctx: ReadContext, item: EntityId, from: EntityId, to: EntityId, told = false): Events => {
   const e = own(ctx.state.entities, item);
   if (!e) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
   if (e.kind === "account") return reject("is_money", "cash changes hands as a transfer");
   if (from !== to && !isInside(ctx.state, item, from) && e.fields.owner !== from) return reject("not_held", `${labelOf(ctx, from)} doesn't have ${e.name}`);
-  const moved = transfer(ctx, item, to);
+  const moved = transfer(ctx, item, to, told);
   if (!Array.isArray(moved)) return moved;
   const owner: LedgerEvent[] = e.fields.owner === from || e.fields.owner === undefined ? [{ type: "set", entity: item, field: "owner", value: to }] : [];
   const loansEnd = e.fields.owner === to || owner.length > 0;
@@ -538,9 +540,17 @@ function heldItem(ctx: ReadContext, item: string, from: EntityId): string {
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
 }
 
-/** The most of a thing one reply may use up, and the most it may move an item's condition (its field's bound): the reply's read is weak at counts. */
-const USE_UP_MAX = 10;
-const CONDITION_STEP_MAX = 25;
+/**
+ * A reply's step of a thing's number field (DESIGN §11): as far as the story tells, cut only to the
+ * step the world's author set on the field (its bound's `maxDelta` in Build; no pack sets one).
+ * The `add` it goes into keeps the result inside the field's range, from its value or, unset, its
+ * default.
+ */
+function toldStep(ctx: ReadContext, id: EntityId, field: string, delta: number): number {
+  const e = own(ctx.state.entities, id);
+  const cap = e ? fieldDef(ctx.registry, ctx.world, e.kind, field)?.bound?.maxDelta : undefined;
+  return cap === undefined ? delta : Math.sign(delta) * Math.min(Math.abs(delta), Math.abs(cap));
+}
 
 /** The one thing lying loose where `who` is by that name (any case, no leading article), as `heldItem` reads a held one; the name itself when none or several fit. */
 function lyingNamed(ctx: ReadContext, item: string, who: EntityId): string {
@@ -733,7 +743,8 @@ export const gearPack: PackDef = {
       return Array.isArray(moved) && own(ctx.state.entities, item)?.fields.owner === to ? [...moved, ...endLoans(ctx, item)] : moved;
     });
     wrap("gear.drop", ["item", "place?"], (a, ctx) => drop(ctx, strOf(a.item), strOf(a.place) || (placeOfEntity(ctx.state, strOf(a.item)) ?? "")));
-    wrap("gear.give", ["item", "from", "to"], (a, ctx) => give(ctx, strOf(a.item), strOf(a.from), strOf(a.to)));
+    // A reply's handover (`told`) lands as the story told it, room or not.
+    wrap("gear.give", ["item", "from", "to", "told?"], (a, ctx) => give(ctx, strOf(a.item), strOf(a.from), strOf(a.to), a.told === true));
     // An NPC hands over something the world hadn't tracked yet: it comes into being, held by the recipient.
     wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}`, stack: true }));
     wrap("gear.search", ["who", "target?"], (a, ctx) => search(ctx, strOf(a.who) || ctx.world.pov, strOf(a.target) || null));
@@ -880,26 +891,34 @@ export const gearPack: PackDef = {
 
     r.view({ panel: "gear.gear", build: (ctx) => buildGearView(ctx) as unknown as JsonValue });
 
+    // A reply's give hands over a thing the giver holds that the player character can see, by id or
+    // by name (`heldItem`). Anything else is words for a thing the world doesn't track yet, as the
+    // reply put it, which only an NPC can hand over; a hidden thing's id or name reads exactly as
+    // such words, so nothing tells of it, and the hidden thing never changes hands (DESIGN §9.4).
+    const givenOf = (p: JsonObject, ctx: ReadContext): EntityId | null => {
+      const id = heldItem(ctx, strOf(p.item), strOf(p.from));
+      return own(ctx.state.entities, id) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? id : null;
+    };
     r.proposal({
       type: "give",
       boundField: "ref",
       validate(p, ctx) {
-        const item = heldItem(ctx, strOf(p.item), strOf(p.from));
-        const e = own(ctx.state.entities, item);
         if (!own(ctx.state.entities, strOf(p.to))) return reject("missing_entity", `no recipient ${labelOf(ctx, strOf(p.to))}`);
-        if (!e) {
+        const given = givenOf(p, ctx);
+        if (given === null) {
+          const item = strOf(p.item);
           // Money handed over is a transfer, never a new item called "$20" or "cash".
           if (cashGift(item, ctx.world.currency)) return reject("is_money", "a cash give is a transfer");
           // Only an NPC can hand over something untracked; the POV can't give what it doesn't have.
           const from = strOf(p.from);
-          return item !== "" && from !== "" && from !== ctx.world.pov && own(ctx.state.entities, from) ? null : reject("missing_entity", `no item ${labelOf(ctx, item)}`);
+          return item !== "" && from !== "" && from !== ctx.world.pov && own(ctx.state.entities, from) ? null : reject("missing_entity", `no item ${item}`);
         }
-        if (e.kind === "account") return reject("is_money", "a cash give is a transfer");
+        if (own(ctx.state.entities, given)?.kind === "account") return reject("is_money", "a cash give is a transfer");
         return null;
       },
       toEffects: (p, ctx) => {
-        const item = heldItem(ctx, strOf(p.item), strOf(p.from));
-        return own(ctx.state.entities, item) ? [{ type: "gear.give", args: { item, from: strOf(p.from), to: strOf(p.to) } }] : [{ type: "gear.receive", args: { name: item, from: strOf(p.from), to: strOf(p.to) } }];
+        const given = givenOf(p, ctx);
+        return given !== null ? [{ type: "gear.give", args: { item: given, from: strOf(p.from), to: strOf(p.to), told: true } }] : [{ type: "gear.receive", args: { name: strOf(p.item), from: strOf(p.from), to: strOf(p.to) } }];
       },
     });
     // The reply's item changes (DESIGN §9.4): each names someone and a thing the world has, by id or by
@@ -959,8 +978,9 @@ export const gearPack: PackDef = {
         const found = itemFor(p, ctx, who, false);
         if ("code" in found) return found;
         if (!isInside(ctx.state, found.id, who)) return reject("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        // As many as the story says, from one up; more than there is uses up all of it.
         const n = p.qty === undefined ? 1 : p.qty;
-        if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > USE_UP_MAX) return reject("bound", `using up is a whole number from 1 to ${USE_UP_MAX} at a time`);
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 1) return reject("bad_amount", "using up is a whole number of at least 1");
         return null;
       },
       toEffects: (p, ctx) => {
@@ -1019,12 +1039,13 @@ export const gearPack: PackDef = {
         const holder = strOf(p.entity) || ctx.world.pov;
         const found = itemFor(p, ctx, holder, true);
         if ("code" in found) return found;
-        if (typeof p.delta !== "number" || !Number.isInteger(p.delta) || p.delta === 0 || Math.abs(p.delta) > CONDITION_STEP_MAX) return reject("bound", `an item's condition moves by a whole number up to ${CONDITION_STEP_MAX} a reply`);
+        if (typeof p.delta !== "number" || !Number.isInteger(p.delta) || p.delta === 0) return reject("bad_amount", "an item's condition moves by a whole, non-zero number");
         return null;
       },
+      // As far as the story says, inside the condition's range and any step the author set.
       toEffects: (p, ctx) => {
         const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
-        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: numOf(p.delta, 0) } }];
+        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: toldStep(ctx, found.id, "condition", numOf(p.delta, 0)) } }];
       },
     });
     r.proposal({
@@ -1038,11 +1059,10 @@ export const gearPack: PackDef = {
         if (typeof delta !== "number" || !Number.isInteger(delta) || delta === 0) return reject("bad_proposal", "quantity needs a whole, non-zero delta");
         const who = strOf(p.entity);
         if (who !== "" && who !== e.fields.owner && !isInside(ctx.state, item, who)) return reject("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
-        // Capped per field: the item kind's `qty` bound, else the default.
-        const cap = Math.abs(fieldDef(ctx.registry, ctx.world, e.kind, "qty")?.bound?.maxDelta ?? QTY_MAX_DELTA);
-        return Math.abs(delta) > cap ? reject("over_bound", `a reply can change a quantity by at most ${cap}`) : null;
+        return null;
       },
-      toEffects: (p) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: numOf(p.delta) } }],
+      // As far as the story says, never below none, and no further than a step the author set.
+      toEffects: (p, ctx) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: toldStep(ctx, strOf(p.item), "qty", numOf(p.delta)) } }],
     });
 
     r.lint({

@@ -104,13 +104,13 @@ const CLAIM_CHOICES = CLAIM_MODES.map((mode) => ({ value: mode, label: CLAIM_MOD
  */
 export function ClaimsControl(props: { value: ClaimsPolicy; disabled?: boolean; onChange(next: ClaimsPolicy): void }) {
   const { mode, capped } = props.value;
-  const help = mode === "real" ? (capped ? "It's added where your action needs it, unless it costs more than the world's claim cap: then you're asked first." : "It's added where your action needs it, at any price.") : mode === "ask" ? "The turn waits for your answer: Add, or Not an action." : "The action doesn't play, and a chip says why.";
+  const help = mode === "real" ? (capped ? "It's added where your action needs it, unless it costs more than the world's claim cap: then you're asked first." : "It's added where your action needs it, at any price.") : mode === "ask" ? "The turn waits for your answer: Add, or Not an action." : "The action plays as plain roleplay, and a receipt says why.";
   return (
     <div class="lre-stack" data-lre-claims>
       <div class="lre-field">
         <span class="label">When you say you have something the world doesn't</span>
         <Seg<ClaimsPolicy["mode"]> label="When you say you have something the world doesn't" value={mode} options={CLAIM_CHOICES} disabled={props.disabled} onChange={(next) => props.onChange({ mode: next, capped })} />
-        <span class="lre-field-help">{help} Money is never made this way.</span>
+        <span class="lre-field-help">{help} Cash you carry is just handed over; money you say you have and don't is always asked about first, except under Hold me to the world.</span>
       </div>
       <div class="lre-field">
         <HostSwitch label="Ask first above the world's claim cap" checked={capped} disabled={props.disabled || mode !== "real"} onChange={(next) => props.onChange({ mode, capped: next })} />

@@ -13,7 +13,7 @@ import { calendarOf, dateAt, formatHHMM, MINUTES_PER_DAY, placeOffset } from "./
 import { ENGINE_EVENTS, signalOf } from "./engine-pack";
 import type { Registry } from "./registry-impl";
 import { povLife } from "./life";
-import type { Resolution } from "./resolve";
+import { playsAsRoleplay, type Resolution } from "./resolve";
 import type { Rng } from "./rng";
 import { allSchedules, nextStartFor, scheduleOwners } from "./schedules";
 import { asObject, placeOfEntity } from "./scope";
@@ -28,6 +28,8 @@ export interface BeatInput {
   timelapse?: TimelapseOutcome | null;
   /** The turn's events (signals, beats and stage changes are read from them). */
   events: readonly LedgerEvent[];
+  /** What the player's message fills the turn's time skip with, in their words (`EngineTurnPlan.fill`). */
+  fill?: string | null;
 }
 
 export const MAX_BEATS = 6;
@@ -62,7 +64,9 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
     const what = r.told?.what ?? r.inferred?.label ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
     const took = r.told && r.told.minutes > 0 ? `, taking ${spanText(r.told.minutes)}` : "";
     const changed = r.told && r.told.changes.length > 0 ? ` What changed: ${r.told.changes.join("; ")}.` : "";
-    // A requirement's expression can name a secret or its stage: it reads as not possible, as on the Outcome.
+    // The player's action that plays as plain roleplay is theirs to tell: no beat says it failed (DESIGN §11).
+    if (playsAsRoleplay(r)) continue;
+    // A hard lock's expression can name a secret or its stage: it reads as not possible, as on the Outcome.
     if (!r.ok) lines.push(`${what} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
     // A check the adjudication policy settled without a roll is decided all the same.
     else if (r.check || r.adjudged) lines.push(`${what}: the result is decided — ${r.outcome}${took}.${changed}`);
@@ -71,10 +75,17 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
   const tl = input.timelapse;
   if (tl) {
     const stop = tl.result.stops[0];
-    if (stop && signalVisible(reg, world, state, pov, stop)) lines.push(`Time passes until it's interrupted: ${stop.text}. Narrate the interval from the Montage; don't add events.`);
-    // A time skip a character's mind stopped (DESIGN §24.7): what they do comes from their mind, never stated here.
-    else if (tl.summary.stoppedBy === "mind") lines.push(`Time passes until ${tl.mindName ?? "someone"} steps in; how they do is in the Minds section. Narrate the interval from the Montage; don't add events.`);
-    else lines.push("Time passes. Narrate the interval from the Montage; don't add events.");
+    // How the span ended, then what the player's message fills it with, which is what the narrator
+    // tells of it: the player's directive, never overruled. What else happened in it is the Montage's.
+    const span =
+      stop && signalVisible(reg, world, state, pov, stop)
+        ? `Time passes until it's interrupted: ${stop.text}.`
+        : // A time skip a character's mind stopped (DESIGN §24.7): what they do comes from their mind, never stated here.
+          tl.summary.stoppedBy === "mind"
+          ? `Time passes until ${tl.mindName ?? "someone"} steps in; how they do is in the Minds section.`
+          : "Time passes.";
+    const filled = input.fill ? ` The player's message fills this time: “${input.fill}”. Narrate that as what the player character does in it.` : "";
+    lines.push(`${span}${filled} What ${filled ? "else " : ""}happened in it is in the Montage.`);
   }
   for (const e of input.events) {
     if (e.type === "stage") {

@@ -34,7 +34,7 @@ function decide(req: DecideRequest): Answers {
   return out;
 }
 
-const ALL_ON: JsonObject = Object.fromEntries(["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
+const ALL_ON: JsonObject = Object.fromEntries(["interpret", "npc.choose", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
 
 /** The brief answers `brief` and the outline `beats`; every other step as `quiet`. */
 const prose =
@@ -92,10 +92,10 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     expect(total).toBe(4);
   });
 
-  test("Full: adds brief, the prose outline and contradiction (narrator + 7)", async () => {
+  test("Full: adds brief and the prose outline, and no step checks the reply against the engine's facts (narrator + 6)", async () => {
     const { rig, counts, total } = await turnCalls("full");
-    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, contradiction: 1 });
-    expect(total).toBe(7);
+    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1 });
+    expect(total).toBe(6);
     // The brief and prose outline reach the narrator through the Outline slot.
     const outline = rig.host.section("Outline");
     expect(outline).toContain("Brief: Sam waits at home for the ferry.");
@@ -104,8 +104,8 @@ describe("model calls per preset (DESIGN §5.3)", () => {
 
   test("Custom with every step on: every step Settings lists that can fire runs (choices too)", async () => {
     const { rig, chatId, counts, total } = await turnCalls("custom");
-    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, contradiction: 1, choices: 1 });
-    expect(total).toBe(8);
+    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, choices: 1 });
+    expect(total).toBe(7);
     const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
     expect(chips.filter((c) => c.kind === "choice").map((c) => c.label)).toEqual(["I board the ferry", "I go home"]);
   });
@@ -167,7 +167,7 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     const purposes = rig.rt.meter.log.slice(start).map((c) => c.purpose);
     expect(purposes.filter((p) => p === "interpret" || p === "brief" || p === "outline" || p === "puzzle.answer").length).toBe(1);
-    expect(purposes.filter((p) => p === "extract" || p === "contradiction" || p === "choices").length).toBe(1);
+    expect(purposes.filter((p) => p === "extract" || p === "choices").length).toBe(1);
   });
 });
 

@@ -7,7 +7,7 @@
 import type { ChatId, EntityId, MessageId, PackId, PanelId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import { formatMoney } from "../shared/world";
+import { formatMoney, requirementExpr } from "../shared/world";
 import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
@@ -223,7 +223,7 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
     // A number the action needs (Lend's days: optional only because a said end can stand in for it,
     // so a requirement reads it) gets an input pre-filled with 1, and a free amount (Pay, Invest) one
     // currency unit: options are judged with them, so a target isn't "needs amount".
-    const numberParam = Object.entries(action.params).find(([name, p]) => p.type === "number" && (!p.optional || action.requires.some((req) => identifiers(req).includes(name))))?.[0];
+    const numberParam = Object.entries(action.params).find(([name, p]) => p.type === "number" && (!p.optional || action.requires.some((req) => identifiers(requirementExpr(req)).includes(name))))?.[0];
     const nominal: JsonObject = { ...(numberParam ? { [numberParam]: 1 } : {}), ...(amountParam && offers.length === 0 ? { [amountParam]: 10 ** world.currency.decimals } : {}) };
     const pick = (params: JsonObject, label: string): PaletteOption => {
       const odds = actionOdds(registry, world, state, { action, params: { ...nominal, ...params } });
@@ -375,8 +375,9 @@ function refKey(ref: EventRef): string {
  * entries' by `seq`, without the undone ones and those a rebased view dropped (a Keep conversion
  * applies, so it stays); a record that folded nothing (paused) applied none. ✎ fixes and GM edits
  * come apart from the rest (`fixes`, each still holding an event), since each is its own Journal
- * line and Undo chip. The change chip and the Journal list these, so an undone purchase, or one an
- * earlier switch dropped, isn't shown as made.
+ * line and Undo chip; one a rebased view worked out again holds what it applied there (the fold's
+ * `resolved`), so one already so there reads as nothing made. The change chip and the Journal list
+ * these, so an undone purchase, or one an earlier switch dropped, isn't shown as made.
  */
 export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: { action: string; label: string }; gm?: true }[] } {
   const result = fold.messages[index];
@@ -384,11 +385,12 @@ export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { even
   if (!result || (result.fold !== "on_path" && result.fold !== "view" && result.fold !== "plain")) return { events: [], post: [], fixes: [] };
   const skipped = new Set(rec.undone.map(refKey));
   for (const n of fold.notes) if (n.kind === "dropped" && n.messageId === result.id && n.ref && "in" in n.ref) skipped.add(refKey(n.ref));
+  const resolved = new Map(fold.resolved.filter((r) => r.messageId === result.id).map((r) => [r.seq, r.events]));
   const recPath = turnPath(rec);
   const live = rec.post
     .filter((p) => isLive(p.at, result.parentPath, recPath))
     .sort((a, b) => a.seq - b.seq)
-    .map((p) => ({ seq: p.seq, kind: p.kind, events: p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))), ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}) }));
+    .map((p) => ({ seq: p.seq, kind: p.kind, events: resolved.get(p.seq) ?? p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))), ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}) }));
   return {
     events: rec.events.filter((_, i) => !skipped.has(refKey({ in: "events", index: i }))),
     post: live.filter((p) => p.kind !== "fix").flatMap((p) => p.events),
@@ -631,7 +633,7 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
       expires: "never",
     });
   }
-  // A write held during a reply that no longer applied once it finished (P2): told, never silent.
+  // A write held during a reply that couldn't be made once it finished (P2): told, never silent.
   const headId = chain.findLast((m) => !m.isUser)?.id ?? "";
   for (const r of core.journal.refused ?? []) {
     const first = r.write.kind === "post" ? r.write.entry.events[0] : undefined;

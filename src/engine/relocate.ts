@@ -3,26 +3,23 @@
 // events of a move, so they all leave the same state: out of whatever holds them (`in`), `place`
 // set, and where they then stand (the space pack's arrival cell, from Space 3), with the event
 // shapes rules and replay read (`unlink`, `set place`, `space.pos`). A narrated move also leaves its
-// old activity behind, and checks routes while the world's travel simulation is on. The player
-// character's party (people who `travels_with` it) comes along when the move says so.
+// old activity behind, and lands by any route or none. The player character's party (people who
+// `travels_with` it) comes along when the move says so.
 
 import type { EntityId, PlaceId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
-import { mapSettingsOf } from "../shared/maps";
 import { PARTY_RELATION } from "../shared/party";
 import { acts } from "./life";
-import { optionalQuery, optionalService, own } from "./pack-kit";
+import { optionalService, own } from "./pack-kit";
 import { together } from "./presence";
 import type { ReadContext, Rejection } from "./registry";
 import { isGone, placeOfEntity } from "./scope";
-import { canSeePlace } from "./visibility";
 
 export interface RelocateOptions {
   /**
-   * A narrated move (the reply's, or ✎): it refuses a move no route reaches while the world's
-   * travel simulation is on, and its activity rule holds: to another place, their activity becomes
-   * `activity`, else `idle`, so what they did where they were stays behind; where they already are,
-   * a stated `activity` still applies.
+   * A narrated move (the reply's, or ✎): it lands whether or not a route joins the places, and its
+   * activity rule holds: to another place, their activity becomes `activity`, else `idle`, so what
+   * they did where they were stays behind; where they already are, a stated `activity` still applies.
    */
   told?: boolean;
   /** The activity a narrated move states. */
@@ -47,14 +44,6 @@ export function relocate(ctx: ReadContext, who: EntityId, to: PlaceId, opts: Rel
   const e = own(ctx.state.entities, who);
   if (!e) return { code: "missing_entity", reason: `no entity ${who}` };
   const from = placeOfEntity(ctx.state, who);
-  // Moves are story first: only the world's travel simulation makes one across a gap no route spans
-  // (off an island with no boat leg back) a move that didn't happen. The reason reaches the player:
-  // a place the POV can't see is somewhere.
-  if (opts.told && from && from !== to && mapSettingsOf(ctx.world).travelSimulation === true) {
-    const reach = optionalQuery(ctx, "space.reachable");
-    const named = (id: PlaceId): string => (canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? (own(ctx.world.places, id)?.name ?? id) : "somewhere");
-    if (reach && !reach(ctx, from, to)) return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(to)}` };
-  }
   const next = opts.told ? (from !== to ? (opts.activity ?? "idle") : opts.activity) : opts.along && from !== to ? "idle" : undefined;
   // A move to where they already are still takes them out of what holds them and onto their cell.
   const out = moveEvents(ctx, who, to);

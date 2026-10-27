@@ -78,17 +78,15 @@ describe("the turn's actions in words (Outcome and Outline)", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("an answer the read gave as someone the player character can't see is never told: the message didn't say it, so it is no answer", async () => {
+  test("an answer the read gave as someone the player character can't see is never told: the message didn't say it, so it is no answer, and no reply hears of it", async () => {
     const { rig, chatId } = await atTheShop("marcus_delgado", true);
     rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify({ action: "answer", params: { puzzle: TRUCK, answer: "Vex Morrow" }, confidence: 0.9 }) : "{}");
     await rig.turn(chatId, "I give my answer: whoever was in the shop last night.", "Marcus wipes his hands and says nothing.");
     for (const section of ["Outcome", "Outline"]) expect(rig.host.section(section)).not.toMatch(/Answer \(|Vex|Morrow/);
-    // The next reply is told the answer didn't happen, in words that still don't name them.
+    // Nor is the next reply told anything of it: it played as plain roleplay.
     rig.host.quietReply = () => "{}";
     await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
-    const outcome = rig.host.section("Outcome");
-    expect(outcome).toContain("doesn't say the answer itself");
-    expect(outcome).not.toMatch(/Vex|Morrow/);
+    expect(rig.host.section("Outcome")).not.toMatch(/Answer|answer itself|Vex|Morrow/);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

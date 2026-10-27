@@ -10,7 +10,7 @@ What a formula can read depends on where it sits: `self` is whoever it is about,
 
 | Where | `self` | Also |
 |---|---|---|
-| An action's `requires`, `duration` and `activity.until`; its check's `modifier`, `advantage` and `dc` | The one acting (the POV in play) | `actor`; each ref parameter by its name (`target`, `item`); scalar parameters by name and as `params.<name>` |
+| An action's `requires` (each a formula, or `{"expr": …, "hard": true}` for a hard lock, which refuses even a typed attempt; DESIGN §11), `duration` and `activity.until`; its check's `modifier`, `advantage` and `dc` | The one acting (the POV in play) | `actor`; each ref parameter by its name (`target`, `item`); scalar parameters by name and as `params.<name>` |
 | An action's outcome effects (`=` arguments) | The one acting | As above, and the roll as `roll.*` |
 | The `check` effect's outcome effects | The one rolling | `actor`, `target` and `roll.*` |
 | A check's opponent (`vs.modifier`, `vs.passive`) | The opponent | The action's names |

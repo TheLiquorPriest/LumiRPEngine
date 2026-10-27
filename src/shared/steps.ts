@@ -56,7 +56,6 @@ export function hasRetiredSignal(signals: readonly string[]): boolean {
 export const STEP_LABEL: Record<StepPurpose, string> = {
   interpret: "Interpret typed input",
   "npc.choose": "NPC choices",
-  contradiction: "Contradiction check",
   "puzzle.answer": "Puzzle answers",
   brief: "Scene brief",
   outline: "Prose outline",
@@ -128,7 +127,6 @@ export const STEP_VARS: Record<StepPurpose | "skip_plan", { phase: "before the r
   outline: { phase: "before the reply", vars: [...PROSE_VARS, "sections"] },
   extract: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
   choices: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
-  contradiction: { phase: "after the reply", vars: [], note: "A world's effects template for this step gets the reply-reading placeholders (extract's)." },
   mind: { phase: "with the minds", vars: MIND_VARS },
   memory: { phase: "with the minds", vars: MIND_VARS },
   consolidate: { phase: "with the minds", vars: MIND_VARS },
@@ -164,10 +162,9 @@ export const PROSE_PROMPTS: Record<"brief" | "outline" | "choices", string> = {
     "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts: each something the scene as written makes possible right now, with the people present and the things {{pov}} has. Each under twelve words, first person, as the player would type it, naming who or what it involves.",
 };
 
-/** The decision steps' built-in questions, which a world template or the user's own prompt replaces; the choices, facts or scale stay the engine's. */
-export const DECISION_PROMPTS: Record<"npc.choose" | "contradiction" | "puzzle.answer" | "judge", string> = {
+/** The decision steps' built-in questions, which a world template or the user's own prompt replaces; the choices or the scale stay the engine's. */
+export const DECISION_PROMPTS: Record<"npc.choose" | "puzzle.answer" | "judge", string> = {
   "npc.choose": "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.",
-  contradiction: "Does the narrator's reply contradict one of these engine facts? Pick the fact it contradicts, or none.",
   "puzzle.answer": "Is the player's answer correct: the same as one of the accepted answers, allowing for wording and spelling?",
   judge: "Judge how well the player's described approach suits what their character attempts.",
 };
@@ -202,7 +199,6 @@ export const PROMPT_EFFECT: Record<StepPurpose, string> = {
   outline: "Replaces the built-in instructions; the answer format stays.",
   choices: "Replaces the built-in instructions; the answer format stays.",
   "npc.choose": "Replaces the question it is asked; the choices stay the engine's.",
-  contradiction: "Replaces the question it is asked; the facts it checks stay the engine's.",
   "puzzle.answer": "Replaces the question it is asked.",
   judge: "Replaces the question it is asked; the rating scale stays.",
   mind: "Replaces the built-in instructions; the answer format stays.",
@@ -216,7 +212,7 @@ export const PROMPT_EFFECT: Record<StepPurpose, string> = {
  * with the player character, in the steps that read the reply (`extract`, and the `effects` and
  * `choices` templates); `sections`, the sections the narrator has this turn, in the outline.
  */
-export const PURPOSE_PLACEHOLDERS: Partial<Record<StepPurpose, readonly string[]>> = { extract: ["usual"], contradiction: ["usual"], choices: ["usual"], outline: ["sections"] };
+export const PURPOSE_PLACEHOLDERS: Partial<Record<StepPurpose, readonly string[]>> = { extract: ["usual"], choices: ["usual"], outline: ["sections"] };
 
 /**
  * The outputs a world template may declare per purpose. `text` on a decision purpose is its
@@ -225,7 +221,6 @@ export const PURPOSE_PLACEHOLDERS: Partial<Record<StepPurpose, readonly string[]
 export const STEP_OUTPUTS: Record<StepPurpose, readonly StepTemplateDef["output"][]> = {
   interpret: ["decision", "text"],
   "npc.choose": ["decision", "text"],
-  contradiction: ["decision", "text", "effects"],
   "puzzle.answer": ["decision", "text"],
   brief: ["text"],
   outline: ["text"],

@@ -14,7 +14,7 @@ import { heldBy } from "../shared/finance";
 import { hashParts } from "../shared/hash";
 import type { LedgerEvent } from "../shared/ledger";
 import type { ActionDef, Expr, LoreEntryDef, PlaceDef, Selector, StageDef, TrackDef, TrackKind, WorldDoc } from "../shared/world";
-import { objectiveLabel, objectiveWhen } from "../shared/world";
+import { isHardLock, objectiveLabel, objectiveWhen, requirementExpr } from "../shared/world";
 import { loreIsSecret, lorePhrases } from "../shared/lore";
 import { compile, ExprError, identifiers, type ExprEnv, type Node } from "./expr";
 import { readEngineSlice, signalOf, type Signal } from "./engine-pack";
@@ -409,10 +409,16 @@ export function readsStory(expr: Expr): boolean {
  * `env` (the POV as `self` and `actor`). A quest's or a secret's later step, or one already taken,
  * isn't an option yet: every list of actions the player or a model reads (the Actions sheet, its
  * Combat tab, interpret's catalog) leaves it out rather than showing it locked, so no list names a
- * step the player hasn't reached. A requirement on where they are or what they carry still locks.
+ * step the player hasn't reached. A requirement on where they are or what they carry still locks,
+ * and so does a hard lock: its author wants a typed attempt to read as the action and fail ("the
+ * safe stays shut"), so it is listed, locked.
  */
 export function storyLocked(env: ExprEnv, action: Pick<ActionDef, "params" | "requires">): boolean {
-  return action.requires.some((req) => readsStory(req) && identifiers(req).every((name) => !hasOwn(action.params, name)) && !truthy(evalExpr(req, env, false)));
+  return action.requires.some((req) => {
+    if (isHardLock(req)) return false;
+    const expr = requirementExpr(req);
+    return readsStory(expr) && identifiers(expr).every((name) => !hasOwn(action.params, name)) && !truthy(evalExpr(expr, env, false));
+  });
 }
 
 /** Every unrevealed secret truth in the world: text that must never reach a player view. */

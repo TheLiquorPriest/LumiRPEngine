@@ -7,7 +7,7 @@
 
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
-import type { LedgerEvent, PostEvent, PostingLine } from "../../../shared/ledger";
+import { APART_GROUP, type LedgerEvent, type PostEvent, type PostingLine } from "../../../shared/ledger";
 import { FINANCE_EVENTS, featureOn, type ClassTraits, type FinanceFeature, type PayTier, type TxnKind } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { hashParts } from "../../../shared/hash";
@@ -93,6 +93,16 @@ export interface ChargeOptions {
   overdraft?: boolean;
   /** When it happens, when that isn't now (a flow at its own instant inside a slot). */
   at?: number;
+  /**
+   * A payment the story made (a narrated purchase or transfer, DESIGN §9.5): it never fails for
+   * cover, and from level 2 it never takes cash or savings below zero (`chooseSource`). The way it
+   * names takes it when that way covers it or can run a debt; else the payer's order, then the last
+   * way that can run a debt, then a savings account that covers it. Its posting carries `overdraw`,
+   * which the funds guard lets through. A purchase nothing of the payer's can pay is theirs with
+   * nothing charged: its journal line, on no account, says what it would have cost (`unpaid`). A
+   * payer whose money is a band alone moves down their band, as level 1 does.
+   */
+  story?: boolean;
 }
 
 export type ChargeService = (ctx: ReadContext, payer: EntityId, cents: number, memo: string, opts?: ChargeOptions) => LedgerEvent[] | Rejection;
@@ -256,6 +266,16 @@ function covers(ctx: ReadContext, s: Source, cents: number, overdraft: boolean):
   return availableOf(ctx, s.account) + (overdraft ? overdraftRoom(ctx, s.account) : 0) >= cents;
 }
 
+/**
+ * Whether an account can run a debt past what it covers when the story pays from it (DESIGN §9.5,
+ * §25.10): a checking account goes into overdraft, and a revolving credit account over its limit.
+ * Cash, savings and the like have neither.
+ */
+export function runsDebt(ctx: ReadContext, account: EntityId): boolean {
+  const t = traitsOf(ctx, account);
+  return t !== null && (t.transactional || t.revolving);
+}
+
 /** The ways a party pays by default: by their wealth and their manner (DESIGN §25.7). */
 export function defaultTiers(ctx: ReadContext, who: EntityId): PayTier[] {
   const e = own(ctx.state.entities, who);
@@ -307,6 +327,8 @@ export interface Picked {
   account: EntityId;
   card?: EntityId;
   via: Source["via"];
+  /** A payment the story made that goes another way than the one its words named: the account they named (`TxnMeta.named`). */
+  named?: EntityId;
 }
 
 /** What a payer's method tries, in order, once each: a way named in words, else the payer's preferences, then anything they can spend from in the usual order. */
@@ -342,34 +364,69 @@ export function mostPayable(ctx: ReadContext, payer: EntityId, cents: number, op
   return Math.max(0, ...sourcesToTry(ctx, payer, cents, opts, []).map(room));
 }
 
+/** Sources once each, in order: an account with the same card (or none) a second time adds nothing. */
+function distinct(sources: readonly Source[]): Source[] {
+  const seen = new Set<string>();
+  return sources.filter((s) => {
+    const key = `${s.account}|${s.card ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Why a payment the story made moves no money: nothing of the payer's covers it or can run a debt (`chooseSource`). */
+export const NO_WAY_TO_PAY = "no_way_to_pay";
+
 /**
  * What a payment comes from, or a decline (from level 2; level 1 overdraws instead). A named source
  * (an account or a card of the payer's) pays when it can; a named loan or brokerage account falls
  * back to the usual choice. A way named in words (a card, cash, savings) is tried first; otherwise
  * the payer's preferences, tier by tier, then anything they can spend from that covers it.
+ *
+ * A payment the story made (`story`, DESIGN §9.5) never declines for cover, and from level 2 it
+ * never takes cash or savings below zero. The way it names (a source, then a way in words) takes it
+ * when that way covers it or can run a debt (`runsDebt`: into overdraft, or over a credit limit):
+ * the story wins. Otherwise it goes through the payer's own order, and when nothing there covers it,
+ * the last way in that order that can run a debt takes it whole; with none, any account of theirs
+ * that can, else a savings account that covers it. With none of those it is refused
+ * (`NO_WAY_TO_PAY`): a purchase is then the payer's with nothing charged, and a transfer moves
+ * nothing. A way other than the one its words named carries that account (`Picked.named`).
  */
-export function chooseSource(ctx: ReadContext, payer: EntityId, cents: number, opts: { method?: PayMethod; source?: EntityId; category?: string; except?: EntityId; till: boolean; overdraft: boolean }): Picked | Rejection {
+export function chooseSource(ctx: ReadContext, payer: EntityId, cents: number, opts: { method?: PayMethod; source?: EntityId; category?: string; except?: EntityId; till: boolean; overdraft: boolean; story?: boolean }): Picked | Rejection {
   const level = ctx.levelOf(payer, "money");
+  const story = opts.story === true && level >= 2;
   const problems: string[] = [];
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
-  if (opts.source) {
-    const named = sourcesFor(ctx, payer, opts.source, opts.till, problems).filter((s) => s.account !== opts.except);
-    const first = named[0];
-    if (first) {
-      if (level < 2 || covers(ctx, first, cents, opts.overdraft)) return first;
-      return reject("declined", first.card ? `${labelOf(ctx, first.card)} was declined for ${money(cents)}` : `${labelOf(ctx, first.account)} can't cover ${money(cents)}`);
-    }
+  const named = opts.source ? sourcesFor(ctx, payer, opts.source, opts.till, problems).filter((s) => s.account !== opts.except) : [];
+  const first = named[0];
+  if (first && (level < 2 || covers(ctx, first, cents, opts.overdraft) || (story && runsDebt(ctx, first.account)))) return first;
+  if (opts.source && !opts.story) {
+    if (first) return reject("declined", first.card ? `${labelOf(ctx, first.card)} was declined for ${money(cents)}` : `${labelOf(ctx, first.account)} can't cover ${money(cents)}`);
     if (problems.length > 0) return reject("declined", `${problems[0]}`);
   }
   const method = opts.method ?? "auto";
-  const candidates = sourcesToTry(ctx, payer, cents, opts, problems);
+  const tried = sourcesToTry(ctx, payer, cents, opts, problems);
+  const said = story ? (first?.account ?? (method !== "auto" ? tried[0]?.account : undefined)) : undefined;
+  const elsewhere = (s: Source): Picked => (said !== undefined && s.account !== said ? { ...s, named: said } : s);
+  if (story && method !== "auto") {
+    const way = tried.find((s) => covers(ctx, s, cents, opts.overdraft)) ?? tried.find((s) => runsDebt(ctx, s.account));
+    if (way) return elsewhere(way);
+  }
+  const candidates = opts.story && method !== "auto" ? distinct([...tried, ...sourcesToTry(ctx, payer, cents, { ...opts, method: "auto" }, [])]) : tried;
   const hit = candidates.find((s) => covers(ctx, s, cents, opts.overdraft));
-  if (hit) return hit;
+  if (hit) return elsewhere(hit);
+  const account = (id: EntityId): Source => ({ account: id, via: "account" });
   if (level < 2) {
-    const fallback = candidates[0] ?? spendable(ctx, payer).filter((id) => id !== opts.except).map((account): Source => ({ account, via: "account" }))[0];
+    const fallback = tried[0] ?? spendable(ctx, payer).filter((id) => id !== opts.except).map(account)[0];
     if (fallback) return fallback;
   }
   const name = own(ctx.state.entities, payer)?.name ?? payer;
+  if (story) {
+    const debt = candidates.findLast((s) => runsDebt(ctx, s.account)) ?? spendable(ctx, payer).filter((id) => id !== opts.except && runsDebt(ctx, id)).map(account).at(-1);
+    const saved = debt ?? sourcesFor(ctx, payer, "savings", opts.till, []).find((s) => s.account !== opts.except && covers(ctx, s, cents, false));
+    return saved ? elsewhere(saved) : reject(NO_WAY_TO_PAY, `${name} has nothing that covers ${money(cents)} or can run a debt, so nothing was paid`);
+  }
   if (problems.length > 0 && (method !== "auto" || candidates.length === 0)) return reject("declined", problems[0] ?? `${name}'s card was declined`);
   return reject("declined", method === "credit" || method === "card" || method === "charge" ? `${name}'s card was declined` : `${name} doesn't have ${money(cents)} available`);
 }
@@ -443,6 +500,10 @@ export interface TxnMeta {
   flow?: string;
   pending?: number;
   narrated?: ChargeOptions["narrated"];
+  /** A payment the story made that went another way than the one it named: the account it named, which Pay another way tries first. */
+  named?: EntityId;
+  /** A purchase the story made that nothing its payer has could pay, so nothing was charged: what it would have cost. Its journal line has no lines. */
+  unpaid?: number;
   at?: number;
 }
 
@@ -474,6 +535,8 @@ export function txn(lines: readonly PostingLine[], meta: TxnMeta): LedgerEvent {
     data.narrated = meta.narrated.cents;
     data.limited = meta.narrated.limited;
   }
+  if (meta.named) data.named = meta.named;
+  if (meta.unpaid !== undefined) data.unpaid = meta.unpaid;
   if (meta.at !== undefined) data.at = meta.at;
   return { type: FINANCE_EVENTS.txn, data };
 }
@@ -485,11 +548,13 @@ export function posting(lines: PostingLine[], meta: TxnMeta): LedgerEvent[] {
 
 /**
  * One payment as an atomic unit (ledger 1.10): its posting, its journal lines and any bookkeeping
- * beside it share a group, so a rebased view that can't afford the posting drops all of them.
+ * beside it share a group, so a rebased view that can't afford the posting drops all of them. One
+ * kept `apart` (`APART_GROUP`) stays out of the unit of the effect it comes with, so a rebased view
+ * keeps or drops it alone.
  */
-export function asUnit(events: LedgerEvent[]): LedgerEvent[] {
+export function asUnit(events: LedgerEvent[], apart = false): LedgerEvent[] {
   if (events.length < 2) return events;
-  const group = `pay:${hashParts(JSON.stringify(events)).slice(0, 10)}`;
+  const group = `${apart ? APART_GROUP : "pay:"}${hashParts(JSON.stringify(events)).slice(0, 10)}`;
   return events.map((e) => ({ ...e, group }));
 }
 
@@ -514,18 +579,21 @@ function overdraftFeesToday(ctx: ReadContext, account: EntityId): number {
 
 /**
  * What an account's overdraft policy adds to a payment that takes more than it has: a transfer from
- * the linked account first, or the overdraft fee after.
+ * the linked account first, of the gap or, for a payment the story made past it, of all the link
+ * has; or the overdraft fee after.
  */
 export function overdraftEvents(ctx: ReadContext, account: EntityId, total: number, at: number): { before: LedgerEvent[]; after: LedgerEvent[] } {
   const short = total - availableOf(ctx, account);
-  if (short <= 0 || overdraftRoom(ctx, account) <= 0) return { before: [], after: [] };
+  const room = overdraftRoom(ctx, account);
+  if (short <= 0 || room <= 0) return { before: [], after: [] };
   const p = productOf(ctx, account);
   if (!p) return { before: [], after: [] };
   if (p.overdraft === "linked") {
     const link = strOf(own(ctx.state.entities, account)?.fields.overdraft_link);
+    const moved = Math.min(short, room);
     const lines: PostingLine[] = [
-      { account: link, amount: -short },
-      { account, amount: short },
+      { account: link, amount: -moved },
+      { account, amount: moved },
     ];
     return { before: posting(lines, { memo: `Overdraft transfer from ${labelOf(ctx, link)}`, kind: "transfer", category: "transfer", at }), after: [] };
   }
@@ -547,7 +615,12 @@ function saleTermsOf(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, cen
   return null;
 }
 
-/** Pay `cents`: a no-op at level 0, a band check plus adjustment at 1, a posting (with declines) from 2. */
+/**
+ * Pay `cents`: a no-op at level 0, a band check plus adjustment at 1, a posting (with declines) from
+ * 2. A payment the story made (`story`) never declines for cover; a purchase nothing of the payer's
+ * can pay (`NO_WAY_TO_PAY`) charges nothing, and its journal line, on no account, says what it would
+ * have cost (`unpaid`), so it is still theirs (DESIGN §9.5).
+ */
 export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, rawCents: number, memo: string, opts: ChargeOptions = {}): LedgerEvent[] | Rejection {
   if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
   const cents = Math.round(rawCents);
@@ -564,14 +637,14 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
   let source: string;
   let picked: Picked | null = null;
   if (hasLedger(ctx, payer)) {
-    const p = chooseSource(ctx, payer, total, { method: opts.method, source: opts.source, category: opts.category, till: opts.sale !== undefined, overdraft });
-    if ("code" in p) return p;
+    const p = chooseSource(ctx, payer, total, { method: opts.method, source: opts.source, category: opts.category, till: opts.sale !== undefined, overdraft, story: opts.story === true });
+    if ("code" in p) return opts.story === true && opts.kind === "purchase" && p.code === NO_WAY_TO_PAY ? [txn([], { memo, kind: "purchase", ...(opts.category ? { category: opts.category } : {}), payer, unpaid: total })] : p;
     picked = p;
     source = p.account;
     if (cashback > 0 && p.via !== "debit") return reject("no_cashback", "cash back comes only with a debit card");
   } else {
     if (cashback > 0) return reject("no_cashback", "cash back needs an account");
-    if (level >= 1 && notional(ctx.state, payer) < total) return reject("declined", `${labelOf(ctx, payer)} can't afford ${formatMoney(total, ctx.world.currency)}`);
+    if (level >= 1 && opts.story !== true && notional(ctx.state, payer) < total) return reject("declined", `${labelOf(ctx, payer)} can't afford ${formatMoney(total, ctx.world.currency)}`);
     source = external(payer);
     out.push(...l1Move(ctx.state, payer, -total));
   }
@@ -589,14 +662,18 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
   // The other side by id when it's someone in the world (a view names it, or masks it), else the outside party's name.
   const outside = opts.counterparty === undefined ? undefined : own(ctx.state.entities, opts.counterparty) ? opts.counterparty : opts.counterparty.replace(/_/g, " ");
   const counterparty = terms?.seller ?? opts.payee ?? outside;
-  const meta: TxnMeta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty } : {}), payer, ...(picked?.card ? { card: picked.card } : {}), ...(opts.flow ? { flow: opts.flow } : {}), ...(holds ? { pending: at + 1440 } : {}), ...(opts.narrated ? { narrated: opts.narrated } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) };
+  const meta: TxnMeta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty } : {}), payer, ...(picked?.card ? { card: picked.card } : {}), ...(opts.flow ? { flow: opts.flow } : {}), ...(holds ? { pending: at + 1440 } : {}), ...(opts.narrated ? { narrated: opts.narrated } : {}), ...(picked?.named ? { named: picked.named } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) };
   const spend: LedgerEvent[] = [];
   if (picked?.card && opts.sale && Number.isFinite(cardRoom(ctx, picked.card, "purchase"))) {
     const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
     const s = spendOf(ctx.state, picked.card, day);
     spend.push({ type: FINANCE_EVENTS.spend, data: { card: picked.card, day, purchase: s.purchase + cents + tax, atm: s.atm } });
   }
-  return asUnit([...od.before, { type: "post", lines, memo }, ...out, ...dest.extra, txn(lines, meta), ...(terms?.extra ?? []), ...od.after, ...spend]);
+  const paid: LedgerEvent[] = [{ type: "post", lines, memo, ...(opts.story === true ? { overdraw: true as const } : {}) }, ...out, ...dest.extra, txn(lines, meta), ...(terms?.extra ?? []), ...od.after, ...spend];
+  // A payment the story made stands on any path, and its overdraft link's transfer is its own unit
+  // (DESIGN §25.10): a rebased view whose link can't spare it drops the transfer alone, and the
+  // payment takes the account the further into overdraft, never the link below zero.
+  return opts.story === true ? [...asUnit(od.before, true), ...asUnit(paid)] : asUnit([...od.before, ...paid]);
 }
 
 // ---------------------------------------------------------------- moving money
@@ -638,9 +715,12 @@ export function cashAdvanceFee(ctx: ReadContext, account: EntityId, cents: numbe
  * A posting between two accounts a party holds (a savings transfer, a card or loan payment). A
  * payment to credit pays at most what it owes (`cap`, or refused as an overpayment); money in a CD
  * or retirement account doesn't move out here, and nothing moves into a closed account or a CD.
- * Money moved from a credit card into an account is a cash advance, with its fee posted first.
+ * Money moved from a credit card into an account is a cash advance, with its fee posted first. A move
+ * the story made (`story`, DESIGN §9.5) from an account that can run a debt (`runsDebt`) isn't
+ * refused for cover, and its posting carries `overdraw`; one that went another way than the account
+ * it named records that account (`named`), for Pay another way.
  */
-export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, opts: { cap?: boolean; flow?: string; at?: number; unchecked?: boolean } = {}): LedgerEvent[] | Rejection {
+export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, opts: { cap?: boolean; flow?: string; at?: number; unchecked?: boolean; story?: boolean; named?: EntityId } = {}): LedgerEvent[] | Rejection {
   const s = ctx.state;
   if (own(s.entities, from)?.kind !== "account" || own(s.entities, to)?.kind !== "account") return reject("missing_account", "both accounts must exist");
   if (from === to) return reject("bad_party", `${labelOf(ctx, from)} can't pay itself`);
@@ -663,16 +743,16 @@ export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: numb
   }
   const advance = fromTraits.revolving && !toTraits.liability;
   const fee = advance ? cashAdvanceFee(ctx, from, c) : 0;
-  if (!opts.unchecked && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee) return reject("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
+  if (!opts.unchecked && !(opts.story && runsDebt(ctx, from)) && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee) return reject("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
   const lines: PostingLine[] = [
     { account: from, amount: -c },
     { account: to, amount: c },
   ];
   const p = productOf(ctx, from);
   const charged = fee > 0 ? posting([{ account: from, amount: -fee }, { account: bankSide(p?.institution ?? ""), amount: fee }], { memo: "Cash advance fee", kind: "fee", category: "cash_advance", ...(opts.at !== undefined ? { at: opts.at } : {}) }) : [];
-  const out: LedgerEvent[] = [...charged, { type: "post", lines, memo }];
+  const out: LedgerEvent[] = [...charged, { type: "post", lines, memo, ...(opts.story ? { overdraw: true as const } : {}) }];
   if (toTraits.liability) out.push({ type: FINANCE_EVENTS.cardPaid, data: { account: to, cents: c } });
-  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance ? "cash_advance" : "transfer", ...(opts.flow ? { flow: opts.flow } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) }));
+  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance ? "cash_advance" : "transfer", ...(opts.flow ? { flow: opts.flow } : {}), ...(opts.named ? { named: opts.named } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) }));
   return asUnit(out);
 }
 
@@ -697,9 +777,12 @@ export function transferParty(ctx: ReadContext, id: EntityId, side: "from" | "to
  * Money from one party to another, each at its own level. Two sides of one holder move money
  * between two of their accounts. Cash handed over (`method` "cash") comes from the payer's carried
  * cash when it covers, else the usual source, and lands in the payee's carried cash, else the usual
- * deposit account.
+ * deposit account. A transfer the story made (`story`, DESIGN §9.5) never declines for cover, and
+ * from level 2 never takes cash or savings below zero: from an account that neither covers it nor can
+ * run a debt it comes the payer's way instead (`chooseSource`), and with no way at all it moves
+ * nothing (`NO_WAY_TO_PAY`).
  */
-export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, method: PayMethod = "auto"): LedgerEvent[] | Rejection {
+export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, method: PayMethod = "auto", story = false): LedgerEvent[] | Rejection {
   const payer = transferParty(ctx, from, "from");
   if ("code" in payer) return payer;
   const payee = transferParty(ctx, to, "to");
@@ -710,22 +793,28 @@ export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, 
   if (!sameSide) {
     const deposit = payee.account ?? cash;
     const source = payer.account ?? (method === "cash" ? (cashAccount(ctx, payer.holder) ?? undefined) : undefined);
-    const fromCash = method === "cash" && source !== undefined && availableOf(ctx, source) >= Math.round(cents) ? source : payer.account;
-    return charge(hooks, ctx, payer.holder, cents, memo, { payee: payee.holder, method: paying, kind: "transfer", ...(fromCash ? { source: fromCash } : {}), ...(deposit ? { deposit } : {}), overdraft: false });
+    // From level 2 the story's payment names its cash even when the cash doesn't cover it, so the way it goes instead remembers it (`chooseSource`).
+    const storyNamed = story && ctx.levelOf(payer.holder, "money") >= 2;
+    const fromCash = storyNamed || (method === "cash" && source !== undefined && availableOf(ctx, source) >= Math.round(cents)) ? source : payer.account;
+    return charge(hooks, ctx, payer.holder, cents, memo, { payee: payee.holder, method: paying, kind: "transfer", ...(fromCash ? { source: fromCash } : {}), ...(deposit ? { deposit } : {}), overdraft: false, story });
   }
   if (!payer.account && !payee.account) return reject("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
   const level = ctx.levelOf(payer.holder, "money");
   if (level === 0) return [];
   const c = Math.round(cents);
-  let source = payer.account;
+  // What the move takes from its source: a payment to credit pays at most what it owes (`move`'s cap).
+  const takes = payee.account !== undefined && traitsOf(ctx, payee.account)?.liability === true ? Math.min(c, Math.max(0, -balance(ctx.state, payee.account))) : c;
+  let named = story && level >= 2 && payer.account !== undefined && !runsDebt(ctx, payer.account) && availableOf(ctx, payer.account) < takes ? payer.account : undefined;
+  let source = named === undefined ? payer.account : undefined;
   if (!source) {
-    const picked = chooseSource(ctx, payer.holder, c, { method: paying, ...(payee.account ? { except: payee.account } : {}), till: false, overdraft: false });
+    const picked = chooseSource(ctx, payer.holder, c, { method: paying, ...(payee.account ? { except: payee.account } : {}), till: false, overdraft: false, story });
     if ("code" in picked) return picked;
     source = picked.account;
+    named ??= picked.named;
   }
   const target = payee.account ?? (cash !== undefined && cash !== source ? cash : (depositAccount(ctx, payee.holder, source) ?? undefined));
   if (!target || target === source) return reject("bad_party", `${labelOf(ctx, source)} can't pay itself`);
-  return move(ctx, source, target, c, memo, { cap: true });
+  return move(ctx, source, target, c, memo, { cap: true, story, ...(named ? { named } : {}) });
 }
 
 // ---------------------------------------------------------------- the funds guard
@@ -734,9 +823,10 @@ export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, 
  * Ledger 1.10: a posting folds only if the accounts it draws on can pay it (the fold-time twin of the
  * choices above): an open account, within its balance less holds, its credit, or the overdraft its
  * policy allows. What a bank posts itself (interest, fees) and what posts against a holder's own
- * outside account (openings, level-1 moves) isn't checked.
+ * outside account (openings, level-1 moves) isn't checked. A payment the story made (`overdraw`,
+ * DESIGN §9.5) needs only open accounts: it stands past what they cover, on any path.
  */
-export function postGuard(ctx: ReadContext, lines: readonly PostingLine[]): Rejection | null {
+export function postGuard(ctx: ReadContext, lines: readonly PostingLine[], overdraw = false): Rejection | null {
   const s = ctx.state;
   if (lines.some((l) => l.amount > 0 && l.account.startsWith(BANK_PREFIX))) return null;
   for (const l of lines) {
@@ -749,7 +839,7 @@ export function postGuard(ctx: ReadContext, lines: readonly PostingLine[]): Reje
     const name = labelOf(ctx, l.account);
     const status = statusOf(s, l.account);
     if (status !== "open") return reject("declined", `${name} is ${status.replace(/_/g, " ")}`);
-    if (availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0) {
+    if (!overdraw && availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0) {
       return reject("declined", t.liability ? `${name} has no room for ${formatMoney(-l.amount, ctx.world.currency)}` : `${name} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
     }
   }
@@ -805,9 +895,39 @@ export function setCash(ctx: ReadContext, holder: EntityId, cents: number): Ledg
 }
 
 /**
+ * Money the player said they had (DESIGN §9.4 player claims): `cents` into `holder`'s carried cash
+ * (else their first cash account, `cashAccount`), a balanced posting against the outside correction
+ * account, so the books still balance. The account it went into, with its events.
+ */
+export function claimCash(ctx: ReadContext, holder: EntityId, cents: number): { entity: EntityId; events: LedgerEvent[] } | Rejection {
+  const into = cashAccount(ctx, holder);
+  if (!into) return reject("no_cash", `${labelOf(ctx, holder)} carries no cash`);
+  const c = Math.round(cents);
+  if (!Number.isSafeInteger(c) || c <= 0) return reject("bad_amount", "cash said to be had is a whole amount above zero");
+  const lines: PostingLine[] = [
+    { account: into, amount: c },
+    { account: CORRECTION_ACCOUNT, amount: -c },
+  ];
+  return { entity: into, events: asUnit(posting(lines, { memo: "Cash you said you had", kind: "adjustment", category: "correction" })) };
+}
+
+/**
+ * The cash `holder` has on them to hand over (DESIGN §9.4): what their carried cash account, the one
+ * a payment in cash takes first and a cash claim goes into (`cashAccount`), has available, or, until
+ * their money first opens (the turn's start opens it), the opening balance the world gives it. Null
+ * when they keep no cash account.
+ */
+export function carriedCash(ctx: ReadContext, holder: EntityId): number | null {
+  const from = cashAccount(ctx, holder);
+  if (!from) return null;
+  return isOpened(ctx.state, from, openerOf(ctx.state, from)) ? availableOf(ctx, from) : Math.round(numOf(own(ctx.state.entities, from)?.fields.opening));
+}
+
+/**
  * A purchase that applied, repriced to `cents` in all: the difference moves between the account that
  * paid and the account that was paid. The purchase is its unit's posting with a purchase journal
- * line, or (a purchase an older build recorded) its unit's one two-line posting.
+ * line, or (a purchase an older build recorded) its unit's one two-line posting. One the story made
+ * (`overdraw`) stands at the player's price as it stood at its own, whatever its account covers.
  */
 export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents: number): LedgerEvent[] | Rejection {
   const posts = events.filter((e): e is PostEvent => e.type === "post");
@@ -830,7 +950,116 @@ export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents:
   // The purchase's own sides, the other way round for money given back.
   const seller = strOf(was?.counterparty);
   const buyer = strOf(was?.payer);
-  return asUnit(posting(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller }));
+  return asUnit([{ type: "post", lines, memo: note, ...(post.overdraw ? { overdraw: true as const } : {}) }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
+}
+
+// ---------------------------------------------------------------- what the story paid
+
+/**
+ * A payment the story made among a change's events (DESIGN §9.5): its posting, the account it drew
+ * on and how much, who paid, the account its words named when it went elsewhere, and what it brought
+ * on that account in its own unit (§25.10): the transfer the account's overdraft link made into it,
+ * and the fees its bank charged for it (an overdraft fee, a cash advance's fee), `fees` in all.
+ */
+interface StoryPayment {
+  post: PostEvent;
+  account: EntityId;
+  total: number;
+  payer: EntityId;
+  named: EntityId | null;
+  brought: PostEvent[];
+  fees: number;
+}
+
+function storyPayment(ctx: ReadContext, events: readonly LedgerEvent[]): StoryPayment | null {
+  const post = events.find((e): e is PostEvent => e.type === "post" && e.overdraw === true);
+  // The line it paid from: its biggest draw on an account in the world.
+  const paid = post?.lines.filter((l) => l.amount < 0 && traitsOf(ctx, l.account) !== null).sort((a, b) => a.amount - b.amount)[0];
+  if (!post || !paid) return null;
+  const line = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.memo === post.memo);
+  const data = line && "data" in line ? line.data : {};
+  const party = strOf(data.payer);
+  const payer = isParty(ctx, party) ? party : (holdersOf(ctx.state, paid.account).find((h) => canSpend(ctx.state, paid.account, h)) ?? "");
+  if (payer === "") return null;
+  const link = strOf(own(ctx.state.entities, paid.account)?.fields.overdraft_link);
+  const brought = events.filter((e): e is PostEvent => e.type === "post" && e !== post && e.lines.some((l) => l.account === paid.account) && e.lines.every((l) => l.account === paid.account || l.account === link || l.account.startsWith(BANK_PREFIX)));
+  const fees = brought.filter((p) => p.lines.some((l) => l.account.startsWith(BANK_PREFIX))).reduce((sum, p) => sum - (p.lines.find((l) => l.account === paid.account)?.amount ?? 0), 0);
+  return { post, account: paid.account, total: -paid.amount, payer, named: strOf(data.named) || null, brought, fees };
+}
+
+/** What a payment the story made did with the money, as `economy.paid_from` gives it: the account it took it from, or nothing charged. */
+export type PaidFrom = PaidFromAccount | PaidNothing;
+
+/** A payment the story made, from an account. */
+export interface PaidFromAccount {
+  /** The account it drew on, by name. */
+  name: string;
+  /** A credit account: `cents` is then what it owes. */
+  credit: boolean;
+  /** Its balance after the payment, or what a credit account owes after it. */
+  cents: number;
+  /** How far past what the account covers the payment itself took it: into overdraft, or over its limit (0 within). A fee its bank charged for it doesn't count. */
+  over: number;
+  /** What the payment drew from it. */
+  total: number;
+}
+
+/** A purchase the story made that nothing of its payer's could pay (`NO_WAY_TO_PAY`): theirs, with nothing charged. */
+export interface PaidNothing {
+  /** What it would have cost. */
+  unpaid: number;
+}
+
+/**
+ * What a payment the story made did with the money, after it (`ctx` holds the payment), for a chip
+ * that says so (DESIGN §9.5): the account it took it from and that account's balance, or, for a
+ * purchase nothing of its payer's could pay, what it would have cost. Null for money that isn't
+ * `viewer`'s, so no one else's money is told.
+ */
+export function paidFrom(ctx: ReadContext, events: readonly LedgerEvent[], viewer: EntityId): PaidFrom | null {
+  const paid = storyPayment(ctx, events);
+  if (!paid) {
+    const line = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && typeof e.data.unpaid === "number");
+    const data = line && "data" in line ? line.data : undefined;
+    return data && strOf(data.payer) === viewer ? { unpaid: numOf(data.unpaid) } : null;
+  }
+  const t = traitsOf(ctx, paid.account);
+  if (!t || rightsOf(ctx.state, paid.account, viewer) === null) return null;
+  const b = balance(ctx.state, paid.account);
+  const room = availableOf(ctx, paid.account) + (t.liability ? 0 : overdraftRoom(ctx, paid.account)) + paid.fees;
+  return { name: labelOf(ctx, paid.account), credit: t.liability, cents: t.liability ? -b : b, over: Math.max(0, -room), total: paid.total };
+}
+
+/**
+ * Pay another way (DESIGN §9.5): for a payment the story made, the first of its payer's ways that
+ * covers it now: the account its words named, when the payment went elsewhere (the story's own
+ * way), then savings, a card, checking, cash; never an account the payment already touched. With it
+ * comes the correction that moves the payment there once it has applied, one unit: what it drew goes
+ * back to the account it came from and leaves the other way, as one transfer between the payer's own
+ * accounts that names the payment, and what it brought on that account goes back too (§25.10): the
+ * overdraft link's transfer returns to the link, and the bank's fee for it is refunded.
+ */
+export function otherWay(ctx: ReadContext, events: readonly LedgerEvent[]): { from: EntityId; repay: LedgerEvent[] } | Rejection {
+  const paid = storyPayment(ctx, events);
+  if (!paid) return reject("not_a_payment", "there's no payment to pay another way");
+  const touched = new Set(paid.post.lines.map((l) => l.account));
+  const ways = [...(paid.named ? sourcesFor(ctx, paid.payer, paid.named, true, []) : []), ...(["savings", "card", "checking", "cash"] as const).flatMap((method) => sourcesToTry(ctx, paid.payer, paid.total, { method, till: true }, []))];
+  const way = ways.find((s) => !touched.has(s.account) && covers(ctx, s, paid.total, false));
+  if (!way) return reject("declined", "No other way to pay covers it.");
+  const memo = `${paid.post.memo}: paid from ${labelOf(ctx, way.account)} instead`;
+  const lines: PostingLine[] = [
+    { account: way.account, amount: -paid.total },
+    { account: paid.account, amount: paid.total },
+  ];
+  const back = paid.brought.flatMap((p): LedgerEvent[] => {
+    const fee = p.lines.some((l) => l.account.startsWith(BANK_PREFIX));
+    const reversed = p.lines.map((l) => ({ account: l.account, amount: -l.amount }));
+    const note = `${p.memo} ${fee ? "refunded" : "reversed"}`;
+    const was = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.memo === p.memo);
+    const category = was && "data" in was ? strOf(was.data.category) : "";
+    return [{ type: "post", lines: reversed, memo: note }, txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...(category ? { category } : {}) })];
+  });
+  return { from: way.account, repay: asUnit([...posting(lines, { memo, kind: "transfer", category: "transfer" }), ...back]) };
 }
 
 // ---------------------------------------------------------------- signals and notes

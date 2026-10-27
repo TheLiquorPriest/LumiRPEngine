@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { MockBackend } from "../../dev/preview/mock-backend";
-import { DECLINED_PURCHASE } from "../../dev/preview/fixtures";
+import { OVERDRAWN_PURCHASE } from "../../dev/preview/fixtures";
 import { applyDelta } from "../../src/frontend/delta";
 import type { DeltaOp, FrontendToBackend } from "../../src/shared/protocol";
 import { isRecord, type JsonObject } from "../../src/shared/json";
@@ -68,19 +68,19 @@ function heldView(sent: unknown[]): StateView {
 }
 
 describe("the preview's Pay another way", () => {
-  test("the declined catering order is paid from savings, the first way with room for it, and the money hub shows it", () => {
+  test("the catering order the story put past the Visa's limit is paid from savings, the first way with room for it, and the money hub shows it", () => {
     const { send, sent } = preview();
     send({ lre: 1, type: "lre.hello", reqId: "hello", chatId: "chat" });
     resultOf(sent, "hello");
     const before = decodeFinanceView(heldView(sent).panels["economy.money"] ?? null);
-    send({ lre: 1, type: "lre.chip", reqId: "other", chatId: "chat", chip: "c-decline", choice: "other" });
+    send({ lre: 1, type: "lre.chip", reqId: "other", chatId: "chat", chip: "c-overdrawn", choice: "other" });
     expect(resultOf(sent, "other")).toEqual({ applied: true, pending: false });
     const after = decodeFinanceView(heldView(sent).panels["economy.money"] ?? null);
     const balance = (v: typeof after, id: string): number | undefined => v?.accounts.find((a) => a.id === id)?.cents;
-    // The Visa had $787.45 of room, less than the $850.00 order; savings comes first anyway.
-    expect(balance(after, "sav")).toBe((balance(before, "sav") ?? 0) - DECLINED_PURCHASE.cents);
+    // Savings comes first and covers the $850.00 order.
+    expect(balance(after, "sav")).toBe((balance(before, "sav") ?? 0) - OVERDRAWN_PURCHASE.cents);
     expect(balance(after, "visa")).toBe(balance(before, "visa"));
-    expect(after?.recent[0]).toMatchObject({ memo: DECLINED_PURCHASE.name, cents: -DECLINED_PURCHASE.cents, accountId: "sav" });
-    expect(after?.overview?.netWorth).toBe((before?.overview?.netWorth ?? 0) - DECLINED_PURCHASE.cents);
+    expect(after?.recent[0]).toMatchObject({ memo: OVERDRAWN_PURCHASE.name, cents: -OVERDRAWN_PURCHASE.cents, accountId: "sav" });
+    expect(after?.overview?.netWorth).toBe((before?.overview?.netWorth ?? 0) - OVERDRAWN_PURCHASE.cents);
   });
 });

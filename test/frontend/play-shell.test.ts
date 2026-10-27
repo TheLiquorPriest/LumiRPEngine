@@ -57,12 +57,12 @@ describe("Needs you on Now", () => {
       chip("offer", "timelapse_offer", "next_send", [{ id: "start", label: "Timelapse" }]),
       chip("overdue", "overdue", "never", [{ id: "retrieve", label: "Ask for it" }]),
       chip("declined", "decline", "never"),
-      chip("unpriced", "decline", "next_send", [{ id: "price", label: "Set price" }]),
+      chip("unread", "read_failed", "next_send", [{ id: "rerun", label: "Retry" }]),
       chip("undo", "undo", "next_send", [{ id: "undo", label: "Undo" }]),
       chip("keep", "keep_report", "never", [{ id: "keep", label: "Keep later turns" }]),
       chip("retry", "retry", "next_send", [{ id: "regenerate", label: "Retry" }]),
     ];
-    expect(needsYou(chips).map((c) => c.id)).toEqual(["keep", "confirm", "unpriced", "retry"]);
+    expect(needsYou(chips).map((c) => c.id)).toEqual(["keep", "confirm", "unread", "retry"]);
   });
 });
 

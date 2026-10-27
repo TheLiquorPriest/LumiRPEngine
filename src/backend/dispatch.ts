@@ -9,7 +9,7 @@ import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import { routineSettingsOf } from "../shared/routines";
-import type { EventRef, HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
+import type { EventRef, FixDirective, HeldWrite, LedgerEvent, MarkerBody, Rec } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { RulesetDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
@@ -27,9 +27,9 @@ import { formatMs, TimeoutFired, timerMs } from "../shared/timeouts";
 import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
-import { optionalService } from "../engine/pack-kit";
+import { optionalQuery, optionalService } from "../engine/pack-kit";
 import { rulesetFloor } from "../engine/registry-impl";
-import { applyTimeAdvance, clockFix, IN_FIGHT, parseOverrides, parseTarget, resolveTarget } from "../engine/time";
+import { applyTimeAdvance, clockFix, parseOverrides, parseTarget, resolveTarget } from "../engine/time";
 import { timelapseIntent } from "../engine/turn";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
 import { actionOdds, resolveAction } from "../engine/resolve";
@@ -51,7 +51,7 @@ import { bookLoreProblem, secureIndexedSecrets, writeBookLore } from "./book-lor
 import { copyKeepers, lorePass, noteEntry, secretCopyOf, secureCopies, withSecretCopy } from "./lore-secrets";
 import { bookLoreFieldsOf, engineWroteEntry } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
-import { ACTIVE_CONNECTION, declineNote, playerReason, readRun, Runtime } from "./runtime";
+import { ACTIVE_CONNECTION, playerReason, readRun, Runtime, unpricedChip } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
@@ -199,6 +199,44 @@ export class Dispatcher {
     if (rules) runRulesOnEvents(this.rt.registry, w, events, { seed: `${seed}:rules` });
     stepTracks(this.rt.registry, w, `${seed}:tracks`);
     return [...events, ...w.events.slice(mark)];
+  }
+
+  /**
+   * A narrated purchase nothing priced, priced on its chip (DESIGN §9.5): at the price the player set
+   * (`price`) or as the catalog item they picked (`item`), applied at the head as one confirm entry.
+   * One that is the payer's already (`owned`) has only its charge made.
+   */
+  private async pricePurchase(chatId: ChatId, userId: UserId, id: string, chip: StoredChip, choice: "price" | "item", payload: JsonObject | undefined, owned: boolean): Promise<{ applied: boolean; pending: boolean }> {
+    const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
+    if (!proposal) throw new RequestError("bad_request", "the chip has no purchase");
+    const value = chipValue(chip, choice, payload);
+    if (value === null) throw new RequestError("bad_request", choice === "price" ? "the price isn't a positive amount of money" : "pick one of the chip's items");
+    const { price: _price, name: _name, ...rest } = proposal;
+    const priced: JsonObject = { ...(choice === "price" ? { ...proposal, playerPrice: value } : { ...rest, item: value }), ...(owned ? { owned: true } : {}) };
+    const { state, world } = await this.head(chatId, userId);
+    const w = new Working(this.rt.registry, world, state);
+    const [outcome] = applyProposals(this.rt.registry, w, [priced], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:${choice}`, this.runSeedOf(chatId));
+    if (!outcome || outcome.rejection || outcome.events.length === 0) throw new RequestError("validation", outcome?.rejection?.reason ?? "the purchase no longer applies");
+    const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${choice}`, true) } });
+    return { applied: result.applied, pending: result.pending };
+  }
+
+  /**
+   * Where a chip's events are in a record, every one of them in order: among its read's own, else in
+   * a Continue's read of its suffix (a `cont` entry, DESIGN §5.1 step 5), else, less what's undone,
+   * the confirm entry that holds exactly them (an Apply that left a chip behind, DESIGN §9.5).
+   */
+  private static refsTo(rec: Rec, events: readonly JsonValue[]): EventRef[] {
+    const read = Runtime.refsOf(rec, events);
+    if (read.length === events.length) return read;
+    for (const cont of rec.post) {
+      if (cont.kind !== "cont") continue;
+      const refs = Runtime.refsOf({ events: cont.events, pre: 0 }, events);
+      if (refs.length === events.length) return refs.map(({ index }) => ({ in: "post", seq: cont.seq, index }));
+    }
+    const wanted = JSON.stringify(events);
+    const entry = rec.post.findLast((p) => p.kind === "confirm" && JSON.stringify(p.events) === wanted);
+    return entry ? entry.events.flatMap((_, index) => (rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index) ? [] : [{ in: "post" as const, seq: entry.seq, index }])) : [];
   }
 
   private async route(r: FrontendToBackend, userId: UserId, session: string | undefined, reply: <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]) => void, noted: DraftNoted): Promise<void> {
@@ -352,6 +390,10 @@ export class Dispatcher {
         const { state, world } = await this.head(r.chatId, userId);
         let events: LedgerEvent[];
         let by: { action: string; label: string } | null = null;
+        // What the fix asks for, kept on its entry: one held through a reply, or that a read later comes
+        // before, is resolved again from it, so it lands over whatever the story changed (DESIGN §7). A
+        // hint opened is the player's doing, not a correction, and keeps its own events.
+        let asked: FixDirective | null = null;
         if ("hint" in r) {
           // Show a hint (DESIGN §10): the next one earned at a quest log row, the player's own doing, with its Undo.
           const id = typeof r.hint === "string" ? Object.keys(world.tracks).find((t) => shownTrackId(world, t) === r.hint) : undefined;
@@ -368,6 +410,7 @@ export class Dispatcher {
           const fixed = clockFix(this.rt.registry, world, state, r.time, this.runSeedOf(r.chatId));
           if ("code" in fixed) throw new RequestError("validation", fixed.reason);
           events = fixed.events;
+          asked = { clock: r.time };
         } else {
           const set = { op: "set" as const, entity: r.entity, field: r.field, value: r.value };
           // A place fixed with ✎ (the player character's, or where someone in People is) is a real move
@@ -381,8 +424,9 @@ export class Dispatcher {
           const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) });
           if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
           events = edit.events;
+          asked = { ops };
         }
-        const result = events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events, ...(by ? { by } : {}) } }) : { pending: false };
+        const result = events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events, ...(by ? { by } : {}), ...(asked ? { edit: asked } : {}) } }) : { pending: false };
         reply("lre.fix", { pending: result.pending });
         return;
       }
@@ -393,7 +437,7 @@ export class Dispatcher {
         const { state, world } = await this.head(r.chatId, userId);
         const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: true, runSeed: this.runSeedOf(r.chatId) });
         if ("rejection" in edit) throw new RequestError("validation", edit.rejection.gm ?? edit.rejection.reason);
-        const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", gm: true, events: edit.events } }) : { pending: false };
+        const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", gm: true, events: edit.events, edit: { ops } } }) : { pending: false };
         // The chip of the entry this edit wrote, so the GM view's Undo takes back this edit and nothing that landed meanwhile.
         const posted = "posted" in result ? result.posted : undefined;
         reply("lre.edit", { pending: result.pending, undo: posted ? fixChip(posted.messageId, posted.swipeId, posted.seq) : null });
@@ -847,7 +891,13 @@ export class Dispatcher {
         // Both read the whole text and replace the swipe's earlier read, so that read's chips go first.
         const context = core.readContext(messageId, now);
         if (context) await this.rt.prepareRead(chatId, userId, messageId, m.swipeId, `${kind}:${messageId}:${m.swipeId}`, m.swipes[m.swipeId] ?? "", { ...context, recent: recentLines(core, now, now.findIndex((x) => x.id === messageId), this.rt.registry) }, true, true);
-        const result = await this.write(chatId, userId, { kind, id: this.nextId(), messageId, swipeId: Number(swipe) });
+        const writeId = this.nextId();
+        const result = await this.write(chatId, userId, { kind, id: writeId, messageId, swipeId: Number(swipe) });
+        // A skip it read too long to run unasked is offered as a Timelapse once the read lands: now,
+        // or, held behind a reply in flight, when that reply's commit lands it.
+        const read = { userId, writeId, messageId, swipeId: m.swipeId, text: m.swipes[m.swipeId] ?? "" };
+        if (result.applied) await this.rt.readLanded(chatId, userId, read.messageId, read.swipeId, read.text);
+        else if (result.pending) this.rt.readHeld(chatId, read);
         return { applied: result.applied, pending: result.pending };
       });
     }
@@ -958,10 +1008,17 @@ export class Dispatcher {
     };
     switch (chip.kind) {
       case "confirm": {
-        if (choice !== "confirm" && choice !== "amount") {
+        // Set price and Pick item price a purchase nothing priced, and Pay another way pays the first
+        // other way that covers it (DESIGN §9.5): each applies it as Apply would, so each accepts it.
+        if (choice !== "confirm" && choice !== "amount" && choice !== "price" && choice !== "item" && choice !== "other") {
           await settle("rejected");
           this.rt.push.changed(chatId, userId);
           return { applied: false, pending: false };
+        }
+        if (choice === "price" || choice === "item") {
+          const result = await this.pricePurchase(chatId, userId, id, chip, choice, payload, false);
+          await settle("accepted");
+          return result;
         }
         const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
         if (!proposal) throw new RequestError("bad_request", "the chip has no proposal");
@@ -976,19 +1033,35 @@ export class Dispatcher {
         let events: LedgerEvent[];
         if (proposal.type === "time_advance") {
           // A narrated time skip applies as it would have automatically (DESIGN §9.4): whole, with its
-          // catch-up, from the clock the head stands at now, or not at all; never while a fight holds
-          // the clock, which may have started since the chip was offered.
+          // catch-up, from the clock the head stands at now, a fight under way or not, or not at all.
           const advance = applyTimeAdvance(this.rt.registry, w, typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: this.runSeedOf(chatId), capMinutes: (await this.rt.settings.get(userId)).time.askBeyondMinutes, unitCap: w.state.time.unitCap });
-          if (!advance.applied) throw new RequestError("validation", advance.reason === "unit_cap" ? "too much happens in between to run it inside the turn" : advance.reason === "in_fight" ? `${IN_FIGHT}, and its rounds take no clock time` : "the time skip no longer applies");
+          if (!advance.applied) throw new RequestError("validation", advance.reason === "unit_cap" ? "too much happens in between to run it inside the turn" : "the time skip no longer applies");
           events = [...w.events];
         } else {
           // The seed the chip's check used, so a purchase charges the amount its label shows.
-          const [outcome] = applyProposals(this.rt.registry, w, [proposal], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:confirm`, this.runSeedOf(chatId));
+          const seed = typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:confirm`;
+          // Pay another way: from the first of the payer's other ways that covers the payment as
+          // Apply would make it, the account the purchase or transfer then pays from.
+          if (choice === "other") {
+            const [made] = applyProposals(this.rt.registry, new Working(this.rt.registry, world, state), [proposal], seed, this.runSeedOf(chatId));
+            if (!made || made.rejection) throw new RequestError("validation", made?.rejection?.reason ?? "the change no longer applies");
+            const way = optionalService(w.ctx, "economy.other_way")?.(w.ctx, made.events);
+            if (!way || "code" in way) throw new RequestError("validation", way?.reason ?? "No other way to pay covers it.");
+            proposal.from = way.from;
+          }
+          const [outcome] = applyProposals(this.rt.registry, w, [proposal], seed, this.runSeedOf(chatId));
           if (!outcome || outcome.rejection) throw new RequestError("validation", outcome?.rejection?.reason ?? "the change no longer applies");
           events = [...outcome.materialized, ...outcome.events];
         }
-        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, events, `${id}:confirm`, proposal.type !== "time_advance") } });
+        const entry = this.consequences(w, events, `${id}:confirm`, proposal.type !== "time_advance");
+        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: entry } });
         await settle("accepted");
+        // A purchase nothing prices is the payer's now with nothing charged, so its chip stays to price
+        // it (DESIGN §9.5); its Undo takes back what Apply wrote, and counts toward no learning.
+        if (choice === "confirm" && proposal.type === "purchase" && optionalQuery(w.ctx, "economy.unpriced")?.(w.ctx, proposal) === true) {
+          await this.rt.chips.add(chatId, userId, [unpricedChip(id.replace(/^confirm:/, "unpriced:"), { messageId: chip.messageId, ...(chip.swipeId !== undefined ? { swipeId: chip.swipeId } : {}) }, proposal, w.ctx, entry, { connection })]);
+          this.rt.push.changed(chatId, userId);
+        }
         return { applied: result.applied, pending: result.pending };
       }
       case "undo": {
@@ -1004,7 +1077,7 @@ export class Dispatcher {
           if (typeof cents !== "number") throw new RequestError("bad_request", "the amount isn't a positive amount of money");
           const { state, world } = await this.head(chatId, userId);
           const w = new Working(this.rt.registry, world, state);
-          const postings = events.flatMap((e): LedgerEvent[] => (isRecord(e) && e.type === "post" && typeof e.memo === "string" && Array.isArray(e.lines) ? [{ type: "post", memo: e.memo, lines: e.lines.flatMap((l) => (isRecord(l) && typeof l.account === "string" && typeof l.amount === "number" ? [{ account: l.account, amount: l.amount }] : [])) }] : []));
+          const postings = events.flatMap((e): LedgerEvent[] => (isRecord(e) && e.type === "post" && typeof e.memo === "string" && Array.isArray(e.lines) ? [{ type: "post", memo: e.memo, lines: e.lines.flatMap((l) => (isRecord(l) && typeof l.account === "string" && typeof l.amount === "number" ? [{ account: l.account, amount: l.amount }] : [])), ...(e.overdraw === true ? { overdraw: true as const } : {}) }] : []));
           const repriced = optionalService(w.ctx, "economy.reprice")?.(w.ctx, postings, cents);
           if (!repriced) throw new RequestError("bad_request", "there's no purchase to reprice");
           if (!Array.isArray(repriced)) throw new RequestError("validation", repriced.reason);
@@ -1016,7 +1089,29 @@ export class Dispatcher {
           await settle("accepted");
           return { applied: result.applied, pending: result.pending };
         }
-        const refs = Runtime.refsOf(rec, events);
+        // A purchase nothing priced, now the payer's: priced here, only its charge is made.
+        if (choice === "price" || choice === "item") {
+          const result = await this.pricePurchase(chatId, userId, id, chip, choice, payload, true);
+          await settle("accepted");
+          return result;
+        }
+        const refs = Dispatcher.refsTo(rec, events);
+        if (choice === "other") {
+          // Pay another way on a payment that applied (DESIGN §9.5): what it drew goes back to the
+          // account it came from and leaves the first other way that covers it, as one correction.
+          if (refs.length === 0) throw new RequestError("not_found", "the payment is gone");
+          const { state, world } = await this.head(chatId, userId);
+          const w = new Working(this.rt.registry, world, state);
+          const way = optionalService(w.ctx, "economy.other_way")?.(w.ctx, events.filter(isRecord) as unknown as LedgerEvent[]);
+          if (!way || "code" in way) throw new RequestError("validation", way?.reason ?? "No other way to pay covers it.");
+          for (const e of way.repay) {
+            const rejection = w.apply(e);
+            if (rejection) throw new RequestError("validation", rejection.reason);
+          }
+          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: way.repay } });
+          await settle("accepted");
+          return { applied: result.applied, pending: result.pending };
+        }
         if (refs.length === 0) return { applied: false, pending: false };
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
         await settle("rejected");
@@ -1041,7 +1136,9 @@ export class Dispatcher {
         if (!target) throw new RequestError("bad_request", "the chip has no target");
         const text = neutralizeMacros(`(Timelapse: ${targetLabel(target)})`);
         const overrides = chip.payload.allNote === true ? { invitation: "note", bill: "note", decline: "note", incident: "note", quest: "note", rule: "note", arrival: "note", overdue: "note", needs: "note", weather: "note" } : undefined;
-        await this.rt.host.chats.appendUserMessage(chatId, text, { [LEDGER_NAMESPACE]: { action: TIMELAPSE_ACTION, params: JSON.parse(JSON.stringify({ target, ...(overrides ? { overrides } : {}), ...(chip.payload.povRoutine === false ? { povRoutine: false } : {}) })) as JsonValue, source: "chip" } }, true, userId);
+        // A span the player's message filled keeps its words (`text`): the Timelapse tells them as the inline skip would have.
+        const fill: JsonObject = typeof chip.payload.fill === "string" && chip.payload.fill.trim() !== "" ? { text: chip.payload.fill } : {};
+        await this.rt.host.chats.appendUserMessage(chatId, text, { [LEDGER_NAMESPACE]: { action: TIMELAPSE_ACTION, params: JSON.parse(JSON.stringify({ target, ...(overrides ? { overrides } : {}), ...(chip.payload.povRoutine === false ? { povRoutine: false } : {}) })) as JsonValue, source: "chip", ...fill } }, true, userId);
         return { applied: true, pending: false };
       }
       case "not_action": {
@@ -1172,54 +1269,6 @@ export class Dispatcher {
         }
         throw new RequestError("not_found", "the routine change is gone");
       }
-      case "decline": {
-        const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
-        const reason = typeof chip.payload.reason === "string" ? chip.payload.reason : "declined";
-        // A typed action that named nothing in the world has no proposal (DESIGN §9.4): its chip holds the note each choice leaves.
-        const note = !proposal && isRecord(chip.payload.notes) && hasOwn(chip.payload.notes, choice) ? chip.payload.notes[choice] : undefined;
-        if (typeof note === "string") {
-          await this.rt.setOutcomeNote(chatId, userId, chip.id, note);
-          this.rt.push.changed(chatId, userId);
-          return { applied: true, pending: false };
-        }
-        if (!proposal || choice === "dismiss") {
-          await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-          this.rt.push.changed(chatId, userId);
-          return { applied: false, pending: false };
-        }
-        const { state, world } = await this.head(chatId, userId);
-        if (choice === "remove" || choice === "accept") {
-          await this.rt.setOutcomeNote(chatId, userId, chip.id, declineNote(proposal, reason, choice, { registry: this.rt.registry, world, state }));
-          this.rt.push.changed(chatId, userId);
-          return { applied: true, pending: false };
-        }
-        if (choice === "price" || choice === "item") {
-          // A purchase nothing priced (DESIGN §9.5): at the price the player set, or as the catalog
-          // item they picked, at its price.
-          const value = chipValue(chip, choice, payload);
-          if (value === null) throw new RequestError("bad_request", choice === "price" ? "the price isn't a positive amount of money" : "pick one of the chip's items");
-          const { price: _price, name: _name, ...rest } = proposal;
-          const priced: JsonObject = choice === "price" ? { ...proposal, playerPrice: value } : { ...rest, item: value };
-          const w = new Working(this.rt.registry, world, state);
-          const [outcome] = applyProposals(this.rt.registry, w, [priced], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:${choice}`, this.runSeedOf(chatId));
-          if (!outcome || outcome.rejection || outcome.events.length === 0) throw new RequestError("validation", outcome?.rejection?.reason ?? "the purchase no longer applies");
-          await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${choice}`, true) } });
-          return { applied: result.applied, pending: result.pending };
-        }
-        if (choice !== "other") throw new RequestError("bad_request", `unknown choice ${choice}`);
-        // Pay another way (DESIGN §9.5): the first payment method that covers it.
-        for (const method of ["savings", "card", "checking", "cash"]) {
-          const w = new Working(this.rt.registry, world, state);
-          const [outcome] = applyProposals(this.rt.registry, w, [{ ...proposal, method }], `${id}:${method}`, this.runSeedOf(chatId));
-          if (!outcome || outcome.rejection || outcome.events.length === 0) continue;
-          await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${method}`, true) } });
-          return { applied: result.applied, pending: result.pending };
-        }
-        // Nothing covers it: the chip stays for Remove or Accept.
-        throw new RequestError("validation", "No other way to pay covers it.");
-      }
       case "read_failed": {
         // Retry: the next swipe re-runs the turn, reading the typed text afresh; the UI swipes.
         if (choice !== "rerun") throw new RequestError("bad_request", `unknown choice ${choice}`);
@@ -1231,16 +1280,6 @@ export class Dispatcher {
         const text = typeof chip.payload.text === "string" ? neutralizeMacros(chip.payload.text).trim() : "";
         if (choice !== "send" || text === "") return { applied: false, pending: false };
         await this.rt.host.chats.appendUserMessage(chatId, text, {}, true, userId);
-        return { applied: true, pending: false };
-      }
-      case "contradiction": {
-        if (choice === "renarrate") {
-          // The next swipe re-narrates this turn (same outcome, new prose); the UI swipes.
-          this.rt.setSwipeChoice(chatId, "renarrate");
-          return { applied: true, pending: false };
-        }
-        await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
-        this.rt.push.changed(chatId, userId);
         return { applied: true, pending: false };
       }
       default:

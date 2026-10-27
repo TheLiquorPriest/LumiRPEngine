@@ -216,7 +216,7 @@ export function knownUsual(ctx: ReadContext, who: EntityId, place: (id: PlaceId,
  * section tells of included (Stance leaves them out, and with minds on the Live cast are exactly
  * those), so the line reaches the narrator for all of them. As a hint it rides last on the section
  * budget and never displaces a section, People never goes out on hints alone, and the helpers' fact
- * lines leave it out, so no prose helper or contradiction check reads a habit as a fact.
+ * lines leave it out, so no prose helper reads a habit as a fact.
  */
 export function usualRoutineHints(ctx: ReadContext): string[] {
   if (!routineSettingsOf(ctx.world).narrator) return [];

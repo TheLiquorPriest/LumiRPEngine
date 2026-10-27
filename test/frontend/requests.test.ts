@@ -56,11 +56,6 @@ describe("chip actions", () => {
     expect(chipIntent(chip("swipe_option", ["renarrate", "rerun"]), "rerun", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-swipe_option", choice: "rerun" }, start: "regenerate" });
   });
 
-  test("a contradiction's Re-narrate records the choice and swipes; It's fine only records", () => {
-    expect(chipIntent(chip("contradiction", ["renarrate", "dismiss"]), "renarrate", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-contradiction", choice: "renarrate" }, start: "regenerate" });
-    expect(chipIntent(chip("contradiction", ["renarrate", "dismiss"]), "dismiss", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-contradiction", choice: "dismiss" }, start: null });
-  });
-
   test("a failed reply's card starts its reply as its kept turn's did: Retry is that command alone, and Re-run the engine drops the turn first", () => {
     const failed = chip("reply_failed", ["regenerate", "rerun", "diagnostics"]);
     expect(chipIntent(failed, "regenerate", "c1")).toEqual({ request: null, start: "regenerate" });

@@ -30,7 +30,6 @@ async function vexWalksIn(extra: JsonObject[], undo = false) {
   rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes(EXTRACT_MARK) ? JSON.stringify({ proposals: [{ type: "spawn", kind: "person", name: NAME, role: "courier" }] }) : "{}");
   await rig.turn(chatId, `I wave at ${NAME} as she walks in.`, `${NAME} walks in, shakes off the rain and waves back.`);
   const view = await rig.rt.view(chatId, rig.host.userId);
-  const notes = (await rig.rt.outcomeNotes.list(chatId, rig.host.userId)).map((n) => n.text);
   const logs = rig.host.logs.slice(logsBefore);
   const core = await rig.rt.ledger.core(chatId, rig.host.userId);
   const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
@@ -48,7 +47,7 @@ async function vexWalksIn(extra: JsonObject[], undo = false) {
   rig.host.quietReply = () => "{}";
   await rig.turn(chatId, "I look around.", "The room is quiet.");
   const told = rig.host.assembled.map((e) => e.content).join("\n");
-  return { view, shown: JSON.stringify(view), notes, logs, state, told, newcomers, undone };
+  return { view, shown: JSON.stringify(view), logs, state, told, newcomers, undone };
 }
 
 const person = (id: string, name: string, fields: JsonObject, visibility?: string): JsonObject => ({ id, kind: "person", name, tier: "background", fields, relations: [], ...(visibility ? { visibility } : {}) });
@@ -65,11 +64,10 @@ describe("a reply that introduces someone by a hidden person's name", () => {
     ["secret, in the same room", person("vex", NAME, { place: "home" }, "secret")],
     ["unmet, elsewhere", person("vex", NAME, { place: "pier" })],
   ] as const) {
-    test(`someone ${hiding}: no chip, no note and nothing the player sees says she exists; the log says why`, async () => {
+    test(`someone ${hiding}: no chip, nothing the player sees and nothing the next reply is told says she exists; the log says why`, async () => {
       const hidden = await vexWalksIn([vex]);
       expect(hidden.newcomers).toEqual([]);
       expect(hidden.view.chips.filter((c) => `${c.label} ${c.detail ?? ""}`.includes("Vex"))).toEqual([]);
-      expect(hidden.notes).toEqual([]);
       for (const said of ["Vex", "exists"]) {
         expect(hidden.shown).not.toContain(said);
         expect(hidden.told).not.toContain(said);
@@ -83,13 +81,13 @@ describe("a reply that introduces someone by a hidden person's name", () => {
     expect(known.newcomers).toEqual([]);
     expect(known.view.chips.filter((c) => c.kind === "decline")).toEqual([]);
     expect(known.view.chips.filter((c) => c.kind === "untracked").map((c) => c.detail)).toEqual([`${NAME} already exists. The story stands as told, and the next reply isn't told otherwise.`]);
-    expect(known.notes).toEqual([]);
+    expect(known.told).not.toContain("already exists");
   });
 
   test("an authored hidden person whose id a name would make: no visible 'exists', and the authored one stays as written", async () => {
     const authored = await vexWalksIn([person("npc_vex_morrow", "The Courier", { place: "pier" }, "secret")]);
     expect(authored.view.chips.filter((c) => `${c.label} ${c.detail ?? ""}`.includes("exists"))).toEqual([]);
-    expect(authored.notes.filter((n) => n.includes("exists"))).toEqual([]);
+    expect(authored.told).not.toContain("exists");
     expect(authored.shown).not.toContain("exists");
     expect(authored.state.entities.npc_vex_morrow?.name).toBe("The Courier");
     // Nothing the POV may know is called Vex Morrow, so she arrives, under an id of her own.

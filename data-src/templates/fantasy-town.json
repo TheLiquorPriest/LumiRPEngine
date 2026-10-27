@@ -4370,7 +4370,10 @@
       "label": "Compare the two Charters",
       "requires": [
         "at(pov, 'reeves_hall')",
-        "carries(pov, 'charter_original')"
+        {
+          "expr": "carries(pov, 'charter_original')",
+          "hard": true
+        }
       ],
       "duration": 30,
       "lexicon": [
@@ -4392,7 +4395,10 @@
       "id": "show_charter",
       "label": "Show the original Charter to Ilsabet or Hollis",
       "requires": [
-        "carries(pov, 'charter_original')",
+        {
+          "expr": "carries(pov, 'charter_original')",
+          "hard": true
+        },
         "at('ilsabet_vane', here) or at('hollis_garrow', here)"
       ],
       "duration": 20,

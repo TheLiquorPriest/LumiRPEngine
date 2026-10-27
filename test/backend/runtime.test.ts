@@ -156,50 +156,21 @@ describe("backend runtime", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a world file with a step template for the retired select purpose imports without it; its other templates stay", async () => {
+  test("a world file with step templates for the retired select and contradiction purposes imports without them; its other templates stay", async () => {
     const rig = new Rig();
     const file = rig.body(await rig.send({ type: "lre.world", op: "export", worldId: await rig.newWorld("Source") })).file as { world: JsonObject };
-    const steps = { pick: { id: "pick", purpose: "select", template: "Does this lore matter?", output: "decision", signals: ["uncached"] }, brief: { id: "brief", purpose: "brief", template: "Summarize the scene.", output: "text", signals: [] } };
+    const steps = {
+      pick: { id: "pick", purpose: "select", template: "Does this lore matter?", output: "decision", signals: ["uncached"] },
+      check: { id: "check", purpose: "contradiction", template: "Does the reply break a fact?", output: "decision", signals: ["reply"] },
+      changes: { id: "changes", purpose: "contradiction", template: "What changed?", output: "effects", signals: ["reply"] },
+      brief: { id: "brief", purpose: "brief", template: "Summarize the scene.", output: "text", signals: [] },
+    };
     const imported = rig.body(await rig.send({ type: "lre.world", op: "import", file: { format: "lre-world-export-v1", world: { ...file.world, steps } } })) as { world: { id: string; steps: Record<string, unknown> } };
     expect(Object.keys(imported.world.steps)).toEqual(["brief"]);
     const stored = rig.body(await rig.send({ type: "lre.world", op: "get", worldId: imported.world.id })) as { world: { steps: Record<string, unknown> } };
     expect(Object.keys(stored.world.steps)).toEqual(["brief"]);
   });
 
-  test("a narrated purchase the engine declines gets a decline chip, the next Outcome slot says so, and Pay another way applies it", async () => {
-    const rig = new Rig();
-    rig.host.quietReply = (req) => (req.messages[0]?.content.includes(EXTRACT_MARK) ? JSON.stringify({ proposals: [{ type: "purchase", payer: POV, item: "lamp", price: 99999 }] }) : "{}");
-    const chatId = await rig.worldChat();
-    await rig.turn(chatId, "I buy the lamp.", "She rings up the lamp.");
-    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
-    expect(chips.some((c) => c.kind === "confirm")).toBe(false);
-    const decline = chips.find((c) => c.kind === "decline");
-    expect(decline?.label).toBe("Couldn't pay for lamp");
-    expect(decline?.actions.map((a) => a.id)).toEqual(["other", "remove", "accept"]);
-    // The next turn (and only it) is told the purchase didn't happen.
-    rig.host.quietReply = () => "{}";
-    rig.host.sendUser(chatId, "I look around.");
-    await rig.host.settle();
-    const g = await rig.host.start(chatId, { type: "normal" });
-    expect(rig.host.section("Outcome")).toContain("payment for lamp was declined (Sam doesn't have $99999)");
-    await rig.host.finish(g, "Nothing much.");
-    rig.host.sendUser(chatId, "I wait.");
-    await rig.host.settle();
-    const g2 = await rig.host.start(chatId, { type: "normal" });
-    expect(rig.host.section("Outcome")).not.toContain("lamp");
-    await rig.host.finish(g2, "Time passes.");
-    expect(rig.rt.ledger.errors).toEqual([]);
-    // Pay another way (on a fresh chat, before the chip lapses): the first method that covers it applies.
-    const other = new Rig();
-    other.host.quietReply = (req) => (req.messages[0]?.content.includes(EXTRACT_MARK) ? JSON.stringify({ proposals: [{ type: "purchase", payer: POV, item: "lamp", price: 99999 }] }) : "{}");
-    const otherChat = await other.worldChat();
-    await other.turn(otherChat, "I buy the lamp.", "She rings up the lamp.");
-    const chip = (await other.rt.view(otherChat, other.host.userId)).chips.find((c) => c.kind === "decline");
-    expect(other.body(await other.send({ type: "lre.chip", chatId: otherChat, chip: chip?.id, choice: "other" })).applied).toBe(true);
-    const core = await other.rt.ledger.core(otherChat, other.host.userId);
-    expect(core?.fold(toChain(await other.host.chats.messages(otherChat, other.host.userId))).state.entities[POV]?.fields.detail).toBe("paid from savings");
-    expect(other.rt.ledger.errors).toEqual([]);
-  });
 
   test("typed text interpret read as an action gets a Not an action? chip that undoes the resolution", async () => {
     const rig = new Rig();

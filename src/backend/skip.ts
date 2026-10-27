@@ -9,7 +9,7 @@ import type { ChatId, EntityId, UserId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { Fidelity, MindCallTrace, MindMoment, MindsSettings } from "../shared/minds";
-import { limitOf, MIND_TEXT_CAPS, MINDS_EVENTS } from "../shared/minds";
+import { limitOf, MIND_TEXT_CAPS, MINDS_EVENTS, SKIP_FILL_HEAD } from "../shared/minds";
 import type { ModelUseSettings } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
 import { calendarOf, formatClock, formatStamp } from "../engine/calendar";
@@ -23,8 +23,8 @@ import { ranTo } from "../engine/simulate";
 import { pinsFor } from "../engine/lore-pins";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
-import { fightHoldsClock, TimelapseRun, type SkipRecord } from "../engine/time";
-import { timelapseOptions, turnStart } from "../engine/turn";
+import { TimelapseRun, type SkipRecord } from "../engine/time";
+import { skipPastFight, timelapseOptions, turnStart } from "../engine/turn";
 import { Working } from "../engine/working";
 import type { HostPort } from "./host";
 import { readPins } from "./lore-pins";
@@ -182,7 +182,9 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
   const pinned = pinnedLines({ reg: deps.registry, world: input.world, state, reads: input.settings.minds.reads, pinned: await readPins(deps.host, input.world, pinsFor(input.world, null, undefined, ["skip"]), input.userId) }, "skip");
   const reads = input.settings.minds.reads;
   const chat = reads.history.on ? recentChat({ reads, hideJson: input.settings.hideJsonBlocks, history: chatBefore(await deps.host.chats.messages(input.chatId, input.userId).catch(() => []), true) }) : [];
-  const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : "", pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : "", chat.length > 0 ? `Recent chat (as the player sees it):\n${chat.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
+  // The player's own words for the span, which the beats must follow, while minds read the player's message.
+  const fill = reads.message.on ? (input.intent.text?.trim() ?? "") : "";
+  const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, fill !== "" ? `${SKIP_FILL_HEAD}\n${fill}` : "", scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : "", pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : "", chat.length > 0 ? `Recent chat (as the player sees it):\n${chat.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
   // The placeholders the minds steps' docs promise; the step thinks for no one, so `character` is empty.
   const here = placeOfEntity(state, input.world.pov);
   const prompt = mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name, character: "", clock: formatClock(cal, scanned.from), place: here ? (own(input.world.places, here)?.name ?? here) : "", pov: own(state.entities, input.world.pov)?.name ?? input.world.pov });
@@ -222,7 +224,9 @@ async function mindsAt(deps: SkipDeps, input: SkipInput, w: Working, kind: MindM
   if (who.length === 0) return [];
   const levels: Record<EntityId, Fidelity> = {};
   for (const id of who) levels[id] = scores.find((s) => s.entity === id)?.level ?? "background";
-  const result = await deps.minds({ chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who, moment: { kind, at: w.state.clock, reason, user: "", reply: "" }, levels, signal: input.signal, guidance: input.guidance?.mind ?? "", phase: "skip" });
+  // The player's own words for the span reach the minds in it, which those with the player character are told (`mindContext`).
+  const skip = input.intent.text?.trim() ?? "";
+  const result = await deps.minds({ chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who, moment: { kind, at: w.state.clock, reason, user: "", reply: "", ...(skip !== "" ? { skip } : {}) }, levels, signal: input.signal, guidance: input.guidance?.mind ?? "", phase: "skip" });
   traces.push(...result.traces);
   return result.events.filter((e) => e.type === MINDS_EVENTS.mind && "data" in e && typeof e.data.entity === "string" && who.includes(e.data.entity));
 }
@@ -248,16 +252,16 @@ function stopperOnly(events: readonly LedgerEvent[], stopper: EntityId | null): 
  * settings ("none" is no cap, which the before-the-reply clock still bounds). A mind's interrupt stops
  * it at its beat; the clock running out stops it at the next beat it reaches, the first one too, so
  * a Continue always gets further, with the rest left for it. Past the last beat it runs to its end,
- * where those with the player character think once more as the turn's own minds. Null when the
- * timelapse can't run (a fight holds the clock among the rest), which the plan then says.
+ * where those with the player character think once more as the turn's own minds. A fight under way
+ * ends first, as the plan ends it (`skipPastFight`). Null when the timelapse can't run, which the
+ * plan then says.
  */
 export async function runSkip(deps: SkipDeps, input: SkipInput): Promise<SkipRun | null> {
   const reg = deps.registry;
   const cal = calendarOf(input.world);
   const w = new Working(reg, input.world, input.state);
   turnStart(reg, w, input.runSeed);
-  // A fight's rounds take no clock time (DESIGN §11): the plan refuses the timelapse, so no one is asked.
-  if (fightHoldsClock(w.ctx)) return null;
+  skipPastFight(w, input.runSeed);
   const scanned = scanBeats(reg, input.world, w.state, input.intent, input.runSeed);
   const { target, opts } = timelapseOptions(input.intent, input.runSeed);
   const run = scanned && target ? TimelapseRun.start(reg, w, target, opts) : null;

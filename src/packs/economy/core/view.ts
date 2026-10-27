@@ -557,6 +557,8 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     if (cycle && cycle.stage !== "current") alerts.push({ tone: "neg", text: `${a.name} is ${cycle.stage === "late" ? "past due" : `${cycle.stage} days past due`}.`, account: a.id });
     else if (a.due && cycle && cycle.due > now && cycle.due - now <= 3 * DAY) alerts.push({ tone: "warn", text: `${a.name}: ${money(ctx, a.due.cents)} due ${a.due.at}.`, account: a.id });
     if (!CLASS_TRAITS[a.class].liability && a.cents < 0) alerts.push({ tone: "neg", text: `${a.name} is overdrawn by ${money(ctx, -a.cents)}.`, account: a.id });
+    // A debt the story ran past a card's limit (DESIGN §25.10) reads as it stands.
+    if (CLASS_TRAITS[a.class].revolving && a.limit !== null && -a.cents > a.limit) alerts.push({ tone: "neg", text: `${a.name} is over its limit by ${money(ctx, -a.cents - a.limit)}.`, account: a.id });
     for (const c of a.cards) if (c.state !== "active") alerts.push({ tone: "warn", text: `${c.name} is ${c.state}.`, account: a.id });
   }
   // A flow that missed within the last month: what's owed may still be owed. Its run is kept by its own id.

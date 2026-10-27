@@ -19,6 +19,7 @@ import { ACTION_QUEUE_LIMIT, type InterpretOutput, type QueuedAction } from "../
 import { TRY_ACTION } from "../engine/inferred";
 import { TIMELAPSE_ACTION } from "../engine/turn";
 import { cashGift } from "../packs/gear/core/index";
+import { axesOf } from "../packs/relationships/core/index";
 import type { HostPort, QuietMessage, QuietRequest, QuietResult } from "./host";
 import type { CatalogEntry, InterpretScene } from "./interpret-context";
 import type { LookupTransport, StepLore } from "./lore-steps";
@@ -474,7 +475,7 @@ function worldBrief(world: WorldDoc, places: readonly PlaceChoice[]): string {
   return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places, those the reply names and the nearest first: ${listed || "none"}.`;
 }
 
-/** What `interpret` may say a thing the player says they have is, for a claim (DESIGN §9.4): food and drink are used up, keys, weapons and documents ask first, money is never made. */
+/** What `interpret` may say a thing the player says they have is, for a claim (DESIGN §9.4): food and drink are used up, money, keys, weapons and documents ask first. */
 export type ThingSort = "food" | "drink" | "weapon" | "key" | "document" | "money" | "other";
 const THING_SORTS: readonly ThingSort[] = ["food", "drink", "weapon", "key", "document", "money", "other"];
 
@@ -660,7 +661,7 @@ export const EXTRACT_STRICT_RULES = [
 ];
 
 /** The reply's item changes (DESIGN §9.4), each by who (`entity`, the player character when left out) and the thing, its id where the state lists it, else its name. */
-const EXTRACT_ITEM_TYPES = "take{entity,item} · drop{entity,item} · use_up{entity,item,qty?} (qty: how many, 1 when not said) · wear{entity,item,off?} · lose{entity,item,by?} (by: who stole it) · item_condition{entity?,item,delta} (delta -25..25: damage negative, mending positive)";
+const EXTRACT_ITEM_TYPES = "take{entity,item} · drop{entity,item} · use_up{entity,item,qty?} (qty: how many, 1 when not said) · wear{entity,item,off?} · lose{entity,item,by?} (by: who stole it) · item_condition{entity?,item,delta} (delta: as far as the prose says it changed, on the condition's 0..100 scale: damage negative, mending positive)";
 
 /** What `extract` reads from a reply: the changes it proposes, and the place it leaves the player character in (a place id as the model gave it; null when it doesn't say). */
 export interface ExtractRead {
@@ -694,8 +695,12 @@ export async function extract(
   places: readonly PlaceChoice[] = [],
   personKinds: readonly string[] = [],
 ): Promise<ExtractRead> {
+  // The world's regard axes with their ranges (the relationships pack's own, or its world's set).
+  const regardAxes = axesOf({ world })
+    .map((a) => `${a.id} (${a.min}..${a.max})`)
+    .join("|");
   const types =
-    `time_advance{minutes} · location{entity,place} (place: its id from Places, or its name as Places lists it) · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) · knows{who,fact} (fact: the id of a person, thing or place the player character newly learns of, or the name of a place they first hear of; never a sentence) · spawn{kind,name,place?,role?} (a new character the reply introduces by name${personKinds.length > 0 ? `; kind: ${personKinds.join("|")}` : ""}; never a thing) · life{entity,state} (state: ${lifeStatesOf(world)
+    `time_advance{minutes} · location{entity,place} (place: its id from Places, or its name as Places lists it) · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis ${regardAxes}; delta: as far as the prose moves it, inside the axis's range: worse negative, better positive) · knows{who,fact} (fact: the id of a person, thing or place the player character newly learns of, or the name of a place they first hear of; never a sentence) · spawn{kind,name,place?,role?} (a new character the reply introduces by name${personKinds.length > 0 ? `; kind: ${personKinds.join("|")}` : ""}; never a thing) · life{entity,state} (state: ${lifeStatesOf(world)
       .map(([id]) => id)
       .join("|")}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
@@ -732,14 +737,16 @@ export async function extract(
  * (`give` of "$20", "a twenty", "cash" with an `amount`), which becomes a cash transfer
  * (`method: "cash"`: bills changing hands go wallet to wallet) of the amount it states (in
  * `amount`, else in the item's own words). A model's own transfer keeps its method. A purchase's
- * `playerPrice` is the player's own, set on a chip, so a model's is dropped. Every proposal a model
- * step returns (`extract`, a world's `effects` templates) goes through it once.
+ * `playerPrice` is the player's own, set on a chip, and `owned` the engine's (an unpriced purchase
+ * priced later), so a model's are dropped. Every proposal a model step returns (`extract`, a world's
+ * `effects` templates) goes through it once.
  */
 export function inMinorUnits(p: JsonObject, currency: WorldCurrency): JsonObject {
   const cash = p.type === "give" && typeof p.item === "string" ? cashGift(p.item, currency) : null;
   const amount = typeof p.amount === "number" ? p.amount : (cash?.amount ?? undefined);
   const q: JsonObject = cash ? { type: "transfer", ...(typeof p.from === "string" ? { from: p.from } : {}), ...(typeof p.to === "string" ? { to: p.to } : {}), ...(amount !== undefined ? { amount } : {}), method: "cash" } : p;
   delete q.playerPrice;
+  delete q.owned;
   const money = q.type === "purchase" ? "price" : q.type === "transfer" ? "amount" : null;
   const v = money ? q[money] : undefined;
   if (money && typeof v === "number" && Number.isFinite(v)) q[money] = Math.round(v * 10 ** currency.decimals);

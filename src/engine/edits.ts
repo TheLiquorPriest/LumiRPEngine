@@ -6,14 +6,15 @@
 // correction account and a change to XP moves the level with it, as anywhere else (a level itself
 // is never written: it follows XP). Values are literals: a typed "=1+1" is text, never a formula.
 // A submit applies all or none and is one `fix` post entry on the head (§4.3), so undo, Keep,
-// swipes, Re-narrate and Re-run treat it like any fix.
+// swipes, Re-narrate and Re-run treat it like any fix. The entry keeps what it asked for, so one
+// that waited out a reply, or that a read now follows, is resolved again from it (`resolveFix`).
 
 import { hashParts } from "../shared/hash";
 import type { EntityId, FieldId } from "../shared/ids";
 import { DOMAINS } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
-import type { LedgerEvent } from "../shared/ledger";
+import type { FixDirective, LedgerEvent, PostEntry } from "../shared/ledger";
 import type { EditOp } from "../shared/protocol";
 import { EDIT_OPS_MAX } from "../shared/protocol";
 import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
@@ -35,6 +36,7 @@ import { createRng, type Rng } from "./rng";
 import { fieldDef, GONE_FIELD, kindDef, kindIs, placeOfEntity } from "./scope";
 import { classOf, classProblems, classValues, tagsOf } from "./selector";
 import type { WorldState } from "./state";
+import { clockFix } from "./time";
 import { moveTrack } from "./tracks";
 import { Working } from "./working";
 
@@ -43,7 +45,16 @@ export interface EditOptions {
   gm: boolean;
   /** The chat run's seed: the edit's generator (spawn ids, level-up effects) forks from it and the operations. */
   runSeed: string;
+  /** Resolved again after the story moved on (`resolveFix`): an operation whose outcome is already so is passed over, not refused. */
+  again?: boolean;
 }
+
+/**
+ * Refusals that mean what an operation asks for is already so: nothing to change, inside it or out
+ * of it already, removed or back already, a relation already gone. Resolving an edit again
+ * (`again`), such an operation is passed over, since the story already did what it asks.
+ */
+const ALREADY_SO: Record<string, true> = { no_change: true, already_inside: true, not_inside: true, gone: true, not_gone: true, missing_relation: true };
 
 export type EditOutcome = { events: LedgerEvent[] } | { rejection: Rejection };
 
@@ -434,8 +445,14 @@ export function resolveEdit(reg: Registry, world: WorldDoc, state: Readonly<Worl
   const w = new Working(reg, world, state);
   const rng = createRng(hashParts("lre.edit", opts.runSeed, JSON.stringify(ops)));
   for (const [i, op] of ops.entries()) {
+    const mark = opts.again ? w.mark() : null;
     const rejection = applyOp(reg, w, op, opts, rng.fork(`op:${i}`));
-    if (rejection) return { rejection };
+    if (!rejection) continue;
+    if (mark && own(ALREADY_SO, rejection.code)) {
+      w.restore(mark);
+      continue;
+    }
+    return { rejection };
   }
   // What a GM sets them doing, and until when, is that activity's span (DESIGN §9.2), stamped as the
   // whole edit leaves them, where they are: Activity and Activity ends read together whether set in
@@ -452,6 +469,25 @@ export function resolveEdit(reg: Registry, world: WorldDoc, state: Readonly<Worl
   // One submit is one unit: a rebased view keeps or drops it whole, as it does a purchase.
   const group = w.events.length > 1 ? `edit:${hashParts(JSON.stringify(w.events)).slice(0, 10)}` : undefined;
   return { events: group ? w.events.map((e) => ({ ...e, group })) : [...w.events] };
+}
+
+/**
+ * A GM edit or ✎ fix resolved again from what it asked for (`PostEntry.edit`) against `state`, the
+ * state it now follows (DESIGN §7, P2): after the reply it was held through, or after a read that
+ * now comes before it (a Re-read, a Retry read, a Re-run's). Its operations resolve as when it was
+ * made, with the same generator, except that one whose outcome is already so is passed over; a
+ * clock fix sets the clock to its time again. Null when the entry asked for nothing this can read:
+ * its own events stand.
+ */
+export function resolveFix(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, entry: Pick<PostEntry, "edit" | "gm">, runSeed: string): EditOutcome | null {
+  const asked: FixDirective | undefined = entry.edit;
+  if (!asked) return null;
+  if ("clock" in asked) {
+    const fixed = clockFix(reg, world, state, asked.clock, runSeed);
+    return "code" in fixed ? { rejection: fixed } : fixed;
+  }
+  const ops = parseEditOps(asked.ops);
+  return ops ? resolveEdit(reg, world, state, ops, { gm: entry.gm === true, runSeed, again: true }) : null;
 }
 
 const str = (v: unknown): v is string => typeof v === "string";

@@ -1,21 +1,23 @@
 // Player claims at the read (DESIGN §9.4): what becomes of a typed action's ref param that names a
 // thing the world doesn't have, as the POV sees it. Only a param that takes claims (`ParamDef.claim`)
 // and holds words the player typed can be one. A thing the POV may know by those words keeps its
-// own rules, and money is never made. The chat's policy decides the rest: made real, asked about
-// first (under Make it real too, when its catalog price is over the world's claim cap under a
-// capped policy, or it is a key, a weapon or a document), or dropped with its decline chip.
+// own rules, and cash the player character carries is handed over as it is. The chat's policy
+// decides the rest: made real, asked about first (under Make it real too, when its catalog price is
+// over the world's claim cap under a capped policy, or it is money they lack, a key, a weapon or a
+// document), or dropped to play as plain roleplay with its receipt.
 
-import type { ClaimsPolicy } from "../shared/claims";
-import type { EntityId } from "../shared/ids";
+import type { ClaimPlace, ClaimsPolicy } from "../shared/claims";
+import type { ActionId, EntityId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import { hasOwn } from "../shared/json";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
-import { optionalService, own } from "../engine/pack-kit";
+import { optionalQuery, optionalService, own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
+import { findAction } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import type { Claim } from "../engine/steps";
+import type { Claim, Needs } from "../engine/steps";
 import { canSeePlace } from "../engine/visibility";
 import { matchCatalog } from "../packs/economy/core/index";
 import { catalogName, itemName } from "../packs/economy/core/items";
@@ -25,14 +27,37 @@ import { isInside } from "../packs/gear/core/model";
 import type { ThingSort } from "./steps";
 import { unfitRef, type UnfitRef } from "./turn-steps";
 
+/** An action that plays in the read's place, held to the needs of the one the player's words named (`needs`, DESIGN §9.4). */
+type InPlace = { action: ActionId; params: JsonObject; needs: Needs };
+
 export type ClaimVerdict =
   /** A thing the POV may know goes by those words: the action takes it, and keeps its own rules. */
   | { kind: "known"; params: JsonObject }
   | { kind: "real"; claim: Claim }
-  /** The turn waits on the player's answer before anything is generated (Ask first, or Make it real over the cap or for a key, a weapon or a document). */
-  | { kind: "ask"; claim: Claim; question: string; detail: string }
-  /** Dropped with its decline chip, as under Hold me to the world; `reason` replaces the usual one (money). */
-  | { kind: "hold"; reason?: string };
+  /**
+   * The turn waits on the player's answer before anything is generated (Ask first, or Make it real
+   * for money, a key, a weapon or a document, or over the cap). `play`: the action that plays in the
+   * read's place once it is added (money is paid over with the economy's Pay).
+   */
+  | { kind: "ask"; claim: Claim; question: string; detail: string; play?: InPlace }
+  /** Nothing to add: the read plays as another action the world can carry (money the player character carries, paid over with the economy's Pay in cash). */
+  | { kind: "play"; play: InPlace }
+  /** Dropped to play as plain roleplay, as under Hold me to the world. */
+  | { kind: "hold" };
+
+/** What `claimFor` judges: the read's action and params, its unfit param, and the chat's policy. */
+interface ClaimInput {
+  registry: Registry;
+  world: WorldDoc;
+  state: Readonly<WorldState>;
+  action: ActionDef;
+  params: JsonObject;
+  unfit: UnfitRef;
+  said: readonly string[];
+  thing: ThingSort | undefined;
+  policy: ClaimsPolicy;
+  mayKnow: (id: EntityId) => boolean;
+}
 
 /** What the reading may say a claimed thing is that always asks first: a claim can't stand in for what opens or proves things, or arms someone. */
 const RESTRICTED: Readonly<Record<string, true>> = { weapon: true, key: true, document: true };
@@ -101,7 +126,7 @@ function gearRow(world: WorldDoc, name: string): string | undefined {
  * caller drops it as before. `said` holds the action's own words, then the message; `thing` is
  * the reading's word for what it is.
  */
-export function claimFor(input: { registry: Registry; world: WorldDoc; state: Readonly<WorldState>; action: ActionDef; params: JsonObject; unfit: UnfitRef; said: readonly string[]; thing: ThingSort | undefined; policy: ClaimsPolicy; mayKnow: (id: EntityId) => boolean }): ClaimVerdict | null {
+export function claimFor(input: ClaimInput): ClaimVerdict | null {
   const { registry, world, state, action, unfit, mayKnow } = input;
   const at = unfit.def.claim;
   const kind = unfit.def.ref ?? "item";
@@ -117,11 +142,12 @@ export function claimFor(input: { registry: Registry; world: WorldDoc; state: Re
   const known = named ? null : knownBy(registry, world, state, name, mayKnow);
   if (known === "place") return { kind: "hold" };
   if (known !== null) return { kind: "known", params: { ...input.params, [unfit.param]: known } };
-  // Cash and accounts belong to the economy, whatever the preset.
-  if (cashGift(name, world.currency) !== null || input.thing === "money") return { kind: "hold", reason: "money is never made from what you say you have" };
+  const verb = (action.lexicon?.[0] ?? action.label).toLowerCase();
+  // Money (a cash phrase, or the sort `money`) is the economy's, whatever the preset.
+  const cash = cashGift(name, world.currency);
+  if (cash !== null || input.thing === "money") return moneyClaim(input, at, kind, cash?.amount ?? null, verb);
   const ctx = registry.context(world, state);
   if (input.policy.mode === "hold" || !optionalService(ctx, "gear.claim") || ctx.levelOf(world.pov, "gear") === 0) return { kind: "hold" };
-  const verb = (action.lexicon?.[0] ?? action.label).toLowerCase();
   const title = `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
   // A tracking gap, not a new thing: the player character's own thing the world has somewhere else
   // ("I put on my clothes" while the world keeps them at home). Made real, it is that very thing
@@ -151,6 +177,40 @@ export function claimFor(input: { registry: Registry; world: WorldDoc; state: Re
           : null;
   if (detail === null) return { kind: "real", claim };
   return { kind: "ask", claim, question: `${title} isn't in this world yet. Add it and ${verb} it?`, detail };
+}
+
+/**
+ * Money the player says they have (DESIGN §9.4). It goes to the person the action gives it to as the
+ * economy's Pay, in cash, and only as that action could: its needs on everything but the money still
+ * hold the Pay (`needs`, Give's `at(to, here)`) as it plays. Cash the player character carries is no
+ * claim at all, so a Pay it covers plays as read, in every mode. Only what they lack is asked about
+ * first, in every mode but Hold me to the world, as a key is, since it buys anything: Add puts what
+ * their carried cash lacks of the amount in it as the Pay plays (`economy.claim_cash`), and the Pay
+ * hands the whole amount over. Money said without an amount or given to no one, or in a world that
+ * keeps no money for the player character, has nothing to carry it, and plays as plain roleplay.
+ */
+function moneyClaim(input: ClaimInput, at: ClaimPlace, kind: string, amount: number | null, verb: string): ClaimVerdict {
+  const { registry, world, state, action, unfit } = input;
+  const ctx = registry.context(world, state);
+  const pay = findAction(registry, world, "pay");
+  const to = Object.entries(action.params).find(([name, def]) => name !== unfit.param && def.type === "ref" && def.ref !== undefined && kindIs(registry, world, def.ref, "person"))?.[0];
+  const recipient = to === undefined ? undefined : input.params[to];
+  const cents = amount === null ? 0 : Math.round(amount * 10 ** world.currency.decimals);
+  if (!pay || typeof recipient !== "string" || !(cents > 0) || !optionalService(ctx, "economy.claim_cash") || ctx.levelOf(world.pov, "money") === 0) return { kind: "hold" };
+  const needs: Needs = { action: action.id, params: Object.fromEntries(Object.entries(input.params).filter(([name]) => name !== unfit.param)) };
+  const play: InPlace = { action: pay.id, params: { to: recipient, amount: cents, method: "cash" }, needs };
+  const carried = Math.max(0, optionalQuery(ctx, "economy.carried_cash")?.(ctx, world.pov) ?? 0);
+  if (carried >= cents) return { kind: "play", play };
+  if (input.policy.mode === "hold") return { kind: "hold" };
+  const money = formatMoney(cents, world.currency);
+  const added = formatMoney(cents - carried, world.currency);
+  return {
+    kind: "ask",
+    claim: { param: unfit.param, name: added, at, kind, consumable: false, cents },
+    question: carried > 0 ? `Only ${formatMoney(carried, world.currency)} of the ${money} is with you as far as the world knows. Add the other ${added} and ${verb} it?` : `${money} in cash isn't with you as far as the world knows. Add it and ${verb} it?`,
+    detail: "Money you say you have and don't carry always asks first.",
+    play,
+  };
 }
 
 /**

@@ -31,7 +31,7 @@ It exits 1 on any error. It checks unique ids; every cross-reference; `[[id]]` l
 | Cards / households / money records | 0 / 0 / 0 | 0 / 0 / 0 | 2 / 1 / 10 |
 | Tracks | 2 quests, 1 secret, 1 puzzle, 3 agendas | 2 quests, 1 secret, 1 puzzle (with `puzzle.answer`), 4 agendas | 2 quests, 1 secret, 1 puzzle, 5 agendas |
 | Clues | n/a | 11 (9 progress, 2 red herrings) | n/a |
-| Rules / actions | 8 / 8 | 10 / 9 | 10 / 13 |
+| Rules / actions | 8 / 8 | 10 / 10 | 10 / 13 |
 | Climates | 1 | 1 (also Saltreach) | 2 (Lakeshore County, Chicago) |
 | Lore entries | 24 | 21 | 26 |
 
@@ -127,8 +127,8 @@ Fields added so the converter can build checkable worlds:
 
 - **Formulas** (engine grammar, see `src/engine/expr.ts`): beside each plain-language `when`, `next[].expr`, `fail.expr`, `gateExpr`, `objectiveExprs[]` (parallel to `objectives`; quest and puzzle stages only), a rule's `whenExpr`, an action's `requires[]` and a clue's `requiresExpr`. Write `story.<flag>` for a flag, `@YYYY-MM-DDTHH:MM` for a date-time, and string literals for ids (`at(pov, 'ferry_landing')`). A rule's `when` of `"always"` needs no `whenExpr`. The validator parses each one and checks every name, function and id argument.
 - **Rules** use `tick`, `enter` or `at` only: the engine has no custom events. A rule that an Economy process already performs carries `handledBy: "economy.money"`, the process that runs flows and pay.
-- **`actions`**: `{id, label, params, requires, duration, lexicon, observable, effects}`; every effect is a template effect or an engine effect (`gear.transfer`, `gear.lend`, `set`, `add`, `move` with `entity` and `to`).
-- **Clues** also carry `action: {label}`, `requiresExpr` and `reveals[]` (hidden item ids that appear when the clue is found).
+- **`actions`**: `{id, label, params, requires, duration, lexicon, observable, effects}`; every effect is a template effect or an engine effect (`gear.transfer`, `gear.lend`, `set`, `add`, `move` with `entity` and `to`). A requirement is a formula, or `{"expr": …, "hard": true}` for a hard lock (DESIGN §11): a typed attempt that misses a plain requirement plays as plain roleplay, so each lock, each puzzle's solution and each guarded secret is marked hard where its action may be listed (the study safe's Open, the cut telephone line, the charter Compare needs), and so is where a fixed thing must be used (the gatehouse the line is spliced at, the hall's telephone), so a typed attempt from elsewhere fails rather than plays as done. A step the story hasn't reached stays plain: it is hidden until then, and a hard lock would list it.
+- **Clues** also carry `action: {label}`, `requiresExpr` and `reveals[]` (hidden item ids that appear when the clue is found), and `hard: true` when the condition is a lock on what holds the clue (Dr. Farrant's bag while he keeps it by him, Verity's typewriter case while she's there and doesn't trust you, Ashcombe's room while he's in it) or a window that closes on it (the muddy prints, until the floor is cleaned).
 - **Characters** carry `wealth` (`broke`, `poor`, `modest`, `comfortable`, `rich` or `wealthy`). `sheets` holds `scale` (`[1, 10]`), `stats` (`{id, label}`) and `derived`.
 - **Climates** carry `tempC` per season; **prices** carry the Economy `category` row they replace; **flags** carry `type` (`bool` by default).
 

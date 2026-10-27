@@ -30,6 +30,7 @@ import type {
   WorldId,
 } from "./ids";
 import type { EntityDef } from "./world";
+import type { EditOp } from "./protocol";
 
 export const LEDGER_NAMESPACE = "lumi_rp_engine";
 
@@ -54,6 +55,14 @@ export interface ContentId {
 export interface EventBase {
   group?: string;
 }
+
+/**
+ * A group an effect keeps apart from its own unit (`applyEffects` makes the rest of an effect's
+ * events one unit, never this one): a rebased view keeps or drops it on its own, and the rest of the
+ * effect stands without it. The transfer a payment the story made draws from its account's
+ * overdraft link is one (DESIGN §25.10).
+ */
+export const APART_GROUP = "apart:";
 
 /** Assignment: carries the final value (location, status, owner, flags, equipped). */
 export interface SetEvent extends EventBase {
@@ -91,6 +100,14 @@ export interface PostEvent extends EventBase {
   type: "post";
   lines: PostingLine[];
   memo: string;
+  /**
+   * A payment the story made (a narrated purchase or transfer, DESIGN §9.5): it stands on any path
+   * whatever its accounts cover, so a pack's funds guard lets it take the account it draws on past
+   * what it allows, into overdraft or over its credit limit. The engine only ever puts it past cover
+   * on an account that can run a debt (§25.10). Events recorded before it existed have none: their
+   * funds are checked as ever.
+   */
+  overdraw?: true;
 }
 
 export interface LinkEvent extends EventBase {
@@ -213,7 +230,17 @@ export interface PostEntry {
   by?: { action: string; label: string };
   /** A `fix` the GM made (`lre.edit`, a GM's minds run), not a ✎ correction of the player's: its chip says it was a GM edit (DESIGN §7). */
   gm?: true;
+  /**
+   * What a GM edit or ✎ fix asked for (DESIGN §7, §12): its operations, or the time it set the
+   * clock to. Landing after a reply it was held through, or carried after a read (a Re-read, a Retry
+   * read, a Re-run's), the entry is resolved again from this against the state it then follows, so
+   * it lands over whatever the story changed meanwhile (P2).
+   */
+  edit?: FixDirective;
 }
+
+/** A GM edit's or ✎ fix's request, kept on its `fix` entry (`PostEntry.edit`). */
+export type FixDirective = { ops: EditOp[] } | { clock: string };
 
 /** A level change for everyone, for one detail band (stored under `tier`, the key the band ids had as tiers) or for one entity. */
 export type ResolveScope = { all: true } | { tier: Band } | { entity: EntityId };
@@ -390,7 +417,7 @@ export interface HeldEntry {
   waitFor: GenerationId[];
 }
 
-/** A held write that no longer applied when its window closed (P2): kept so the player is told, until they dismiss the notice. */
+/** A held write that couldn't be made when its window closed (P2): kept so the player is told, until they dismiss the notice. */
 export interface RefusedWrite {
   write: HeldWrite;
   /** The validator's reason, which may name hidden things: the GM view shows it; the player's notice words the write itself. */

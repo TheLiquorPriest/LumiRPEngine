@@ -38,7 +38,7 @@ const PRESETS: { value: ModelUsePresetId; label: string }[] = [
 const PRESET_PLAIN: Record<ModelUsePresetId, string> = {
   lean: "The fewest calls: quickest and cheapest. A model reads each message you type for its actions, and the reply; people's choices follow the engine's own rules.",
   standard: "The default. A model also judges your approach when the rules for checks need it, and decides close calls for the people around you.",
-  full: "The most calls, so the slowest and costliest. A model decides for everyone present, writes a brief and an outline for the narrator, and checks the reply against the facts.",
+  full: "The most calls, so the slowest and costliest. A model decides for everyone present, and writes a brief and an outline for the narrator.",
   custom: "Your own mix, set step by step in Steps and connections.",
 };
 
@@ -46,7 +46,7 @@ const PRESET_PLAIN: Record<ModelUsePresetId, string> = {
 export const PRESET_NOTE: Record<ModelUsePresetId, string> = {
   lean: "Narrator + up to 2 model steps a turn, and no lore lookups: helpers get the lore their inputs find. The floor: it doesn't meet “a model decides” on its own. The call meter shows each turn's real count.",
   standard: "Narrator + up to 4 model steps a turn, plus up to 7 lore lookups. The call meter shows each turn's real count.",
-  full: "Narrator + up to 9 model steps a turn, plus up to 10 lore lookups. The call meter shows each turn's real count.",
+  full: "Narrator + up to 8 model steps a turn, plus up to 10 lore lookups. The call meter shows each turn's real count.",
   custom: "Your own steps, signals, providers, lore and budgets. The count depends on the steps you enable; the call meter shows it live.",
 };
 
@@ -67,7 +67,6 @@ const LORE_TRANSPORT: { value: LoreTransport; label: string }[] = [
 const STEP_PLAIN: Record<StepPurpose, string> = {
   interpret: "Before the reply: reads what you type as the actions it takes.",
   "npc.choose": "Picks what someone does on a close call or an invitation: before the reply for people with you, after it for people elsewhere.",
-  contradiction: "After the reply: checks it against the established facts.",
   "puzzle.answer": "Before the reply: judges a free-text puzzle answer, for puzzles that ask for it.",
   brief: "Before the reply: writes a short briefing for the narrator.",
   outline: "Before the reply: writes a prose outline for the narrator.",

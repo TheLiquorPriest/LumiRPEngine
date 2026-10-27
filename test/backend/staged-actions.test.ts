@@ -86,6 +86,15 @@ describe("a tap with no words waits for the player's next message", () => {
     expect(account(await chat.hub(), SAVINGS).cents).toBe(before + 1000);
     expect((await chat.state()).staged ?? null).toBeNull();
   });
+
+  test("the staged action is the player's pick, held to its requirements: one they can't afford is refused, never played as roleplay", async () => {
+    const chat = await MoneyChat.start();
+    expect(await tap(chat, { action: "pay", params: { to: "danny_okafor", amount: 100_000_000 } })).toEqual({ staged: true });
+    const outcome = await say(chat, "I hand Danny the money.");
+    const chips = (await chat.rig.rt.view(chat.chatId, chat.rig.host.userId)).chips.filter((c) => c.label.startsWith("Pay"));
+    expect(chips.map((c) => c.kind)).toEqual(["decline"]);
+    expect(outcome).toContain("Pay");
+  });
 });
 
 describe("a staged action's message is read for all else its words say", () => {

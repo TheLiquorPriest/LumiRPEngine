@@ -1,7 +1,8 @@
 // The extract prompt's purchase contract on the shipped packs: the model is told the payer is a
 // person and the method is the prose's way of paying, and a narrated purchase paid "by debit card"
 // charges checking, not wallet cash (DESIGN §9.4). Money the model states as written ($8.00 is 8)
-// reaches the packs in minor units (800 cents), once.
+// reaches the packs in minor units (800 cents), once. A thing's condition and a regard are asked
+// for as far as the prose moves them, on the world's own axes and ranges.
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
@@ -85,5 +86,30 @@ describe("extract: purchase payer and method", () => {
       { type: "transfer", from: "dev", to: POV, amount: 1200 },
       { type: "transfer", from: "dev", to: POV, amount: 500, method: "cash" },
     ]);
+  });
+});
+
+describe("extract: how far a told change goes", () => {
+  test("the prompt asks for a thing's condition and a regard as far as the prose moves them, on the world's own axes and ranges", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const prompts: string[] = [];
+    rig.host.quietReply = (req) => {
+      const text = req.messages.map((m) => m.content).join("\n");
+      if (text.includes(EXTRACT_MARK)) prompts.push(text);
+      return "{}";
+    };
+    await rig.turn(chatId, "I drop my phone.", "The phone cracks across the screen.");
+    expect(prompts).toHaveLength(1);
+    const condition = prompts[0]?.match(/item_condition\{[^}]*\}(?: \([^)]*\))?/)?.[0] ?? "";
+    const regard = prompts[0]?.match(/regard\{[^}]*\}[^·]*/)?.[0] ?? "";
+    expect(condition).toContain("as far as the prose says");
+    expect(condition).toContain("0..100");
+    expect(regard).toContain("as far as the prose moves it");
+    for (const axis of ["warmth (-100..100)", "trust (-100..100)", "respect (-100..100)"]) expect(regard).toContain(axis);
+    expect(regard).not.toContain("affection");
+    for (const spec of [condition, regard]) expect(spec).not.toMatch(/-25\.\.25|-3\.\.3/);
   });
 });

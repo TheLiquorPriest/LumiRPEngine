@@ -1,7 +1,7 @@
 // Moves are story first (DESIGN §9.4, §4.1): a move the reply tells lands whether or not a route
-// joins the places, a move it only implies never tells the next reply it didn't happen, typed Go
-// goes by any mode or nominally, and only the world's travel simulation brings route checks back.
-// ✎ Place moves the POV for real, and a refused confirm-mode change gets its chip.
+// joins the places, under the travel simulation too, a move it only implies waits on Apply, and
+// typed Go goes by any mode or nominally. ✎ Place moves the POV for real, and a refused
+// confirm-mode change gets its chip.
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
@@ -70,19 +70,21 @@ describe("story-first moves", () => {
     expect(await declines(rig, chatId)).toEqual([]);
   });
 
-  test("with the travel simulation on, it's refused as before", async () => {
+  test("with the travel simulation on, it lands too", async () => {
     const { rig, chatId } = await portAlder({ travelSimulation: true });
     script(rig, NONE, { proposals: [{ type: "location", entity: MARCUS, place: ROCK }], where: null });
     await rig.turn(chatId, "I wave Marcus off.", "Marcus rows out to Lighthouse Rock.");
-    expect(placeOfEntity(await stateOf(rig, chatId), MARCUS)).toBe(SHOP);
-    expect((await declines(rig, chatId)).length).toBe(1);
+    expect(placeOfEntity(await stateOf(rig, chatId), MARCUS)).toBe(ROCK);
+    expect(await declines(rig, chatId)).toEqual([]);
   });
 
-  test("a move the reply only implies that can't happen leaves no Outcome note", async () => {
+  test("a move the reply only implies waits on Apply, with no route to it under the travel simulation as anywhere", async () => {
     const { rig, chatId } = await portAlder({ travelSimulation: true });
     script(rig, NONE, { proposals: [], where: ROCK });
     await rig.turn(chatId, "I look around.", "Wind whips off the water around the lighthouse.");
-    expect(await rig.rt.outcomeNotes.list(chatId, rig.host.userId)).toEqual([]);
+    const head = rig.host.head(chatId);
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === head?.id);
+    expect(chips.filter((c) => c.kind === "confirm").map((c) => c.detail)).toEqual([expect.stringContaining("Apply the move?")]);
     expect(await declines(rig, chatId)).toEqual([]);
   });
 
@@ -131,11 +133,13 @@ describe("✎ Place", () => {
 });
 
 describe("a refused confirm-mode change", () => {
-  test("gets a decline chip; one naming a secret place is a receipt naming it only as something you don't know", async () => {
+  test("a payment of nothing is a receipt, never a decline; one naming a secret place is a receipt naming it only as something you don't know", async () => {
     const { rig, chatId } = await portAlder();
     script(rig, NONE, { proposals: [{ type: "transfer", from: MARCUS, to: "pov", amount: 0 }], where: null });
     await rig.turn(chatId, "I ask Marcus about pay.", "Marcus waves the question off.");
-    expect((await declines(rig, chatId)).length).toBe(1);
+    expect(await declines(rig, chatId)).toEqual([]);
+    const paid = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === rig.host.head(chatId)?.id && c.kind === "untracked");
+    expect(paid.map((c) => c.label)).toEqual([expect.stringMatching(/^Not tracked: Marcus Delgado paid /)]);
     script(rig, NONE, { proposals: [{ type: "knows", who: "pov", fact: "smugglers_den" }], where: null });
     await rig.turn(chatId, "I listen.", "Marcus mutters about the old smugglers.");
     expect(await declines(rig, chatId)).toEqual([]);

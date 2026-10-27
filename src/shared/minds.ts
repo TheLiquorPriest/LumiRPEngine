@@ -994,7 +994,12 @@ export interface MindMoment {
   /** The player's latest message and the reply before it, on a turn; empty at a beat. */
   user: string;
   reply: string;
+  /** At a time skip's beats and its end: what the player's message says the player character does in the skip, in their words (its fill); absent otherwise. */
+  skip?: string;
 }
+
+/** How a time skip's calls (its plan, its beats, the minds in it) are given the player's words for the span: their directive, which comes first. */
+export const SKIP_FILL_HEAD = "What the player's message says the player character does in this time, in their words (it comes first):";
 
 /**
  * How one mind of a GM's run went (DESIGN §24.9): GM data, never on a player surface. `pinned`

@@ -56,11 +56,13 @@ const NAMED = ["from", "to", "payer", "who", "entity"] as const;
  * Turns proposals into events through their channels (DESIGN §9.4): the detail of the people it
  * names is materialized first, as an action's participants are (their accounts get their opening
  * balances), then channel validation, then the channel's effects, applied in order on `w`. A
- * rejected proposal applies nothing, its materialization included.
+ * rejected proposal applies nothing, its materialization included. `first` is the first one's place
+ * in a longer list applied a few at a time, so each draws the same seed as applied with the rest.
  */
-export function applyProposals(registry: Registry, w: Working, proposals: readonly JsonObject[], seed: string, runSeed: string): ProposalOutcome[] {
+export function applyProposals(registry: Registry, w: Working, proposals: readonly JsonObject[], seed: string, runSeed: string, first = 0): ProposalOutcome[] {
   const out: ProposalOutcome[] = [];
-  proposals.forEach((proposal, i) => {
+  proposals.forEach((proposal, at) => {
+    const i = first + at;
     const type = typeof proposal.type === "string" ? proposal.type : "";
     const channel = registry.proposals.get(type);
     if (!channel) {
@@ -89,6 +91,36 @@ export function applyProposals(registry: Registry, w: Working, proposals: readon
   return out;
 }
 
+/**
+ * What a reply's read applies before its post steps (DESIGN §9.4), in the order the commit applies
+ * it: the off-screen `npc.choose` decisions, then each narrated time skip up to how long one runs
+ * without asking (a longer one, or one past the unit cap, is a Timelapse chip instead, returned),
+ * then the other automatic proposals on `seed`, each told to `each` the moment it applies. The
+ * commit's read and the chips worked out ahead of it both apply through here, so a chip's events
+ * are the record's own.
+ */
+export function applyRead(registry: Registry, w: Working, read: PreparedRead, seed: string, runSeed: string, each?: (outcome: ProposalOutcome) => void): ReadChip[] {
+  w.applyAll(read.events ?? []);
+  const chips: ReadChip[] = [];
+  const proposals: JsonObject[] = [];
+  for (const p of read.auto) {
+    if (p.type !== "time_advance") {
+      proposals.push(p);
+      continue;
+    }
+    const minutes = typeof p.minutes === "number" ? Math.round(p.minutes) : 0;
+    // Up to how long a skip runs without asking it applies, a fight under way or not; a longer one,
+    // or one past the unit cap, is offered as a Timelapse.
+    const outcome = applyTimeAdvance(registry, w, minutes, { runSeed, capMinutes: read.askBeyond, unitCap: w.state.time.unitCap });
+    if (outcome.chip) chips.push({ target: outcome.chip.target, reason: outcome.reason === "unit_cap" ? "unit_cap" : "over_cap" });
+  }
+  // One at a time, each on its place among the rest, so `each` reads the state that one left.
+  proposals.forEach((p, i) => {
+    for (const outcome of applyProposals(registry, w, [p], seed, runSeed, i)) each?.(outcome);
+  });
+  return chips;
+}
+
 function clockMinutes(events: readonly LedgerEvent[]): number {
   let minutes = 0;
   for (const e of events) if (e.type === "clock") minutes += e.minutes;
@@ -109,22 +141,27 @@ export interface ReadChip {
 
 /**
  * An action `interpret` read whose params name nothing in the world that fits (DESIGN §9.4): its
- * label and why, as its decline chip tells the player (`reason`, which may echo their own words)
- * and as the next reply is told it (`told`, one wording whatever the read named, unless the POV knows it).
+ * label and why, as its receipt tells the player (`reason`, which may echo their own words).
  */
 export interface UnfitAction {
   label: string;
   reason: string;
-  told: string;
 }
 
 /**
  * One action of a typed message's read (DESIGN §9.4, §11): it plays, with any claim, unless it waits
  * on the player's answer (`ask`): a claim's question (Add or Not an action), or a check the chat only
- * suggests (Roll or No roll).
+ * suggests (Roll or No roll). `picked`: the action the player staged in the engine's own controls,
+ * which leads the read and is held to its requirements (DESIGN §11).
  */
 export interface ReadStep extends QueuedAction {
   ask?: { kind: "claim" | "check"; question: string; detail: string };
+  picked?: true;
+}
+
+/** A read's step as the intent plays it, without its question or its pick. */
+function queued({ ask: _ask, picked: _picked, ...step }: ReadStep): QueuedAction {
+  return step;
 }
 
 /** A typed message's read as `interpret` gave it and the engine judged it: what leads, its actions in order, and those dropped. */
@@ -178,7 +215,7 @@ export class TurnBridge implements TurnModel {
   /** Plan-phase prose (brief, outline) keyed by plan seed. */
   private readonly prose = new Map<string, PlanProse>();
   /** A typed timelapse longer than a turn may run (`interpret`), offered as a chip instead, keyed like `intents`. */
-  private readonly offers = new Map<string, TimelapseTarget>();
+  private readonly offers = new Map<string, { target: TimelapseTarget; fill: string; hold: boolean }>();
   /** A timelapse turn's time skip as its pre phase ran it (DESIGN §24.7), keyed like `intents`: the plan replays it. */
   private readonly skips = new Map<string, SkipRecord>();
   /** A timelapse turn's `castlife.skip_plan` (#53), keyed like `intents`: recorded ahead of the timelapse it plans, so a Re-run or Retry asks no model again. */
@@ -297,10 +334,12 @@ export class TurnBridge implements TurnModel {
       return;
     }
     this.held.delete(userText);
-    const [first, ...queue] = read.steps.map(({ ask: _ask, ...step }): QueuedAction => step);
+    const [lead, ...rest] = read.steps;
+    const first = lead ? queued(lead) : undefined;
+    const queue = rest.map(queued);
     const confidence = read.lead ? (read.probabilities[read.lead] ?? 1) : 1;
     const probabilities = !first || first.action === read.lead ? read.probabilities : { [first.action]: confidence, none: 1 - confidence };
-    const intent: InterpretOutput | null = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...(first?.text ? { text: first.text } : {}), ...(first?.claim ? { claim: first.claim } : {}), ...(read.then ? { then: read.then } : {}), ...(queue.length > 0 ? { queue } : {}) };
+    const intent: InterpretOutput | null = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...(first?.text ? { text: first.text } : {}), ...(first?.claim ? { claim: first.claim } : {}), ...(first?.needs ? { needs: first.needs } : {}), ...(lead?.picked ? { picked: true } : {}), ...(read.then ? { then: read.then } : {}), ...(queue.length > 0 ? { queue } : {}) };
     if (read.dropped.length > 0) this.setUnfit(userText, read.dropped, intent);
     else this.setIntent(userText, intent, true);
   }
@@ -322,7 +361,7 @@ export class TurnBridge implements TurnModel {
   answerAsk(userText: string, index: number, keep: boolean): boolean {
     const read = this.held.get(userText);
     if (!read?.steps[index]?.ask) return false;
-    const steps = keep ? read.steps.map((s, i): ReadStep => (i === index ? { action: s.action, params: s.params, text: s.text, ...(s.claim ? { claim: s.claim } : {}) } : s)) : read.steps.filter((_, i) => i !== index);
+    const steps = keep ? read.steps.map((s, i): ReadStep => (i === index ? { action: s.action, params: s.params, text: s.text, ...(s.claim ? { claim: s.claim } : {}), ...(s.needs ? { needs: s.needs } : {}), ...(s.picked ? { picked: true } : {}) } : s)) : read.steps.filter((_, i) => i !== index);
     this.setRead(userText, { ...read, steps });
     return true;
   }
@@ -393,14 +432,26 @@ export class TurnBridge implements TurnModel {
     trim(this.skips);
   }
 
-  setOffer(userText: string, target: TimelapseTarget | null): void {
-    if (target) this.offers.set(userText, target);
+  /**
+   * A span offered rather than run (longer than a skip runs without asking, or after the actions):
+   * what the player's message fills it with, in their words (`fill`), and whether it holds the POV
+   * where the story has it (`hold`, a span the words spend), so its chip's Timelapse runs as the
+   * inline skip would have.
+   */
+  setOffer(userText: string, target: TimelapseTarget | null, spent: { fill: string; hold: boolean } = { fill: "", hold: false }): void {
+    if (target) this.offers.set(userText, { target, ...spent });
     else this.offers.delete(userText);
     trim(this.offers);
   }
 
   offerFor(userText: string): TimelapseTarget | undefined {
-    return this.offers.get(userText);
+    return this.offers.get(userText)?.target;
+  }
+
+  /** How the offered span is spent (`setOffer`): its fill ("" when none) and whether it holds the POV. */
+  offerSpent(userText: string): { fill: string; hold: boolean } {
+    const offer = this.offers.get(userText);
+    return { fill: offer?.fill ?? "", hold: offer?.hold ?? false };
   }
 
   setNext(userText: string, next: string | null): void {
@@ -517,20 +568,7 @@ export class TurnBridge implements TurnModel {
     const key = hashParts("lre.read", input.text);
     const prepared = this.reads.get(key);
     const w = new Working(this.registry, input.ctx.world, input.state);
-    w.applyAll(prepared?.events ?? []);
-    const chips: ReadChip[] = [];
-    const proposals: JsonObject[] = [];
-    if (prepared) for (const p of prepared.auto) {
-      if (p.type !== "time_advance") {
-        proposals.push(p);
-        continue;
-      }
-      const minutes = typeof p.minutes === "number" ? Math.round(p.minutes) : 0;
-      // During a fight it applies nothing and offers nothing: the read's preparation declined it already.
-      const outcome = applyTimeAdvance(this.registry, w, minutes, { runSeed: this.runSeed, capMinutes: prepared.askBeyond, unitCap: w.state.time.unitCap });
-      if (outcome.chip) chips.push({ target: outcome.chip.target, reason: outcome.reason === "unit_cap" ? "unit_cap" : "over_cap" });
-    }
-    applyProposals(this.registry, w, proposals, input.seed, this.runSeed);
+    const chips = prepared ? applyRead(this.registry, w, prepared, input.seed, this.runSeed) : [];
     if (prepared?.post !== false) {
       const base = input.seed.split(":")[0] ?? input.seed;
       const applied = (this.plans.get(base)?.elapsedMinutes ?? 0) + clockMinutes(w.events);

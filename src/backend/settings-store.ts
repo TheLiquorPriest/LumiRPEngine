@@ -100,7 +100,6 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       brief: step(true, ["always"], HELPER, lore("prefetch", 1600)),
       outline: step(true, ["always"], HELPER, lore("prefetch", 1600)),
       extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 2400)),
-      contradiction: step(true, ["reply"], HELPER, lore("prefetch+lookup", 2400)),
       "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 2400)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 2400)),
       mind: step(true, ["always"], HELPER),
@@ -285,7 +284,7 @@ function normalize(raw: unknown): UserSettings {
 
 // ---------------------------------------------------------------- the settings schema
 
-const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"];
+const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"];
 
 const int = (v: unknown, lo: number, hi: number): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined);
 /** A token or call budget: a whole number from `lo` (below it the budget can't work), with no ceiling. */

@@ -270,26 +270,19 @@ describe("minds around a turn", () => {
     expect(record?.tokens).toBeLessThanOrEqual(600);
   });
 
-  test("under full secrecy a mind reaches no helper step, no contradiction chip and no choice", async () => {
+  test("under full secrecy a mind reaches no helper step and no choice", async () => {
     const rig = new Rig({ shipped: true, minds: true });
-    // Every step on, every turn: brief, outline, choices, contradiction, extract and the rest.
-    const steps = Object.fromEntries(["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
+    // Every step on, every turn: brief, outline, choices, extract and the rest.
+    const steps = Object.fromEntries(["interpret", "npc.choose", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", steps } } }));
     fakeModels(rig);
     const minds = rig.host.quietReply;
-    // A choices helper that suggests whatever intent it is shown, and a contradiction helper that calls
-    // any mind among the facts contradicted: either would carry the mind onto a chip.
+    // A choices helper that suggests whatever intent it is shown would carry the mind onto a chip.
     rig.host.quietReply = (req) => {
       const system = req.messages[0]?.content ?? "";
       const user = req.messages[1]?.content ?? "";
       if (system.includes("Suggest three short")) return JSON.stringify({ choices: [/Intends: ([^.\n]+)/.exec(user)?.[1] ?? "I wave back"] });
-      const asked = /^"contradicts": .* Criteria: (\{.*\})$/m.exec(user)?.[1];
-      if (system.startsWith("Answer each question about the state") && asked) {
-        const criteria: Record<string, string> = JSON.parse(asked);
-        const pick = Object.keys(criteria).find((k) => criteria[k]?.includes("PRIVATE")) ?? "none";
-        return JSON.stringify({ contradicts: { probabilities: { [pick]: 1 } } });
-      }
       return minds?.(req) ?? "{}";
     };
     const chatId = await alderChat(rig, { secrecy: "full" });
@@ -298,8 +291,8 @@ describe("minds around a turn", () => {
     expect(section(rig, "Minds")).toContain("PRIVATE thoughts of Danny Okafor");
     const leaks = /PRIVATE|means to ask about the weekend/;
     const helpers = rig.host.quietCalls.filter((c) => !MIND.test(c.messages[0]?.content ?? "") && !MEMORY.test(c.messages[0]?.content ?? ""));
-    const asked = helpers.map((c) => /You brief|You outline|Suggest three short|propose concrete state changes|"contradicts"/.exec(`${c.messages[0]?.content ?? ""} ${c.messages[1]?.content ?? ""}`)?.[0]);
-    for (const step of ["You brief", "You outline", "Suggest three short", "propose concrete state changes", '"contradicts"']) expect(asked).toContain(step);
+    const asked = helpers.map((c) => /You brief|You outline|Suggest three short|propose concrete state changes/.exec(`${c.messages[0]?.content ?? ""} ${c.messages[1]?.content ?? ""}`)?.[0]);
+    for (const step of ["You brief", "You outline", "Suggest three short", "propose concrete state changes"]) expect(asked).toContain(step);
     for (const c of helpers) expect(JSON.stringify(c.messages)).not.toMatch(leaks);
     const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
     expect(chips.some((c) => c.kind === "choice")).toBe(true);
@@ -512,6 +505,27 @@ describe("a mind's context", () => {
     // A beat's reason reads as one sentence.
     expect(now("danny_okafor", { kind: "beat", at: state.clock, reason: "Marcus's appointment", user: "", reply: "" })).toMatch(/\. Marcus's appointment\.$/);
     expect(now("danny_okafor", { kind: "beat", at: state.clock, reason: ended, user: "", reply: "" })).not.toContain("..");
+  });
+
+  test("inside a time skip the player's message fills, someone with the player character is told it in the player's words; someone away isn't", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await alderChat(rig);
+    const { state, world } = await stateOf(rig, chatId);
+    const fill = "I sort the stock and price the new crates";
+    const now = (who: string, moment: MindMoment, reads = DEFAULT_MIND_READS): string => {
+      const text = mindContext({ reg: rig.rt.registry, world, state, who, memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, reads, moment });
+      return text.slice(text.indexOf("## Now"));
+    };
+    const beat: MindMoment = { kind: "beat", at: state.clock, reason: "Marcus's appointment", user: "", reply: "", skip: fill };
+    const end: MindMoment = { kind: "turn", at: state.clock, reason: "The time skip ends.", user: "", reply: "", skip: fill };
+    expect(placeOfEntity(state, "dale_whitcomb")).not.toBe(placeOfEntity(state, "pov"));
+    // With The player's message off (Settings → Minds), no mind is given the words.
+    const unread = { ...DEFAULT_MIND_READS, message: { ...DEFAULT_MIND_READS.message, on: false } };
+    for (const moment of [beat, end]) {
+      expect(now("danny_okafor", moment)).toContain(fill);
+      expect(now("dale_whitcomb", moment)).not.toContain(fill);
+      expect(now("danny_okafor", moment, unread)).not.toContain(fill);
+    }
   });
 
   test("a character's own secrets are in their context: the tracks they own, and the secret a cue of theirs stands for", async () => {

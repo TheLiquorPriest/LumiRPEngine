@@ -68,14 +68,15 @@ describe("bounds", () => {
     expect(combineBounds({ mode: "auto", maxDelta: 20 }, { mode: "confirm", maxDelta: -5 }, undefined)).toEqual({ mode: "confirm", maxDelta: 5 });
   });
 
-  test("a proposal is capped by field, type and channel bounds and the field's range; locked fields are never", () => {
+  test("a proposal is capped by the field's own bound, the player's max delta and the field's range; locked fields are never", () => {
     const world = baseWorld();
     world.kinds.person!.fields.stress = { ...world.kinds.person!.fields.stress!, bound: { mode: "auto", maxDelta: 30 } };
     world.kinds.person!.fields.skill = { type: "number", locked: true };
     const reg = registryOf();
     const s = startState(world);
-    const b = boundProposal(reg, world, s, { type: "condition", entity: POV, field: "stress", delta: 50 }, { typeMode: "auto", channelCap: 20 });
+    const b = boundProposal(reg, world, s, { type: "condition", entity: POV, field: "stress", delta: 50 }, { typeMode: "auto", typeMaxDelta: 20 });
     expect([b.mode, b.delta, b.capped]).toEqual(["auto", 20, true]);
+    expect(boundProposal(reg, world, s, { type: "condition", entity: POV, field: "stress", delta: 50 }, { typeMode: "auto" }).delta).toBe(30);
     const range = boundProposal(reg, world, s, { type: "condition", entity: POV, field: "stress", delta: -10 }, { typeMode: "confirm" });
     expect([range.mode, range.delta, range.capped]).toEqual(["confirm", 0, true]);
     expect(boundProposal(reg, world, s, { type: "quantity", entity: POV, field: "skill", delta: 1 }, { typeMode: "auto" }).mode).toBe("never");
@@ -151,11 +152,14 @@ describe("beats", () => {
     expect(a.join(" ")).not.toContain("secret plot");
   });
 
-  test("an action a requirement stopped is told as not possible, never by the requirement, which can name a secret", () => {
+  test("an action a requirement stopped is told as not possible, never by the requirement, which can name a secret; a typed one that played as roleplay isn't told", () => {
     const world = baseWorld();
-    const stopped: Pick<Resolution, "action" | "ok" | "failed"> = { action: "read_notice", ok: false, failed: { code: "requirement", reason: "requires stage('s_hidden') == 'notice'" } };
-    const lines = outline(registryOf(), world, startState(world), { resolutions: [stopped as Resolution], events: [] }, createRng("x"));
+    const failed = { code: "requirement", reason: "requires stage('s_hidden') == 'notice'", requirement: "stage('s_hidden') == 'notice'" };
+    const locked: Pick<Resolution, "action" | "ok" | "failed"> = { action: "read_notice", ok: false, failed: { ...failed, hard: true } };
+    const plain: Pick<Resolution, "action" | "ok" | "failed" | "roleplay"> = { action: "read_letter", ok: false, failed, roleplay: true };
+    const lines = outline(registryOf(), world, startState(world), { resolutions: [locked as Resolution, plain as Resolution], events: [] }, createRng("x"));
     expect(lines[0]).toBe("read_notice doesn't happen: not possible here and now.");
+    expect(lines.join(" ")).not.toContain("read_letter");
     expect(lines.join(" ")).not.toContain("s_hidden");
   });
 });

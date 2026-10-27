@@ -7,6 +7,7 @@ import { hashJson } from "../../../src/shared/hash";
 import type { EventRef, LedgerEvent, PostEntry, Rec } from "../../../src/shared/ledger";
 import type { MindEditOp } from "../../../src/shared/minds";
 import type { ChainMessage, FoldInput, FoldOutput } from "../../../src/engine/ledger/chain";
+import { resolveFix } from "../../../src/engine/edits";
 import { LedgerFold } from "../../../src/engine/ledger/fold";
 import { computePaths, contentId } from "../../../src/engine/ledger/path";
 import { referenceFold } from "../../../src/engine/ledger/reference";
@@ -42,7 +43,7 @@ function chain(fixes: readonly LedgerEvent[][], undone: readonly EventRef[] = []
 
 /** The chain through the reference fold and the optimized one, which must agree on everything. */
 function both(messages: ChainMessage[]): FoldOutput {
-  const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain: messages };
+  const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain: messages, resolveFix: (world, state, entry) => resolveFix(registry, world, state, entry, "run") };
   const reference = referenceFold(input, registry);
   const optimized = new LedgerFold(registry).fold(input);
   expect(hashJson(optimized.state)).toBe(hashJson(reference.state));

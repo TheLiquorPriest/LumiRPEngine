@@ -701,6 +701,8 @@ function valueWords(field: FieldSpec, value: JsonValue | undefined, ctx: FormCtx
       return Array.isArray(value) ? `${value.length} ${field.label.toLowerCase()}` : "";
     case "enum":
       return typeof value === "string" ? (field.labels?.[value] ?? words(value)) : "";
+    case "requirement":
+      return typeof value === "string" ? value : isRecord(value) && typeof value.expr === "string" ? (value.hard === true ? `${value.expr} · hard lock` : value.expr) : "";
     case "text":
     case "expr":
     case "dice":
@@ -1391,6 +1393,18 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
     }
     case "expr":
       return <ExprEditor label={spec.label} value={typeof props.value === "string" ? props.value : ""} identifiers={ctx.identifiers} functions={ctx.functions} doc={ctx.doc} lint={issues} optional={spec.optional} onChange={(next) => props.onChange(next === "" && spec.optional ? undefined : next)} />;
+    case "requirement": {
+      // A plain requirement stays a formula; a hard lock is the formula marked `hard` (DESIGN §11).
+      const formula = typeof props.value === "string" ? props.value : isRecord(props.value) && typeof props.value.expr === "string" ? props.value.expr : "";
+      const hard = isRecord(props.value) && props.value.hard === true;
+      const put = (expr: string, lock: boolean): void => props.onChange(lock ? { expr, hard: true } : expr);
+      return (
+        <div class="lre-field" data-lre-requirement={hard ? "hard" : "plain"}>
+          <ExprEditor label={spec.label} value={formula} identifiers={ctx.identifiers} functions={ctx.functions} doc={ctx.doc} lint={issues} onChange={(next) => put(next, hard)} />
+          <CheckField label="Hard lock" help="A typed attempt that misses it fails, and the reply tells it failing. Off, the attempt plays as plain roleplay." checked={hard} onChange={(checked) => put(formula, checked)} />
+        </div>
+      );
+    }
     case "effectArgs":
       return <EffectArgsInput label={spec.label} value={props.value} identifiers={ctx.identifiers} functions={ctx.functions} doc={ctx.doc} lint={(at) => lintAt(ctx.lint, at)} path={path} onChange={props.onChange} />;
     case "tags": {

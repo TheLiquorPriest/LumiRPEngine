@@ -2,7 +2,7 @@
 
 Persistent world simulation for [Lumiverse](https://github.com/prolix-oc/Lumiverse).
 
-I built LumiRPEngine because long roleplay chats forget things. Who owes whom money, how much fuel is left in the truck, what an NPC did last night while you were somewhere else: a chat history is a poor place to keep any of that. LumiRPEngine keeps a real world underneath your chat (places, people, belongings, money, vehicles, schedules, quests and the calendar) and settles the things that should be settled by rules, like prices, travel times and dice odds, so the AI model can spend its effort on writing. The model proposes; the engine decides.
+I built LumiRPEngine because long roleplay chats forget things. Who owes whom money, how much fuel is left in the truck, what an NPC did last night while you were somewhere else: a chat history is a poor place to keep any of that. LumiRPEngine keeps a real world underneath your chat (places, people, belongings, money, vehicles, schedules, quests and the calendar) and settles the things that should be settled by rules, like prices, travel times and dice odds, so the AI model can spend its effort on writing. You and the story always win: your own instructions come first, then what the story has narrated, and the engine's world follows both.
 
 You choose how deep it goes. On the lowest setting it is a light layer that tracks where you are, what time it is and what you are carrying. On the highest it runs payroll with withholding, credit card statements, fuel and maintenance, and whole days of NPC life, while you are chatting.
 

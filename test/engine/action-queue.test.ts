@@ -1,6 +1,7 @@
 // The action queue within a turn (DESIGN §11): a message's actions play in order in one turn, each
 // against the state the one before it left, their times adding up, until the queue stops at a check,
-// a failure or an interruption; the plan says how many were left and why.
+// a failure (a hard lock among them) or an interruption; an action that plays as plain roleplay
+// stops nothing. The plan says how many were left and why.
 
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
@@ -13,7 +14,7 @@ import { baseWorld, fold, POV, registryOf, startState } from "../packs/support";
 
 const reg = registryOf();
 
-/** Sam at home: a 15-minute walk to the cafe, a 5-minute drink that steadies the hands (skill +1), a climb with a check on skill, a splurge Sam can't afford, alarms that raise an incident, one of them hidden, and a trap that leaves Sam dying. */
+/** Sam at home: a 15-minute walk to the cafe, a 5-minute drink that steadies the hands (skill +1), a climb with a check on skill, a splurge Sam can't afford and a vault its hard lock keeps shut, alarms that raise an incident, one of them hidden, and a trap that leaves Sam dying. */
 function queueWorld(): WorldDoc {
   const world = baseWorld();
   world.checks.climb = { id: "climb", dice: "d20", modifier: "self.skill", dc: "12" };
@@ -21,6 +22,7 @@ function queueWorld(): WorldDoc {
   world.actions.drink = { id: "drink", label: "Have a drink", params: {}, requires: [], outcomes: { default: [{ type: "add", args: { entity: "self", field: "skill", delta: 1 } }] }, duration: "5" };
   world.actions.climb = { id: "climb", label: "Climb the wall", params: {}, requires: [], check: "climb", outcomes: { success: [], failure: [] }, duration: "10" };
   world.actions.splurge = { id: "splurge", label: "Splurge", params: {}, requires: ["self.cash >= 1000000"], outcomes: { default: [] }, duration: "30" };
+  world.actions.vault = { id: "vault", label: "Open the vault", params: {}, requires: [{ expr: "self.cash >= 1000000", hard: true }], outcomes: { default: [] }, duration: "30" };
   world.actions.alarm = { id: "alarm", label: "Trip the alarm", params: {}, requires: [], outcomes: { default: [{ type: "signal", args: { class: "incident", text: "An alarm goes off." } }] }, duration: "1" };
   world.actions.silent = { id: "silent", label: "Trip a silent alarm", params: {}, requires: [], outcomes: { default: [{ type: "signal", args: { class: "incident", text: "A silent alarm calls the guards.", visibility: "secret" } }] }, duration: "1" };
   world.actions.trap = { id: "trap", label: "Spring the trap", params: {}, requires: [], outcomes: { default: [{ type: "life", args: { entity: "self", to: "dying" } }] }, duration: "1" };
@@ -68,19 +70,33 @@ describe("a message's actions in one turn", () => {
     expect(fold(reg, world, state, p.events).entities[POV]?.fields.place).toBe("home");
   });
 
-  test("stop at a failure, which adds no time; a first action that fails leaves the turn its scene tick", () => {
+  test("an action whose requirement isn't a hard lock plays as plain roleplay: nothing of it applies, it takes no time, and the queue goes on", () => {
     const world = queueWorld();
     const state = startState(world);
     const p = plan(world, state, "walk", "splurge", "drink");
     expect(p.resolutions.map((r) => [r.action, r.ok])).toEqual([
       ["walk", true],
       ["splurge", false],
+      ["drink", true],
+    ]);
+    expect(p.stopped).toBeNull();
+    expect(p.elapsedMinutes).toBe(20);
+    expect(fold(reg, world, state, p.events).entities[POV]?.fields.skill).toBe(3);
+  });
+
+  test("stop at a hard lock's failure, which adds no time; a first action one stops leaves the turn its scene tick", () => {
+    const world = queueWorld();
+    const state = startState(world);
+    const p = plan(world, state, "walk", "vault", "drink");
+    expect(p.resolutions.map((r) => [r.action, r.ok])).toEqual([
+      ["walk", true],
+      ["vault", false],
     ]);
     expect(p.stopped).toEqual({ left: 1, cause: "failure" });
     expect(p.elapsedMinutes).toBe(15);
     expect(fold(reg, world, state, p.events).entities[POV]?.fields.skill).toBe(2);
 
-    const first = plan(world, state, "splurge", "walk");
+    const first = plan(world, state, "vault", "walk");
     expect(first.stopped).toEqual({ left: 1, cause: "failure" });
     expect(first.elapsedMinutes).toBe(turnElapsed(world, state, null).minutes);
   });

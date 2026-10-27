@@ -331,7 +331,8 @@ export interface TplAction {
   id: string;
   label: string;
   params?: Record<string, { type: string; ref?: string; label?: string }>;
-  requires: string[];
+  /** Each a formula, or one marked a hard lock (DESIGN §11): a typed attempt that misses it fails. */
+  requires: (string | { expr: string; hard: true })[];
   duration: number;
   lexicon: string[];
   observable: string;
@@ -349,6 +350,8 @@ export interface TplClue {
   item?: string;
   action: { label: string };
   requiresExpr: string;
+  /** Its condition is a hard lock (DESIGN §11): a typed attempt to find it while the condition doesn't hold fails. */
+  hard?: boolean;
   reveals: string[];
 }
 

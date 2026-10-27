@@ -10,7 +10,8 @@
 //   0  off: charges are no-ops
 //   1  a wealth band. Parties without accounts post against their external account
 //      (`economy.external:<id>`) and their band follows a continuous notional net worth.
-//   2  cash plus one account (the ledger is live; declines on insufficient funds)
+//   2  cash plus one account (the ledger is live; declines on insufficient funds, except for a
+//      payment the story made, which runs a debt instead: DESIGN §9.5)
 //   3  every account, cards, flows, payment preferences, households, living costs
 //   4  statements, interest, fees, delinquency, credit, cash machines, holds and limits, overdrafts
 // What each feature needs and where a world's Custom toggles may move it is `FEATURE_DEFS`.
@@ -66,7 +67,7 @@ import {
   type Price,
   type PriceRef,
 } from "./model";
-import { accountLevel, asUnit, charge, featureFor, isParty, isRejection, l1Move, loseWith, mayUse, move, overdraftRoom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PayMethod } from "./pay";
+import { accountLevel, asUnit, carriedCash, charge, claimCash, featureFor, isParty, isRejection, l1Move, loseWith, mayUse, move, otherWay, overdraftRoom, paidFrom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PaidFrom, type PayMethod } from "./pay";
 import { materializeMoney, MONEY_STEP_LEVEL, moneyStep, openAccounts, openingEvent, planStep } from "./process";
 import { moneySummary } from "./summary";
 import { buildFinanceView, buildMoneyView, buildPeopleMoney } from "./view";
@@ -80,7 +81,7 @@ import type { DataTable } from "../../../shared/tables";
 
 const TABLES: DataTable[] = [catalog, categories, occupations, regions, finance] as unknown as DataTable[];
 
-export type { ChargeOptions, ChargeService, PayMethod };
+export type { ChargeOptions, ChargeService, PaidFrom, PayMethod };
 export { payMethodOf };
 
 /**
@@ -200,6 +201,12 @@ declare module "../../../engine/registry" {
      * correction account. Empty when it already does; null when the holder has no cash account.
      */
     "economy.set_cash": (ctx: ReadContext, holder: EntityId, cents: number) => LedgerEvent[] | Rejection | null;
+    /**
+     * Money the player said they had (DESIGN §9.4 player claims): `cents` into `holder`'s carried
+     * cash, a balanced posting against the outside correction account. The account it went into, with
+     * its events; refused when the holder carries no cash account or the amount isn't whole and above zero.
+     */
+    "economy.claim_cash": (ctx: ReadContext, holder: EntityId, cents: number) => { entity: EntityId; events: LedgerEvent[] } | Rejection;
     /** A purchase that applied (its events) repriced to `cents` in all: the difference moves between the two accounts its payment used. */
     "economy.reprice": (ctx: ReadContext, events: readonly LedgerEvent[], cents: number) => LedgerEvent[] | Rejection;
     /** A GM money edit: `cents` into (positive) or out of an account, posted against the outside correction account, with its journal line. */
@@ -210,6 +217,14 @@ declare module "../../../engine/registry" {
      * outside account, with its journal line. Empty before, when the opening posts the new amount itself.
      */
     "economy.reopen": (ctx: ReadContext, account: EntityId, cents: number) => LedgerEvent[];
+    /**
+     * Pay another way (DESIGN §9.5): for a payment the story made (its events), the first of its
+     * payer's ways that covers it now and isn't an account it touched (`from`): the account its words
+     * named when it went elsewhere, then savings, cards, checking or cash, in that order. With it, the
+     * correction that moves it there once it has applied, and takes back the overdraft transfer and
+     * fee it brought.
+     */
+    "economy.other_way": (ctx: ReadContext, events: readonly LedgerEvent[]) => { from: EntityId; repay: LedgerEvent[] } | Rejection;
   }
   interface QueryMap {
     wealth: (ctx: ReadContext, who: EntityId) => string;
@@ -226,6 +241,14 @@ declare module "../../../engine/registry" {
     "economy.people_money": (ctx: ReadContext) => FinanceView[];
     /** One party's money at their own Money level; `player` hides who the POV can't see behind "someone". */
     "economy.finance": (ctx: ReadContext, party: EntityId, player: boolean) => FinanceView;
+    /** What a payment the story made (its events) did with the money, after it: the account `viewer` holds it took it from, or a purchase of `viewer`'s nothing could pay; null for anyone else's money (DESIGN §9.5). */
+    "economy.paid_from": (ctx: ReadContext, events: readonly LedgerEvent[], viewer: EntityId) => PaidFrom | null;
+    /** Whether nothing prices a narrated purchase where its payer is, who keeps money (DESIGN §9.5): it's then theirs with nothing charged until a price is set. */
+    "economy.unpriced": (ctx: ReadContext, purchase: JsonObject) => boolean;
+    /** The cash `who` has on them to hand over (`carriedCash`): what a payment in cash takes first and a cash claim tops up (DESIGN §9.4). Null when they keep no cash account. */
+    "economy.carried_cash": (ctx: ReadContext, who: EntityId) => number | null;
+    /** Who pays for a narrated purchase (DESIGN §9.5): its payer, the holder of an account or card it names as one, or the owner of a thing it names; the player character when it names no one. */
+    "economy.purchaser": (ctx: ReadContext, purchase: JsonObject) => EntityId;
   }
 }
 
@@ -410,6 +433,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   r.service("economy.transfer", (ctx, from, to, cents, memo, method) => transfer(hooks, ctx, from, to, cents, memo, method));
   r.service("economy.lose", loseWith);
   r.service("economy.set_cash", setCash);
+  r.service("economy.claim_cash", claimCash);
   r.service("economy.reprice", reprice);
   r.service("economy.adjust", (ctx, account, cents) => {
     if (own(ctx.state.entities, account)?.kind !== "account") return reject("not_account", `${labelOf(ctx, account)} isn't an account`);
@@ -432,6 +456,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     ];
     return posting(lines, { memo: "Opening balance changed", kind: "adjustment", category: "opening" });
   });
+  r.service("economy.other_way", otherWay);
 
   r.query("wealth", (ctx, who) => wealthOf(hooks, ctx, who));
   r.query("can_afford", (ctx, who, cents) => canAfford(hooks, ctx, who, cents, spendableNow(ctx, who)));
@@ -466,9 +491,20 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   r.query("economy.finance", (ctx, party, player) => buildFinanceView(hooks, ctx, party, player));
   r.query("economy.summary", (ctx, who): MoneySummary => moneySummary(hooks, ctx, who));
   r.query("economy.holders", (ctx, entity) => holdersOf(ctx.state, entity));
+  r.query("economy.paid_from", paidFrom);
+  r.query("economy.carried_cash", carriedCash);
+  r.query("economy.unpriced", (ctx, p) => {
+    const { payer } = purchaser(p, ctx);
+    const item = strOf(p.item);
+    const category = strOf(p.category);
+    // Priced as `economy.buy` prices it: a price set or narrated, a catalog row that names the item, or a category's band.
+    const priced = (typeof p.price === "number" && p.price > 0) || (typeof p.playerPrice === "number" && p.playerPrice > 0) || !!rowOf(ctx, "economy.categories", category) || (item !== "" && (!!rowOf(ctx, "economy.catalog", item) || !!rowOf(ctx, "economy.categories", item) || matchCatalog(ctx, item, placeOfEntity(ctx.state, payer), category) !== null));
+    return !priced && own(ctx.state.entities, payer) !== undefined && ctx.levelOf(payer, "money") >= 1;
+  });
+  r.query("economy.purchaser", (ctx, p) => purchaser(p, ctx).payer);
 
-  // Ledger 1.10: a posting folds only if the accounts it draws on can pay it.
-  r.guard({ type: "post", validate: (e, ctx) => (e.type === "post" ? postGuard(ctx, e.lines) : null) });
+  // Ledger 1.10: a posting folds only if the accounts it draws on can pay it, or the story made it (`overdraw`).
+  r.guard({ type: "post", validate: (e, ctx) => (e.type === "post" ? postGuard(ctx, e.lines, e.overdraw === true) : null) });
   r.formula("wealth", (ctx, who) => wealthOf(hooks, ctx, String(who ?? ctx.world.pov)));
   r.formula("can_afford", (ctx, who, cents) => ctx.query("can_afford")(ctx, String(who ?? ctx.world.pov), Number(cents ?? 0)));
   r.formula("net_worth", (ctx, who) => netWorth(hooks, ctx, String(who ?? ctx.world.pov)));
@@ -533,6 +569,10 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   r.renderer({ slot: "property", label: "Property your character holds a part in", render: (ctx) => propertyLines(ctx, "player").map((l) => l.text), feed: propertyLines });
   r.view({ panel: "economy.money", build: (ctx) => buildMoneyView(hooks, ctx) as unknown as JsonValue });
 
+  // A narrated purchase or transfer is the story's (DESIGN §9.5): it never fails for cover. It goes
+  // the payer's way, and when nothing covers it, it runs a debt on a way that can
+  // (`ChargeOptions.story`); with none, a purchase is the payer's with nothing charged and a transfer
+  // moves nothing, a Not tracked receipt. Cash and savings never go below zero.
   r.proposal({
     type: "purchase",
     boundField: "money",
@@ -540,20 +580,18 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       const { payer } = purchaser(p, ctx);
       if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
       if (!isParty(ctx, payer)) return reject("bad_payer", "a payer must be an account holder");
-      const item = strOf(p.item);
-      const category = strOf(p.category);
-      if (item === "" && category === "") return reject("bad_proposal", "a purchase needs an item or a category");
-      // Priced as `economy.buy` prices it: a catalog row that names the item, a price, or a category's band.
-      const priced = (typeof p.price === "number" && p.price > 0) || (typeof p.playerPrice === "number" && p.playerPrice > 0) || !!rowOf(ctx, "economy.categories", category) || (item !== "" && (!!rowOf(ctx, "economy.catalog", item) || !!rowOf(ctx, "economy.categories", item) || matchCatalog(ctx, item, placeOfEntity(ctx.state, payer), category) !== null));
-      return priced ? null : reject("unpriced", `no catalog item or category ${item || category}, and no price`);
+      // Nothing pricing it doesn't refuse it: what was bought is the payer's, with nothing charged
+      // until a price is set (`economy.unpriced`).
+      return strOf(p.item) === "" && strOf(p.category) === "" ? reject("bad_proposal", "a purchase needs an item or a category") : null;
     },
-    // `playerPrice` (minor units) is the price the player set on a chip, charged as set; the engine
-    // adds it, never a model (`inMinorUnits` drops it from model output).
+    // `playerPrice` (minor units) is the price the player set on a chip, charged as set; `owned` says
+    // the thing is the payer's already (an unpriced purchase priced later), so only its charge is
+    // made. The engine adds both, never a model (`inMinorUnits` drops them from model output).
     toEffects: (p, ctx) => {
       const { payer, from, method } = purchaser(p, ctx);
       const set = typeof p.playerPrice === "number" && p.playerPrice > 0 ? p.playerPrice : undefined;
       const price = set ?? (typeof p.price === "number" ? p.price : undefined);
-      return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...(price !== undefined ? { price } : {}), ...(set !== undefined ? { exact: true } : {}), ...(method !== undefined ? { method } : {}), ...(from !== undefined ? { from } : {}) } }];
+      return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...(price !== undefined ? { price } : {}), ...(set !== undefined ? { exact: true } : {}), ...(method !== undefined ? { method } : {}), ...(from !== undefined ? { from } : {}), ...(p.owned === true ? { keep: false } : {}), story: true } }];
     },
   });
   r.proposal({
@@ -569,7 +607,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       return Number.isFinite(cents) && cents > 0 ? null : reject("bad_amount", "a transfer needs a positive amount");
     },
     // `method`: how the money changed hands ("cash" for bills handed over).
-    toEffects: (p) => [{ type: "economy.transfer", args: { from: strOf(p.from), to: strOf(p.to), cents: transferCents(p), memo: strOf(p.memo, "Payment"), ...(typeof p.method === "string" ? { method: p.method } : {}) } }],
+    toEffects: (p) => [{ type: "economy.transfer", args: { from: strOf(p.from), to: strOf(p.to), cents: transferCents(p), memo: strOf(p.memo, "Payment"), ...(typeof p.method === "string" ? { method: p.method } : {}), story: true } }],
   });
 
   r.lint({
@@ -659,30 +697,40 @@ function actor(ctx: EffectContext, args: Record<string, JsonValue>, key = "who")
 function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
   r.effect({
     type: "economy.buy",
-    args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?", "cashback?"],
+    args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?", "cashback?", "story?"],
     resolve(args, ctx) {
       const payer = strOf(args.payer) || ctx.world.pov;
       const qty = typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
       const priced = quote(ctx, args, payer, qty);
-      if (!priced) return reject("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
-      const { price, row } = priced;
-      const name = strOf(args.name) || price.name;
-      // "Pay another way" retries name a method (savings, card, checking, cash) or a specific account
-      // or card (`from`); the Buy action passes the player's words ("with my card").
-      const said = payMethodOf(strOf(args.method));
-      const paid = charge(hooks, ctx, payer, price.cents, `Bought ${name}${qty > 1 ? ` ×${qty}` : ""}`, { method: said, category: price.category, kind: "purchase", sale: { place: placeOfEntity(ctx.state, payer), item: row ?? name }, ...(priced.narrated ? { narrated: priced.narrated } : {}), ...(typeof args.payee === "string" ? { payee: args.payee } : {}), ...(strOf(args.from) !== "" ? { source: strOf(args.from) } : {}), ...(typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {}) });
-      if (isRejection(paid)) return paid;
-      const out = [...paid];
-      const spawn = PHYSICAL.has(price.category) && args.keep !== false ? optionalService(ctx, "gear.spawn") : null;
+      // A purchase the story made (`story`, DESIGN §9.5) stands without a price too: what was bought
+      // is the payer's, with nothing charged until a price is set. So does one nothing of the payer's
+      // can pay: `charge` charges nothing, and its journal line says what it would have cost.
+      const story = args.story === true;
+      if (!priced && !story) return reject("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
+      const name = strOf(args.name) || priced?.price.name || strOf(args.item) || strOf(args.category) || "something";
+      const out: LedgerEvent[] = [];
+      if (priced) {
+        const { price, row } = priced;
+        // Pay another way names the account it pays from (`from`); the Buy action passes the player's
+        // words ("with my card"), and a narrated purchase the prose's.
+        const said = payMethodOf(strOf(args.method));
+        const paid = charge(hooks, ctx, payer, price.cents, `Bought ${name}${qty > 1 ? ` ×${qty}` : ""}`, { method: said, category: price.category, kind: "purchase", sale: { place: placeOfEntity(ctx.state, payer), item: row ?? name }, ...(priced.narrated ? { narrated: priced.narrated } : {}), ...(typeof args.payee === "string" ? { payee: args.payee } : {}), ...(strOf(args.from) !== "" ? { source: strOf(args.from) } : {}), ...(typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {}), ...(story ? { story } : {}) });
+        if (isRejection(paid)) return paid;
+        out.push(...paid);
+      }
+      // A thing in a category of things is kept. So is what the story bought that nothing says is
+      // anything else: no price, or no category the world knows ("misc").
+      const thing = priced ? PHYSICAL.has(priced.price.category) || (story && priced.price.category === "misc") : story;
+      const spawn = args.keep !== false && thing ? optionalService(ctx, "gear.spawn") : null;
       if (spawn && ctx.levelOf(payer, "gear") >= 1) {
         // A second of the same thing joins the stack the payer has (gear's stacking, DESIGN §9.4).
-        const made = spawn(ctx, { name, owner: payer, holder: payer, ...(row ? { catalog: row } : {}), category: price.category, qty, salt: `buy:${ctx.rng.seed}`, stack: true });
+        const made = spawn(ctx, { name, owner: payer, holder: payer, ...(priced?.row ? { catalog: priced.row } : {}), ...(priced ? { category: priced.price.category } : {}), qty, salt: `buy:${ctx.rng.seed}`, stack: true });
         if (Array.isArray(made)) out.push(...made);
       }
       return out;
     },
   });
-  r.effect({ type: "economy.transfer", args: ["to", "cents", "from?", "memo?", "method?"], resolve: (a, ctx) => transfer(hooks, ctx, strOf(a.from) || ctx.world.pov, strOf(a.to), amountOf(a.cents), strOf(a.memo, "Payment"), typeof a.method === "string" ? payMethodOf(a.method) : "auto") });
+  r.effect({ type: "economy.transfer", args: ["to", "cents", "from?", "memo?", "method?", "story?"], resolve: (a, ctx) => transfer(hooks, ctx, strOf(a.from) || ctx.world.pov, strOf(a.to), amountOf(a.cents), strOf(a.memo, "Payment"), typeof a.method === "string" ? payMethodOf(a.method) : "auto", a.story === true) });
   r.effect({ type: "economy.move", args: ["from", "to", "cents", "memo?"], resolve: (a, ctx) => move(ctx, strOf(a.from), strOf(a.to), amountOf(a.cents), strOf(a.memo, "Transfer")) });
   // Template `price_modifier`: `percent` (+25 = 25 % dearer) for a `scope` (a category, or all) at a `place`, for `minutes` or until cleared (`percent: 0` or `clear`).
   r.effect({
@@ -742,7 +790,8 @@ function registerActions(r: CoreRegistry): void {
   // The phone's actions are the player's own bookkeeping, done alone: a panel tap records them at once (`mechanical`).
   const phone = { duration: "2", observable: "checks their phone", mechanical: true } as const;
   r.action({ id: "buy", label: "Buy", description: "Buy something: food, drinks, goods or a service, here or delivered.", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
-  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
+  // Paid with a way the player names ("in cash"), else their pay order; money they said they had is handed over in cash (DESIGN §9.4).
+  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment", method: "=params.method" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
   r.action({ id: "move_money", label: "Transfer between accounts", description: "Move money between your own accounts: checking, savings, cash.", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
   r.action({ id: "pay_card", label: "Pay card or loan", description: "Pay off some or all of a card or loan balance.", pack: "economy", params: { card: { type: "ref", ref: "account" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, card)", "is_credit(card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", from: "=params.from", cents: "=amount > 0 ? amount : 0 - balance(card)", who: "self" } }] }, lexicon: ["pay off the card", "pay the card", "pay my credit card", "make a loan payment"], ...phone });
   r.action({ id: "withdraw_cash", label: "Withdraw cash", description: "Take cash out of a bank account.", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });

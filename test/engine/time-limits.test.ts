@@ -1,8 +1,8 @@
-// Hard maxima for time controls and realism levels. A huge timelapse request is rejected and
-// runs nothing; an oversized unit cap still ends a segment at the ceiling; a malformed document
-// starts inside the bounds.
+// Hard maxima for time controls and realism levels. A timelapse past the reach runs one reach at a
+// time and offers to carry on, and a narrated skip past it is offered; an oversized unit cap still
+// ends a segment at the ceiling; a malformed document starts inside the bounds.
 import { describe, expect, test } from "bun:test";
-import { applyTimeAdvance, runTimelapse, tickMinutes } from "../../src/engine/time";
+import { applyTimeAdvance, resolveTarget, runTimelapse, tickMinutes } from "../../src/engine/time";
 import { clampLevel, clampScale, clampTick, clampUnitCap, TIME_LIMITS } from "../../src/engine/time-limits";
 import { Working } from "../../src/engine/working";
 import { MINUTES_PER_DAY } from "../../src/engine/calendar";
@@ -11,16 +11,24 @@ import { baseWorld, registryOf, startState } from "../packs/support";
 const reg = registryOf();
 
 describe("time limits", () => {
-  test("a 1e7-minute timelapse, or an absolute time past the reach, is rejected and runs nothing", () => {
+  test("a 1e7-minute timelapse runs one reach at a time and offers to carry on; told, it is offered whole and runs nothing", () => {
     const world = baseWorld();
     const w = new Working(reg, world, startState(world));
     const clock = w.state.clock;
-    expect(runTimelapse(reg, w, { type: "duration", minutes: 1e7 }, { runSeed: "x" })).toMatchObject({ code: "too_long" });
-    expect(runTimelapse(reg, w, { type: "at", at: clock + TIME_LIMITS.timelapseMinutes + 1 }, { runSeed: "x" })).toMatchObject({ code: "too_long" });
     expect(runTimelapse(reg, w, { type: "duration", minutes: Number.POSITIVE_INFINITY }, { runSeed: "x" })).toMatchObject({ code: "past" });
-    expect(applyTimeAdvance(reg, w, 1e7, { runSeed: "x", capMinutes: 240 })).toEqual({ applied: false, reason: "over_cap", chip: null });
-    expect(w.state.clock).toBe(clock);
-    expect(w.events).toEqual([]);
+    const far = resolveTarget(reg, world, w.state, { type: "duration", minutes: 1e7 });
+    if ("code" in far) throw new Error(far.reason);
+    expect(far.goal).toBeGreaterThanOrEqual(clock + 1e7);
+    expect(far.to - clock).toBeLessThanOrEqual(TIME_LIMITS.timelapseMinutes);
+    const run = runTimelapse(reg, w, { type: "duration", minutes: 1e7 }, { runSeed: "x", unitCap: { agentDays: 1, events: 5000 } });
+    if ("code" in run) throw new Error(run.reason);
+    expect(run.result.to).toBeGreaterThan(clock);
+    expect(run.remaining).toBe((far.goal ?? 0) - run.result.to);
+    expect(run.chip).toMatchObject({ kind: "continue_timelapse", target: { type: "duration", minutes: run.remaining } });
+    const told = new Working(reg, world, startState(world));
+    expect(applyTimeAdvance(reg, told, 1e7, { runSeed: "x", capMinutes: 240 })).toMatchObject({ applied: false, reason: "over_cap", chip: { kind: "timelapse_offer", target: { type: "duration", minutes: 1e7 } } });
+    expect(told.state.clock).toBe(clock);
+    expect(told.events).toEqual([]);
   });
 
   test("an oversized unit cap, from the state or the request, still ends a segment at the ceiling", () => {

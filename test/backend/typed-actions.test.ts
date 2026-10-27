@@ -1,7 +1,7 @@
 // What `interpret` reads from typed text (DESIGN §5.2, §9.4, §11), on Port Alder: an action whose
-// params name nothing in the world plays as plain roleplay, says why on a decline chip and tells the
-// next reply it didn't happen; a message's actions play in order in one turn until the queue stops,
-// and what the turn didn't play is offered as a chip that sends it as the next message.
+// params name nothing in the world plays as plain roleplay, says why on a receipt and tells no reply
+// it didn't happen; a message's actions play in order in one turn until the queue stops, and what
+// the turn didn't play is offered as a chip that sends it as the next message.
 
 import { describe, expect, test } from "bun:test";
 import type { DecideRequest, QuietRequest } from "../../src/backend/host";
@@ -11,6 +11,7 @@ import { placeOfEntity } from "../../src/engine/scope";
 import { unrevealedSecrets } from "../../src/engine/visibility";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";
+import type { Requirement } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 import { heldBy } from "../../src/shared/finance";
 
@@ -85,6 +86,16 @@ async function replyChips(rig: Rig, chatId: string): Promise<Chip[]> {
   return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === head?.id);
 }
 
+/** The latest reply's receipts for typed actions that played as plain roleplay. */
+async function roleplayed(rig: Rig, chatId: string): Promise<Chip[]> {
+  return (await replyChips(rig, chatId)).filter((c) => c.kind === "untracked");
+}
+
+/** The Outcome lines that name `label`. */
+function naming(outcome: string, label: string): string[] {
+  return outcome.split("\n").filter((line) => line.includes(label));
+}
+
 /** Plays the next turn on `text` and returns what its Outcome slot told the narrator. */
 async function nextTurn(rig: Rig, chatId: string, text: string): Promise<string> {
   rig.host.sendUser(chatId, text);
@@ -97,57 +108,48 @@ async function nextTurn(rig: Rig, chatId: string, text: string): Promise<string>
 
 describe("a typed action that names nothing in the world", () => {
   const pay = (to: string) => () => ({ action: "pay", params: { to, amount: 6 }, confidence: 0.9 });
+  const nothing = () => ({ action: null, params: {}, confidence: 0.9 });
 
-  test("'I pay Rena for the latte' charges nothing, its reply says why on a decline chip, and the next reply is told it didn't happen", async () => {
+  test("'I pay Rena for the latte' charges nothing and plays as plain roleplay: its receipt says why and asks nothing, and no reply is told it didn't happen", async () => {
     const { rig, chatId } = await chat();
     reading(rig, pay("rena"));
     const before = await history(rig, chatId);
-    await rig.turn(chatId, "I pay Rena for the latte.", "You hand Rena a few bills and take the cup.");
+    const told = await nextTurn(rig, chatId, "I pay Rena for the latte.");
     expect(await history(rig, chatId)).toEqual(before);
-    const chip = (await replyChips(rig, chatId)).find((c) => c.kind === "decline");
-    // The chip names the action and the name as the player typed it, with the usual choices.
-    expect(`${chip?.label} ${chip?.detail}`).toContain("Pay");
-    expect(chip?.detail).toContain("Rena");
-    expect(chip?.actions.map((a) => a.id)).toEqual(["remove", "accept"]);
-    const told = (await nextTurn(rig, chatId, "I look around.")).split("\n").find((line) => line.includes("Pay"));
-    // The next reply's note says why in one wording, whatever the player called them (DESIGN §5.2).
-    expect(told).toContain("it names no one you know");
+    const receipts = await roleplayed(rig, chatId);
+    expect(receipts).toHaveLength(1);
+    // The receipt names the action and the name as the player typed it, with nothing to answer.
+    expect(`${receipts[0]?.label} ${receipts[0]?.detail}`).toContain("Pay");
+    expect(receipts[0]?.detail).toContain("Rena");
+    expect(receipts[0]?.actions).toEqual([]);
+    // Neither this reply nor the next hears anything of it.
+    reading(rig, nothing);
+    expect([...naming(told, "Pay"), ...naming(await nextTurn(rig, chatId, "I look around."), "Pay")]).toEqual([]);
     expect(rig.rt.ledger.errors).toEqual([]);
-
-    // Remove it rewords that note before the next reply.
-    const other = await chat();
-    reading(other.rig, pay("rena"));
-    await other.rig.turn(other.chatId, "I pay Rena for the latte.", "You hand Rena a few bills and take the cup.");
-    const decline = (await replyChips(other.rig, other.chatId)).find((c) => c.kind === "decline");
-    expect(other.rig.body(await other.rig.send({ type: "lre.chip", chatId: other.chatId, chip: decline?.id, choice: "remove" })).applied).toBe(true);
-    const removed = (await nextTurn(other.rig, other.chatId, "I look around.")).split("\n").find((line) => line.includes("Pay"));
-    expect(removed).toBeDefined();
-    expect(removed).not.toBe(told);
   });
 
-  test("a name the player typed reads the same, made up or hidden, on the chip and in the next reply's note", async () => {
-    const declined = async (extra: { hidden?: string; secretAlias?: string }): Promise<{ detail: string; told: string }> => {
+  test("a name the player typed reads the same on the receipt, made up or hidden, and no reply hears of it", async () => {
+    const played = async (extra: { hidden?: string; secretAlias?: string }): Promise<{ detail: string; told: string[] }> => {
       const { rig, chatId } = await chat(extra);
       reading(rig, pay("vex_morrow"));
-      await rig.turn(chatId, "I pay Vex Morrow for the latte.", "You look around for the barista.");
-      const detail = (await replyChips(rig, chatId)).find((c) => c.kind === "decline")?.detail ?? "";
-      const told = (await nextTurn(rig, chatId, "I look around.")).split("\n").find((line) => line.includes("Pay")) ?? "";
-      return { detail, told };
+      const now = await nextTurn(rig, chatId, "I pay Vex Morrow for the latte.");
+      const detail = (await roleplayed(rig, chatId))[0]?.detail ?? "";
+      reading(rig, nothing);
+      return { detail, told: [...naming(now, "Pay"), ...naming(await nextTurn(rig, chatId, "I look around."), "Pay")] };
     };
-    const none = await declined({});
-    expect(none.detail).toStartWith("Vex Morrow isn't anyone you know.");
-    expect(none.told).toContain("it names no one you know");
-    // Someone hidden by that name, or a secret entry going by it: the chip says the player's own words,
-    // and the note its one wording, as in a world without them.
-    for (const extra of [{ hidden: "Vex Morrow" }, { secretAlias: "Vex Morrow" }]) expect(await declined(extra)).toEqual(none);
+    const none = await played({});
+    expect(none.detail).toStartWith("Vex Morrow isn't anyone you know");
+    expect(none.told).toEqual([]);
+    // Someone hidden by that name, or a secret entry going by it: the receipt says the player's own words, as in a world without them.
+    for (const extra of [{ hidden: "Vex Morrow" }, { secretAlias: "Vex Morrow" }]) expect(await played(extra)).toEqual(none);
   });
 
-  test("a name the player didn't type is never repeated on the chip", async () => {
+  test("a name the player didn't type is never repeated on the receipt", async () => {
     const made = await chat();
     reading(made.rig, pay("Lena"));
     await made.rig.turn(made.chatId, "I pay the barista for the latte.", "You hand the barista a few bills.");
     const madeChips = await replyChips(made.rig, made.chatId);
-    expect(madeChips.find((c) => c.kind === "decline")?.detail).toStartWith("It names no one you know.");
+    expect((await roleplayed(made.rig, made.chatId))[0]?.detail).toStartWith("It names no one you know");
     for (const c of madeChips) expect(`${c.label} ${c.detail ?? ""}`).not.toContain("Lena");
   });
 
@@ -158,12 +160,12 @@ describe("a typed action that names nothing in the world", () => {
     reading(rig, () => ({ action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9 }));
     await rig.turn(chatId, "I walk to Bluebird Coffee.", "You set off down Main Street.");
     const chips = await replyChips(rig, chatId);
-    expect(chips.some((c) => c.kind === "decline")).toBe(false);
+    expect(chips.some((c) => c.kind === "decline" || c.kind === "untracked")).toBe(false);
     expect(chips.find((c) => c.kind === "read_failed")?.actions.map((a) => a.id)).toEqual(["rerun"]);
     expect(await nextTurn(rig, chatId, "I look around.")).not.toContain("Go to");
   });
 
-  test("a Continue and a Re-read edit of the reply keep the decline and the note it leaves the next reply", async () => {
+  test("a Continue and a Re-read edit of the reply keep its receipt", async () => {
     const { rig, chatId } = await chat();
     reading(rig, pay("rena"));
     await rig.turn(chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
@@ -176,37 +178,11 @@ describe("a typed action that names nothing in the world", () => {
     const reread = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "reread");
     if (!reread) throw new Error("no Re-read chip");
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: reread.id, choice: "reread" }));
-    expect((await replyChips(rig, chatId)).some((c) => c.kind === "decline")).toBe(true);
-    expect((await nextTurn(rig, chatId, "I look around.")).split("\n").find((line) => line.includes("Pay"))).toContain("didn't happen (it names no one you know)");
+    expect(await roleplayed(rig, chatId)).toHaveLength(1);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("after a swipe delete, the next reply is told only of the reply left, and its decline still rewords that note", async () => {
-    // What the next reply is told after one reply whose decline was answered Remove it.
-    const once = await chat();
-    reading(once.rig, pay("rena"));
-    await once.rig.turn(once.chatId, "I pay Rena for the latte.", "You look around for Rena.");
-    const decline = (await replyChips(once.rig, once.chatId)).find((c) => c.kind === "decline");
-    expect(once.rig.body(await once.rig.send({ type: "lre.chip", chatId: once.chatId, chip: decline?.id, choice: "remove" })).applied).toBe(true);
-    const removed = (await nextTurn(once.rig, once.chatId, "I look around.")).split("\n").filter((line) => line.includes("Pay"));
-    expect(removed).toHaveLength(1);
-
-    // Two swipes of the same reply, each with its decline and its note; the first goes.
-    const { rig, chatId } = await chat();
-    reading(rig, pay("rena"));
-    await rig.turn(chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
-    const head = rig.host.head(chatId)?.id ?? "";
-    await rig.host.finish(await rig.host.start(chatId, { type: "swipe", messageId: head }), "You look around for Rena.");
-    rig.host.deleteSwipe(chatId, head, 0);
-    await rig.host.settle();
-    const left = (await replyChips(rig, chatId)).filter((c) => c.kind === "decline");
-    expect(left).toHaveLength(1);
-    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: left[0]?.id, choice: "remove" })).applied).toBe(true);
-    expect((await nextTurn(rig, chatId, "I look around.")).split("\n").filter((line) => line.includes("Pay"))).toEqual(removed);
-    expect(rig.rt.ledger.errors).toEqual([]);
-  });
-
-  test("after a swipe delete, a swipe made later at the old index doesn't take the decline of the reply that moved", async () => {
+  test("after a swipe delete, a swipe made later at the old index doesn't take the receipt of the reply that moved", async () => {
     const { rig, chatId } = await chat();
     reading(rig, pay("rena"));
     await rig.turn(chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
@@ -216,10 +192,10 @@ describe("a typed action that names nothing in the world", () => {
     await rig.host.settle();
     // A new swipe takes the index the reply left had before the delete.
     await rig.host.finish(await rig.host.start(chatId, { type: "swipe", messageId: head }), "Rena isn't here.");
-    expect((await replyChips(rig, chatId)).filter((c) => c.kind === "decline")).toHaveLength(1);
+    expect(await roleplayed(rig, chatId)).toHaveLength(1);
     rig.host.navigate(chatId, head, 0);
     await rig.host.settle();
-    expect((await replyChips(rig, chatId)).filter((c) => c.kind === "decline")).toHaveLength(1);
+    expect(await roleplayed(rig, chatId)).toHaveLength(1);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
@@ -343,7 +319,7 @@ describe("a second action in the same message", () => {
     reading(rig, () => ({ action: "pay", params: { to: "rena", amount: 6 }, confidence: 0.9, next: "I buy a muffin", then: { minutes: 60 } }));
     await rig.turn(chatId, "I pay Rena for the latte, buy a muffin and wait an hour.", "You hand Rena a few bills.");
     const chips = await replyChips(rig, chatId);
-    expect(chips.filter((c) => c.kind === "decline")).toHaveLength(1);
+    expect(await roleplayed(rig, chatId)).toHaveLength(1);
     expect(chips.find((c) => c.kind === "choice")?.label).toBe("I buy a muffin");
     expect(chips.map((c) => c.kind)).toContain("timelapse_offer");
   });
@@ -374,32 +350,69 @@ describe("several actions in one message (the action queue)", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a Buy the money can't cover stops the queue: the rest is offered on the chip, and Send plays it as the next turn", async () => {
+  test("a typed Buy the money can't cover plays as plain roleplay: nothing is charged, the narrator hears nothing of it, its receipt says why, and the rest of the message plays", async () => {
     const { rig, chatId } = await chat();
     reading(rig, (text): JsonObject => (text.startsWith("I buy a yacht") ? { action: "buy", params: { item: "yacht", price: 9000000 }, confidence: 0.9, more: [buying("muffin")] } : { action: "buy", params: { item: "muffin" }, confidence: 0.9 }));
-    await rig.turn(chatId, "I buy a yacht for $9,000,000, then a muffin.", "The broker laughs.");
-    expect(await bought(rig, chatId, /muffin/i)).toBe(0);
-    expect(outcomeLines(rig).some((line) => /hasn't happened/.test(line))).toBe(true);
-    const chip = (await replyChips(rig, chatId)).find((c) => c.kind === "choice");
-    expect(chip?.label).toBe("I buy a muffin");
-    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id, choice: chip?.actions[0]?.id })).applied).toBe(true);
-    expect((await rig.host.chats.messages(chatId, rig.host.userId)).findLast((m) => m.isUser)?.content).toBe("I buy a muffin");
-    const g = await rig.host.start(chatId, { type: "normal" });
-    await rig.host.finish(g, "The barista bags a muffin.");
+    const told = await nextTurn(rig, chatId, "I buy a yacht for $9,000,000, then a muffin.");
+    expect(await bought(rig, chatId, /yacht/i)).toBe(0);
     expect(await bought(rig, chatId, /muffin/i)).toBe(1);
+    expect(naming(told.toLowerCase(), "yacht")).toEqual([]);
+    expect((await roleplayed(rig, chatId)).map((c) => c.label)).toEqual([expect.stringContaining(rig.rt.registry.actions.get("buy")?.label ?? "buy")]);
+    expect((await replyChips(rig, chatId)).some((c) => c.kind === "decline" || c.kind === "choice")).toBe(false);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a queued action that names nothing in the world is dropped with its decline, and the actions after it still play", async () => {
+  test("a queued action that names nothing in the world plays as plain roleplay with its receipt, and the actions after it still play", async () => {
     const { rig, chatId } = await chat();
     reading(rig, walkThen([{ action: "pay", params: { to: "rena", amount: 6 }, text: "I pay Rena" }, buying("muffin")]));
     await rig.turn(chatId, "I walk to Bluebird Coffee, pay Rena and buy a muffin.", "You look around for Rena.");
     const { state, world } = await folded(rig, chatId);
     expect(placeOfEntity(state, world.pov)).toBe("bluebird_coffee");
     const chips = await replyChips(rig, chatId);
-    expect(chips.filter((c) => c.kind === "decline").map((c) => c.detail)).toEqual([expect.stringContaining("Rena")]);
+    expect((await roleplayed(rig, chatId)).map((c) => c.detail)).toEqual([expect.stringContaining("Rena")]);
     expect(chips.some((c) => c.kind === "choice")).toBe(false);
     expect(await bought(rig, chatId, /muffin/i)).toBe(1);
+  });
+});
+
+describe("a typed action whose requirement doesn't hold", () => {
+  const BELL = "Ring the harbor bell";
+  const AT_MARINA = "at(pov, 'alder_harbor_marina')";
+  const ring = (requirement: Requirement): JsonObject => ({ id: "ring_bell", label: BELL, params: {}, requires: [requirement], outcomes: { default: [{ type: "story.flag", args: { name: "bell_rung", value: true } }] }, duration: "1", lexicon: ["ring the bell"] });
+  /** Reads the message as ringing the bell, then the walk to Alder Automotive; "I look around." as no action. */
+  const ringThenWalk = (text: string): JsonObject => (text.startsWith("I look around") ? { action: null, params: {}, confidence: 0.9 } : { action: "ring_bell", params: {}, confidence: 0.9, more: [{ action: "go", params: { to: "alder_automotive" }, text: "I walk down to Alder Automotive" }] });
+  const MESSAGE = "I ring the harbor bell and walk down to Alder Automotive.";
+
+  test("plays as plain roleplay when it isn't a hard lock: nothing of it applies, the narrator hears nothing of it, a receipt says why, and the rest of the message plays", async () => {
+    const { rig, chatId } = await chat({ puts: [["actions", ring(AT_MARINA)]] });
+    reading(rig, ringThenWalk);
+    const told = await nextTurn(rig, chatId, MESSAGE);
+    const { state, world } = await folded(rig, chatId);
+    expect(JSON.stringify(state.packs.story ?? {})).not.toContain("bell_rung");
+    expect(placeOfEntity(state, world.pov)).toBe("alder_automotive");
+    expect(naming(told, BELL)).toEqual([]);
+    expect(rig.host.section("Outline")).not.toContain(BELL);
+    const chips = await replyChips(rig, chatId);
+    expect(chips.some((c) => c.kind === "decline" || c.kind === "choice")).toBe(false);
+    const receipts = await roleplayed(rig, chatId);
+    expect(receipts.map((c) => c.label)).toEqual([expect.stringContaining(BELL)]);
+    expect(receipts[0]?.actions).toEqual([]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a hard lock vetoes it: the narrator is told it failed, its chip says it couldn't, and the rest of the message waits on the chip", async () => {
+    const { rig, chatId } = await chat({ puts: [["actions", ring({ expr: AT_MARINA, hard: true })]] });
+    reading(rig, ringThenWalk);
+    const told = await nextTurn(rig, chatId, MESSAGE);
+    const { state, world } = await folded(rig, chatId);
+    expect(JSON.stringify(state.packs.story ?? {})).not.toContain("bell_rung");
+    expect(placeOfEntity(state, world.pov)).not.toBe("alder_automotive");
+    expect(naming(told, BELL)).toHaveLength(1);
+    const chips = await replyChips(rig, chatId);
+    expect(chips.filter((c) => c.kind === "decline").map((c) => c.label)).toEqual([expect.stringContaining(BELL)]);
+    expect(await roleplayed(rig, chatId)).toEqual([]);
+    expect(chips.find((c) => c.kind === "choice")?.label).toBe("I walk down to Alder Automotive");
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
 
@@ -420,41 +433,38 @@ describe("an incidental action before the move a turn is about (#30)", () => {
     ["actions", { id: "vault_fence", label: "Vault the fence", params: {}, requires: [], check: "slip_check", outcomes: { success: [], fail: [] }, duration: "1", lexicon: ["vault the fence"] }],
   ];
 
-  test("a jacket the world doesn't have is dropped: the walk still plays, and its one chip is about the jacket", async () => {
+  test("a jacket the world doesn't have plays as plain roleplay: the walk still plays, and its one receipt is about the jacket", async () => {
     const { rig, chatId } = await chat();
     reading(rig, reads(wear("work jacket"), walk));
     await rig.turn(chatId, JACKET, "You shrug into your jacket and head down the hill to the garage.");
     expect(await at(rig, chatId)).toBe("alder_automotive");
-    const declines = (await replyChips(rig, chatId)).filter((c) => c.kind === "decline");
-    expect(declines).toHaveLength(1);
-    expect(declines[0]?.label).toBe(`${rig.rt.registry.actions.get("wear")?.label}: couldn't`);
-    expect(declines[0]?.detail).toMatch(/work jacket/i);
-    expect(declines[0]?.detail).not.toContain("after it");
+    const receipts = await roleplayed(rig, chatId);
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]?.label).toStartWith(rig.rt.registry.actions.get("wear")?.label ?? "wear");
+    expect(receipts[0]?.detail).toMatch(/work jacket/i);
+    expect(receipts[0]?.detail).not.toContain("after it");
     // The narrator is told the walk played, and that nothing of the message was left unplayed.
     const lines = outcomeLines(rig);
     expect(lines.some((line) => line.startsWith(`${rig.rt.registry.actions.get("go")?.label} (`))).toBe(true);
     expect(lines.some((line) => /hasn't happened/.test(line))).toBe(false);
-    // The next reply is told only that the wear didn't happen.
-    const told = (await nextTurn(rig, chatId, "I look around.")).split("\n").filter((line) => line.includes("didn't happen"));
-    expect(told).toHaveLength(1);
-    expect(told[0]).toContain("Wear");
+    // The next reply hears nothing of the wear.
+    expect(naming(await nextTurn(rig, chatId, "I look around."), "Wear")).toEqual([]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("two actions that name nothing get a chip each, and the walk still plays", async () => {
+  test("two actions that name nothing get a receipt each, the walk still plays, and no reply hears of either", async () => {
     const { rig, chatId } = await chat();
     reading(rig, reads(wear("work jacket"), { action: "pay", params: { to: "rena", amount: 6 }, text: "I pay Rena" }, walk));
     await rig.turn(chatId, "I pull on my work jacket, pay Rena and walk down to Alder Automotive.", "You head down the hill to the garage.");
     expect(await at(rig, chatId)).toBe("alder_automotive");
-    const declines = (await replyChips(rig, chatId)).filter((c) => c.kind === "decline");
-    expect(declines.map((c) => c.label)).toEqual([`${rig.rt.registry.actions.get("wear")?.label}: couldn't`, `${rig.rt.registry.actions.get("pay")?.label}: couldn't`]);
-    expect(declines[0]?.detail).toMatch(/work jacket/i);
-    expect(declines[1]?.detail).toContain("Rena");
-    // Remove it rewords only its own note.
-    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: declines[1]?.id, choice: "remove" })).applied).toBe(true);
-    const told = (await nextTurn(rig, chatId, "I look around.")).split("\n").filter((line) => line.includes("never happened") || line.includes("didn't happen"));
-    expect(told).toHaveLength(2);
-    expect(told).toEqual(expect.arrayContaining([expect.stringMatching(/Wear.*didn't happen/), expect.stringMatching(/Pay.*leave it out/)]));
+    const receipts = await roleplayed(rig, chatId);
+    expect(receipts).toHaveLength(2);
+    expect(receipts[0]?.label).toStartWith(rig.rt.registry.actions.get("wear")?.label ?? "wear");
+    expect(receipts[1]?.label).toStartWith(rig.rt.registry.actions.get("pay")?.label ?? "pay");
+    expect(receipts[0]?.detail).toMatch(/work jacket/i);
+    expect(receipts[1]?.detail).toContain("Rena");
+    const told = await nextTurn(rig, chatId, "I look around.");
+    expect([...naming(told, "Wear"), ...naming(told, "Pay")]).toEqual([]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
@@ -473,12 +483,12 @@ describe("an incidental action before the move a turn is about (#30)", () => {
     await rig.turn(chatId, "I pull on my work jacket, vault the fence and walk down to Alder Automotive.", "You catch your foot on the top rail.");
     expect(await at(rig, chatId)).not.toBe("alder_automotive");
     const chips = await replyChips(rig, chatId);
-    expect(chips.filter((c) => c.kind === "decline")).toHaveLength(1);
+    expect(await roleplayed(rig, chatId)).toHaveLength(1);
     expect(chips.find((c) => c.kind === "choice")?.label).toBe(String(walk.text));
     expect(outcomeLines(rig).some((line) => line.startsWith("Vault the fence: fail"))).toBe(true);
   });
 
-  test("a guessed id of a thing the POV can't see is dropped just as a missing one is, and never named", async () => {
+  test("a guessed id of a thing the POV can't see plays as plain roleplay just as a missing one does, and is never named", async () => {
     const chips: string[] = [];
     for (const item of ["hidden_coat", "spare_coat"]) {
       const here = "harbor_street_114";
@@ -489,7 +499,7 @@ describe("an incidental action before the move a turn is about (#30)", () => {
       expect(await at(rig, chatId)).toBe("alder_automotive");
       const shown = (await replyChips(rig, chatId)).map((c) => `${c.label} ${c.detail ?? ""}`);
       for (const c of shown) expect(c).not.toMatch(/oilskin|smuggler|hidden coat/i);
-      chips.push(shown.filter((c) => c.includes("couldn't")).join("\n"));
+      chips.push((await roleplayed(rig, chatId)).map((c) => `${c.label} ${c.detail ?? ""}`).join("\n"));
       const told = await nextTurn(rig, chatId, "I look around.");
       expect(told).not.toMatch(/oilskin|smuggler/i);
     }
@@ -499,21 +509,21 @@ describe("an incidental action before the move a turn is about (#30)", () => {
 });
 
 describe("a new reply after a reply (Send with nothing typed)", () => {
-  test("repeats nothing the message before it left: no decline or second note, no rest of the message and no Timelapse offer", async () => {
+  test("repeats nothing the message before it left: no receipt, no rest of the message and no Timelapse offer, and no reply hears of the pay", async () => {
     const { rig, chatId } = await chat();
     // The pay names nobody in the world, the muffin is left to say, and an hour is let pass after them.
     const paid: JsonObject = { action: "pay", params: { to: "rena", amount: 6 }, confidence: 0.9, next: "I buy a muffin", then: { minutes: 60 } };
     reading(rig, (text) => (text.startsWith("I pay") ? paid : { action: null, params: {}, confidence: 0.9 }));
     await rig.turn(chatId, "I pay Rena for the latte, buy a muffin and wait an hour.", "You hand Rena a few bills.");
-    expect((await replyChips(rig, chatId)).map((c) => c.kind)).toEqual(expect.arrayContaining(["decline", "choice", "timelapse_offer"]));
-    // The new reply is told once that the pay didn't happen, and offers nothing of the message again.
+    expect((await replyChips(rig, chatId)).map((c) => c.kind)).toEqual(expect.arrayContaining(["untracked", "choice", "timelapse_offer"]));
+    // The new reply hears nothing of the pay, and offers nothing of the message again.
     const g = await rig.host.start(chatId, { type: "normal" });
-    expect(rig.host.section("Outcome")).toContain(`the player's "Pay"`);
+    const told = naming(rig.host.section("Outcome"), "Pay");
     await rig.host.finish(g, "The cafe hums along.");
-    const repeated = (await replyChips(rig, chatId)).filter((c) => c.kind === "decline" || c.kind === "choice" || c.kind === "timelapse_offer").map((c) => c.kind);
-    // The reply after that isn't told it again.
-    const toldAgain = (await nextTurn(rig, chatId, "I look around.")).includes(`the player's "Pay"`);
-    expect({ repeated, toldAgain }).toEqual({ repeated: [], toldAgain: false });
+    const repeated = (await replyChips(rig, chatId)).filter((c) => c.kind === "untracked" || c.kind === "choice" || c.kind === "timelapse_offer").map((c) => c.kind);
+    // Nor does the reply after that.
+    const toldAgain = naming(await nextTurn(rig, chatId, "I look around."), "Pay");
+    expect({ repeated, told, toldAgain }).toEqual({ repeated: [], told: [], toldAgain: [] });
   });
 
   test("a message that went unread puts no Retry on the reply after its reply", async () => {

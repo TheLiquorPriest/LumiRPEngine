@@ -1,11 +1,12 @@
 // The engine feed (DESIGN §6.11): a section's switch, caps and sources as the world sets them, the
 // GM's per-chat settings over them with their Undo, and the scopes: the player's never names a
-// secret, the GM's names it marked for the narrator only, and no player surface gets it.
+// secret, the GM's names it marked for the narrator only, and no player surface gets it. The narrator
+// rules put secrecy above the order of authority, in the same words with marked facts or without.
 
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SECTIONS } from "../../src/backend/book";
+import { DEFAULT_SECTIONS, NARRATOR_AUTHORITY, NARRATOR_SECRECY } from "../../src/backend/book";
 import type { Delivered } from "../../src/backend/ledger-io";
-import { markedText } from "../../src/engine/feed";
+import { MARKED_FACTS_RULE, markedText } from "../../src/engine/feed";
 import type { SectionRenderer } from "../../src/engine/registry";
 import { editRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";
@@ -147,10 +148,32 @@ describe("feed scopes", () => {
     const line = people.find((l) => l.includes(SECRET));
     expect(line).toBe(markedText({ text: `${SECRET} is here.`, known: "gm" }));
     // The narrator rules tell what marked facts are for.
-    expect(rig.host.assembled.some((e) => e.content.startsWith("[Narrator rules]"))).toBe(true);
+    expect(rig.host.assembled.some((e) => e.content.startsWith("[Narrator rules]") && e.content.includes(MARKED_FACTS_RULE))).toBe(true);
     // Play's view: chips, the Journal, panels, the HUD.
     expect(JSON.stringify(rig.latestView(chatId))).not.toContain(SECRET);
     expect(JSON.stringify(await rig.rt.view(chatId, rig.host.userId))).not.toContain(SECRET);
+  });
+
+  test("the narrator rules put secrecy before the order of authority, in the same words whether or not the turn carries marked facts", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await alder(rig, null, secretHere);
+    const label = DEFAULT_SECTIONS.people?.label ?? "People";
+    const marked = markedText({ text: `${SECRET} is here.`, known: "gm" });
+    const rules = (): string => rig.host.assembled.find((e) => e.content.startsWith("[Narrator rules]\n"))?.content ?? "";
+    await rig.turn(chatId, "I look around.", "Quiet.");
+    expect(sent(rig).get(label)).not.toContain(marked);
+    const plain = rules();
+    // The GM's scope puts a marked fact into People.
+    await edit(rig, chatId, { op: "feed", section: "people", to: { scope: "gm" } });
+    await rig.turn(chatId, "I look around again.", "Still quiet.");
+    expect(sent(rig).get(label)).toContain(marked);
+    expect(rules()).toBe(plain);
+    const secrecy = plain.indexOf(NARRATOR_SECRECY);
+    expect(secrecy).toBeGreaterThan(0);
+    expect(secrecy).toBeLessThan(plain.indexOf(NARRATOR_AUTHORITY));
+    // The rule for marked facts is part of it, even on a turn that carries none.
+    expect(plain.indexOf(MARKED_FACTS_RULE)).toBeGreaterThan(secrecy);
+    expect(plain.indexOf(MARKED_FACTS_RULE)).toBeLessThan(plain.indexOf(NARRATOR_AUTHORITY));
   });
 
   test("a scene-scope fact reaches the narrator marked, and no player surface, Journal line or panel", async () => {

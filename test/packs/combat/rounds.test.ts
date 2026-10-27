@@ -102,7 +102,7 @@ describe("leaving a fight", () => {
 });
 
 describe("the clock in a fight", () => {
-  test("a fight's turns take no clock time, whatever the POV does, and nothing skips ahead in one", () => {
+  test("a fight's turns take no clock time, whatever the POV does; a skip the player asks for ends the fight first, then runs", () => {
     const world = fightWorld((w) => {
       povFirst(w);
       w.actions.persuade = { id: "persuade", label: "Persuade", params: {}, requires: [], outcomes: { default: [] }, duration: "10" };
@@ -117,8 +117,22 @@ describe("the clock in a fight", () => {
       expect(p.events.some((e) => e.type === "clock")).toBe(false);
     }
     const skip = withoutAmbient(() => planTurn({ registry: reg, world, state: fight, runSeed: "run", seed: "skip", kind: "normal", userTexts: ["wait an hour"], intent: timelapseIntent({ type: "duration", minutes: 60 }) }));
-    expect(skip.elapsedMinutes).toBe(0);
+    expect(skip.events.filter((e) => e.type === "combat.end").map((e) => dataOf(e).reason)).toEqual(["skip"]);
+    expect(encounterOf(fold(reg, world, fight, skip.events))).toBeNull();
+    expect(skip.combat).toHaveLength(1);
+    expect(skip.elapsedMinutes).toBe(60);
+    expect(skip.timelapse).not.toBeNull();
+  });
+
+  test("a skip that can't run (the clock paused) leaves the fight as it was", () => {
+    const world = fightWorld((w) => povFirst(w));
+    const fight = started(world).state;
+    const paused: WorldState = { ...fight, time: { ...fight.time, paused: true } };
+    const skip = withoutAmbient(() => planTurn({ registry: reg, world, state: paused, runSeed: "run", seed: "skip", kind: "normal", userTexts: ["wait an hour"], intent: timelapseIntent({ type: "duration", minutes: 60 }) }));
     expect(skip.timelapse).toBeNull();
+    expect(skip.events.some((e) => e.type === "combat.end")).toBe(false);
+    expect(skip.combat).toEqual([]);
+    expect(encounterOf(fold(reg, world, paused, skip.events))).not.toBeNull();
   });
 
   test("the action that starts a fight keeps its time; the turns inside it take none", () => {
@@ -213,19 +227,14 @@ describe("the clock in a fight", () => {
     expect(caught(fold(registry, world, over, [{ type: "set", entity: world.pov, field: "place", value: "bluebird_coffee" }]))).not.toBe(place);
   });
 
-  test("a time skip the narration tells applies nothing during a fight and offers no Timelapse, so no one moves; after it, it applies", () => {
+  test("a time skip the narration tells applies during a fight as after it: the story says the time passed", () => {
     const { registry, world, state } = starterFight();
-    const places = (s: Readonly<WorldState>) => Object.keys(s.entities).map((id) => placeOfEntity(s, id));
-    for (const minutes of [20, 600]) {
-      const w = new Working(registry, world, state);
-      expect(applyTimeAdvance(registry, w, minutes, { runSeed: "run", capMinutes: ASK_BEYOND_DEFAULT, unitCap: w.state.time.unitCap })).toEqual({ applied: false, reason: "in_fight", chip: null });
-      expect(w.events).toEqual([]);
-      expect(places(w.state)).toEqual(places(state));
-    }
     const over = fold(registry, world, state, [{ type: "combat.end", data: { encounter: encounterOf(state)?.id ?? "", reason: "effect", winner: null, rounds: 1 } }]);
-    const w = new Working(registry, world, over);
-    expect(applyTimeAdvance(registry, w, 20, { runSeed: "run", capMinutes: ASK_BEYOND_DEFAULT, unitCap: w.state.time.unitCap }).applied).toBe(true);
-    expect(w.state.clock - over.clock).toBe(20);
+    for (const s of [state, over]) {
+      const w = new Working(registry, world, s);
+      expect(applyTimeAdvance(registry, w, 20, { runSeed: "run", capMinutes: ASK_BEYOND_DEFAULT, unitCap: w.state.time.unitCap }).applied).toBe(true);
+      expect(w.state.clock - s.clock).toBe(20);
+    }
   });
 });
 

@@ -30,6 +30,8 @@ export type FieldSpec =
   | { kind: "ref"; key: string; label: string; collection: RefCollection; optional?: boolean; any?: boolean; inline?: boolean; hint?: string; when?: When }
   | { kind: "refs"; key: string; label: string; collections: readonly RefCollection[] }
   | { kind: "expr"; key: string; label: string; optional?: boolean }
+  /** An action's requirement: a formula, with a switch that marks it a hard lock (DESIGN §11). */
+  | { kind: "requirement"; key: string; label: string }
   /** An effect's arguments: each a value, or a `=` formula in the expression editor's effect mode (where `roll()` works). */
   | { kind: "effectArgs"; key: string; label: string }
   | { kind: "dice"; key: string; label: string; optional?: boolean }
@@ -409,7 +411,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
         ],
       },
     },
-    { kind: "list", key: "requires", label: "Requires", item: { kind: "expr", key: "", label: "Requirement" } },
+    { kind: "list", key: "requires", label: "Requires", hint: "A typed attempt that misses a requirement plays as plain roleplay; one that misses a hard lock fails", item: { kind: "requirement", key: "", label: "Requirement" } },
     { kind: "ref", key: "check", label: "Check", collection: "checks", optional: true, inline: true },
     { kind: "record", key: "outcomes", label: "Effects per outcome", keyLabel: "Outcome", suggest: "outcomes", hint: "One list per outcome of the check; default when the action has no check", item: { kind: "list", key: "", label: "Effects", item: EFFECT, title: "type" } },
     { kind: "expr", key: "duration", label: "Duration (minutes)" },
@@ -648,7 +650,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
             { kind: "number", key: "sightRadius", label: "Sight radius (cells the POV sees around it)", min: 0, max: 32, step: 1 },
           ],
         },
-        { kind: "bool", key: "travelSimulation", label: "Travel simulation: moves need a route", hint: "Off (the default): moves are story first, so a move the reply tells always lands and Go goes even where no route leads. On: a narrated move no route reaches didn't happen, and Go needs a walking route" },
+        { kind: "bool", key: "travelSimulation", label: "Travel simulation: Go needs a route", hint: "Off (the default): Go goes even where no route leads. On: Go needs a walking route. A move the reply tells lands either way" },
         {
           kind: "object",
           key: "travel",

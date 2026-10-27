@@ -32,7 +32,6 @@ const PROMPTS: Record<string, string> = {
   brief: "You brief a roleplay narrator",
   outline: "You outline a roleplay narrator",
   choices: "Suggest three short",
-  contradiction: "Answer each question about the state",
 };
 
 function quiet(req: QuietRequest): string {
@@ -98,7 +97,7 @@ describe("the prefetch", () => {
     const counts: Record<string, number> = {};
     for (const c of rig.rt.meter.log.slice(start)) if (c.lookup !== true) counts[c.purpose] = (counts[c.purpose] ?? 0) + 1;
     // The calls Full makes on this turn without lore (DESIGN §5.3); lookups are counted apart.
-    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, contradiction: 1 });
+    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1 });
     expect(systemOf(rig, "interpret")).toContain("The ferry: The ferry crosses to Gull Island");
     expect(systemOf(rig, "extract")).toContain("The ferry: The ferry crosses to Gull Island");
     expect(systemOf(rig, "brief")).toContain("The ferry: The ferry crosses to Gull Island");
@@ -112,8 +111,8 @@ describe("the prefetch", () => {
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     expect(systemOf(rig, "interpret")).toContain(SECRET);
     expect(JSON.stringify(rig.host.decideCalls.map((r) => r.state))).toContain(SECRET);
-    // Brief is in its audience but writes prose; extract and contradiction aren't in it.
-    for (const step of ["brief", "outline", "extract", "contradiction"]) {
+    // Brief is in its audience but writes prose; extract isn't in it.
+    for (const step of ["brief", "outline", "extract"]) {
       expect(systemOf(rig, step)).not.toBe("");
       expect(systemOf(rig, step)).not.toContain(SECRET);
     }

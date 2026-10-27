@@ -347,7 +347,7 @@ describe("the intent gate's card names no one hidden the player didn't name", ()
     await rig.host.finish(g, "Marcus wipes his hands and says nothing.");
     const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
     expect(chips.some((c) => c.kind === "intent_gate")).toBe(false);
-    expect(chips.find((c) => c.kind === "decline")?.label).toBe("Answer: couldn't");
+    expect(chips.find((c) => c.kind === "untracked")?.label).toStartWith("Answer");
     expect(JSON.stringify(chips)).not.toMatch(/Vex|Morrow/);
   });
 

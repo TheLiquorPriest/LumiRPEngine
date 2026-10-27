@@ -1,5 +1,5 @@
 // Purchases and money on the shipped packs (DESIGN §9.2, §9.5, §11): catalog rows that name the
-// item, one purchase per item, unpriced purchases priced from their chip, the cash ✎ as a balanced
+// item, one purchase per item, unpriced purchases owned and priced from their chip, the cash ✎ as a balanced
 // correction, the world's cap on narrated prices, and an action the helper couldn't read.
 
 import { describe, expect, test } from "bun:test";
@@ -166,13 +166,13 @@ describe("one purchase per item", () => {
 });
 
 describe("a narrated purchase nothing prices", () => {
-  test("leaves a chip that charges the price the player sets", async () => {
+  test("asks to make it the player's with nothing charged, or at the price the player sets", async () => {
     const { rig, chatId } = await chat();
     script(rig, [{ item: "tin whistle" }]);
     await rig.turn(chatId, "I buy a kazoo for $3.", "You also pocket a tin whistle.");
     const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.label.startsWith("Bought tin whistle"));
-    // Nothing in the catalog is called a whistle, so there's no item to pick here: price or dismiss.
-    expect(chip?.actions.map((a) => a.id)).toEqual(["price", "dismiss"]);
+    // Nothing in the catalog is called a whistle, so there's no item to pick here: a price, Apply or No.
+    expect(chip?.actions.map((a) => a.id)).toEqual(["price", "confirm", "reject"]);
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id ?? "", choice: "price", payload: { cents: 450 } }));
     expect((await bought(rig, chatId)).find((b) => b.memo === "Bought tin whistle")?.cents).toBe(477);
   });

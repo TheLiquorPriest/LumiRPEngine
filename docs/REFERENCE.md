@@ -110,7 +110,6 @@ Built in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `re
 | `brief` | `text` |
 | `choices` | `text`, `effects` |
 | `consolidate` | `text` |
-| `contradiction` | `decision`, `text`, `effects` |
 | `extract` | `text`, `effects` |
 | `interpret` | `decision`, `text` |
 | `judge` | `decision`, `text` |
@@ -540,7 +539,7 @@ Extends `thing`.
 | Effect | Arguments |
 |---|---|
 | `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?` |
-| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?` |
+| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?` |
 | `economy.card_replace` | `card`, `who?` |
 | `economy.card_state` | `card`, `state`, `who?` |
 | `economy.close_account` | `account` |
@@ -574,7 +573,7 @@ Extends `thing`.
 | `economy.set_status` | `account`, `status` |
 | `economy.stake_sell` | `business`, `share`, `price`, `buyer?`, `to?`, `party?` |
 | `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?` |
-| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?` |
+| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?` |
 | `economy.withdraw` | `account`, `cents`, `who?` |
 
 ### Formula functions
@@ -626,7 +625,7 @@ Extends `thing`.
 | `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |
 | `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |
 | `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |
-| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |
+| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref → person`, `amount: money`, `method?: text` |  | `default` | `1` | pay, give money, send money, venmo |
 | `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
 | `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |
 | `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |
@@ -707,14 +706,14 @@ Extends `thing`.
 |---|---|---|---|---|---|---|---|
 | `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |
 | `category` | Category | text |  |  |  |  |  |
-| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto, ±25 a turn; bands: broken, worn, good, like new |
+| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto; bands: broken, worn, good, like new |
 | `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |
 | `fixed` | Fixed in place (can't be picked up) | bool |  |  |  |  | locked |
 | `from_kit` | From kit | ref |  |  |  |  | locked |
 | `notable` | Notable | bool |  |  |  |  | live from gear 1 |
 | `overdue` | Overdue | bool |  |  |  |  | locked |
 | `piece` | Kit piece | text |  |  |  |  | locked |
-| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2; bound confirm, ±10 a turn |
+| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2; bound confirm |
 | `slot` | Equip slot | text |  |  |  |  | live from gear 3 |
 | `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |
 | `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |
@@ -743,7 +742,7 @@ Extends `container`.
 | Effect | Arguments |
 |---|---|
 | `gear.drop` | `item`, `place?` |
-| `gear.give` | `item`, `from`, `to` |
+| `gear.give` | `item`, `from`, `to`, `told?` |
 | `gear.lend` | `item`, `to`, `until?`, `said?` |
 | `gear.lose` | `item`, `thief?` |
 | `gear.receive` | `name`, `to`, `from?` |
@@ -1103,7 +1102,7 @@ Extends `container`.
 |---|---|---|---|---|---|---|---|
 | `class` | Vehicle class | text |  |  |  |  |  |
 | `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |
-| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto, ±30 a turn |
+| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto |
 | `home` | Home base | ref |  |  |  |  | live from vehicles 3 |
 | `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |
 | `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |

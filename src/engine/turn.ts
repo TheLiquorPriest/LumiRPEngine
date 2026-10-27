@@ -18,14 +18,14 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hashParts } from "../shared/hash";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent, TimelapseTarget } from "../shared/ledger";
-import { activitySpanEnd, type WorldDoc } from "../shared/world";
+import { activitySpanEnd, formatMoney, type WorldDoc } from "../shared/world";
 import type { Judgement } from "./adjudication";
 import { actionWords, toldAction, type BeforeAction } from "./action-words";
 import { outline } from "./beats";
 import { ENGINE_EVENTS, signalOf } from "./engine-pack";
 import { materializeAll } from "./materialize";
 import type { Registry } from "./registry-impl";
-import { findAction, resolveAction, type Resolution } from "./resolve";
+import { findAction, missedPlainRequirement, playsAsRoleplay, resolveAction, unmetNeeds, type Resolution } from "./resolve";
 import { IDLE_OPTION } from "./plan-day";
 import { resolveTry, TRY_ACTION } from "./inferred";
 import { createRng } from "./rng";
@@ -33,13 +33,13 @@ import { runRulesOnEvents, runRulesOnTick } from "./rules";
 import { acts } from "./life";
 import { isGone, placeOfEntity } from "./scope";
 import { advance, catchUp, coarsen, interruptPolicy } from "./simulate";
-import type { Claim, InterpretOutput, PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
-import { buildMontage, fightHoldsClock, IN_FIGHT, pauseBookkeeping, parseOverrides, parseTarget, replaySkip, runTimelapse, sceneKey, speedThrough, turnElapsed, type Montage, type TimelapseOptions, type TimelapseOutcome } from "./time";
+import type { Claim, InterpretOutput, Needs, PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
+import { buildMontage, fightHoldsClock, pauseBookkeeping, parseOverrides, parseTarget, replaySkip, runTimelapse, sceneKey, speedThrough, turnElapsed, type Montage, type TimelapseOptions, type TimelapseOutcome } from "./time";
 import { TIME_LIMITS } from "./time-limits";
 import { stepTracks } from "./tracks";
 import { signalVisible } from "./visibility";
 import { Working } from "./working";
-import { optionalService, own } from "./pack-kit";
+import { optionalQuery, optionalService, own } from "./pack-kit";
 
 export const TIMELAPSE_ACTION = "timelapse";
 /** Off-screen agents caught up per turn (K) and their agent-day budget. */
@@ -66,6 +66,8 @@ export interface EngineTurnPlan extends TurnPlan {
   outline: string[];
   /** A fight's part of the turn as the Outcome slot tells it (the combat pack, DESIGN §11); empty without one. */
   combat: string[];
+  /** What the player's message says the player character does in the turn's time skip, in their words; null without one, or a skip it doesn't fill. */
+  fill: string | null;
 }
 
 /** LOD1 agents with the POV who still act (DESIGN §8): caught up with it, not off-screen. */
@@ -81,6 +83,7 @@ interface TurnStep {
   params: JsonObject;
   judgement: Judgement | null;
   claim: Claim | null;
+  needs: Needs | null;
 }
 
 /**
@@ -115,16 +118,17 @@ function spanOwner(resolutions: readonly Resolution[], pov: EntityId, span: { ty
 }
 
 /**
- * Whether the action queue stops after an action (DESIGN §11), and why: a failure (it couldn't run,
- * or part of it was refused), a check (resolved, then the player sees how it fell), or an
- * interruption: the POV no longer acting (dying, dead, any state that doesn't act), a fight (one
- * starting, or one under way, where each turn is one act), a long activity Speed through offers or
- * runs, a change of place or scene the action's own effects didn't make, or a signal the POV can see
- * whose class stops a timelapse. A signal the POV can't see never stops it, since stopping would give
- * it away.
+ * Whether the action queue stops after an action (DESIGN §11), and why: a failure (a hard lock or
+ * anything else it couldn't run, or part of it refused), a check (resolved, then the player sees how
+ * it fell), or an interruption: the POV no longer acting (dying, dead, any state that doesn't act),
+ * a fight (one starting, or one under way, where each turn is one act), a long activity Speed
+ * through offers or runs, a change of place or scene the action's own effects didn't make, or a
+ * signal the POV can see whose class stops a timelapse. A signal the POV can't see never stops it,
+ * since stopping would give it away. An action that plays as plain roleplay (`playsAsRoleplay`)
+ * changed nothing the rest of the message could hang on, so the rest goes on.
  */
 function queueStop(w: Working, res: Resolution, since: number, scene: string, speeding: boolean): QueueStop | null {
-  if (!res.ok || res.rejected.length > 0) return "failure";
+  if ((!res.ok && !playsAsRoleplay(res)) || res.rejected.length > 0) return "failure";
   if (res.check || res.adjudged) return "check";
   if (!acts(w.world, w.state, w.world.pov) || speeding || fightHoldsClock(w.ctx) || sceneKey(w.world, w.state) !== scene) return "interruption";
   const policy = interruptPolicy(w.state);
@@ -153,13 +157,30 @@ export function timelapseOptions(intent: InterpretOutput, runSeed: string): { ta
 }
 
 /**
- * Makes a claim real (DESIGN §9.4 player claims) through the gear pack's `gear.claim`, all or
- * nothing: the entity the action takes, and how many events made it (none when the claimer already
- * holds the thing, made by an earlier action of the turn). Null when it can't be made, and the
- * action then fails as one naming nothing.
+ * A time skip the player asked for moves the story past a fight under way (DESIGN §11): a fight's
+ * rounds take no clock time, so no skip runs inside one, and the fight ends before it
+ * (`combat.break_off`). The plan and a time skip's pre phase both start a skip this way, from the
+ * run's seed, so the pre phase reaches its beats in the state the plan will (DESIGN §24.7). The
+ * narrator's lines for the fight's end; none without one.
  */
-function claimThing(w: Working, claim: Claim, salt: string): { entity: EntityId; events: number } | null {
-  const made = optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim, by: w.world.pov, salt });
+export function skipPastFight(w: Working, runSeed: string): string[] {
+  if (!fightHoldsClock(w.ctx)) return [];
+  return optionalService(w.ctx, "combat.break_off")?.(w, hashParts(runSeed, "skip", "fight")) ?? [];
+}
+
+/**
+ * Makes a claim real (DESIGN §9.4 player claims), all or nothing: a thing through the gear pack's
+ * `gear.claim`, money through the economy's `economy.claim_cash` (into the claimer's carried cash):
+ * only what that cash lacks of the amount as the action plays, so what they carry is never made
+ * again. The entity the action takes, or the cash account money went into, how many events made it
+ * and the cash added. Null when nothing needs making (the claimer already holds the thing, made by
+ * an earlier action of the turn, or carries the money by then) or it can't be made, and the action
+ * then plays without it.
+ */
+function claimThing(w: Working, claim: Claim, salt: string): { entity: EntityId; events: number; cents?: number } | null {
+  const lacking = claim.cents === undefined ? undefined : claim.cents - Math.max(0, optionalQuery(w.ctx, "economy.carried_cash")?.(w.ctx, w.world.pov) ?? 0);
+  if (lacking !== undefined && lacking <= 0) return null;
+  const made = lacking !== undefined ? optionalService(w.ctx, "economy.claim_cash")?.(w.ctx, w.world.pov, lacking) : optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim, by: w.world.pov, salt });
   if (!made || !("entity" in made)) return null;
   const before = w.mark();
   for (const e of made.events) {
@@ -168,7 +189,7 @@ function claimThing(w: Working, claim: Claim, salt: string): { entity: EntityId;
       return null;
     }
   }
-  return { entity: made.entity, events: made.events.length };
+  return { entity: made.entity, events: made.events.length, ...(lacking !== undefined ? { cents: lacking } : {}) };
 }
 
 export function planTurn(input: TurnPlanInput): EngineTurnPlan {
@@ -185,22 +206,27 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   let stopped: EngineTurnPlan["stopped"] = null;
   let timelapse: TimelapseOutcome | null = null;
   const combat: string[] = [];
+  // What the player's message fills a time skip with, in their words (the read's `text`): the content
+  // the narrator tells of the span, a directive the engine's lines never overrule (DESIGN §9.2).
+  const fill = intent?.action === TIMELAPSE_ACTION ? (intent.text?.trim() ?? "") || null : null;
 
   if (intent?.action === TIMELAPSE_ACTION) {
     const { target, opts } = timelapseOptions(intent, input.runSeed);
-    // A fight's rounds take no clock time (DESIGN §11), so nothing skips ahead while the POV is in one.
-    // A time skip's pre phase recorded the minds at its beats: the plan replays them (DESIGN §24.7).
-    const outcome = !target
-      ? { code: "bad_target", reason: "no timelapse target" }
-      : fightHoldsClock(w.ctx)
-        ? { code: "in_fight", reason: IN_FIGHT }
-        : input.skip
-          ? replaySkip(reg, w, target, input.skip, opts)
-          : runTimelapse(reg, w, target, opts);
-    if ("code" in outcome) w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
-    else timelapse = outcome;
+    // A fight under way ends first, and the skip runs from there (`skipPastFight`). A time skip's pre
+    // phase recorded the minds at its beats from the same start: the plan replays them (DESIGN §24.7).
+    // A skip that can't run (the clock paused) leaves the fight as it was.
+    const before = w.mark();
+    const broke = target ? skipPastFight(w, input.runSeed) : [];
+    const outcome = !target ? { code: "bad_target", reason: "no timelapse target" } : input.skip ? replaySkip(reg, w, target, input.skip, opts) : runTimelapse(reg, w, target, opts);
+    if ("code" in outcome) {
+      w.restore(before);
+      w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
+    } else {
+      combat.push(...broke);
+      timelapse = outcome;
+    }
   } else {
-    const steps: TurnStep[] = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null }))] : [];
+    const steps: TurnStep[] = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null, needs: intent.needs ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null, needs: q.needs ?? null }))] : [];
     const heard = input.userTexts.join("\n");
     // With no action the loop runs once all the same: a fight under way takes its turns, and the turn its tick.
     for (let i = 0; i < Math.max(1, steps.length); i++) {
@@ -217,21 +243,37 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
       let resolution: Resolution | null = null;
       // The place and scene as the action's own effects leave them; any other change interrupts the queue.
       let scene = sceneKey(w.world, w.state);
-      let made: { entity: EntityId; name: string; events: number } | null = null;
+      let made: { entity: EntityId; name: string; events: number; cents?: number } | null = null;
       let ruled = mark;
       const before: BeforeAction = { picks: "", from: placeOfEntity(w.state, w.world.pov), fields: { ...own(w.state.entities, w.world.pov)?.fields } };
       if (step) {
+        // What the player typed is their will (DESIGN §11); one picked in the engine's own controls is held to its requirements.
+        const typed = i > 0 || intent?.picked !== true;
+        // An action played in the place of the one the player's words named (money handed over, as
+        // Pay) is held to that one's needs too; when they don't hold, nothing is made for it.
+        const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs) : null;
         // A thing the player said they had comes into being where the action expects it, just
-        // before the action, which takes it (DESIGN §9.4 player claims).
-        const claimed = step.claim ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
-        if (claimed && step.claim) made = { entity: claimed.entity, name: step.claim.name, events: claimed.events };
-        const params = claimed && step.claim ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
+        // before the action, which takes it; money goes into their cash, which the action pays over
+        // (DESIGN §9.4 player claims).
+        const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
+        if (claimed && step.claim) made = { entity: claimed.entity, name: claimed.cents !== undefined ? formatMoney(claimed.cents, w.world.currency) : step.claim.name, events: claimed.events, ...(claimed.cents !== undefined ? { cents: claimed.cents } : {}) };
+        const params = claimed && step.claim && step.claim.cents === undefined ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
         // Its picks in words as the POV knows them now, before the action gives away or uses up what it
         // names; the turn's own message counts as said, since the narrator reads it anyway (DESIGN §7).
         const def = findAction(reg, w.world, step.action);
         before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard) : "";
+        const acting = w.mark();
         // An inferred check plays as Try something, carrying the world's own check (DESIGN §11).
-        resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
+        resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement, ...(step.needs ? { needs: step.needs } : {}) });
+        // A typed action whose plain requirement doesn't hold plays as plain roleplay; hard locks hold it.
+        if (typed && missedPlainRequirement(resolution)) resolution = { ...resolution, roleplay: true };
+        // So does one whose payment the money can't cover: what money covers is the engine's default,
+        // not a lock, and the reply's read charges a purchase the story tells (DESIGN §9.5). None of it plays.
+        const uncovered = typed && resolution.ok ? resolution.rejected.find((r) => r.rejection.code === "declined") : undefined;
+        if (uncovered) {
+          w.restore(acting);
+          resolution = { ...resolution, ok: false, failed: { code: "declined", reason: uncovered.rejection.reason }, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, adjudged: null, roleplay: true };
+        }
         scene = sceneKey(w.world, w.state);
         // The rules see the claimed thing's making too, so a world rule can react to its mark.
         const done = w.events.slice(mark, mark + (made?.events ?? 0) + resolution.events.length);
@@ -249,7 +291,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
           const group = w.events[end]?.group;
           if (group === undefined || !groups.has(group)) break;
         }
-        resolution = { ...resolution, events: w.events.slice(mark, end), ...(made && made.events > 0 ? { claimed: { entity: made.entity, name: made.name, events: w.events.slice(mark, ruled) } } : {}) };
+        resolution = { ...resolution, events: w.events.slice(mark, end), ...(made && made.events > 0 ? { claimed: { entity: made.entity, name: made.name, events: w.events.slice(mark, ruled), ...(made.cents !== undefined ? { cents: made.cents } : {}) } } : {}) };
         resolutions.push(resolution);
         played.push(before);
       }
@@ -341,8 +383,9 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     timelapse,
     montage,
     chips,
-    outline: outline(reg, w.world, w.state, { resolutions: told, timelapse, events: w.events }, rng.fork("beats")),
+    outline: outline(reg, w.world, w.state, { resolutions: told, timelapse, events: w.events, fill: timelapse ? fill : null }, rng.fork("beats")),
     combat,
+    fill: timelapse ? fill : null,
   };
 }
 

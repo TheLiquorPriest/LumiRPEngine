@@ -33,12 +33,12 @@ describe("the Outline points only at sections the narrator has", () => {
     await timelapse(rig, chatId, 10);
     expect(rig.host.section("Montage")).toBe("");
     const outline = rig.host.section("Outline");
-    expect(outline).toContain("- Time passes. Don't add events.");
+    expect(outline).toMatch(/^- Time passes\./m);
     expect(outline).not.toContain("Montage");
     // Two hours brings service reminders into the Montage, and the Outline points at it.
     await timelapse(rig, chatId, 120);
     expect(rig.host.section("Montage")).not.toBe("");
-    expect(rig.host.section("Outline")).toContain("Time passes. Narrate the interval from the Montage; don't add events.");
+    expect(rig.host.section("Outline")).toMatch(/^- Time passes\..*\bMontage\b/m);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

@@ -1,6 +1,6 @@
 // The `knows`, `spawn` and `quantity` narration channels exist for every extraction type the
 // settings list, and each is bounded: public facts only; capped, deduplicated spawns with a
-// validated kind and place; quantity steps capped per field.
+// validated kind and place; quantity steps of any size the story tells, kept in the field's range.
 import { describe, expect, test } from "bun:test";
 import { EXTRACTION_TYPES } from "../../src/shared/settings";
 import { applyEffects } from "../../src/engine/effects";
@@ -31,7 +31,7 @@ function propose(w: Working, type: string, p: Record<string, string | number>): 
 
 const knowsOf = (w: Working, id: string): boolean => w.state.entities.you?.relations.some((r) => r.type === "knows" && r.to === id) ?? false;
 
-/** What a decline chip and the next reply's note would say of a refusal: its code and reason, never the GM's. */
+/** What a decline chip would say of a refusal: its code and reason, never the GM's. */
 function refusal(w: Working, type: string, p: Record<string, string>): { code: string; reason: string } | null {
   const bad = reg.proposals.get(type)?.validate(p, w.ctx);
   return bad ? { code: bad.code, reason: bad.reason } : null;
@@ -141,16 +141,17 @@ describe("narration channels", () => {
     expect(newcomer(none, "Ellie Park")).toBeUndefined();
   });
 
-  test("quantity: whole steps on an item its holder has, capped by the field's bound", () => {
+  test("quantity: whole steps on an item its holder has, as many as the story tells, kept in the field's range", () => {
     const w = setup();
     expect(propose(w, "quantity", { entity: "you", item: "phone", delta: 2 })).toBe("ok");
     expect(w.state.entities.phone?.fields.qty).toBe(3);
-    expect(propose(w, "quantity", { entity: "you", item: "phone", delta: 50 })).toBe("over_bound");
+    expect(propose(w, "quantity", { entity: "you", item: "phone", delta: 50 })).toBe("ok");
+    expect(w.state.entities.phone?.fields.qty).toBe(53);
     expect(propose(w, "quantity", { entity: "you", item: "phone", delta: 1.5 })).toBe("bad_proposal");
     expect(propose(w, "quantity", { entity: "you", item: "phone", delta: 0 })).toBe("bad_proposal");
     expect(propose(w, "quantity", { entity: "maya", item: "phone", delta: 1 })).toBe("not_holder");
     expect(propose(w, "quantity", { entity: "you", item: "maya", delta: 1 })).toBe("missing_entity");
-    expect(propose(w, "quantity", { entity: "you", item: "phone", delta: -10 })).toBe("ok");
+    expect(propose(w, "quantity", { entity: "you", item: "phone", delta: -60 })).toBe("ok");
     expect(w.state.entities.phone?.fields.qty).toBe(0);
   });
 });

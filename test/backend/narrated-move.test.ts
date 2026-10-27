@@ -1,7 +1,6 @@
-// A reply that moves someone who doesn't act (DESIGN §8): the body stays where it lies. A body the
-// POV knows of is declined in plain words, even one since brought back out of its sight; any other
-// such move is dropped with nothing the player sees, so no refusal tells of a death or a revival the
-// POV hasn't heard of.
+// A reply that moves someone who doesn't act (DESIGN §8, §11): the story stands, so the body goes
+// where the reply puts it, as any narrated move does. What the player sees of the move reads as it
+// would for anyone, so it never tells of a death or a revival the POV hasn't heard of.
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
@@ -41,41 +40,39 @@ async function daleComesOver(start: JsonObject, revive = false) {
     view,
     truth: lifeOf(before, "dale_whitcomb"),
     povTakes: lifeKnownTo(before, "dale_whitcomb", "pov"),
-    stayed: !!after && placeOfEntity(after, "dale_whitcomb") === placeOfEntity(before, "dale_whitcomb"),
     arrived: !!after && placeOfEntity(after, "dale_whitcomb") === home,
     chips: view.chips.filter((c) => `${c.label} ${c.detail ?? ""}`.includes("Dale")),
   };
 }
 
+/** What the player sees of the move, without the ids that differ from chat to chat. */
+const seen = (chips: { kind: string; label: string; detail?: string; actions: unknown[] }[]) => chips.map((c) => ({ kind: c.kind, label: c.label, detail: c.detail, actions: c.actions }));
+
 describe("a reply that moves someone who doesn't act", () => {
-  test("someone the POV doesn't know is dead: the move is dropped, and nothing the player sees says so", async () => {
+  test("someone the POV doesn't know is dead: the move lands, read as the living one's does", async () => {
     const alive = await daleComesOver({});
     const dead = await daleComesOver({ life: "dead", lifeKnownBy: ["marcus_delgado"] });
-    // The living Dale's move reaches the player (to undo or to apply); the dead one's reaches nothing.
-    expect(alive.chips.length).toBeGreaterThan(0);
-    expect(dead.stayed).toBe(true);
-    expect(dead.chips).toEqual([]);
+    expect([alive.arrived, dead.arrived]).toEqual([true, true]);
+    expect(alive.chips.map((c) => c.kind)).toEqual(["undo"]);
+    expect(seen(dead.chips)).toEqual(seen(alive.chips));
     const shown = JSON.stringify(dead.view);
     for (const said of ["didn't happen", "lies dead"]) expect(shown).not.toContain(said);
   });
 
-  test("a body the POV knows of: a plain chip says so, with nothing of paying", async () => {
+  test("a body the POV knows of: the move lands as told, with its Undo and nothing of paying", async () => {
+    const alive = await daleComesOver({});
     const dead = await daleComesOver({ life: "dead" });
-    expect(dead.stayed).toBe(true);
-    expect(dead.chips.map((c) => c.kind)).toEqual(["decline"]);
-    const [chip] = dead.chips;
-    expect(chip?.detail).toContain("lies dead");
-    expect(chip?.detail).not.toContain("..");
-    expect(chip?.detail).not.toContain("unowned");
-    expect(chip?.actions.map((a) => a.label)).not.toContain("Pay another way");
+    expect(dead.arrived).toBe(true);
+    expect(seen(dead.chips)).toEqual(seen(alive.chips));
+    expect(dead.chips[0]?.actions.map((a) => a.label)).not.toContain("Pay another way");
   });
 
-  test("a body the POV knows of, brought back out of its sight: still declined as that body, with no hint of the revival", async () => {
+  test("a body the POV knows of, brought back out of its sight: the move lands as told, with no hint of the revival", async () => {
+    const dead = await daleComesOver({ life: "dead" });
     const revived = await daleComesOver({ life: "dead" }, true);
     expect([revived.truth, revived.povTakes]).toEqual(["alive", "dead"]);
-    expect(revived.arrived).toBe(false);
+    expect(revived.arrived).toBe(true);
     const moves = revived.chips.filter((c) => c.kind === "undo" || c.kind === "decline");
-    expect(moves.map((c) => c.kind)).toEqual(["decline"]);
-    expect(moves[0]?.detail).toContain("lies dead");
+    expect(seen(moves)).toEqual(seen(dead.chips));
   });
 });

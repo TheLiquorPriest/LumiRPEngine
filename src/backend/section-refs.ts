@@ -1,5 +1,5 @@
 // The Outline's pointers at other sections (DESIGN §9.2, §9.5): the engine's beats send the
-// narrator to a section ("Narrate the interval from the Montage"), and an outline step's beats may
+// narrator to a section ("What happened in it is in the Montage"), and an outline step's beats may
 // too. A section the turn didn't fill must not be pointed at, so what names one goes.
 
 import type { SlotId } from "../shared/ids";
@@ -40,9 +40,9 @@ function names(text: string, label: string): boolean {
 /**
  * Outline lines without what points at a section the narrator doesn't have this turn (`missing`,
  * by label): in a line that names one, each clause naming one (a sentence's parts between
- * semicolons) goes, and a sentence, or a line, left with none goes whole. So "Time passes. Narrate
- * the interval from the Montage; don't add events." without a Montage reads "Time passes. Don't add
- * events." A line naming none stays exactly as it is.
+ * semicolons) goes, and a sentence, or a line, left with none goes whole. So "Time passes. What
+ * happened in it is in the Montage." without a Montage reads "Time passes." A line naming none
+ * stays exactly as it is.
  */
 export function withoutMissing(lines: readonly string[], missing: readonly string[]): string[] {
   const out: string[] = [];

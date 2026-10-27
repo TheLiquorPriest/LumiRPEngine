@@ -186,7 +186,7 @@ describe("what the narrator is told", () => {
     world.actions.climb = { id: "climb", label: "Climb", params: {}, requires: [], check: { id: "climb", dice: "d20", dc: "11" }, outcomes: { success: [], failure: [] }, duration: "5" };
     const reg = registryOf();
     const resolution = resolveOn(reg, world, startState(world), { action: "climb" }, createRng(seed)).resolution;
-    const plan: EngineTurnPlan = { events: resolution.events, elapsedMinutes: 5, resolutions: [resolution], stopped: null, timelapse: null, montage: null, chips: [], outline: [], combat: [] };
+    const plan: EngineTurnPlan = { events: resolution.events, elapsedMinutes: 5, resolutions: [resolution], stopped: null, timelapse: null, montage: null, chips: [], outline: [], combat: [], fill: null };
     return { text: planLines(plan, world, reg).outcome[0] ?? "", close: resolution.adjudged?.close != null };
   }
 

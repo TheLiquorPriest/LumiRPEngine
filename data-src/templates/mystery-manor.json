@@ -3911,6 +3911,7 @@
         "label": "Examine the floor by the garden door"
       },
       "requiresExpr": "at(pov, 'conservatory') and clock < @1934-10-27T11:00",
+      "hard": true,
       "reveals": []
     },
     {
@@ -3927,6 +3928,7 @@
         "label": "Examine the brogues in Ashcombe's room"
       },
       "requiresExpr": "at(pov, 'upper_floor') and not at('julian_ashcombe', here)",
+      "hard": true,
       "reveals": [
         "ashcombe_brogues"
       ]
@@ -3960,6 +3962,7 @@
         "label": "Look inside Dr. Farrant's bag"
       },
       "requiresExpr": "at(pov, 'drawing_room') and clock >= @1934-10-26T21:30 and clock < @1934-10-27T08:00",
+      "hard": true,
       "reveals": [
         "tincture_bottle"
       ]
@@ -3994,6 +3997,7 @@
         "label": "Open Verity's typewriter case"
       },
       "requiresExpr": "at(pov, 'upper_floor') and (not at('verity_lorne', here) or regard('verity_lorne', 'pov', 'trust') >= 30)",
+      "hard": true,
       "reveals": [
         "verity_memo_carbon"
       ]
@@ -4869,8 +4873,14 @@
       "id": "telephone_constable",
       "label": "Telephone Constable Hobbs",
       "requires": [
-        "at('hall_telephone', here)",
-        "story.phone_working",
+        {
+          "expr": "at('hall_telephone', here)",
+          "hard": true
+        },
+        {
+          "expr": "story.phone_working",
+          "hard": true
+        },
         "not story.constable_called"
       ],
       "duration": 10,
@@ -4899,8 +4909,14 @@
       "id": "splice_line",
       "label": "Splice the telephone line",
       "requires": [
-        "at(pov, 'gatehouse')",
-        "at('tool_roll', 'gatehouse')",
+        {
+          "expr": "at(pov, 'gatehouse')",
+          "hard": true
+        },
+        {
+          "expr": "at('tool_roll', 'gatehouse')",
+          "hard": true
+        },
         "story.clue_phone_fault",
         "not story.phone_working"
       ],
@@ -5091,6 +5107,31 @@
           "args": {
             "flag": "tea_brought",
             "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "open_study_safe",
+      "label": "Open the study safe",
+      "requires": [
+        "at(pov, 'study')",
+        {
+          "expr": "story.safe_open",
+          "hard": true
+        }
+      ],
+      "duration": 1,
+      "lexicon": [
+        "open the safe",
+        "open the wall safe"
+      ],
+      "observable": "tries the wall safe",
+      "effects": [
+        {
+          "type": "note",
+          "args": {
+            "text": "The safe's door swings open on its hinges."
           }
         }
       ]

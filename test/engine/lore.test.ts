@@ -1,6 +1,7 @@
 // World lore (DESIGN §4.2): a secret entry may hold the secret but needs a gate; a helper that
-// writes prose in its audience is flagged; a public entry never holds a track's truth. The lookup
-// table: its migration, its lint, additions and suggestions.
+// writes prose in its audience is flagged; a public entry never holds a track's truth; a retired
+// step named in an audience or the step pins is dropped on load (§5.2). The lookup table: its
+// migration, its lint, additions and suggestions.
 
 import { describe, expect, test } from "bun:test";
 import { blankWorld, lintWorld, migrateWorld } from "../../src/engine/authoring";
@@ -46,7 +47,7 @@ describe("world lore lint", () => {
 
   test("a helper that writes prose in a secret entry's audience is flagged; decision helpers are not", () => {
     const gate = "stage.keeper == 'hidden'";
-    expect(loreIssues(world([entry("keeper_note", { secret: true, gate, audience: ["npc.choose", "contradiction"] })]))).toEqual([]);
+    expect(loreIssues(world([entry("keeper_note", { secret: true, gate, audience: ["npc.choose", "judge"] })]))).toEqual([]);
     expect(loreIssues(world([entry("keeper_note", { secret: true, gate, audience: ["npc.choose", "brief", "choices"] })]))).toEqual([{ severity: "warning", path: "lore.keeper_note.audience", code: "prose_audience" }]);
     // A world file can name a helper this engine doesn't have.
     const odd = JSON.parse(JSON.stringify({ ...entry("keeper_note", { secret: true, gate }), audience: ["narrator"] })) as LoreEntryDef;
@@ -82,6 +83,22 @@ describe("world lore lint", () => {
     expect(loreSourceOf(old.lore.harbor?.source)).toEqual({ kind: "authored" });
     expect(loreSourceOf({ kind: "book", bookId: "b1" })).toEqual({ kind: "authored" });
     expect(loreIssues(old)).toEqual([]);
+  });
+
+  test("a secret's audience or a step's lore pins naming the retired contradiction check load without it, the rest kept, and lint clean", () => {
+    const gate = "stage.keeper == 'hidden'";
+    const current = world([entry("keeper_note", { secret: true, gate, audience: ["npc.choose", "judge"] })]);
+    current.lorePins = { characters: {}, places: {}, steps: { judge: [{ lore: "keeper_note" }] } };
+    // As an earlier build stored it: the world file names the step this engine no longer has.
+    const old = JSON.parse(JSON.stringify(current)) as WorldDoc;
+    const audience: unknown = JSON.parse('["npc.choose", "contradiction", "judge"]');
+    const pins: unknown = JSON.parse('{"contradiction": [{"lore": "keeper_note"}]}');
+    Object.assign(old.lore.keeper_note ?? {}, { audience });
+    Object.assign(old.lorePins?.steps ?? {}, pins);
+    const migrated = migrateWorld(old);
+    expect(migrated.lore.keeper_note?.audience).toEqual(["npc.choose", "judge"]);
+    expect(migrated.lorePins?.steps).toEqual({ judge: [{ lore: "keeper_note" }] });
+    expect(lintWorld(migrated, registry).filter((i) => i.path.startsWith("lore"))).toEqual([]);
   });
 });
 

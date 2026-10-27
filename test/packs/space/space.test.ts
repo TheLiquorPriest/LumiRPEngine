@@ -68,7 +68,7 @@ describe("space: routes", () => {
     expect(resolveAction(reg, w, { action: "go", params: { to: "maya" } }, createRng("g3")).failed?.code).toBe("bad_param");
   });
 
-  test("the location proposal rejects unknown places; a move no route reaches lands, unless the travel simulation is on", () => {
+  test("the location proposal rejects unknown places; a move no route reaches lands, under the travel simulation too", () => {
     const world = modernUsWorld("w", "R");
     world.realism.levels.space = 2;
     const s = startState(world);
@@ -81,8 +81,8 @@ describe("space: routes", () => {
     s.entities.you!.fields.place = "islet";
     expect(ch?.validate({ entity: "you", place: "cafe" }, reg.context(world, s))).toBeNull();
     world.mapSettings = { display: "knowledge", grid: { movement: false, sightRadius: 3 }, travelSimulation: true };
-    // A move's own refusal, never a payment's decline (`declined`): its chip ends the sentence.
-    expect(ch?.validate({ entity: "you", place: "cafe" }, reg.context(world, s))).toEqual({ code: "no_route", reason: `There's no way from The islet to ${world.places.cafe?.name}` });
+    // The story first: the travel simulation holds typed Go to the routes, never a reply's move.
+    expect(ch?.validate({ entity: "you", place: "cafe" }, reg.context(world, s))).toBeNull();
   });
 
   test("a POV stranded where no route leads home stays put through a timelapse; its routine resumes once it can get there", () => {

@@ -1686,7 +1686,7 @@
       "id": "telephone_constable",
       "label": "Telephone Constable Hobbs",
       "params": {},
-      "requires": ["at('hall_telephone', here)", "flag('phone_working')", "not flag('constable_called')"],
+      "requires": [{"expr": "at('hall_telephone', here)", "hard": true}, {"expr": "flag('phone_working')", "hard": true}, "not flag('constable_called')"],
       "outcomes": {
         "default": [
           {"type": "story.flag", "args": {"name": "constable_called", "value": true}},
@@ -1704,7 +1704,12 @@
       "id": "splice_line",
       "label": "Splice the telephone line",
       "params": {},
-      "requires": ["at(pov, 'gatehouse')", "at('tool_roll', 'gatehouse')", "flag('clue_phone_fault')", "not flag('phone_working')"],
+      "requires": [
+        {"expr": "at(pov, 'gatehouse')", "hard": true},
+        {"expr": "at('tool_roll', 'gatehouse')", "hard": true},
+        "flag('clue_phone_fault')",
+        "not flag('phone_working')"
+      ],
       "outcomes": {
         "default": [
           {"type": "story.flag", "args": {"name": "phone_working", "value": true}},
@@ -1793,6 +1798,16 @@
       "lexicon": ["make tea for mrs marsh", "sit with the cook"],
       "observable": "shares a pot of tea"
     },
+    "open_study_safe": {
+      "id": "open_study_safe",
+      "label": "Open the study safe",
+      "params": {},
+      "requires": ["at(pov, 'study')", {"expr": "flag('safe_open')", "hard": true}],
+      "outcomes": {"default": [{"type": "note", "args": {"text": "The safe's door swings open on its hinges."}}]},
+      "duration": "1",
+      "lexicon": ["open the safe", "open the wall safe"],
+      "observable": "tries the wall safe"
+    },
     "find_second_glass": {
       "id": "find_second_glass",
       "label": "Look at the drinks tray in the library",
@@ -1868,7 +1883,7 @@
       "id": "find_muddy_prints",
       "label": "Examine the floor by the garden door",
       "params": {},
-      "requires": ["at(pov, 'conservatory') and clock < 2100", "not flag('clue_muddy_prints')"],
+      "requires": [{"expr": "at(pov, 'conservatory') and clock < 2100", "hard": true}, "not flag('clue_muddy_prints')"],
       "outcomes": {
         "default": [
           {"type": "story.flag", "args": {"name": "clue_muddy_prints", "value": true}},
@@ -1887,7 +1902,7 @@
       "id": "find_ashcombe_shoes",
       "label": "Examine the brogues in Ashcombe's room",
       "params": {},
-      "requires": ["at(pov, 'upper_floor') and not at('julian_ashcombe', here)", "not flag('clue_ashcombe_shoes')"],
+      "requires": [{"expr": "at(pov, 'upper_floor') and not at('julian_ashcombe', here)", "hard": true}, "not flag('clue_ashcombe_shoes')"],
       "outcomes": {
         "default": [
           {"type": "story.flag", "args": {"name": "clue_ashcombe_shoes", "value": true}},
@@ -1939,7 +1954,7 @@
       "id": "find_tincture_bottle",
       "label": "Look inside Dr. Farrant's bag",
       "params": {},
-      "requires": ["at(pov, 'drawing_room') and clock >= 1290 and clock < 1920", "not flag('clue_tincture_bottle')"],
+      "requires": [{"expr": "at(pov, 'drawing_room') and clock >= 1290 and clock < 1920", "hard": true}, "not flag('clue_tincture_bottle')"],
       "outcomes": {
         "default": [
           {"type": "story.flag", "args": {"name": "clue_tincture_bottle", "value": true}},
@@ -1992,7 +2007,10 @@
       "id": "find_verity_memo",
       "label": "Open Verity's typewriter case",
       "params": {},
-      "requires": ["at(pov, 'upper_floor') and (not at('verity_lorne', here) or regard('verity_lorne', 'pov', 'trust') >= 30)", "not flag('clue_verity_memo')"],
+      "requires": [
+        {"expr": "at(pov, 'upper_floor') and (not at('verity_lorne', here) or regard('verity_lorne', 'pov', 'trust') >= 30)", "hard": true},
+        "not flag('clue_verity_memo')"
+      ],
       "outcomes": {
         "default": [
           {"type": "story.flag", "args": {"name": "clue_verity_memo", "value": true}},

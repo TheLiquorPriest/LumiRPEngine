@@ -65,14 +65,11 @@ export function clockPaused(world: WorldDoc, state: Readonly<WorldState>): boole
 
 /**
  * Whether a fight holds the clock: the POV is in one under way (the combat pack's `combat.engaged`),
- * and its rounds take no clock time (DESIGN §11), so no skip ahead, told or asked for, applies.
+ * and its rounds take no clock time (DESIGN §11).
  */
 export function fightHoldsClock(ctx: ReadContext): boolean {
   return optionalQuery(ctx, "combat.engaged")?.(ctx, ctx.world.pov) === true;
 }
-
-/** Why nothing skips ahead during a fight, as the player reads it. */
-export const IN_FIGHT = "a fight is under way";
 
 /** Bookkeeping that pins a fresh pause to the current scene, or clears a lifted one. */
 export function pauseBookkeeping(world: WorldDoc, state: Readonly<WorldState>): LedgerEvent[] {
@@ -146,7 +143,13 @@ const IDLE = new Set(["", "idle", "free", "home", "sleep"]);
 const SHIFT = /shift|work/i;
 
 export interface ResolvedTarget {
+  /** Where this run stops: the target, or as far as one timelapse reaches when it lies farther. */
   to: number;
+  /**
+   * The target itself when it lies farther than one timelapse reaches: the run gets that far and
+   * offers to continue.
+   */
+  goal?: number;
   label: string;
   stopWhen?: (w: Working) => boolean;
 }
@@ -235,8 +238,12 @@ export function resolveTarget(reg: Registry, world: WorldDoc, state: Readonly<Wo
     if (slotStart(cal, k) < to) to = slotStart(cal, k + 1);
   }
   if (!Number.isFinite(to) || to <= now) return { code: "past", reason: "that time has passed" };
-  if (to - now > TIME_LIMITS.timelapseMinutes) return { code: "too_long", reason: `a timelapse reaches at most ${TIME_LIMITS.timelapseMinutes / MINUTES_PER_DAY} days ahead` };
-  return { to, label, ...(stopWhen ? { stopWhen } : {}) };
+  // A target farther than one timelapse reaches is run toward in steps: this run goes as far as it
+  // reaches (to a day part's start at Calendar level 1), and its Continue carries on (DESIGN §9.2).
+  const reach = now + TIME_LIMITS.timelapseMinutes;
+  if (to <= reach) return { to, label, ...(stopWhen ? { stopWhen } : {}) };
+  const step = level <= 1 ? slotStart(cal, slotIndexAt(cal, reach)) : reach;
+  return { to: step > now ? step : reach, goal: to, label, ...(stopWhen ? { stopWhen } : {}) };
 }
 
 // ---------------------------------------------------------------- typed spans
@@ -546,7 +553,10 @@ export class TimelapseRun {
     const result: AdvanceResult = { ...this.result, to: w.state.clock, events: w.events.length - this.start, ...(stop ? { stop: stop.by === "mind" ? "interrupt" : "cap" } : {}) };
     const summary: TimelapseEvent = { type: "timelapse", from: this.from, to: result.to, target: this.target, stoppedBy: stop?.by === "mind" ? "mind" : result.stoppedBy, segment: this.opts.segment ?? 1, ...(stop?.by === "mind" ? { mind: stop.entity } : {}) };
     w.apply(summary);
-    const remaining = result.stop === "cap" ? Math.max(0, this.to - result.to) : 0;
+    // What is left of the way: what the cap or the before-the-reply clock left, and the rest of a
+    // target farther than one timelapse reaches, which the Continue carries on toward.
+    const goal = this.resolved.goal ?? this.to;
+    const remaining = result.stop === "cap" || result.stop === "target" ? Math.max(0, goal - result.to) : 0;
     const montage = buildMontage(this.reg, w.world, this.before, w.state, w.events.slice(this.start), w.state.time.montage);
     const held = this.opts.povRoutine === false ? { povRoutine: false as const } : {};
     return {
@@ -605,26 +615,24 @@ export function minimumUnitCap(world: WorldDoc, state: Readonly<WorldState>): nu
 
 export interface AdvanceOutcome {
   applied: boolean;
-  /** Why it became a Timelapse chip instead, or (`in_fight`) why it was dropped: a fight holds the clock. */
-  reason: "over_cap" | "unit_cap" | "in_fight" | null;
+  /** Why it became a Timelapse chip instead. */
+  reason: "over_cap" | "unit_cap" | null;
   chip: { kind: "timelapse_offer"; target: TimelapseTarget; overrides: Record<InterruptClass, InterruptPolicy> } | null;
 }
 
 /**
  * An extracted `time.advance` (DESIGN §9.2, §9.4): `minutes` beyond what the swipe already applied.
  * Under `capMinutes` it applies whole, with its catch-up run like a timelapse segment with every
- * interrupt class at `note`; over the cap, or when the catch-up exceeds the unit cap, nothing is
- * applied and it becomes a Timelapse chip to that time. During a fight nothing is applied and
- * nothing is offered, so no one in the fight or outside it moves.
+ * interrupt class at `note`, a fight under way or not (the story says the time passed); over the
+ * cap, or when the catch-up exceeds the unit cap, nothing is applied and it becomes a Timelapse chip
+ * to that time, which runs in steps where it lies farther than one timelapse reaches. Narrated time
+ * is never dropped.
  */
 export function applyTimeAdvance(reg: Registry, w: Working, minutes: number, opts: { runSeed: string; capMinutes: number; unitCap?: { agentDays: number; events: number } }): AdvanceOutcome {
   const target: TimelapseTarget = { type: "duration", minutes };
   const chip = { kind: "timelapse_offer" as const, target, overrides: { ...ALL_NOTE } };
   if (!(minutes > 0)) return { applied: false, reason: null, chip: null };
-  if (fightHoldsClock(w.ctx)) return { applied: false, reason: "in_fight", chip: null };
-  // Beyond the timelapse reach there is nothing to offer: a narrated "ten years later" changes nothing.
-  if (minutes > TIME_LIMITS.timelapseMinutes) return { applied: false, reason: "over_cap", chip: null };
-  if (minutes > opts.capMinutes) return { applied: false, reason: "over_cap", chip };
+  if (minutes > Math.min(opts.capMinutes, TIME_LIMITS.timelapseMinutes)) return { applied: false, reason: "over_cap", chip };
   const mark = w.mark();
   // The narration told what the POV did in the skip, so its own routine doesn't move it (DESIGN §8).
   const result = advance(reg, w, w.state.clock + minutes, { runSeed: opts.runSeed, mode: "timelapse", cause: "advance", includePov: true, povRoutine: false, interrupts: ALL_NOTE, unitCap: clampUnitCap(opts.unitCap ?? w.state.time.unitCap) });
@@ -644,9 +652,9 @@ export type ClockFix = { events: LedgerEvent[] } | Rejection;
  * The ✎ fix of the clock (DESIGN §9.2, §12): the clock set to `local`, a date and time of day in the
  * world's calendar (`YYYY-MM-DD HH:MM`) at the POV's place, as the HUD reads it. Calendar & time on.
  * - Later: the time passes as an applied `time.advance` to then does (L28): the interval run whole
- *   with every interrupt class at `note`, and no Montage. A fight holds the clock, as it does for a
- *   narrated skip, and past the unit cap nothing applies: a Timelapse gets there in steps. The
- *   events are recorded as a timelapse's are, coarsened, and as one unit kept or dropped whole.
+ *   with every interrupt class at `note`, and no Montage, a fight under way or not. Past the unit cap
+ *   nothing applies: a Timelapse gets there in steps. The events are recorded as a timelapse's are,
+ *   coarsened, and as one unit kept or dropped whole.
  * - Earlier: the clock goes back (`engine.rewind`), never before the story starts. Nothing that ran
  *   up to where it stood is undone, and none of it runs again (L48).
  */
@@ -659,7 +667,6 @@ export function clockFix(reg: Registry, world: WorldDoc, state: Readonly<WorldSt
   const w = new Working(reg, world, state);
   if (to < state.clock) return w.apply({ type: ENGINE_EVENTS.rewind, data: { minutes: state.clock - to } }) ?? { events: [...w.events] };
   const advanced = applyTimeAdvance(reg, w, to - state.clock, { runSeed, capMinutes: TIME_LIMITS.timelapseMinutes });
-  if (advanced.reason === "in_fight") return { code: "in_fight", reason: `${IN_FIGHT}, and its rounds take no clock time` };
   if (advanced.reason === "unit_cap") return { code: "unit_cap", reason: "too much happens before then to run in one go; a Timelapse to that time gets there in steps" };
   if (advanced.reason === "over_cap") return { code: "too_long", reason: `the clock moves on at most ${TIME_LIMITS.timelapseMinutes / MINUTES_PER_DAY} days at a time` };
   if (!advanced.applied) return { events: [] };

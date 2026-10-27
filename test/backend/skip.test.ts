@@ -20,6 +20,7 @@ import { toChain } from "../../src/backend/ledger-io";
 import { readRun } from "../../src/backend/runtime";
 import { capBeats, runSkip, scanBeats, type Beat, type BeatMinds } from "../../src/backend/skip";
 import { ALL_PACKS } from "../../src/packs/index";
+import { encounterOf } from "../../src/packs/combat/core/model";
 import { modernUsWorld } from "../packs/riverton";
 import { fold, startState } from "../packs/support";
 import { decodeContextView } from "../../src/frontend/play/context";
@@ -304,7 +305,7 @@ describe("time skips", () => {
     expect(out.chip).toEqual({ kind: "continue_timelapse", target: { type: "duration", minutes: state.clock + target.minutes - (beats[1] ?? 0) }, remaining: state.clock + target.minutes - (beats[1] ?? 0) });
   });
 
-  test("no skip runs while a fight holds the clock: no one is asked, and the turn notes why", async () => {
+  test("a skip asked for while a fight holds the clock ends the fight, and runs from there: its beats' minds are asked, and the clock moves on", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     rig.host.quietReply = plainly;
     const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
@@ -322,15 +323,19 @@ describe("time skips", () => {
     rig.body(await rig.send({ type: "lre.action", chatId, action: "fight", params: { target: "danny_okafor" }, source: "palette", now: true }));
     const g = await rig.host.start(chatId, { type: "normal" });
     await rig.host.finish(g, "Danny squares up to you.");
-    const before = (await folded(rig, chatId)).state.clock;
+    const fighting = await folded(rig, chatId);
+    expect(encounterOf(fighting.state)).not.toBeNull();
     const calls: { at: number; who: string[]; reason: string }[] = [];
     rig.rt.beatMinds = fakeMinds(calls, () => false);
     await skipDays(rig, chatId, 2);
     const after = await folded(rig, chatId);
-    expect(calls).toEqual([]);
-    expect(JSON.stringify(after.record?.events)).toContain("Timelapse not run: a fight is under way");
-    expect(after.record?.events.some((e) => e.type === "minds.skip" || e.type === "timelapse")).toBe(false);
-    expect(after.state.clock).toBe(before);
+    expect(encounterOf(after.state)).toBeNull();
+    expect(ofType(after.record?.events, "combat.end").map((e) => ("data" in e ? e.data.reason : null))).toEqual(["skip"]);
+    expect(JSON.stringify(after.record?.events)).not.toContain("Timelapse not run");
+    expect(after.record?.events.some((e) => e.type === "minds.skip")).toBe(true);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(after.state.clock).toBeGreaterThan(fighting.state.clock);
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 
   test("the minds at a skip's end are the turn's own: a model's interrupt there is no stop and isn't recorded", async () => {

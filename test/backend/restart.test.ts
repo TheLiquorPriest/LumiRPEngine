@@ -1,7 +1,6 @@
-// What survives a server or extension restart (issue #15): jobs and their proposals, the decline
-// notes for the next turn's Outcome slot, the inspector's history and delivery badges, and the
-// call meter. Each test restarts the runtime, job runner and stores over the same fake-host
-// storage, and checks the damaged-file path of each store.
+// What survives a server or extension restart (issue #15): jobs and their proposals, the
+// inspector's history and delivery badges, and the call meter. Each test restarts the runtime, job
+// runner and stores over the same fake-host storage, and checks the damaged-file path of each store.
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
@@ -14,19 +13,12 @@ import { CallMeter, METER_PATH } from "../../src/backend/steps";
 import { CORRUPT_SUFFIX } from "../../src/backend/stored-json";
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";
-import { POV } from "../support/test-pack";
-
-const EXTRACT_MARK = "propose concrete state changes";
 
 const lore = (comment: string, content: string) => ({ comment, content, keys: [comment.toLowerCase()], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} });
 
 async function jobsOf(rig: Rig, worldId: string): Promise<JobSummary[]> {
   const body = rig.body(await rig.send({ type: "lre.job", op: "list", worldId }));
   return Array.isArray(body.jobs) ? (body.jobs as JobSummary[]) : [];
-}
-
-function outcomeText(rig: Rig): string {
-  return rig.host.section("Outcome");
 }
 
 /** Lets the queued storage work run (the fake host's storage settles on microtasks) until `ready` holds. */
@@ -115,35 +107,6 @@ describe("a restart", () => {
     expect((await rig.jobs.list(worldId, rig.host.userId)).map((j) => j.jobId)).toEqual([...ids.slice(-JOBS_KEPT + 1), running]);
   });
 
-  test("a decline note from the last reply still reaches the next turn's Outcome slot, and only that turn's", async () => {
-    const rig = new Rig();
-    rig.host.quietReply = (req) => (req.messages[0]?.content.includes(EXTRACT_MARK) ? JSON.stringify({ proposals: [{ type: "purchase", payer: POV, item: "lamp", price: 99999 }] }) : "{}");
-    const chatId = await rig.worldChat();
-    await rig.turn(chatId, "I buy the lamp.", "She rings up the lamp.");
-    expect((await rig.rt.view(chatId, rig.host.userId)).chips.some((c) => c.kind === "decline")).toBe(true);
-
-    const after = rig.restart();
-    after.host.quietReply = () => "{}";
-    after.host.sendUser(chatId, "I look around.");
-    await after.host.settle();
-    const g = await after.host.start(chatId, { type: "normal" });
-    expect(outcomeText(after)).toContain("payment for lamp was declined (Sam doesn't have $99999)");
-    await after.host.finish(g, "Nothing much.");
-    // A swipe of that turn is told too.
-    const swipe = await after.host.start(chatId, { type: "swipe" });
-    expect(outcomeText(after)).toContain("payment for lamp was declined");
-    await after.host.finish(swipe, "Still nothing much.");
-    // Once a later message has committed and another follows, the note is gone, across a restart too.
-    const later = after.restart();
-    later.host.quietReply = () => "{}";
-    later.host.sendUser(chatId, "I wait.");
-    await later.host.settle();
-    const g2 = await later.host.start(chatId, { type: "normal" });
-    expect(outcomeText(later)).not.toContain("lamp");
-    await later.host.finish(g2, "Time passes.");
-    expect(later.rt.ledger.errors).toEqual([]);
-  });
-
   test("the inspector's history and delivery badges are still there, and the next turn adds to them", async () => {
     const rig = new Rig({ shipped: true });
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
@@ -219,19 +182,17 @@ describe("a restart", () => {
 });
 
 describe("damaged files", () => {
-  test("a damaged jobs, Outcome notes, inspector or call meter file is set aside as .corrupt-<time> with a warning, and a fresh one is used", async () => {
+  test("a damaged jobs, inspector or call meter file is set aside as .corrupt-<time> with a warning, and a fresh one is used", async () => {
     const rig = new Rig();
     const user = rig.host.userId;
     const chatId = "chat-1";
     const damaged: [string, string][] = [
       [JOBS_PATH, "{\"v\":1,\"jobs\":"],
-      [`${runDir(chatId)}outcome-notes.json`, "{\"notes\":[]}"],
       [`${runDir(chatId)}inspector.json`, "{not json"],
       [METER_PATH, "{\"v\":1,\"turns\":[],\"current\":{\"calls\":-1}}"],
     ];
     for (const [path, text] of damaged) await rig.host.storage.write(path, text, user);
     expect(await rig.jobs.list("w_any", user)).toEqual([]);
-    expect(await rig.rt.outcomeNotes.list(chatId, user)).toEqual([]);
     expect((await rig.rt.inspector.load(chatId, user)).records).toEqual([]);
     await rig.rt.meter.ready(user);
     expect(rig.rt.meter.view(user).turn).toEqual({ calls: 0, tokens: 0, ms: 0, lookups: 0 });

@@ -264,15 +264,13 @@ describe("life states: who knows", () => {
     expect(playerLines(reg, w.world, w.state, YOU, w.events.slice(seen, seen + 1))).toEqual(["Jordan Price lies dead"]);
   });
 
-  test("a reply can't carry a body somewhere, and its refusal says nothing of why", () => {
+  test("a reply carries a body where it tells, as it would anyone", () => {
     const w = riverton(1);
     w.apply({ type: "link", rel: "knows", from: YOU, to: "jordan" });
     life(w, { entity: "jordan", to: "dead" });
     const [outcome] = applyProposals(reg, w, [{ type: "location", entity: "jordan", place: "apartment" }], "seed", "run");
-    expect(outcome?.rejection).toBeDefined();
-    expect((outcome?.rejection?.reason ?? "").toLowerCase()).not.toContain("dead");
-    expect(placeOfEntity(w.state, "jordan")).toBe("office");
-    expect(lifeKnownTo(w.state, "jordan", YOU)).toBe("alive");
+    expect(outcome?.rejection).toBeNull();
+    expect(placeOfEntity(w.state, "jordan")).toBe("apartment");
   });
 });
 

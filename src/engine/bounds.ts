@@ -1,11 +1,12 @@
 // One bounds mechanism (DESIGN §9.4, §11; D4). Every model-proposed change meets `{maxDelta, mode}`
-// bounds: the field's own bound, the proposal type's mode and any channel cap. The most
-// restrictive applies: `never` > `confirm` > `auto`, and the smallest `maxDelta`. Locked and
-// derived fields are `never`.
+// bounds: the field's own bound and the proposal type's mode, with the player's own max delta. The
+// most restrictive applies: `never` > `confirm` > `auto`, and the smallest `maxDelta`. Locked and
+// derived fields are `never`, and a change stays inside the field's range. No pack sets a max delta:
+// the story's change goes as far as it tells, unless the player or the world's author bounds it.
 //
 // The proposal type's mode is resolved by the backend (`settings-store.effectiveMode`: the
 // player's pin, then the mode learned on the turn's connection, then the D4 cold-start default)
-// and passed in; this module combines it with the field and the channel.
+// and passed in; this module combines it with the field.
 
 import type { JsonValue } from "../shared/json";
 import type { BoundMode, EntityId } from "../shared/ids";
@@ -49,8 +50,6 @@ export interface BoundPolicy {
   typeMode: BoundMode | null;
   /** A per-type maxDelta the player set, if any. */
   typeMaxDelta?: number;
-  /** The channel's own cap (DESIGN §9.4: regard per pair per turn, condition and quantities per field). */
-  channelCap?: number;
 }
 
 export interface BoundedProposal {
@@ -78,7 +77,6 @@ export function boundProposal(reg: Registry, world: WorldDoc, state: Readonly<Wo
   const bound = combineBounds(
     def?.bound,
     policy.typeMode ? { mode: policy.typeMode, ...(policy.typeMaxDelta !== undefined ? { maxDelta: policy.typeMaxDelta } : {}) } : undefined,
-    policy.channelCap !== undefined ? { mode: "auto", maxDelta: policy.channelCap } : undefined,
     locked ? { mode: "never" } : undefined,
   );
   let capped = false;

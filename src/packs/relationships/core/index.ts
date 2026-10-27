@@ -71,8 +71,6 @@ export const APPRAISALS: Readonly<Record<string, Readonly<Record<string, number>
 /** Half-life of regard decay at level 4, in days (world config `halfLifeDays`). */
 export const DEFAULT_HALF_LIFE_DAYS = 30;
 const HISTORY = 8;
-/** The most one reply's extracted regard may move an axis of a pair, net across its proposals (DESIGN §9.4); each proposal is clamped to it too. */
-export const REGARD_CHANNEL_CAP = 10;
 /** A chat's time: the stated length, else a quarter of an hour. */
 const CHAT_FOR = "minutes > 0 ? minutes : 15";
 
@@ -376,7 +374,8 @@ export const relationshipsPack: PackDef = {
         if (typeof p.axis === "string" && !axesOf(ctx).some((a) => a.id === p.axis)) return reject("bad_axis", `no regard axis ${p.axis}`);
         return null;
       },
-      toEffects: (p) => [{ type: "relationships.adjust", args: { from: strOf(p.from), to: strOf(p.to), ...(typeof p.axis === "string" ? { axis: p.axis } : {}), delta: Math.max(-REGARD_CHANNEL_CAP, Math.min(REGARD_CHANNEL_CAP, numOf(p.delta))), why: strOf(p.why, "narrated") } }],
+      // As far as the story says; each axis stays inside its range (`appraise`).
+      toEffects: (p) => [{ type: "relationships.adjust", args: { from: strOf(p.from), to: strOf(p.to), ...(typeof p.axis === "string" ? { axis: p.axis } : {}), delta: numOf(p.delta), why: strOf(p.why, "narrated") } }],
     });
 
     r.lint({

@@ -2,9 +2,11 @@
 // routes that section to its outlet twin for the generation, while the world's placement stands
 // otherwise; switched-off "RPEngine · <step>" blocks are appended to that helper's prompt as style
 // and rules (notes skipped, macros never resolved, length bounded, read once per preset revision);
-// "RPEngine · narrator" reaches the narrator in world chats; Add RPEngine blocks fills in the rest.
+// every world-chat reply gets the narrator rules, secrecy and the order of authority, and "RPEngine ·
+// narrator" follows them as the player's own; Add RPEngine blocks fills in the rest.
 
 import { describe, expect, test } from "bun:test";
+import { NARRATOR_AUTHORITY, NARRATOR_SECRECY, PRESET_RULES_LEAD } from "../../src/backend/book";
 import { GUIDANCE_MAX_CHARS } from "../../src/backend/preset-binding";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { isRecord } from "../../src/shared/json";
@@ -90,20 +92,38 @@ describe("the preset's guidance", () => {
     expect(rig.host.blockReads).toBe(2);
   });
 
-  test("RPEngine · narrator reaches the narrator in world chats: before the character, or at {{outlet::lre_narrator}}", async () => {
+  test("every world-chat reply gets the narrator rules, with secrecy and the order of authority, before the character, with no preset rules of its own", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const rules = await entryWith(rig, chatId, "narrator", "rules");
+    await rig.turn(chatId, "I look around.", "Quiet.");
+    const content = rig.host.assembled.find((e) => e.id === rules)?.content ?? "";
+    expect(content.startsWith("[Narrator rules]\n")).toBe(true);
+    expect(content).toContain(NARRATOR_SECRECY);
+    expect(content).toContain(NARRATOR_AUTHORITY);
+    // It stays in the book only for the reply that took it.
+    expect(rig.host.storedEntry(rules)).toMatchObject({ disabled: true, content: "" });
+  });
+
+  test("RPEngine · narrator reaches the narrator in world chats, after secrecy and the order of authority, as the player's: before the character, or at {{outlet::lre_narrator}}", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     const rules = await entryWith(rig, chatId, "narrator", "rules");
     const outlet = await entryWith(rig, chatId, "narrator", "outlet");
-    rig.host.presetBlocks = [block("RPEngine · narrator", "Trust the Outcome.", false)];
+    rig.host.presetBlocks = [block("RPEngine · narrator", "Keep replies under 300 words.", false)];
     await rig.turn(chatId, "I look around.", "Quiet.");
     const at = (id: string) => rig.host.assembled.find((e) => e.id === id);
-    expect(at(rules)?.content).toBe("[Narrator rules]\nTrust the Outcome.");
+    const told = (content: string | undefined): boolean => {
+      if (content === undefined || !content.endsWith(`\n${PRESET_RULES_LEAD}\nKeep replies under 300 words.`)) return false;
+      const where = [NARRATOR_SECRECY, NARRATOR_AUTHORITY, PRESET_RULES_LEAD].map((part) => content.indexOf(part));
+      return where.every((i, n) => i >= 0 && i > (n === 0 ? -1 : (where[n - 1] ?? Infinity)));
+    };
+    expect(told(at(rules)?.content)).toBe(true);
     expect(at(outlet)).toBeUndefined();
     rig.host.presetBlocks = [...rig.host.presetBlocks, block("Rules", "{{outlet::lre_narrator}}", true)];
     rig.host.presetRevision++;
     await rig.turn(chatId, "I wait.", "Quiet.");
-    expect(at(outlet)?.content).toBe("[Narrator rules]\nTrust the Outcome.");
+    expect(told(at(outlet)?.content)).toBe(true);
     expect(at(rules)).toBeUndefined();
   });
 
@@ -118,7 +138,7 @@ describe("the preset's guidance", () => {
     expect(names.slice(0, 3)).toEqual(["Main", "RPEngine · judge", "RPEngine"]);
     expect(rig.host.presetBlocks[2]?.marker).toBe("category");
     const added = rig.host.presetBlocks.slice(3);
-    expect(added.map((b) => b.name)).toEqual(["interpret", "extract", "brief", "outline", "choices", "npc.choose", "contradiction", "puzzle.answer", "mind", "memory", "skip", "consolidate", "narrator"].map((t) => `RPEngine · ${t}`));
+    expect(added.map((b) => b.name)).toEqual(["interpret", "extract", "brief", "outline", "choices", "npc.choose", "puzzle.answer", "mind", "memory", "skip", "consolidate", "narrator"].map((t) => `RPEngine · ${t}`));
     expect(added.every((b) => !b.enabled && b.content.split("\n").every((line) => line === "" || line.startsWith("//")))).toBe(true);
     // One write of the preset, however many blocks it adds.
     expect(rig.host.presetWrites).toBe(1);

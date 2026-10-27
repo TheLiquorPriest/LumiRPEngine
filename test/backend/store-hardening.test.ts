@@ -1,6 +1,7 @@
-// Stored files that are damaged inside: wrong-typed chips are dropped, set-aside copies never
-// overwrite each other, a journal with junk entries is set aside and the player told, a damaged
-// record on a message is skipped and the player told, and metadata writes never loop.
+// Stored files that are damaged inside: wrong-typed chips are dropped, and so are an earlier build's
+// chips that nothing acts on now, with its Outcome notes; set-aside copies never overwrite each
+// other, a journal with junk entries is set aside and the player told, a damaged record on a
+// message is skipped and the player told, and metadata writes never loop.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
@@ -34,6 +35,32 @@ describe("stored chips", () => {
     const ids = view.chips.map((c) => c.id);
     expect(ids).toContain("decline:good");
     for (const b of bad) expect(ids).not.toContain(b.id);
+  });
+
+  test("an earlier build's chips that nothing acts on now are dropped as the file loads, and its Outcome notes go", async () => {
+    const rig = new Rig();
+    const user = rig.host.userId;
+    const worldId = await rig.newWorld();
+    const chatId = rig.host.createChat("Morning, Sam.");
+    const messageId = (await rig.host.chats.messages(chatId, user))[0]?.id ?? "";
+    const receipt = { id: "decline:receipt", kind: "decline", messageId, label: "Buy: declined", detail: "No money.", actions: [], expires: "next_send", payload: {} };
+    const retired = [
+      { ...receipt, id: "unfit:asked", label: "Fix the sink: declined", actions: [{ id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }] },
+      { ...receipt, id: "decline:pay", label: "Bought a lamp: couldn't pay", actions: [{ id: "other", label: "Pay another way", style: "primary" }, { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }] },
+      { ...receipt, id: "unpriced:asked", label: "Bought a lamp: no price", actions: [{ id: "dismiss", label: "Dismiss" }] },
+      { ...receipt, id: "contradiction:asked", kind: "contradiction", label: "The reply contradicts the facts", actions: [{ id: "renarrate", label: "Re-narrate", style: "primary" }, { id: "dismiss", label: "It's fine" }] },
+    ];
+    const notes = [`${runDir(chatId)}outcome-notes.json`, `${runDir(chatId)}outcome-notes.json${CORRUPT_SUFFIX}0`, `${runDir("another_chat")}outcome-notes.json`];
+    await rig.host.storage.write(`${runDir(chatId)}chips.json`, JSON.stringify([...retired, receipt]), user);
+    for (const path of notes) await rig.host.storage.write(path, "[]", user);
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const ids = (await rig.rt.view(chatId, user)).chips.map((c) => c.id);
+    expect(ids).toContain("decline:receipt");
+    for (const c of retired) expect(ids).not.toContain(c.id);
+    const stored: unknown = JSON.parse((await rig.host.storage.read(`${runDir(chatId)}chips.json`, user)) ?? "[]");
+    expect(stored).toContainEqual(receipt);
+    for (const c of retired) expect(stored).not.toContainEqual(c);
+    for (const path of notes) expect([path, await rig.host.storage.read(path, user)]).toEqual([path, null]);
   });
 });
 

@@ -9,7 +9,7 @@ import { defaultAdjudication, readAdjudication } from "../shared/adjudication";
 import { DOMAINS } from "../shared/ids";
 import type { LintIssue } from "../shared/protocol";
 import type { CheckDef, EffectSpec, Expr, ProgressionDef, WorldDoc } from "../shared/world";
-import { EFFECT_ONLY_FUNCTIONS, objectiveWhen } from "../shared/world";
+import { EFFECT_ONLY_FUNCTIONS, objectiveWhen, requirementExpr } from "../shared/world";
 import { lintAdjudication } from "./adjudication";
 import { diceDistribution, naturalDie, parseDice } from "./dice";
 import { callsIn, compile, type FormulaCall } from "./expr";
@@ -106,7 +106,7 @@ export function exprSites(world: WorldDoc): ExprSite[] {
     }
   }
   for (const [id, a] of Object.entries(world.actions)) {
-    a.requires.forEach((r, i) => push(`actions.${id}.requires.${i}`, r));
+    a.requires.forEach((r, i) => push(`actions.${id}.requires.${i}`, requirementExpr(r)));
     push(`actions.${id}.duration`, a.duration);
     push(`actions.${id}.activity.until`, a.activity?.until);
     if (typeof a.check === "object" && a.check !== null) out.push(...checkSites(`actions.${id}.check`, a.check));

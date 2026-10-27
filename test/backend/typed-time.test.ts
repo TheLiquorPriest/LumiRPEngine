@@ -1,7 +1,7 @@
 // A typed skip to a stated day and time (DESIGN §9.2, §24.7): `interpret` is told the day and time as
 // the HUD shows them and names the moment as "YYYY-MM-DD HH:MM"; the engine reads it with the world's
-// calendar into the timelapse's `at` target, refuses one that has passed or lies beyond its reach, and
-// with minds on runs it as a time skip to exactly then.
+// calendar into the timelapse's `at` target, refuses one that has passed, runs toward one beyond its
+// reach in steps, and with minds on runs it as a time skip to exactly then.
 
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
@@ -12,6 +12,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { resolveTarget } from "../../src/engine/time";
+import { TIME_LIMITS } from "../../src/engine/time-limits";
 import { toChain } from "../../src/backend/ledger-io";
 import { interpretedTarget } from "../../src/backend/runtime";
 import type { BeatMinds } from "../../src/backend/skip";
@@ -57,12 +58,16 @@ describe("a stated day and time", () => {
     expect(interpretedTarget({ at: "2026-09-18 18:00" }, world, state, "")).toEqual({ type: "at", at: clock("2026-09-18 19:00") });
   });
 
-  test("a time that has passed or lies beyond a timelapse's reach is refused with a note", () => {
-    const { world, state } = monday();
+  test("a time that has passed is refused with a note; one beyond a timelapse's reach is run toward one reach at a time", () => {
+    const { world, clock, state } = monday();
     const past = interpretedTarget({ at: "2026-09-11 18:00" }, world, state, "Skip ahead to Friday at 6 PM.");
     expect(past && resolveTarget(reg, world, state, past)).toEqual({ code: "past", reason: "that time has passed" });
     const far = interpretedTarget({ at: "2027-10-01 09:00" }, world, state, "");
-    expect(far && resolveTarget(reg, world, state, far)).toMatchObject({ code: "too_long", reason: "a timelapse reaches at most 366 days ahead" });
+    const resolved = far && resolveTarget(reg, world, state, far);
+    if (!resolved || "code" in resolved) throw new Error("the far target was refused");
+    expect(resolved.goal).toBe(clock("2027-10-01 09:00"));
+    expect(resolved.to).toBeGreaterThan(state.clock);
+    expect(resolved.to - state.clock).toBeLessThanOrEqual(TIME_LIMITS.timelapseMinutes);
   });
 
   test("text that isn't a day and time the calendar has is no stated time", () => {

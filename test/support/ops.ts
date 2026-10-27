@@ -19,8 +19,9 @@ import { hashJson } from "../../src/shared/hash";
 import type { ChatId } from "../../src/shared/ids";
 import { runDir } from "../../src/shared/ids";
 import { hasOwn } from "../../src/shared/json";
-import type { EventRef, HeldWrite, LedgerEvent, Marker, MarkerBody, MessageLedger, Rec, Tombstone, UpgradePicks } from "../../src/shared/ledger";
+import type { EventRef, HeldWrite, LedgerEvent, Marker, MarkerBody, MessageLedger, PostEntry, Rec, Tombstone, UpgradePicks } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE, ROOT_PATH } from "../../src/shared/ledger";
+import type { EditOp } from "../../src/shared/protocol";
 import { decodeLedger, encodeLedger, toChain } from "../../src/backend/ledger-io";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { startMarkersFrom } from "../../src/backend/start-markers";
@@ -51,13 +52,15 @@ export type Op =
   | { op: "import" }
   /**
    * `gm`: a GM-style fix instead (a money correction, a relation added or removed, a grouped edit),
-   * picked by its value; `open`: a ✎ cash fix on Dev instead, which opens his money first while it
-   * isn't; `life`: a GM life edit instead (a state set, someone told, or both as one unit); `mind`:
-   * a GM minds control instead (a pin, a refresh, a plan added or closed).
+   * picked by its value; `asked`: a GM edit as the GM view writes it instead, with its request (the
+   * same kinds, `gmEditOps`), not written when the head refuses it; `open`: a ✎ cash fix on Dev
+   * instead, which opens his money first while it isn't; `life`: a GM life edit instead (a state set,
+   * someone told, or both as one unit); `mind`: a GM minds control instead (a pin, a refresh, a plan
+   * added or closed).
    */
-  | { op: "write"; kind: number; a: number; b: number; gm?: number; open?: number; life?: number; mind?: number }
-  /** A GM-style fix on the head (with `open`, a ✎ cash fix on Dev; with `life`, a GM life edit), then a Re-run of the head with any reply (L43). */
-  | { op: "fixRerun"; gm: number; a: number; reply: number; open?: number; opens?: number; life?: number }
+  | { op: "write"; kind: number; a: number; b: number; gm?: number; asked?: number; open?: number; life?: number; mind?: number }
+  /** A GM-style fix on the head (with `asked`, a GM edit with its request; with `open`, a ✎ cash fix on Dev; with `life`, a GM life edit), then a Re-run of the head with any reply (L43). */
+  | { op: "fixRerun"; gm: number; a: number; reply: number; asked?: number; open?: number; opens?: number; life?: number }
   | { op: "dryRun" }
   | { op: "restart" }
   | { op: "clobber"; at: number; echo: boolean }
@@ -67,7 +70,13 @@ export type Op =
   /** An Upgrade with picks (the definition merge) to one of the revisions, `picks` choosing them. */
   | { op: "upgrade"; to: number; picks: number }
   /** The chat as an earlier build wrote it from here (`Runner.earlierBuildStarts`): first in a sequence, if at all. */
-  | { op: "earlierBuild" };
+  | { op: "earlierBuild" }
+  /**
+   * A GM edit with its request on the head (`gmEditOps`), then an edit of an earlier reply and its
+   * Re-read: the head folds behind the changed reply, as a rebased view, where the edit is worked out
+   * again from its request (DESIGN §7).
+   */
+  | { op: "askedEarlier"; asked: number; a: number; at: number; text: number };
 
 const USER_TEXTS = ["buy:map:30", "buy:lamp:20", "buy:rope:90", "use:map", "use:lamp", "use:rope", "earn:15", "roll", "look around"];
 const REPLIES = ["Okay.", "You find coins. [found:5]", "The lamp slips away. [lose:lamp]", "A windfall! [found:40]", "You drop the map. [lose:map]", "Nothing happens."];
@@ -180,6 +189,23 @@ function gmFix(which: number, x: number): LedgerEvent[] {
   ];
 }
 
+/**
+ * A GM edit's operations as the GM view sends them (`lre.edit`), the kinds `gmFix` writes as events:
+ * a money correction out of Sam's account, Sam's acquaintance with Dev begun or ended, or ended
+ * with a mood. Resolved again wherever what comes before them changed, an unlink of what is gone
+ * is passed over and the rest still lands.
+ */
+function gmEditOps(which: number, x: number): EditOp[] {
+  const knows = { rel: "knows", from: POV, to: "dev" };
+  if (which < 0.25) return [{ op: "adjust", account: POV, cents: -pick([20, 60, 120], x) }];
+  if (which < 0.5) return [{ op: "link", ...knows }];
+  if (which < 0.75) return [{ op: "unlink", ...knows }];
+  return [
+    { op: "unlink", ...knows },
+    { op: "set", entity: POV, field: "mood", value: pick(["calm", "tense"], x) },
+  ];
+}
+
 /** Starting markers as an earlier build journaled them: each one the marker check clamps, as the world writes it. */
 function writtenStarts(markers: readonly Marker[], raws: readonly MarkerBody[]): Marker[] {
   return markers.map((mk) => {
@@ -243,9 +269,49 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     // Minds' turns and GM controls come last, from their own stream, so everything before runs as before.
     const minds = rng.fork("minds");
     ops.push(...generateMinds(minds, 1 + Math.floor(minds.next() * 8)));
+    // GM edits that keep their request, and what moves them onto other views, after those, from their own stream.
+    const asked = rng.fork("asked");
+    ops.push(...generateAsked(asked, 1 + Math.floor(asked.next() * 14)));
   }
   // Drawn from a stream of its own, so the sequence is otherwise as before.
   if (depth === 0 && rng.fork("earlier-build").next() < 0.25) ops.unshift({ op: "earlierBuild" });
+  return ops;
+}
+
+/**
+ * GM edits that keep their request (DESIGN §7, P2): written on the head as the GM view writes them,
+ * held through replies in flight, carried by Re-runs, and left behind an earlier reply edited and
+ * read again; and around them the turns, swipes and user edits with their Keep that put the records
+ * they sit on behind a changed story, where each is worked out again from its request. It starts by
+ * settling a pause an earlier part left, since a paused chat refuses every edit.
+ */
+function generateAsked(rng: Rng, length: number): Op[] {
+  const ops: Op[] = [];
+  const r = (): number => rng.next();
+  const opens = rng.fork("opens");
+  const removals = rng.fork("removals");
+  ops.push({ op: "write", kind: 0.62 + r() * 0.1, a: r(), b: r() });
+  for (let i = 0; i < length; i++) {
+    const roll = r();
+    if (roll < 0.2) ops.push({ op: "write", kind: r(), a: r(), b: r(), asked: r() });
+    else if (roll < 0.36) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: false, ...(r() < 0.35 ? { money: r() } : {}) });
+    else if (roll < 0.52) ops.push({ op: "askedEarlier", asked: r(), a: r(), at: r(), text: r() });
+    else if (roll < 0.58) ops.push({ op: "editAssistant", at: r() * 0.8, text: r() });
+    // A Re-read, of an edited reply when there is one (`writeFor`).
+    else if (roll < 0.64) ops.push({ op: "write", kind: 0.89 + r() * 0.035, a: r(), b: r() });
+    else if (roll < 0.7) ops.push({ op: "navigate", at: r() * 0.8, swipe: r() });
+    else if (roll < 0.74) ops.push({ op: "addSwipe", at: r() * 0.8, text: r() });
+    else if (roll < 0.79) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5 });
+    else if (roll < 0.86) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r(), asked: r() });
+    else if (roll < 0.89) ops.push({ op: "editUser", at: r(), text: r() });
+    // Keep (with a conversion when something dropped) or Discard.
+    else if (roll < 0.94) ops.push({ op: "write", kind: 0.62 + r() * 0.23, a: r(), b: r() });
+    else {
+      // The same edit twice while a reply streams, at times: the second lands already so, kept with its request alone.
+      const asked: Op = { op: "write", kind: r(), a: r(), b: r(), asked: r() };
+      ops.push({ op: "inFlight", type: r(), inner: [asked, ...(r() < 0.5 ? [asked] : []), ...generateInner(rng, Math.floor(r() * 2), opens, removals)], stop: r() < 0.25, reply: r() });
+    }
+  }
   return ops;
 }
 
@@ -564,6 +630,19 @@ export class Runner {
         this.removed.push({ messageId: target.id, swipeId });
         return;
       }
+      case "askedEarlier": {
+        const earlier = this.earlierAssistant(op.at);
+        if (!earlier) return;
+        const w = await this.h.gmEdit(chat, `w${++this.ids}`, gmEditOps(op.asked, op.a));
+        if (w) await this.h.write(chat, w);
+        await this.keepsWorld(async () => {
+          host.editMessage(chat, earlier.id, `${pick(EDITS, op.text)} (${++this.ids})`);
+          await host.settle();
+        });
+        const edited = this.messages().find((m) => m.id === earlier.id);
+        if (edited) await this.h.write(chat, { kind: "reread", id: `w${++this.ids}`, messageId: edited.id, swipeId: edited.swipeId });
+        return;
+      }
       case "editAssistant": {
         const target = this.editable().length > 0 ? pick(this.editable(), op.at) : undefined;
         if (!target) return;
@@ -633,7 +712,9 @@ export class Runner {
       case "fixRerun": {
         const head = this.head();
         if (!head || this.assistants().length < 2) return;
-        await this.h.write(chat, { kind: "post", id: `w${++this.ids}`, target: "head", entry: { kind: "fix", events: op.open !== undefined ? await this.devCashFix(op.open) : op.life !== undefined ? pick(LIFE_FIXES, op.life) : gmFix(op.gm, op.a) } });
+        const fix: HeldWrite | null = op.asked !== undefined ? await this.h.gmEdit(chat, `w${++this.ids}`, gmEditOps(op.asked, op.a)) : { kind: "post", id: `w${++this.ids}`, target: "head", entry: { kind: "fix", events: op.open !== undefined ? await this.devCashFix(op.open) : op.life !== undefined ? pick(LIFE_FIXES, op.life) : gmFix(op.gm, op.a) } };
+        if (!fix) return;
+        await this.h.write(chat, fix);
         const core = await this.h.core(chat);
         const before = structuredClone(core.journal.messages[head.id]?.ledger);
         const tombstones = structuredClone(core.journal.tombstones);
@@ -891,7 +972,9 @@ export class Runner {
   /**
    * L11: a Re-narrate folds as its source up to the reply (same seed, `pre` and `markersApplied`);
    * its reply's read follows `pre` in its own events, as any turn's does; its copies are the source's
-   * live fixes and materializations with their seqs, anchored at the new record's path. It falls
+   * live fixes and materializations with their seqs, anchored at the new record's path. A GM edit or
+   * ✎ fix that keeps its request is worked out again after the new read (DESIGN §7): its copy keeps
+   * the request, with whatever events that gives, and one already so there is left out. It falls
    * back to a Re-run only when the source can't be reproduced (no planned source, a pause, or a
    * `pre` event that no longer validates).
    */
@@ -925,7 +1008,8 @@ export class Runner {
     const sourcePosts = new Map(source.post.map((p) => [p.seq, p]));
     for (const p of made.post) {
       const original = sourcePosts.get(p.seq);
-      if (!original || (p.kind !== "fix" && p.kind !== "materialize") || original.kind !== p.kind || strippedFrom(original.events, p.events) === null) throw new InvariantError("L11", `${chat}/${messageId}: post ${p.seq} is not a copy of a source fix or materialization`);
+      const asked = original?.edit !== undefined && p.edit !== undefined && hashJson(p.edit) === hashJson(original.edit);
+      if (!original || (p.kind !== "fix" && p.kind !== "materialize") || original.kind !== p.kind || (!asked && strippedFrom(original.events, p.events) === null)) throw new InvariantError("L11", `${chat}/${messageId}: post ${p.seq} is not a copy of a source fix or materialization`);
       if (p.at !== made.path) throw new InvariantError("L11", `${chat}/${messageId}: copy ${p.seq} is not anchored at the new parent path`);
     }
     if (made.post.some((p) => p.kind === "cont" || p.kind === "confirm")) throw new InvariantError("L11", `${chat}/${messageId}: a cont or confirm entry was copied`);
@@ -955,7 +1039,7 @@ export class Runner {
     const index = chain.findIndex((m) => m.id === messageId);
     if (core.journal.pauses.length > 0 || index !== swipes.length || swipes.some((e, i) => chain[i]?.id !== e.id)) return null;
     const rebuilt = chain.slice(0, index + 1).map((m, i) => ({ ...m, swipeId: swipes[i]?.swipeId ?? m.swipeId }));
-    const out = referenceFold({ worlds: (r) => this.h.worlds.get(r), revision: this.h.revision, chain: rebuilt, pauses: core.journal.pauses, tombstones: core.journal.tombstones }, this.h.registry);
+    const out = referenceFold(core.foldInput(rebuilt), this.h.registry);
     return out.messages[index]?.parentPath === planned ? { out, index, shifted } : null;
   }
 
@@ -963,7 +1047,10 @@ export class Runner {
    * L43: a Re-run carries the live fixes of the swipe it was made from (the nearest earlier one
    * holding a record): each is on the new record with its seq, events (less a materialization the new
    * swipe already made) and undos, anchored at the record's path, or listed in its `dropped`; nothing
-   * else is copied. A turn committed under a pause carries nothing.
+   * else is copied. A GM edit or ✎ fix that keeps its request, none of it undone, is worked out again
+   * after the new turn (DESIGN §7): its copy keeps the request, with whatever events that gives (none
+   * when the new turn already made it so), and so does one that held none, already so on the source.
+   * A turn committed under a pause carries nothing.
    */
   private async checkRerun(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[], readOn?: string): Promise<void> {
     let source: Rec | undefined;
@@ -980,20 +1067,28 @@ export class Runner {
     const parent = readOn ?? made.path;
     const sourceUndone = source.undone;
     const off = (seq: number, index: number): boolean => sourceUndone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
-    const live = source.post.filter((p) => p.kind === "fix" && isLive(p.at, parent, source.path !== "" ? source.path : null) && !p.events.every((_, i) => off(p.seq, i)));
+    const asks = (p: PostEntry): boolean => p.edit !== undefined && !sourceUndone.some((u) => u.in === "post" && u.seq === p.seq);
+    const live = source.post.filter((p) => p.kind === "fix" && isLive(p.at, parent, source.path !== "" ? source.path : null) && (asks(p) || !p.events.every((_, i) => off(p.seq, i))));
     const copies = made.post.filter((p) => p.seq < made.seq);
     for (const fix of live) {
       const copy = copies.find((p) => p.seq === fix.seq);
       const dropped = made.dropped?.some((d) => d.seq === fix.seq) === true;
+      const asked = asks(fix);
       if (!copy && !dropped) throw new InvariantError("L43", `${chat}/${messageId}: the Re-run neither carried nor dropped fix ${fix.seq}`);
       if (copy && dropped) throw new InvariantError("L43", `${chat}/${messageId}: fix ${fix.seq} was both carried and dropped`);
       if (dropped) this.coverage.carryDrops++;
       if (!copy) continue;
       this.coverage.carried++;
+      if (copy.at !== made.path) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} is not anchored at the record's path`);
+      if (asked) {
+        if (copy.kind !== "fix" || copy.edit === undefined || hashJson(copy.edit) !== hashJson(fix.edit)) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} doesn't keep its source's request`);
+        this.coverage.askedCarried++;
+        if (fix.events.length === 0) this.coverage.askedEmpty++;
+        continue;
+      }
       const stripped = copy.kind === "fix" ? strippedFrom(fix.events, copy.events) : null;
       if (!stripped) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} differs from its source`);
       if (stripped.length > 0) this.coverage.stripped++;
-      if (copy.at !== made.path) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} is not anchored at the record's path`);
       // An undo moves up with its event past what left the copy.
       for (const u of sourceUndone) {
         if (u.in !== "post" || u.seq !== fix.seq) continue;
@@ -1018,6 +1113,7 @@ export class Runner {
     const id = `w${++this.ids}`;
     if (op.open !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: await this.devCashFix(op.open) } };
     if (op.gm !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: gmFix(op.gm, op.a) } };
+    if (op.asked !== undefined) return this.h.gmEdit(this.current, id, gmEditOps(op.asked, op.a));
     if (op.life !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: pick(LIFE_FIXES, op.life) } };
     if (op.mind !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: pick(MIND_FIXES, op.mind) } };
     const all = this.messages();
@@ -1078,11 +1174,12 @@ export class Runner {
       const core = await this.h.core(chatId);
       const { reference, optimized, cold, materializedTwice } = await this.h.folds(chatId);
       // L42: a cold fold that starts from the chat's stored snapshots equals the full fold.
-      if (hashJson(cold.state) !== hashJson(reference.state) || hashJson(cold.messages) !== hashJson(reference.messages) || hashJson(cold.notes) !== hashJson(reference.notes) || hashJson(cold.keepReport) !== hashJson(reference.keepReport) || hashJson(cold.violations) !== hashJson(reference.violations)) throw new InvariantError("L42", `${chatId}: a snapshot-started fold differs from the full fold`);
+      if (hashJson(cold.state) !== hashJson(reference.state) || hashJson(cold.messages) !== hashJson(reference.messages) || hashJson(cold.notes) !== hashJson(reference.notes) || hashJson(cold.keepReport) !== hashJson(reference.keepReport) || hashJson(cold.resolved) !== hashJson(reference.resolved) || hashJson(cold.violations) !== hashJson(reference.violations)) throw new InvariantError("L42", `${chatId}: a snapshot-started fold differs from the full fold`);
       // L1: the optimized fold equals the reference fold.
       if (hashJson(optimized.state) !== hashJson(reference.state)) throw new InvariantError("L1", `${chatId}: state differs`);
       if (hashJson(optimized.messages) !== hashJson(reference.messages)) throw new InvariantError("L1", `${chatId}: message folds differ`);
       if (hashJson(optimized.notes) !== hashJson(reference.notes) || hashJson(optimized.keepReport) !== hashJson(reference.keepReport)) throw new InvariantError("L1", `${chatId}: notes or Keep report differ`);
+      if (hashJson(optimized.resolved) !== hashJson(reference.resolved)) throw new InvariantError("L1", `${chatId}: the GM edits and ✎ fixes a view worked out again differ`);
       // L7: on-path entries re-validate.
       if (reference.violations.length > 0) throw new InvariantError("L7", reference.violations.join("; "));
       // L40: no own account folds below zero, on any path; a rebased view drops what
@@ -1143,6 +1240,12 @@ export class Runner {
         }
         for (const p of rec?.post ?? []) {
           if (!live(p.at) && !noted.has(`inert:${m.id}:${JSON.stringify({ in: "post", seq: p.seq, index: 0 })}`)) throw new InvariantError("L16", `${chatId}/${m.id}: inert post ${p.seq} has no note`);
+          // A GM edit with its request on a rebased view, which folds it worked out again there; one
+          // with no events of its own was already so where it was made.
+          if (r.fold === "view" && live(p.at) && p.kind === "fix" && p.edit !== undefined) {
+            this.coverage.askedViews++;
+            if (p.events.length === 0) this.coverage.askedEmpty++;
+          }
         }
       }
       if (core.journal.windows.length > 0) throw new InvariantError("P2", `${chatId}: a window is still open between operations`);
@@ -1163,8 +1266,10 @@ export class Runner {
         }
         for (const [swipe, rec] of Object.entries(jm.ledger.swipes)) {
           claim(rec.seq, `rec:${mid}:${swipe}`);
-          // A carried copy may leave out a materialization its new prefix already records (L46).
-          for (const p of rec.post) claim(p.seq, `post:${mid}:${p.kind}:${hashJson(p.events.filter((e) => e.type !== "materialize"))}`);
+          // A carried copy may leave out a materialization its new prefix already records (L46); a GM
+          // edit or ✎ fix with its request is the entry that request names, worked out again wherever
+          // it is carried, whatever events that gives (DESIGN §7).
+          for (const p of rec.post) claim(p.seq, `post:${mid}:${p.kind}:${p.edit !== undefined ? `asked:${hashJson(p.edit)}` : hashJson(p.events.filter((e) => e.type !== "materialize"))}`);
         }
       }
       if ([...seqs.keys()].some((s) => s > core.journal.seq)) throw new InvariantError("L9", `${chatId}: a seq above the counter`);
@@ -1219,6 +1324,9 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
       coverage.carried += runner.coverage.carried;
       coverage.carryDrops += runner.coverage.carryDrops;
       coverage.stripped += runner.coverage.stripped;
+      coverage.askedCarried += runner.coverage.askedCarried;
+      coverage.askedViews += runner.coverage.askedViews;
+      coverage.askedEmpty += runner.coverage.askedEmpty;
       coverage.earlierCopies += runner.coverage.earlierCopies;
       coverage.shiftedPlans += runner.coverage.shiftedPlans;
       for (const k of ["start", "act", "turn", "end"] as const) coverage.fights[k] += runner.coverage.fights[k];

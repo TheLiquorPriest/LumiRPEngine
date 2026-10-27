@@ -231,7 +231,8 @@ function isRec(rec: unknown): rec is Rec {
   if (!isRecord(rec) || rec.v !== 1 || typeof rec.defHash !== "string" || !isInt(rec.seq) || !isContent(rec.swipeHash) || typeof rec.path !== "string" || typeof rec.seed !== "string") return false;
   if (!isInt(rec.pre) || rec.pre < 0 || !isInt(rec.markersApplied) || !REC_STATUSES.includes(rec.status) || !isRefs(rec.undone) || !isRecord(rec.intents)) return false;
   if (!Array.isArray(rec.events) || !rec.events.every((e) => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string"))) return false;
-  if (!Array.isArray(rec.post) || !rec.post.every((p) => isRecord(p) && isInt(p.seq) && typeof p.at === "string" && POST_KINDS.includes(p.kind) && Array.isArray(p.events) && p.events.every((e) => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string")))) return false;
+  // A fix's request (`edit`) is checked for its shape here; its operations are parsed when it is resolved again.
+  if (!Array.isArray(rec.post) || !rec.post.every((p) => isRecord(p) && isInt(p.seq) && typeof p.at === "string" && POST_KINDS.includes(p.kind) && Array.isArray(p.events) && p.events.every((e) => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string")) && (p.edit === undefined || (isRecord(p.edit) && (typeof p.edit.clock === "string" ? p.edit.ops === undefined : Array.isArray(p.edit.ops) && p.edit.clock === undefined))))) return false;
   if (rec.keep !== undefined && !(isRecord(rec.keep) && Object.values(rec.keep).every((k) => isRecord(k) && isRefs(k.convert)))) return false;
   if (rec.dropped !== undefined && !(Array.isArray(rec.dropped) && rec.dropped.every((d) => isRecord(d) && isInt(d.seq) && POST_KINDS.includes(d.kind) && typeof d.reason === "string"))) return false;
   return (rec.accepted === undefined || isContent(rec.accepted)) && (rec.diag === undefined || typeof rec.diag === "string") && (rec.readElsewhere === undefined || rec.readElsewhere === true);
@@ -243,7 +244,7 @@ function isHeldWrite(w: unknown): boolean {
   if (!isRecord(w) || typeof w.id !== "string") return false;
   switch (w.kind) {
     case "post":
-      return w.target === "head" && isRecord(w.entry) && typeof w.entry.kind === "string" && Array.isArray(w.entry.events);
+      return w.target === "head" && isRecord(w.entry) && typeof w.entry.kind === "string" && Array.isArray(w.entry.events) && (w.entry.edit === undefined || (isRecord(w.entry.edit) && (typeof w.entry.edit.clock === "string" ? w.entry.edit.ops === undefined : Array.isArray(w.entry.edit.ops) && w.entry.edit.clock === undefined)));
     case "marker":
       return w.target === "head" && validMarkerBody(w.body) !== null;
     case "keep":
@@ -343,7 +344,6 @@ export type PreOutcome = { waiting: string };
 const TURN_INPUTS = {
   revision: "the chat's world revision changed",
   settings: "your RPEngine settings changed",
-  notes: "a note for the next reply was reworded or dismissed",
 } as const satisfies Record<string, string>;
 
 /** Each of a turn's other inputs (`TURN_INPUTS`), as one comparable value. */
@@ -399,9 +399,8 @@ export interface TurnHooks {
   worldOf(chatId: ChatId, userId: UserId): Promise<WorldId | null>;
   /**
    * What else the chat's sections are made from, each read from memory (DESIGN §5.1): the chat's
-   * world revision, the settings the turn reads (not every setting: one it doesn't read keeps it),
-   * the active preset and the presets written, and the chat's Outcome notes. Each is named, so a turn
-   * dropped for it says which changed.
+   * world revision and the settings the turn reads (not every setting: one it doesn't read keeps it).
+   * Each is named, so a turn dropped for it says which changed.
    */
   inputs(chatId: ChatId, userId: UserId): TurnInputs;
   beforeCommit(input: TurnContext): Promise<void>;

@@ -11,9 +11,7 @@ import { isRecord, type JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { FakeHost, type AssembledEntry } from "../support/fake-host";
 import { Rig } from "../support/rig";
-import { POV } from "../support/test-pack";
 
-const EXTRACT_MARK = "propose concrete state changes";
 const OUTLINE_MARK = "You outline a roleplay narrator's next reply";
 
 const block = (name: string, content: string, enabled = true): HostPresetBlock => ({ id: `b_${name}`, name, content, enabled, marker: null, injectionTrigger: [], characterTagTrigger: [], categoryMode: null });
@@ -310,24 +308,6 @@ describe("no stale outlets", () => {
     const flag = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "engine_failed");
     expect(flag?.label).toBe("The engine didn't finish, so nothing was generated");
     expect(flag?.detail).toContain("presets.getActive failed");
-  });
-
-  test("an Outcome note reworded after the engine prepared the reply: the reply holds the note as it now reads", async () => {
-    const rig = new Rig();
-    rig.host.quietReply = (req) => (req.messages[0]?.content.includes(EXTRACT_MARK) ? JSON.stringify({ proposals: [{ type: "purchase", payer: POV, item: "lamp", price: 99999 }] }) : "{}");
-    const chatId = await rig.worldChat();
-    await rig.turn(chatId, "I buy the lamp.", "She rings up the lamp.");
-    rig.host.quietReply = () => "{}";
-    const decline = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "decline");
-    expect(decline).toBeDefined();
-    expect((await rig.host.begin(chatId, { type: "normal" })).halted).toBe("cancelled");
-    expect(rig.host.restarts).toMatchObject([{ chatId, as: "send" }]);
-    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: decline?.id, choice: "remove" })).applied).toBe(true);
-    const reply = await rig.host.start(chatId, { type: "normal" });
-    expect(reply.halted).toBeUndefined();
-    const outcome = rig.host.section("Outcome");
-    expect(outcome).toContain("lamp was narrated but never happened; leave it out from here on.");
-    expect(outcome).not.toContain("was declined");
   });
 
   test("same-roll Re-runs: a Re-run whose outline step is switched off holds no outline line an earlier run wrote", async () => {

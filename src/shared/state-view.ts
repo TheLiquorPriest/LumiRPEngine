@@ -126,7 +126,12 @@ export type ChipKind =
   | "price"
   | "confirm"
   | "decline"
-  /** A change the reply told that the engine has no place for (a fact told in prose, a thing as a newcomer, a place it doesn't have): the story stands, nothing is asked, and the next reply isn't told it didn't happen (DESIGN §9.5). */
+  /**
+   * What the engine keeps nothing of while the story stands, nothing is asked and no reply is told it
+   * didn't happen: a change the reply told that the engine has no place for (a fact told in prose, a
+   * thing as a newcomer, a place it doesn't have, DESIGN §9.5), or a typed action the engine couldn't
+   * play, which played as plain roleplay (DESIGN §9.4, §11).
+   */
   | "untracked"
   | "undo"
   | "retry_read"
@@ -144,8 +149,6 @@ export type ChipKind =
   | "mode_change"
   /** A suggested next move (DESIGN §5.2 `choices`); Send posts it as the player's message. */
   | "choice"
-  /** The reply went against an engine fact (DESIGN §5.2 `contradiction`): Re-narrate, or It's fine. */
-  | "contradiction"
   /** The call that reads typed text failed, so the turn ran as plain roleplay; Retry runs it again (DESIGN §9.4). */
   | "read_failed"
   /** The engine run before the reply failed, so nothing was generated; Retry runs the engine and then the reply (DESIGN §5.1). */
@@ -164,7 +167,7 @@ export type ChipKind =
   | "routine_added"
   /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
   | "fix"
-  /** A write held during a reply that no longer applied when the reply finished (P2), with Dismiss. */
+  /** A write held during a reply that couldn't be made when the reply finished (P2), with Dismiss. */
   | "refused"
   /** The intent gate (DESIGN §5.1 preview gates): a typed message's read action waits, nothing generated, on Play, Edit (its params) or Cancel; Play and Edit resume the turn. */
   | "intent_gate"
@@ -215,7 +218,7 @@ export interface Chip {
 export function chipStarts(chip: Pick<Chip, "kind" | "as">, choice: string): GenerateAs | null {
   if (choice === "regenerate" || choice === "continue") return choice;
   const kind = chip.kind;
-  const starts = (kind === "reply_failed" && choice === "rerun") || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit"));
+  const starts = (kind === "reply_failed" && choice === "rerun") || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit"));
   return starts ? (chip.as ?? "regenerate") : null;
 }
 

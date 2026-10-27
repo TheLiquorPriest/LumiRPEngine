@@ -23,7 +23,7 @@ import { decodeMapView } from "../../src/packs/space/ui/view";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { bookLoreProblem } from "../../src/backend/book-lore";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
-import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
+import { extractionView, freshFixture, gmFixture, OVERDRAWN_PURCHASE, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
 import { applyRoutineOp, chatRolesFixture, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
 import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
@@ -191,14 +191,14 @@ export class MockBackend {
   }
 
   /**
-   * Pay another way on the declined payment (`c-decline`), as the backend tries it (DESIGN §9.5):
+   * Pay another way on the payment the story put past the Visa's limit (`c-overdrawn`), as the backend tries it (DESIGN §9.5):
    * savings, then a card, then checking, then cash; the first with room for it pays (a card up to
    * what's available on it, any other account up to what it holds). False when none has room.
    */
   private payAnotherWay(): boolean {
     const money = decodeFinanceView(this.view?.panels["economy.money"] ?? null);
     if (!money) return false;
-    const cents = DECLINED_PURCHASE.cents;
+    const cents = OVERDRAWN_PURCHASE.cents;
     const tries: readonly ((a: AccountView) => boolean)[] = [(a) => a.class === "savings", (a) => CLASS_TRAITS[a.class].revolving, (a) => a.class === "checking", (a) => CLASS_TRAITS[a.class].cash];
     const source = tries.flatMap((is) => money.accounts.filter((a) => a.status === "open" && is(a))).find((a) => (a.available ?? a.cents) >= cents);
     if (!source) return false;
@@ -206,7 +206,7 @@ export class MockBackend {
     this.mutate((view) => {
       const panel = decodeFinanceView(view.panels["economy.money"] ?? null);
       if (!panel) return;
-      const line: JournalLine = { id: "preview:pay-another-way", at: view.hud?.clock.label ?? "", memo: DECLINED_PURCHASE.name, cents: -cents, account: source.name, accountId: source.id, kind: "purchase", category: null, counterparty: null, card: null, status: "posted" };
+      const line: JournalLine = { id: "preview:pay-another-way", at: view.hud?.clock.label ?? "", memo: OVERDRAWN_PURCHASE.name, cents: -cents, account: source.name, accountId: source.id, kind: "purchase", category: null, counterparty: null, card: null, status: "posted" };
       const accounts = panel.accounts.map((a) => (a.id === source.id ? { ...a, cents: a.cents - cents, available: a.available === null ? null : a.available - cents, transactions: [line, ...a.transactions] } : a));
       // A total the level doesn't show stays unknown.
       const less = (total: number | null, by: number): number | null => (total === null ? null : total - by);
@@ -380,7 +380,7 @@ export class MockBackend {
           this.gm = undone.gm;
           this.routines = undone.routines;
         }
-        if (chip.kind === "decline" && message.choice === "other" && !this.payAnotherWay()) return this.error(reqId, "validation", "No other way to pay covers it.");
+        if (chip.id === "c-overdrawn" && message.choice === "other" && !this.payAnotherWay()) return this.error(reqId, "validation", "No other way to pay covers it.");
         this.result(reqId, "lre.chip", { applied: true, pending: false });
         this.mutate((view) => {
           view.chips = view.chips.filter((c) => c.id !== message.chip);

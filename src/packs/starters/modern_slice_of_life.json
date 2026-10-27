@@ -2802,7 +2802,12 @@
       "id": "replace_fuel_pump_relay",
       "label": "Replace the fuel pump relay",
       "params": {},
-      "requires": ["stage('q_fleet_contract') == 'trial'", "at(pov, 'alder_automotive')", "at('spare_relay', 'alder_automotive')", "not flag('relay_replaced')"],
+      "requires": [
+        "stage('q_fleet_contract') == 'trial'",
+        "at(pov, 'alder_automotive')",
+        {"expr": "at('spare_relay', 'alder_automotive')", "hard": true},
+        "not flag('relay_replaced')"
+      ],
       "outcomes": {
         "default": [
           {"type": "story.flag", "args": {"name": "relay_replaced", "value": true}},

@@ -33,11 +33,29 @@ function isStoredChip(raw: unknown): raw is StoredChip {
   return Array.isArray(raw.actions) && raw.actions.every((a) => isRecord(a) && typeof a.id === "string" && typeof a.label === "string" && (a.style === undefined || a.style === "primary" || a.style === "danger") && (a.input === undefined || isChipInput(a.input)));
 }
 
+/**
+ * A chip an earlier build stored that nothing acts on now, dropped as a chat's chips load: the
+ * retired contradiction check's, and a decline that asked (Remove it, Accept, Pay another way, a
+ * price, Dismiss) from before every refusal became a receipt (DESIGN §11).
+ */
+function retiredChip(chip: StoredChip): boolean {
+  const kind: string = chip.kind;
+  return kind === "contradiction" || (kind === "decline" && chip.actions.length > 0);
+}
+
+/**
+ * A file an earlier build kept in a chat's run directory that nothing reads now: its Outcome notes,
+ * with their temp and set-aside copies.
+ */
+const RETIRED_RUN_FILE = /^runs\/[^/]+\/outcome-notes\.json(?:\.tmp|\.corrupt-\d+)?$/;
+
 export class ChipStore {
   /** Chips by `user \0 chat`: one user's cache never answers another. */
   private readonly chips = new Map<string, StoredChip[]>();
   /** The chips each chat's latest lapse took, by `user \0 chat`: a turn sent after it may still read them (`recent`), a message sent again in its place included. */
   private readonly lapsed = new Map<string, StoredChip[]>();
+  /** Users whose run directories lost an earlier build's files (`RETIRED_RUN_FILE`) this start. */
+  private readonly swept = new Set<UserId>();
 
   constructor(private readonly host: HostPort) {}
 
@@ -52,11 +70,26 @@ export class ChipStore {
   async list(chatId: ChatId, userId: UserId): Promise<StoredChip[]> {
     const known = this.chips.get(this.key(chatId, userId));
     if (known) return known;
+    await this.sweep(userId);
     const raw = await readStoredJson(this.host, this.path(chatId), userId, "chips", Array.isArray);
-    const list = Array.isArray(raw) ? raw.filter(isStoredChip) : [];
+    const valid = Array.isArray(raw) ? raw.filter(isStoredChip) : [];
+    const list = valid.filter((c) => !retiredChip(c));
     this.chips.set(this.key(chatId, userId), list);
     if (this.chips.size > 256) this.chips.delete(this.chips.keys().next().value ?? "");
+    // The retired chips leave the file too, as every chip that goes does.
+    if (list.length < valid.length) await this.save(chatId, userId);
     return list;
+  }
+
+  /** Clears the user's run directories of what an earlier build kept there, once per start. */
+  private async sweep(userId: UserId): Promise<void> {
+    if (this.swept.has(userId)) return;
+    this.swept.add(userId);
+    try {
+      for (const path of await this.host.storage.list("runs/", userId)) if (RETIRED_RUN_FILE.test(path)) await this.host.storage.remove(path, userId);
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] couldn't remove an earlier build's Outcome notes: ${error instanceof Error ? error.message : String(error)}`, userId);
+    }
   }
 
   private async save(chatId: ChatId, userId: UserId): Promise<void> {
@@ -136,37 +169,32 @@ export class ChipStore {
    * A swipe of `messageId` was deleted (the host shifts the swipes after it down; DESIGN §4.3 swipe
    * identity): its chips go, and the chips of the swipes after it move down with them, as the
    * ledger's records do. A turn's chip names its swipe in its id, so that id moves too
-   * (`idAfterSwipeDelete`) and a chip a later swipe makes at the old index can't replace it. Returns
-   * the ids of the chips that went, for the notes tied to them.
+   * (`idAfterSwipeDelete`) and a chip a later swipe makes at the old index can't replace it.
    */
-  async shiftSwipes(chatId: ChatId, userId: UserId, messageId: MessageId, deleted: number): Promise<Set<ChipId>> {
+  async shiftSwipes(chatId: ChatId, userId: UserId, messageId: MessageId, deleted: number): Promise<void> {
     const list = await this.list(chatId, userId);
-    const dropped = new Set<ChipId>();
     let changed = false;
     // Changed in place: an `add` or `take` already holding this list keeps writing to the same one.
     for (let i = list.length - 1; i >= 0; i--) {
       const c = list[i];
       if (!c || c.messageId !== messageId || c.swipeId === undefined || c.swipeId < deleted) continue;
       changed = true;
-      if (c.swipeId === deleted) {
-        dropped.add(c.id);
-        list.splice(i, 1);
-      } else list[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
+      if (c.swipeId === deleted) list.splice(i, 1);
+      else list[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
     }
     // What the latest lapse took of the message goes too: its ids may now name another swipe.
     const key = this.key(chatId, userId);
     const lapsed = this.lapsed.get(key);
     if (lapsed?.some((c) => c.messageId === messageId)) this.lapsed.set(key, lapsed.filter((c) => c.messageId !== messageId));
     if (changed) await this.save(chatId, userId);
-    return dropped;
   }
 }
 
 /**
- * A chip's or a note's id after a swipe of `messageId` was deleted. An id that names one of its swipes
- * (`<kind>:<message>:<swipe>`, then `:…` or nothing, as a turn's chips and an unfit decline's note
- * do): null for the deleted swipe, the swipe before it for a later one. Any other id (one keyed by
- * its generation) stays as it is.
+ * A chip's id after a swipe of `messageId` was deleted. An id that names one of its swipes
+ * (`<kind>:<message>:<swipe>`, then `:…` or nothing, as a turn's chips do): null for the deleted
+ * swipe, the swipe before it for a later one. Any other id (one keyed by its generation) stays as
+ * it is.
  */
 export function idAfterSwipeDelete(id: string, messageId: MessageId, deleted: number): string | null {
   const head = `:${messageId}:`;

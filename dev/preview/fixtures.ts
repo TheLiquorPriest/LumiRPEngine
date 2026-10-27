@@ -38,8 +38,8 @@ function placeFixFixture(): FieldFixTarget {
 
 const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, ["invitation", "decline", "incident", "quest", "arrival"].includes(cls) ? "stop" : cls === "bill" ? "note" : "ignore"])) as Record<InterruptClass, InterruptPolicy>;
 
-/** The purchase `c-decline` declined at Rosie's: more than the Visa's room ($787.45), which Pay another way takes from savings. */
-export const DECLINED_PURCHASE = { name: "Catering order", cents: 85000 };
+/** The purchase the story put on the Visa past its limit at Rosie's (`c-overdrawn`), which Pay another way moves to savings. */
+export const OVERDRAWN_PURCHASE = { name: "Catering order", cents: 85000 };
 
 export function stateFixture(chatId: string): StateView {
   return {
@@ -79,9 +79,9 @@ export function stateFixture(chatId: string): StateView {
       { id: "c-confirm", kind: "confirm", messageId: "m2", label: "Dev gives you his car keys?", actions: [{ id: "confirm", label: "Yes", style: "primary" }, { id: "reject", label: "No" }], expires: "next_send" },
       { id: "c-mode", kind: "mode_change", messageId: "m2", label: "Purchases now apply automatically", detail: "28 of 30 kept on DeepSeek", actions: [{ id: "undo", label: "Undo" }], expires: "never" },
       { id: "c-swipe", kind: "swipe_option", messageId: "m2", label: "Swipe:", actions: [{ id: "renarrate", label: "Re-narrate" }, { id: "rerun", label: "Re-run" }], expires: "next_send" },
-      // As the engine words a payment it declines (DESIGN §9.5): "with my card" over the Visa's room, with Pay another way.
-      { id: "c-decline", kind: "decline", messageId: "m4", label: `Couldn't pay for ${DECLINED_PURCHASE.name}`, detail: "Sam Rivera's card was declined. It stays unowned, and the next reply is told so.", actions: [{ id: "other", label: "Pay another way", style: "primary" }, { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send" },
-      { id: "c-unpriced", kind: "decline", messageId: "m4", label: "Didn't apply: Buy a used bike", detail: "no price for a used bike. Nothing changed, and the next reply is told so.", actions: [{ id: "price", label: "Set price", style: "primary", input: { type: "money", label: "Price of a used bike" } }, { id: "item", label: "Pick item", input: { type: "choice", label: "Priced as", options: [{ value: "bike_used", label: "Used bike · $120.00" }, { value: "bike_new", label: "New bike · $450.00" }] } }, { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send" },
+      // As the engine words a payment the story made past the Visa's limit (DESIGN §9.5), with Pay another way and Undo.
+      { id: "c-overdrawn", kind: "undo", messageId: "m4", label: `Bought ${OVERDRAWN_PURCHASE.name}: $850.00 (over Visa ··4421's limit)`, detail: "Applied automatically. On Visa ··4421: $1,262.55 owed, $62.55 over its limit. No way of paying covered $850.00.", actions: [{ id: "other", label: "Pay another way", style: "primary" }, { id: "undo", label: "Undo" }], expires: "next_send" },
+      { id: "c-unpriced", kind: "undo", messageId: "m4", label: "Bought a used bike: no price", detail: "It's yours, with nothing charged: the narration gives no price and the catalog doesn't list it. Set price or Pick item charges it.", actions: [{ id: "price", label: "Set price", style: "primary", input: { type: "money", label: "Price of a used bike" } }, { id: "item", label: "Pick item", input: { type: "choice", label: "Priced as", options: [{ value: "bike_used", label: "Used bike · $120.00" }, { value: "bike_new", label: "New bike · $450.00" }] } }, { id: "undo", label: "Undo" }], expires: "next_send" },
       { id: "c-undo", kind: "undo", messageId: "m4", label: "Paid Dev $20", actions: [{ id: "undo", label: "Undo" }], expires: "next_send" },
       { id: "c-tl", kind: "timelapse_offer", messageId: "m4", label: "Sleep until 07:00?", detail: "8 h 20 min", actions: [{ id: "start", label: "Timelapse", style: "primary" }], expires: "next_send" },
       { id: "c-notaction", kind: "not_action", messageId: "m3", label: "Read as: Ask Rosie for a raise", actions: [{ id: "not_action", label: "Not an action?" }], expires: "next_send" },

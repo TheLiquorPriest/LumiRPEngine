@@ -1,5 +1,7 @@
 // ✎ fixes (DESIGN §12): checked against the field they write, one `fix` entry each with its own
-// Undo chip, and a fix held through a reply that no longer applies is told, never dropped silently.
+// Undo chip. One made while a reply streams lands after it, over what the reply changed, and no later
+// read of that reply undoes it (DESIGN §7); a held fix that can't be made at all is told, never
+// dropped silently.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
@@ -79,23 +81,100 @@ describe("✎ fixes", () => {
     expect(journal.map((n) => n.text)).toEqual([expect.stringContaining("2")]);
   });
 
-  test("a fix held through a reply that no longer applies shows a notice until dismissed", async () => {
+  test("a held fix that can't be made at all after the reply shows a notice until dismissed", async () => {
     const rig = new Rig();
     const chatId = await chat(rig);
     rig.host.sendUser(chatId, "buy:lamp:20");
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
-    // Made while the reply streams: held, and checked again when the reply finishes (P2).
+    // Made while the reply streams: held, and checked again when the reply finishes (P2). It keeps no
+    // request to resolve again, so its own event is checked, and there is no lamp to use.
     const held = await rig.rt.ledger.write(chatId, rig.host.userId, { kind: "post", id: "w-held", target: "head", entry: { kind: "fix", events: [{ type: "test.use", data: { item: "lamp" } }] } });
     expect(held.pending).toBe(true);
     await rig.host.finish(g, "The lamp slips away. [lose:lamp]");
     const [notice] = await chips(rig, chatId, "refused");
-    expect(notice?.label).toBe("Your correction didn't apply after the reply");
     expect(notice?.actions.map((a) => a.id)).toEqual(["dismiss"]);
     // It stays until dismissed, restarts included.
     const again = rig.restart();
     expect((await chips(again, chatId, "refused")).map((c) => c.id)).toEqual(["refused:w-held"]);
     again.body(await again.send({ type: "lre.chip", chatId, chip: "refused:w-held", choice: "dismiss" }));
     expect(await chips(again, chatId, "refused")).toEqual([]);
+  });
+});
+
+const EXTRACT_MARK = "propose concrete state changes";
+/** The time the narration says passed, as the reply's read proposes it. */
+const NARRATED: Record<string, number> = { "An hour later": 60, "Two hours later": 120 };
+
+/** A chat whose reply's read proposes the time its narration says passed. */
+async function timedChat(rig: Rig): Promise<string> {
+  rig.host.quietReply = (req) => {
+    if (!req.messages[0]?.content.includes(EXTRACT_MARK)) return "{}";
+    const text = req.messages[1]?.content ?? "";
+    const said = Object.entries(NARRATED).find(([words]) => text.includes(words));
+    return JSON.stringify({ proposals: said ? [{ type: "time_advance", minutes: said[1] }] : [] });
+  };
+  return chat(rig);
+}
+
+/** The clock as the time row's ✎ reads it: the date and time of day where the player character is. */
+async function clock(rig: Rig, chatId: string): Promise<string | undefined> {
+  const fix = (await rig.rt.view(chatId, rig.host.userId)).hud?.fixes.time;
+  return fix?.type === "time" ? fix.value : undefined;
+}
+
+const TYPED = "2026-10-16 07:30";
+
+describe("the clock's ✎ and the time a reply narrates", () => {
+  test("set while a reply that narrates an hour streams, the clock reads the time typed once it finishes", async () => {
+    const rig = new Rig();
+    const chatId = await timedChat(rig);
+    rig.host.sendUser(chatId, "I wait.");
+    await rig.host.settle();
+    const g = await rig.host.start(chatId, { type: "normal" });
+    expect(rig.body(await rig.send({ type: "lre.fix", chatId, time: TYPED })).pending).toBe(true);
+    await rig.host.finish(g, "An hour later, the kettle sings.");
+    expect(await clock(rig, chatId)).toBe(TYPED);
+    expect(await chips(rig, chatId, "refused")).toEqual([]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("set after a reply, a Re-read of that reply edited to narrate more time leaves the clock at the time typed", async () => {
+    const rig = new Rig();
+    const chatId = await timedChat(rig);
+    await rig.turn(chatId, "I wait.", "An hour later, the kettle sings.");
+    rig.body(await rig.send({ type: "lre.fix", chatId, time: TYPED }));
+    expect(await clock(rig, chatId)).toBe(TYPED);
+    const head = rig.host.head(chatId);
+    if (!head) throw new Error("no reply");
+    rig.host.editMessage(chatId, head.id, "Two hours later, the kettle sings.");
+    await rig.host.settle();
+    const [reread] = await chips(rig, chatId, "reread");
+    if (!reread) throw new Error("no Re-read edit chip");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: reread.id, choice: "reread" }));
+    // The read was of a reply written before the fix, so it comes before it: the fix still stands.
+    expect(await clock(rig, chatId)).toBe(TYPED);
+    expect((await chips(rig, chatId, "fix")).length).toBe(1);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("set on a later reply, a Re-read of an earlier reply edited to narrate more time leaves the clock at the time typed", async () => {
+    const rig = new Rig();
+    const chatId = await timedChat(rig);
+    await rig.turn(chatId, "I wait.", "An hour later, the kettle sings.");
+    const earlier = rig.host.head(chatId);
+    if (!earlier) throw new Error("no reply");
+    await rig.turn(chatId, "I make tea.", "Steam fogs the window.");
+    const later = "2026-10-16 09:30";
+    rig.body(await rig.send({ type: "lre.fix", chatId, time: later }));
+    expect(await clock(rig, chatId)).toBe(later);
+    rig.host.editMessage(chatId, earlier.id, "Two hours later, the kettle sings.");
+    await rig.host.settle();
+    const reread = (await chips(rig, chatId, "reread")).find((c) => c.messageId === earlier.id);
+    if (!reread) throw new Error("no Re-read edit chip");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: reread.id, choice: "reread" }));
+    // The later reply now follows the earlier one's new read, and the fix on it is made again there.
+    expect(await clock(rig, chatId)).toBe(later);
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

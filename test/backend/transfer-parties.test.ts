@@ -50,7 +50,7 @@ async function turn(proposals: JsonObject[]): Promise<Turn> {
   return { pov, outside, danny, accounts: { ...state.accounts }, chips: view.chips.map((c) => `${c.kind}: ${c.label}`), errors: rig.rt.ledger.errors };
 }
 
-const money = (chips: string[]): string[] => chips.filter((c) => c.startsWith("undo:") || c.startsWith("decline:"));
+const money = (chips: string[]): string[] => chips.filter((c) => c.startsWith("undo:") || c.startsWith("decline:") || c.startsWith("untracked:"));
 
 /** The same turn with nothing read from its reply, which every test compares against: it plays the same every time, so once. */
 let unread: Promise<Turn> | null = null;
@@ -83,12 +83,12 @@ describe("a narrated transfer's two sides", () => {
     expect(money(got.chips)).toEqual(["undo: Your checking account paid $100.00 to Your savings account"]);
   });
 
-  test("a loan or a thing on either side is refused with a Didn't apply chip, and nothing moves", async () => {
+  test("a loan or a thing on either side can't be kept: a Not tracked receipt, and nothing moves", async () => {
     const none = await baseline();
     const cases: [JsonObject, string][] = [
-      [{ type: "transfer", from: "acct_pov_auto_loan", to: DANNY, amount: 400 }, "decline: Didn't apply: Your auto loan paid $400.00 to Danny Okafor"],
-      [{ type: "transfer", from: "pov_truck", to: "pov", amount: 50 }, "decline: Didn't apply: Your pickup paid $50.00 to you"],
-      [{ type: "transfer", from: "pov", to: "pov_truck", amount: 50 }, "decline: Didn't apply: Paid $50.00 to Your pickup"],
+      [{ type: "transfer", from: "acct_pov_auto_loan", to: DANNY, amount: 400 }, "untracked: Not tracked: Your auto loan paid $400.00 to Danny Okafor"],
+      [{ type: "transfer", from: "pov_truck", to: "pov", amount: 50 }, "untracked: Not tracked: Your pickup paid $50.00 to you"],
+      [{ type: "transfer", from: "pov", to: "pov_truck", amount: 50 }, "untracked: Not tracked: Paid $50.00 to Your pickup"],
     ];
     for (const [p, chip] of cases) {
       const got = await turn([p]);

@@ -8,11 +8,13 @@ import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { interpretCatalog } from "../../src/backend/interpret-context";
 import { toChain } from "../../src/backend/ledger-io";
+import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { regardAxes } from "../../src/packs/relationships/core/index";
 import { decodeQuestsView, type QuestTrack } from "../../src/packs/story/ui/panel";
+import { hashJson } from "../../src/shared/hash";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { EditOp, ResultBodies } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
@@ -217,20 +219,20 @@ describe("hints", () => {
 });
 
 describe("a typed answer", () => {
-  /** A typed turn interpret reads as Answer to `puzzle` with `answer`; the turn's decline chips, as "label | detail". */
+  /** A typed turn interpret reads as Answer to `puzzle` with `answer`; the turn's receipts for what played as plain roleplay, as "label | detail". */
   const typedAnswer = async (rig: Rig, chatId: string, puzzle: string, text: string, answer: string): Promise<string[]> => {
     rig.host.quietReply = (req) => (req.messages.map((m) => m.content).join("\n").includes("You map a player's typed input") ? JSON.stringify({ action: "answer", params: { puzzle, answer }, confidence: 0.9 }) : "{}");
     await rig.turn(chatId, text, "You give it some thought.");
-    return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "decline").map((c) => `${c.label} | ${c.detail ?? ""}`);
+    return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "untracked").map((c) => `${c.label} | ${c.detail ?? ""}`);
   };
-  const DECLINED = /^Answer: couldn't \| The message doesn't say the answer itself, so it isn't a try at the puzzle\./;
+  const NO_TRY = /^Answer: .* \| The message doesn't say the answer itself, so it isn't a try at the puzzle\./;
   /** Who came into the shop last night: `culprit`, by name, with a hint for a wrong answer. */
   const visitorOf = (culprit: string): JsonObject => ({ id: "p_visitor", kind: "puzzle", label: "The night visitor", start: "ask", visibility: "public", stages: { ask: { label: "Who came in?", cue: "Someone was in the shop last night, and the till is short.", answer: { expect: [culprit], normalize: true }, hints: ["The back door's lock is scratched."], next: [{ to: "named", when: "false" }] }, named: { label: "Named", next: [] } } });
   /** A Port Alder townsperson at `place` (the player character starts at harbor_street_114). */
   const person = (id: string, name: string, place: string): JsonObject => ({ id, kind: "character", name, tier: "background", fields: { place }, relations: [] });
   const visitorRow = async (rig: Rig, chatId: string) => (await questLog(rig, chatId)).find((q) => q.id === "p_visitor");
 
-  test("counts only in the player's own words: one the read gives that the message doesn't is no try at all, and its decline names none of it", async () => {
+  test("counts only in the player's own words: one the read gives that the message doesn't is no try at all, and its receipt names none of it", async () => {
     const rig = new Rig({ shipped: true });
     const cellar: JsonObject = { id: "p_cellar", kind: "puzzle", label: "The cellar riddle", start: "ask", visibility: "public", stages: { ask: { label: "The riddle", cue: "Chalked on the cellar door: what answers without a mouth?", answer: { expect: ["echo"], normalize: true }, next: [{ to: "open", when: "false" }] }, open: { label: "Open", next: [] } } };
     const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [visitorOf("Avery Holt"), cellar]);
@@ -238,7 +240,7 @@ describe("a typed answer", () => {
     const typed = (text: string, answer: string): Promise<string[]> => typedAnswer(rig, chatId, "p_visitor", text, answer);
     // The read answers with a name the player never typed: nothing is solved, it isn't even a try, and the chip says why without the name.
     const declined = await typed("I give my answer: whoever was in the shop last night.", "Avery Holt");
-    expect(declined).toEqual([expect.stringMatching(DECLINED)]);
+    expect(declined).toEqual([expect.stringMatching(NO_TRY)]);
     expect(declined.join("\n")).not.toContain("Avery");
     expect([(await row("p_visitor"))?.status, (await row("p_visitor"))?.hints]).toEqual(["active", []]);
     // Typed, it is the player's own, case and spacing aside.
@@ -263,19 +265,19 @@ describe("a typed answer", () => {
   test("with two people of that name the player character knows, the shared word names neither and isn't a try, and a word only one has names them", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [visitorOf("Avery Holt")], [person("avery_holt", "Avery Holt", "harbor_street_114"), person("avery_lane", "Avery Lane", "harbor_street_114")]);
-    expect(await typedAnswer(rig, chatId, "p_visitor", "It was Avery.", "avery_holt")).toEqual([expect.stringMatching(DECLINED)]);
+    expect(await typedAnswer(rig, chatId, "p_visitor", "It was Avery.", "avery_holt")).toEqual([expect.stringMatching(NO_TRY)]);
     expect([(await visitorRow(rig, chatId))?.status, (await visitorRow(rig, chatId))?.hints]).toEqual(["active", []]);
     expect(await typedAnswer(rig, chatId, "p_visitor", "No, it was Holt.", "avery_holt")).toEqual([]);
     expect((await visitorRow(rig, chatId))?.status).toBe("done");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("someone the player character can't know isn't named by a word of their name, and the decline never names them; once known, the same words name them", async () => {
+  test("someone the player character can't know isn't named by a word of their name, and the receipt never names them; once known, the same words name them", async () => {
     const rig = new Rig({ shipped: true });
     // Corin Vale is across town at the marina, and the player character has never met them.
     const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [visitorOf("Corin Vale")], [person("corin_vale", "Corin Vale", "alder_harbor_marina")]);
     const declined = await typedAnswer(rig, chatId, "p_visitor", "It was Corin.", "corin_vale");
-    expect(declined).toEqual([expect.stringMatching(DECLINED)]);
+    expect(declined).toEqual([expect.stringMatching(NO_TRY)]);
     expect(declined.join("\n")).not.toMatch(/Vale|corin_vale/i);
     expect([(await visitorRow(rig, chatId))?.status, (await visitorRow(rig, chatId))?.hints]).toEqual(["active", []]);
     await gm(rig, chatId, { op: "link", rel: "knows", from: "pov", to: "corin_vale" });
@@ -294,13 +296,13 @@ describe("a typed answer", () => {
     const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
     expect((await questLog(rig, chatId)).find((q) => q.id === "p_lockbox")?.status).toBe("active");
     expect(rig.rt.ledger.errors).toEqual([]);
-    return { rest: chips.filter((c) => c.kind === "choice").map((c) => c.label), declines: chips.filter((c) => c.kind === "decline").map((c) => c.label), all: JSON.stringify(chips) };
+    return { rest: chips.filter((c) => c.kind === "choice").map((c) => c.label), receipts: chips.filter((c) => c.kind === "untracked").map((c) => c.label), all: JSON.stringify(chips) };
   };
   const NAP = { action: "timelapse", params: { span: "for the next hour" }, text: "I nap for an hour", confidence: 0.9 };
 
   test("one the read queues after a time skip, with a code the message doesn't give, is no try either, and the chip never offers it to send", async () => {
     const turn = await lockboxTurn("I nap for an hour, then I punch in the code.", { ...NAP, more: [{ action: "answer", params: { puzzle: "p_lockbox", answer: "4512" }, text: "I key in 4512" }] });
-    expect([turn.rest, turn.declines]).toEqual([[], ["Answer: couldn't"]]);
+    expect([turn.rest, turn.receipts]).toEqual([[], [expect.stringMatching(/^Answer\b/)]]);
     expect(turn.all).not.toContain("4512");
   });
 
@@ -317,7 +319,7 @@ describe("a typed answer", () => {
   test("a one-letter answer counts only set apart, typed alone, quoted or a capital other than I and A, never as the word a sentence holds", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [puzzleOf("p_door", "A"), puzzleOf("p_gate", "B")]);
-    expect(await typedAnswer(rig, chatId, "p_door", "I take a moment to think.", "A")).toEqual([expect.stringMatching(DECLINED)]);
+    expect(await typedAnswer(rig, chatId, "p_door", "I take a moment to think.", "A")).toEqual([expect.stringMatching(NO_TRY)]);
     expect(await statusOf(rig, chatId, "p_door")).toBe("active");
     expect(await typedAnswer(rig, chatId, "p_door", "My answer is “A”.", "A")).toEqual([]);
     expect(await typedAnswer(rig, chatId, "p_gate", "I try door B.", "B")).toEqual([]);
@@ -328,7 +330,7 @@ describe("a typed answer", () => {
   test("a possessive names someone else's, so “Holt's daughter” gives no answer Holt", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [visitorOf("Holt")]);
-    expect(await typedAnswer(rig, chatId, "p_visitor", "I ask Holt's daughter about the night.", "Holt")).toEqual([expect.stringMatching(DECLINED)]);
+    expect(await typedAnswer(rig, chatId, "p_visitor", "I ask Holt's daughter about the night.", "Holt")).toEqual([expect.stringMatching(NO_TRY)]);
     expect([(await visitorRow(rig, chatId))?.status, (await visitorRow(rig, chatId))?.hints]).toEqual(["active", []]);
     expect(await typedAnswer(rig, chatId, "p_visitor", "It was Holt.", "Holt")).toEqual([]);
     expect((await visitorRow(rig, chatId))?.status).toBe("done");
@@ -350,11 +352,11 @@ describe("a typed answer", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  /** A typed turn interpret reads as `read`; the turn's decline chips' labels. */
+  /** A typed turn interpret reads as `read`; the labels of the turn's receipts for what played as plain roleplay. */
   const readAs = async (rig: Rig, chatId: string, text: string, read: JsonObject): Promise<string[]> => {
     rig.host.quietReply = (req) => (req.messages.map((m) => m.content).join("\n").includes("You map a player's typed input") ? JSON.stringify(read) : "{}");
     await rig.turn(chatId, text, "Something happens.");
-    return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "decline").map((c) => c.label);
+    return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "untracked").map((c) => c.label);
   };
 
   test("a money answer is the player's own by its amount: “$12” is the twelve the read gives", async () => {
@@ -372,7 +374,7 @@ describe("a typed answer", () => {
     const steady: JsonObject = { id: "steady", dice: "1d2", bands: [{ outcome: "fail", max: 1 }, { outcome: "success", min: 2 }] };
     const work: JsonObject = { id: "work_dial", label: "Work the dial", params: { combo: { type: "text" } }, requires: [], outcomes: { default: [{ type: "check", args: { check: "steady", actor: "self", outcomes: { success: [{ type: "story.answer", args: { track: "p_dial", answer: "=params.combo" } }] } } }] }, duration: "1", lexicon: ["work the dial"] };
     const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [puzzleOf("p_dial", "4512")], [], { actions: [work], checks: [steady] });
-    expect(await readAs(rig, chatId, "I work the dial by feel.", { action: "work_dial", params: { combo: "4512" }, confidence: 0.9 })).toEqual(["Work the dial: couldn't"]);
+    expect(await readAs(rig, chatId, "I work the dial by feel.", { action: "work_dial", params: { combo: "4512" }, confidence: 0.9 })).toEqual([expect.stringMatching(/^Work the dial\b/)]);
     expect(await statusOf(rig, chatId, "p_dial")).toBe("active");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
@@ -417,12 +419,29 @@ describe("the GM's Stage, its reply read again", () => {
       done: { label: "Done", next: [], rewards: [{ type: "relationships.adjust", args: { from: "priya_nair", to: "pov", axis: "respect", delta: 5, why: "Priya hears the errand is done." } }] },
     },
   };
+  /** The errand with a stage between: Danny's trust takes it under way; only the GM takes it on to its end. */
+  const ERRAND_UNDER_WAY: JsonObject = {
+    ...ERRAND,
+    stages: {
+      asked: { label: "Asked to help", next: [{ to: "working", when: "regard('danny_okafor', 'pov', 'trust') >= 30" }], rewards: [{ type: "relationships.adjust", args: { from: "priya_nair", to: "pov", axis: "respect", delta: 5, why: "Priya hears the errand is under way." } }] },
+      working: { label: "Under way", next: [{ to: "done", when: "false" }] },
+      done: { label: "Done", next: [], rewards: [{ type: "relationships.adjust", args: { from: "priya_nair", to: "pov", axis: "respect", delta: 5, why: "Priya hears the errand is done." } }] },
+    },
+  };
   /** How many times each of the errand's payouts is in Priya's regard for the player character. */
   const paid = async (rig: Rig, chatId: string): Promise<number[]> => {
     const { why } = await regardOf(rig, chatId, "priya_nair", "respect");
     return ["Priya hears the errand is under way.", "Priya hears the errand is done."].map((reason) => why.filter((w) => w === reason).length);
   };
-  const stage = async (rig: Rig, chatId: string): Promise<string> => (await head(rig, chatId)).state.tracks.q_errand?.stage ?? "asked";
+  /** The errand's stage at the head, by both folds, which agree (DESIGN §14, L1). */
+  const stage = async (rig: Rig, chatId: string): Promise<string> => {
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    if (!core) throw new Error("no ledger");
+    const chain = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
+    const reference = referenceFold(core.foldInput(chain), rig.rt.registry).state;
+    expect(hashJson(core.fold(chain).state)).toBe(hashJson(reference));
+    return reference.tracks.q_errand?.stage ?? "asked";
+  };
   /** The errand's quest signals the latest reply holds, in its own events and in the entries kept on it. */
   const signals = async (rig: Rig, chatId: string): Promise<number> => {
     const m = toChain(await rig.host.chats.messages(chatId, rig.host.userId)).at(-1);
@@ -446,7 +465,7 @@ describe("the GM's Stage, its reply read again", () => {
     expect([await stage(rig, chatId), await paid(rig, chatId)]).toEqual(["done", [1, 1]]);
   };
 
-  test("a Re-run carries the GM's move while its reply leaves the quest where it was, and drops it whole once its own reply takes the quest to the same end: each reward is paid once, and the quest is told of once", async () => {
+  test("a Re-run carries the GM's move while its reply leaves the quest where it was, and keeps it with nothing of its own once its own reply takes the quest to the same end: each reward is paid once, and the quest is told of once", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await errandChat(rig);
     await movedOnReply(rig, chatId);
@@ -477,7 +496,7 @@ describe("the GM's Stage, its reply read again", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("made while a reply streams that takes the quest there itself, it is refused with a notice", async () => {
+  test("made while a reply streams that takes the quest there itself, it lands as already so: each reward is paid once, and nothing is refused", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await errandChat(rig);
     rig.host.sendUser(chatId, "I look around.");
@@ -487,26 +506,31 @@ describe("the GM's Stage, its reply read again", () => {
     rig.host.quietReply = trusting;
     await rig.host.finish(reply, "Danny claps you on the shoulder. He trusts you now.");
     expect([await stage(rig, chatId), await paid(rig, chatId), await signals(rig, chatId)]).toEqual(["done", [1, 1], 1]);
-    expect((await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "refused").map((c) => c.label)).toEqual(["Your correction didn't apply after the reply"]);
+    expect((await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "refused")).toEqual([]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("one that landed as already so is kept, so a Re-run whose reply stops short of the end still takes the quest there, each reward paid once", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await errandChat(rig);
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "stage", track: "q_errand", to: "done" }] })).pending).toBe(true);
+    rig.host.quietReply = trusting;
+    await rig.host.finish(reply, "Danny claps you on the shoulder. He trusts you now.");
+    expect([await stage(rig, chatId), await paid(rig, chatId)]).toEqual(["done", [1, 1]]);
+    // Re-run, its reply reads as nothing: the GM's move, already so on the swipe before, is made on it.
+    rig.host.quietReply = () => "{}";
+    rig.rt.setSwipeChoice(chatId, "rerun");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The shop is quiet.");
+    expect([await stage(rig, chatId), await paid(rig, chatId)]).toEqual(["done", [1, 1]]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
   test("a Re-narrate carries the GM's move on from the stage its reply's read took the quest to: the new reply is read first, so the end stands, each reward paid once", async () => {
     const rig = new Rig({ shipped: true });
-    // A trusting reply's read takes the errand under way; only the GM takes it on to its end.
-    const errand: JsonObject = {
-      id: "q_errand",
-      kind: "quest",
-      label: "The errand",
-      start: "asked",
-      visibility: "public",
-      stages: {
-        asked: { label: "Asked to help", next: [{ to: "working", when: "regard('danny_okafor', 'pov', 'trust') >= 30" }], rewards: [{ type: "relationships.adjust", args: { from: "priya_nair", to: "pov", axis: "respect", delta: 5, why: "Priya hears the errand is under way." } }] },
-        working: { label: "Under way", next: [{ to: "done", when: "false" }] },
-        done: { label: "Done", next: [], rewards: [{ type: "relationships.adjust", args: { from: "priya_nair", to: "pov", axis: "respect", delta: 5, why: "Priya hears the errand is done." } }] },
-      },
-    };
-    const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [errand]);
+    const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [ERRAND_UNDER_WAY]);
     rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { regard: { mode: "auto" } } } }));
     rig.host.quietReply = trusting;
     await rig.turn(chatId, "I help Danny with the truck.", "Danny claps you on the shoulder. He trusts you now.");
@@ -520,6 +544,29 @@ describe("the GM's Stage, its reply read again", () => {
     await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "Danny grins and shakes your hand. He trusts you now.");
     const swipes = (await rig.rt.ledger.core(chatId, rig.host.userId))?.journal.messages[reply.id]?.ledger.swipes;
     expect(swipes?.["1"]?.seed).toBe(swipes?.["0"]?.seed);
+    expect([await stage(rig, chatId), await paid(rig, chatId)]).toEqual(["done", [1, 1]]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("made on a later reply, it stands when a Re-read of an earlier reply takes the quest partway: it moves on from there, each reward paid once", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await chatOf(rig, "modern_slice_of_life", "Port Alder", [ERRAND_UNDER_WAY]);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { regard: { mode: "auto" } } } }));
+    rig.host.quietReply = () => "{}";
+    await rig.turn(chatId, "I look around.", "The shop is quiet.");
+    const earlier = rig.host.head(chatId);
+    if (!earlier) throw new Error("no reply");
+    await rig.turn(chatId, "I wait.", "Nothing much happens.");
+    await gm(rig, chatId, { op: "stage", track: "q_errand", to: "done" });
+    expect([await stage(rig, chatId), await paid(rig, chatId)]).toEqual(["done", [1, 1]]);
+    // The earlier reply, edited and read again, takes the errand under way: the GM's move, made after
+    // it, is made again from there.
+    rig.host.quietReply = trusting;
+    rig.host.editMessage(chatId, earlier.id, "Danny claps you on the shoulder. He trusts you now.");
+    await rig.host.settle();
+    const reread = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "reread" && c.messageId === earlier.id);
+    if (!reread) throw new Error("no Re-read chip");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: reread.id, choice: "reread" }));
     expect([await stage(rig, chatId), await paid(rig, chatId)]).toEqual(["done", [1, 1]]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });

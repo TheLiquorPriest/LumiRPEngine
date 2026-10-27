@@ -8,6 +8,7 @@ import type { ChatId } from "../../src/shared/ids";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import type { ChatRun, HeldWrite } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
+import type { EditOp } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
@@ -15,6 +16,7 @@ import { LedgerFold } from "../../src/engine/ledger/fold";
 import type { LedgerCore, TurnModel } from "../../src/engine/ledger/journal";
 import { referenceFold, type FoldTypes } from "../../src/engine/ledger/reference";
 import type { EventTypeDef, PackDef } from "../../src/engine/registry";
+import { resolveEdit, resolveFix } from "../../src/engine/edits";
 import { enginePack } from "../../src/engine/engine-pack";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import type { QueueStop } from "../../src/engine/turn";
@@ -112,6 +114,7 @@ export class Harness {
           // settings filling in, through the code production uses (half-minute ticks included).
           startMarkers: () => startMarkersFrom(this.settings, world, run.revision),
           newSeed: () => `seed-${++this.seeds}`,
+          resolveFix: (doc, state, entry) => resolveFix(this.registry, doc, state, entry, run.runSeed),
         };
       },
       new LedgerFold(this.registry, { snapshotEvery: HARNESS_SNAPSHOT_EVERY }),
@@ -137,7 +140,7 @@ export class Harness {
         const raw = (await this.host.chats.chatMetadata(chatId, this.host.userId))[LEDGER_NAMESPACE];
         return isRecord(raw) && typeof raw.worldId === "string" ? raw.worldId : null;
       },
-      inputs: () => ({ revision: "", settings: "", preset: "", presetWrites: "", notes: "" }),
+      inputs: () => ({ revision: "", settings: "", preset: "", presetWrites: "" }),
       beforeCommit: noop,
       afterCommit: noop,
       changed: () => undefined,
@@ -172,6 +175,21 @@ export class Harness {
     return result;
   }
 
+  /**
+   * A GM edit as `lre.edit` writes one (DESIGN §7): its operations resolved on the head the GM sees
+   * (a turn in flight's planned state included), the request kept on its `fix` entry; null when the
+   * head refuses it, as the GM view would.
+   */
+  async gmEdit(chatId: ChatId, id: string, ops: EditOp[]): Promise<HeldWrite | null> {
+    const core = await this.core(chatId);
+    const head = core.renderState(toChain(await this.host.chats.messages(chatId, this.host.userId)));
+    const raw = (await this.host.chats.chatMetadata(chatId, this.host.userId))[LEDGER_NAMESPACE];
+    if (!head || !isRecord(raw) || typeof raw.runSeed !== "string") return null;
+    const edit = resolveEdit(this.registry, head.world, head.state, ops, { gm: true, runSeed: raw.runSeed });
+    if ("rejection" in edit || edit.events.length === 0) return null;
+    return { kind: "post", id, target: "head", entry: { kind: "fix", gm: true, events: edit.events, edit: { ops } } };
+  }
+
   async core(chatId: ChatId): Promise<LedgerCore> {
     const core = await this.service.core(chatId, this.host.userId);
     if (!core) throw new Error(`${chatId} is not a world chat`);
@@ -183,7 +201,7 @@ export class Harness {
     const core = await this.core(chatId);
     const all = toChain(await this.host.chats.messages(chatId, this.host.userId));
     const observed = limit === undefined ? all : all.slice(0, limit);
-    const input = { worlds: (r: string) => this.worlds.get(r), revision: this.revision, chain: core.chain(observed), pauses: core.journal.pauses, tombstones: core.journal.tombstones };
+    const input = core.foldInput(observed);
     const optimized = core.fold(observed);
     const snapshots = this.service.snapshotsOf(chatId);
     const cold = new LedgerFold(this.registry, { snapshotEvery: HARNESS_SNAPSHOT_EVERY }).fold({ ...input, ...(snapshots ? { snapshots: new ChatSnapshots(snapshots.toJSON()) } : {}) });

@@ -52,7 +52,6 @@ The engine makes small model calls of its own around each turn. A switched-off b
 | `RPEngine · choices` | Suggests what you could do next | Tone, length and person of the suggestions |
 | `RPEngine · npc.choose` | Picks what people do on close calls | How your preset's characters behave: how bold or kind, what they never do |
 | `RPEngine · judge` | Rates how well your described approach suits an action | How generous to be, and what a good plan looks like in your genre |
-| `RPEngine · contradiction` | Checks the reply against the engine's facts | What the narrator may add without it counting (weather, small talk, thoughts) |
 | `RPEngine · puzzle.answer` | Judges whether a typed answer matches a puzzle's | How loose to be about wording and spelling |
 | `RPEngine · mind` | Thinks as one character at a time, from only what that character knows, and gives the narrator their mind | How your preset's characters think: how candid or scheming, how far ahead they plan |
 | `RPEngine · memory` | Writes down, as each character present, what they'll remember of the reply: notes, promises and debts, plans | What your preset's characters hold on to: slights, kindnesses, money, promises |
@@ -66,12 +65,15 @@ How the engine reads a guidance block:
 - **No macro runs in it.** The engine reads the text as written and never resolves a Lumiverse macro in it: `{{char}}` reaches the helper as look-alike braces, not as a name.
 - **It is kept short.** The engine reads the first 1,500 characters (after the notes), cut at a word.
 - **The first block of a name counts**, and the name is matched without regard to case or extra spaces.
+- **An `RPEngine · contradiction` block is no longer read.** An earlier version checked each reply against the engine's facts; what a reply narrates is the story now, so the check is gone. Delete the block, or leave it switched off.
 
 ## The narrator block
 
-A switched-off **RPEngine · narrator** block gives the narrator rules in world chats only, so a preset used for other chats too can carry rules about the engine's sections without them showing up elsewhere. The engine puts its text into the prompt as a short "[Narrator rules]" section, before the character, or exactly where an enabled block holds `{{outlet::lre_narrator}}`. It doesn't count against the section budget, and the same reading rules apply: notes skipped, no macros run, 1,500 characters at most.
+In world chats every reply gets narrator rules from the engine, as a short "[Narrator rules]" section before the character, or exactly where an enabled block holds `{{outlet::lre_narrator}}`. They put secrecy first, above everything after it and in the same words in every world: facts marked "[unknown to you]" are only for steering, never revealed, narrated as known or acted on by the player character, and nothing the player character can't know is revealed, whoever asks, the player included. Then comes the order of authority: the player's own instructions first (what they say out of character, and what they write their character does; an attempt the engine rolled for goes as the roll says), then what the story has already established, then the engine's sections, the world as it stands, to follow unless the player directs otherwise, though what they keep from the player character stays kept; and people, places and things the story brings in become part of the world.
 
-Good narrator rules are about using the sections: trust the Outcome and narrate the result it states, don't invent prices, purchases or events the sections don't hold, keep to the time the Scene section says passed.
+A switched-off **RPEngine · narrator** block adds your preset's own rules after them, marked as the player's, in world chats only, so a preset used for other chats too can carry rules about the engine's sections without them showing up elsewhere. It doesn't count against the section budget, and the same reading rules apply: notes skipped, no macros run, 1,500 characters at most.
+
+Good narrator rules are about using the sections: what to show of them, what to stress, what to leave in the background. Secrecy and the order of authority come first in every world chat, so your rules don't need to repeat them, and nothing in your rules lifts secrecy.
 
 ## Examples
 
@@ -79,7 +81,7 @@ A preset that keeps the engine's facts together near the end of the prompt, in i
 
 ```
 [Block "World state", enabled, after chat history]
-Established facts for this turn. Treat them as true.
+The world as it stands this turn, from LumiRPEngine.
 {{outlet::lre_outcome}}
 {{outlet::lre_scene}}
 {{outlet::lre_people}}
@@ -100,8 +102,9 @@ Narrator rules for world chats:
 
 ```
 [Block "RPEngine · narrator", switched off]
-The engine's sections are the facts. Narrate the Outcome's result as stated, never a different one.
-Don't name a price the sections don't give.
+Open on the place and the time the Scene section gives, in a sentence or two.
+Show the Outcome through what the people there do and say, not as a list.
+Leave Gear and Money in the background unless the reply turns on them.
 ```
 
 ## With world step templates and Build → Sections

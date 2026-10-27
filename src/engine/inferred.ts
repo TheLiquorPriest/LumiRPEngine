@@ -26,7 +26,7 @@ import { hasOwn, isRecord } from "../shared/json";
 import { tableChoices } from "../shared/tables";
 import type { LintIssue } from "../shared/protocol";
 import type { ActionDef, WorldDoc } from "../shared/world";
-import { offersAction } from "../shared/world";
+import { offersAction, requirementExpr } from "../shared/world";
 import { passOutcomes } from "./adjudication";
 import { checkOf, readyCheck, rollCheck, type ReadyCheck } from "./checks";
 import { diceDistribution, meanFloor } from "./dice";
@@ -90,7 +90,7 @@ function skillParam(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
 export function skillSources(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, gated = true): SkillSource[] {
   const env = scopeEnv({ reg, ctx: reg.context(world, state), bindings: { self: world.pov, actor: world.pov } });
   const actions = [...Object.values(world.actions), ...[...reg.actions.values()].filter((a) => !own(world.actions, a.id))];
-  const ready = actions.filter((a) => offersAction(world, a) && a.combat === undefined && checkOf(world, a.check) !== null && (!gated || a.requires.every((r) => truthy(evalExpr(r, env, false)))));
+  const ready = actions.filter((a) => offersAction(world, a) && a.combat === undefined && checkOf(world, a.check) !== null && (!gated || a.requires.every((r) => truthy(evalExpr(requirementExpr(r), env, false)))));
   const ordered = [...ready.filter((a) => a.requires.length === 0), ...ready.filter((a) => a.requires.length > 0)];
   const out: SkillSource[] = [];
   const seen = new Set<string>();

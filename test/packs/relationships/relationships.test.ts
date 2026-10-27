@@ -84,11 +84,13 @@ describe("relationships", () => {
     expect(voice).not.toMatch(/\d/);
   });
 
-  test("the regard channel is capped per proposal; level 0 makes appraisals no-ops", () => {
+  test("the regard channel moves an axis as far as the story says, inside its range; level 0 makes appraisals no-ops", () => {
     const w = setup(3);
     const ch = reg.proposals.get("regard");
     const effects = ch?.toEffects({ from: "maya", to: "you", delta: 60 }, w.ctx) ?? [];
-    expect(effects[0]?.args.delta).toBe(10);
+    expect(effects[0]?.args.delta).toBe(60);
+    applyEffects(reg, w, [...effects, ...effects], { bindings: {}, rng: createRng("far") });
+    expect(regardValue(w.ctx, "maya", "you", "trust")).toBe(100);
     w.state.realism.levels.relationships = 0;
     expect(w.ctx.service("relationship.appraise")(w.ctx, "maya", "you", "gift")).toEqual([]);
   });

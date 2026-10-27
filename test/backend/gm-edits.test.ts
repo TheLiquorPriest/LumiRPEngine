@@ -3,11 +3,14 @@
 // every process, and Restore brings it back.
 
 import { describe, expect, test } from "bun:test";
+import type { QuietRequest } from "../../src/backend/host";
+import { hashJson } from "../../src/shared/hash";
 import type { JsonObject } from "../../src/shared/json";
 import type { EditOp } from "../../src/shared/protocol";
 import type { GmView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/backend/ledger-io";
+import { referenceFold } from "../../src/engine/ledger/reference";
 import { paramCandidates } from "../../src/engine/resolve";
 import { scheduleOwners } from "../../src/engine/schedules";
 import { lod1Agents } from "../../src/engine/simulate";
@@ -55,6 +58,43 @@ async function refused(rig: Rig, chatId: string, ...ops: EditOp[]): Promise<stri
   const reply = await rig.send({ type: "lre.edit", chatId, ops });
   if (reply.type !== "lre.error") throw new Error(`${JSON.stringify(ops)} was accepted`);
   return reply.message;
+}
+
+/** The head's state by both folds, which agree (DESIGN §14, L1). */
+async function bothFolds(rig: Rig, chatId: string): Promise<WorldState> {
+  const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+  if (!core) throw new Error("no ledger");
+  const chain = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
+  const reference = referenceFold(core.foldInput(chain), rig.rt.registry);
+  expect(hashJson(core.fold(chain).state)).toBe(hashJson(reference.state));
+  return reference.state;
+}
+
+/** A Port Alder chat as the starter ships it (its people public, none known yet), whose replies' new acquaintances are read as made. */
+async function portAlder(rig: Rig): Promise<string> {
+  const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+  const chatId = rig.host.createChat("Morning.");
+  rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { knows: { mode: "auto" } } } }));
+  rig.host.quietReply = () => "{}";
+  return chatId;
+}
+
+/** Whether the player character knows Danny at the head, by both folds. */
+async function knowsDanny(rig: Rig, chatId: string): Promise<boolean> {
+  return (await bothFolds(rig, chatId)).entities.pov?.relations.some((r) => r.type === "knows" && r.to === "danny_okafor") === true;
+}
+
+/** A read that has the player character meet Danny; every other model call answers with nothing. */
+const meetsDanny = (req: QuietRequest): string => ((req.messages[0]?.content ?? "").includes("propose concrete state changes") ? JSON.stringify({ proposals: [{ type: "knows", fact: "danny_okafor" }] }) : "{}");
+
+/** Edits a reply and reads it again with its Re-read edit chip. */
+async function reread(rig: Rig, chatId: string, messageId: string, text: string): Promise<void> {
+  rig.host.editMessage(chatId, messageId, text);
+  await rig.host.settle();
+  const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "reread" && c.messageId === messageId);
+  if (!chip) throw new Error("no Re-read chip");
+  rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "reread" }));
 }
 
 describe("GM edits", () => {
@@ -183,22 +223,79 @@ describe("GM edits", () => {
     expect(lines.some((l) => l.includes("spy") || l.includes("Mara"))).toBe(false);
   });
 
-  test("an edit held through a reply that no longer applies when it finishes is refused with a notice", async () => {
+  test("an edit held through a reply lands after it even where what it edits changed meanwhile, passing over what is already so", async () => {
     const rig = new Rig();
     const chatId = await chat(rig);
-    await edit(rig, chatId, { op: "link", rel: "knows", from: POV, to: "dev" });
+    await edit(rig, chatId, { op: "link", rel: "knows", from: POV, to: "dev" }, { op: "spawn", kind: "box", name: "Crate", id: "crate", place: "home" });
     rig.host.sendUser(chatId, "look around");
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
-    // Each is checked against the state the reply is written from, then held until it finishes;
-    // the first to land takes the relation the second needs.
-    const unlink: EditOp = { op: "unlink", rel: "knows", from: POV, to: "dev" };
-    expect(rig.body(await rig.send({ type: "lre.edit", chatId, ops: [unlink] })).pending).toBe(true);
-    expect(rig.body(await rig.send({ type: "lre.edit", chatId, ops: [unlink] })).pending).toBe(true);
+    // Each is checked against the state the reply is written from, then held until it finishes. The
+    // first to land changes what the later ones were made against: the second unlink asks for what is
+    // already so, and the coin taken out of the chest is no longer in it when it goes into the crate.
+    const held: EditOp[] = [
+      { op: "unlink", rel: "knows", from: POV, to: "dev" },
+      { op: "unlink", rel: "knows", from: POV, to: "dev" },
+      { op: "put", entity: "coin", into: null },
+      { op: "put", entity: "coin", into: "crate" },
+    ];
+    for (const op of held) expect(rig.body(await rig.send({ type: "lre.edit", chatId, ops: [op] })).pending).toBe(true);
     await rig.host.finish(g, "Quiet again.");
-    const notices = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "refused");
-    expect(notices.map((c) => c.label)).toEqual(["Your correction didn't apply after the reply"]);
-    expect((await folded(rig, chatId)).state.entities[POV]?.relations).toEqual([]);
+    expect((await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "refused")).toEqual([]);
+    const { state } = await folded(rig, chatId);
+    expect(state.entities[POV]?.relations).toEqual([]);
+    expect(state.entities.coin?.relations).toEqual([{ type: "in", to: "crate" }]);
+    // The GM view keeps no refusal; each edit that changed something is in force, and the second
+    // unlink, already so when it landed, adds none of its own.
+    const gm = rig.body(await rig.send({ type: "lre.gm", chatId })) as unknown as GmView;
+    expect(gm.refused).toEqual([]);
+    expect(gm.edits).toHaveLength(4);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("an unlink a Re-read already made so keeps its request, so reading the reply as it was again doesn't bring the link back", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await portAlder(rig);
+    rig.host.quietReply = meetsDanny;
+    await rig.turn(chatId, "I wave at the mechanic.", "Danny waves back and tells you his name.");
+    expect(await knowsDanny(rig, chatId)).toBe(true);
+    await edit(rig, chatId, { op: "unlink", rel: "knows", from: "pov", to: "danny_okafor" });
+    expect(await knowsDanny(rig, chatId)).toBe(false);
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    // Edited so that the two never meet: the unlink is already so after the new read.
+    rig.host.quietReply = () => "{}";
+    await reread(rig, chatId, reply.id, "Nobody waves back.");
+    expect(await knowsDanny(rig, chatId)).toBe(false);
+    // Edited back: the read has them meet again, and the GM's unlink is made again after it.
+    rig.host.quietReply = meetsDanny;
+    await reread(rig, chatId, reply.id, "Danny waves back and tells you his name.");
+    expect(await knowsDanny(rig, chatId)).toBe(false);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("on a later reply that a Re-read of an earlier one puts on a rebased view, an edit already so there reads as nothing made: no chip, no Journal line", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await portAlder(rig);
+    rig.host.quietReply = meetsDanny;
+    await rig.turn(chatId, "I wave at the mechanic.", "Danny waves back and tells you his name.");
+    const earlier = rig.host.head(chatId);
+    if (!earlier) throw new Error("no reply");
+    rig.host.quietReply = () => "{}";
+    await rig.turn(chatId, "I wait.", "Nothing much happens.");
+    const later = rig.host.head(chatId);
+    if (!later) throw new Error("no reply");
+    await edit(rig, chatId, { op: "unlink", rel: "knows", from: "pov", to: "danny_okafor" });
+    const shown = async () => {
+      const view = await rig.rt.view(chatId, rig.host.userId);
+      return { chips: view.chips.filter((c) => c.kind === "fix" && c.messageId === later.id).length, journal: view.journal.filter((n) => n.kind === "fix" && n.messageId === later.id).length };
+    };
+    expect(await shown()).toEqual({ chips: 1, journal: 1 });
+    // The earlier reply, edited so that the two never meet and read again: the unlink is already so there.
+    await reread(rig, chatId, earlier.id, "Nobody waves back.");
+    expect(await knowsDanny(rig, chatId)).toBe(false);
+    expect(await shown()).toEqual({ chips: 0, journal: 0 });
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 
   test("malformed edits are refused before anything is read", async () => {

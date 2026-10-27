@@ -1,9 +1,10 @@
 // Player claims (DESIGN §9.4), on Port Alder: a typed action that uses a thing the world doesn't
 // have, as the POV sees it, plays by the chat's policy. Make it real makes the thing, plays the
 // action and says so with an Undo; Ask first waits, with nothing generated, on Add or Not an
-// action, and either gives one reply; Hold me to the world drops the action as before. Money is
-// never made; keys and things over the cap ask; a claimed key opens nothing authored; a hidden
-// thing counts as absent, and nothing tells of it.
+// action, and either gives one reply; Hold me to the world plays the action as plain roleplay. Cash
+// the player character carries is handed over as it is; money they lack, keys and things over the
+// cap ask, and added money tops up their cash for the Pay; a claimed key opens no lock its author
+// marked hard; a hidden thing counts as absent, and nothing tells of it.
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
@@ -11,7 +12,8 @@ import { toChain } from "../../src/backend/ledger-io";
 import { isGone } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import type { ClaimsPolicy } from "../../src/shared/claims";
-import type { JsonObject } from "../../src/shared/json";
+import { heldBy } from "../../src/shared/finance";
+import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { STARTER_WORLDS } from "../../src/packs/index";
@@ -50,6 +52,19 @@ async function state(rig: Rig, chatId: string): Promise<WorldState> {
 /** The claimed things in the chat, by id. */
 async function claimed(rig: Rig, chatId: string): Promise<[string, WorldState["entities"][string]][]> {
   return Object.entries((await state(rig, chatId)).entities).filter(([, e]) => e.fields.claimed === true);
+}
+
+/** What moved on the player character's own accounts, as their journal shows it, less the openings: each line's memo, amount and other side. */
+async function journal(rig: Rig, chatId: string): Promise<{ memo: string; cents: number; counterparty: string | null }[]> {
+  const s = await state(rig, chatId);
+  const out: { memo: string; cents: number; counterparty: string | null }[] = [];
+  const book = s.packs.economy?.journal;
+  if (!isRecord(book)) return out;
+  for (const [account, entries] of Object.entries(book)) {
+    if (!heldBy(s.entities, account, "pov") || !Array.isArray(entries)) continue;
+    for (const e of entries) if (isRecord(e) && e.kind !== "opening") out.push({ memo: String(e.memo), cents: Number(e.cents), counterparty: typeof e.counterparty === "string" ? e.counterparty : null });
+  }
+  return out;
 }
 
 async function chips(rig: Rig, chatId: string): Promise<Chip[]> {
@@ -182,32 +197,80 @@ describe("Ask first", () => {
 });
 
 describe("Hold me to the world", () => {
-  test("the action is dropped with its decline chip and the next reply is told it didn't happen, as before", async () => {
+  test("the action plays as plain roleplay: a receipt says why with nothing to answer, and no reply is told it didn't happen", async () => {
     const { rig, chatId } = await chat({ mode: "hold", capped: false });
     reading(rig, give("coffee", "drink"));
     await rig.turn(chatId, "I pour Danny a coffee.", "You pour Danny a coffee.");
     expect((await rig.rt.view(chatId, rig.host.userId)).controls?.realism.claims).toEqual({ mode: "hold", capped: false });
     expect(await claimed(rig, chatId)).toEqual([]);
-    const decline = (await chips(rig, chatId)).find((c) => c.kind === "decline");
-    expect(decline?.label).toBe("Give: couldn't");
-    expect(decline?.detail).toMatch(/coffee/i);
+    const receipt = (await chips(rig, chatId)).find((c) => c.kind === "untracked");
+    expect(receipt?.label).toStartWith("Give");
+    expect(receipt?.detail).toMatch(/coffee/i);
+    expect(receipt?.actions).toEqual([]);
     rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
     const next = await rig.host.start(chatId, { type: "normal" });
-    expect(rig.host.section("Outcome")).toMatch(/Give.*didn't happen/);
+    expect(rig.host.section("Outcome")).not.toMatch(/didn't happen|never happened/);
+    expect(rig.host.section("Outcome")).not.toContain("Give");
     await rig.host.finish(next, "Quiet.");
   });
 });
 
 describe("limits in every mode", () => {
-  test("'I hand him a twenty' never makes money, in any mode", async () => {
+  test("'I hand Danny a twenty' with $85 on them hands it over as it is, in every mode: nothing is asked and no money is made", async () => {
     for (const mode of ["real", "ask", "hold"] as const) {
       const { rig, chatId } = await chat({ mode, capped: false });
       reading(rig, give("a twenty", "money"));
-      await rig.turn(chatId, "I hand Danny a twenty.", "Danny looks at you, puzzled.");
-      expect({ mode, made: await claimed(rig, chatId), replies: replies(rig, chatId) }).toEqual({ mode, made: [], replies: 2 });
-      expect((await chips(rig, chatId)).find((c) => c.kind === "decline")?.detail).toMatch(/^Money is never made/);
+      const g = await send(rig, chatId, "I hand Danny a twenty.");
+      expect({ mode, halted: g.halted }).toEqual({ mode, halted: undefined });
+      await rig.host.finish(g, "You press a twenty into Danny's hand.");
+      const moved = (await journal(rig, chatId)).filter((l) => Math.abs(l.cents) === 2000).map((l) => [l.cents, l.counterparty === DANNY]);
+      expect({ mode, moved }).toEqual({ mode, moved: [[-2000, true]] });
+      expect((await chips(rig, chatId)).some((c) => c.kind === "claim" || c.kind === "claimed")).toBe(false);
     }
+  });
+
+  test("'I hand Danny $100' with $85 on them asks to add only the $15 they lack, and Add hands the $100 over in cash; Hold me to the world plays it as plain roleplay", async () => {
+    for (const mode of ["real", "ask"] as const) {
+      const { rig, chatId } = await chat({ mode, capped: false });
+      reading(rig, give("$100", "money"));
+      expect({ mode, halted: (await send(rig, chatId, "I hand Danny $100.")).halted }).toEqual({ mode, halted: "cancelled" });
+      const ask = (await chips(rig, chatId)).find((c) => c.kind === "claim");
+      expect(ask?.label).toContain("$15.00");
+      expect(ask?.actions.map((a) => a.id)).toEqual(["add", "drop"]);
+      expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: ask?.id, choice: "add" })).applied).toBe(true);
+      await rig.host.finish(await rig.host.start(chatId, { type: "regenerate" }), "You count a hundred into Danny's hand.");
+      // Only the $15 came into the player character's cash, and the whole $100 went to Danny.
+      const moved = (await journal(rig, chatId)).filter((l) => l.cents > 0 || l.counterparty === DANNY).map((l) => [l.cents, l.counterparty === DANNY]);
+      expect({ mode, moved }).toEqual({ mode, moved: expect.arrayContaining([[1500, false], [-10000, true]]) });
+      expect(moved.some(([cents]) => cents === 10000)).toBe(false);
+      expect((await chips(rig, chatId)).find((c) => c.kind === "claimed")?.label).toContain("$15.00");
+      expect(await claimed(rig, chatId)).toEqual([]);
+    }
+    const held = await chat({ mode: "hold", capped: false });
+    reading(held.rig, give("$100", "money"));
+    await held.rig.turn(held.chatId, "I hand Danny $100.", "Danny looks at you, puzzled.");
+    expect((await journal(held.rig, held.chatId)).filter((l) => l.counterparty === DANNY || l.cents > 0)).toEqual([]);
+    const shown = await chips(held.rig, held.chatId);
+    expect(shown.some((c) => c.kind === "claim")).toBe(false);
+    expect(shown.find((c) => c.kind === "untracked")?.label).toStartWith("Give");
+  });
+
+  test("money for someone who isn't there plays as plain roleplay, as the give would: nothing is made, nothing moves, and a receipt says why", async () => {
+    const { rig, chatId } = await chat({ mode: "real", capped: false });
+    reading(rig, { action: "go", params: { to: "bluebird_coffee" } });
+    await rig.turn(chatId, "I walk to Bluebird Coffee.", "The cafe is warm.");
+    reading(rig, give("a twenty", "money"));
+    await rig.turn(chatId, "I hand Danny a twenty.", "You look around for Danny.");
+    const head = rig.host.head(chatId)?.id ?? "";
+    expect((await chips(rig, chatId)).filter((c) => c.kind === "untracked").map((c) => c.messageId)).toEqual([head]);
+    reading(rig, give("$100", "money"));
+    expect((await send(rig, chatId, "I hand Danny $100.")).halted).toBe("cancelled");
+    const ask = (await chips(rig, chatId)).find((c) => c.kind === "claim");
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: ask?.id, choice: "add" })).applied).toBe(true);
+    await rig.host.finish(await rig.host.start(chatId, { type: "regenerate" }), "You look around for Danny.");
+    expect((await chips(rig, chatId)).some((c) => c.kind === "claimed")).toBe(false);
+    expect((await journal(rig, chatId)).filter((l) => l.counterparty === DANNY || l.cents > 0)).toEqual([]);
   });
 
   test("capped Make it real asks for a thing over the cap and makes one under it", async () => {
@@ -222,8 +285,8 @@ describe("limits in every mode", () => {
     expect((await claimed(under.rig, under.chatId)).map(([, e]) => e.name)).toEqual(["coffee"]);
   });
 
-  test("a claimed key asks first, and once added never opens a lock that needs the authored key", async () => {
-    const unlock: JsonObject = { id: "unlock_office", label: "Unlock the office", description: "Unlock the shop's back office.", params: {}, requires: ["carries(self, shop_office_key)"], outcomes: { default: [] }, duration: "1", lexicon: ["unlock the office"] };
+  test("a claimed key asks first, and once added never opens a lock its author marked hard that needs the authored key", async () => {
+    const unlock: JsonObject = { id: "unlock_office", label: "Unlock the office", description: "Unlock the shop's back office.", params: {}, requires: [{ expr: "carries(self, shop_office_key)", hard: true }], outcomes: { default: [] }, duration: "1", lexicon: ["unlock the office"] };
     const { rig, chatId } = await chat(undefined, [["actions", unlock]]);
     reading(rig, { action: "use", params: { item: "office key" }, thing: "key", more: [{ action: "unlock_office", params: {}, text: "I unlock the office" }] });
     expect((await send(rig, chatId, "I take out my office key and unlock the office.")).halted).toBe("cancelled");

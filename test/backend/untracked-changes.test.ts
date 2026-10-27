@@ -1,14 +1,17 @@
 // What a reply told that the engine has no place for (DESIGN §9.5): a fact told in prose, a thing
-// as a newcomer. The story stands, so the read shows it as not tracked, asks nothing and never tells
-// the next reply it didn't happen; a refusal by the world's rules still does. A receipt never names
-// a person, place or thing the player character doesn't know, and reads the same whether that is
+// as a newcomer, a payment of nothing. The story stands, so the read shows it as not tracked, asks
+// nothing and never tells the next reply otherwise; nothing a read refuses is told to the next
+// reply. A receipt never turns an id into the name of a person, place or thing the player character
+// doesn't know, shows words the reply wrote as written, and reads the same whether what it names is
 // hidden or nowhere in the world (DESIGN §11); extract's input never names a place the player
-// character hasn't heard of. And extract is asked for what its knows and spawn channels take (DESIGN §9.4).
+// character hasn't heard of. And extract is asked for what its knows and spawn channels take
+// (DESIGN §9.4).
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { chipRole } from "../../src/frontend/chip-roles";
 import type { JsonObject } from "../../src/shared/json";
+import { toChain } from "../../src/backend/ledger-io";
 import { Rig } from "../support/rig";
 
 const INTERPRET_MARK = "You map a player's typed input";
@@ -20,6 +23,8 @@ const COVE = "smugglers_cove";
 const MILL = "old_mill";
 /** A secret person the player character has never met. */
 const RUTH = "ruth_calder";
+/** A secret thing Danny carries: the player character has never seen it. */
+const OILSKIN = "smugglers_oilskin";
 const TOLD = "The story stands as told, and the next reply isn't told otherwise.";
 /** The receipt of a change naming someone or something the player character doesn't know. */
 const UNKNOWN = { kind: "untracked" as const, detail: `the engine keeps only whom and what you know of. ${TOLD}`, actions: [] };
@@ -60,6 +65,18 @@ async function alderWithStrangers(): Promise<{ rig: Rig; chatId: string }> {
   return { rig, chatId };
 }
 
+/** Port Alder with the Smuggler's Oilskin, a secret thing Danny carries. */
+async function alderWithSecretThing(): Promise<{ rig: Rig; chatId: string }> {
+  const rig = new Rig({ shipped: true });
+  const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+  const value = { id: OILSKIN, kind: "item", name: "Smuggler's Oilskin", tier: "background", visibility: "secret", fields: { owner: DANNY }, relations: [{ type: "in", to: DANNY }] };
+  rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: OILSKIN, value }));
+  rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+  const chatId = rig.host.createChat("Morning.");
+  rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+  return { rig, chatId };
+}
+
 /** The read's chips on the reply after `proposals` are read from it: what each says and offers. */
 async function readChips({ rig, chatId }: { rig: Rig; chatId: string }, proposals: JsonObject[], reply: string): Promise<unknown[]> {
   script(rig, { proposals, where: null });
@@ -93,7 +110,7 @@ async function nextOutcome(rig: Rig, chatId: string, text: string): Promise<stri
 }
 
 describe("a change the engine has no place for", () => {
-  test("a fact told in prose or a thing as a newcomer is Not tracked: a receipt, no card, no note, and the next reply isn't told it didn't happen; a refused payment still is", async () => {
+  test("a fact told in prose, a thing as a newcomer or a payment of nothing is Not tracked, as the reply told it: a receipt, no card, and the next reply is told nothing of it", async () => {
     const { rig, chatId } = await portAlder();
     script(rig, {
       proposals: [
@@ -109,20 +126,17 @@ describe("a change the engine has no place for", () => {
     const head = rig.host.head(chatId);
     const chips = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === head?.id);
     const untracked = chips.filter((c) => c.kind === "untracked");
-    // One receipt for the thing the reply introduced, by its name, and one for the fact told in prose,
-    // which names nothing the player character knows.
-    expect(untracked).toHaveLength(2);
+    // One receipt for the thing the reply introduced, by its name, one for the fact told in prose,
+    // as the reply wrote it, and one for the payment of nothing.
+    expect(untracked).toHaveLength(3);
     expect(untracked.filter((c) => c.label.includes("Brass key"))).toHaveLength(1);
-    expect(untracked.filter((c) => c.label === "Not tracked: You learn: something you don't know")).toHaveLength(1);
+    expect(untracked.filter((c) => c.label === "Not tracked: You learn: The ferry stops running at nine.")).toHaveLength(1);
+    expect(untracked.filter((c) => c.label.startsWith("Not tracked: Marcus Delgado paid"))).toHaveLength(1);
     // A receipt: nothing to answer before the next send.
     for (const c of untracked) expect([c.actions, chipRole(c)]).toEqual([[], "done"]);
-    const declines = chips.filter((c) => c.kind === "decline");
-    expect(declines.map((c) => c.label)).toEqual([expect.stringContaining("Marcus Delgado paid")]);
-    const notes = (await rig.rt.outcomeNotes.list(chatId, rig.host.userId)).map((n) => n.text);
-    expect(notes).toEqual([expect.stringContaining("didn't happen")]);
+    expect(chips.filter((c) => c.kind === "decline")).toEqual([]);
     const outcome = await nextOutcome(rig, chatId, "I pocket the key.");
-    for (const said of ["ferry", "Brass key"]) expect(outcome).not.toContain(said);
-    expect(outcome).toMatch(/Marcus Delgado paid.*didn't happen/);
+    for (const said of ["ferry", "Brass key", "Marcus Delgado paid", "didn't happen"]) expect(outcome).not.toContain(said);
   });
 
   test("extract is asked for what its channels take: knows by id, never a sentence; spawn a newcomer of the world's person kinds, never a thing", async () => {
@@ -135,7 +149,7 @@ describe("a change the engine has no place for", () => {
     expect(prompt).toContain("knows only when the player character newly learns of a public person, thing or place");
   });
 
-  test("a refused fact never names a place the player character doesn't know, and reads the same whether or not the world holds it: by id or by name, known to those who know it or secret; and extract never sees either place", async () => {
+  test("a refused fact never turns an id into the name of a place the player character doesn't know, shows words as written, and reads the same whether or not the world holds the place: by id or by name, known to those who know it or secret; and extract never sees either place", async () => {
     // The reply tells of the Old Mill, and of Danny hearing of Smugglers' Cove.
     const proposals: JsonObject[] = [
       { type: "knows", fact: "Old Mill" },
@@ -156,9 +170,9 @@ describe("a change the engine has no place for", () => {
     const without = await receipts(await portAlder());
     const hidden = await receipts(await alderWithHiddenPlaces());
     expect(without.shown).toEqual([
+      { ...UNKNOWN, label: "Not tracked: You learn: Old Mill" },
       { ...UNKNOWN, label: "Not tracked: You learn: something you don't know" },
-      { ...UNKNOWN, label: "Not tracked: You learn: something you don't know" },
-      { ...UNKNOWN, label: "Not tracked: Danny Okafor learns: something you don't know" },
+      { ...UNKNOWN, label: "Not tracked: Danny Okafor learns: Smugglers' Cove" },
       { ...UNKNOWN, label: "Not tracked: Danny Okafor learns: something you don't know" },
       { kind: "untracked", label: "Not tracked: Danny Okafor learns: Alder Market", detail: `a reply only teaches the player character. ${TOLD}`, actions: [] },
     ]);
@@ -169,7 +183,7 @@ describe("a change the engine has no place for", () => {
     for (const said of [hidden.read?.messages[0]?.content ?? "", stateLine]) for (const place of [COVE, MILL, "Smugglers' Cove", "Old Mill"]) expect(said).not.toContain(place);
   });
 
-  test("a move or a person the player character doesn't know reads the same in every world: by id or by name, secret or nowhere in the world, it is a receipt that names neither", async () => {
+  test("a move or a person the player character doesn't know reads the same in every world: by id it is named by no name, in words as the reply wrote them, secret or nowhere in the world", async () => {
     // The reply walks you and Marcus to the Old Mill, Ruth Calder to the market, and has her warm to you.
     const proposals: JsonObject[] = [
       { type: "location", entity: "pov", place: MILL },
@@ -185,10 +199,42 @@ describe("a change the engine has no place for", () => {
     expect(without).toEqual([
       { kind: "undo", label: "Danny Okafor went to Alder Market", detail: "Applied automatically.", actions: [{ id: "undo", label: "Undo", style: "danger" }] },
       { ...UNKNOWN, label: "Not tracked: You went to a place you don't know" },
-      { ...UNKNOWN, label: "Not tracked: Marcus Delgado went to a place you don't know" },
+      { ...UNKNOWN, label: "Not tracked: Marcus Delgado went to Old Mill" },
       { ...UNKNOWN, label: "Not tracked: Someone you don't know went to Alder Market" },
-      { ...UNKNOWN, label: "Not tracked: Someone you don't know's trust toward you rose by 1" },
+      { ...UNKNOWN, label: "Not tracked: Ruth Calder's trust toward you rose by 1" },
     ]);
     expect(hidden).toEqual(without);
+  });
+
+  test("a thing handed over or bought reads as the reply put it, the same whether the world hides a thing by that id or name or has none, and the hidden one stays where it is", async () => {
+    // A reply each: Danny hands over the oilskin, or you buy one, by the secret thing's id or by its
+    // name (a purchase takes in a handover of the same thing in its reply).
+    const replies: [JsonObject, string][] = [
+      [{ type: "give", item: OILSKIN, from: DANNY, to: "pov" }, "Danny hands you an oilskin."],
+      [{ type: "give", item: "Smuggler's Oilskin", from: DANNY, to: "pov" }, "Danny hands you another."],
+      [{ type: "purchase", payer: "pov", item: OILSKIN, price: 5 }, "You buy an oilskin off the rack."],
+      [{ type: "purchase", payer: "pov", item: "Smuggler's Oilskin", name: OILSKIN, price: 5 }, "You buy another."],
+    ];
+    /** Each reply's chips, every confirm chip then applied. */
+    const play = async (world: { rig: Rig; chatId: string }): Promise<unknown[][]> => {
+      const { rig, chatId } = world;
+      const shown: unknown[][] = [];
+      for (const [proposal, reply] of replies) {
+        shown.push(await readChips(world, [proposal], reply));
+        const head = rig.host.head(chatId);
+        for (const c of (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.messageId === head?.id && c.kind === "confirm")) rig.body(await rig.send({ type: "lre.chip", chatId, chip: c.id, choice: "confirm" }));
+      }
+      return shown;
+    };
+    const without = await play(await portAlder());
+    const world = await alderWithSecretThing();
+    const hidden = await play(world);
+    expect(without.map((chips) => chips.length)).toEqual([1, 1, 1, 1]);
+    expect(hidden).toEqual(without);
+    // Each applied as words for a new thing: the hidden one never changed hands.
+    const { rig, chatId } = world;
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+    expect(state?.entities[OILSKIN]?.relations).toContainEqual({ type: "in", to: DANNY });
   });
 });

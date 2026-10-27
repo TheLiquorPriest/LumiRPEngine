@@ -30,7 +30,7 @@ import type { WorldDoc } from "../../shared/world";
 import { applyEvent, applyMarker, applyValidUnits, validateEvent, validMarkerBody } from "../events";
 import type { ReadContext } from "../registry";
 import type { WorldState } from "../state";
-import type { ChainMessage, FoldOutput, SnapshotStore } from "./chain";
+import type { ChainMessage, FoldInput, FoldOutput, SnapshotStore } from "./chain";
 import type { LedgerFold } from "./fold";
 import { activeRecord, activeText, contentId, isLive, isTombstoned, nextPath, sameContent, stepPath, storedRecordHash, turnPath } from "./path";
 import type { FoldTypes } from "./reference";
@@ -51,6 +51,13 @@ export interface LedgerEnv {
   startMarkers(): MarkerBody[];
   /** A fresh seed for a Re-run (random in production, deterministic in tests). */
   newSeed(): string;
+  /**
+   * A GM edit or ✎ fix resolved again from what it asked for (`PostEntry.edit`) against `state`, the
+   * state it now follows (DESIGN §7, P2): its events (none when all it asks is already so), or why
+   * it can't be made there; null for an entry that keeps nothing to resolve, whose own events stand.
+   * The journal resolves held and carried edits with it, and the folds a rebased view's.
+   */
+  resolveFix: FoldInput["resolveFix"];
   /** The chat's stored fold snapshots (cold folds); absent folds without them. */
   snapshots?: SnapshotStore;
   /**
@@ -95,6 +102,22 @@ function readElsewhereRefusal(latest: boolean): string {
   const cause = "This reply was written while an earlier message or swipe it depended on changed, so switching back can't restore it.";
   return latest ? `${cause} Re-run it to play the turn again.` : `${cause} It can't be undone or read again.`;
 }
+
+/**
+ * The seed a record's own read takes: its turn's, and a Re-read's or Retry read's, each of which
+ * replaces that read; a Re-narrate's commit reads with its own (P3). Each is known before the read
+ * lands (`commitContext`, `readContext`), so the chips the backend works out ahead hold the events
+ * the record will.
+ */
+function readSeed(seed: string, narrated = false): string {
+  return `${seed}:${narrated ? "narr" : "read"}`;
+}
+
+/** The seed a Continue's suffix is read with: its record's, and the `seq` its `cont` entry takes (`continueContext`). */
+function contSeed(seed: string, seq: number): string {
+  return `${seed}:cont:${seq}`;
+}
+
 export class LedgerCore {
   /** Whether this open has checked the starting markers against the chain's stored paths (`restoreStartMarkers`). */
   private startsChecked = false;
@@ -142,14 +165,19 @@ export class LedgerCore {
   }
 
   fold(observed: readonly ChainMessage[]): FoldOutput {
-    return this.folder.fold({
+    return this.folder.fold({ ...this.foldInput(observed), ...(this.env.snapshots ? { snapshots: this.env.snapshots } : {}) });
+  }
+
+  /** What a fold of `observed` reads (`fold`, and the reference fold the ledger gate holds it to); stored snapshots aside. */
+  foldInput(observed: readonly ChainMessage[]): FoldInput {
+    return {
       worlds: (r) => this.env.worlds(r),
       revision: this.env.run.revision,
       chain: this.chain(observed),
       pauses: this.journal.pauses,
       tombstones: this.journal.tombstones,
-      ...(this.env.snapshots ? { snapshots: this.env.snapshots } : {}),
-    });
+      resolveFix: (world, state, entry) => this.env.resolveFix(world, state, entry),
+    };
   }
 
   /** Messages whose metadata mirror differs from the journal (unflushed, or clobbered by another writer). */
@@ -653,9 +681,14 @@ export class LedgerCore {
    * Carries post entries onto a record's prefix (a Re-narrate's copies, a Re-run's fixes, what a
    * Re-read keeps), after its events: each, in fold order with the message's later live markers, is
    * re-validated event by event against `state` (the prefix after the record's events, advanced in
-   * place) and kept or dropped whole. Events `undone` names stay undone: they neither validate nor
-   * apply, an entry left with none is not carried, and the refs of those that travel come back with
-   * them. A materialization of detail the prefix already records leaves the entry (DESIGN §9.2).
+   * place) and kept or dropped whole. A GM edit or ✎ fix is first resolved again from what it asked
+   * for, so it still lands over whatever the story now does before it (DESIGN §7): one whose every
+   * operation is already so is kept with no events of its own, its request still standing, so a later
+   * read or swipe that changes what is so works it out again; only one that can't be made at all is
+   * dropped. Events `undone` names stay undone: they neither validate nor apply, an entry left with
+   * none is not carried, and the refs of those that travel come back with them; an entry undone in
+   * any part keeps its own events. A materialization of detail the prefix already records leaves the
+   * entry (DESIGN §9.2).
    */
   private carry(state: WorldState, world: WorldDoc, entries: readonly PostEntry[], undone: readonly EventRef[], markers: readonly Marker[]): { kept: PostEntry[]; undone: EventRef[]; dropped: CarryDrop[] } {
     const off = (seq: number, index: number): boolean => undone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
@@ -667,16 +700,24 @@ export class LedgerCore {
         continue;
       }
       const { entry } = item;
-      if (entry.events.every((_, i) => off(entry.seq, i))) continue;
+      // Worked out again even with no events of its own: it was already so where it was made.
+      const asked = entry.kind === "fix" && entry.edit !== undefined && !undone.some((u) => u.in === "post" && u.seq === entry.seq);
+      if (!asked && entry.events.every((_, i) => off(entry.seq, i))) continue;
       const scratch = structuredClone(state);
       const doc = this.env.worlds(scratch.revision) ?? world;
+      const again = asked ? this.env.resolveFix(doc, scratch, entry) : null;
+      if (again && "rejection" in again) {
+        out.dropped.push({ seq: entry.seq, kind: entry.kind, reason: again.rejection.reason });
+        continue;
+      }
+      const events = again ? again.events : entry.events;
       let failure: string | null = null;
       // Detail the prefix already records (a ✎ cash fix's opening, when the new swipe's reply opened
       // the same accounts) isn't recorded twice: that materialization leaves the entry, the rest is
       // re-validated without it, so the correction still lands, and later undos move up with their events.
       const stripped: number[] = [];
       let recorded = "";
-      for (const [i, ev] of entry.events.entries()) {
+      for (const [i, ev] of events.entries()) {
         if (off(entry.seq, i)) continue;
         const ctx = this.env.types.context(doc, scratch);
         const rejection = validateEvent(this.env.types, ev, ctx);
@@ -691,14 +732,14 @@ export class LedgerCore {
         }
         applyEvent(this.env.types, ev, scratch, ctx);
       }
-      // Left with nothing to apply, it isn't carried.
-      if (failure === null && entry.events.every((_, i) => off(entry.seq, i) || stripped.includes(i))) failure = recorded;
+      // Left with nothing to apply, it isn't carried, unless it keeps its request (`again`).
+      if (failure === null && !again && events.every((_, i) => off(entry.seq, i) || stripped.includes(i))) failure = recorded;
       if (failure !== null) {
         out.dropped.push({ seq: entry.seq, kind: entry.kind, reason: failure });
         continue;
       }
       Object.assign(state, scratch);
-      out.kept.push({ ...structuredClone(entry), events: entry.events.filter((_, i) => !stripped.includes(i)) });
+      out.kept.push({ ...structuredClone(entry), events: events.filter((_, i) => !stripped.includes(i)) });
       out.undone.push(...undone.filter((u) => u.in === "post" && u.seq === entry.seq).map((u) => ({ ...u, index: u.index - stripped.filter((s) => s < u.index).length })));
     }
     return out;
@@ -722,7 +763,8 @@ export class LedgerCore {
    * A Re-run carries the live ✎ fixes and GM edits of the swipe it was made from (the nearest
    * earlier swipe holding a record), and a Re-narrate its copies, the same way: same `seq`s and
    * undos, anchored at the new record's path, each re-validated after the new turn's events, its
-   * reply's read included. One that no longer applies is dropped with a Journal note.
+   * reply's read included, a GM edit or ✎ fix resolved again first (`carry`). One that can't be made
+   * there is dropped with a Journal note.
    */
   private carryFixes(rec: Rec, target: ChainMessage | undefined, swipeId: number, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }): void {
     // The fixes in force on the chain the Re-run was read on (the one it was planned on, when it could be rebuilt).
@@ -834,15 +876,19 @@ export class LedgerCore {
     return (out.messages.at(-1)?.path ?? ROOT_PATH) === path ? { out, path, elsewhere: false } : inForce(path, true);
   }
 
-  /** What a Re-read edit or Retry read of an existing record reads against (its fold prefix plus `pre`), and the state before `pre`. */
-  readContext(messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; pre: LedgerEvent[]; start: WorldState } | null {
+  /**
+   * What a Re-read edit or Retry read of an existing record reads against (its fold prefix plus
+   * `pre`), the state before `pre`, and `read`, the seed the read takes, so what the backend works
+   * out ahead (a chip's events) is what the record will hold.
+   */
+  readContext(messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; read: string; pre: LedgerEvent[]; start: WorldState } | null {
     const index = observed.findIndex((m) => m.id === messageId);
     const m = this.chain(observed)[index];
     if (!m) return null;
     const rec = activeRecord(m, this.journal.tombstones);
     if (!rec) return null;
     const prefix = this.prefixState(this.fold(observed.slice(0, index)), m, rec, [], true);
-    return prefix?.start ? { ...prefix, start: prefix.start, seed: rec.seed, pre: rec.events.slice(0, rec.pre) } : null;
+    return prefix?.start ? { ...prefix, start: prefix.start, seed: rec.seed, read: readSeed(rec.seed), pre: rec.events.slice(0, rec.pre) } : null;
   }
 
   /**
@@ -877,16 +923,45 @@ export class LedgerCore {
   /**
    * What a turn's post steps will read against when it commits on `messageId` (its fold prefix
    * plus `pre`), so the backend can run `extract` first, and the state before `pre`: where the
-   * player's message was said. Null when the reply won't be read (no pending turn, a pause before
-   * it, or its own swipe deleted while it streamed, which leaves the commit nothing to record it on).
+   * player's message was said. `read` is the seed the commit reads the reply with, so what the
+   * backend works out ahead (a chip's events) is what the record will hold. Null when the reply
+   * won't be read (no pending turn, a pause before it, or its own swipe deleted while it streamed,
+   * which leaves the commit nothing to record it on).
    */
-  commitContext(generationId: GenerationId, messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; pre: LedgerEvent[]; start: WorldState } | null {
+  commitContext(generationId: GenerationId, messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; read: string; pre: LedgerEvent[]; start: WorldState } | null {
     const p = this.journal.pending[generationId];
     const index = observed.findIndex((m) => m.id === messageId);
     if (!p || index < 0 || p.swipeId === GONE_SWIPE || this.pausedWithin(observed.slice(0, index))) return null;
     const at = this.plannedPrefix(p, observed, index);
     const prefix = this.prefixState(at.out, this.chain(observed.slice(index, index + 1))[0], { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: at.path, undone: [] }, this.journal.started ? [] : p.startMarkers, true);
-    return prefix?.start ? { ...prefix, start: prefix.start, seed: p.seed, pre: [...p.events] } : null;
+    return prefix?.start ? { ...prefix, start: prefix.start, seed: p.seed, read: readSeed(p.seed, !!p.copies), pre: [...p.events] } : null;
+  }
+
+  /**
+   * What a Continue's suffix will be read against when it commits on `messageId` (DESIGN §5.1 step
+   * 5): the head's fold, and `read`, the seed it is read with, so what the backend works out ahead
+   * (a chip's events) is what its `cont` entry will hold. `content` is the whole message as saved.
+   * Null when the Continue won't be read and is accepted unread instead (`continueSuffix`).
+   */
+  continueContext(generationId: GenerationId, messageId: MessageId, content: string, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; read: string } | null {
+    const p = this.journal.pending[generationId];
+    const index = observed.findIndex((m) => m.id === messageId);
+    const m = this.chain(observed)[index];
+    const rec = m?.ledger?.swipes[String(m.swipeId)];
+    if (!p || p.kind !== "continue" || !m || !rec || this.continueSuffix(p, m, rec, content) === null) return null;
+    const head = this.fold(observed.slice(0, index + 1));
+    const world = this.env.worlds(head.state.revision);
+    return world ? { state: head.state, world, read: contSeed(rec.seed, this.journal.seq + 1) } : null;
+  }
+
+  /**
+   * The suffix a Continue of `m` reads into `rec` (DESIGN §5.1 step 5, L13): only on the head it
+   * started on, a record holding events, and a prefix still as captured. Null: it is accepted unread.
+   */
+  private continueSuffix(p: PendingTurn, m: ChainMessage, rec: Rec | undefined, content: string): string | null {
+    const captured = p.captured;
+    if (p.continueHead !== m.id || !rec || rec.events.length === 0 || !captured || !sameContent(rec.swipeHash, captured)) return null;
+    return content.length >= captured.len && contentId(content.slice(0, captured.len)).hash === captured.hash ? content.slice(captured.len) : null;
   }
 
   /**
@@ -969,7 +1044,7 @@ export class LedgerCore {
       if (p.dropped && p.dropped.length > 0) rec.dropped = structuredClone(p.dropped);
       const prefix = at && carries ? this.prefixState(at.out, target, rec, start) : null;
       if (prefix) {
-        if (read) rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:narr`, content));
+        if (read) rec.events.push(...this.read(prefix.state, prefix.world, readSeed(p.seed, true), content));
         this.carryOnto(rec, target, p.copies, p.undone ?? [], prefix);
       } else if (paused) {
         const left = pausedDrops(p.copies, p.undone ?? []);
@@ -977,7 +1052,7 @@ export class LedgerCore {
       }
     } else if (at && (read || carries)) {
       const prefix = this.prefixState(at.out, target, rec, start);
-      if (prefix && read) rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:read`, content));
+      if (prefix && read) rec.events.push(...this.read(prefix.state, prefix.world, readSeed(p.seed), content));
       // Starting markers land only on a record that holds events: one left with none folds its carried fixes without them.
       if (prefix && carries) this.carryFixes(rec, target, swipeId, start.length > 0 && rec.events.length === 0 ? (this.prefixState(at.out, target, rec) ?? prefix) : prefix);
     } else if (rerun && paused) {
@@ -1002,16 +1077,13 @@ export class LedgerCore {
     if (!m) return;
     const ledger = this.ledgerFor(messageId, m);
     const rec = ledger.swipes[String(m.swipeId)];
-    const isHead = p.continueHead === messageId;
-    const captured = p.captured;
-    const prefixIntact = captured !== undefined && content.length >= captured.len && contentId(content.slice(0, captured.len)).hash === captured.hash;
-    if (isHead && rec && rec.events.length > 0 && prefixIntact && captured && sameContent(rec.swipeHash, captured)) {
+    const suffix = this.continueSuffix(p, m, rec, content);
+    if (rec && suffix !== null) {
       // A head Continue reads only its suffix into a `cont` entry (DESIGN §5.1 step 5, L13).
-      const suffix = content.slice(captured.len);
       const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
       const head = this.fold(observed.slice(0, index + 1));
       const world = this.env.worlds(head.state.revision);
-      const events = world && suffix !== "" ? this.read(structuredClone(head.state), world, `${rec.seed}:cont:${this.journal.seq + 1}`, suffix) : [];
+      const events = world && suffix !== "" ? this.read(structuredClone(head.state), world, contSeed(rec.seed, this.journal.seq + 1), suffix) : [];
       if (events.length > 0) rec.post.push({ seq: ++this.journal.seq, at: parent, kind: "cont", events });
       rec.swipeHash = contentId(content);
       delete rec.accepted;
@@ -1060,10 +1132,11 @@ export class LedgerCore {
     for (const h of j.held) h.waitFor = h.waitFor.filter((w) => w !== generationId);
     const ready = j.held.filter((h) => h.waitFor.length === 0);
     j.held = j.held.filter((h) => h.waitFor.length > 0);
-    // A held write that no longer applies is kept with its reason, so the player is told rather than
-    // it vanishing (the view's notice; the GM view has the reason).
+    // A GM edit or ✎ fix lands over whatever the reply changed (`apply`, `held`). A held write that
+    // can't be made at all is kept with its reason, so the player is told rather than it vanishing
+    // (the view's notice; the GM view has the reason).
     for (const h of ready) {
-      const reason = this.apply(h.write, observed);
+      const reason = this.apply(h.write, observed, true);
       if (reason) this.refuse(h.write, reason, observed);
     }
     this.snapshot(observed);
@@ -1118,8 +1191,8 @@ export class LedgerCore {
     return { applied: true, pending: false, ...(head ? { posted: { messageId: head.id, swipeId: head.swipeId, seq: this.journal.seq } } : {}) };
   }
 
-  /** Journals one write now; returns a rejection reason or undefined. */
-  private apply(w: HeldWrite, observed: readonly ChainMessage[]): string | undefined {
+  /** Journals one write now; returns a rejection reason or undefined. `held`: it waited for a reply to finish (P2). */
+  private apply(w: HeldWrite, observed: readonly ChainMessage[], held = false): string | undefined {
     const j = this.journal;
     const chain = this.chain(observed);
     const headIndex = chain.map((m) => !m.isUser).lastIndexOf(true);
@@ -1145,9 +1218,16 @@ export class LedgerCore {
         const state = structuredClone(out.state);
         const world = this.env.worlds(state.revision);
         if (!world) return "unknown revision";
+        // A GM edit or ✎ fix held through a reply is resolved again from what it asked for, against
+        // what the reply left, so it lands over whatever the reply changed and passes over what the
+        // reply already did (DESIGN §7); only one that can't be made at all is refused. One the reply
+        // made wholly so is journaled all the same, with its request and no events of its own, so a
+        // later read or swipe that takes back what the reply did works it out again.
+        const again = held && w.entry.kind === "fix" ? this.env.resolveFix(world, state, w.entry) : null;
+        if (again && "rejection" in again) return again.rejection.gm ?? again.rejection.reason;
         const events: LedgerEvent[] = [];
         let recorded: string | null = null;
-        for (const ev of w.entry.events) {
+        for (const ev of again ? again.events : w.entry.events) {
           const ctx = this.env.types.context(world, state);
           const failure = validateEvent(this.env.types, ev, ctx);
           if (failure?.code === "materialized") {
@@ -1158,7 +1238,7 @@ export class LedgerCore {
           applyEvent(this.env.types, ev, state, ctx);
           events.push(ev);
         }
-        if (events.length === 0 && recorded !== null) return recorded;
+        if (events.length === 0 && recorded !== null && !again) return recorded;
         const key = String(head.swipeId);
         let rec = ledger.swipes[key];
         if (!rec) {
@@ -1234,7 +1314,7 @@ export class LedgerCore {
           // proposals confirmed from that read's chips (like a Re-read).
           const prefix = this.prefixState(this.fold(observed.slice(0, index)), this.chain(observed.slice(index, index + 1))[0], rec);
           if (!prefix) return "unknown revision";
-          rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, `${rec.seed}:read`, text)];
+          rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, readSeed(rec.seed), text)];
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
           this.keepAfterRead(rec, m, prefix);
           rec.undone = plannedUndos(rec);
@@ -1247,12 +1327,12 @@ export class LedgerCore {
           const head = this.fold(observed.slice(0, index + 1));
           const world = this.env.worlds(head.state.revision);
           if (!world) return "unknown revision";
-          const events = this.read(structuredClone(head.state), world, `${rec.seed}:cont:${j.seq + 1}`, text.slice(rec.swipeHash.len));
+          const events = this.read(structuredClone(head.state), world, contSeed(rec.seed, j.seq + 1), text.slice(rec.swipeHash.len));
           if (events.length > 0) rec.post.push({ seq: ++j.seq, at: out.messages[index]?.parentPath ?? ROOT_PATH, kind: "cont", events });
         } else {
           const prefix = this.prefixState(this.fold(observed.slice(0, index)), this.chain(observed.slice(index, index + 1))[0], rec);
           if (!prefix) return "unknown revision";
-          rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, `${rec.seed}:reread:${j.seq + 1}`, text)];
+          rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, readSeed(rec.seed), text)];
           // A Re-read replaces the whole read: its read events, the Continue suffix reads (the text it
           // reads now holds them) and the proposals confirmed from its chips. Fixes and materialized
           // detail are not the read's, so they stay. Its new chips offer anything still narrated. A
@@ -1271,16 +1351,20 @@ export class LedgerCore {
 
   /**
    * After a read replaced a record's events, its remaining live entries (fixes, materialized detail,
-   * a Re-narrate's narration) are re-validated after them: one that no longer applies is dropped
-   * with a Journal note rather than failing on its own path (L7), and one the read already made
-   * detail for stays without that materialization, its undos moved with its events.
+   * a Re-narrate's narration) are re-validated after them, a GM edit or ✎ fix resolved again first
+   * (`carry`), so the read never undoes it: one that can't be made is dropped with a Journal note
+   * rather than failing on its own path (L7), one the read already made so stays with its request
+   * and no events of its own, and one the read already made detail for stays without that
+   * materialization, its undos moved with its events.
    */
   private keepAfterRead(rec: Rec, target: ChainMessage, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }): void {
     const live = rec.post.filter((p) => isLive(p.at, prefix.parent, turnPath(rec)));
     const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, turnPath(rec)));
     const carried = this.carry(prefix.state, prefix.world, live, rec.undone, markers);
     const kept = new Map(carried.kept.map((p) => [p.seq, p]));
-    rec.post = rec.post.flatMap((p) => (carried.dropped.some((d) => d.seq === p.seq) ? [] : [kept.get(p.seq) ?? p]));
+    // A dropped entry goes with a Journal note.
+    const gone = new Set(carried.dropped.map((d) => d.seq));
+    rec.post = rec.post.flatMap((p) => (gone.has(p.seq) ? [] : [kept.get(p.seq) ?? p]));
     // A kept entry's undos come back from `carry`, moved past what it left out; every other undo stays.
     rec.undone = [...rec.undone.filter((u) => u.in !== "post" || !kept.has(u.seq)), ...carried.undone];
     if (carried.dropped.length > 0) rec.dropped = [...(rec.dropped ?? []), ...carried.dropped];
@@ -1322,11 +1406,13 @@ function plannedUndos(rec: Pick<Rec, "undone" | "pre" | "post">): EventRef[] {
 
 /**
  * What a turn committed under a pause would have carried, each as a Journal drop (P3, L43): every
- * entry not wholly undone, so no correction leaves the new swipe unannounced.
+ * entry not wholly undone, so no correction leaves the new swipe unannounced; a GM edit or ✎ fix
+ * that keeps its request and holds no events of its own (it was already so) is one too, unless undone.
  */
 function pausedDrops(entries: readonly PostEntry[], undone: readonly EventRef[]): CarryDrop[] {
   const off = (seq: number, index: number): boolean => undone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
-  return entries.filter((e) => !e.events.every((_, i) => off(e.seq, i))).map((e) => ({ seq: e.seq, kind: e.kind, reason: PAUSED_DROP }));
+  const carries = (e: PostEntry): boolean => (e.events.length === 0 ? e.edit !== undefined && !undone.some((u) => u.in === "post" && u.seq === e.seq) : !e.events.every((_, i) => off(e.seq, i)));
+  return entries.filter(carries).map((e) => ({ seq: e.seq, kind: e.kind, reason: PAUSED_DROP }));
 }
 
 /**

@@ -5178,7 +5178,10 @@
       "requires": [
         "stage('q_fleet_contract') == 'trial'",
         "at(pov, 'alder_automotive')",
-        "at('spare_relay', 'alder_automotive')",
+        {
+          "expr": "at('spare_relay', 'alder_automotive')",
+          "hard": true
+        },
         "not story.relay_replaced"
       ],
       "duration": 60,

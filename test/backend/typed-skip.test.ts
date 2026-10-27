@@ -276,3 +276,180 @@ describe("the palette's Timelapse", () => {
     expect(await palette({ followRoutine: true })).toEqual({ held: false, recorded: undefined });
   });
 });
+
+describe("what the player's message fills a time skip with is a directive (DESIGN §9.2)", () => {
+  const OOC = "OOC: over the next hour, I sort the stock and price the new crates.";
+  const FILL = "I sort the stock and price the new crates";
+  const filled: JsonObject = { action: "timelapse", params: { span: "over the next hour" }, text: FILL, confidence: 0.9 };
+  /** A section's own lines, without its lead. */
+  const linesOf = (section: string): string[] => section.split("\n").filter((l) => l.startsWith("- "));
+  /** Words that forbid the narrator what the player asked for. */
+  const FORBIDS = /add (no )?events|don't add|only this span/i;
+
+  test("its words reach the Outcome, the Outline and the Montage as what to narrate, and no line forbids them", async () => {
+    const { rig, chatId } = await alder(() => filled);
+    await rig.turn(chatId, OOC, "An hour goes by among the shelves.");
+    for (const section of ["Outcome", "Outline", "Montage"]) {
+      const lines = linesOf(rig.host.section(section));
+      expect(lines.some((l) => l.includes(FILL))).toBe(true);
+      expect(lines.some((l) => FORBIDS.test(l))).toBe(false);
+    }
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a skip it doesn't fill keeps a plain line that time passes, forbidding nothing", async () => {
+    const { rig, chatId } = await alder(() => ({ action: "timelapse", params: { span: "over the next hour" }, confidence: 0.9 }));
+    await rig.turn(chatId, "OOC: skip ahead an hour.", "An hour goes by.");
+    const outcome = linesOf(rig.host.section("Outcome"));
+    const outline = linesOf(rig.host.section("Outline"));
+    expect(outcome.some((l) => l.startsWith("- Time passed"))).toBe(true);
+    expect(outline.some((l) => l.startsWith("- Time passes"))).toBe(true);
+    expect([...outcome, ...outline].some((l) => FORBIDS.test(l))).toBe(false);
+  });
+
+  test("the skip plan and the beat finder are given the player's words for the span", async () => {
+    const { rig, chatId } = await alder(() => filled, true);
+    // The plan and the beats are the Time-skip step's calls; Danny's skip is the model's to plan.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "routine_follow", entity: "danny_okafor", role: "informative", skips: "model" }] }));
+    const asked: { plan: string[]; beats: string[] } = { plan: [], beats: [] };
+    const answer = rig.host.quietReply;
+    rig.host.quietReply = (req: QuietRequest) => {
+      const system = req.messages[0]?.content ?? "";
+      const user = req.messages[1]?.content ?? "";
+      if (system.includes("skipping ahead in time")) {
+        asked.beats.push(user);
+        return JSON.stringify({ beats: [] });
+      }
+      if (system.includes("You plan how some people in a roleplay spend a stretch of time")) {
+        asked.plan.push(user);
+        return JSON.stringify({ plans: [] });
+      }
+      return answer?.(req) ?? "{}";
+    };
+    await rig.turn(chatId, OOC, "An hour goes by among the shelves.");
+    expect(asked.plan.length).toBeGreaterThan(0);
+    expect(asked.beats.length).toBeGreaterThan(0);
+    for (const user of [...asked.plan, ...asked.beats]) expect(user).toContain(FILL);
+  });
+
+  test("a span longer than a skip runs without asking is offered on a chip that keeps the player's words: tapped, the Timelapse tells them as an inline skip does", async () => {
+    const { rig, chatId } = await alder(() => filled, true);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { time: { askBeyondMinutes: 30 }, modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "routine_follow", entity: "danny_okafor", role: "informative", skips: "model" }] }));
+    const asked: { plan: string[]; beats: string[] } = { plan: [], beats: [] };
+    const answer = rig.host.quietReply;
+    rig.host.quietReply = (req: QuietRequest) => {
+      const system = req.messages[0]?.content ?? "";
+      const user = req.messages[1]?.content ?? "";
+      if (system.includes("skipping ahead in time")) {
+        asked.beats.push(user);
+        return JSON.stringify({ beats: [] });
+      }
+      if (system.includes("You plan how some people in a roleplay spend a stretch of time")) {
+        asked.plan.push(user);
+        return JSON.stringify({ plans: [] });
+      }
+      return answer?.(req) ?? "{}";
+    };
+    const before = await folded(rig, chatId);
+    await rig.turn(chatId, OOC, "You settle in at the counter.");
+    // An hour is past the thirty minutes a skip may run unasked: nothing ran, and a chip offers it.
+    expect((await folded(rig, chatId)).state.clock).toBeLessThan(before.state.clock + 60);
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "timelapse_offer");
+    if (!chip) throw new Error("no Timelapse offered");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "timelapse" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "An hour goes by among the shelves.");
+    for (const section of ["Outcome", "Outline", "Montage"]) {
+      const lines = linesOf(rig.host.section(section));
+      expect(lines.some((l) => l.includes(FILL))).toBe(true);
+      expect(lines.some((l) => FORBIDS.test(l))).toBe(false);
+    }
+    expect(asked.plan.length).toBeGreaterThan(0);
+    expect(asked.beats.length).toBeGreaterThan(0);
+    for (const user of [...asked.plan, ...asked.beats]) expect(user).toContain(FILL);
+    // It holds the player character where the story has it, as the inline span would have.
+    const after = await folded(rig, chatId);
+    expect(placeOfEntity(after.state, after.world.pov)).toBe(placeOfEntity(before.state, before.world.pov));
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  /** The skip plan's and the beat finder's inputs as `rig` sends them, with the Time-skip step on and Danny's skip the model's to plan. */
+  async function watchSkipCalls(rig: Rig, chatId: string): Promise<{ plan: string[]; beats: string[] }> {
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "routine_follow", entity: "danny_okafor", role: "informative", skips: "model" }] }));
+    const asked: { plan: string[]; beats: string[] } = { plan: [], beats: [] };
+    const answer = rig.host.quietReply;
+    rig.host.quietReply = (req: QuietRequest) => {
+      const system = req.messages[0]?.content ?? "";
+      const user = req.messages[1]?.content ?? "";
+      if (system.includes("skipping ahead in time")) {
+        asked.beats.push(user);
+        return JSON.stringify({ beats: [] });
+      }
+      if (system.includes("You plan how some people in a roleplay spend a stretch of time")) {
+        asked.plan.push(user);
+        return JSON.stringify({ plans: [] });
+      }
+      return answer?.(req) ?? "{}";
+    };
+    return asked;
+  }
+
+  test("a filled span an interrupt stops is continued with the player's words: the rest tells them as the start did", async () => {
+    const three: JsonObject = { action: "timelapse", params: { span: "over the next three hours" }, text: FILL, confidence: 0.9 };
+    const { rig, worldId } = await alder(() => three, true);
+    // An incident the player character sees, at the first slot's end inside the skip, stops it.
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "rules", id: "van", value: { id: "van", on: { tick: "slot" }, do: [{ type: "signal", args: { class: "incident", text: "A delivery van blocks the loading door." } }], once: true } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
+    const start = (await folded(rig, chatId)).state.clock;
+    await rig.turn(chatId, "OOC: over the next three hours, I sort the stock and price the new crates.", "The first hour goes by among the shelves.");
+    const stopped = await folded(rig, chatId);
+    expect(stopped.state.clock).toBeLessThan(start + 180);
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
+    if (!chip) throw new Error("no Continue");
+    const asked = await watchSkipCalls(rig, chatId);
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "timelapse" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "The rest of the afternoon goes by.");
+    expect((await folded(rig, chatId)).state.clock).toBeGreaterThan(stopped.state.clock);
+    for (const section of ["Outcome", "Outline", "Montage"]) expect(linesOf(rig.host.section(section)).some((l) => l.includes(FILL))).toBe(true);
+    expect(asked.beats.length).toBeGreaterThan(0);
+    for (const user of [...asked.plan, ...asked.beats]) expect(user).toContain(FILL);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("with minds not reading the player's message, the skip's calls aren't given its words; the narrator still is", async () => {
+    const { rig, chatId } = await alder(() => filled, true);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { message: { on: false } } } } }));
+    const asked = await watchSkipCalls(rig, chatId);
+    await rig.turn(chatId, OOC, "An hour goes by among the shelves.");
+    expect(asked.plan.length + asked.beats.length).toBeGreaterThan(0);
+    for (const user of [...asked.plan, ...asked.beats]) expect(user).not.toContain(FILL);
+    expect(linesOf(rig.host.section("Outcome")).some((l) => l.includes(FILL))).toBe(true);
+  });
+
+  test("a Timelapse staged from the sheet is filled by the words sent with it", async () => {
+    const { rig, chatId } = await alder(() => NONE);
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 60 } }, source: "palette" }));
+    await rig.turn(chatId, FILL, "An hour goes by among the shelves.");
+    for (const section of ["Outcome", "Outline"]) expect(linesOf(rig.host.section(section)).some((l) => l.includes(FILL))).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a span typed after the actions, too long to run unasked, keeps its words on the Timelapse it is offered as", async () => {
+    const { rig, chatId } = await alder(() => ({ action: "go", params: { to: "bluebird_coffee" }, text: "I walk over to Bluebird Coffee", confidence: 0.9, more: [{ action: "timelapse", params: { span: "for the next two days" }, text: FILL }] }));
+    await rig.turn(chatId, "I walk over to Bluebird Coffee, then for the next two days I sort the stock and price the new crates.", "You reach the cafe.");
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "timelapse_offer");
+    if (!chip) throw new Error("no Timelapse offered");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "timelapse" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "Two days go by among the shelves.");
+    for (const section of ["Outcome", "Outline"]) expect(linesOf(rig.host.section(section)).some((l) => l.includes(FILL))).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});

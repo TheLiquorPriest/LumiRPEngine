@@ -375,7 +375,7 @@ describe("cross-user access", () => {
     expect(await rig.rt.runOf(chatId, intruder)).toBeNull();
     expect(await rig.rt.ledger.core(chatId, intruder)).toBeNull();
     expect(await rig.rt.chips.list(chatId, intruder)).toEqual([]);
-    await rig.dispatch.handle({ lre: PROTOCOL_VERSION, reqId: "x1", type: "lre.chip", chatId, chip: owned.chips[0]?.id ?? "", choice: "accept" } as unknown as FrontendToBackend, intruder);
+    await rig.dispatch.handle({ lre: PROTOCOL_VERSION, reqId: "x1", type: "lre.chip", chatId, chip: owned.chips[0]?.id ?? "", choice: "dismiss" } as unknown as FrontendToBackend, intruder);
     await rig.host.settle();
     const reply = rig.host.sent.find((m) => m.type === "lre.error" && m.reqId === "x1");
     expect(reply?.type).toBe("lre.error");

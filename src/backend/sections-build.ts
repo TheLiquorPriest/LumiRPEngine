@@ -30,7 +30,7 @@ export interface SectionsInput {
   mindsBudget: number;
   /** The player's words this turn, which order the minds ladder; empty for none yet. */
   said: string;
-  /** What the turn itself tells: its resolution (with the declines told to it) and a timelapse's Montage. */
+  /** What the turn itself tells: its resolution and a timelapse's Montage. */
   planned: { outcome: readonly string[]; montage: readonly string[] };
   outline: readonly string[];
   /** The minutes the turn took, for Scene's elapsed-time line; null without a turn. */
@@ -73,7 +73,6 @@ export interface SectionsBuilt {
   recorded: SlotId[];
   /** The World Info entries the delivered lines carry. */
   sources: Source[];
-  markedSent: boolean;
   used: number;
 }
 
@@ -208,7 +207,6 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
   // it, so both ride last, in what the budget has left, and the inspector counts none of them: no
   // clip, size or total the player sees moves when an off-screen secret changes (§6.2, §6.11).
   // Marked facts go first, one at a time while they fit; hints still all or none.
-  let markedSent = false;
   for (const h of hinted) {
     const fits = (extra: number, total: number): boolean => extra <= budget && (h.maxTokens === undefined || total <= h.maxTokens);
     const costOf = (body: string[]): number => {
@@ -227,7 +225,6 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
       cost = next;
       body.push(m.text);
       if (m.source) carried.push(m.source);
-      markedSent = true;
       facts++;
     }
     // The section's line cap holds for its hints too: they go in whole or not at all.
@@ -248,5 +245,5 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
     const was = outcomes.get(h.slot);
     if (was) outcomes.set(h.slot, { ...was, status: "sent", content, tokens: input.cost(content), marked: facts, hints });
   }
-  return { sections: sectionsOf(world).flatMap((s) => outcomes.get(s.id) ?? []), record, fills, recorded, sources, markedSent, used };
+  return { sections: sectionsOf(world).flatMap((s) => outcomes.get(s.id) ?? []), record, fills, recorded, sources, used };
 }

@@ -59,6 +59,15 @@ describe("gear: containment, slots and use grants", () => {
     expect(cyc.rejected[0]?.rejection.code).toBe("cycle");
   });
 
+  test("a reply's handover lands as the story told it, room or not; an action's still needs the room", () => {
+    const w = setup();
+    const acted = applyEffects(reg, w, [{ type: "gear.give", args: { item: "toolbox", from: "you", to: "wallet" } }], { bindings: {}, rng: createRng("x") });
+    expect(acted.rejected[0]?.rejection.code).toBe("no_room");
+    const told = applyEffects(reg, w, [{ type: "gear.give", args: { item: "toolbox", from: "you", to: "wallet", told: true } }], { bindings: {}, rng: createRng("x") });
+    expect(told.rejected).toEqual([]);
+    expect(w.state.entities.toolbox?.relations).toContainEqual({ type: "in", to: "wallet" });
+  });
+
   test("Owned lists a container's contents under it, not again at the top; slots read as words", () => {
     const w = setup();
     w.state.realism.levels.gear = 3;

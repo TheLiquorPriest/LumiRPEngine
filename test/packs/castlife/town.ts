@@ -10,8 +10,8 @@ import type { RoutineBlock, RoutineDef, RoutineEditOp, RoutineSettings } from ".
 import { DEFAULT_ROUTINE_SETTINGS } from "../../../src/shared/routines";
 import type { WorldDoc } from "../../../src/shared/world";
 import { calendarOf, clockAt, parseHHMM } from "../../../src/engine/calendar";
-import { resolveEdit } from "../../../src/engine/edits";
-import type { ChainMessage, FoldOutput } from "../../../src/engine/ledger/chain";
+import { resolveEdit, resolveFix } from "../../../src/engine/edits";
+import type { ChainMessage, FoldInput, FoldOutput } from "../../../src/engine/ledger/chain";
 import { LedgerFold } from "../../../src/engine/ledger/fold";
 import { computePaths, contentId } from "../../../src/engine/ledger/path";
 import { referenceFold } from "../../../src/engine/ledger/reference";
@@ -141,7 +141,7 @@ export function foldBoth(world: WorldDoc, events: readonly LedgerEvent[], fixes:
   const rec: Rec = { v: 1, defHash: revision, seq: 0, swipeHash: contentId("The day goes by."), path, seed: "s", pre: events.length, events: [...events], post, markersApplied: 0, status: "ok", undone: [...undone], intents: {} };
   const reply = chain[2];
   if (reply) reply.ledger = { v: 1, swipes: { "0": rec }, markers: [] };
-  const input = { worlds: (r: string) => (r === revision ? world : undefined), revision, pauses: [], tombstones: [], chain };
+  const input: FoldInput = { worlds: (r) => (r === revision ? world : undefined), revision, pauses: [], tombstones: [], chain, resolveFix: (doc, state, entry) => resolveFix(reg, doc, state, entry, "run") };
   const reference = referenceFold(input, reg);
   const optimized = new LedgerFold(reg).fold(input);
   expect(hashJson(optimized.state)).toBe(hashJson(reference.state));

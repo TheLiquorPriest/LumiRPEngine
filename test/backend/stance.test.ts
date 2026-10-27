@@ -13,9 +13,12 @@ import { modernUsWorld } from "../packs/riverton";
 import { startState } from "../packs/support";
 import { Rig } from "../support/rig";
 
+const SECTION_LABELS = new Set(Object.values(DEFAULT_SECTIONS).map((s) => s.label));
+
 /**
- * What the chat's next reply's prompt carried, by section label (a clipped section isn't there): the
- * last reply is swiped as a Re-narrate, so each call renders the same turn's sections again.
+ * What the chat's next reply's prompt carried, by section label (a clipped section isn't there, and
+ * the narrator rules, apart from the section budget, are no section): the last reply is swiped as a
+ * Re-narrate, so each call renders the same turn's sections again.
  */
 async function sent(rig: Rig, chatId: string, budget: number): Promise<Map<string, string>> {
   rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeDefault: "renarrate", modelUse: { tokens: { sections: budget } } } }));
@@ -23,7 +26,7 @@ async function sent(rig: Rig, chatId: string, budget: number): Promise<Map<strin
   const out = new Map<string, string>();
   for (const m of rig.host.assembled) {
     const label = /^\[([^\]]+)\]\n/.exec(m.content)?.[1];
-    if (label !== undefined) out.set(label, m.content);
+    if (label !== undefined && SECTION_LABELS.has(label)) out.set(label, m.content);
   }
   await rig.host.finish(g, "Quiet.");
   return out;

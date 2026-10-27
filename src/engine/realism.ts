@@ -9,7 +9,7 @@ import type { ClaimsPolicy } from "../shared/claims";
 import { CLAIM_PRESETS, DEFAULT_CLAIMS, readClaims } from "../shared/claims";
 import type { MarkerBody } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
-import { objectiveWhen } from "../shared/world";
+import { objectiveWhen, requirementExpr } from "../shared/world";
 import { applyMarker } from "./events";
 import { identifiers } from "./expr";
 import { isMaterialized } from "./materialize";
@@ -114,7 +114,7 @@ function predicates(world: WorldDoc, reg: Registry): { where: FrozenPredicate["w
       for (const o of s.objectives ?? []) out.push({ where: "track", id, expr: objectiveWhen(o) });
     }
   }
-  for (const [id, a] of Object.entries(world.actions)) for (const req of a.requires) out.push({ where: "action", id, expr: req });
+  for (const [id, a] of Object.entries(world.actions)) for (const req of a.requires) out.push({ where: "action", id, expr: requirementExpr(req) });
   return out;
 }
 

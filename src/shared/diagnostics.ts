@@ -118,7 +118,6 @@ export const STEP_LABEL: Record<string, string> = {
   reply: "Waiting for the reply…",
   read: "Reading the reply…",
   extract: "Reading the reply…",
-  contradiction: "Checking the reply…",
   choices: "Writing choices…",
   memory: "Updating memory…",
   consolidate: "Updating memory…",

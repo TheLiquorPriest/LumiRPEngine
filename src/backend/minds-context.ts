@@ -463,11 +463,14 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
   const why = moment.user.trim() === "" ? sentence(moment.reason) : "";
   const ended = reads.reply.on && moment.kind !== "beat" && withPov && heardLast && moment.reply.trim() !== "" ? latestReply(scope, moment.reply) : "";
   const message = reads.message.on && withPov && moment.kind !== "beat" && moment.user.trim() !== "" ? clip(moment.user, charsOf(reads.message.tokens)) : "";
+  // Inside a time skip, those with the player character are told what the player said it does in that
+  // time, in the player's words, while minds read the player's message (Settings → Minds).
+  const spending = reads.message.on && withPov && moment.skip ? `${povLabel(scope)} is spending this time as the player's message says: ${clip(moment.skip, charsOf(reads.message.tokens))}` : "";
   const now =
     moment.kind === "beat"
-      ? [`It is ${formatClock(cal, moment.at)}. ${sentence(moment.reason)}`.trim()]
+      ? [`It is ${formatClock(cal, moment.at)}. ${sentence(moment.reason)}`.trim(), spending]
       : withPov
-        ? [ended !== "" || message !== "" ? storyVoice(scope) : "", ended !== "" ? `The story so far ended: ${ended}` : "", why, message !== "" ? `Now ${povLabel(scope)} says or does: ${message}` : `${povLabel(scope)} is here with you.`]
+        ? [ended !== "" || message !== "" ? storyVoice(scope) : "", ended !== "" ? `The story so far ended: ${ended}` : "", why, spending, message !== "" ? `Now ${povLabel(scope)} says or does: ${message}` : `${povLabel(scope)} is here with you.`]
         : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`, why];
   // What the moment is to them, which activates their lore and ranks their recall: what the POV says
   // and how the last reply ended (as displayed) when they are there to hear it, else where they are.

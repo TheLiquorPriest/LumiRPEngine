@@ -161,7 +161,7 @@
     "band": { "enum": ["principal", "supporting", "background"] },
     "visibility": { "enum": ["public", "known_by", "secret"] },
     "fieldType": { "enum": ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] },
-    "stepPurpose": { "enum": ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
+    "stepPurpose": { "enum": ["interpret", "npc.choose", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
     "minds": {
       "title": "character minds",
       "type": "object",
@@ -537,7 +537,22 @@
         "label": { "type": "string" },
         "description": { "type": "string", "description": "what the action does, in a line; interpret's catalog gives it the model" },
         "params": { "type": "object", "additionalProperties": { "$ref": "#/$defs/param" } },
-        "requires": { "type": "array", "items": { "$ref": "#/$defs/expr" } },
+        "requires": {
+          "type": "array",
+          "description": "each a formula, or one marked a hard lock: a typed attempt that misses a plain requirement plays as plain roleplay, one that misses a hard lock fails",
+          "items": {
+            "anyOf": [
+              { "$ref": "#/$defs/expr" },
+              {
+                "title": "a hard lock",
+                "type": "object",
+                "required": ["expr"],
+                "additionalProperties": false,
+                "properties": { "expr": { "$ref": "#/$defs/expr" }, "hard": { "type": "boolean" } }
+              }
+            ]
+          }
+        },
         "check": { "anyOf": [{ "title": "a check id", "type": "string", "minLength": 1 }, { "$ref": "#/$defs/check" }] },
         "outcomes": { "type": "object", "description": "effects per check outcome; default when there is no check", "additionalProperties": { "$ref": "#/$defs/effects" } },
         "duration": { "$ref": "#/$defs/expr", "description": "minutes" },

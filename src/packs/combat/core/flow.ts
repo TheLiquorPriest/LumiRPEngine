@@ -257,6 +257,18 @@ function stalled(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boo
 }
 
 /**
+ * Ends the fight under way because the player moved the story past it with a time skip (DESIGN
+ * §11): its rounds take no clock time, so no skip runs inside one. Its winner is the side left
+ * standing, if only one is, as the `combat.end` effect reads it. The narrator's line for it; none
+ * when no fight ended.
+ */
+export function breakOff(w: Working, seed: string): string[] {
+  const enc = encounterOf(w.state);
+  if (!enc || record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "skip", winner: winnerOf(w, enc), rounds: enc.round } }], seed).length === 0) return [];
+  return ["The fight breaks off as time moves on."];
+}
+
+/**
  * After anything happened in a fight: whether the POV has left it, who went down or got back up
  * (with the rules' condition, through the Sheets pack's `sheets.condition` where it's loaded, and
  * the rules' life state: falling into it, and alive again once back up from it), then whether it's

@@ -160,11 +160,11 @@ function stagesAfter(track: TrackDef, stage: StageId): Set<StageId> {
  * no part. A stage that doesn't follow from where it stands (one already passed, a way back) is only
  * set, so nothing is granted, spawned or revealed twice. The stage's own ways on wait for the next
  * step of the tracks, so the chat stands where the GM put it. The same stage again changes nothing.
- * Either way the stage event records where the track stood (`from`), as every entry's does: the edit
- * holds only while it still stands there, so carried onto a reading of its reply in which the story
- * moved the track itself (a Re-run, a Re-read, a reply it was held through), it is dropped whole,
- * with what it granted (`resolveEdit` makes an edit one unit), rather than entered and paid for a
- * second time.
+ * Either way the stage event records where the track stood (`from`), as every entry's does. Carried
+ * onto a reading of its reply in which the story moved the track itself (a Re-run, a Re-read, a reply
+ * it was held through), the edit is resolved again from where the story left it (`resolveFix`): a
+ * track already at `to` changes nothing, so nothing is entered or paid for a second time, and one
+ * anywhere else moves on to `to` from there.
  */
 export function moveTrack(reg: Registry, w: Working, trackId: TrackId, to: StageId, seed: string): Rejection | null {
   const track = own(w.world.tracks, trackId);

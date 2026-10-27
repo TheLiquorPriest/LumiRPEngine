@@ -34,7 +34,7 @@ import { placeOfEntity, truthy } from "../../../engine/scope";
 import { selectorMatches } from "../../../engine/selector";
 import { knownBySelector } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
-import { fightChoices, hpLine, nextTurn, openRound, spendFor, type FightRound } from "./flow";
+import { breakOff, fightChoices, hpLine, nextTurn, openRound, spendFor, type FightRound } from "./flow";
 import { attacks, canFight, downHolds, encounterOf, endHolds, engaged, fighterOf, fits, fullEconomy, hpByFighter, LOG_CAP, offTurnCost, PACK, povLeft, readFor, rulesOf, sameHp, stalemateRounds, stalledHolds, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
 import { buildEncounterView, fightOffers, type EncounterView } from "./view";
 
@@ -44,6 +44,8 @@ declare module "../../../engine/registry" {
     "combat.spend": (ctx: ReadContext, actor: EntityId, action: Pick<ActionDef, "combat">) => LedgerEvent[] | Rejection;
     /** Opens a fight's part of a turn before the POV's action; its `after` runs the rest. Null without combat rules. */
     "combat.round": (w: Working, rng: Rng) => FightRound | null;
+    /** Ends the fight under way before a time skip the player asked for (`seed`: the run's), with the narrator's line for it; none without a fight. */
+    "combat.break_off": (w: Working, seed: string) => string[];
   }
   interface QueryMap {
     /** The `npc.choose` questions before the POV's next turn: each participant acting first, with its legal options by key and their labels. */
@@ -285,7 +287,7 @@ const events: EventTypeDef<PackEvent>[] = [
       return null;
     },
     apply: (_e, state) => writeEncounter(state, null),
-    describe: (e) => (e.data.reason === "left" ? "You left the fight" : e.data.reason === "stalemate" ? "The fight petered out" : `The fight is over${e.data.winner === "party" ? ": your side won" : e.data.winner === "foes" ? ": your side lost" : ""}`),
+    describe: (e) => (e.data.reason === "left" ? "You left the fight" : e.data.reason === "stalemate" ? "The fight petered out" : e.data.reason === "skip" ? "The fight broke off as time moved on" : `The fight is over${e.data.winner === "party" ? ": your side won" : e.data.winner === "foes" ? ": your side lost" : ""}`),
   },
   {
     type: "combat.decision",
@@ -340,6 +342,7 @@ export const combatPack: PackDef = {
 
     r.service("combat.spend", spendFor);
     r.service("combat.round", openRound);
+    r.service("combat.break_off", breakOff);
     r.query("combat.choices", fightChoices);
     r.query("combat.gm", (ctx) => buildEncounterView(ctx, { gm: true }));
     r.query("combat.hp_line", hpLine);

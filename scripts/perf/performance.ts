@@ -17,6 +17,7 @@ import type { WorldDoc } from "../../src/shared/world";
 import type { ChainMessage } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
 import { emptyJournal, LedgerCore, type LedgerEnv, type TurnModel } from "../../src/engine/ledger/journal";
+import { resolveFix } from "../../src/engine/edits";
 import { createRegistry } from "../../src/engine/registry-impl";
 import type { InterpretOutput } from "../../src/engine/steps";
 import { planTurn, postTurn, timelapseIntent } from "../../src/engine/turn";
@@ -78,7 +79,7 @@ function buildChat(world: WorldDoc, turns: number, timelapseEvery = 10, timelaps
   };
   let seeds = 0;
   // The chat keeps its fold snapshots as the real ledger service does (cold folds start from them).
-  const env: LedgerEnv = { types: registry, worlds: (r) => (r === revision ? world : undefined), run, model, startMarkers: () => [], newSeed: () => `seed-${++seeds}`, snapshots: new ChatSnapshots() };
+  const env: LedgerEnv = { types: registry, worlds: (r) => (r === revision ? world : undefined), run, model, startMarkers: () => [], newSeed: () => `seed-${++seeds}`, resolveFix: (doc, state, entry) => resolveFix(registry, doc, state, entry, run.runSeed), snapshots: new ChatSnapshots() };
   const core = new LedgerCore(emptyJournal("bench"), env, new LedgerFold(registry));
   const observed: ChainMessage[] = [{ id: "m0", isUser: false, swipeId: 0, swipes: ["Morning in Riverton."], ledger: null }];
   core.sync(observed);

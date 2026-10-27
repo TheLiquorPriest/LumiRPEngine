@@ -2,7 +2,7 @@
 // name a secret track or someone the player doesn't know. A shape the packs use reads as what it
 // needs, for `interpret`'s catalog, and as why it failed, for a decline chip and the Outcome.
 
-import type { ActionDef, Expr } from "../shared/world";
+import { requirementExpr, type ActionDef, type Expr } from "../shared/world";
 import { identifiers } from "../engine/expr";
 
 /**
@@ -75,7 +75,7 @@ function paramsRead(action: Pick<ActionDef, "params">, req: Expr): string[] {
 
 /** The requirements that rule an action in or out whatever its params: a level or money-feature gate that reads none of them. */
 export function gatesOf(action: Pick<ActionDef, "params" | "requires">): Expr[] {
-  return action.requires.filter((req) => GATE.test(req) && paramsRead(action, req).length === 0);
+  return action.requires.map(requirementExpr).filter((req) => GATE.test(req) && paramsRead(action, req).length === 0);
 }
 
 /**
@@ -86,7 +86,7 @@ export function gatesOf(action: Pick<ActionDef, "params" | "requires">): Expr[] 
  */
 export function needsOf(action: Pick<ActionDef, "params" | "requires">, nameOf: (param: string) => string): string[] {
   const out: string[] = [];
-  for (const req of action.requires) {
+  for (const req of action.requires.map(requirementExpr)) {
     const read = paramsRead(action, req);
     if (read.length === 0) continue;
     const shape = SHAPES.find((s) => s.shape.test(req));
@@ -100,4 +100,17 @@ export function needsOf(action: Pick<ActionDef, "params" | "requires">, nameOf: 
 /** Why a requirement failed, for the player, when its shape is one a decline names; else null. */
 export function failureWords(req: Expr): string | null {
   return SHAPES.find((s) => s.fails !== undefined && s.shape.test(req))?.fails ?? null;
+}
+
+/**
+ * Why the engine didn't play a typed action that played as plain roleplay (DESIGN §11), for its
+ * receipt: a requirement in the words its shape has (`failureWords`), never its expression, or the
+ * reason an effect gave (a payment the money can't cover), which names only what the player sees.
+ */
+export function unplayedWords(failed: { code: string; reason: string; requirement?: string }): string {
+  if (failed.code !== "requirement") return `The engine can't play it as things stand: ${failed.reason}`;
+  const req = failed.requirement ?? failed.reason.replace(/^requires\s+/, "");
+  if (/\bto\s*!=\s*here\b/.test(req)) return "You're already there";
+  const why = failureWords(req);
+  return `The engine can't play it as things stand${why ? `: ${why}` : ""}`;
 }

@@ -10,7 +10,7 @@ import { materializeAll } from "../../src/engine/materialize";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { ReadContext } from "../../src/engine/registry";
 import { unpricedCap } from "../../src/packs/economy/core/model";
-import { isRecord } from "../../src/shared/json";
+import { isRecord, type JsonObject } from "../../src/shared/json";
 import { buildGearView } from "../../src/packs/gear/core/view";
 import { modernUsWorld } from "./riverton";
 import { startState } from "./support";
@@ -27,7 +27,7 @@ function setup(): Working {
   return w;
 }
 
-function propose(w: Working, type: string, p: Record<string, string | number>): ReturnType<typeof applyEffects> | string {
+function propose(w: Working, type: string, p: JsonObject): ReturnType<typeof applyEffects> | string {
   const ch = reg.proposals.get(type);
   const bad = ch?.validate(p, w.ctx);
   if (bad) return bad.code;
@@ -35,13 +35,24 @@ function propose(w: Working, type: string, p: Record<string, string | number>): 
 }
 
 describe("narration proposals", () => {
-  test("an uncatalogued purchase is charged at its narrated price (capped at the world's unpricedCap); without a price it is refused", () => {
+  test("an uncatalogued purchase is charged at its narrated price (capped at the world's unpricedCap); without a price it is owned with nothing charged until one is set", () => {
     const world = modernUsWorld("p", "R");
     const economy = world.packs.economy;
     if (economy) economy.config = { ...economy.config, unpricedCap: 50_000 };
     const w = new Working(reg, world, startState(world));
     materializeAll(reg, w, world.pov, "run");
-    expect(propose(w, "purchase", { item: "gum", name: "a pack of gum" })).toBe("unpriced");
+    const gum = { type: "purchase", item: "gum", name: "a pack of gum" };
+    expect(w.ctx.query("economy.unpriced")(w.ctx, gum)).toBe(true);
+    const before = structuredClone(w.state.accounts);
+    const owned = propose(w, "purchase", gum);
+    expect(typeof owned === "string" ? owned : owned.rejected).toEqual([]);
+    expect(w.state.accounts).toEqual(before);
+    expect(Object.values(w.state.entities).filter((e) => e.name === "a pack of gum" && e.fields.owner === "you")).toHaveLength(1);
+    // Priced on its chip, only its charge is made: no second pack.
+    const charged = propose(w, "purchase", { ...gum, playerPrice: 200, owned: true });
+    expect(typeof charged === "string" ? charged : charged.rejected).toEqual([]);
+    expect(Object.values(w.state.entities).filter((e) => e.name === "a pack of gum")).toHaveLength(1);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought a pack of gum")?.cents).toBe(-214);
     const r = propose(w, "purchase", { item: "gum", name: "a pack of gum", price: 200 });
     expect(typeof r === "string" ? r : r.rejected).toEqual([]);
     // $2 and its 7% sales tax, at the top Money level.
@@ -101,7 +112,7 @@ describe("narration proposals", () => {
     const beer = resolveAction(reg, w, { action: "buy", params: { item: "a round of beers" } }, createRng("b"));
     expect(beer.rejected).toEqual([]);
     expect(moneyView(w.ctx).recent.some((t) => t.memo.startsWith("Bought Beer at a bar"))).toBe(true);
-    expect(propose(w, "purchase", { item: "beers" })).not.toBe("unpriced");
+    expect(w.ctx.query("economy.unpriced")(w.ctx, { type: "purchase", item: "beers" })).toBe(false);
     expect(resolveAction(reg, w, { action: "buy", params: { item: "a unicorn" } }, createRng("u")).rejected[0]?.rejection.code).toBe("unpriced");
     const pizza = resolveAction(reg, w, { action: "buy", params: { item: "a large pepperoni pizza for delivery" } }, createRng("p"));
     expect(pizza.rejected).toEqual([]);

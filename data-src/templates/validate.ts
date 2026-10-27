@@ -819,7 +819,11 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     if (!(num(a.duration) !== null && (num(a.duration) ?? 0) > 0)) err(`${where}: duration must be positive minutes`);
     if (list(a.lexicon).length === 0 || !text(a.observable)) err(`${where}: needs a lexicon and an observable label`);
     if (list(a.requires).length === 0) err(`${where}: needs at least one requirement`);
-    for (const [i, r] of list(a.requires).entries()) formula(r, `${where}.requires[${i}]`, params);
+    // A requirement is a formula, or `{expr, hard: true}`: a hard lock (DESIGN §11).
+    for (const [i, r] of list(a.requires).entries()) {
+      if (isRec(r) && r.hard !== true) err(`${where}.requires[${i}]: a requirement written as an object is a hard lock, with "hard": true`);
+      formula(isRec(r) ? r.expr : r, `${where}.requires[${i}]`, params);
+    }
     if (recs(a.effects).length === 0) err(`${where}: no effects`);
     for (const e of recs(a.effects)) {
       checkEffect(e, where, false);
@@ -829,6 +833,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
   for (const c of recs(t.clues)) {
     const where = `clue ${text(c.id)}`;
     formula(c.requiresExpr, `${where}.requiresExpr`);
+    if (c.hard !== undefined && typeof c.hard !== "boolean") err(`${where}.hard: true or false`);
     if (text(rec(c.action).label).length < 8) err(`${where}: needs an action label`);
     for (const id of list(c.reveals)) if (!has(id, "item")) err(`${where}.reveals: "${text(id)}" is not an item`);
   }

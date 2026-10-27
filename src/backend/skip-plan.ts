@@ -9,7 +9,7 @@ import type { ChatId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { ROUTINE_EVENTS, routineSettingsOf, type SkipPlan } from "../shared/routines";
-import type { Limit, MindsReads } from "../shared/minds";
+import { type Limit, type MindsReads, SKIP_FILL_HEAD } from "../shared/minds";
 import type { StepConfig } from "../shared/settings";
 import { firedTimeout, within } from "../shared/timeouts";
 import type { WorldDoc } from "../shared/world";
@@ -118,7 +118,9 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
   // already reads, each line held to the same check as the journal's.
   const before = input.reads.history.on ? chatBefore(await deps.host.chats.messages(input.chatId, input.userId).catch(() => []), true) : [];
   const chat = recentChat({ reads: input.reads, hideJson: input.hideJson, history: told !== "" && before.at(-1)?.isUser === false ? before.slice(0, -1) : before }).filter(safe);
-  const extra = [pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : "", chat.length > 0 ? `Recent chat (as the player sees it):\n${chat.join("\n")}` : ""].filter((part) => part !== "");
+  // The player's own words for the span, the plan's first word (their directive), while minds read the player's message.
+  const fill = input.reads.message.on ? (input.intent.text?.trim() ?? "") : "";
+  const extra = [fill !== "" && safe(fill) ? `${SKIP_FILL_HEAD}\n${fill}` : "", pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : "", chat.length > 0 ? `Recent chat (as the player sees it):\n${chat.join("\n")}` : ""].filter((part) => part !== "");
   const signal = within(input.signal, "skipPlanMs", input.limit);
   const system = skipPlanSystem(deps.registry, input.world, input.state, from, input.config);
   const groups = routineSettingsOf(input.world).skipPlanCalls === "parallel" ? people.map((id) => [id]) : [people];

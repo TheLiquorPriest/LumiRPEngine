@@ -25,13 +25,12 @@ import type { LintIssue } from "../../../shared/protocol";
 import type { GridDef, GridTrigger, KindDef, WorldDoc } from "../../../shared/world";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { GRID_SPACE_FLOOR } from "../../../engine/registry-impl";
-import { acts, lifeOf, povLife } from "../../../engine/life";
 import { placeOfEntity, placeWithin } from "../../../engine/scope";
 import { relocate } from "../../../engine/relocate";
 import { placeSaid } from "../../../engine/place-names";
 import { PARTY_RELATION } from "../../../shared/party";
 import { observeCells } from "../../../engine/seen";
-import { canSeeEntity, canSeePlace, knownBySelector } from "../../../engine/visibility";
+import { canSeePlace, knownBySelector } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
@@ -349,27 +348,13 @@ export const spacePack: PackDef = {
     r.proposal({
       type: "location",
       boundField: "ref",
+      // The story first (DESIGN §11): a move the reply tells lands, by any route or none, and of
+      // anyone it moves, a body the POV knows doesn't act as much as someone it takes to be about.
       validate(p, ctx) {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
         const place = placeOf(p, ctx);
         if (!own(ctx.state.entities, entity)) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
         if (!own(ctx.world.places, place)) return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
-        // Someone who doesn't act walks nowhere: the body stays where it lies. What the POV knows decides
-        // how a move is refused, so the refusal never tells of a change it hasn't learned of: a body it
-        // knows of is declined as that body, even one since brought back out of its sight (a revival it
-        // hasn't seen still reads as death, DESIGN §8); someone it takes to act who doesn't is refused
-        // unseen (dropped as a change that changed nothing), as no living person's move is refused. Only
-        // the log says why (`gm`).
-        const name = labelOf(ctx, entity);
-        const truth = lifeOf(ctx.state, entity);
-        const stopped = !acts(ctx.world, ctx.state, entity);
-        const known = povLife(ctx.world, ctx.state, entity);
-        if (known && !known.acts && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, entity)) {
-          return { code: "not_moved", reason: `${name} ${known.reads}; that move didn't happen`, gm: stopped ? `${name} is ${truth} and doesn't act` : `${name} is ${truth}, which the POV hasn't learned; it takes them as ${known.id}` };
-        }
-        if (stopped) return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
-        // Moves are story first: the one move path refuses one no route reaches only under the travel
-        // simulation, and says so in what the POV may know.
         const route = relocate(ctx, entity, place, { told: true });
         return "code" in route ? route : null;
       },

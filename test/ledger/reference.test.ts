@@ -4,8 +4,9 @@
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import type { EventRef, LedgerEvent, Marker, PostEntry, Rec } from "../../src/shared/ledger";
+import type { EditOp } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
-import { resolveEdit } from "../../src/engine/edits";
+import { resolveEdit, resolveFix } from "../../src/engine/edits";
 import { applyEffects } from "../../src/engine/effects";
 import { enginePack } from "../../src/engine/engine-pack";
 import type { ChainMessage, FoldInput, FoldOutput, FoldSnapshot, SnapshotStore } from "../../src/engine/ledger/chain";
@@ -22,6 +23,8 @@ import { POV, testPack, testWorld, testWorlds } from "../support/test-pack";
 const registry = createRegistry([testPack]);
 const worlds = testWorlds();
 const revision = [...worlds.keys()][0] ?? "";
+/** GM edits and ✎ fixes worked out again from their requests, as a chat's run does. */
+const fixes: FoldInput["resolveFix"] = (world, state, entry) => resolveFix(registry, world, state, entry, "run");
 
 const user = (id: string, text: string): ChainMessage => ({ id, isUser: true, swipeId: 0, swipes: [text], ledger: null });
 const reply = (id: string, ...swipes: string[]): ChainMessage => ({ id, isUser: false, swipeId: 0, swipes, ledger: null });
@@ -41,7 +44,7 @@ function record(chain: ChainMessage[], index: number, events: LedgerEvent[], ext
 }
 
 function both(input: Partial<FoldInput> & { chain: ChainMessage[] }, types: Registry = registry): FoldOutput {
-  const full: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], ...input };
+  const full: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], resolveFix: (world, state, entry) => resolveFix(types, world, state, entry, "run"), ...input };
   const reference = referenceFold(full, types);
   const optimized = new LedgerFold(types).fold(full);
   expect(hashJson(optimized.state)).toBe(hashJson(reference.state));
@@ -49,6 +52,7 @@ function both(input: Partial<FoldInput> & { chain: ChainMessage[] }, types: Regi
   expect(optimized.notes).toEqual(reference.notes);
   expect(optimized.keepReport).toEqual(reference.keepReport);
   expect(optimized.violations).toEqual(reference.violations);
+  expect(optimized.resolved).toEqual(reference.resolved);
   return reference;
 }
 
@@ -129,6 +133,84 @@ describe("reference fold", () => {
     const out = both({ chain });
     expect(out.keepReport.map((k) => k.status)).toEqual(["converted"]);
     expect(out.state.packs.test?.uses).toBe(1);
+  });
+
+  test("a GM edit that keeps its request folds on a rebased view as that request worked out again there, not as stored: what is already so is passed over and the rest lands", () => {
+    const chain = [reply("a0", "Morning."), user("u1", "talk"), reply("a1", "Sam gets to know Dev."), user("u2", "wait"), reply("a2", "Time passes.")];
+    record(chain, 2, [{ type: "link", rel: "knows", from: POV, to: "dev" }]);
+    const a2 = record(chain, 4, []);
+    // Made on a2 while Sam knew Dev: no longer, and Sam is tense; stored as it resolved there.
+    const ops: EditOp[] = [
+      { op: "unlink", rel: "knows", from: POV, to: "dev" },
+      { op: "set", entity: POV, field: "mood", value: "tense" },
+    ];
+    const world = worlds.get(revision);
+    if (!world) throw new Error("no world");
+    const made = resolveEdit(registry, world, both({ chain }).state, ops, { gm: true, runSeed: "run" });
+    if ("rejection" in made) throw new Error(made.rejection.reason);
+    a2.post = [{ seq: 1, at: a2.path, kind: "fix", gm: true, events: made.events, edit: { ops } }];
+    expect(both({ chain }).state.entities[POV]?.fields.mood).toBe("tense");
+    // On a swipe of a1 where Sam never met Dev, the stored unlink no longer applies; the edit still does.
+    const a1 = chain[2];
+    if (!a1) throw new Error("no a1");
+    a1.swipes.push("Sam stays home.");
+    a1.swipeId = 1;
+    const out = both({ chain });
+    expect(out.messages[4]?.fold).toBe("view");
+    expect(out.state.entities[POV]?.fields.mood).toBe("tense");
+    expect(out.state.entities[POV]?.relations).toEqual([]);
+    expect(out.notes.filter((n) => n.kind === "dropped")).toEqual([]);
+    // What the view worked it out to is what its chip and Journal line say: the mood alone.
+    expect(out.resolved.map((r) => ({ messageId: r.messageId, seq: r.seq, events: r.events.length }))).toEqual([{ messageId: "a2", seq: 1, events: 1 }]);
+  });
+
+  test("a GM edit already so where it was made holds no events of its own: on its own path it folds as nothing, and on a rebased view it is worked out again, so what it asked for stands", () => {
+    const chain = [reply("a0", "Morning."), user("u1", "talk"), reply("a1", "Sam gets to know Dev."), user("u2", "wait"), reply("a2", "Time passes.")];
+    record(chain, 2, [{ type: "link", rel: "knows", from: POV, to: "dev" }]);
+    const a2 = record(chain, 4, []);
+    a2.post = [{ seq: 1, at: a2.path, kind: "fix", gm: true, events: [], edit: { ops: [{ op: "link", rel: "knows", from: POV, to: "dev" }] } }];
+    const knows = (out: FoldOutput): boolean => out.state.entities[POV]?.relations.some((r) => r.type === "knows" && r.to === "dev") === true;
+    const onPath = both({ chain });
+    expect(knows(onPath)).toBe(true);
+    expect(onPath.resolved).toEqual([]);
+    // On a swipe of a1 where Sam never met Dev, the edit makes it so.
+    const a1 = chain[2];
+    if (!a1) throw new Error("no a1");
+    a1.swipes.push("Sam stays home.");
+    a1.swipeId = 1;
+    const view = both({ chain });
+    expect(view.messages[4]?.fold).toBe("view");
+    expect(knows(view)).toBe(true);
+    expect(view.resolved.map((r) => ({ messageId: r.messageId, seq: r.seq, events: r.events.length }))).toEqual([{ messageId: "a2", seq: 1, events: 1 }]);
+  });
+
+  test("one that can't be made on a rebased view is dropped there with a note and a Keep line by its first ref, which a Keep conversion folds as stored: as nothing", () => {
+    const chain = [reply("a0", "Morning."), user("u1", "talk"), reply("a1", "Kit turns up, and Sam meets her."), user("u2", "wait"), reply("a2", "Time passes.")];
+    const world = worlds.get(revision);
+    if (!world) throw new Error("no world");
+    const met = resolveEdit(registry, world, both({ chain: chain.slice(0, 2) }).state, [{ op: "spawn", kind: "person", name: "Kit", id: "kit", place: "home" }, { op: "link", rel: "knows", from: POV, to: "kit" }], { gm: true, runSeed: "run" });
+    if ("rejection" in met) throw new Error(met.rejection.reason);
+    record(chain, 2, met.events);
+    const a2 = record(chain, 4, []);
+    a2.post = [{ seq: 1, at: a2.path, kind: "fix", gm: true, events: [], edit: { ops: [{ op: "link", rel: "knows", from: POV, to: "kit" }] } }];
+    expect(both({ chain }).notes.filter((n) => n.kind === "dropped")).toEqual([]);
+    // On a swipe of a1 where Kit never turns up, there is no one to know.
+    const a1 = chain[2];
+    if (!a1) throw new Error("no a1");
+    a1.swipes.push("Nobody comes.");
+    a1.swipeId = 1;
+    const view = both({ chain });
+    const ref: EventRef = { in: "post", seq: 1, index: 0 };
+    expect(view.notes.filter((n) => n.kind === "dropped").map((n) => [n.messageId, n.ref])).toEqual([["a2", ref]]);
+    expect(view.keepReport.filter((k) => k.status === "dropped").map((k) => [k.messageId, k.ref])).toEqual([["a2", ref]]);
+    expect(view.resolved).toEqual([]);
+    const parent = view.messages[4]?.parentPath;
+    if (!parent) throw new Error("no parent path");
+    a2.keep = { [parent]: { convert: [ref] } };
+    const converted = both({ chain });
+    expect(converted.notes.filter((n) => n.kind === "dropped")).toEqual([]);
+    expect(converted.keepReport.filter((k) => k.status === "dropped")).toEqual([]);
+    expect(converted.state.entities.kit).toBeUndefined();
   });
 
   test("records after an unresolved pause fold nothing", () => {
@@ -240,7 +322,7 @@ describe("reference fold", () => {
     const a2 = record(chain, 4, [tick]);
     // Every step keeps its state, so a re-fold runs only from the first message that changed.
     const folder = new LedgerFold(counted, { snapshotEvery: 1 });
-    const fold = (): FoldOutput => folder.fold({ worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain });
+    const fold = (): FoldOutput => folder.fold({ worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain, resolveFix: fixes });
     fold();
     a1.swipeId = 1;
     validations = 0;
@@ -252,7 +334,7 @@ describe("reference fold", () => {
     validations = 0;
     const edited = fold();
     expect(validations).toBe(0);
-    expect(hashJson(edited.state)).toBe(hashJson(referenceFold({ worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain }, registry).state));
+    expect(hashJson(edited.state)).toBe(hashJson(referenceFold({ worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain, resolveFix: fixes }, registry).state));
   });
 
   test("a fold started from a stored snapshot remembers the steps it rebuilt: the same chain folds again from its cache (L42)", () => {
@@ -267,7 +349,7 @@ describe("reference fold", () => {
       chain.push(user(`u${t}`, "walk"), reply(`a${t}`, `Walked ${t}.`));
       record(chain, chain.length - 1, [{ type: "clock", minutes: 2, cause: "tick" }]);
     }
-    const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain, snapshots };
+    const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain, snapshots, resolveFix: fixes };
     new LedgerFold(registry, { snapshotEvery: 3 }).fold(input);
     // After a restart the first fold starts from the last stored snapshot, two messages before the end.
     const restarted = new LedgerFold(registry, { snapshotEvery: 3 });
@@ -287,7 +369,7 @@ describe("reference fold", () => {
       chain.push(user(`u${t}`, "walk"), reply(`a${t}`, `Walked ${t}.`));
       record(chain, chain.length - 1, [{ type: "clock", minutes: 2, cause: "tick" }]);
     }
-    const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain, snapshots };
+    const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain, snapshots, resolveFix: fixes };
     const full = new LedgerFold(registry, { snapshotEvery: 3 }).fold(input);
     // As an earlier build stored them: everything but the clocks.
     for (const [key, s] of stored) stored.set(key, { key: s.key, state: s.state, notes: s.notes, keep: s.keep, violations: s.violations });
@@ -308,7 +390,7 @@ describe("reference fold", () => {
         record(chain, chain.length - 1, [tick]);
         // The head, the message before it, and a prefix from an earlier turn, each against the reference fold.
         for (const end of [chain.length, chain.length - 1, Math.max(1, chain.length - 9)]) {
-          const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain: chain.slice(0, end), snapshots };
+          const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain: chain.slice(0, end), snapshots, resolveFix: fixes };
           const out = folder.fold(input);
           expect(hashJson(out.state)).toBe(hashJson(referenceFold(input, registry).state));
           // The caller owns what it was given: changing it changes neither the cache nor a stored snapshot.

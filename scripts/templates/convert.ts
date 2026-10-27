@@ -287,7 +287,7 @@ function actionDef(c: Ctx, a: Template["actions"][number]): ActionDef {
     id: a.id,
     label: a.label,
     params: Object.fromEntries(Object.entries(a.params ?? {}).map(([k, p]) => [k, { type: p.type as FieldDef["type"], ...(p.ref ? { ref: p.ref } : {}), ...(p.label ? { label: p.label } : {}) }])),
-    requires: a.requires.map((x, i) => formula(c, x, `actions.${a.id}.requires[${i}]`)),
+    requires: a.requires.map((x, i) => (typeof x === "string" ? formula(c, x, `actions.${a.id}.requires[${i}]`) : { expr: formula(c, x.expr, `actions.${a.id}.requires[${i}]`), hard: true })),
     outcomes: { default: effects(c, a.effects, `actions.${a.id}.effects`) },
     duration: String(a.duration),
     lexicon: a.lexicon,
@@ -295,7 +295,7 @@ function actionDef(c: Ctx, a: Template["actions"][number]): ActionDef {
   };
 }
 
-/** A clue is found by an action: it requires the clue's condition and that the clue is not yet found. */
+/** A clue is found by an action: it requires the clue's condition (a hard lock when the clue says so) and that the clue is not yet found. */
 function clueAction(c: Ctx, clue: NonNullable<Template["clues"]>[number]): ActionDef {
   const found: TplEffect[] = [{ type: "set_flag", args: { flag: clue.id, value: true } }];
   for (const id of clue.reveals) {
@@ -307,7 +307,7 @@ function clueAction(c: Ctx, clue: NonNullable<Template["clues"]>[number]): Actio
     id: `find_${clue.id.replace(/^clue_/, "")}`,
     label: clue.action.label,
     params: {},
-    requires: [formula(c, clue.requiresExpr, `clues.${clue.id}.requires`), formula(c, `not story.${clue.id}`, `clues.${clue.id}`)],
+    requires: [clue.hard === true ? { expr: formula(c, clue.requiresExpr, `clues.${clue.id}.requires`), hard: true } : formula(c, clue.requiresExpr, `clues.${clue.id}.requires`), formula(c, `not story.${clue.id}`, `clues.${clue.id}`)],
     outcomes: { default: effects(c, found, `clues.${clue.id}`) },
     duration: clue.kind === "testimony" ? "15" : "10",
     observable: "looks around",

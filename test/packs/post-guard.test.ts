@@ -1,9 +1,11 @@
 // Ledger 1.10: postings re-validate against the state they fold on. From Money 2 a payment can't
 // take cash, checking or savings below zero or a card past its limit (the `post` guard), and a
 // payment is one atomic unit with its history line and what it bought, so a rebased view that
-// can't afford it drops all of them instead of folding the wallet negative.
+// can't afford it drops all of them instead of folding the wallet negative. A payment the story
+// made (`overdraw`, DESIGN §9.5) is the one that folds past what its account covers.
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent, PostingLine } from "../../src/shared/ledger";
+import { applyEffects } from "../../src/engine/effects";
 import { applyValidUnits, EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
 import { materializeAll } from "../../src/engine/materialize";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -77,5 +79,46 @@ describe("posting guard and payment units (ledger 1.10)", () => {
     expect(branch.state.accounts.cash).toBe(100);
     expect(moneyView(branch.ctx).recent.length).toBe(history);
     expect(Object.keys(branch.state.entities).length).toBe(items);
+  });
+
+  test("a payment the story made (`overdraw`) folds past what its account covers; the same posting without it doesn't", () => {
+    const w = setup();
+    const lines: PostingLine[] = [
+      { account: "checking", amount: -((w.state.accounts.checking ?? 0) + 5000) },
+      { account: shop, amount: (w.state.accounts.checking ?? 0) + 5000 },
+    ];
+    expect(reg.get("post")?.validate({ type: "post", lines, memo: "Payment" }, w.ctx)?.code).toBe("declined");
+    expect(reg.get("post")?.validate({ type: "post", lines, memo: "Payment", overdraw: true }, w.ctx)).toBeNull();
+  });
+
+  test("a narrated purchase nothing covers goes on the payer's last way that can run a debt, and Pay another way moves it to savings", () => {
+    const w = setup();
+    // $10 in cash, $20 in checking and $30 left on the Visa; savings as it starts.
+    const adjust = w.ctx.service("economy.adjust");
+    for (const [account, to] of [["cash", 1000], ["checking", 2000], ["card", -397000]] as const) {
+      const events = adjust(w.ctx, account, to - (w.state.accounts[account] ?? 0));
+      if (!Array.isArray(events)) throw new Error(events.reason);
+      for (const e of events) expect(w.apply(e)).toBeNull();
+    }
+    const savings = w.state.accounts.savings ?? 0;
+    const purchase = reg.proposals.get("purchase");
+    const p = { type: "purchase", item: "brass compass", price: 16500 };
+    const bought = applyEffects(reg, w, purchase?.toEffects(p, w.ctx) ?? [], { bindings: {}, rng: createRng("c") });
+    expect(bought.rejected).toEqual([]);
+    const post = bought.applied.find((e) => e.type === "post" && e.memo === "Bought brass compass");
+    const charged = post?.type === "post" ? -(post.lines.find((l) => l.account === "card")?.amount ?? 0) : 0;
+    expect(post).toMatchObject({ overdraw: true });
+    expect(charged).toBeGreaterThan(3000);
+    expect(w.state.accounts.card).toBe(-397000 - charged);
+    expect([w.state.accounts.cash, w.state.accounts.checking]).toEqual([1000, 2000]);
+    expect(Object.values(w.state.entities).some((e) => e.name === "brass compass" && e.fields.owner === "you")).toBe(true);
+    expect(w.ctx.query("economy.paid_from")(w.ctx, bought.applied, "you")).toEqual({ name: "Visa card", credit: true, cents: 397000 + charged, over: charged - 3000, total: charged });
+    expect(moneyView(w.ctx).overview?.alerts.map((a) => a.text)).toContain(`Visa card is over its limit by $${((charged - 3000) / 100).toFixed(2)}.`);
+    const way = w.ctx.service("economy.other_way")(w.ctx, bought.applied);
+    if ("code" in way) throw new Error(way.reason);
+    expect(way.from).toBe("savings");
+    for (const e of way.repay) expect(w.apply(e)).toBeNull();
+    expect(moneyView(w.ctx).overview?.alerts.some((a) => a.text.includes("over its limit"))).toBe(false);
+    expect([w.state.accounts.card, w.state.accounts.savings]).toEqual([-397000, savings - charged]);
   });
 });

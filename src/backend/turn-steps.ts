@@ -4,7 +4,7 @@
 //   - prompted text: `brief` and the prose `outline` (stacked on the engine's beats), `choices`;
 //   - prompted `effects`: proposals, validated and bounded like extraction by the caller;
 //   - decisions: `npc.choose` (present agents before the plan, off-screen ones after the reply),
-//     `contradiction`, `puzzle.answer` and `judge` (the player's described approach, DESIGN §11).
+//     `puzzle.answer` and `judge` (the player's described approach, DESIGN §11).
 // Secrecy batching rule: each step is its own call, and prose-producing steps only ever see
 // player-visible facts (lines that would leak an unrevealed truth are dropped), so a question that
 // carries a secret never shares a call with prose.
@@ -48,7 +48,7 @@ import { inMinorUnits, type Steps } from "./steps";
  * Player-visible fact lines (the engine's slot renders, minus the turn's own), leak-checked. Stance
  * is left out: its cues are hints for the narrator to play, and a prose helper given one could state
  * it (DESIGN §6.6). So is every other hint (People's usual routines): background for the narrator,
- * which a helper or the contradiction check would read as fact. So is the Minds section: under
+ * which a helper would read as fact. So is the Minds section: under
  * `full` it carries each mind whole, which only the narrator may read, to depict and never state
  * (DESIGN §24.3).
  */
@@ -351,10 +351,10 @@ function templatesFor(world: WorldDoc, purpose: StepPurpose): StepTemplateDef[] 
 
 /**
  * What the user's own prompt for a step is, as a world template of the step's own kind: the
- * question of a decision step (only a decision contradiction template is the check), else text, with
- * the effect a world template of that output has on the purpose.
+ * question of a decision step, else text, with the effect a world template of that output has on
+ * the purpose.
  */
-const OWN_OUTPUT: Record<StepPurpose, StepTemplateDef["output"]> = { interpret: "text", "npc.choose": "decision", contradiction: "decision", "puzzle.answer": "decision", judge: "decision", brief: "text", outline: "text", extract: "text", choices: "text", mind: "text", memory: "text", skip: "text", consolidate: "text" };
+const OWN_OUTPUT: Record<StepPurpose, StepTemplateDef["output"]> = { interpret: "text", "npc.choose": "decision", "puzzle.answer": "decision", judge: "decision", brief: "text", outline: "text", extract: "text", choices: "text", mind: "text", memory: "text", skip: "text", consolidate: "text" };
 
 /** The user's own prompt for a step as the template it runs with; null when it's blank (the world's, else the built-in, prompts). */
 export function ownTemplate(purpose: StepPurpose, config: Pick<StepConfig, "template">): StepTemplateDef | null {
@@ -515,25 +515,6 @@ export function decisionEvents(asked: readonly Tie[], answers: Answers, rng: Rng
     out.push({ type: t.decision ?? "castlife.decision", data: { key: t.key, choice } });
   });
   return out;
-}
-
-/**
- * `contradiction` (DESIGN §5.2, §18 "narrator contradiction"): which engine fact, if any, the reply
- * contradicts. Facts are player-visible only. Null when no fact is contradicted or the call fails.
- */
-export async function contradiction(steps: Steps, run: StepRun, facts: readonly string[], reply: string, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string | null> {
-  const asked = facts.slice(0, 12);
-  if (asked.length === 0 || reply.trim() === "") return null;
-  const criteria: Record<string, string> = { none: "The reply is consistent with every fact." };
-  asked.forEach((f, i) => {
-    criteria[`f${i}`] = f;
-  });
-  const questions: Questions = { contradicts: { type: "choice", instructions: run.template?.template ?? DECISION_PROMPTS.contradiction, criteria } };
-  const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run.config, userId, signal, lore, run.guidance, run.recent);
-  const a = answer?.answers.contradicts;
-  if (!a || a.type !== "choice" || a.choice === "none" || a.confidence < 0.5) return null;
-  const index = Number(a.choice.slice(1));
-  return Number.isInteger(index) ? (asked[index] ?? null) : null;
 }
 
 /**

@@ -9,14 +9,14 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import { heldBy } from "../shared/finance";
-import { spanRecords, type ActionDef, type CheckDef, type EffectSpec, type Expr, type WorldDoc } from "../shared/world";
+import { isHardLock, requirementExpr, spanRecords, type ActionDef, type CheckDef, type EffectSpec, type Expr, type WorldDoc } from "../shared/world";
 import { tableRowKey } from "../shared/tables";
 import { plainRolling } from "../shared/adjudication";
 import { approachShift, closeCall, fightRound, judgedOutcome, oddsSignature, outcomeChoices, passOutcome, policyFor, ratingOf, tryKey, verdictOf, type Adjudged, type Judgement, type Verdict } from "./adjudication";
 import { checkCounts, checkOdds, checkOf, oddsOf, readyCheck, rollCheck, rollVars, type CheckRoll } from "./checks";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { applyEffects } from "./effects";
-import type { EnvVars, ExprEnv, Value } from "./expr";
+import { identifiers, type EnvVars, type ExprEnv, type Value } from "./expr";
 import { materializeAll } from "./materialize";
 import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
@@ -32,6 +32,7 @@ import { together } from "./presence";
 import { labelOf, optionalService, own } from "./pack-kit";
 import type { InferredResult } from "./inferred";
 import type { ToldAction } from "./action-words";
+import type { Needs } from "./steps";
 
 export interface ActionRequest {
   action: ActionId | ActionDef;
@@ -57,8 +58,11 @@ export interface Resolution {
   action: ActionId;
   actor: EntityId;
   ok: boolean;
-  /** Why the action could not run: a bad parameter or the first unmet requirement. */
-  failed: { code: string; reason: string; requirement?: Expr } | null;
+  /**
+   * Why the action could not run: a bad parameter or the requirement that didn't hold, `hard` when it
+   * is its author's hard lock (DESIGN §11), which alone vetoes what the player typed.
+   */
+  failed: Failure | null;
   check: CheckResult | null;
   outcome: string | null;
   /** Everything this resolution applied: materialization first, then effects, then the activity. */
@@ -73,13 +77,21 @@ export interface Resolution {
   /**
    * The thing the player said they had, made real for this action as one of a turn's (DESIGN §9.4
    * player claims; set by the plan): its entity and name, and what its Undo takes back: its making,
-   * the action's own events and the rules they fired.
+   * the action's own events and the rules they fired. Money's `cents`: the cash it added, which its
+   * entity (the carried cash account) holds.
    */
-  claimed?: { entity: EntityId; name: string; events: LedgerEvent[] };
+  claimed?: { entity: EntityId; name: string; events: LedgerEvent[]; cents?: number };
   /** An inferred check's people and wording (DESIGN §11), when the action was Try something: the plan's, never recorded. */
   inferred?: InferredResult;
   /** The action as the narrator is told it (`toldAction`): set by the turn's plan once the turn has played, never recorded. */
   told?: ToldAction;
+  /**
+   * The player's typed action plays as plain roleplay (DESIGN §11): the engine couldn't play it as
+   * things stand, for a requirement that isn't a hard lock or a payment the money can't cover. Set by
+   * the turn's plan, never recorded; one picked in the engine's own controls, and anyone else's, is
+   * held to its requirements and its payments.
+   */
+  roleplay?: true;
 }
 
 export function findAction(reg: Registry, world: WorldDoc, id: ActionId): ActionDef | undefined {
@@ -157,14 +169,57 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
   return { action, actor, bindings, vars, params };
 }
 
-function firstUnmet(action: ActionDef, env: ExprEnv): Expr | null {
-  for (const req of action.requires) if (!truthy(evalExpr(req, env, false))) return req;
-  return null;
+/** Why an action can't run: a rejection, or a requirement that didn't hold, as its formula (`hard`: its author's hard lock). */
+export type Failure = { code: string; reason: string; requirement?: Expr; hard?: true };
+
+/**
+ * The requirement that keeps the action from running (DESIGN §11): a hard lock that doesn't hold
+ * before any plain one, since it alone vetoes a typed action; null when every one holds.
+ */
+function firstUnmet(action: ActionDef, env: ExprEnv): Failure | null {
+  let plain: Expr | null = null;
+  for (const req of action.requires) {
+    const expr = requirementExpr(req);
+    if (truthy(evalExpr(expr, env, false))) continue;
+    if (isHardLock(req)) return { code: "requirement", reason: `requires ${expr}`, requirement: expr, hard: true };
+    plain ??= expr;
+  }
+  return plain === null ? null : { code: "requirement", reason: `requires ${plain}`, requirement: plain };
+}
+
+/**
+ * What keeps the action the player's words named (`needs`) from holding one that plays in its place
+ * (DESIGN §9.4): the first of its requirements on the picks it was given that doesn't hold, a hard
+ * lock first; its requirements on anything else (the money it never was) are left out. Null when
+ * they all hold, or the action is gone.
+ */
+export function unmetNeeds(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, needs: Needs): Failure | null {
+  const named = findAction(reg, world, needs.action);
+  if (!named) return null;
+  const given = (name: string): boolean => Object.prototype.hasOwnProperty.call(needs.params, name);
+  const reads = (req: Expr): string[] => identifiers(req).filter((name) => Object.prototype.hasOwnProperty.call(named.params, name));
+  const action: ActionDef = { ...named, params: Object.fromEntries(Object.entries(named.params).filter(([name]) => given(name))), requires: named.requires.filter((req) => reads(requirementExpr(req)).every(given)) };
+  const p = prepare(reg, world, state, { action, params: needs.params });
+  return "code" in p ? p : firstUnmet(action, scopeEnv({ reg, ctx: reg.context(world, state), bindings: p.bindings, vars: p.vars }));
+}
+
+/**
+ * Whether the player's action plays as plain roleplay (DESIGN §11, `Resolution.roleplay`): what they
+ * typed is their will, so the engine plays none of it, the narrator hears nothing of it and the rest
+ * of the message goes on.
+ */
+export function playsAsRoleplay(res: Pick<Resolution, "roleplay">): boolean {
+  return res.roleplay === true;
+}
+
+/** Whether a resolution failed on a requirement that isn't its author's hard lock: a typed action that does plays as plain roleplay. */
+export function missedPlainRequirement(res: Pick<Resolution, "ok" | "failed">): boolean {
+  return !res.ok && res.failed?.code === "requirement" && res.failed.hard !== true;
 }
 
 export interface Availability {
   available: boolean;
-  failed: { code: string; reason: string; requirement?: Expr } | null;
+  failed: Failure | null;
   odds: Record<string, number> | null;
   modifier: number;
   /** How the check would roll (its notation, advantage, DC and opponent), when the action has one. */
@@ -198,7 +253,7 @@ export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<World
   const refused = Array.isArray(spend) ? null : spend;
   return {
     available: unmet === null && refused === null && usable === ready,
-    failed: unmet !== null ? { code: "requirement", reason: `requires ${unmet}`, requirement: unmet } : (refused ?? (ready && "code" in ready ? ready : null)),
+    failed: unmet ?? refused ?? (ready && "code" in ready ? ready : null),
     odds,
     modifier: usable?.modifier ?? 0,
     check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
@@ -214,6 +269,8 @@ export interface ResolveOptions {
   judgement?: Judgement | null;
   /** The turn's own messages, which the narrator reads anyway: an inferred check's attempt names nothing hidden by words they say too (DESIGN §7). */
   heard?: string;
+  /** The action the player's words named, when this one plays in its place: its needs hold this one too (`unmetNeeds`). */
+  needs?: Needs;
 }
 
 /**
@@ -246,8 +303,11 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
   }
 
   const env = scopeEnv({ reg, ctx: w.ctx, bindings: p.bindings, vars: p.vars });
-  const unmet = firstUnmet(p.action, env);
-  if (unmet !== null) return { ...base, actor: p.actor, failed: { code: "requirement", reason: `requires ${unmet}`, requirement: unmet }, events: w.events.slice(start) };
+  const itself = firstUnmet(p.action, env);
+  const named = opts.needs ? unmetNeeds(reg, w.world, w.state, opts.needs) : null;
+  // A hard lock vetoes first, whichever action's it is.
+  const unmet = itself?.hard ? itself : named?.hard ? named : (itself ?? named);
+  if (unmet !== null) return { ...base, actor: p.actor, failed: unmet, events: w.events.slice(start) };
 
   // The plan is read from the state before the action: its duration and activity span.
   const duration = Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0));
@@ -419,11 +479,12 @@ const EXPR_WORDS = new Set(["and", "or", "not", "true", "false", "null", "self"]
  * The action's requirements about the candidate alone: they read only the candidate (its fields,
  * or calls on it like `invited(host)` or `carries(self, item)`) and `self`. A candidate failing one
  * can never fill the param, so it isn't offered (Accept invitation offers only the hosts who
- * invited you). Requirements that read anything else (`at(to, here)`) stay availability.
+ * invited you). Requirements that read anything else (`at(to, here)`) stay availability, and so
+ * does a hard lock, so a typed attempt on a candidate it shuts out reads as the action and fails.
  */
 function candidateFilters(action: ActionDef, param: string): Expr[] {
   const named = new RegExp(`(?<![\\w.])${param.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-  return action.requires.filter((req) => {
+  return action.requires.flatMap((req) => (isHardLock(req) ? [] : [requirementExpr(req)])).filter((req) => {
     const bare = req.replace(/'[^']*'|"[^"]*"/g, "''");
     if (!named.test(bare)) return false;
     for (const m of bare.matchAll(/(\.?)\b([A-Za-z_][A-Za-z0-9_]*)\b(\s*\()?/g)) {

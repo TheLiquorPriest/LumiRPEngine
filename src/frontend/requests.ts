@@ -20,7 +20,7 @@ export type Req<K extends RequestBody["type"]> = Extract<RequestBody, { type: K 
 /**
  * What a chip button does. `regenerate` (the Retry chip on an empty reply, D32) runs the host's
  * own Regenerate, and `continue` its Continue: only the frontend can start them. A swipe option
- * (`renarrate`, `rerun`), a contradiction's Re-narrate, the Retry of an unread action (`read_failed`,
+ * (`renarrate`, `rerun`), the Retry of an unread action (`read_failed`,
  * a Re-run) and the answer to a claim's question (Add, Not an action: the turn waiting on it
  * resumes) record the one-shot choice with `lre.chip`, then run the same Regenerate; a failed
  * reply's Re-run starts the reply as its card says (`Chip.as`), and a `send` start is the player's

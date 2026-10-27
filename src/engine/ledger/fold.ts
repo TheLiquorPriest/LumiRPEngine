@@ -19,7 +19,7 @@ import { ROOT_PATH } from "../../shared/ledger";
 import { applyEvent, applyMarker, validateEvent } from "../events";
 import type { WorldState } from "../state";
 import { initialState } from "../world-state";
-import { FoldError, type ChainMessage, type FoldInput, type FoldOutput, type FoldSnapshot, type MessageResult } from "./chain";
+import { FoldError, type ChainMessage, type FoldInput, type FoldOutput, type FoldSnapshot, type MessageResult, type ResolvedFix } from "./chain";
 import { activeRecord, activeText, contentId, isLive, isTombstoned, markersHash, recordHash, stepPath, turnPath } from "./path";
 import type { FoldTypes } from "./reference";
 
@@ -30,6 +30,8 @@ interface Step {
   notes: JournalNote[];
   keep: KeepLine[];
   violations: string[];
+  /** The GM edits and ✎ fixes this step, a rebased view, worked out again: state-dependent, as its drops are. */
+  resolved: ResolvedFix[];
   paused: boolean;
 }
 
@@ -184,8 +186,9 @@ export class LedgerFold {
         if ((i + 1) % this.every !== 0) continue;
         const found = input.snapshots.get(hashParts(context, p));
         // A snapshot that lacks the clock of a step it would restore (saved before steps kept their
-        // clocks, or on top of one) is passed over, so every reply keeps the time it ended at.
-        if (found && clocksCover(found, base, i)) {
+        // clocks, or on top of one), or the fixes its views worked out again (saved before the folds
+        // kept them), is passed over, so every reply keeps the time it ended at and its chips.
+        if (found && found.resolved !== undefined && clocksCover(found, base, i)) {
           best = i;
           snapshot = found;
         }
@@ -194,9 +197,11 @@ export class LedgerFold {
         const notes = new Map<number, JournalNote[]>();
         const keep = new Map<number, KeepLine[]>();
         const violations = new Map<number, string[]>();
+        const resolved = new Map<number, ResolvedFix[]>();
         for (const [i, x] of snapshot.notes) notes.set(i, [...(notes.get(i) ?? []), x]);
         for (const [i, x] of snapshot.keep) keep.set(i, [...(keep.get(i) ?? []), x]);
         for (const [i, x] of snapshot.violations) violations.set(i, [...(violations.get(i) ?? []), x]);
+        for (const [i, x] of snapshot.resolved ?? []) resolved.set(i, [...(resolved.get(i) ?? []), x]);
         const clocks = new Map(snapshot.clocks ?? []);
         // Steps already cached keep their outputs; the rest come from their frames and the snapshot.
         // They are remembered, the snapshot's step with its state, so the next fold of this chain
@@ -204,7 +209,7 @@ export class LedgerFold {
         for (let i = base + 1; i <= best; i++) {
           const f = frames[i - base - 1] as Frame;
           const k = frameKeys[i - base - 1] as string;
-          const step: Step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...(notes.get(i) ?? [])], keep: [...f.keep, ...(keep.get(i) ?? [])], violations: violations.get(i) ?? [], paused: false };
+          const step: Step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...(notes.get(i) ?? [])], keep: [...f.keep, ...(keep.get(i) ?? [])], violations: violations.get(i) ?? [], resolved: resolved.get(i) ?? [], paused: false };
           this.remember(k, i === best ? { ...step, state: snapshot.state } : step, i === best ? "checkpoint" : null, true);
           steps.push(step);
           keys.push(k);
@@ -239,11 +244,12 @@ export class LedgerFold {
       if (kept && checkpoint && input.snapshots && input.pauses.length === 0) input.snapshots.put(this.snapshotOf(hashParts(context, parent), steps, kept));
     }
 
-    const out: FoldOutput = { state: shared ? structuredClone(shared) : state, notes: [], keepReport: [], messages: [], violations: [] };
+    const out: FoldOutput = { state: shared ? structuredClone(shared) : state, notes: [], keepReport: [], messages: [], resolved: [], violations: [] };
     for (const s of steps) {
       out.messages.push(s.result);
       out.notes.push(...s.notes);
       out.keepReport.push(...s.keep);
+      out.resolved.push(...s.resolved);
       out.violations.push(...s.violations);
     }
     return out;
@@ -252,11 +258,13 @@ export class LedgerFold {
   /** The stored snapshot of a checkpoint: `state` is the copy its cached step keeps, which no fold changes, so the snapshot holds that copy too. */
   private snapshotOf(key: string, steps: readonly Step[], state: WorldState): FoldSnapshot {
     const clocks: [number, number][] = [];
-    const snap: FoldSnapshot = { key, state, notes: [], keep: [], violations: [], clocks };
+    const resolved: [number, ResolvedFix][] = [];
+    const snap: FoldSnapshot = { key, state, notes: [], keep: [], violations: [], clocks, resolved };
     steps.forEach((s, i) => {
       for (const x of s.notes) if (dependentNote(x)) snap.notes.push([i, x]);
       for (const x of s.keep) if (dependentKeep(x)) snap.keep.push([i, x]);
       for (const x of s.violations) snap.violations.push([i, x]);
+      for (const x of s.resolved) resolved.push([i, x]);
       if (s.result.clock !== null) clocks.push([i, s.result.clock]);
     });
     return snap;
@@ -307,6 +315,7 @@ export class LedgerFold {
     const notes: JournalNote[] = [...f.notes];
     const keep: KeepLine[] = [...f.keep];
     const violations: string[] = [];
+    const resolved: ResolvedFix[] = [];
     const types = this.types;
     const ctx = () => {
       const world = input.worlds(state.revision);
@@ -334,8 +343,10 @@ export class LedgerFold {
       if (view) {
         // A view folds as its record did on its own path only from the same state and with the same
         // entries: a marker or post entry made on this branch (live here by its `at`, inert on the
-        // record's path) can make a stored one fail, so then everything is re-validated.
-        const asOnPath = liveMarkers.every((mk) => mk.at === null || mk.at === recPath) && livePost.every((p) => p.at === recPath);
+        // record's path) can make a stored one fail, so then everything is re-validated. So it is
+        // when it holds a GM edit or ✎ fix with its request, which folds worked out again (`post`)
+        // and may leave a state its record never folded on its own path.
+        const asOnPath = liveMarkers.every((mk) => mk.at === null || mk.at === recPath) && livePost.every((p) => p.at === recPath && !(p.kind === "fix" && p.edit !== undefined));
         const original = this.settled.get(settledKey);
         converged = asOnPath && original !== undefined && original === hashJson(state);
       }
@@ -409,6 +420,32 @@ export class LedgerFold {
           }
         }
       };
+      // On a view, a GM edit or ✎ fix that keeps what it asked for folds as that request worked out
+      // again against the state here (DESIGN §7, P2): the story before it changed, and it still says
+      // what it said. One the request can't be made from is dropped whole, as a group is, by its first
+      // ref when it holds no events of its own (it was already so where it was made); one undone or
+      // converted in any part, by those refs too, folds as stored.
+      const post = (p: PostEntry): void => {
+        const refOf = (index: number): EventRef => ({ in: "post", seq: p.seq, index });
+        const own = (u: EventRef): boolean => u.in === "post" && u.seq === p.seq;
+        const asked = view && p.kind === "fix" && p.edit !== undefined && !record.undone.some(own) && !converted.some(own);
+        const world = asked ? input.worlds(state.revision) : undefined;
+        if (asked && !world) throw new FoldError(`unknown revision ${state.revision}`);
+        const again = world ? input.resolveFix(world, state, p) : null;
+        if (!again) {
+          run(p.events, refOf);
+          return;
+        }
+        if ("rejection" in again) {
+          for (const i of p.events.length > 0 ? p.events.keys() : [0]) {
+            notes.push({ kind: "dropped", messageId: m.id, ref: refOf(i), text: again.rejection.reason });
+            keep.push({ messageId: m.id, parentPath: parent, ref: refOf(i), status: "dropped", text: again.rejection.reason });
+          }
+          return;
+        }
+        resolved.push({ messageId: m.id, seq: p.seq, events: again.events });
+        for (const ev of again.events) applyEvent(types, ev, state, ctx());
+      };
       for (const mk of liveMarkers) if (mk.seq <= record.markersApplied) marker(mk);
       run(record.events, (index) => ({ in: "events", index }));
       const later: ({ seq: number; marker: Marker } | { seq: number; post: PostEntry })[] = [
@@ -417,11 +454,11 @@ export class LedgerFold {
       ].sort((a, b) => a.seq - b.seq);
       for (const item of later) {
         if ("marker" in item) marker(item.marker);
-        else run(item.post.events, (index) => ({ in: "post", seq: item.post.seq, index }));
+        else post(item.post);
       }
       if (before !== null && violations.length === 0) this.digest(this.settled, settledKey, () => before);
     }
-    return { state, result: { ...f.result, clock: state.clock }, notes, keep, violations, paused: f.paused };
+    return { state, result: { ...f.result, clock: state.clock }, notes, keep, violations, resolved, paused: f.paused };
   }
 
   /** Everything about one message that doesn't need the state: its record, live entries, path, fold kind and inert notes. */

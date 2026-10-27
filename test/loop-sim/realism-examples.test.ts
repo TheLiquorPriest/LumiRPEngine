@@ -2,7 +2,6 @@
 // the panel view models the UI renders and on the narrator slots — not only on internal state.
 import { describe, expect, test } from "bun:test";
 import type { WorldDoc } from "../../src/shared/world";
-import { hashJson } from "../../src/shared/hash";
 import { calendarOf, clockOfLocal } from "../../src/engine/calendar";
 import { applyEffects } from "../../src/engine/effects";
 import { materializeAll, pinnedVersion, previewMaterialization } from "../../src/engine/materialize";
@@ -124,7 +123,7 @@ describe("realism examples: money", () => {
     expect(moneyView(t.ctx).recent.some((r) => r.memo === "Stolen with Wallet" && r.cents === -8400)).toBe(true);
   });
 
-  test("a narrated off-catalog purchase is priced inside its category band; one the POV can't afford is declined after the fact", () => {
+  test("a narrated off-catalog purchase is priced inside its category band; one the POV can't afford still stands, run as a debt", () => {
     const w = setup();
     const ch = reg.proposals.get("purchase");
     const fx = ch?.toEffects({ category: "electronics", name: "a used drone" }, w.ctx) ?? [];
@@ -138,10 +137,11 @@ describe("realism examples: money", () => {
       wd.entities.card!.fields.limit = 0;
       wd.entities.card!.fields.opening = 0;
     });
-    const before = hashJson(moneyView(broke.ctx));
-    const declined = applyEffects(reg, broke, ch?.toEffects({ category: "electronics", name: "a new laptop" }, broke.ctx) ?? [], { bindings: {}, rng: createRng("x") });
-    expect(declined.rejected[0]?.rejection.code).toBe("declined");
-    expect(hashJson(moneyView(broke.ctx))).toBe(before);
+    // The story pays (DESIGN §9.5): bought all the same, for more than every way of paying held.
+    const stands = applyEffects(reg, broke, ch?.toEffects({ category: "electronics", name: "a new laptop" }, broke.ctx) ?? [], { bindings: {}, rng: createRng("x") });
+    expect(stands.rejected).toEqual([]);
+    expect(-(moneyView(broke.ctx).recent.find((r) => r.memo === "Bought a new laptop")?.cents ?? 0)).toBeGreaterThan(300);
+    expect(trialBalance(broke.state)).toBe(0);
   });
 
   test("after a 30-day timelapse the books balance and the Montage's money equals the record", () => {

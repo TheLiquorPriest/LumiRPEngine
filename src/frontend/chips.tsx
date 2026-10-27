@@ -46,7 +46,6 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   pending: "hourglass",
   mode_change: "gear",
   choice: "send",
-  contradiction: "info",
   read_failed: "alert",
   engine_failed: "alert",
   reply_failed: "alert",

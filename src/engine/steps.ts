@@ -70,11 +70,12 @@ export const ACTION_QUEUE_LIMIT = 5;
 /**
  * A thing the player's typed action uses that the world doesn't have, made real for it (DESIGN
  * §9.4 player claims): the plan makes it where the action expects it, marked `claimed`, just
- * before the action plays, and the action's `param` takes it.
+ * before the action plays, and the action's `param` takes it. Money (`cents`) is no thing: it goes
+ * into the player character's carried cash, and the action pays it over.
  */
 export interface Claim {
   param: string;
-  /** Its name, in the player's own words. */
+  /** Its name, in the player's own words; money's, its amount. */
   name: string;
   at: ClaimPlace;
   /** Its kind: the param's. */
@@ -88,6 +89,22 @@ export interface Claim {
   like?: string;
   /** The player character's own thing the world had elsewhere: brought to hand (or here) rather than made (DESIGN §9.4). Absent in older records. */
   existing?: string;
+  /**
+   * Money the player said they had, in minor units: what the action pays over in cash. As it plays,
+   * only what the claimer's carried cash lacks of it is added (DESIGN §9.4), and nothing when they
+   * carry that much by then.
+   */
+  cents?: number;
+}
+
+/**
+ * The action the player's words named, when another plays in its place (money handed over plays as
+ * the economy's Pay, DESIGN §9.4), with the picks the two share: its requirements on those picks
+ * still hold the one that plays (Give's `at(to, here)`: cash goes only to someone here).
+ */
+export interface Needs {
+  action: ActionId;
+  params: JsonObject;
 }
 
 /** One of the input's actions after the first, as `interpret` read it: an engine action, its params, and its words. */
@@ -100,6 +117,8 @@ export interface QueuedAction {
   judgement?: Judgement;
   /** The thing the player said they had that this action uses, made real before it plays (DESIGN §9.4). */
   claim?: Claim;
+  /** The action the player's words named, when this one plays in its place. */
+  needs?: Needs;
 }
 
 export interface InterpretOutput {
@@ -122,6 +141,14 @@ export interface InterpretOutput {
   judgement?: Judgement;
   /** The thing the player said they had that the first action uses, made real before it plays (DESIGN §9.4). */
   claim?: Claim;
+  /** The action the player's words named, when the first action plays in its place. */
+  needs?: Needs;
+  /**
+   * The first action was picked in the engine's own controls (the Actions sheet, a panel, the map, a
+   * chip), not typed: its requirements hold it as they always have, while a typed action whose plain
+   * requirement doesn't hold plays as plain roleplay (DESIGN §11).
+   */
+  picked?: true;
 }
 
 /** `extract`: proposals read from a reply, bounded per channel (DESIGN §9.4). */

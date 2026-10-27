@@ -593,13 +593,32 @@ export interface CombatActionDef {
   role?: "attack" | "defend";
 }
 
+/**
+ * An action's requirement (DESIGN §11): a formula, or one its author marks as a hard lock (`hard`).
+ * The player's will decides what a typed action is, so one whose plain requirement doesn't hold still
+ * plays, as plain roleplay; only a hard lock that doesn't hold vetoes it, and the narrator tells the
+ * attempt failing ("the safe stays shut"). Every other reader (the palette, the catalog's needs, an
+ * NPC's choice) holds both alike.
+ */
+export type Requirement = Expr | { expr: Expr; hard?: boolean };
+
+/** A requirement's formula. */
+export function requirementExpr(req: Requirement): Expr {
+  return typeof req === "string" ? req : req.expr;
+}
+
+/** Whether a requirement is its author's hard lock. */
+export function isHardLock(req: Requirement): boolean {
+  return typeof req !== "string" && req.hard === true;
+}
+
 export interface ActionDef {
   id: ActionId;
   label: string;
   /** What the action does, in a line: `interpret`'s catalog gives it the model with the label (DESIGN §5.2). Public text, like the label. */
   description?: string;
   params: Record<string, ParamDef>;
-  requires: Expr[];
+  requires: Requirement[];
   /** Inline check or a reference to `checks`. */
   check?: CheckId | CheckDef;
   /** Effects per check outcome; `default` when there is no check. */
@@ -886,7 +905,6 @@ export interface SectionTemplate extends SectionFeed {
 export type StepPurpose =
   | "interpret"
   | "npc.choose"
-  | "contradiction"
   | "puzzle.answer"
   | "brief"
   | "outline"
@@ -1177,8 +1195,8 @@ export type MapDisplay = "knowledge" | "fog";
  * A world's map settings (DESIGN §4.1, §12); a world without them plays with `DEFAULT_MAP_SETTINGS`
  * (`shared/maps` `mapSettingsOf`). The grid system is optional: with `movement` on, walls and doors
  * steer the POV across grids, things lie in cells, cells and zones trigger rules, and the POV sees
- * `sightRadius` cells around it. `travelSimulation` (off unless set) makes a move need a route: a
- * narrated move no route reaches is refused, and Go needs a walking route; off, moves are story first.
+ * `sightRadius` cells around it. `travelSimulation` (off unless set) makes Go need a walking route;
+ * a narrated move lands either way, story first.
  */
 export interface MapSettings {
   display: MapDisplay;

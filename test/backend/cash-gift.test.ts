@@ -5,7 +5,6 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import { dedupeProposals, inMinorUnits } from "../../src/backend/steps";
-import { declineNote } from "../../src/backend/runtime";
 import { toChain } from "../../src/backend/ledger-io";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -80,20 +79,11 @@ describe("an NPC's cash gift", () => {
     expect(prompt).toContain('method: "cash" when bills or coins change hands in person');
   });
 
-  test("a gift that can't apply gets a decline chip, never silence", async () => {
+  test("a gift of no amount can't be kept: a Not tracked receipt, never silence", async () => {
     const none = await baseline();
     const got = await gift([{ type: "give", item: "cash", from: "danny_okafor", to: "pov" }]);
     expect(got.worth).toBe(none.worth);
-    expect(got.chips.filter((c) => c.startsWith("decline:"))).toEqual(["decline: Didn't apply: Danny Okafor paid $? to you"]);
-  });
-
-  test("a decline note keeps names' case", async () => {
-    const { rig, state, world } = await baseline();
-    const move = { type: "location", entity: "danny_okafor", place: "harbor_street_114" };
-    const view = { registry: rig.rt.registry, world, state };
-    const notes = [declineNote(move, "no route", "accept", view), declineNote(move, "no route", "remove", view)];
-    expect(notes.every((n) => n.includes('"Danny Okafor'))).toBe(true);
-    expect(notes.some((n) => n.includes("danny"))).toBe(false);
+    expect(got.chips.filter((c) => c.startsWith("decline:") || c.startsWith("untracked:"))).toEqual(["untracked: Not tracked: Danny Okafor paid $? to you"]);
   });
 
   test("with default settings a narrated transfer between people waits on a confirm chip; no money moves until Apply", async () => {

@@ -135,7 +135,7 @@ export const TIMEOUTS: Readonly<Record<TimeoutKey, TimeoutDef>> = {
   postReplyMs: {
     label: "Reading the reply",
     group: "turn",
-    limits: "Everything the engine asks a model after the reply: what changed, the contradiction check, people elsewhere, suggested choices, memory.",
+    limits: "Everything the engine asks a model after the reply: what changed, people elsewhere, suggested choices, memory.",
     fires: "The reads still waiting are skipped; the reply stands, and Re-read tries again.",
     defaultMs: 5 * MIN,
     minMs: 0,

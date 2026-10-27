@@ -11,7 +11,7 @@ import { applyEvent, applyMarker, validateEvent } from "../events";
 import type { ReadContext } from "../registry";
 import type { MarkerEnv, UpgradeTypes } from "../upgrade";
 import { initialState } from "../world-state";
-import { FoldError, type FoldInput, type FoldOutput, type MessageResult } from "./chain";
+import { FoldError, type FoldInput, type FoldOutput, type MessageResult, type ResolvedFix } from "./chain";
 
 /** What the fold needs from the registry: event types, relation types for the start state, read contexts (what an Upgrade's merge needs too). */
 export type FoldTypes = UpgradeTypes;
@@ -30,6 +30,7 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
   const keepReport: KeepLine[] = [];
   const messages: MessageResult[] = [];
   const violations: string[] = [];
+  const resolved: ResolvedFix[] = [];
   const pausedAfter = new Set(input.pauses.map((p) => p.messageId));
   let paused = false;
   let parent: PathHash = ROOT_PATH;
@@ -171,6 +172,32 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
           }
         }
       };
+      // On a view, a GM edit or ✎ fix that keeps what it asked for folds as that request worked out
+      // again here (DESIGN §7, P2), not as stored: dropped whole when it can't be made (by its first
+      // ref when it holds no events, being already so where it was made). One undone or converted in
+      // any part folds as stored.
+      const post = (p: PostEntry): void => {
+        const refOf = (index: number): EventRef => ({ in: "post", seq: p.seq, index });
+        const touched = [...record.undone, ...converted].some((u) => u.in === "post" && u.seq === p.seq);
+        if (!view || p.kind !== "fix" || p.edit === undefined || touched) {
+          run(p.events, refOf);
+          return;
+        }
+        const world = input.worlds(state.revision);
+        if (!world) throw new FoldError(`unknown revision ${state.revision}`);
+        const again = input.resolveFix(world, state, p);
+        if (again === null) run(p.events, refOf);
+        else if ("rejection" in again) {
+          const refs = p.events.length === 0 ? [refOf(0)] : p.events.map((_, i) => refOf(i));
+          for (const ref of refs) {
+            notes.push({ kind: "dropped", messageId: m.id, ref, text: again.rejection.reason });
+            keepReport.push({ messageId: m.id, parentPath: parent, ref, status: "dropped", text: again.rejection.reason });
+          }
+        } else {
+          resolved.push({ messageId: m.id, seq: p.seq, events: again.events });
+          for (const ev of again.events) applyEvent(types, ev, state, ctx());
+        }
+      };
       for (const mk of liveMarkers) if (mk.seq <= record.markersApplied) marker(m.id, mk);
       run(record.events, (index) => ({ in: "events", index }));
       const later: ({ seq: number; marker: Marker } | { seq: number; post: PostEntry })[] = [
@@ -179,7 +206,7 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
       ].sort((a, b) => a.seq - b.seq);
       for (const item of later) {
         if ("marker" in item) marker(m.id, item.marker);
-        else run(item.post.events, (index) => ({ in: "post", seq: item.post.seq, index }));
+        else post(item.post);
       }
       fold = recPath === null ? "plain" : view ? "view" : "on_path";
     }
@@ -214,5 +241,5 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
     parent = path;
   }
   state = structuredClone(state);
-  return { state, notes, keepReport, messages, violations };
+  return { state, notes, keepReport, messages, resolved, violations };
 }

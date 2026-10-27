@@ -1,7 +1,6 @@
 // What lint says of a world's step templates (DESIGN §5.2), and the one limit on a GM edit's
-// operations: a placeholder only some steps are given passes in those steps, a blank template and a
-// contradiction template that isn't a check are warned of, and the tools' schemas take exactly as
-// many operations as the engine accepts.
+// operations: a placeholder only some steps are given passes in those steps, a blank template is
+// warned of, and the tools' schemas take exactly as many operations as the engine accepts.
 
 import { describe, expect, test } from "bun:test";
 import { PLAY_TOOLS } from "../../src/cli/tools-play";
@@ -32,10 +31,8 @@ describe("step template checks", () => {
     expect(codesFor({ purpose: "brief", template: "Brief, with {{usual}}.", output: "text", signals: [] })).toEqual(["unknown_placeholder"]);
   });
 
-  test("a blank template is flagged, and a contradiction template that isn't a decision is", () => {
+  test("a blank template is flagged", () => {
     expect(codesFor({ purpose: "brief", template: "  ", output: "text", signals: [] })).toEqual(["step_blank"]);
-    expect(codesFor({ purpose: "contradiction", template: "Does the reply contradict the facts?", output: "text", signals: [] })).toEqual(["step_contradiction_output"]);
-    expect(codesFor({ purpose: "contradiction", template: "Does the reply contradict the facts?", output: "decision", signals: [] })).toEqual([]);
   });
 });
 

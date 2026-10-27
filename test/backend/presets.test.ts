@@ -2,9 +2,9 @@
 // from its steps and phase budgets (DESIGN §5.3), so a budget change can't leave the note behind;
 // the same for lore lookups. Each step run takes one call from its phase's budget when it starts;
 // a disabled step never runs, and puzzle.answer is on unless set. No note claims a typical count:
-// the call meter shows each turn's real one. Settings saved by a build that still managed lore
-// load without its retired keys; settings saved before lore policies existed load with their
-// preset's.
+// the call meter shows each turn's real one. Settings saved by a build that still managed lore, or
+// that still had the contradiction check, load without their retired keys; settings saved before
+// lore policies existed load with their preset's.
 
 import { describe, expect, test } from "bun:test";
 import { defaultSettings, MODEL_USE_PRESETS, SettingsStore } from "../../src/backend/settings-store";
@@ -15,7 +15,7 @@ import type { StepPurpose } from "../../src/shared/world";
 import { FakeHost } from "../support/fake-host";
 
 const PRE: StepPurpose[] = ["interpret", "npc.choose", "puzzle.answer", "judge", "brief", "outline"];
-const POST: StepPurpose[] = ["extract", "npc.choose", "contradiction", "choices"];
+const POST: StepPurpose[] = ["extract", "npc.choose", "choices"];
 
 function ceiling(m: Omit<ModelUseSettings, "preset">): number {
   const on = (p: StepPurpose): boolean => m.steps[p]?.enabled ?? p === "puzzle.answer";
@@ -51,9 +51,10 @@ describe("model-use preset notes", () => {
   });
 });
 
-describe("settings saved by a build that still managed lore", () => {
-  const at = (v: unknown, ...path: string[]): unknown => path.reduce<unknown>((x, k) => (x !== null && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>)[k] : undefined), v);
+/** The value at `path` in a settings file as stored. */
+const at = (v: unknown, ...path: string[]): unknown => path.reduce<unknown>((x, k) => (x !== null && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>)[k] : undefined), v);
 
+describe("settings saved by a build that still managed lore", () => {
   test("load without the lore keys, keep the preset and the user's other choices, and save clean", async () => {
     const host = new FakeHost();
     const user = host.userId;
@@ -82,6 +83,27 @@ describe("settings saved by a build that still managed lore", () => {
     const saved: unknown = JSON.parse((await host.storage.read("settings.json", user)) ?? "null");
     for (const path of [["passThroughBooks"], ["modelUse", "steps", "select"], ["modelUse", "budgets", "select"], ["modelUse", "tokens", "lore"]]) expect(at(saved, ...path)).toBeUndefined();
     expect(at(saved, "swipeDefault")).toBe("renarrate");
+  });
+});
+
+describe("settings saved while the contradiction check was a step", () => {
+  test("load without it, keep the preset and the user's other steps, and save clean", async () => {
+    const host = new FakeHost();
+    const user = host.userId;
+    const current = defaultSettings();
+    // Full as it was, with the check on the user's own connection and prompt.
+    const check = { enabled: true, signals: ["reply"], route: { provider: "helper", connectionId: "conn-check", model: null }, template: "Does the reply break a fact?" };
+    const old = { ...current, modelUse: { preset: "full", ...structuredClone(MODEL_USE_PRESETS.full), steps: { ...structuredClone(MODEL_USE_PRESETS.full.steps), contradiction: check } } };
+    await host.storage.write("settings.json", JSON.stringify(old), user);
+    const store = new SettingsStore(host);
+    const loaded = await store.get(user);
+    expect(loaded.modelUse.preset).toBe("full");
+    expect(at(loaded, "modelUse", "steps", "contradiction")).toBeUndefined();
+    expect(loaded.modelUse.steps).toEqual(MODEL_USE_PRESETS.full.steps);
+    await store.set(user, { swipeDefault: "renarrate" });
+    const saved: unknown = JSON.parse((await host.storage.read("settings.json", user)) ?? "null");
+    expect(at(saved, "modelUse", "steps", "contradiction")).toBeUndefined();
+    expect(at(saved, "modelUse", "preset")).toBe("full");
   });
 });
 
