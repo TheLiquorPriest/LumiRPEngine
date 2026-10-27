@@ -863,7 +863,6 @@ var RETIRED_SIGNALS = new Map([["classifier", "typed_input"]]);
 var STEP_LABEL = {
   interpret: "Interpret typed input",
   "npc.choose": "NPC choices",
-  contradiction: "Contradiction check",
   "puzzle.answer": "Puzzle answers",
   brief: "Scene brief",
   outline: "Prose outline",
@@ -914,7 +913,6 @@ var STEP_VARS = {
   outline: { phase: "before the reply", vars: [...PROSE_VARS, "sections"] },
   extract: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
   choices: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
-  contradiction: { phase: "after the reply", vars: [], note: "A world's effects template for this step gets the reply-reading placeholders (extract's)." },
   mind: { phase: "with the minds", vars: MIND_VARS },
   memory: { phase: "with the minds", vars: MIND_VARS },
   consolidate: { phase: "with the minds", vars: MIND_VARS },
@@ -945,7 +943,6 @@ var PROSE_PROMPTS = {
 };
 var DECISION_PROMPTS = {
   "npc.choose": "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.",
-  contradiction: "Does the narrator's reply contradict one of these engine facts? Pick the fact it contradicts, or none.",
   "puzzle.answer": "Is the player's answer correct: the same as one of the accepted answers, allowing for wording and spelling?",
   judge: "Judge how well the player's described approach suits what their character attempts."
 };
@@ -975,7 +972,6 @@ var PROMPT_EFFECT = {
   outline: "Replaces the built-in instructions; the answer format stays.",
   choices: "Replaces the built-in instructions; the answer format stays.",
   "npc.choose": "Replaces the question it is asked; the choices stay the engine's.",
-  contradiction: "Replaces the question it is asked; the facts it checks stay the engine's.",
   "puzzle.answer": "Replaces the question it is asked.",
   judge: "Replaces the question it is asked; the rating scale stays.",
   mind: "Replaces the built-in instructions; the answer format stays.",
@@ -986,7 +982,6 @@ var PROMPT_EFFECT = {
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
   "npc.choose": ["decision", "text"],
-  contradiction: ["decision", "text", "effects"],
   "puzzle.answer": ["decision", "text"],
   brief: ["text"],
   outline: ["text"],
@@ -4181,7 +4176,7 @@ var COLLECTION_SPECS = {
         ]
       }
     },
-    { kind: "list", key: "requires", label: "Requires", item: { kind: "expr", key: "", label: "Requirement" } },
+    { kind: "list", key: "requires", label: "Requires", hint: "A typed attempt that misses a requirement plays as plain roleplay; one that misses a hard lock fails", item: { kind: "requirement", key: "", label: "Requirement" } },
     { kind: "ref", key: "check", label: "Check", collection: "checks", optional: true, inline: true },
     { kind: "record", key: "outcomes", label: "Effects per outcome", keyLabel: "Outcome", suggest: "outcomes", hint: "One list per outcome of the check; default when the action has no check", item: { kind: "list", key: "", label: "Effects", item: EFFECT, title: "type" } },
     { kind: "expr", key: "duration", label: "Duration (minutes)" },
@@ -4414,7 +4409,7 @@ var PART_SPECS = {
             { kind: "number", key: "sightRadius", label: "Sight radius (cells the POV sees around it)", min: 0, max: 32, step: 1 }
           ]
         },
-        { kind: "bool", key: "travelSimulation", label: "Travel simulation: moves need a route", hint: "Off (the default): moves are story first, so a move the reply tells always lands and Go goes even where no route leads. On: a narrated move no route reaches didn't happen, and Go needs a walking route" },
+        { kind: "bool", key: "travelSimulation", label: "Travel simulation: Go needs a route", hint: "Off (the default): Go goes even where no route leads. On: Go needs a walking route. A move the reply tells lands either way" },
         {
           kind: "object",
           key: "travel",
@@ -4610,7 +4605,7 @@ function chipStarts(chip, choice) {
   if (choice === "regenerate" || choice === "continue")
     return choice;
   const kind = chip.kind;
-  const starts = kind === "reply_failed" && choice === "rerun" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop") || (kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit");
+  const starts = kind === "reply_failed" && choice === "rerun" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop") || (kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit");
   return starts ? chip.as ?? "regenerate" : null;
 }
 
@@ -4874,7 +4869,7 @@ function OverrideWorldSwitch(props) {
 var CLAIM_CHOICES = CLAIM_MODES.map((mode) => ({ value: mode, label: CLAIM_MODE_LABEL[mode] }));
 function ClaimsControl(props) {
   const { mode, capped } = props.value;
-  const help = mode === "real" ? capped ? "It's added where your action needs it, unless it costs more than the world's claim cap: then you're asked first." : "It's added where your action needs it, at any price." : mode === "ask" ? "The turn waits for your answer: Add, or Not an action." : "The action doesn't play, and a chip says why.";
+  const help = mode === "real" ? capped ? "It's added where your action needs it, unless it costs more than the world's claim cap: then you're asked first." : "It's added where your action needs it, at any price." : mode === "ask" ? "The turn waits for your answer: Add, or Not an action." : "The action plays as plain roleplay, and a receipt says why.";
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-claims": true,
@@ -4897,7 +4892,7 @@ function ClaimsControl(props) {
             class: "lre-field-help",
             children: [
               help,
-              " Money is never made this way."
+              " Cash you carry is just handed over; money you say you have and don't is always asked about first, except under Hold me to the world."
             ]
           }, undefined, true, undefined, this)
         ]
@@ -6809,6 +6804,8 @@ function valueWords(field, value, ctx) {
       return Array.isArray(value) ? `${value.length} ${field.label.toLowerCase()}` : "";
     case "enum":
       return typeof value === "string" ? field.labels?.[value] ?? words(value) : "";
+    case "requirement":
+      return typeof value === "string" ? value : isRecord(value) && typeof value.expr === "string" ? value.hard === true ? `${value.expr} · hard lock` : value.expr : "";
     case "text":
     case "expr":
     case "dice":
@@ -7988,6 +7985,32 @@ function FieldInput(props) {
         optional: spec.optional,
         onChange: (next) => props.onChange(next === "" && spec.optional ? undefined : next)
       }, undefined, false, undefined, this);
+    case "requirement": {
+      const formula = typeof props.value === "string" ? props.value : isRecord(props.value) && typeof props.value.expr === "string" ? props.value.expr : "";
+      const hard = isRecord(props.value) && props.value.hard === true;
+      const put = (expr, lock) => props.onChange(lock ? { expr, hard: true } : expr);
+      return /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        "data-lre-requirement": hard ? "hard" : "plain",
+        children: [
+          /* @__PURE__ */ u3(ExprEditor, {
+            label: spec.label,
+            value: formula,
+            identifiers: ctx.identifiers,
+            functions: ctx.functions,
+            doc: ctx.doc,
+            lint: issues,
+            onChange: (next) => put(next, hard)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(CheckField, {
+            label: "Hard lock",
+            help: "A typed attempt that misses it fails, and the reply tells it failing. Off, the attempt plays as plain roleplay.",
+            checked: hard,
+            onChange: (checked) => put(formula, checked)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this);
+    }
     case "effectArgs":
       return /* @__PURE__ */ u3(EffectArgsInput, {
         label: spec.label,
@@ -13168,7 +13191,6 @@ function JobView(props) {
 var ROLE = {
   confirm: "decision",
   keep_report: "decision",
-  contradiction: "decision",
   read_failed: "decision",
   engine_failed: "decision",
   reply_failed: "decision",
@@ -13217,7 +13239,6 @@ var TONE = {
   overdue: "warn",
   confirm: "warn",
   keep_report: "neutral",
-  contradiction: "neutral",
   retry: "neutral",
   retry_read: "neutral",
   reread: "neutral",
@@ -13238,7 +13259,7 @@ var TONE = {
   untracked: "neutral"
 };
 function chipRole(chip) {
-  return chip.kind === "decline" && chip.actions.length > 0 ? "decision" : ROLE[chip.kind];
+  return ROLE[chip.kind];
 }
 function chipTone(chip) {
   return TONE[chip.kind];
@@ -13307,7 +13328,7 @@ var TIMEOUTS = {
   postReplyMs: {
     label: "Reading the reply",
     group: "turn",
-    limits: "Everything the engine asks a model after the reply: what changed, the contradiction check, people elsewhere, suggested choices, memory.",
+    limits: "Everything the engine asks a model after the reply: what changed, people elsewhere, suggested choices, memory.",
     fires: "The reads still waiting are skipped; the reply stands, and Re-read tries again.",
     defaultMs: 5 * MIN,
     minMs: 0,
@@ -13904,7 +13925,6 @@ var CHIP_ICON = {
   pending: "hourglass",
   mode_change: "gear",
   choice: "send",
-  contradiction: "info",
   read_failed: "alert",
   engine_failed: "alert",
   reply_failed: "alert",
@@ -28530,13 +28550,13 @@ var PRESETS3 = [
 var PRESET_PLAIN = {
   lean: "The fewest calls: quickest and cheapest. A model reads each message you type for its actions, and the reply; people's choices follow the engine's own rules.",
   standard: "The default. A model also judges your approach when the rules for checks need it, and decides close calls for the people around you.",
-  full: "The most calls, so the slowest and costliest. A model decides for everyone present, writes a brief and an outline for the narrator, and checks the reply against the facts.",
+  full: "The most calls, so the slowest and costliest. A model decides for everyone present, and writes a brief and an outline for the narrator.",
   custom: "Your own mix, set step by step in Steps and connections."
 };
 var PRESET_NOTE = {
   lean: "Narrator + up to 2 model steps a turn, and no lore lookups: helpers get the lore their inputs find. The floor: it doesn't meet “a model decides” on its own. The call meter shows each turn's real count.",
   standard: "Narrator + up to 4 model steps a turn, plus up to 7 lore lookups. The call meter shows each turn's real count.",
-  full: "Narrator + up to 9 model steps a turn, plus up to 10 lore lookups. The call meter shows each turn's real count.",
+  full: "Narrator + up to 8 model steps a turn, plus up to 10 lore lookups. The call meter shows each turn's real count.",
   custom: "Your own steps, signals, providers, lore and budgets. The count depends on the steps you enable; the call meter shows it live."
 };
 var LORE_POLICY = [
@@ -28553,7 +28573,6 @@ var LORE_TRANSPORT = [
 var STEP_PLAIN = {
   interpret: "Before the reply: reads what you type as the actions it takes.",
   "npc.choose": "Picks what someone does on a close call or an invitation: before the reply for people with you, after it for people elsewhere.",
-  contradiction: "After the reply: checks it against the established facts.",
   "puzzle.answer": "Before the reply: judges a free-text puzzle answer, for puzzles that ask for it.",
   brief: "Before the reply: writes a short briefing for the narrator.",
   outline: "Before the reply: writes a prose outline for the narrator.",

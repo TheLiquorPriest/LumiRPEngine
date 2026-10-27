@@ -268,7 +268,7 @@ var TIMEOUTS = {
   postReplyMs: {
     label: "Reading the reply",
     group: "turn",
-    limits: "Everything the engine asks a model after the reply: what changed, the contradiction check, people elsewhere, suggested choices, memory.",
+    limits: "Everything the engine asks a model after the reply: what changed, people elsewhere, suggested choices, memory.",
     fires: "The reads still waiting are skipped; the reply stands, and Re-read tries again.",
     defaultMs: 5 * MIN,
     minMs: 0,
@@ -917,7 +917,7 @@ var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activit
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "c29417cd";
+var BUILD = "274d4ea3";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
