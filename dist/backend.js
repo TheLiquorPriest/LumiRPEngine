@@ -8822,8 +8822,13 @@ function apartHost(events2, [from, to]) {
     end++;
   return [to, end];
 }
+function tiesOf(unit) {
+  return [...new Set(unit.flatMap((ev) => ev.tiedTo ?? []))];
+}
+var TIED_DROP = "what it was made to put right didn't happen here";
 function applyValidUnits(types, events2, state, context) {
   const out = [];
+  const skipped = new Set;
   const fits = (unit) => {
     const scratch = structuredClone(state);
     return unit.every((ev) => {
@@ -8840,6 +8845,11 @@ function applyValidUnits(types, events2, state, context) {
       out.push(ev);
     }
   };
+  const skip = (unit) => {
+    const group = unit[0]?.group;
+    if (group !== undefined)
+      skipped.add(group);
+  };
   const units = eventUnits(events2);
   for (let u = 0;u < units.length; u++) {
     const [from, to] = units[u] ?? [0, 0];
@@ -8849,20 +8859,33 @@ function applyValidUnits(types, events2, state, context) {
       const hosted = events2.slice(host[0], host[1]);
       if (fits([...unit, ...hosted]))
         apply([...unit, ...hosted]);
-      else if (fits(hosted))
-        apply(hosted);
+      else {
+        skip(unit);
+        if (fits(hosted))
+          apply(hosted);
+        else
+          skip(hosted);
+      }
       u++;
+      continue;
+    }
+    if (tiesOf(unit).some((t) => skipped.has(t))) {
+      skip(unit);
       continue;
     }
     if (unit.length > 1) {
       if (fits(unit))
         apply(unit);
+      else
+        skip(unit);
       continue;
     }
     for (const ev of unit) {
       const ctx = context(state);
-      if (validateEvent(types, ev, ctx))
+      if (validateEvent(types, ev, ctx)) {
+        skip(unit);
         break;
+      }
       applyEvent(types, ev, state, ctx);
       out.push(ev);
     }
@@ -19385,6 +19408,10 @@ function apartFrom(events2, unit3) {
   const group = unit3[0]?.group;
   return group === undefined ? events2 : events2.map((e) => ({ ...e, group: apartOf(group) }));
 }
+function tied(unit3, groups) {
+  const to = [...new Set(groups.filter((g) => g !== undefined))];
+  return to.length === 0 ? unit3 : unit3.map((e) => ({ ...e, tiedTo: to }));
+}
 function merged(lines) {
   const out = [];
   for (const l of lines) {
@@ -19740,12 +19767,13 @@ function reprice(ctx, events2, cents) {
   const seller = strOf(was?.counterparty);
   const buyer = strOf(was?.payer);
   const overdraw = post.overdraw === true && diff > 0 && runsDebt(ctx, paid.account);
-  return asUnit([{ type: "post", lines, memo: note, ...overdraw ? { overdraw: true } : {} }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
+  return tied(asUnit([{ type: "post", lines, memo: note, ...overdraw ? { overdraw: true } : {} }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]), [post.group]);
 }
 function storyPayment(ctx, events2) {
-  const line2 = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.story === true);
+  const marked = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.story === true);
+  const post = marked && "data" in marked ? events2.find((e) => e.type === "post" && e.memo === strOf(marked.data.memo)) : events2.find((e) => e.type === "post" && e.overdraw === true);
+  const line2 = marked ?? events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && post !== undefined && e.data.memo === post.memo);
   const data = line2 && "data" in line2 ? line2.data : {};
-  const post = events2.find((e) => e.type === "post" && e.memo === strOf(data.memo));
   const paid = post?.lines.filter((l) => l.amount < 0 && traitsOf(ctx, l.account) !== null).sort((a, b) => a.amount - b.amount)[0];
   if (!post || !paid)
     return null;
@@ -19786,15 +19814,16 @@ function otherWay(ctx, events2) {
     { account: way.account, amount: -paid.total },
     { account: paid.account, amount: paid.total }
   ];
+  const moved = tied(asUnit(posting(lines, { memo, kind: "transfer", category: "transfer" })), [paid.post.group]);
   const back = paid.brought.flatMap((p) => {
     const fee = p.lines.some((l) => l.account.startsWith(BANK_PREFIX));
     const reversed = p.lines.map((l) => ({ account: l.account, amount: -l.amount }));
     const note = `${p.memo} ${fee ? "refunded" : "reversed"}`;
     const was = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.memo === p.memo);
     const category = was && "data" in was ? strOf(was.data.category) : "";
-    return [{ type: "post", lines: reversed, memo: note }, txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...category ? { category } : {} })];
+    return tied(asUnit([{ type: "post", lines: reversed, memo: note }, txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...category ? { category } : {} })]), [p.group, moved[0]?.group]);
   });
-  return { from: way.account, repay: asUnit([...posting(lines, { memo, kind: "transfer", category: "transfer" }), ...back]) };
+  return { from: way.account, repay: [...moved, ...back] };
 }
 function signal(cls, text3, who, at) {
   return { type: ENGINE_EVENTS.signal, data: { class: cls, text: text3, entity: who, visibility: "known_by", at } };
@@ -28094,11 +28123,11 @@ function planDay(input) {
       t = idleEnd;
       continue;
     }
-    const tied = candidates.filter((c) => c.u > 0 && best.u - c.u <= eps);
+    const tied2 = candidates.filter((c) => c.u > 0 && best.u - c.u <= eps);
     let chosen = best;
-    if (tied.length > 1) {
+    if (tied2.length > 1) {
       const key = tieKey(input.agent, input.start, t);
-      const ids = tied.map((c) => c.o.id);
+      const ids = tied2.map((c) => c.o.id);
       const recorded = input.recorded?.[key];
       let via;
       let pick;
@@ -28106,7 +28135,7 @@ function planDay(input) {
         pick = recorded;
         via = "recorded";
       } else {
-        const model = input.decide?.({ key, at: t, options: tied.map((c) => ({ id: c.o.id, label: c.o.label, utility: c.u })) }) ?? null;
+        const model = input.decide?.({ key, at: t, options: tied2.map((c) => ({ id: c.o.id, label: c.o.label, utility: c.u })) }) ?? null;
         if (model && ids.includes(model)) {
           pick = model;
           via = "model";
@@ -28116,8 +28145,8 @@ function planDay(input) {
           tieZone = true;
         }
       }
-      chosen = tied.find((c) => c.o.id === pick) ?? best;
-      ties.push({ key, at: t, options: tied.map((c) => ({ id: c.o.id, utility: c.u })), chosen: pick, via });
+      chosen = tied2.find((c) => c.o.id === pick) ?? best;
+      ties.push({ key, at: t, options: tied2.map((c) => ({ id: c.o.id, utility: c.u })), chosen: pick, via });
     }
     const end = Math.min(t + chosen.o.duration, gapEnd);
     blocks.push({ start: t, end, option: chosen.o.id, label: chosen.o.label, activity: chosen.o.activity, place: chosen.o.place ?? null, utility: chosen.u, reasons: [...chosen.o.reasons, ...chosen.o.because?.(t, blocks) ?? []], fixed: false });
@@ -63493,9 +63522,13 @@ class LedgerCore {
           return readElsewhereRefusal(index === headIndex);
         if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH))
           return "You've swiped away from the timeline this reply was made on. Switch back to undo it.";
+        const named = w.entry === undefined ? undefined : rec.post.find((p) => p.seq === w.entry);
+        if (w.entry !== undefined && !named)
+          return "nothing to undo";
+        const whole4 = named ? Array.from({ length: Math.max(1, named.events.length) }, (_, index2) => ({ in: "post", seq: named.seq, index: index2 })) : [];
         const before = { undone: [...rec.undone], post: rec.post, dropped: rec.dropped };
         const added = [];
-        for (const ref of w.refs) {
+        for (const ref of [...w.refs, ...whole4]) {
           if (rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref)))
             continue;
           rec.undone.push(ref);
@@ -64197,14 +64230,15 @@ var isRefs = (v) => Array.isArray(v) && v.every((r) => isRecord(r) && isInt(r.in
 var SWIPE_KEY = /^\d{1,6}$/;
 var POST_KINDS = ["materialize", "fix", "confirm", "cont", "narr"];
 var REC_STATUSES = ["ok", "degraded", "stopped"];
+var isStoredEvent = (e) => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string") && (e.tiedTo === undefined || Array.isArray(e.tiedTo) && e.tiedTo.every((g) => typeof g === "string"));
 function isRec(rec) {
   if (!isRecord(rec) || rec.v !== 1 || typeof rec.defHash !== "string" || !isInt(rec.seq) || !isContent(rec.swipeHash) || typeof rec.path !== "string" || typeof rec.seed !== "string")
     return false;
   if (!isInt(rec.pre) || rec.pre < 0 || !isInt(rec.markersApplied) || !REC_STATUSES.includes(rec.status) || !isRefs(rec.undone) || !isRecord(rec.intents))
     return false;
-  if (!Array.isArray(rec.events) || !rec.events.every((e) => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string")))
+  if (!Array.isArray(rec.events) || !rec.events.every(isStoredEvent))
     return false;
-  if (!Array.isArray(rec.post) || !rec.post.every((p) => isRecord(p) && isInt(p.seq) && typeof p.at === "string" && POST_KINDS.includes(p.kind) && Array.isArray(p.events) && p.events.every((e) => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string")) && (p.edit === undefined || isRecord(p.edit) && (typeof p.edit.clock === "string" ? p.edit.ops === undefined : Array.isArray(p.edit.ops) && p.edit.clock === undefined))))
+  if (!Array.isArray(rec.post) || !rec.post.every((p) => isRecord(p) && isInt(p.seq) && typeof p.at === "string" && POST_KINDS.includes(p.kind) && Array.isArray(p.events) && p.events.every(isStoredEvent) && (p.edit === undefined || isRecord(p.edit) && (typeof p.edit.clock === "string" ? p.edit.ops === undefined : Array.isArray(p.edit.ops) && p.edit.clock === undefined))))
     return false;
   if (rec.keep !== undefined && !(isRecord(rec.keep) && Object.values(rec.keep).every((k) => isRecord(k) && isRefs(k.convert))))
     return false;
@@ -64229,7 +64263,7 @@ function isHeldWrite(w) {
     case "retry_read":
       return typeof w.messageId === "string" && isInt(w.swipeId);
     case "undo":
-      return typeof w.messageId === "string" && isInt(w.swipeId) && isRefs(w.refs);
+      return typeof w.messageId === "string" && isInt(w.swipeId) && isRefs(w.refs) && (w.entry === undefined || isInt(w.entry));
     default:
       return false;
   }
@@ -66424,7 +66458,7 @@ function sheetFields(scope, who) {
   }
   return out;
 }
-function tiesOf(scope, who) {
+function tiesOf2(scope, who) {
   const ties = new Map;
   const add = (other, type) => {
     if (other === who || hasOwn(NOT_TIES, type) || !(scope.people.has(other) || scope.groups.has(other)))
@@ -66575,7 +66609,7 @@ ${fields.map((f) => `- ${f.field}: ${f.text}`).join(`
     if (groups.length > 0)
       lines.push(`Groups: ${groups.map((g) => `${nameOf6(scope, g)} (${g})`).join(", ")}.`);
   }
-  const ties = [...tiesOf(scope, who)].sort(([a], [b]) => a < b ? -1 : 1);
+  const ties = [...tiesOf2(scope, who)].sort(([a], [b]) => a < b ? -1 : 1);
   if (ties.length > 0)
     lines.push(`Tied to: ${ties.map(([id, how]) => `${nameOf6(scope, id)} (${id}: ${how.join(", ")})`).join("; ")}.`);
   const held3 = heldLines(scope, who);
@@ -66713,7 +66747,7 @@ function hhmm(v) {
   return `${m[1] === "24" && m[2] === "00" ? "00" : (m[1] ?? "").padStart(2, "0")}:${m[2] ?? ""}`;
 }
 function grounded(scope, owner, company2, sources) {
-  if (tiesOf(scope, owner).has(company2))
+  if (tiesOf2(scope, owner).has(company2))
     return true;
   if (scope.groups.has(owner) ? isMemberOf(scope.state, company2, owner) : groupsOf(scope, owner).some((g) => isMemberOf(scope.state, company2, g)))
     return true;
@@ -73022,7 +73056,7 @@ function presentNames(registry, world, state2) {
 function agentsActHere(registry, world, state2) {
   return presentAgents(registry, world, state2).some(([id]) => povLife(world, state2, id)?.acts !== false);
 }
-function tiesOf2(ctx, world, state2) {
+function tiesOf3(ctx, world, state2) {
   const all2 = optionalQuery(ctx, "castlife.tie_zones")?.(ctx) ?? [];
   const here = placeOfEntity(state2, world.pov);
   const present2 = [];
@@ -74290,14 +74324,6 @@ function combineBounds(...bounds) {
   }
   return maxDelta === undefined ? { mode: strictest(...modes) } : { mode: strictest(...modes), maxDelta };
 }
-function clampToRange(range, start, delta) {
-  let next = start + delta;
-  if (range.min !== undefined)
-    next = Math.max(range.min, next);
-  if (range.max !== undefined)
-    next = Math.min(range.max, next);
-  return next - start;
-}
 function boundProposal(reg, world, state2, input, policy) {
   const e = input.entity ? own(state2.entities, input.entity) : undefined;
   const def = e && input.field ? fieldDef(reg, world, e.kind, input.field) : undefined;
@@ -74309,15 +74335,6 @@ function boundProposal(reg, world, state2, input, policy) {
     if (bound.maxDelta !== undefined && Math.abs(delta) > bound.maxDelta) {
       delta = Math.sign(delta) * bound.maxDelta;
       capped = true;
-    }
-    if (e && input.entity && input.field) {
-      const ctx = reg.context(world, state2);
-      const stored = own(e.fields, input.field);
-      const start = typeof stored === "number" ? stored : typeof def?.default === "number" ? def.default : def?.pool ? poolMax(reg, ctx, input.entity, def.pool) ?? 0 : 0;
-      const clamped = clampToRange(fieldBounds(reg, ctx, input.entity, def), start, delta);
-      if (clamped !== delta)
-        capped = true;
-      delta = clamped;
     }
   }
   let value = input.value;
@@ -74589,17 +74606,18 @@ class LedgerFold {
       }
       const converted = rec.keep?.[parent]?.convert ?? [];
       const record3 = rec;
+      const fell = new Set;
       const event = (ev, ref) => {
         if (record3.undone.some((u) => refEq(u, ref)))
-          return;
+          return false;
         if (converged) {
           applyEvent(types, ev, state2, ctx());
-          return;
+          return false;
         }
         const failure = validateEvent(types, ev, ctx());
         if (failure && !view) {
           violations.push(`${m.id}: on-path ${ev.type} failed re-validation (${failure.reason})`);
-          return;
+          return false;
         }
         if (failure) {
           if (converted.some((c) => refEq(c, ref))) {
@@ -74607,10 +74625,11 @@ class LedgerFold {
           } else {
             notes.push({ kind: "dropped", messageId: m.id, ref, text: failure.reason });
             keep.push({ messageId: m.id, parentPath: parent, ref, status: "dropped", text: failure.reason });
-            return;
+            return true;
           }
         }
         applyEvent(types, ev, state2, ctx());
+        return false;
       };
       const run2 = (list2, refOf) => {
         const unitAt = (i) => {
@@ -74643,15 +74662,18 @@ class LedgerFold {
             return rejection;
           }, null);
         };
-        const drop2 = (unit3, reason2) => {
+        const drop2 = (unit3, reason2, group) => {
           for (const u of unit3) {
             notes.push({ kind: "dropped", messageId: m.id, ref: u.ref, text: reason2 });
             keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "dropped", text: reason2 });
           }
+          if (group !== undefined && unit3.length > 0)
+            fell.add(group);
         };
         const isConverted = (unit3) => unit3.some((u) => converted.some((c) => refEq(c, u.ref)));
         for (let i = 0;i < list2.length; ) {
           const { end, unit: unit3 } = unitAt(i);
+          const group = list2[i]?.group;
           const host = view && !converged ? apartHost(list2, [i, end]) : null;
           const hosted = host ? unitAt(host[0]).unit : [];
           if (host && !isConverted(unit3) && !isConverted(hosted)) {
@@ -74663,18 +74685,23 @@ class LedgerFold {
               continue;
             }
             const alone = trial(hosted);
-            drop2(unit3, together2.reason);
+            drop2(unit3, together2.reason, group);
             if (alone === null)
               for (const u of hosted)
                 applyEvent(types, u.ev, state2, ctx());
             else
-              drop2(hosted, alone.reason);
+              drop2(hosted, alone.reason, list2[host[0]]?.group);
             continue;
           }
           i = end;
+          if (view && !converged && !isConverted(unit3) && tiesOf(unit3.map((u) => u.ev)).some((t) => fell.has(t))) {
+            drop2(unit3, TIED_DROP, group);
+            continue;
+          }
           if (unit3.length < 2 || !view || converged) {
             for (const u of unit3)
-              event(u.ev, u.ref);
+              if (event(u.ev, u.ref) && group !== undefined)
+                fell.add(group);
             continue;
           }
           const failure = trial(unit3);
@@ -74689,7 +74716,7 @@ class LedgerFold {
               applyEvent(types, u.ev, state2, ctx());
             }
           } else
-            drop2(unit3, failure.reason);
+            drop2(unit3, failure.reason, group);
         }
       };
       const post = (p) => {
@@ -74843,9 +74870,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "fb4675d041635a65b3fb4251b8c31a83d5bdddc9524e711014a4edc8b35cf1e6";
+  const sha256 = "9de3f51cdf115125eada2f6c564849e288a567fe64455dc782d565a4c9288a06";
   const tools = ["d7ea5d8f68714fbde356a1b99c522de6", "3a95a1966944ca155e67ff625d472024"].filter((f) => f !== undefined);
-  return { id: "d2c6d3c4", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "8bd219f4", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -78052,7 +78079,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "d2c6d3c4" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "8bd219f4" }), (chatId) => this.messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }
@@ -78193,7 +78220,7 @@ class Runtime {
     this.preBudgets.set(p.generationId, budget);
     trimMap(this.preBudgets);
     const ctx = this.registry.context(render.world, render.state);
-    const ties = tiesOf2(ctx, render.world, render.state);
+    const ties = tiesOf3(ctx, render.world, render.state);
     if (lastUser)
       await this.takeStaged(input.chatId, input.userId, lastUser.id);
     const recorded = lastUser ? (await this.host.chats.messages(input.chatId, input.userId)).find((m) => m.id === lastUser.id)?.metadata[LEDGER_NAMESPACE] : undefined;
@@ -78888,7 +78915,7 @@ ${answer}`, links: owner ? [owner] : [] }));
     const guidance = (pre?.preset ?? this.presets.last(userId)).guidance;
     const plan2 = bridge.planFor(context.seed);
     const ctx = this.registry.context(context.world, context.state);
-    const ties = tiesOf2(ctx, context.world, context.state);
+    const ties = tiesOf3(ctx, context.world, context.state);
     const facts = { ...pre?.facts ?? noFacts(), ...pre ? planFacts(context.world, pre.start, context.state, plan2) : {}, reply: text6.trim() !== "", present: false, offscreen: ties.offscreen.length > 0, tieZone: ties.offscreen.length > 0 };
     const budget = phaseBudget(settings, "post", signal2);
     const live = await this.liveWorld(key, chatId, userId, context.world);
@@ -78978,10 +79005,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       const bounded = boundProposal(this.registry, context.world, context.state, { type, ...entity ? { entity } : {}, ...field ? { field } : {}, ...typeof p.delta === "number" ? { delta: p.delta } : {} }, { typeMode, ...settings.extraction[type]?.maxDelta !== undefined ? { typeMaxDelta: settings.extraction[type]?.maxDelta } : {} });
       if (bounded.mode === "never")
         continue;
-      if (bounded.delta === 0 && typeof p.delta === "number" && p.delta !== 0) {
-        this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (its field goes no further)`, userId);
+      if (bounded.delta === 0 && typeof p.delta === "number" && p.delta !== 0)
         continue;
-      }
       if (type === "time_advance" && skipped) {
         this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (a timelapse turn's time passed as its timelapse)`, userId);
         continue;
@@ -79034,11 +79059,12 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         payload: { type, connection, events: JSON.parse(JSON.stringify(o.events)) }
       });
     });
+    const told = new Working(this.registry, context.world, w.state);
     confirm.forEach((proposal, i) => {
       if (proposal.type === "time_advance") {
         const advance3 = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: settings.time.askBeyondMinutes, unitCap: w.state.time.unitCap });
         if (advance3.chip)
-          stored.push(skipAheadChip(`adv:${messageId}:${swipeId}:c${i}`, { messageId, swipeId }, advance3.chip.target, advance3.reason === "unit_cap" ? "unit_cap" : "over_cap"));
+          stored.push(skipAheadChip(post ? `adv:${messageId}:${swipeId}:c${i}` : `adv:${messageId}:${swipeId}:${key}:c${i}`, { messageId, swipeId }, advance3.chip.target, advance3.reason === "unit_cap" ? "unit_cap" : "over_cap"));
         else if (advance3.applied) {
           stored.push({
             id: `confirm:${input.messageId}:${input.generationId}:${i}`,
@@ -79059,8 +79085,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         return;
       }
       const also = unsure.has(proposal);
-      const cw = new Working(this.registry, context.world, w.state);
-      const [check] = applyProposals(this.registry, cw, [proposal], `${context.seed}:check`, bridge.runSeed);
+      const against = also || guessed.has(proposal) ? new Working(this.registry, context.world, told.state) : told;
+      const [check] = applyProposals(this.registry, against, [proposal], `${context.seed}:check`, bridge.runSeed);
       if (check?.rejection && guessed.has(proposal)) {
         this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped a guessed move (${check.rejection.code}: ${check.rejection.reason})`, input.userId);
         return;
@@ -79092,7 +79118,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         return;
       }
       const quote2 = purchaseQuote(proposal, check.events, context.world);
-      const money4 = paidWords(optionalQuery(cw.ctx, "economy.paid_from")?.(cw.ctx, check.events, context.world.pov) ?? null, context.world);
+      const money4 = paidWords(optionalQuery(against.ctx, "economy.paid_from")?.(against.ctx, check.events, context.world.pov) ?? null, context.world);
       const guess = guessed.has(proposal);
       const here = guess ? povPlace(this.registry, context.world, context.state) : null;
       stored.push({
@@ -79195,8 +79221,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       const left2 = rest.type === "duration" ? ` (${compactSpan(rest.minutes)} left)` : "";
       stored.push({ id: `tl:${at2}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? plan2?.timelapse?.mindName ?? "someone" : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left2}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)), ...hold, ...plan2?.fill ? { fill: plan2.fill } : {} } });
     }
+    const offer = input.kind === "continue" ? `adv:${at2}:${input.generationId}` : `adv:${at2}`;
     for (const [i, chip] of bridge.chipsFor(input.content).entries())
-      stored.push(skipAheadChip(`adv:${at2}:${i}`, base, chip.target, chip.reason));
+      stored.push(skipAheadChip(`${offer}:${i}`, base, chip.target, chip.reason));
     await this.chips.add(input.chatId, input.userId, stored);
   }
   async swipeDeleted(chatId, userId, messageId, deleted2) {
@@ -81466,10 +81493,9 @@ class Dispatcher {
       const entry = rec?.post.find((p) => p.seq === seq && p.kind === "fix");
       if (!m || !rec || !entry || String(m.swipeId) !== swipe)
         throw new RequestError("not_found", "the correction is gone");
-      const refs = entry.events.flatMap((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index) ? [] : [{ in: "post", seq, index }]);
-      if (refs.length === 0)
+      if (entry.events.length > 0 && entry.events.every((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index)))
         return { applied: false, pending: false };
-      const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
+      const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: seq });
       return { applied: result.applied, pending: result.pending };
     }
     if (kind === "refused") {
@@ -81789,10 +81815,9 @@ class Dispatcher {
           const entry = rec?.post.findLast((p) => p.kind === "confirm" && JSON.stringify(p.events) === wanted);
           if (!rec || !entry)
             continue;
-          const refs = entry.events.flatMap((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index) ? [] : [{ in: "post", seq: entry.seq, index }]);
-          if (refs.length === 0)
+          if (entry.events.every((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index)))
             return { applied: false, pending: false };
-          const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
+          const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: entry.seq });
           return { applied: result.applied, pending: result.pending };
         }
         throw new RequestError("not_found", "the routine change is gone");

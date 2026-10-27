@@ -20795,6 +20795,10 @@ function apartFrom(events2, unit3) {
   const group = unit3[0]?.group;
   return group === undefined ? events2 : events2.map((e) => ({ ...e, group: apartOf(group) }));
 }
+function tied(unit3, groups) {
+  const to = [...new Set(groups.filter((g) => g !== undefined))];
+  return to.length === 0 ? unit3 : unit3.map((e) => ({ ...e, tiedTo: to }));
+}
 function merged(lines) {
   const out = [];
   for (const l of lines) {
@@ -21150,12 +21154,13 @@ function reprice(ctx, events2, cents) {
   const seller = strOf(was?.counterparty);
   const buyer = strOf(was?.payer);
   const overdraw = post.overdraw === true && diff > 0 && runsDebt(ctx, paid.account);
-  return asUnit([{ type: "post", lines, memo: note, ...overdraw ? { overdraw: true } : {} }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
+  return tied(asUnit([{ type: "post", lines, memo: note, ...overdraw ? { overdraw: true } : {} }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]), [post.group]);
 }
 function storyPayment(ctx, events2) {
-  const line2 = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.story === true);
+  const marked = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.story === true);
+  const post = marked && "data" in marked ? events2.find((e) => e.type === "post" && e.memo === strOf(marked.data.memo)) : events2.find((e) => e.type === "post" && e.overdraw === true);
+  const line2 = marked ?? events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && post !== undefined && e.data.memo === post.memo);
   const data = line2 && "data" in line2 ? line2.data : {};
-  const post = events2.find((e) => e.type === "post" && e.memo === strOf(data.memo));
   const paid = post?.lines.filter((l) => l.amount < 0 && traitsOf(ctx, l.account) !== null).sort((a, b) => a.amount - b.amount)[0];
   if (!post || !paid)
     return null;
@@ -21196,15 +21201,16 @@ function otherWay(ctx, events2) {
     { account: way.account, amount: -paid.total },
     { account: paid.account, amount: paid.total }
   ];
+  const moved = tied(asUnit(posting(lines, { memo, kind: "transfer", category: "transfer" })), [paid.post.group]);
   const back = paid.brought.flatMap((p) => {
     const fee = p.lines.some((l) => l.account.startsWith(BANK_PREFIX));
     const reversed = p.lines.map((l) => ({ account: l.account, amount: -l.amount }));
     const note = `${p.memo} ${fee ? "refunded" : "reversed"}`;
     const was = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.memo === p.memo);
     const category = was && "data" in was ? strOf(was.data.category) : "";
-    return [{ type: "post", lines: reversed, memo: note }, txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...category ? { category } : {} })];
+    return tied(asUnit([{ type: "post", lines: reversed, memo: note }, txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...category ? { category } : {} })]), [p.group, moved[0]?.group]);
   });
-  return { from: way.account, repay: asUnit([...posting(lines, { memo, kind: "transfer", category: "transfer" }), ...back]) };
+  return { from: way.account, repay: [...moved, ...back] };
 }
 function signal(cls, text3, who, at) {
   return { type: ENGINE_EVENTS.signal, data: { class: cls, text: text3, entity: who, visibility: "known_by", at } };
