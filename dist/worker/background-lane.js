@@ -678,6 +678,47 @@ function agentOf(world, e) {
 function tierLabel(world, tier) {
   return tierOf(world, tier)?.label ?? (isBand(tier) ? BAND_LABEL[tier] : tier);
 }
+
+// src/shared/sections.ts
+var LINES_MARKER = "{{lines}}";
+var DEFAULT_SECTIONS = {
+  outcome: { id: "outcome", label: "Outcome", rank: 0, template: `What the player character's actions did this turn, in the order they played, as the engine settled them: the authoritative record of this turn's results. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences ("you" is the player character). Narrate each as having happened this turn, with the exact results, rolls, amounts and changes its line gives; never soften, round or swap them for vaguer ones.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  montage: { id: "montage", label: "Montage", rank: 1, template: `What happened while time passed, in order, as the engine played it out: the authoritative record of the interval. Narrate the interval as a summary of these lines, in their order, keeping the specific people, places, amounts and changes each one names. A line that gives the player's own words for this time comes first: narrate what they say happens, and fit the other lines around it.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  scene: { id: "scene", label: "Scene", rank: 2, template: `Where the player character is now, when, and what they can perceive there: the authoritative facts of the scene. Describe it from these specifics as given (the place by its name, the time, the weather, what is in view), never generic stand-ins, and keep to them whenever the prose touches the setting.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  people: { id: "people", label: "People", rank: 3, template: `The people with the player character, as the player character knows them, and what each is doing: the authoritative record of who is here. Call them by these names, and keep each one's activity, state, clothes and what they carry as their line gives it; never fold them into a crowd or swap in generic details. Bring a person's specifics in whenever the prose turns to them.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  money: { id: "money", label: "Money", rank: 4, template: `The player character's money as it stands now: the authoritative figures. Use these exact amounts whenever money comes up; never round them, estimate them or give another balance.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  gear: { id: "gear", label: "Gear", rank: 5, template: `What the player character carries, wears and has to hand, as it stands now: the authoritative list, one specific item a line. Name each item as given, with its details and condition, whenever the prose touches it; never replace it with a generic stand-in ("a bag", "some tools").
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: `The vehicles the player character may use, and others nearby, as they know them: where each is, whose it is, its fuel and its state. These lines are the authoritative record: call each vehicle by the name and details its line gives, keep its place, fuel and condition as stated, and bring them in whenever a vehicle comes up, never a generic "the car" where a line names one.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  quest: { id: "quest", label: "Quest", rank: 7, template: `The player character's quests and goals, as far as they know them: the authoritative record of where each stands. Let the reply follow from these, keeping each one's names, objectives and stage as given; never reveal a step they haven't reached.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  outline: { id: "outline", label: "Outline", rank: 8, template: `The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one and keeping the specific people, things, places and amounts it names; what a beat leaves open is yours to fill in.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  stance: { id: "stance", label: "Stance", rank: 9, template: `The narrator knows only what the player character knows. These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: `Each mind below is scoped to what that character knows and is blind to everyone else's. Let each shape that character's own choices, words and manner this turn, as specifically as it says. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  place: { id: "place", label: "Place", rank: 11, template: `The place the player character is in: what it is like, what is here, where it leads, and the lore about it. These lines are the authoritative inventory of the place: name each thing, room, way out and detail as given whenever the prose touches it, and never reduce them to a summary or a generic stand-in ("some furniture", "various goods").
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  property: { id: "property", label: "Property", rank: 12, template: `Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says "yours"; otherwise they only use, keep or benefit from it. These lines are the authoritative record: use each property's name, place and details as given whenever it comes up.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } }
+};
+function builtInSectionsOf(world) {
+  const own = Object.keys(world.sections);
+  if (own.length === 0)
+    return Object.values(DEFAULT_SECTIONS);
+  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
+  return minds && !own.includes(MINDS_SLOT) ? [minds] : [];
+}
+function sectionTemplateProblem(text) {
+  return text.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
+}
 // src/shared/lre-map-v1.schema.json
 var lre_map_v1_schema_default = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -4506,45 +4547,7 @@ function isLorePin(v) {
 function lorePinKey(pin) {
   return "lore" in pin ? `lore:${pin.lore}` : ("entry" in pin) ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
-function pinJson(pin) {
-  const base = "lore" in pin ? { lore: pin.lore } : ("entry" in pin) ? { book: pin.book, entry: pin.entry } : { book: pin.book };
-  if (pin.keep === "end")
-    base.keep = "end";
-  return base;
-}
 var pinsRead = new WeakMap;
-function lorePinsOf(world) {
-  const raw = world.lorePins;
-  if (!isRecord(raw))
-    return { characters: {}, places: {}, steps: {} };
-  const known = pinsRead.get(raw);
-  if (known)
-    return known;
-  const part = (value) => {
-    const out = {};
-    if (!isRecord(value))
-      return out;
-    for (const [id, list] of Object.entries(value)) {
-      if (!safeKey(id) || !Array.isArray(list))
-        continue;
-      const seen = new Set;
-      const pins = [];
-      for (const pin of list) {
-        if (!isLorePin(pin) || seen.has(lorePinKey(pin)))
-          continue;
-        seen.add(lorePinKey(pin));
-        pins.push(pinJson(pin));
-      }
-      if (pins.length > 0)
-        out[id] = pins;
-    }
-    return out;
-  };
-  const steps = part(raw.steps);
-  const read = { characters: part(raw.characters), places: part(raw.places), steps: Object.fromEntries(LORE_AUDIENCE.flatMap((p) => hasOwn(steps, p) ? [[p, steps[p] ?? []]] : [])) };
-  pinsRead.set(raw, read);
-  return read;
-}
 function loreTerm(text) {
   return text.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -5786,27 +5789,6 @@ function placeChain(world, place) {
   const out = [];
   for (let at = place ?? undefined;at !== undefined && hasOwn(world.places, at) && !out.includes(at) && out.length < CHAIN_MAX; at = world.places[at]?.parent)
     out.push(at);
-  return out;
-}
-function pinsFor(world, place, who, steps = []) {
-  const pins = lorePinsOf(world);
-  const out = [];
-  const seen = new Set;
-  const add = (list, on) => {
-    for (const pin of list ?? []) {
-      const key = lorePinKey(pin);
-      if (seen.has(key))
-        continue;
-      seen.add(key);
-      out.push({ key, pin, on });
-    }
-  };
-  if (who !== undefined)
-    add(own(pins.characters, who), { character: who });
-  for (const step of steps)
-    add(pins.steps[step], { step });
-  for (const at of placeChain(world, place))
-    add(own(pins.places, at), { place: at });
   return out;
 }
 
@@ -12216,6 +12198,22 @@ function lintWorld(world, registry) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0)
       err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
   }
+  const builtIn = new Set(builtInSectionsOf(world).map((s) => s.id));
+  for (const [id, text3] of Object.entries(world.sectionTemplates ?? {})) {
+    const path = `sectionTemplates.${id}`;
+    const label = DEFAULT_SECTIONS[id]?.label ?? id;
+    if (typeof text3 !== "string") {
+      err(path, "section_template", `the wording of "${label}" must be text`);
+      continue;
+    }
+    const problem = hasOwn(DEFAULT_SECTIONS, id) ? sectionTemplateProblem(text3) : `there is no built-in section "${id}"`;
+    if (problem !== null)
+      err(path, "section_template", `"${label}": ${problem}`);
+    if (macroHazards(text3, ["{{lines}}"]).length > 0)
+      err(path, "section_macro", `"${label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
+    if (hasOwn(DEFAULT_SECTIONS, id) && !builtIn.has(id))
+      warn(path, "section_template_unused", `"${label}" is the world's own section, so its own template is used and this wording isn't`);
+  }
   const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
   for (const [id, s] of Object.entries(world.sections)) {
     const feed = readSectionFeed(Object.fromEntries(SECTION_FEED_KEYS.flatMap((k) => s[k] !== undefined ? [[k, s[k]]] : [])));
@@ -14087,9 +14085,118 @@ function mayUse(state, who, id) {
   return owns(state, who, id) || accessOf(state, id).users.some((u) => u.who === who);
 }
 
+// src/engine/thing-words.ts
+var UNTOLD = { place: true, x: true, y: true, owner: true, qty: true, description: true, notable: true, catalog: true, category: true, slot: true, weight_g: true, volume_l: true, capacity_l: true, max_load_kg: true, overdue: true, piece: true, from_kit: true, stock: true, kit: true, pieces: true, piece_count: true };
+function fieldsInOrder(ctx, kind) {
+  const out = new Map;
+  let id = kind;
+  for (let guard = 0;id !== undefined && guard < 32; guard++) {
+    const mine = own(ctx.world.kinds, id);
+    const pack = ctx.registry.kinds.get(id);
+    if (!mine && !pack)
+      break;
+    for (const [field, def] of [...Object.entries(mine?.fields ?? {}), ...Object.entries(pack?.fields ?? {})])
+      if (!out.has(field))
+        out.set(field, def);
+    id = kindParent(ctx.registry, ctx.world, id);
+  }
+  return [...out];
+}
+function numberWords(v, unit) {
+  const r = Math.round(v * 100) / 100;
+  return `${unit !== "" && Number.isInteger(r) && Math.abs(r) >= 1000 ? r.toLocaleString("en-US") : String(r)}${unit}`;
+}
+function valueWords(ctx, def, unit, v) {
+  const pov = ctx.world.pov;
+  if (v === undefined || v === null)
+    return null;
+  if (typeof v === "boolean")
+    return v ? "" : null;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v))
+      return null;
+    if (def.type === "money")
+      return formatMoney(v, ctx.world.currency);
+    return bandOf(def.bands, v)?.label ?? numberWords(v, unit);
+  }
+  if (typeof v === "string") {
+    const text3 = v.replace(/\s+/g, " ").trim();
+    if (text3 === "")
+      return null;
+    if (def.type === "ref") {
+      const place = own(ctx.world.places, text3);
+      if (place)
+        return canSeePlace(ctx.registry, ctx.world, ctx.state, pov, text3) ? place.name : null;
+      const e = own(ctx.state.entities, text3);
+      return e && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, text3) ? e.name : null;
+    }
+    if (def.table) {
+      const row = rowOf(ctx, def.table, text3);
+      const name = row?.name ?? row?.label;
+      if (typeof name === "string" && name.trim() !== "")
+        return name.trim();
+    }
+    return def.type === "enum" || /^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(text3) ? text3.replace(/_/g, " ") : text3;
+  }
+  if (Array.isArray(v)) {
+    const words4 = v.map((x) => typeof x === "string" ? x.replace(/\s+/g, " ").trim() : typeof x === "number" && Number.isFinite(x) ? String(x) : "");
+    return words4.length > 0 && words4.every((w) => w !== "") ? words4.join(", ") : null;
+  }
+  return null;
+}
+function thingDetails(ctx, id, omit = () => false) {
+  const pov = ctx.world.pov;
+  const e = own(ctx.state.entities, id);
+  if (!e)
+    return [];
+  const out = [];
+  for (const [field, def] of fieldsInOrder(ctx, e.kind)) {
+    if (UNTOLD[field] || def.derived !== undefined || omit(field, def))
+      continue;
+    if (def.domain && ctx.levelOf(pov, def.domain) < (def.level ?? 1))
+      continue;
+    if (!canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field))
+      continue;
+    const { noun, unit } = fieldNoun(def.label, field);
+    const words4 = valueWords(ctx, def, unit, own(e.fields, field));
+    if (words4 !== null)
+      out.push(words4 === "" ? noun : `${noun} ${words4}`);
+  }
+  return out;
+}
+function thingDescription(ctx, id) {
+  const text3 = own(ctx.state.entities, id)?.fields.description;
+  if (typeof text3 !== "string" || !canSeeField(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id, "description"))
+    return null;
+  const words4 = text3.replace(/\s+/g, " ").trim();
+  return words4 === "" ? null : words4;
+}
+function kitWords(ctx, id, gearLevel) {
+  const kit = gearLevel >= 3 ? optionalQuery(ctx, "gear.kit_status")?.(ctx, id) ?? null : null;
+  return kit ? `${kit.present} of its ${kit.total} pieces` : null;
+}
+function countedName(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  if (!e)
+    return id;
+  const qty = typeof e.fields.qty === "number" ? e.fields.qty : 1;
+  return `${e.name}${qty > 1 ? ` \xD7${qty}` : ""}`;
+}
+function thingName(ctx, id, gearLevel = ctx.levelOf(ctx.world.pov, "gear")) {
+  const kit = kitWords(ctx, id, gearLevel);
+  return `${countedName(ctx, id)}${kit ? ` (${kit})` : ""}`;
+}
+function thingText(ctx, id, lead = []) {
+  const kit = kitWords(ctx, id, ctx.levelOf(ctx.world.pov, "gear"));
+  const parts = [...kit ? [kit] : [], ...lead, ...thingDetails(ctx, id)];
+  const description = thingDescription(ctx, id);
+  return `${countedName(ctx, id)}${parts.length > 0 ? ` (${parts.join("; ")})` : ""}${description ? `: ${description}` : ""}`;
+}
+function sentence(text3) {
+  return /[.!?\u2026]["')\]]?$/.test(text3) ? text3 : `${text3}.`;
+}
+
 // src/packs/space/core/feed.ts
-var THINGS_CAP = 12;
-var EXITS_CAP = 6;
 function companions(ctx) {
   const pov = ctx.world.pov;
   const here = placeOfEntity(ctx.state, pov);
@@ -14142,7 +14249,7 @@ function sceneLines(ctx, scope) {
         hidden.push({ id, text: text3 });
     }
     if (exits.length > 0)
-      lines.push({ text: `Nearby: ${exits.slice(0, EXITS_CAP).join("; ")}.`, known: "pov" });
+      lines.push({ text: `Nearby: ${exits.join("; ")}.`, known: "pov" });
     for (const h of hidden) {
       const line2 = beyond(ctx, scope, `Nearby: ${h.text}.`, (who) => sees(who, h.id));
       if (line2)
@@ -14180,6 +14287,14 @@ function placeLines(ctx, scope) {
     else if (scope === "gm")
       lines.push({ text: `${place.name}: ${description.trim()}`, known: "gm" });
   }
+  const inside = Object.values(ctx.world.places).filter((p) => p.parent === here).map((p) => p.id).sort();
+  const insideSeen = inside.filter((id) => seePlace(pov, id));
+  if (insideSeen.length > 0)
+    lines.push({ text: `Places inside it: ${insideSeen.map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
+  const ways = waysOut(ctx, here);
+  const waysSeen = ways.filter((id) => seePlace(pov, id));
+  if (waysSeen.length > 0)
+    lines.push({ text: `Ways out from here, to: ${waysSeen.map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
   const things = Object.keys(ctx.state.entities).sort().filter((id) => {
     const e = own(ctx.state.entities, id);
     if (!e || isGone(ctx.state, id) || e.fields.place !== here || e.relations.some((r) => r.type === "in"))
@@ -14189,27 +14304,19 @@ function placeLines(ctx, scope) {
   const seen = things.filter((id) => seeThing(pov, id));
   const whose = (id) => {
     if (owns(ctx.state, pov, id))
-      return " (yours)";
+      return ["yours"];
     if (mayUse(ctx.state, pov, id))
-      return " (yours to use)";
+      return ["yours to use"];
     const owner = accessOf(ctx.state, id).owners.map((o) => o.party).find((p) => seeThing(pov, p));
-    return owner ? ` (${nameOf3(ctx, owner)}'s)` : "";
+    return owner ? [`${nameOf3(ctx, owner)}'s`] : [];
   };
-  if (seen.length > 0)
-    lines.push({ text: `Lying here: ${seen.slice(0, THINGS_CAP).map((id) => `${nameOf3(ctx, id)}${whose(id)}`).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
+  for (const id of seen)
+    lines.push({ text: sentence(`Lying here: ${thingText(ctx, id, whose(id))}`), known: "pov" });
   for (const id of things.filter((t) => !seeThing(pov, t))) {
     const line2 = beyond(ctx, scope, `Lying here: ${nameOf3(ctx, id)}.`, (who) => seeThing(who, id));
     if (line2)
       lines.push(line2);
   }
-  const inside = Object.values(ctx.world.places).filter((p) => p.parent === here).map((p) => p.id).sort();
-  const insideSeen = inside.filter((id) => seePlace(pov, id));
-  if (insideSeen.length > 0)
-    lines.push({ text: `Places inside it: ${insideSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
-  const ways = waysOut(ctx, here);
-  const waysSeen = ways.filter((id) => seePlace(pov, id));
-  if (waysSeen.length > 0)
-    lines.push({ text: `Ways out from here, to: ${waysSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
   for (const id of [...inside, ...ways].filter((p) => !seePlace(pov, p))) {
     const line2 = beyond(ctx, scope, `A way from here leads to ${placeName(ctx, id)}.`, (who) => seePlace(who, id));
     if (line2)
@@ -14229,8 +14336,6 @@ function placeLines(ctx, scope) {
 }
 
 // src/engine/place-lore.ts
-var PLACE_LORE_CAP = 6;
-var PLACE_LORE_CHARS = 480;
 var NARRATOR_READS = "brief";
 function placeLoreLines(ctx, scope) {
   const { registry, world, state } = ctx;
@@ -14252,23 +14357,18 @@ function placeLoreLines(ctx, scope) {
     found.push({ entry, at, read });
   }
   found.sort((a, b) => a.at - b.at || (b.entry.priority ?? 0) - (a.entry.priority ?? 0) || String(a.entry.title).localeCompare(String(b.entry.title)) || a.entry.id.localeCompare(b.entry.id));
-  const keeps = new Map(pinsFor(world, here).map((ref) => [ref.key, ref.pin.keep ?? "start"]));
-  const keepOf = (entry) => {
-    const source = loreSourceOf(entry.source);
-    return keeps.get(lorePinKey({ lore: entry.id })) ?? (source.kind === "book" ? keeps.get(lorePinKey({ book: source.bookId, entry: source.entryId })) : undefined) ?? "start";
-  };
   const lineOf = (entry, known) => {
     const title = typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : entry.id;
-    const snippet = loreSnippet((text3) => text3.length, { title, content: entry.content }, PLACE_LORE_CHARS, keepOf(entry));
-    if (!snippet)
+    const whole4 = loreSnippet((text3) => text3.length, { title, content: entry.content }, Number.POSITIVE_INFINITY);
+    if (!whole4)
       return [];
     const source = loreSourceOf(entry.source);
-    return [{ text: snippet.text, known, ...source.kind === "book" && !snippet.cut && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {} }];
+    return [{ text: whole4.text, known, ...source.kind === "book" && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {} }];
   };
-  const lines = found.filter((f) => f.read).slice(0, PLACE_LORE_CAP).flatMap((f) => lineOf(f.entry, "pov"));
+  const lines = found.filter((f) => f.read).flatMap((f) => lineOf(f.entry, "pov"));
   if (scope !== "gm")
     return lines;
-  return [...lines, ...found.filter((f) => !f.read).slice(0, PLACE_LORE_CAP).flatMap((f) => lineOf(f.entry, "gm"))];
+  return [...lines, ...found.filter((f) => !f.read).flatMap((f) => lineOf(f.entry, "gm"))];
 }
 
 // src/packs/space/core/index.ts
@@ -25741,14 +25841,6 @@ var slots_default = {
 };
 
 // src/packs/gear/core/index.ts
-function gearLabel(ctx, id, level) {
-  const e = own(ctx.state.entities, id);
-  if (!e)
-    return id;
-  const qty = numOf(e.fields.qty, 1);
-  const kit = level >= 3 ? kitStatus(ctx, id) : null;
-  return `${e.name}${qty > 1 ? ` \xD7${qty}` : ""}${kit ? ` (${kit.present} of its ${kit.total} pieces)` : ""}`;
-}
 function wornBy(ctx, who) {
   return Object.keys(ctx.state.entities).sort().filter((id) => own(ctx.state.entities, id)?.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who));
 }
@@ -25767,14 +25859,17 @@ function gearLines(ctx, scope) {
   const carried = carriedBy(ctx.state, pov).filter((id) => own(ctx.state.entities, id)?.kind !== "account");
   const worn = level >= 3 ? wornBy(ctx, pov).filter(see) : [];
   const shown3 = carried.filter((id) => see(id) && !worn.includes(id) && (level >= 2 || own(ctx.state.entities, id)?.fields.notable === true));
+  const inside = (id) => {
+    const holder = holderOf(ctx.state, id);
+    return holder !== null && holder !== pov && see(holder) ? [`in ${own(ctx.state.entities, holder)?.name ?? holder}`] : [];
+  };
   const lines = [];
   for (const as of ["worn", "pockets", "hand"]) {
-    const here = worn.filter((id) => wornAs(ctx, id, pov) === as);
-    if (here.length > 0)
-      lines.push({ text: `${WORN_LEAD[as]}: ${here.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+    for (const id of worn.filter((w) => wornAs(ctx, w, pov) === as))
+      lines.push({ text: sentence(`${WORN_LEAD[as]}: ${thingText(ctx, id)}`), known: "pov" });
   }
-  if (shown3.length > 0)
-    lines.push({ text: `${worn.length > 0 ? "Also carrying" : "Carrying"}: ${shown3.slice(0, 12).map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+  for (const id of shown3)
+    lines.push({ text: sentence(`${worn.length > 0 ? "Also carrying" : "Carrying"}: ${thingText(ctx, id, inside(id))}`), known: "pov" });
   for (const g of grants(ctx.state)) {
     if (!see(g.thing))
       continue;
@@ -25786,11 +25881,10 @@ function gearLines(ctx, scope) {
   if (scope === "gm") {
     const unknown = [...carried, ...wornBy(ctx, pov)].filter((id) => !see(id));
     if (unknown.length > 0)
-      lines.push({ text: `On you without your knowing: ${unknown.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "gm" });
+      lines.push({ text: `On you without your knowing: ${unknown.map((id) => thingName(ctx, id, level)).join(", ")}.`, known: "gm" });
   }
   return lines;
 }
-var PRESENT_GEAR_CAP = 6;
 var MOVES = {
   "gear.transfer": { thing: "item", into: "to" },
   "gear.give": { thing: "item", into: "to" },
@@ -25879,9 +25973,9 @@ function presentGearLines(ctx, scope) {
       const e = own(ctx.state.entities, id);
       return !!e && e.kind !== "account" && e.fields.slot !== "pocket" && !worn.includes(id);
     });
-    const say = (ids) => ids.slice(0, PRESENT_GEAR_CAP).map((id) => gearLabel(ctx, id, level)).join(", ");
+    const say = (ids) => ids.map((id) => thingName(ctx, id, level)).join(", ");
     const wornSeen = worn.filter((id) => see(pov, id));
-    const heldSeen = held2.filter((id) => see(pov, id)).slice(0, Math.max(0, PRESENT_GEAR_CAP - wornSeen.length));
+    const heldSeen = held2.filter((id) => see(pov, id));
     const parts = [...wornSeen.length > 0 ? [`wears ${say(wornSeen)}`] : [], ...heldSeen.length > 0 ? [`carries ${say(heldSeen)}`] : []];
     if (parts.length > 0)
       lines.push({ text: `${person.name} ${parts.join("; ")}.`, known: "pov" });
@@ -26833,6 +26927,11 @@ var VEHICLE = {
   extends: "container",
   pack: "vehicles",
   fields: {
+    make: { type: "text", label: "Make" },
+    model: { type: "text", label: "Model" },
+    year: { type: "number", label: "Year" },
+    colour: { type: "text", label: "Colour" },
+    plate: { type: "text", label: "Plate" },
     class: { type: "text", label: "Vehicle class" },
     status: { type: "enum", label: "Status", values: ["ok", "needs_service", "broken"], default: "ok", domain: "vehicles", level: 1, bound: { mode: "confirm" } },
     fuel_pct: { type: "number", label: "Fuel %", min: 0, max: 100, domain: "vehicles", level: 2, bound: { mode: "auto" } },
@@ -26850,7 +26949,7 @@ function burnsFuel(ctx, vehicle) {
   const row = classRow(ctx, vehicle);
   return row !== undefined && strOf(row.fuel_type, "gasoline") !== "none";
 }
-var OTHERS_CAP2 = 8;
+var TOLD_APART = { class: true, fuel_pct: true, status: true, last_service: true };
 function vehicleLines(ctx, scope) {
   const pov = ctx.world.pov;
   const level = ctx.levelOf(pov, "vehicles");
@@ -26863,9 +26962,21 @@ function vehicleLines(ctx, scope) {
   const site = siteOf(ctx.world, here);
   const ownerName = (owner) => see(pov, owner) ? own(ctx.state.entities, owner)?.name ?? "someone" : "someone";
   const placeText = (place) => !place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere";
-  const lines = [];
+  const classText = (v, kind) => {
+    const name = classRow(ctx, v)?.name;
+    if (typeof name !== "string" || name.trim() === "" || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "class"))
+      return [];
+    return [`${fieldNoun(fieldDef(ctx.registry, ctx.world, kind, "class")?.label, "class").noun} ${name.trim()}`];
+  };
+  const contents = (holder) => Object.keys(ctx.state.entities).sort().filter((id) => !isGone(ctx.state, id) && see(pov, id) && own(ctx.state.entities, id)?.relations.some((r) => r.type === "in" && r.to === holder));
+  const named = (id, depth, mine) => {
+    const open = mine || owns(ctx.state, pov, id);
+    const inner = depth >= 8 ? [] : contents(id).filter((x) => open || knows(ctx.state, pov, x)).map((x) => named(x, depth + 1, mine));
+    return `${thingName(ctx, id)}${inner.length > 0 ? ` (holding ${inner.join(", ")})` : ""}`;
+  };
+  const usable = [];
+  const away = [];
   const others = [];
-  const away = new Map;
   for (const v of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, v);
     if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v))
@@ -26881,16 +26992,12 @@ function vehicleLines(ctx, scope) {
     }
     if (owner !== pov && !see(pov, v))
       continue;
-    const where = placeText(place);
-    if (site !== null && siteOf(ctx.world, place) !== site) {
-      away.set(where, (away.get(where) ?? 0) + 1);
-      continue;
-    }
-    const parts = [`${e.name}: ${where}`];
+    const elsewhere = site !== null && siteOf(ctx.world, place) !== site;
+    const head = [placeText(place), ...level === 1 ? [] : [whose], ...elsewhere ? ["away from here"] : []];
+    const parts = classText(v, e.kind);
     if (level === 1)
       parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
     else {
-      parts.push(whose);
       if (burnsFuel(ctx, v)) {
         const range = rangeLeft(ctx, v);
         parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? `, about ${Math.round(range.value)} ${range.unit} left` : ""}`);
@@ -26898,17 +27005,32 @@ function vehicleLines(ctx, scope) {
       if (e.fields.status !== "ok" && e.fields.status !== undefined)
         parts.push(String(e.fields.status).replace(/_/g, " "));
     }
-    lines.push({ text: `${parts.join(", ")}.`, known: "pov" });
+    parts.push(...thingDetails(ctx, v, (field) => TOLD_APART[field] === true || field === "condition" && level < 3));
+    const interval = level >= 4 ? serviceInterval(ctx, v) : null;
+    if (interval !== null && canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "last_service")) {
+      const unit3 = domainOf(ctx, v) === "road" ? "mi" : "h";
+      const due = Math.round(numOf(e.fields.last_service) + interval).toLocaleString("en-US");
+      parts.push(usage(ctx, v) > numOf(e.fields.last_service) + interval ? `service overdue (it was due at ${due} ${unit3})` : `next service due at ${due} ${unit3}`);
+    }
+    const inside = elsewhere ? [] : contents(v);
+    const aboard = inside.filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => id === pov ? "you" : own(ctx.state.entities, id)?.name ?? id);
+    const cargo = inside.filter((id) => !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => named(id, 0, owns(ctx.state, pov, v)));
+    const description = thingDescription(ctx, v);
+    const text3 = [
+      `${e.name}: ${[head.join(", "), ...parts].join("; ")}.`,
+      ...aboard.length > 0 ? [`Aboard: ${aboard.join(", ")}.`] : [],
+      ...cargo.length > 0 ? [`Cargo: ${cargo.join(", ")}.`] : [],
+      ...description ? [sentence(description)] : []
+    ].join(" ");
+    (elsewhere ? away : usable).push({ text: text3, known: "pov" });
   }
-  const elsewhere = [...away].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
-  const total = elsewhere.reduce((sum, [, n]) => sum + n, 0);
-  if (total > 0)
-    lines.push({ text: `${total} more ${total === 1 ? "vehicle" : "vehicles"} you may use, away from here: ${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}.`, known: "pov" });
-  const seen = others.filter((o) => see(pov, o.v));
-  for (const o of seen.slice(0, OTHERS_CAP2))
-    lines.push({ text: `${own(ctx.state.entities, o.v)?.name ?? o.v}: ${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}.`, known: "pov" });
-  if (seen.length > OTHERS_CAP2)
-    lines.push({ text: `And ${seen.length - OTHERS_CAP2} more vehicles here.`, known: "pov" });
+  const seen = others.filter((o) => see(pov, o.v)).map((o) => {
+    const e = own(ctx.state.entities, o.v);
+    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field, def) => TOLD_APART[field] === true || def.domain !== undefined)] : [];
+    const description = thingDescription(ctx, o.v);
+    return { text: `${e?.name ?? o.v}: ${[`${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}`, ...looks].join("; ")}.${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
+  });
+  const lines = [...usable, ...seen, ...away];
   if (scope === "player")
     return lines;
   for (const o of others.filter((x) => !see(pov, x.v))) {

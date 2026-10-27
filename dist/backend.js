@@ -6440,8 +6440,6 @@ var MINDS_EVENTS = {
   skip: "minds.skip"
 };
 var MINDS_SLOT = "minds";
-var MINDS_SECTION_TEMPLATE = `Each mind below is scoped to what that character knows and is blind to everyone else's. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.
-{{lines}}`;
 var SKIP_FILL_HEAD = "What the player's message says the player character does in this time, in their words (it comes first):";
 var MIND_PROMPT_DEFAULTS = Object.freeze({
   mind: [
@@ -6558,7 +6556,7 @@ var EXTRACTION_LEARNING = Object.freeze({
   window: 30,
   demoteUndoRate: 0.1
 });
-var SETTINGS_DEFAULTS_REV = 3;
+var SETTINGS_DEFAULTS_REV = 4;
 var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 function jobSettingsOf(raw, base = JOB_SETTINGS_DEFAULTS) {
   const j = isRecord(raw) ? raw : {};
@@ -12607,9 +12605,118 @@ function mayUse(state, who, id) {
   return owns(state, who, id) || accessOf(state, id).users.some((u) => u.who === who);
 }
 
+// src/engine/thing-words.ts
+var UNTOLD = { place: true, x: true, y: true, owner: true, qty: true, description: true, notable: true, catalog: true, category: true, slot: true, weight_g: true, volume_l: true, capacity_l: true, max_load_kg: true, overdue: true, piece: true, from_kit: true, stock: true, kit: true, pieces: true, piece_count: true };
+function fieldsInOrder(ctx, kind) {
+  const out = new Map;
+  let id = kind;
+  for (let guard = 0;id !== undefined && guard < 32; guard++) {
+    const mine = own(ctx.world.kinds, id);
+    const pack = ctx.registry.kinds.get(id);
+    if (!mine && !pack)
+      break;
+    for (const [field, def] of [...Object.entries(mine?.fields ?? {}), ...Object.entries(pack?.fields ?? {})])
+      if (!out.has(field))
+        out.set(field, def);
+    id = kindParent(ctx.registry, ctx.world, id);
+  }
+  return [...out];
+}
+function numberWords(v, unit) {
+  const r = Math.round(v * 100) / 100;
+  return `${unit !== "" && Number.isInteger(r) && Math.abs(r) >= 1000 ? r.toLocaleString("en-US") : String(r)}${unit}`;
+}
+function valueWords(ctx, def, unit, v) {
+  const pov = ctx.world.pov;
+  if (v === undefined || v === null)
+    return null;
+  if (typeof v === "boolean")
+    return v ? "" : null;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v))
+      return null;
+    if (def.type === "money")
+      return formatMoney(v, ctx.world.currency);
+    return bandOf(def.bands, v)?.label ?? numberWords(v, unit);
+  }
+  if (typeof v === "string") {
+    const text3 = v.replace(/\s+/g, " ").trim();
+    if (text3 === "")
+      return null;
+    if (def.type === "ref") {
+      const place = own(ctx.world.places, text3);
+      if (place)
+        return canSeePlace(ctx.registry, ctx.world, ctx.state, pov, text3) ? place.name : null;
+      const e = own(ctx.state.entities, text3);
+      return e && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, text3) ? e.name : null;
+    }
+    if (def.table) {
+      const row = rowOf(ctx, def.table, text3);
+      const name = row?.name ?? row?.label;
+      if (typeof name === "string" && name.trim() !== "")
+        return name.trim();
+    }
+    return def.type === "enum" || /^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(text3) ? text3.replace(/_/g, " ") : text3;
+  }
+  if (Array.isArray(v)) {
+    const words3 = v.map((x) => typeof x === "string" ? x.replace(/\s+/g, " ").trim() : typeof x === "number" && Number.isFinite(x) ? String(x) : "");
+    return words3.length > 0 && words3.every((w) => w !== "") ? words3.join(", ") : null;
+  }
+  return null;
+}
+function thingDetails(ctx, id, omit = () => false) {
+  const pov = ctx.world.pov;
+  const e = own(ctx.state.entities, id);
+  if (!e)
+    return [];
+  const out = [];
+  for (const [field, def] of fieldsInOrder(ctx, e.kind)) {
+    if (UNTOLD[field] || def.derived !== undefined || omit(field, def))
+      continue;
+    if (def.domain && ctx.levelOf(pov, def.domain) < (def.level ?? 1))
+      continue;
+    if (!canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field))
+      continue;
+    const { noun, unit } = fieldNoun(def.label, field);
+    const words3 = valueWords(ctx, def, unit, own(e.fields, field));
+    if (words3 !== null)
+      out.push(words3 === "" ? noun : `${noun} ${words3}`);
+  }
+  return out;
+}
+function thingDescription(ctx, id) {
+  const text3 = own(ctx.state.entities, id)?.fields.description;
+  if (typeof text3 !== "string" || !canSeeField(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id, "description"))
+    return null;
+  const words3 = text3.replace(/\s+/g, " ").trim();
+  return words3 === "" ? null : words3;
+}
+function kitWords(ctx, id, gearLevel) {
+  const kit = gearLevel >= 3 ? optionalQuery(ctx, "gear.kit_status")?.(ctx, id) ?? null : null;
+  return kit ? `${kit.present} of its ${kit.total} pieces` : null;
+}
+function countedName(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  if (!e)
+    return id;
+  const qty = typeof e.fields.qty === "number" ? e.fields.qty : 1;
+  return `${e.name}${qty > 1 ? ` \xD7${qty}` : ""}`;
+}
+function thingName(ctx, id, gearLevel = ctx.levelOf(ctx.world.pov, "gear")) {
+  const kit = kitWords(ctx, id, gearLevel);
+  return `${countedName(ctx, id)}${kit ? ` (${kit})` : ""}`;
+}
+function thingText(ctx, id, lead = []) {
+  const kit = kitWords(ctx, id, ctx.levelOf(ctx.world.pov, "gear"));
+  const parts = [...kit ? [kit] : [], ...lead, ...thingDetails(ctx, id)];
+  const description = thingDescription(ctx, id);
+  return `${countedName(ctx, id)}${parts.length > 0 ? ` (${parts.join("; ")})` : ""}${description ? `: ${description}` : ""}`;
+}
+function sentence(text3) {
+  return /[.!?\u2026]["')\]]?$/.test(text3) ? text3 : `${text3}.`;
+}
+
 // src/packs/space/core/feed.ts
-var THINGS_CAP = 12;
-var EXITS_CAP = 6;
 function companions(ctx) {
   const pov = ctx.world.pov;
   const here = placeOfEntity(ctx.state, pov);
@@ -12662,7 +12769,7 @@ function sceneLines(ctx, scope) {
         hidden.push({ id, text: text3 });
     }
     if (exits.length > 0)
-      lines.push({ text: `Nearby: ${exits.slice(0, EXITS_CAP).join("; ")}.`, known: "pov" });
+      lines.push({ text: `Nearby: ${exits.join("; ")}.`, known: "pov" });
     for (const h of hidden) {
       const line2 = beyond(ctx, scope, `Nearby: ${h.text}.`, (who) => sees(who, h.id));
       if (line2)
@@ -12700,6 +12807,14 @@ function placeLines(ctx, scope) {
     else if (scope === "gm")
       lines.push({ text: `${place.name}: ${description.trim()}`, known: "gm" });
   }
+  const inside = Object.values(ctx.world.places).filter((p) => p.parent === here).map((p) => p.id).sort();
+  const insideSeen = inside.filter((id) => seePlace(pov, id));
+  if (insideSeen.length > 0)
+    lines.push({ text: `Places inside it: ${insideSeen.map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
+  const ways = waysOut(ctx, here);
+  const waysSeen = ways.filter((id) => seePlace(pov, id));
+  if (waysSeen.length > 0)
+    lines.push({ text: `Ways out from here, to: ${waysSeen.map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
   const things = Object.keys(ctx.state.entities).sort().filter((id) => {
     const e = own(ctx.state.entities, id);
     if (!e || isGone(ctx.state, id) || e.fields.place !== here || e.relations.some((r) => r.type === "in"))
@@ -12709,27 +12824,19 @@ function placeLines(ctx, scope) {
   const seen = things.filter((id) => seeThing(pov, id));
   const whose = (id) => {
     if (owns(ctx.state, pov, id))
-      return " (yours)";
+      return ["yours"];
     if (mayUse(ctx.state, pov, id))
-      return " (yours to use)";
+      return ["yours to use"];
     const owner = accessOf(ctx.state, id).owners.map((o) => o.party).find((p) => seeThing(pov, p));
-    return owner ? ` (${nameOf3(ctx, owner)}'s)` : "";
+    return owner ? [`${nameOf3(ctx, owner)}'s`] : [];
   };
-  if (seen.length > 0)
-    lines.push({ text: `Lying here: ${seen.slice(0, THINGS_CAP).map((id) => `${nameOf3(ctx, id)}${whose(id)}`).join(", ")}${seen.length > THINGS_CAP ? `, and ${seen.length - THINGS_CAP} more` : ""}.`, known: "pov" });
+  for (const id of seen)
+    lines.push({ text: sentence(`Lying here: ${thingText(ctx, id, whose(id))}`), known: "pov" });
   for (const id of things.filter((t) => !seeThing(pov, t))) {
     const line2 = beyond(ctx, scope, `Lying here: ${nameOf3(ctx, id)}.`, (who) => seeThing(who, id));
     if (line2)
       lines.push(line2);
   }
-  const inside = Object.values(ctx.world.places).filter((p) => p.parent === here).map((p) => p.id).sort();
-  const insideSeen = inside.filter((id) => seePlace(pov, id));
-  if (insideSeen.length > 0)
-    lines.push({ text: `Places inside it: ${insideSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
-  const ways = waysOut(ctx, here);
-  const waysSeen = ways.filter((id) => seePlace(pov, id));
-  if (waysSeen.length > 0)
-    lines.push({ text: `Ways out from here, to: ${waysSeen.slice(0, EXITS_CAP).map((id) => placeName(ctx, id)).join(", ")}.`, known: "pov" });
   for (const id of [...inside, ...ways].filter((p) => !seePlace(pov, p))) {
     const line2 = beyond(ctx, scope, `A way from here leads to ${placeName(ctx, id)}.`, (who) => seePlace(who, id));
     if (line2)
@@ -12749,8 +12856,6 @@ function placeLines(ctx, scope) {
 }
 
 // src/engine/place-lore.ts
-var PLACE_LORE_CAP = 6;
-var PLACE_LORE_CHARS = 480;
 var NARRATOR_READS = "brief";
 function placeLoreLines(ctx, scope) {
   const { registry, world, state } = ctx;
@@ -12772,23 +12877,18 @@ function placeLoreLines(ctx, scope) {
     found.push({ entry, at, read });
   }
   found.sort((a, b) => a.at - b.at || (b.entry.priority ?? 0) - (a.entry.priority ?? 0) || String(a.entry.title).localeCompare(String(b.entry.title)) || a.entry.id.localeCompare(b.entry.id));
-  const keeps = new Map(pinsFor(world, here).map((ref) => [ref.key, ref.pin.keep ?? "start"]));
-  const keepOf = (entry) => {
-    const source = loreSourceOf(entry.source);
-    return keeps.get(lorePinKey({ lore: entry.id })) ?? (source.kind === "book" ? keeps.get(lorePinKey({ book: source.bookId, entry: source.entryId })) : undefined) ?? "start";
-  };
   const lineOf = (entry, known) => {
     const title = typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : entry.id;
-    const snippet = loreSnippet((text3) => text3.length, { title, content: entry.content }, PLACE_LORE_CHARS, keepOf(entry));
-    if (!snippet)
+    const whole4 = loreSnippet((text3) => text3.length, { title, content: entry.content }, Number.POSITIVE_INFINITY);
+    if (!whole4)
       return [];
     const source = loreSourceOf(entry.source);
-    return [{ text: snippet.text, known, ...source.kind === "book" && !snippet.cut && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {} }];
+    return [{ text: whole4.text, known, ...source.kind === "book" && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {} }];
   };
-  const lines = found.filter((f) => f.read).slice(0, PLACE_LORE_CAP).flatMap((f) => lineOf(f.entry, "pov"));
+  const lines = found.filter((f) => f.read).flatMap((f) => lineOf(f.entry, "pov"));
   if (scope !== "gm")
     return lines;
-  return [...lines, ...found.filter((f) => !f.read).slice(0, PLACE_LORE_CAP).flatMap((f) => lineOf(f.entry, "gm"))];
+  return [...lines, ...found.filter((f) => !f.read).flatMap((f) => lineOf(f.entry, "gm"))];
 }
 
 // src/packs/space/core/index.ts
@@ -25782,14 +25882,6 @@ var slots_default = {
 };
 
 // src/packs/gear/core/index.ts
-function gearLabel(ctx, id, level) {
-  const e = own(ctx.state.entities, id);
-  if (!e)
-    return id;
-  const qty = numOf(e.fields.qty, 1);
-  const kit = level >= 3 ? kitStatus(ctx, id) : null;
-  return `${e.name}${qty > 1 ? ` \xD7${qty}` : ""}${kit ? ` (${kit.present} of its ${kit.total} pieces)` : ""}`;
-}
 function wornBy(ctx, who) {
   return Object.keys(ctx.state.entities).sort().filter((id) => own(ctx.state.entities, id)?.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who));
 }
@@ -25808,14 +25900,17 @@ function gearLines(ctx, scope) {
   const carried = carriedBy(ctx.state, pov).filter((id) => own(ctx.state.entities, id)?.kind !== "account");
   const worn = level >= 3 ? wornBy(ctx, pov).filter(see) : [];
   const shown3 = carried.filter((id) => see(id) && !worn.includes(id) && (level >= 2 || own(ctx.state.entities, id)?.fields.notable === true));
+  const inside = (id) => {
+    const holder = holderOf(ctx.state, id);
+    return holder !== null && holder !== pov && see(holder) ? [`in ${own(ctx.state.entities, holder)?.name ?? holder}`] : [];
+  };
   const lines = [];
   for (const as of ["worn", "pockets", "hand"]) {
-    const here = worn.filter((id) => wornAs(ctx, id, pov) === as);
-    if (here.length > 0)
-      lines.push({ text: `${WORN_LEAD[as]}: ${here.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+    for (const id of worn.filter((w) => wornAs(ctx, w, pov) === as))
+      lines.push({ text: sentence(`${WORN_LEAD[as]}: ${thingText(ctx, id)}`), known: "pov" });
   }
-  if (shown3.length > 0)
-    lines.push({ text: `${worn.length > 0 ? "Also carrying" : "Carrying"}: ${shown3.slice(0, 12).map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+  for (const id of shown3)
+    lines.push({ text: sentence(`${worn.length > 0 ? "Also carrying" : "Carrying"}: ${thingText(ctx, id, inside(id))}`), known: "pov" });
   for (const g of grants(ctx.state)) {
     if (!see(g.thing))
       continue;
@@ -25827,11 +25922,10 @@ function gearLines(ctx, scope) {
   if (scope === "gm") {
     const unknown = [...carried, ...wornBy(ctx, pov)].filter((id) => !see(id));
     if (unknown.length > 0)
-      lines.push({ text: `On you without your knowing: ${unknown.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "gm" });
+      lines.push({ text: `On you without your knowing: ${unknown.map((id) => thingName(ctx, id, level)).join(", ")}.`, known: "gm" });
   }
   return lines;
 }
-var PRESENT_GEAR_CAP = 6;
 var MOVES = {
   "gear.transfer": { thing: "item", into: "to" },
   "gear.give": { thing: "item", into: "to" },
@@ -25920,9 +26014,9 @@ function presentGearLines(ctx, scope) {
       const e = own(ctx.state.entities, id);
       return !!e && e.kind !== "account" && e.fields.slot !== "pocket" && !worn.includes(id);
     });
-    const say = (ids) => ids.slice(0, PRESENT_GEAR_CAP).map((id) => gearLabel(ctx, id, level)).join(", ");
+    const say = (ids) => ids.map((id) => thingName(ctx, id, level)).join(", ");
     const wornSeen = worn.filter((id) => see(pov, id));
-    const heldSeen = held2.filter((id) => see(pov, id)).slice(0, Math.max(0, PRESENT_GEAR_CAP - wornSeen.length));
+    const heldSeen = held2.filter((id) => see(pov, id));
     const parts = [...wornSeen.length > 0 ? [`wears ${say(wornSeen)}`] : [], ...heldSeen.length > 0 ? [`carries ${say(heldSeen)}`] : []];
     if (parts.length > 0)
       lines.push({ text: `${person.name} ${parts.join("; ")}.`, known: "pov" });
@@ -26874,6 +26968,11 @@ var VEHICLE = {
   extends: "container",
   pack: "vehicles",
   fields: {
+    make: { type: "text", label: "Make" },
+    model: { type: "text", label: "Model" },
+    year: { type: "number", label: "Year" },
+    colour: { type: "text", label: "Colour" },
+    plate: { type: "text", label: "Plate" },
     class: { type: "text", label: "Vehicle class" },
     status: { type: "enum", label: "Status", values: ["ok", "needs_service", "broken"], default: "ok", domain: "vehicles", level: 1, bound: { mode: "confirm" } },
     fuel_pct: { type: "number", label: "Fuel %", min: 0, max: 100, domain: "vehicles", level: 2, bound: { mode: "auto" } },
@@ -26891,7 +26990,7 @@ function burnsFuel(ctx, vehicle) {
   const row = classRow(ctx, vehicle);
   return row !== undefined && strOf(row.fuel_type, "gasoline") !== "none";
 }
-var OTHERS_CAP2 = 8;
+var TOLD_APART = { class: true, fuel_pct: true, status: true, last_service: true };
 function vehicleLines(ctx, scope) {
   const pov = ctx.world.pov;
   const level = ctx.levelOf(pov, "vehicles");
@@ -26904,9 +27003,21 @@ function vehicleLines(ctx, scope) {
   const site = siteOf(ctx.world, here);
   const ownerName = (owner) => see(pov, owner) ? own(ctx.state.entities, owner)?.name ?? "someone" : "someone";
   const placeText = (place) => !place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere";
-  const lines = [];
+  const classText = (v, kind) => {
+    const name = classRow(ctx, v)?.name;
+    if (typeof name !== "string" || name.trim() === "" || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "class"))
+      return [];
+    return [`${fieldNoun(fieldDef(ctx.registry, ctx.world, kind, "class")?.label, "class").noun} ${name.trim()}`];
+  };
+  const contents = (holder) => Object.keys(ctx.state.entities).sort().filter((id) => !isGone(ctx.state, id) && see(pov, id) && own(ctx.state.entities, id)?.relations.some((r) => r.type === "in" && r.to === holder));
+  const named = (id, depth2, mine) => {
+    const open = mine || owns(ctx.state, pov, id);
+    const inner = depth2 >= 8 ? [] : contents(id).filter((x) => open || knows(ctx.state, pov, x)).map((x) => named(x, depth2 + 1, mine));
+    return `${thingName(ctx, id)}${inner.length > 0 ? ` (holding ${inner.join(", ")})` : ""}`;
+  };
+  const usable = [];
+  const away = [];
   const others = [];
-  const away = new Map;
   for (const v of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, v);
     if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v))
@@ -26922,16 +27033,12 @@ function vehicleLines(ctx, scope) {
     }
     if (owner !== pov && !see(pov, v))
       continue;
-    const where = placeText(place);
-    if (site !== null && siteOf(ctx.world, place) !== site) {
-      away.set(where, (away.get(where) ?? 0) + 1);
-      continue;
-    }
-    const parts = [`${e.name}: ${where}`];
+    const elsewhere = site !== null && siteOf(ctx.world, place) !== site;
+    const head = [placeText(place), ...level === 1 ? [] : [whose], ...elsewhere ? ["away from here"] : []];
+    const parts = classText(v, e.kind);
     if (level === 1)
       parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
     else {
-      parts.push(whose);
       if (burnsFuel(ctx, v)) {
         const range = rangeLeft(ctx, v);
         parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? `, about ${Math.round(range.value)} ${range.unit} left` : ""}`);
@@ -26939,17 +27046,32 @@ function vehicleLines(ctx, scope) {
       if (e.fields.status !== "ok" && e.fields.status !== undefined)
         parts.push(String(e.fields.status).replace(/_/g, " "));
     }
-    lines.push({ text: `${parts.join(", ")}.`, known: "pov" });
+    parts.push(...thingDetails(ctx, v, (field) => TOLD_APART[field] === true || field === "condition" && level < 3));
+    const interval = level >= 4 ? serviceInterval(ctx, v) : null;
+    if (interval !== null && canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "last_service")) {
+      const unit3 = domainOf(ctx, v) === "road" ? "mi" : "h";
+      const due = Math.round(numOf(e.fields.last_service) + interval).toLocaleString("en-US");
+      parts.push(usage(ctx, v) > numOf(e.fields.last_service) + interval ? `service overdue (it was due at ${due} ${unit3})` : `next service due at ${due} ${unit3}`);
+    }
+    const inside = elsewhere ? [] : contents(v);
+    const aboard = inside.filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => id === pov ? "you" : own(ctx.state.entities, id)?.name ?? id);
+    const cargo = inside.filter((id) => !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => named(id, 0, owns(ctx.state, pov, v)));
+    const description = thingDescription(ctx, v);
+    const text3 = [
+      `${e.name}: ${[head.join(", "), ...parts].join("; ")}.`,
+      ...aboard.length > 0 ? [`Aboard: ${aboard.join(", ")}.`] : [],
+      ...cargo.length > 0 ? [`Cargo: ${cargo.join(", ")}.`] : [],
+      ...description ? [sentence(description)] : []
+    ].join(" ");
+    (elsewhere ? away : usable).push({ text: text3, known: "pov" });
   }
-  const elsewhere = [...away].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
-  const total = elsewhere.reduce((sum, [, n]) => sum + n, 0);
-  if (total > 0)
-    lines.push({ text: `${total} more ${total === 1 ? "vehicle" : "vehicles"} you may use, away from here: ${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}.`, known: "pov" });
-  const seen = others.filter((o) => see(pov, o.v));
-  for (const o of seen.slice(0, OTHERS_CAP2))
-    lines.push({ text: `${own(ctx.state.entities, o.v)?.name ?? o.v}: ${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}.`, known: "pov" });
-  if (seen.length > OTHERS_CAP2)
-    lines.push({ text: `And ${seen.length - OTHERS_CAP2} more vehicles here.`, known: "pov" });
+  const seen = others.filter((o) => see(pov, o.v)).map((o) => {
+    const e = own(ctx.state.entities, o.v);
+    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field, def) => TOLD_APART[field] === true || def.domain !== undefined)] : [];
+    const description = thingDescription(ctx, o.v);
+    return { text: `${e?.name ?? o.v}: ${[`${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}`, ...looks].join("; ")}.${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
+  });
+  const lines = [...usable, ...seen, ...away];
   if (scope === "player")
     return lines;
   for (const o of others.filter((x) => !see(pov, x.v))) {
@@ -60325,6 +60447,61 @@ function macroHazards(text5, allowed = []) {
   return out;
 }
 
+// src/shared/sections.ts
+var LINES_MARKER = "{{lines}}";
+var DEFAULT_SECTIONS = {
+  outcome: { id: "outcome", label: "Outcome", rank: 0, template: `What the player character's actions did this turn, in the order they played, as the engine settled them: the authoritative record of this turn's results. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences ("you" is the player character). Narrate each as having happened this turn, with the exact results, rolls, amounts and changes its line gives; never soften, round or swap them for vaguer ones.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  montage: { id: "montage", label: "Montage", rank: 1, template: `What happened while time passed, in order, as the engine played it out: the authoritative record of the interval. Narrate the interval as a summary of these lines, in their order, keeping the specific people, places, amounts and changes each one names. A line that gives the player's own words for this time comes first: narrate what they say happens, and fit the other lines around it.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  scene: { id: "scene", label: "Scene", rank: 2, template: `Where the player character is now, when, and what they can perceive there: the authoritative facts of the scene. Describe it from these specifics as given (the place by its name, the time, the weather, what is in view), never generic stand-ins, and keep to them whenever the prose touches the setting.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  people: { id: "people", label: "People", rank: 3, template: `The people with the player character, as the player character knows them, and what each is doing: the authoritative record of who is here. Call them by these names, and keep each one's activity, state, clothes and what they carry as their line gives it; never fold them into a crowd or swap in generic details. Bring a person's specifics in whenever the prose turns to them.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  money: { id: "money", label: "Money", rank: 4, template: `The player character's money as it stands now: the authoritative figures. Use these exact amounts whenever money comes up; never round them, estimate them or give another balance.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  gear: { id: "gear", label: "Gear", rank: 5, template: `What the player character carries, wears and has to hand, as it stands now: the authoritative list, one specific item a line. Name each item as given, with its details and condition, whenever the prose touches it; never replace it with a generic stand-in ("a bag", "some tools").
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: `The vehicles the player character may use, and others nearby, as they know them: where each is, whose it is, its fuel and its state. These lines are the authoritative record: call each vehicle by the name and details its line gives, keep its place, fuel and condition as stated, and bring them in whenever a vehicle comes up, never a generic "the car" where a line names one.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  quest: { id: "quest", label: "Quest", rank: 7, template: `The player character's quests and goals, as far as they know them: the authoritative record of where each stands. Let the reply follow from these, keeping each one's names, objectives and stage as given; never reveal a step they haven't reached.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  outline: { id: "outline", label: "Outline", rank: 8, template: `The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one and keeping the specific people, things, places and amounts it names; what a beat leaves open is yours to fill in.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  stance: { id: "stance", label: "Stance", rank: 9, template: `The narrator knows only what the player character knows. These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: `Each mind below is scoped to what that character knows and is blind to everyone else's. Let each shape that character's own choices, words and manner this turn, as specifically as it says. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  place: { id: "place", label: "Place", rank: 11, template: `The place the player character is in: what it is like, what is here, where it leads, and the lore about it. These lines are the authoritative inventory of the place: name each thing, room, way out and detail as given whenever the prose touches it, and never reduce them to a summary or a generic stand-in ("some furniture", "various goods").
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  property: { id: "property", label: "Property", rank: 12, template: `Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says "yours"; otherwise they only use, keep or benefit from it. These lines are the authoritative record: use each property's name, place and details as given whenever it comes up.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } }
+};
+function builtInSectionsOf(world) {
+  const own2 = Object.keys(world.sections);
+  if (own2.length === 0)
+    return Object.values(DEFAULT_SECTIONS);
+  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
+  return minds && !own2.includes(MINDS_SLOT) ? [minds] : [];
+}
+function sectionTemplateProblem(text5) {
+  return text5.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
+}
+function sectionTemplatesProblem(value) {
+  if (!isRecord(value))
+    return "sectionTemplates must be an object of section ids";
+  for (const [id, text5] of Object.entries(value)) {
+    if (!hasOwn(DEFAULT_SECTIONS, id))
+      return `sectionTemplates.${id}: there is no built-in section "${id}"`;
+    if (typeof text5 !== "string")
+      return `sectionTemplates.${id} must be text`;
+    const problem = sectionTemplateProblem(text5);
+    if (problem !== null)
+      return `sectionTemplates.${id}: ${problem}`;
+  }
+  return null;
+}
+
 // src/engine/lore-lint.ts
 function lintLore(world) {
   const issues = [];
@@ -61191,7 +61368,7 @@ function isWorldDoc(v) {
 var COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"];
 var LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers", "routines"];
 var PARTS2 = ["pins", "calendar", "realism", "time", "start"];
-var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins", "routineSettings"];
+var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins", "routineSettings", "sectionTemplates"];
 function shapeIssues(doc) {
   const issues = [];
   const err = (path, message) => {
@@ -61367,6 +61544,22 @@ function lintWorld(world, registry) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0)
       err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
   }
+  const builtIn = new Set(builtInSectionsOf(world).map((s) => s.id));
+  for (const [id, text5] of Object.entries(world.sectionTemplates ?? {})) {
+    const path = `sectionTemplates.${id}`;
+    const label = DEFAULT_SECTIONS[id]?.label ?? id;
+    if (typeof text5 !== "string") {
+      err(path, "section_template", `the wording of "${label}" must be text`);
+      continue;
+    }
+    const problem = hasOwn(DEFAULT_SECTIONS, id) ? sectionTemplateProblem(text5) : `there is no built-in section "${id}"`;
+    if (problem !== null)
+      err(path, "section_template", `"${label}": ${problem}`);
+    if (macroHazards(text5, ["{{lines}}"]).length > 0)
+      err(path, "section_macro", `"${label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
+    if (hasOwn(DEFAULT_SECTIONS, id) && !builtIn.has(id))
+      warn(path, "section_template_unused", `"${label}" is the world's own section, so its own template is used and this wording isn't`);
+  }
   const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
   for (const [id, s] of Object.entries(world.sections)) {
     const feed = readSectionFeed(Object.fromEntries(SECTION_FEED_KEYS.flatMap((k) => s[k] !== undefined ? [[k, s[k]]] : [])));
@@ -61411,6 +61604,9 @@ function macrosIn(world) {
     scan(`lore.${id}.content`, l.content);
   for (const [id, s] of Object.entries(world.sections))
     scan(`sections.${id}.template`, s.template);
+  for (const [id, text5] of Object.entries(world.sectionTemplates ?? {}))
+    if (typeof text5 === "string")
+      scan(`sectionTemplates.${id}`, text5);
   for (const [id, t] of Object.entries(world.steps))
     scan(`steps.${id}.template`, t.template);
   return out;
@@ -66119,33 +66315,6 @@ class PresetBinding {
 }
 
 // src/backend/book.ts
-var DEFAULT_SECTIONS = {
-  outcome: { id: "outcome", label: "Outcome", rank: 0, template: `What the player character's actions did this turn, in the order they played, as the engine settled them. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences ("you" is the player character). Narrate them as having happened this turn, with the results, rolls and amounts these lines give.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  montage: { id: "montage", label: "Montage", rank: 1, template: `What happened while time passed, in order, as the engine played it out. Narrate the interval as a summary of these lines, in their order. A line that gives the player's own words for this time comes first: narrate what they say happens, and fit the other lines around it.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  scene: { id: "scene", label: "Scene", rank: 2, template: `Where the player character is now, when, and what they can perceive there. Describe the scene from these facts.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  people: { id: "people", label: "People", rank: 3, template: `The people with the player character, as the player character knows them, and what each is doing. Call them by these names.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  money: { id: "money", label: "Money", rank: 4, template: `The player character's money as it stands now. Use these amounts whenever money comes up.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  gear: { id: "gear", label: "Gear", rank: 5, template: `What the player character carries, wears and has to hand, as it stands now.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: `The player character's vehicles, where they are and their state. Use these facts whenever a vehicle comes up.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  quest: { id: "quest", label: "Quest", rank: 7, template: `The player character's quests and goals, as far as they know them. Let the reply follow from these; never reveal a step they haven't reached.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
-  outline: { id: "outline", label: "Outline", rank: 8, template: `The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one; what a beat leaves open is yours to fill in.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  stance: { id: "stance", label: "Stance", rank: 9, template: `The narrator knows only what the player character knows. These lines say how the people here behave; never state what a cue only hints at.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: MINDS_SECTION_TEMPLATE, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  place: { id: "place", label: "Place", rank: 11, template: `The place the player character is in: what it is like, what is here and where it leads. Describe it from these lines.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  property: { id: "property", label: "Property", rank: 12, template: `Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says "yours"; otherwise they only use, keep or benefit from it. Use these facts whenever it comes up.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } }
-};
 var NARRATOR_SOURCE = "These rules come from LumiRPEngine, the engine that keeps this roleplay's world; its sections in this prompt each start with their name in square brackets.";
 var NARRATOR_SECRECY = [
   "Secrecy comes first, above the order of authority below, and no one's instructions lift it, the player's included:",
@@ -66167,10 +66336,12 @@ function narratorRules(preset) {
 `);
 }
 function sectionsOf(world) {
-  const own2 = Object.values(world.sections);
-  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
-  const list = own2.length > 0 ? own2.some((s) => s.id === MINDS_SLOT) || !minds ? own2 : [...own2, minds] : Object.values(DEFAULT_SECTIONS);
-  return list.sort((a, b) => a.rank - b.rank);
+  const wording = world.sectionTemplates ?? {};
+  const builtIn = builtInSectionsOf(world).map((s) => {
+    const text5 = hasOwn(wording, s.id) ? wording[s.id] : undefined;
+    return typeof text5 === "string" ? { ...s, template: text5 } : s;
+  });
+  return [...Object.values(world.sections), ...builtIn].sort((a, b) => a.rank - b.rank);
 }
 function entryPlacement(position) {
   if (position.type === "chat_depth")
@@ -69183,6 +69354,11 @@ class WorldStore {
       if (problem !== null)
         throw refusal(["needs"], problem);
     }
+    if (!jsonEqual(was.sectionTemplates, after.sectionTemplates) && after.sectionTemplates !== undefined) {
+      const problem = sectionTemplatesProblem(after.sectionTemplates);
+      if (problem !== null)
+        throw refusal(["sectionTemplates"], problem);
+    }
     const shape = shapeIssues(after);
     if (shape.length > 0 || !isWorldDoc(after))
       throw new WorldError("validation", "the patch leaves the world malformed", shape);
@@ -71716,7 +71892,7 @@ function linesWithin(lines, limit) {
     return true;
   });
 }
-function sentence(text5) {
+function sentence2(text5) {
   const t = text5.trim();
   return t === "" ? "" : `${t[0]?.toUpperCase() ?? ""}${t.slice(1)}${/[.!?\u2026]$/.test(t) ? "" : "."}`;
 }
@@ -71855,7 +72031,7 @@ function routineLines(scope) {
   if (routineRole(ctx, who) === "off")
     return [];
   try {
-    return usualRoutine(ctx, who, { place: (place) => own(world.places, place)?.name ?? null, activity: true }).filter((c) => !c.private || c.own).map((c) => `- ${sentence(c.text)}`);
+    return usualRoutine(ctx, who, { place: (place) => own(world.places, place)?.name ?? null, activity: true }).filter((c) => !c.private || c.own).map((c) => `- ${sentence2(c.text)}`);
   } catch {
     return [];
   }
@@ -71953,11 +72129,11 @@ function mindContext(scope, report) {
   const cal = calendarOf(world);
   const said2 = readSlice(state2).presence.findLast((p) => p.msg !== null);
   const heardLast = said2 === undefined || said2.who.includes(who);
-  const why = moment.user.trim() === "" ? sentence(moment.reason) : "";
+  const why = moment.user.trim() === "" ? sentence2(moment.reason) : "";
   const ended = reads.reply.on && moment.kind !== "beat" && withPov2 && heardLast && moment.reply.trim() !== "" ? latestReply(scope, moment.reply) : "";
   const message2 = reads.message.on && withPov2 && moment.kind !== "beat" && moment.user.trim() !== "" ? clip(moment.user, charsOf(reads.message.tokens)) : "";
   const spending = reads.message.on && withPov2 && moment.skip ? `${povLabel(scope)} is spending this time as the player's message says: ${clip(moment.skip, charsOf(reads.message.tokens))}` : "";
-  const now = moment.kind === "beat" ? [`It is ${formatClock(cal, moment.at)}. ${sentence(moment.reason)}`.trim(), spending] : withPov2 ? [ended !== "" || message2 !== "" ? storyVoice(scope) : "", ended !== "" ? `The story so far ended: ${ended}` : "", why, spending, message2 !== "" ? `Now ${povLabel(scope)} says or does: ${message2}` : `${povLabel(scope)} is here with you.`] : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`, why];
+  const now = moment.kind === "beat" ? [`It is ${formatClock(cal, moment.at)}. ${sentence2(moment.reason)}`.trim(), spending] : withPov2 ? [ended !== "" || message2 !== "" ? storyVoice(scope) : "", ended !== "" ? `The story so far ended: ${ended}` : "", why, spending, message2 !== "" ? `Now ${povLabel(scope)} says or does: ${message2}` : `${povLabel(scope)} is here with you.`] : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`, why];
   const about2 = withPov2 && moment.kind === "turn" ? `${moment.user}
 ${heardLast ? readableReply(moment.reply, scope.hideJson) : ""}` : place ? nameOf7(scope, place) : "";
   const recall = reads.recall.on ? recallFor(scope, about2) : [];
@@ -72997,6 +73173,8 @@ class ToolSupport {
 }
 
 // src/backend/turn-steps.ts
+var FACT_LINES = 40;
+var FACT_LINE_CHARS = 480;
 function factLines(registry, world, state2, secrets) {
   return readPass(() => {
     const ctx = registry.context(world, state2);
@@ -73005,18 +73183,38 @@ function factLines(registry, world, state2, secrets) {
     const place = povPlace(registry, world, state2);
     out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state2.clock)}.`);
     const named = `${povLead(pov?.name ?? world.pov)}.`;
+    const seen = new Set(out);
+    const each = [];
     for (const r of registry.renderers) {
       if (r.hint || r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT)
         continue;
+      const mine = [];
       try {
-        for (const line2 of r.render(ctx))
-          if (line2 !== named && findLeaks(line2, secrets).length === 0 && !out.includes(line2))
-            out.push(line2);
+        for (const line2 of r.render(ctx)) {
+          if (line2 === named || findLeaks(line2, secrets).length > 0)
+            continue;
+          const text5 = line2.length <= FACT_LINE_CHARS ? line2 : `${line2.slice(0, FACT_LINE_CHARS).replace(/\s+\S*$/, "")}\u2026`;
+          if (seen.has(text5))
+            continue;
+          seen.add(text5);
+          mine.push(text5);
+        }
       } catch {}
-      if (out.length >= 40)
-        break;
+      each.push(mine);
     }
-    return out.slice(0, 40);
+    const take = each.map(() => 0);
+    for (let room = FACT_LINES - out.length, gave = true;room > 0 && gave; ) {
+      gave = false;
+      each.forEach((lines, i) => {
+        if (room > 0 && (take[i] ?? 0) < lines.length) {
+          take[i] = (take[i] ?? 0) + 1;
+          room--;
+          gave = true;
+        }
+      });
+    }
+    each.forEach((lines, i) => out.push(...lines.slice(0, take[i] ?? 0)));
+    return out;
   });
 }
 var VAR_SLOTS = { gear: ["gear"], money: ["money"], property: ["property", "vehicles"], positions: ["people"], knowledge: ["quest"] };
@@ -74870,9 +75068,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "3a3505561b5550392b136a9b38a48399fa599073f9d1dfba60f13517e2fb1df3";
+  const sha256 = "a423007b2f5fac6529744f64e8894676562c04e1aa4d443894d4f95e3eec65cc";
   const tools = ["d7ea5d8f68714fbde356a1b99c522de6", "3a95a1966944ca155e67ff625d472024"].filter((f) => f !== undefined);
-  return { id: "5598d74b", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "1c22fa49", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -75814,7 +76012,7 @@ var MODEL_USE_PRESETS = {
       consolidate: step(true, ["reply"], UNREASONED_ROUTE)
     },
     budgets: { pre: { calls: 2, lookup: { calls: 4 } }, post: { calls: 2, lookup: { calls: 3 } } },
-    tokens: { sections: 4000 }
+    tokens: { sections: 8000 }
   },
   full: {
     steps: {
@@ -75830,7 +76028,7 @@ var MODEL_USE_PRESETS = {
       consolidate: step(true, ["reply"], UNREASONED_ROUTE)
     },
     budgets: { pre: { calls: 8, lookup: { calls: 6 } }, post: { calls: 4, lookup: { calls: 4 } } },
-    tokens: { sections: 8000 }
+    tokens: { sections: 12000 }
   }
 };
 var LIFTED = {
@@ -75856,6 +76054,10 @@ var LIFTED = {
     [600, MODEL_USE_PRESETS.standard.tokens.sections],
     [1000, MODEL_USE_PRESETS.full.tokens.sections]
   ]),
+  wholeSections: new Map([
+    [4000, MODEL_USE_PRESETS.standard.tokens.sections],
+    [8000, MODEL_USE_PRESETS.full.tokens.sections]
+  ]),
   minds: new Map([
     [300, MINDS_PRESETS.lean.tokens],
     [600, MINDS_PRESETS.standard.tokens],
@@ -75868,8 +76070,8 @@ function lifted(raw) {
   if (rev >= SETTINGS_DEFAULTS_REV)
     return out;
   const mu = isRecord(out.modelUse) ? out.modelUse : null;
+  const lift = (map, n) => map.get(n) ?? n;
   if (rev < 2) {
-    const lift = (map, n) => map.get(n) ?? n;
     if (mu && isRecord(mu.steps)) {
       for (const s of Object.values(mu.steps)) {
         if (!isRecord(s))
@@ -75893,7 +76095,8 @@ function lifted(raw) {
       mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
     if (isRecord(out.minds) && typeof out.minds.tokens === "number")
       out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
-  }
+  } else if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number")
+    mu.tokens.sections = lift(LIFTED.wholeSections, mu.tokens.sections);
   const helperEffort = isRecord(out.helper) ? out.helper.effort : undefined;
   if (rev < 3 && mu && isRecord(mu.steps) && (helperEffort === undefined || helperEffort === DEFAULT_HELPER.effort)) {
     for (const purpose of UNREASONED_STEPS) {
@@ -76764,11 +76967,11 @@ function withoutMissing(lines, missing) {
       continue;
     }
     const sentences = line2.trim().split(/(?<=[.!?])\s+(?=[A-Z"\u201C'\u2018([])/u);
-    const kept2 = sentences.flatMap((sentence2) => {
-      const clauses = sentence2.split(/\s*;\s*/);
+    const kept2 = sentences.flatMap((sentence3) => {
+      const clauses = sentence3.split(/\s*;\s*/);
       const left = clauses.filter((c) => !missing.some((label) => names2(c, label)));
       if (left.length === clauses.length)
-        return [sentence2];
+        return [sentence3];
       if (left.length === 0)
         return [];
       const joined3 = left.join("; ").replace(/[\s,;:]+$/, "");
@@ -76866,13 +77069,18 @@ function buildSections(input) {
       const screened = lines.map((text6, i) => ({ text: text6, source: lineSources[i] })).filter((l) => minds || findLeaks(l.text, secrets).length === 0);
       const capped = feed.maxLines !== undefined ? screened.slice(0, feed.maxLines) : [...screened];
       const markedRoom = feed.maxLines !== undefined ? Math.max(0, feed.maxLines - capped.length) : marked.length;
+      const costOf3 = (body) => input.cost(renderSection(section.label, section.template, body.map((l) => l.text)));
       if (feed.maxTokens !== undefined)
-        while (capped.length > 0 && input.cost(renderSection(section.label, section.template, capped.map((l) => l.text))) > feed.maxTokens)
+        while (capped.length > 0 && costOf3(capped) > feed.maxTokens)
           capped.pop();
-      const safe = capped.map((l) => l.text);
+      const kept2 = [...capped];
+      if (!minds && section.rank > 0)
+        while (kept2.length > 1 && costOf3(kept2) > budget)
+          kept2.pop();
+      const safe = kept2.map((l) => l.text);
       const facts = marked.slice(0, markedRoom);
       const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
-      const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - capped.length);
+      const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - kept2.length);
       if (safe.length === 0) {
         if (minds && allMinds.length > 0) {
           record3.push({ slot: section.id, label: section.label, tokens: input.cost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
@@ -76886,19 +77094,21 @@ function buildSections(input) {
       const content = renderSection(section.label, section.template, safe);
       input.seen(content);
       const cost = input.cost(content);
-      const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
-      record3.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...cut > 0 ? { cut } : {}, delivery: "unchecked" });
-      if (clipped) {
-        outcome(section, feed, "clipped", { tokens: cost, cut });
+      if (minds ? cost > mindsBudget : section.rank > 0 && cost > budget) {
+        const whole4 = minds ? cost : costOf3(capped);
+        const capsCut = cut - (capped.length - kept2.length);
+        record3.push({ slot: section.id, label: section.label, tokens: whole4, clipped: true, ...capsCut > 0 ? { cut: capsCut } : {}, delivery: "unchecked" });
+        outcome(section, feed, "clipped", { tokens: whole4, cut: capsCut });
         continue;
       }
+      record3.push({ slot: section.id, label: section.label, tokens: cost, clipped: false, ...cut > 0 ? { cut } : {}, delivery: "unchecked" });
       if (!minds)
         budget -= cost;
       const fill = { slot: section.id, content };
       fills.push(fill);
       filled.add(section.id);
       recorded.push(section.id);
-      sources.push(...capped.flatMap((l) => l.source ? [l.source] : []));
+      sources.push(...kept2.flatMap((l) => l.source ? [l.source] : []));
       outcome(section, feed, "sent", { content, tokens: cost, cut });
       if (safeHints.length > 0 || facts.length > 0)
         hinted.push({ fill, slot: section.id, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
@@ -78079,7 +78289,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "5598d74b" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1c22fa49" }), (chatId) => this.messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }

@@ -4247,7 +4247,6 @@ var COLLECTION_SPECS = {
   sections: [
     { kind: "text", key: "label", label: "Label" },
     { kind: "number", key: "rank", label: "Rank (lower is reserved first)", step: 1 },
-    { kind: "text", key: "template", label: "Template", multiline: true },
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
     { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v3) => v3 !== false },
     { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: SCOPE_LABEL, optional: true, hint: "Unset, it's what your character knows. The wider choices also tell the narrator what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
@@ -4480,7 +4479,7 @@ function newItem(collection, id, world, name) {
     case "tables":
       return { id, pack: "", schema: `lre-table/${id}/v1`, revision: "", label: shown, columns: {}, rows: {} };
     case "sections":
-      return { id, label: shown, rank: 50, template: "", position: { type: "native" } };
+      return { id, label: shown, rank: 50, template: "{{lines}}", position: { type: "native" } };
     case "steps":
       return { id, purpose: "brief", template: "", output: "text", signals: [] };
     case "packs":
@@ -9139,6 +9138,8 @@ function issueTarget(path) {
   const [head, id, pinned] = path.split(".");
   if (head === "lorePins" && pinned)
     return id === "characters" ? { collection: "entities", id: pinned } : id === "places" ? { collection: "places", id: pinned } : null;
+  if (head === "sectionTemplates" && id)
+    return { collection: "sections", id };
   const collection = COLLECTIONS.find((c3) => c3 === head);
   return collection && id ? { collection, id } : null;
 }
@@ -9481,6 +9482,7 @@ var MIND_TEXT_CAPS = {
   tolds: 3,
   reason: 160
 };
+var MINDS_SLOT = "minds";
 var MIND_PROMPT_DEFAULTS = Object.freeze({
   mind: [
     "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
@@ -24582,6 +24584,158 @@ function PromptEditor(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/shared/sections.ts
+var LINES_MARKER = "{{lines}}";
+var DEFAULT_SECTIONS = {
+  outcome: { id: "outcome", label: "Outcome", rank: 0, template: `What the player character's actions did this turn, in the order they played, as the engine settled them: the authoritative record of this turn's results. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences ("you" is the player character). Narrate each as having happened this turn, with the exact results, rolls, amounts and changes its line gives; never soften, round or swap them for vaguer ones.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  montage: { id: "montage", label: "Montage", rank: 1, template: `What happened while time passed, in order, as the engine played it out: the authoritative record of the interval. Narrate the interval as a summary of these lines, in their order, keeping the specific people, places, amounts and changes each one names. A line that gives the player's own words for this time comes first: narrate what they say happens, and fit the other lines around it.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  scene: { id: "scene", label: "Scene", rank: 2, template: `Where the player character is now, when, and what they can perceive there: the authoritative facts of the scene. Describe it from these specifics as given (the place by its name, the time, the weather, what is in view), never generic stand-ins, and keep to them whenever the prose touches the setting.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  people: { id: "people", label: "People", rank: 3, template: `The people with the player character, as the player character knows them, and what each is doing: the authoritative record of who is here. Call them by these names, and keep each one's activity, state, clothes and what they carry as their line gives it; never fold them into a crowd or swap in generic details. Bring a person's specifics in whenever the prose turns to them.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  money: { id: "money", label: "Money", rank: 4, template: `The player character's money as it stands now: the authoritative figures. Use these exact amounts whenever money comes up; never round them, estimate them or give another balance.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  gear: { id: "gear", label: "Gear", rank: 5, template: `What the player character carries, wears and has to hand, as it stands now: the authoritative list, one specific item a line. Name each item as given, with its details and condition, whenever the prose touches it; never replace it with a generic stand-in ("a bag", "some tools").
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: `The vehicles the player character may use, and others nearby, as they know them: where each is, whose it is, its fuel and its state. These lines are the authoritative record: call each vehicle by the name and details its line gives, keep its place, fuel and condition as stated, and bring them in whenever a vehicle comes up, never a generic "the car" where a line names one.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  quest: { id: "quest", label: "Quest", rank: 7, template: `The player character's quests and goals, as far as they know them: the authoritative record of where each stands. Let the reply follow from these, keeping each one's names, objectives and stage as given; never reveal a step they haven't reached.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  outline: { id: "outline", label: "Outline", rank: 8, template: `The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one and keeping the specific people, things, places and amounts it names; what a beat leaves open is yours to fill in.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  stance: { id: "stance", label: "Stance", rank: 9, template: `The narrator knows only what the player character knows. These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: `Each mind below is scoped to what that character knows and is blind to everyone else's. Let each shape that character's own choices, words and manner this turn, as specifically as it says. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  place: { id: "place", label: "Place", rank: 11, template: `The place the player character is in: what it is like, what is here, where it leads, and the lore about it. These lines are the authoritative inventory of the place: name each thing, room, way out and detail as given whenever the prose touches it, and never reduce them to a summary or a generic stand-in ("some furniture", "various goods").
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  property: { id: "property", label: "Property", rank: 12, template: `Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says "yours"; otherwise they only use, keep or benefit from it. These lines are the authoritative record: use each property's name, place and details as given whenever it comes up.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } }
+};
+function builtInSectionsOf(world) {
+  const own = Object.keys(world.sections);
+  if (own.length === 0)
+    return Object.values(DEFAULT_SECTIONS);
+  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
+  return minds && !own.includes(MINDS_SLOT) ? [minds] : [];
+}
+function sectionTemplateProblem(text) {
+  return text.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
+}
+function storedSectionTemplates(value) {
+  return Object.fromEntries(Object.entries(value).filter(([id, text]) => hasOwn(DEFAULT_SECTIONS, id) && text !== DEFAULT_SECTIONS[id]?.template));
+}
+
+// src/frontend/build/section-template.tsx
+var SECTION_TEMPLATE_HELP = `What the narrator reads about this section: what it holds and how to write from it. ${LINES_MARKER} marks where the section's lines go, and must stay in it.`;
+function SectionTemplateField(props) {
+  const problem = sectionTemplateProblem(props.value);
+  const issues = [...problem === null ? [] : [{ severity: "error", path: "", code: "section_lines", message: `The guidance ${problem}.` }], ...props.issues];
+  const defaultText = props.defaultText;
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-section-template": true,
+    children: [
+      /* @__PURE__ */ u3(TextInput, {
+        label: "Guidance",
+        multiline: true,
+        value: props.value,
+        hint: SECTION_TEMPLATE_HELP,
+        issues,
+        onChange: (next) => props.onChange(typeof next === "string" ? next : "")
+      }, undefined, false, undefined, this),
+      defaultText !== null ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          variant: "ghost",
+          icon: "undo",
+          disabled: props.disabled || props.value === defaultText,
+          onClick: () => props.onChange(defaultText),
+          children: "Reset to default"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function builtInSection(world, id) {
+  return builtInSectionsOf(world).find((s3) => s3.id === id) ?? null;
+}
+function builtInText(world, section) {
+  const own = world.sectionTemplates ?? {};
+  const text = hasOwn(own, section.id) ? own[section.id] : undefined;
+  return typeof text === "string" ? text : section.template;
+}
+function sectionTemplatesPatch(world, id, text) {
+  const next = storedSectionTemplates({ ...world.sectionTemplates ?? {}, [id]: text });
+  if (Object.keys(next).length > 0)
+    return [{ op: "add", path: "/sectionTemplates", value: next }];
+  return world.sectionTemplates === undefined ? [] : [{ op: "remove", path: "/sectionTemplates" }];
+}
+function sectionRows(world) {
+  const own = Object.values(world.sections).map((s3) => ({ section: s3, path: `sections.${s3.id}`, note: undefined }));
+  const builtIn = builtInSectionsOf(world).map((s3) => ({ section: s3, path: `sectionTemplates.${s3.id}`, note: builtInText(world, s3) === s3.template ? "Built-in" : "Built-in, in this world's wording" }));
+  return [...own, ...builtIn].sort((a3, b3) => a3.section.rank - b3.section.rank).map((r3) => ({ id: r3.section.id, value: r3.section, label: r3.section.label || r3.section.id, path: r3.path, note: r3.note }));
+}
+function BuiltInSectionEditor(props) {
+  const app = useApp();
+  const lint = useSelect(app.drafts, (d3) => d3?.lint ?? []);
+  const id = props.section.id;
+  const initial = builtInText(props.world, props.section);
+  const [value, setValue] = d2(initial);
+  const [busy, run] = useBusy();
+  useHeld(value, setValue, initial, `${props.world.id}/sectionTemplates/${id}`);
+  const defaultText = DEFAULT_SECTIONS[id]?.template ?? props.section.template;
+  const changed = value !== initial;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-page",
+    "data-lre-editor": "sections",
+    "data-lre-built-in": id,
+    children: [
+      /* @__PURE__ */ u3(ItemHeader, {
+        title: props.section.label,
+        id,
+        subtitle: value === defaultText ? "Built-in section" : "Built-in section, in this world's wording"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Banner, {
+        tone: "info",
+        children: "This world has this section without listing it, so its guidance is what you can change here; the rest of its settings are the built-in ones."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        children: /* @__PURE__ */ u3(SectionTemplateField, {
+          value,
+          defaultText,
+          issues: lintAt(lint, `sectionTemplates.${id}`),
+          disabled: busy,
+          onChange: setValue
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SaveBar, {
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: !changed || sectionTemplateProblem(value) !== null,
+            busy,
+            onClick: () => run(async () => {
+              const ops = sectionTemplatesPatch(props.world, id, value);
+              if (ops.length > 0)
+                await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "patch", ops });
+            }),
+            children: "Save to draft"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: busy || !changed,
+            onClick: () => setValue(initial),
+            children: "Revert"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/build/build.tsx
 var GROUPS2 = [
   { title: "People & things", collections: ["entities", "kinds", "classifications", "relations"] },
@@ -25163,10 +25317,10 @@ function WorldHome() {
             icon: COLLECTION_INFO[collection].icon,
             title: COLLECTION_INFO[collection].label,
             subtitle: COLLECTION_INFO[collection].hint,
-            value: Object.keys(doc[collection] ?? {}).length,
+            value: collection === "sections" ? sectionRows(doc).length : Object.keys(doc[collection] ?? {}).length,
             valueTone: "muted",
             badge: /* @__PURE__ */ u3(IssueBadge, {
-              issues: lintAt(draft.lint, collection)
+              issues: collection === "sections" ? [...lintAt(draft.lint, collection), ...lintAt(draft.lint, "sectionTemplates")] : lintAt(draft.lint, collection)
             }, undefined, false, undefined, this),
             chevron: true,
             onClick: () => go(app, { view: "collection", worldId: draft.worldId, collection })
@@ -25228,7 +25382,7 @@ function CollectionView(props) {
   const bulk = props.collection === "entities" || props.collection === "places" ? props.collection : null;
   const doc = draft.doc;
   const info = COLLECTION_INFO[props.collection];
-  const items = Object.entries(doc[props.collection]).map(([id, value]) => ({ id, value, label: itemLabel(props.collection, id, value, doc.places) }));
+  const items = props.collection === "sections" ? sectionRows(doc) : Object.entries(doc[props.collection]).map(([id, value]) => ({ id, value, label: itemLabel(props.collection, id, value, doc.places), path: `${props.collection}.${id}`, note: undefined }));
   const q2 = query.trim().toLowerCase();
   const shown = items.filter((item) => !q2 || item.id.toLowerCase().includes(q2) || item.label.toLowerCase().includes(q2));
   const chosen = items.filter((item) => selection.ids.includes(item.id)).map((item) => item.id);
@@ -25292,6 +25446,10 @@ function CollectionView(props) {
         class: "lre-build-note",
         children: "New data tables come from packs; open one to edit this world's copy of it."
       }, undefined, false, undefined, this),
+      props.collection === "sections" ? /* @__PURE__ */ u3("p", {
+        class: "lre-build-note",
+        children: Object.keys(doc.sections).length === 0 ? "This world lists no sections of its own, so it has every built-in one: open one to change its guidance. A world that lists its own gets only those, and the built-in Minds." : "This world lists its own sections, so it has only those and the built-in Minds."
+      }, undefined, false, undefined, this) : null,
       items.length > 8 ? /* @__PURE__ */ u3("div", {
         class: "lre-build-search",
         children: [
@@ -25327,14 +25485,14 @@ function CollectionView(props) {
         children: /* @__PURE__ */ u3(List, {
           children: shown.map((item) => /* @__PURE__ */ u3(ListRow, {
             title: item.label,
-            subtitle: detail(item.value),
+            subtitle: item.note ?? detail(item.value),
             id: item.id,
             leading: selection.on ? /* @__PURE__ */ u3(PickBox, {
               label: `Select ${item.label}`,
               checked: selection.ids.includes(item.id)
             }, undefined, false, undefined, this) : undefined,
             badge: /* @__PURE__ */ u3(IssueBadge, {
-              issues: lintAt(draft.lint, `${props.collection}.${item.id}`)
+              issues: lintAt(draft.lint, item.path)
             }, undefined, false, undefined, this),
             chevron: !selection.on,
             onClick: () => selection.on ? selection.toggle(item.id) : go(app, { view: "item", worldId: draft.worldId, collection: props.collection, id: item.id })
@@ -25423,6 +25581,7 @@ function SchemaEditor(props) {
   const formDoc = b2(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds), relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
   const path = `${props.collection}.${id}`;
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
+  const unusable = props.collection === "sections" && sectionTemplateProblem(typeof value.template === "string" ? value.template : "") !== null;
   const PackConfig = props.collection === "packs" ? app.catalog.configs.get(id) : undefined;
   const release = T2(() => {
     return;
@@ -25471,6 +25630,13 @@ function SchemaEditor(props) {
         config: isRecord(value.config) ? value.config : {},
         lint: lintAt(draft?.lint ?? [], `${path}.config`),
         onChange: (config) => setValue({ ...value, config })
+      }, undefined, false, undefined, this) : null,
+      props.collection === "sections" ? /* @__PURE__ */ u3(SectionTemplateField, {
+        value: typeof value.template === "string" ? value.template : "",
+        defaultText: hasOwn(DEFAULT_SECTIONS, id) ? DEFAULT_SECTIONS[id]?.template ?? null : null,
+        issues: lintAt(draft?.lint ?? [], `${path}.template`),
+        disabled: busy,
+        onChange: (template) => setValue({ ...value, template })
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(SchemaFields, {
         specs: props.collection === "entities" ? entityFormSpecs(formDoc, value) : COLLECTION_SPECS[props.collection],
@@ -25526,7 +25692,7 @@ function SchemaEditor(props) {
         children: [
           /* @__PURE__ */ u3(Button, {
             variant: "primary",
-            disabled: !changed && !isNew,
+            disabled: !changed && !isNew || unusable,
             busy,
             onClick: save,
             children: isNew ? "Create" : "Save to draft"
@@ -25550,6 +25716,15 @@ function ItemView(props) {
     return null;
   const registered = app.catalog.editors.get(props.collection);
   const character = opensCharacterPage({ ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) }, props.collection, props.id);
+  const builtIn = props.collection === "sections" && props.id !== null && !hasOwn(draft.doc.sections, props.id) ? builtInSection(draft.doc, props.id) : null;
+  if (builtIn)
+    return /* @__PURE__ */ u3(BuiltInSectionEditor, {
+      world: draft.doc,
+      collection: props.collection,
+      id: props.id,
+      send,
+      section: builtIn
+    }, builtIn.id, false, undefined, this);
   const Editor = registered ? registered.component : character ? CharacterPage : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return /* @__PURE__ */ u3(Editor, {
     world: draft.doc,
@@ -26719,7 +26894,7 @@ function previewNotes(s3, budget) {
   if (s3.hints > 0)
     notes.push(`${s3.hints} background ${s3.hints === 1 ? "hint" : "hints"} at the end.`);
   if (s3.cut > 0)
-    notes.push(`${s3.cut} ${s3.cut === 1 ? "line" : "lines"} left out by its caps.`);
+    notes.push(`${s3.cut} ${s3.cut === 1 ? "line" : "lines"} left out ${s3.slot === "minds" ? "over its own budget" : "by its caps or the section budget"}.`);
   const turn = TURN_WRITES[s3.slot];
   if (turn && s3.status !== "off")
     notes.push(turn);
@@ -52460,9 +52635,10 @@ var ACTIVATION = {
 function sectionNote(s3) {
   if (s3.cut === undefined)
     return s3.clipped ? "Left out: over the section budget" : undefined;
+  const minds2 = s3.slot === MINDS_SLOT;
   if (s3.clipped)
-    return "Left out: over its own budget";
-  return `${s3.cut} line${s3.cut === 1 ? "" : "s"} left out: over its own budget`;
+    return minds2 ? "Left out: over its own budget" : "Left out: over the section budget";
+  return `${s3.cut} line${s3.cut === 1 ? "" : "s"} left out: ${minds2 ? "over its own budget" : "over its caps or the section budget"}`;
 }
 function CallMeter2(props) {
   const rows = [
