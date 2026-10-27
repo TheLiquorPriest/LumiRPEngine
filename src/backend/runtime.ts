@@ -4031,7 +4031,8 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
       return world && p.from !== world.pov && typeof p.from === "string" ? `${s("from")} paid ${amount} to ${s("to")}` : `Paid ${amount} to ${s("to")}`;
     }
     case "give":
-      return `${s("from")} gave ${s("item")} to ${s("to")}`;
+      // The channel passes a left-out giver through (the thing's holder gives it), so the label names only who got it.
+      return named("from") ? `${subject("from")} gave ${s("item")} to ${s("to")}` : `${subject("to")} got ${s("item")}`;
     case "location":
       return `${actor("entity")} went to ${s("place")}`;
     case "condition": {

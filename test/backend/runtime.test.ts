@@ -624,6 +624,15 @@ describe("proposal labels", () => {
     // A count names no holder by default: the thing's own count moved.
     expect(describeProposal({ type: "quantity", item: "a lantern", delta: -1 }, view)).toBe("The count of a lantern went down by 1");
   });
+
+  test("a hand-over reads as a sentence about whoever gave it, and one that names no giver names only who got it", () => {
+    const view = devAtHome();
+    const pov = view.world.pov;
+    expect(describeProposal({ type: "give", from: pov, item: "a lantern", to: "dev" }, view)).toBe("You gave a lantern to Dev");
+    expect(describeProposal({ type: "give", from: "dev", item: "a lantern", to: pov }, view)).toBe("Dev gave a lantern to you");
+    // The channel doesn't read a left-out giver as the player character, so neither does its label.
+    expect(describeProposal({ type: "give", item: "a lantern", to: "dev" }, view)).toBe("Dev got a lantern");
+  });
 });
 
 describe("Scene slot", () => {
