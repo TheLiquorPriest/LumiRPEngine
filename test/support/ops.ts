@@ -26,10 +26,10 @@ import type { EditOp } from "../../src/shared/protocol";
 import { decodeLedger, encodeLedger, toChain } from "../../src/backend/ledger-io";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { startMarkersFrom } from "../../src/backend/start-markers";
-import { apartHost, applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, validateEvent, validMarkerBody } from "../../src/engine/events";
+import { apartHost, applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, tiesOf, validateEvent, validMarkerBody } from "../../src/engine/events";
 import { touchedField } from "../../src/engine/touched";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
-import { activeRecord, isLive, isTombstoned } from "../../src/engine/ledger/path";
+import { activeRecord, isLive, isTombstoned, turnPath } from "../../src/engine/ledger/path";
 import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRng, type Rng } from "../../src/engine/rng";
 import type { FakeMessage, Generation } from "./fake-host";
@@ -38,7 +38,8 @@ import type { Folds, Harness } from "./harness";
 import { openMoney, POV } from "./test-pack";
 
 export type Op =
-  | { op: "send"; text: number; reply: number; createAtEnd: boolean; rerender: boolean; money?: number; toll?: number; fight?: number; opens?: number; life?: number; mind?: number }
+  /** `linked`: a purchase Dev's account covers part of instead (`LINKED_TEXTS`), with his transfer kept apart before it. */
+  | { op: "send"; text: number; reply: number; createAtEnd: boolean; rerender: boolean; money?: number; toll?: number; fight?: number; opens?: number; life?: number; mind?: number; linked?: number }
   | { op: "regenerate"; at: number; reply: number; renarrate?: boolean; toll?: number; opens?: number }
   | { op: "continue"; at: number; reply: number; stop: boolean; rerenderPrefix: boolean }
   | { op: "editAndSend"; at: number; text: number; reply: number; branch: boolean }
@@ -57,9 +58,12 @@ export type Op =
    * same kinds, `gmEditOps`), not written when the head refuses it; `open`: a ✎ cash fix on Dev
    * instead, which opens his money first while it isn't; `life`: a GM life edit instead (a state set,
    * someone told, or both as one unit); `mind`: a GM minds control instead (a pin, a refresh, a plan
-   * added or closed).
+   * added or closed); `tie`: the head's latest purchase's price corrected instead, as Edit amount
+   * records it (`tiedTo` that purchase), not written when the head holds no purchase; `convert`: Keep
+   * converting the dropped line it picks instead (the chat's latest nearest 1), not written when
+   * nothing dropped.
    */
-  | { op: "write"; kind: number; a: number; b: number; gm?: number; asked?: number; open?: number; life?: number; mind?: number }
+  | { op: "write"; kind: number; a: number; b: number; gm?: number; asked?: number; open?: number; life?: number; mind?: number; tie?: number; convert?: number }
   /** A GM-style fix on the head (with `asked`, a GM edit with its request; with `open`, a ✎ cash fix on Dev; with `life`, a GM life edit), then a Re-run of the head with any reply (L43). */
   | { op: "fixRerun"; gm: number; a: number; reply: number; asked?: number; open?: number; opens?: number; life?: number }
   | { op: "dryRun" }
@@ -78,7 +82,7 @@ export type Op =
    * again from its request (DESIGN §7).
    */
   | { op: "askedEarlier"; asked: number; a: number; at: number; text: number }
-  /** The Undo on a GM edit's chip on the head (picked by `a` among those it shows), as the player presses it: every event of the entry. */
+  /** The Undo on a GM edit's chip on the head (picked by `a` among those it shows), as the player presses it: its entry named, taken back whole as it stands when the undo lands. */
   | { op: "undoAsked"; a: number };
 
 const USER_TEXTS = ["buy:map:30", "buy:lamp:20", "buy:rope:90", "use:map", "use:lamp", "use:rope", "earn:15", "roll", "look around"];
@@ -93,6 +97,11 @@ const TOLL_REPLIES = ["You pay the toll. [pay:30]", "A fee is taken. [pay:15]", 
 const FIGHT_TEXTS = ["fight:rat", "strike:rat", "strike:rat", "end_turn", "flee"];
 // Replies naming Dev, whose read opens his money (once), kept apart for the same reason; the optional `opens` op field picks from these.
 const OPENING_REPLIES = ["Dev counts out his wages. [opens:dev]", "Dev pays you back. [opens:dev] [found:5]"];
+// Purchases Dev's account covers part of, as an overdraft link covers a payment the story made (DESIGN
+// §25.10), kept apart for the same reason; the optional `linked` op field picks from these. Their
+// items collide with `buy:` and `shop:` ones on other branches, and Dev's money opens on some only,
+// so a rebased view drops the transfer alone, or with its purchase.
+const LINKED_TEXTS = ["linked:lamp:40:30", "linked:map:70:40", "linked:tire:110:50"];
 // Turns the engine plans with life changes and queued actions (DESIGN §8, §11), kept apart for the
 // same reason; the optional `life` op field picks from these. A queue stops at the gamble's check, a
 // splurge Sam can't afford, a visible alarm, a fight starting, or Sam collapsing; never at a hidden alarm.
@@ -275,9 +284,69 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     // GM edits that keep their request, and what moves them onto other views, after those, from their own stream.
     const asked = rng.fork("asked");
     ops.push(...generateAsked(asked, 1 + Math.floor(asked.next() * 14)));
+    // Purchases an overdraft link covers part of, and their price corrections, last, from their own stream.
+    const linked = rng.fork("linked");
+    ops.push(...generateLinked(linked, 1 + Math.floor(linked.next() * 14)));
   }
   // Drawn from a stream of its own, so the sequence is otherwise as before.
   if (depth === 0 && rng.fork("earlier-build").next() < 0.25) ops.unshift({ op: "earlierBuild" });
+  return ops;
+}
+
+/**
+ * Payments the story made that an overdraft link covers part of (DESIGN §25.10): turns that buy with
+ * Dev's account covering part (`LINKED_TEXTS`), his transfer kept apart before the purchase, and
+ * price corrections tied to the purchase (`tie`); and around them Dev's money opened on some swipes
+ * only and spent by ✎ fixes, deposits and payments, Keep with its conversions, and the swipes,
+ * Re-runs and user edits that put those records behind a changed story, where the transfer drops
+ * alone or with its purchase, and a correction with the purchase it corrected. It starts by settling
+ * a pause an earlier part left, then a turn that pays Sam in and opens Dev's money.
+ */
+function generateLinked(rng: Rng, length: number): Op[] {
+  const ops: Op[] = [];
+  const r = (): number => rng.next();
+  ops.push({ op: "write", kind: 0.62 + r() * 0.1, a: r(), b: r() });
+  ops.push({ op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false, money: 1.5 / MONEY_TEXTS.length, opens: r() });
+  for (let i = 0; i < length; i++) {
+    const roll = r();
+    if (roll < 0.3) ops.push(...linkedRebased(rng));
+    else if (roll < 0.42) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false, linked: r() });
+    else if (roll < 0.5) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false, money: r(), ...(r() < 0.3 ? { opens: r() } : {}) });
+    else if (roll < 0.58) ops.push({ op: "write", kind: r(), a: r(), b: r(), tie: r() });
+    else if (roll < 0.62) ops.push({ op: "write", kind: r(), a: r(), b: r(), open: r() });
+    else if (roll < 0.7) ops.push({ op: "write", kind: r(), a: r(), b: r(), convert: r() });
+    else if (roll < 0.76) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5, ...(r() < 0.3 ? { opens: r() } : {}) });
+    else if (roll < 0.84) ops.push({ op: "navigate", at: 0.5 + r() * 0.5, swipe: r() });
+    else if (roll < 0.88) ops.push({ op: "addSwipe", at: 0.5 + r() * 0.5, text: r() });
+    // Keep (with a conversion when something dropped) or Discard.
+    else if (roll < 0.94) ops.push({ op: "write", kind: 0.62 + r() * 0.23, a: r(), b: r() });
+    else if (roll < 0.97) ops.push({ op: "editUser", at: r(), text: r() });
+    else ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r() });
+  }
+  return ops;
+}
+
+/**
+ * A linked purchase put behind a changed story: Sam paid in and Dev's money opened, the lamp (or the
+ * map) bought, a reply that loses it, then the same thing bought again with Dev covering part and at
+ * times its price corrected; then a swipe added to the reply that lost it, so it is still Sam's there
+ * and the second purchase drops, with its transfer and its correction; at times Keep converting one
+ * of the lines that dropped, and a switch back.
+ */
+function linkedRebased(rng: Rng): Op[] {
+  const r = (): number => rng.next();
+  const at = <T>(items: readonly T[], item: T): number => (items.indexOf(item) + 0.5) / items.length;
+  const lamp = r() < 0.5;
+  const ops: Op[] = [
+    { op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false, money: at(MONEY_TEXTS, "deposit:150"), opens: r() },
+    { op: "send", text: at(USER_TEXTS, lamp ? "buy:lamp:20" : "buy:map:30"), reply: at(REPLIES, "Okay."), createAtEnd: false, rerender: false },
+    { op: "send", text: at(USER_TEXTS, "look around"), reply: at(REPLIES, lamp ? "The lamp slips away. [lose:lamp]" : "You drop the map. [lose:map]"), createAtEnd: false, rerender: false },
+    { op: "send", text: r(), reply: at(REPLIES, "Okay."), createAtEnd: false, rerender: false, linked: at(LINKED_TEXTS, lamp ? "linked:lamp:40:30" : "linked:map:70:40") },
+  ];
+  if (r() < 0.7) ops.push({ op: "write", kind: r(), a: r(), b: r(), tie: r() });
+  ops.push({ op: "addSwipe", at: 0.999, text: r() });
+  if (r() < 0.6) ops.push({ op: "write", kind: r(), a: r(), b: r(), convert: 0.4 + r() * 0.6 });
+  if (r() < 0.4) ops.push({ op: "navigate", at: 0.999, swipe: 0 });
   return ops;
 }
 
@@ -318,7 +387,9 @@ function generateAsked(rng: Rng, length: number): Op[] {
       const twice = r();
       if (twice >= 0.25 && twice < 0.75) ops.push({ ...first, asked: 0.25 + r() * 0.25 });
       const pair: Op[] = twice < 0.25 ? [first, first] : twice < 0.75 ? [{ ...first, asked: 0.75 + r() * 0.25 }, { ...first, asked: 0.5 + r() * 0.25 }] : [first];
-      ops.push({ op: "inFlight", type: r(), inner: [...pair, ...generateInner(rng, Math.floor(r() * 2), opens, removals)], stop: r() < 0.25, reply: r() });
+      // At times the first's Undo waits for the reply too, behind whatever else the reply holds.
+      const held: Op[] = r() < 0.3 ? [{ op: "undoAsked", a: r() * 0.5 }] : [];
+      ops.push({ op: "inFlight", type: r(), inner: [...pair, ...held, ...generateInner(rng, Math.floor(r() * 2), opens, removals)], stop: r() < 0.25, reply: r() });
       if (r() < 0.4) ops.push({ op: "undoAsked", a: r() * 0.5 });
     }
   }
@@ -427,6 +498,68 @@ export class InvariantError extends Error {
   }
 }
 
+/**
+ * What a chat's fold dropped on rebased views: groups of several events, units kept apart
+ * (`APART_GROUP`), those or the units they stand with that Keep converted, and units dropped with a
+ * unit they are tied to (`tiedTo`).
+ */
+export interface GroupDrops {
+  groups: number;
+  apart: number;
+  apartConverted: number;
+  tied: number;
+}
+
+/**
+ * L41 for a chat's fold (`fold`, of `chain`): within one record list, a unit of grouped events is
+ * dropped entirely or not at all on a rebased view; a unit kept apart (`APART_GROUP`) is dropped
+ * whenever the unit it stands with is, unless Keep converted part of either; and a unit tied to one
+ * dropped before it in its record (`tiedTo`) is dropped too, unless Keep converted it. Conversions are
+ * the record's own for the parent path the message folds under (`Rec.keep`): a converted member
+ * that fits leaves no Keep line. Entries made on another branch don't fold, so they aren't held to
+ * it. What broke it, if anything, and what it dropped.
+ */
+export function groupsLandWhole(chain: readonly ChainMessage[], fold: FoldOutput): { broken: string | null; drops: GroupDrops } {
+  const drops: GroupDrops = { groups: 0, apart: 0, apartConverted: 0, tied: 0 };
+  const droppedRefs = new Set(fold.keepReport.filter((k) => k.status === "dropped").map((k) => `${k.messageId}:${JSON.stringify(k.ref)}`));
+  for (const [i, m] of chain.entries()) {
+    const rec = m.ledger?.swipes[String(m.swipeId)];
+    const parent = fold.messages[i]?.parentPath;
+    if (m.isUser || !rec || parent === undefined) continue;
+    const converts = rec.keep?.[parent]?.convert ?? [];
+    const isConverted = (ref: EventRef): boolean => converts.some((c) => JSON.stringify(c) === JSON.stringify(ref));
+    const isDropped = (ref: EventRef): boolean => droppedRefs.has(`${m.id}:${JSON.stringify(ref)}`);
+    // The groups dropped so far in the record, in fold order: its events, then its live entries by `seq`.
+    const fell = new Set<string>();
+    const entries = rec.post.filter((p) => isLive(p.at, parent, turnPath(rec))).sort((a, b) => a.seq - b.seq);
+    const lists: { events: LedgerEvent[]; ref: (index: number) => EventRef }[] = [{ events: rec.events, ref: (index) => ({ in: "events", index }) }, ...entries.map((p) => ({ events: p.events, ref: (index: number): EventRef => ({ in: "post", seq: p.seq, index }) }))];
+    for (const list of lists) {
+      const live = (from: number, to: number): EventRef[] => Array.from({ length: to - from }, (_, k) => list.ref(from + k)).filter((ref) => !rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref)));
+      for (const [from, to] of eventUnits(list.events)) {
+        const members = live(from, to);
+        const dropped = members.filter(isDropped).length;
+        if (dropped > 0 && dropped < members.length) return { broken: `${m.id}: a group was partly dropped`, drops };
+        if (dropped > 0 && to - from > 1) drops.groups++;
+        const host = apartHost(list.events, [from, to]);
+        if (host) {
+          const hosted = live(host[0], host[1]);
+          const overridden = [...members, ...hosted].some(isConverted);
+          if (overridden) drops.apartConverted++;
+          if (dropped > 0) drops.apart++;
+          if (!overridden && hosted.some(isDropped) && dropped < members.length) return { broken: `${m.id}: a unit kept apart stood without the unit it stands with`, drops };
+        }
+        if (!members.some(isConverted) && tiesOf(list.events.slice(from, to)).some((g) => fell.has(g))) {
+          if (dropped < members.length) return { broken: `${m.id}: a unit tied to one that dropped stood without it`, drops };
+          drops.tied++;
+        }
+        const group = list.events[from]?.group;
+        if (dropped > 0 && group !== undefined) fell.add(group);
+      }
+    }
+  }
+  return { broken: null, drops };
+}
+
 interface ChatMemory {
   start: string | null;
   maxSeq: number;
@@ -509,7 +642,7 @@ export class Runner {
       case "send": {
         // Money texts take precedence, so fights never thin out the postings the coverage counts; fights
         // take it over life and queued turns, which would otherwise thin out a fight's turns.
-        const text = op.money !== undefined ? pick(MONEY_TEXTS, op.money) : op.fight !== undefined ? pick(FIGHT_TEXTS, op.fight) : op.life !== undefined ? pick(LIFE_TEXTS, op.life) : op.mind !== undefined ? pick(MIND_TEXTS, op.mind) : pick(USER_TEXTS, op.text);
+        const text = op.linked !== undefined ? pick(LINKED_TEXTS, op.linked) : op.money !== undefined ? pick(MONEY_TEXTS, op.money) : op.fight !== undefined ? pick(FIGHT_TEXTS, op.fight) : op.life !== undefined ? pick(LIFE_TEXTS, op.life) : op.mind !== undefined ? pick(MIND_TEXTS, op.mind) : pick(USER_TEXTS, op.text);
         const u = host.sendUser(chat, text);
         await host.settle();
         const g = await host.start(chat, { type: "normal", createAtEnd: op.createAtEnd });
@@ -726,7 +859,7 @@ export class Runner {
         const shown = (rec?.post ?? []).filter((p) => p.kind === "fix" && p.edit !== undefined && p.events.length > 0 && !rec?.undone.some((u) => u.in === "post" && u.seq === p.seq));
         if (!head || !rec || shown.length === 0) return;
         const entry = pick(shown, op.a);
-        await this.h.write(chat, { kind: "undo", id: `w${++this.ids}`, messageId: head.id, swipeId: head.swipeId, refs: entry.events.map((_, index): EventRef => ({ in: "post", seq: entry.seq, index })) });
+        await this.h.write(chat, { kind: "undo", id: `w${++this.ids}`, messageId: head.id, swipeId: head.swipeId, refs: [], entry: entry.seq });
         return;
       }
       case "fixRerun": {
@@ -1129,6 +1262,29 @@ export class Runner {
     return [...(open ? [] : [openMoney("dev")]), { type: "post", lines: [{ account: "dev", amount: -amount }, { account: `${EXTERNAL_ACCOUNT_PREFIX}correction`, amount }], memo: "Correction" }];
   }
 
+  /**
+   * The head's latest purchase (a `shop:` or `linked:` group) with its price corrected, as Edit amount
+   * records one: a confirm entry whose unit is tied to the purchase's (`tiedTo`), giving Sam some back
+   * or taking more, which a branch that can't cover drops. Null when the head holds no purchase.
+   */
+  private async priceCorrection(id: string, x: number): Promise<HeldWrite | null> {
+    const core = await this.h.core(this.current);
+    const head = this.messages().at(-1);
+    const rec = head && !head.isUser ? core.journal.messages[head.id]?.ledger.swipes[String(head.swipeId)] : undefined;
+    const bought = [...(rec?.events ?? []), ...(rec?.post ?? []).flatMap((p) => p.events)]
+      .map((e) => e.group)
+      .filter((g): g is string => g !== undefined && (g.startsWith("shop:") || g.startsWith("linked:")))
+      .at(-1);
+    if (!bought) return null;
+    const back = pick([5, 15, -10], x);
+    const group = `corrected:${id}`;
+    const events: LedgerEvent[] = [
+      { type: "post", lines: [{ account: POV, amount: back }, { account: `${EXTERNAL_ACCOUNT_PREFIX}shop`, amount: -back }], memo: "price corrected", group, tiedTo: [bought] },
+      { type: "set", entity: POV, field: "detail", value: "price corrected", group, tiedTo: [bought] },
+    ];
+    return { kind: "post", id, target: "head", entry: { kind: "confirm", events } };
+  }
+
   private async writeFor(op: Extract<Op, { op: "write" }>): Promise<HeldWrite | null> {
     const id = `w${++this.ids}`;
     if (op.open !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: await this.devCashFix(op.open) } };
@@ -1136,6 +1292,12 @@ export class Runner {
     if (op.asked !== undefined) return this.h.gmEdit(this.current, id, gmEditOps(op.asked, op.a));
     if (op.life !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: pick(LIFE_FIXES, op.life) } };
     if (op.mind !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: pick(MIND_FIXES, op.mind) } };
+    if (op.tie !== undefined) return this.priceCorrection(id, op.tie);
+    if (op.convert !== undefined) {
+      const dropped = (await this.h.folds(this.current)).optimized.keepReport.filter((line) => line.status === "dropped" && "in" in line.ref);
+      const line = dropped.length > 0 ? pick(dropped, op.convert) : undefined;
+      return line && "in" in line.ref ? { kind: "keep", id, messageId: line.messageId, parentPath: line.parentPath, convert: [line.ref] } : null;
+    }
     const all = this.messages();
     const k = op.kind;
     if (k < 0.15) return { kind: "post", id, target: "head", entry: { kind: "materialize", events: [{ type: "materialize", entity: POV, domain: "gear", generatorVersion: 1, tablesRevision: "t", events: [{ type: "set", entity: POV, field: "detail", value: `detail-${Math.floor(op.a * 5)}` }] }] } };
@@ -1225,12 +1387,7 @@ export class Runner {
       const droppedKeep = new Set(reference.keepReport.filter((k) => k.status === "dropped").map((k) => `${k.messageId}:${JSON.stringify(k.ref)}`));
       if ([...droppedNotes].some((k) => !droppedKeep.has(k)) || [...droppedKeep].some((k) => !droppedNotes.has(k))) throw new InvariantError("L40", `${chatId}: dropped notes and Keep lines differ`);
       if (reference.keepReport.some((k) => k.status === "dropped" && k.text.includes("can't cover"))) this.coverage.fundsDrops++;
-      // L41: a group lands whole: within one record list, a unit of grouped events is dropped
-      // entirely or not at all on a rebased view, and a unit kept apart (`APART_GROUP`) is dropped
-      // whenever the unit it stands with is, unless Keep converted part of either.
       const chain = await this.h.chain(chatId);
-      const droppedRefs = new Set(reference.keepReport.filter((k) => k.status === "dropped").map((k) => `${k.messageId}:${JSON.stringify(k.ref)}`));
-      const convertedRefs = new Set(reference.keepReport.filter((k) => k.status === "converted").map((k) => `${k.messageId}:${JSON.stringify(k.ref)}`));
       for (const m of chain) {
         const rec = m.ledger?.swipes[String(m.swipeId)];
         if (m.isUser || !rec) continue;
@@ -1244,23 +1401,13 @@ export class Runner {
           const mind = Object.hasOwn(MIND_EVENTS, e.type) ? MIND_EVENTS[e.type] : undefined;
           if (mind) this.coverage.minds[mind]++;
         }
-        const lists: { events: LedgerEvent[]; ref: (index: number) => EventRef }[] = [{ events: rec.events, ref: (index) => ({ in: "events", index }) }, ...rec.post.map((p) => ({ events: p.events, ref: (index: number): EventRef => ({ in: "post", seq: p.seq, index }) }))];
-        for (const list of lists) {
-          const live = (from: number, to: number): EventRef[] => Array.from({ length: to - from }, (_, k) => list.ref(from + k)).filter((ref) => !rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref)));
-          const isDropped = (ref: EventRef): boolean => droppedRefs.has(`${m.id}:${JSON.stringify(ref)}`);
-          for (const [from, to] of eventUnits(list.events)) {
-            if (to - from < 2) continue;
-            const members = live(from, to);
-            const dropped = members.filter(isDropped).length;
-            if (dropped > 0 && dropped < members.length) throw new InvariantError("L41", `${chatId}/${m.id}: a group was partly dropped`);
-            if (dropped > 0) this.coverage.groupDrops++;
-            const host = apartHost(list.events, [from, to]);
-            const hosted = host ? live(host[0], host[1]) : [];
-            const overridden = [...members, ...hosted].some((ref) => convertedRefs.has(`${m.id}:${JSON.stringify(ref)}`));
-            if (!overridden && hosted.some(isDropped) && dropped < members.length) throw new InvariantError("L41", `${chatId}/${m.id}: a unit kept apart stood without the unit it stands with`);
-          }
-        }
       }
+      const groups = groupsLandWhole(chain, reference);
+      if (groups.broken) throw new InvariantError("L41", `${chatId}/${groups.broken}`);
+      this.coverage.groupDrops += groups.drops.groups;
+      this.coverage.apartDrops += groups.drops.apart;
+      this.coverage.apartConverts += groups.drops.apartConverted;
+      this.coverage.tiedDrops += groups.drops.tied;
       // L16: every stored entry that isn't live, and every tombstoned record, has a Journal note.
       const noted = new Set(reference.notes.map((n) => `${n.kind}:${n.messageId}:${JSON.stringify(n.ref)}`));
       for (const [i, r] of reference.messages.entries()) {
@@ -1358,6 +1505,9 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
     if (coverage) {
       coverage.fundsDrops += runner.coverage.fundsDrops;
       coverage.groupDrops += runner.coverage.groupDrops;
+      coverage.apartDrops += runner.coverage.apartDrops;
+      coverage.apartConverts += runner.coverage.apartConverts;
+      coverage.tiedDrops += runner.coverage.tiedDrops;
       coverage.carried += runner.coverage.carried;
       coverage.carryDrops += runner.coverage.carryDrops;
       coverage.stripped += runner.coverage.stripped;

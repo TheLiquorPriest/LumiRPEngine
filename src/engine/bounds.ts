@@ -1,8 +1,10 @@
 // One bounds mechanism (DESIGN §9.4, §11; D4). Every model-proposed change meets `{maxDelta, mode}`
 // bounds: the field's own bound and the proposal type's mode, with the player's own max delta. The
 // most restrictive applies: `never` > `confirm` > `auto`, and the smallest `maxDelta`. Locked and
-// derived fields are `never`, and a change stays inside the field's range. No pack sets a max delta:
-// the story's change goes as far as it tells, unless the player or the world's author bounds it.
+// derived fields are `never`. No pack sets a max delta: the story's change goes as far as it tells,
+// unless the player or the world's author bounds it. A change keeps the field's range as it applies
+// (the `add` effect), one after another as the reply told them, so a step here is never cut
+// against a state the reply's earlier changes have since moved.
 //
 // The proposal type's mode is resolved by the backend (`settings-store.effectiveMode`: the
 // player's pin, then the mode learned on the turn's connection, then the D4 cold-start default)
@@ -11,9 +13,8 @@
 import type { JsonValue } from "../shared/json";
 import type { BoundMode, EntityId } from "../shared/ids";
 import type { FieldBound, WorldDoc } from "../shared/world";
-import { fieldBounds } from "./effects";
 import type { Registry } from "./registry-impl";
-import { fieldDef, poolMax } from "./scope";
+import { fieldDef } from "./scope";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 
@@ -55,20 +56,12 @@ export interface BoundPolicy {
 
 export interface BoundedProposal {
   mode: BoundMode;
-  /** The delta after clamping to `maxDelta` and the field's range. */
+  /** The delta after clamping to `maxDelta`; the field's range is kept as the change applies. */
   delta?: number;
   value?: JsonValue;
   /** True when the proposal was cut down to fit. */
   capped: boolean;
   bound: FieldBound;
-}
-
-/** The delta that keeps `start + delta` inside `range`. */
-function clampToRange(range: { min?: number; max?: number }, start: number, delta: number): number {
-  let next = start + delta;
-  if (range.min !== undefined) next = Math.max(range.min, next);
-  if (range.max !== undefined) next = Math.min(range.max, next);
-  return next - start;
 }
 
 /** Bounds one proposed change: the mode it applies under and the delta or value it may apply. */
@@ -87,16 +80,6 @@ export function boundProposal(reg: Registry, world: WorldDoc, state: Readonly<Wo
     if (bound.maxDelta !== undefined && Math.abs(delta) > bound.maxDelta) {
       delta = Math.sign(delta) * bound.maxDelta;
       capped = true;
-    }
-    if (e && input.entity && input.field) {
-      // From where a change starts the field (`add`): its value, else its default, else a pool's
-      // evaluated max (an unset pool is full), kept inside its range, a pool's evaluated one included.
-      const ctx = reg.context(world, state);
-      const stored = own(e.fields, input.field);
-      const start = typeof stored === "number" ? stored : typeof def?.default === "number" ? def.default : def?.pool ? (poolMax(reg, ctx, input.entity, def.pool) ?? 0) : 0;
-      const clamped = clampToRange(fieldBounds(reg, ctx, input.entity, def), start, delta);
-      if (clamped !== delta) capped = true;
-      delta = clamped;
     }
   }
   let value = input.value;

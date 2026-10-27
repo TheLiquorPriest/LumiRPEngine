@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
 import type { WorldState } from "../../src/engine/state";
 import { regardAxes } from "../../src/packs/relationships/core/index";
-import type { JsonObject } from "../../src/shared/json";
+import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { Rig } from "../support/rig";
 
 const EXTRACT_MARK = "propose concrete state changes";
@@ -264,6 +264,72 @@ describe("a reply's regard", () => {
   });
 });
 
+/** The phone's count and condition as stored; null where nothing is. */
+async function phone(state: () => Promise<WorldState>): Promise<{ qty: JsonValue; condition: JsonValue }> {
+  const fields = (await state()).entities.pov_phone?.fields;
+  return { qty: fields?.qty ?? null, condition: fields?.condition ?? null };
+}
+
+describe("a reply's changes to one thing's field", () => {
+  const crackAndRepair = [
+    { type: "item_condition", entity: "pov", item: "pov_phone", delta: -40 },
+    { type: "item_condition", entity: "pov", item: "pov_phone", delta: 40 },
+  ];
+  const fourThenThree = [
+    { type: "quantity", entity: "pov", item: "pov_phone", delta: 4 },
+    { type: "quantity", entity: "pov", item: "pov_phone", delta: -3 },
+  ];
+  const auto = { quantity: { mode: "auto" }, item_condition: { mode: "auto" } };
+  const asks = { quantity: { mode: "confirm" }, item_condition: { mode: "confirm" } };
+  const labels = (chips: readonly { kind: string; label: string }[], kind: string) => chips.filter((c) => c.kind === kind).map((c) => c.label);
+
+  test("apply one after another, as told, each chip saying the whole of its change", async () => {
+    const cracked = await chat(crackAndRepair, auto);
+    expect((await phone(cracked.state)).condition).toBe(100);
+    expect(labels(cracked.chips, "undo")).toEqual(["Phone's condition went down by 40", "Phone's condition went up by 40"]);
+    const counted = await chat(fourThenThree, auto);
+    expect((await phone(counted.state)).qty).toBe(2);
+    expect(labels(counted.chips, "undo")).toEqual(["Your count of Phone went up by 4", "Your count of Phone went down by 3"]);
+    for (const got of [cracked, counted]) expect(got.rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("under confirm each asks, checked after the ones told before it, and Apply in turn ends where the story does", async () => {
+    const got = await chat(crackAndRepair, asks);
+    const confirms = got.chips.filter((c) => c.kind === "confirm");
+    expect(confirms.map((c) => c.label)).toEqual(["Phone's condition went down by 40", "Phone's condition went up by 40"]);
+    for (const c of confirms) got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: c.id, choice: "confirm" }));
+    expect((await phone(got.state)).condition).toBe(100);
+    expect(got.rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("a reply's change to a thing that would change nothing", () => {
+  /** The player character's phone is used up: its count is none. */
+  const usedUp = async (rig: Rig, chatId: string) => {
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: "pov_phone", field: "qty", value: 0 }] }));
+  };
+  const auto = { quantity: { mode: "auto" } };
+
+  test("is dropped with no chip once its channel takes it, and one its channel refuses keeps its receipt", async () => {
+    const own = await chat([{ type: "quantity", entity: "pov", item: "pov_phone", delta: -1 }], auto, { ready: usedUp });
+    expect(own.chips.filter((c) => c.kind === "undo" || c.kind === "confirm" || c.kind === "untracked")).toEqual([]);
+    const other = await chat([{ type: "quantity", entity: "danny_okafor", item: "pov_phone", delta: -1 }], auto, { ready: usedUp });
+    expect(other.chips.filter((c) => c.kind === "untracked").map((c) => c.label)).toEqual(["Not tracked: Danny Okafor's count of Phone went down by 1"]);
+    for (const got of [own, other]) expect(got.rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a player's step limit of none moves nothing and shows nothing, under auto and confirm alike", async () => {
+    const four = [{ type: "quantity", entity: "pov", item: "pov_phone", delta: 4 }];
+    for (const mode of ["auto", "confirm"]) {
+      const none = await chat([], { quantity: { mode } });
+      const got = await chat(four, { quantity: { mode, maxDelta: 0 } });
+      expect(got.chips.filter((c) => c.kind === "undo" || c.kind === "confirm" || c.kind === "untracked")).toEqual([]);
+      expect((await phone(got.state)).qty).toEqual((await phone(none.state)).qty);
+      expect(got.rig.rt.ledger.errors).toEqual([]);
+    }
+  });
+});
+
 describe("a thing's count and condition under the bound its world's author set in Build", () => {
   /** The item kind's count and condition, bounded by the world's author as `bound`. */
   const authored = (bound: JsonObject) => async (rig: Rig, worldId: string) => {
@@ -277,11 +343,6 @@ describe("a thing's count and condition under the bound its world's author set i
     { type: "item_condition", entity: "pov", item: "pov_phone", delta: -40 },
   ];
   const auto = { quantity: { mode: "auto" }, item_condition: { mode: "auto" } };
-  /** The phone's count and condition as stored; null where nothing is. */
-  const phone = async (state: () => Promise<WorldState>) => {
-    const fields = (await state()).entities.pov_phone?.fields;
-    return { qty: fields?.qty ?? null, condition: fields?.condition ?? null };
-  };
 
   test("never: the reply's change to either is left alone, with no chip", async () => {
     const got = await chat(told, auto, { world: authored({ mode: "never" }) });

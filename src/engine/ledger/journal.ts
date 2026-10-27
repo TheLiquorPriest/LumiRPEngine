@@ -1295,9 +1295,17 @@ export class LedgerCore {
         // which one read elsewhere never does.
         if (rec.readElsewhere) return readElsewhereRefusal(index === headIndex);
         if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH)) return "You've swiped away from the timeline this reply was made on. Switch back to undo it.";
+        // An Undo that names its entry (a ✎ fix's or GM edit's, a confirmed change's) takes back every
+        // event the entry holds now, under the journal's lock, whatever a write journaled since the tap
+        // made of them (an earlier held Undo or a Re-read working its request out again); one that holds
+        // none (its request already so here) by its first ref, so its request goes too and is never
+        // worked out again.
+        const named = w.entry === undefined ? undefined : rec.post.find((p) => p.seq === w.entry);
+        if (w.entry !== undefined && !named) return "nothing to undo";
+        const whole: EventRef[] = named ? Array.from({ length: Math.max(1, named.events.length) }, (_, index): EventRef => ({ in: "post", seq: named.seq, index })) : [];
         const before = { undone: [...rec.undone], post: rec.post, dropped: rec.dropped };
         const added: EventRef[] = [];
-        for (const ref of w.refs) {
+        for (const ref of [...w.refs, ...whole]) {
           if (rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref))) continue;
           rec.undone.push(ref);
           added.push(ref);

@@ -2056,12 +2056,8 @@ export class Runtime implements TurnHooks {
       const field = target?.field ?? (typeof p.field === "string" ? p.field : undefined);
       const bounded = boundProposal(this.registry, context.world, context.state, { type, ...(entity ? { entity } : {}), ...(field ? { field } : {}), ...(typeof p.delta === "number" ? { delta: p.delta } : {}) }, { typeMode, ...(settings.extraction[type]?.maxDelta !== undefined ? { typeMaxDelta: settings.extraction[type]?.maxDelta } : {}) });
       if (bounded.mode === "never") continue;
-      // A change its field's range leaves nothing of (a thing at none used up, one mended past new)
-      // changes nothing: no chip, as an automatic change that changes nothing has none.
-      if (bounded.delta === 0 && typeof p.delta === "number" && p.delta !== 0) {
-        this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (its field goes no further)`, userId);
-        continue;
-      }
+      // A step limit of none (`maxDelta` 0) leaves a told change nothing to move, as `never` does: no chip.
+      if (bounded.delta === 0 && typeof p.delta === "number" && p.delta !== 0) continue;
       // L27: whichever step proposed it (extraction or a world's effects step), on a Re-read too.
       if (type === "time_advance" && skipped) {
         this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (a timelapse turn's time passed as its timelapse)`, userId);
@@ -2128,6 +2124,9 @@ export class Runtime implements TurnHooks {
         payload: { type, connection, events: JSON.parse(JSON.stringify(o.events)) as JsonValue },
       });
     });
+    // The reply's confirm changes as told, one after another, after its automatic ones: each is
+    // checked on what the ones before it leave, as they would apply in order.
+    const told = new Working(this.registry, context.world, w.state);
     confirm.forEach((proposal, i) => {
       // A narrated time skip under confirm (DESIGN §9.4) is checked as it would apply automatically:
       // whole, with its catch-up, after this read's automatic changes. One that fits is offered for
@@ -2135,7 +2134,8 @@ export class Runtime implements TurnHooks {
       // so narrated time is never dropped.
       if (proposal.type === "time_advance") {
         const advance = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: settings.time.askBeyondMinutes, unitCap: w.state.time.unitCap });
-        if (advance.chip) stored.push(skipAheadChip(`adv:${messageId}:${swipeId}:c${i}`, { messageId, swipeId }, advance.chip.target, advance.reason === "unit_cap" ? "unit_cap" : "over_cap"));
+        // A Continue's offer (a read with no post steps) is its own, beside the reply's.
+        if (advance.chip) stored.push(skipAheadChip(post ? `adv:${messageId}:${swipeId}:c${i}` : `adv:${messageId}:${swipeId}:${key}:c${i}`, { messageId, swipeId }, advance.chip.target, advance.reason === "unit_cap" ? "unit_cap" : "over_cap"));
         else if (advance.applied) {
           stored.push({
             id: `confirm:${input.messageId}:${input.generationId}:${i}`,
@@ -2155,10 +2155,14 @@ export class Runtime implements TurnHooks {
         return;
       }
       // Offer Apply for what would apply now: anything refused gets a receipt as under auto, and a
-      // purchase nothing prices asks for its price beside Apply.
+      // purchase nothing prices asks for its price beside Apply. Each is checked after the reply's
+      // confirm changes told before it (`told`), so a crack and its repair both ask, as told.
       const also = unsure.has(proposal);
-      const cw = new Working(this.registry, context.world, w.state);
-      const [check] = applyProposals(this.registry, cw, [proposal], `${context.seed}:check`, bridge.runSeed);
+      // A change the player is likely to decline (a purchase that may be their own typed Buy told
+      // again, a move the reply only implied) is checked on a copy, so what's told after it doesn't
+      // count it: its account, limit and Pay another way read as if it weren't there.
+      const against = also || guessed.has(proposal) ? new Working(this.registry, context.world, told.state) : told;
+      const [check] = applyProposals(this.registry, against, [proposal], `${context.seed}:check`, bridge.runSeed);
       // A move the reply only implied that can't happen is no told move: no chip (DESIGN §9.4).
       if (check?.rejection && guessed.has(proposal)) {
         this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped a guessed move (${check.rejection.code}: ${check.rejection.reason})`, input.userId);
@@ -2196,7 +2200,7 @@ export class Runtime implements TurnHooks {
         return;
       }
       const quote = purchaseQuote(proposal, check.events, context.world);
-      const money = paidWords(optionalQuery(cw.ctx, "economy.paid_from")?.(cw.ctx, check.events, context.world.pov) ?? null, context.world);
+      const money = paidWords(optionalQuery(against.ctx, "economy.paid_from")?.(against.ctx, check.events, context.world.pov) ?? null, context.world);
       // A guessed move says why it asks (where the engine has the POV, as every player surface names
       // it) and carries no type, so Apply or No on it counts nothing toward the learning (DESIGN §11).
       const guess = guessed.has(proposal);
@@ -2325,7 +2329,9 @@ export class Runtime implements TurnHooks {
       // The rest of a span the player's message filled keeps its words, as it keeps its hold (DESIGN §9.2).
       stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? (plan?.timelapse?.mindName ?? "someone") : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) as JsonValue, ...hold, ...(plan?.fill ? { fill: plan.fill } : {}) } });
     }
-    for (const [i, chip] of bridge.chipsFor(input.content).entries()) stored.push(skipAheadChip(`adv:${at}:${i}`, base, chip.target, chip.reason));
+    // A Continue's offers are its own, beside those of the reply it went on from (DESIGN §9.4).
+    const offer = input.kind === "continue" ? `adv:${at}:${input.generationId}` : `adv:${at}`;
+    for (const [i, chip] of bridge.chipsFor(input.content).entries()) stored.push(skipAheadChip(`${offer}:${i}`, base, chip.target, chip.reason));
     await this.chips.add(input.chatId, input.userId, stored);
   }
 

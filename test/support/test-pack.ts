@@ -3,10 +3,12 @@
 //
 // User text drives planning: `buy:<item>:<price>`, `use:<item>`, `earn:<n>`, `roll`,
 // `deposit:<n>` and `pay:<n>` (postings on Sam's account), `shop:<item>:<price>` (a posting and
-// the item as one event group), the fight's texts, `do:<action>[:<target>],…` (the engine plans
-// the actions in order as one queued turn), anything else is a plain turn. Reply text drives
-// reading: `[found:<n>]`, `[lose:<item>]`, `[pay:<n>]`, and `[opens:<id>]` (naming someone opens
-// their money, once, ahead of the rest, as a read naming them does).
+// the item as one event group), `linked:<item>:<price>:<cover>` (that, with Dev's account covering
+// part of it as an overdraft link does: his transfer kept apart just before it), the fight's texts,
+// `do:<action>[:<target>],…` (the engine plans the actions in order as one queued turn), anything
+// else is a plain turn. Reply text drives reading: `[found:<n>]`, `[lose:<item>]`, `[pay:<n>]`, and
+// `[opens:<id>]` (naming someone opens their money, once, ahead of the rest, as a read naming them
+// does).
 //
 // The pack guards the core `post` the way economy does: an own account never goes
 // below zero, so a payment rebased onto a poorer branch is dropped, not folded negative.
@@ -14,7 +16,7 @@
 import { hashJson } from "../../src/shared/hash";
 import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
-import type { LedgerEvent, PackEvent } from "../../src/shared/ledger";
+import { apartOf, type LedgerEvent, type PackEvent } from "../../src/shared/ledger";
 import { defaultTiers } from "../../src/shared/tiers";
 import type { WorldDoc } from "../../src/shared/world";
 import { DEFAULT_CURRENCY, WORLD_FORMAT } from "../../src/shared/world";
@@ -331,7 +333,7 @@ export function testModelWith(observe?: (plan: EngineTurnPlan) => void): TurnMod
           });
         if (first) return engine(input, { action: first.action, params: first.params, probabilities: { [first.action]: 1 }, ...(rest.length > 0 ? { queue: rest } : {}) });
       }
-      const [verb, a, b] = text.split(":");
+      const [verb, a, b, c] = text.split(":");
       const fight = verb !== undefined && Object.hasOwn(FIGHT_INTENTS, verb) ? FIGHT_INTENTS[verb] : undefined;
       if (fight) return engine(input, { ...fight, probabilities: { [fight.action]: 1 } });
       if (verb === "buy" && a) events.push({ type: "test.buy", data: { item: a, price: Number(b ?? "0") || 0 } });
@@ -342,6 +344,18 @@ export function testModelWith(observe?: (plan: EngineTurnPlan) => void): TurnMod
       else if (verb === "pay") events.push(posting(-(Number(a ?? "0") || 0), "payment"));
       // A purchase paid from the account: the posting and the item are one group (they land together).
       else if (verb === "shop" && a) events.push({ ...posting(-(Number(b ?? "0") || 0), `bought ${a}`), group: `shop:${a}` }, { type: "test.buy", data: { item: a, price: 0 }, group: `shop:${a}` });
+      // One that Dev's account covers part of, as a payment the story made draws on its overdraft link
+      // (DESIGN §25.10): his transfer and a note of it, kept apart just before the purchase's group.
+      else if (verb === "linked" && a) {
+        const group = `linked:${a}`;
+        const cover = Number(c ?? "0") || 0;
+        events.push(
+          { type: "post", lines: [{ account: "dev", amount: -cover }, { account: POV, amount: cover }], memo: "Overdraft transfer", group: apartOf(group) },
+          { type: "set", entity: POV, field: "detail", value: "covered by Dev", group: apartOf(group) },
+          { ...posting(-(Number(b ?? "0") || 0), `bought ${a}`), group },
+          { type: "test.buy", data: { item: a, price: 0 }, group },
+        );
+      }
       // A minds round and one character's mind (DESIGN §24), as the pre phase records them; its plan's id follows the seed, so a Re-run thinks anew.
       else if (verb === "mind" && a) {
         const place = state.entities[a]?.fields.place;

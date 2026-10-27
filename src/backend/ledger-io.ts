@@ -222,6 +222,9 @@ const SWIPE_KEY = /^\d{1,6}$/;
 const POST_KINDS: readonly unknown[] = ["materialize", "fix", "confirm", "cont", "narr"] satisfies PostKind[];
 const REC_STATUSES: readonly unknown[] = ["ok", "degraded", "stopped"] satisfies RecStatus[];
 
+/** A stored event as the folds read it: its type, and its group and the groups it is tied to, when it has them. */
+const isStoredEvent = (e: unknown): boolean => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string") && (e.tiedTo === undefined || (Array.isArray(e.tiedTo) && e.tiedTo.every((g) => typeof g === "string")));
+
 /**
  * A stored turn record (DESIGN §4.3 `Rec`), checked through every field the folds, hashes and
  * ledger operations read. Records reach the engine from the journal file and from message
@@ -230,9 +233,9 @@ const REC_STATUSES: readonly unknown[] = ["ok", "degraded", "stopped"] satisfies
 function isRec(rec: unknown): rec is Rec {
   if (!isRecord(rec) || rec.v !== 1 || typeof rec.defHash !== "string" || !isInt(rec.seq) || !isContent(rec.swipeHash) || typeof rec.path !== "string" || typeof rec.seed !== "string") return false;
   if (!isInt(rec.pre) || rec.pre < 0 || !isInt(rec.markersApplied) || !REC_STATUSES.includes(rec.status) || !isRefs(rec.undone) || !isRecord(rec.intents)) return false;
-  if (!Array.isArray(rec.events) || !rec.events.every((e) => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string"))) return false;
+  if (!Array.isArray(rec.events) || !rec.events.every(isStoredEvent)) return false;
   // A fix's request (`edit`) is checked for its shape here; its operations are parsed when it is resolved again.
-  if (!Array.isArray(rec.post) || !rec.post.every((p) => isRecord(p) && isInt(p.seq) && typeof p.at === "string" && POST_KINDS.includes(p.kind) && Array.isArray(p.events) && p.events.every((e) => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string")) && (p.edit === undefined || (isRecord(p.edit) && (typeof p.edit.clock === "string" ? p.edit.ops === undefined : Array.isArray(p.edit.ops) && p.edit.clock === undefined))))) return false;
+  if (!Array.isArray(rec.post) || !rec.post.every((p) => isRecord(p) && isInt(p.seq) && typeof p.at === "string" && POST_KINDS.includes(p.kind) && Array.isArray(p.events) && p.events.every(isStoredEvent) && (p.edit === undefined || (isRecord(p.edit) && (typeof p.edit.clock === "string" ? p.edit.ops === undefined : Array.isArray(p.edit.ops) && p.edit.clock === undefined))))) return false;
   if (rec.keep !== undefined && !(isRecord(rec.keep) && Object.values(rec.keep).every((k) => isRecord(k) && isRefs(k.convert)))) return false;
   if (rec.dropped !== undefined && !(Array.isArray(rec.dropped) && rec.dropped.every((d) => isRecord(d) && isInt(d.seq) && POST_KINDS.includes(d.kind) && typeof d.reason === "string"))) return false;
   return (rec.accepted === undefined || isContent(rec.accepted)) && (rec.diag === undefined || typeof rec.diag === "string") && (rec.readElsewhere === undefined || rec.readElsewhere === true);
@@ -255,7 +258,7 @@ function isHeldWrite(w: unknown): boolean {
     case "retry_read":
       return typeof w.messageId === "string" && isInt(w.swipeId);
     case "undo":
-      return typeof w.messageId === "string" && isInt(w.swipeId) && isRefs(w.refs);
+      return typeof w.messageId === "string" && isInt(w.swipeId) && isRefs(w.refs) && (w.entry === undefined || isInt(w.entry));
     default:
       return false;
   }

@@ -68,7 +68,7 @@ describe("bounds", () => {
     expect(combineBounds({ mode: "auto", maxDelta: 20 }, { mode: "confirm", maxDelta: -5 }, undefined)).toEqual({ mode: "confirm", maxDelta: 5 });
   });
 
-  test("a proposal is capped by the field's own bound, the player's max delta and the field's range; locked fields are never", () => {
+  test("a proposal is capped by the field's own bound and the player's max delta, never by the field's range, which the change keeps as it applies; locked fields are never", () => {
     const world = baseWorld();
     world.kinds.person!.fields.stress = { ...world.kinds.person!.fields.stress!, bound: { mode: "auto", maxDelta: 30 } };
     world.kinds.person!.fields.skill = { type: "number", locked: true };
@@ -78,7 +78,7 @@ describe("bounds", () => {
     expect([b.mode, b.delta, b.capped]).toEqual(["auto", 20, true]);
     expect(boundProposal(reg, world, s, { type: "condition", entity: POV, field: "stress", delta: 50 }, { typeMode: "auto" }).delta).toBe(30);
     const range = boundProposal(reg, world, s, { type: "condition", entity: POV, field: "stress", delta: -10 }, { typeMode: "confirm" });
-    expect([range.mode, range.delta, range.capped]).toEqual(["confirm", 0, true]);
+    expect([range.mode, range.delta, range.capped]).toEqual(["confirm", -10, false]);
     expect(boundProposal(reg, world, s, { type: "quantity", entity: POV, field: "skill", delta: 1 }, { typeMode: "auto" }).mode).toBe("never");
   });
 });

@@ -946,16 +946,18 @@ export class Dispatcher {
       return { applied: result.applied, pending: result.pending };
     }
     if (kind === "fix") {
-      // Undo on a ✎ fix or GM edit (`fix:<message>:<swipe>:<seq>`): every event of its entry stops folding.
+      // Undo on a ✎ fix or GM edit (`fix:<message>:<swipe>:<seq>`), from the chat or GM → Edits: every
+      // event of its entry stops folding. The undo names the entry, so the journal takes back what it
+      // holds when the undo lands, which an Undo or a Re-read journaled since the tap may have worked
+      // out again from its request (DESIGN §11 Undo).
       const seq = Number(id.split(":")[3]);
       const core = await this.rt.ledger.core(chatId, userId);
       const m = core?.chain(observed).find((x) => x.id === messageId);
       const rec = m && core ? activeRecord(m, core.journal.tombstones) : null;
       const entry = rec?.post.find((p) => p.seq === seq && p.kind === "fix");
       if (!m || !rec || !entry || String(m.swipeId) !== swipe) throw new RequestError("not_found", "the correction is gone");
-      const refs: EventRef[] = entry.events.flatMap((_, index) => (rec.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index) ? [] : [{ in: "post" as const, seq, index }]));
-      if (refs.length === 0) return { applied: false, pending: false };
-      const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
+      if (entry.events.length > 0 && entry.events.every((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index))) return { applied: false, pending: false };
+      const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: seq });
       return { applied: result.applied, pending: result.pending };
     }
     if (kind === "refused") {
@@ -1270,7 +1272,8 @@ export class Dispatcher {
         return { applied: result.applied, pending: result.pending };
       }
       case "routine_added": {
-        // Undo of a routine change the player said yes to: the confirmed entry it was written as stops folding.
+        // Undo of a routine change the player said yes to: the confirmed entry it was written as stops
+        // folding, named by its seq so the journal takes back what it holds when the undo lands.
         if (choice !== "undo") throw new RequestError("bad_request", `unknown choice ${choice}`);
         const core = await this.rt.ledger.core(chatId, userId);
         const wanted = JSON.stringify(chip.payload.events);
@@ -1278,9 +1281,8 @@ export class Dispatcher {
           const rec = core ? activeRecord(m, core.journal.tombstones) : null;
           const entry = rec?.post.findLast((p) => p.kind === "confirm" && JSON.stringify(p.events) === wanted);
           if (!rec || !entry) continue;
-          const refs: EventRef[] = entry.events.flatMap((_, index) => (rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index) ? [] : [{ in: "post" as const, seq: entry.seq, index }]));
-          if (refs.length === 0) return { applied: false, pending: false };
-          const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
+          if (entry.events.every((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index))) return { applied: false, pending: false };
+          const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: entry.seq });
           return { applied: result.applied, pending: result.pending };
         }
         throw new RequestError("not_found", "the routine change is gone");

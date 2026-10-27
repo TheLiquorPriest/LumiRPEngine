@@ -16,7 +16,7 @@
 import { hashJson, hashParts } from "../../shared/hash";
 import type { EventRef, JournalNote, KeepLine, LedgerEvent, Marker, MarkerBody, PathHash, PostEntry, Rec } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
-import { apartHost, applyEvent, applyMarker, validateEvent } from "../events";
+import { apartHost, applyEvent, applyMarker, tiesOf, TIED_DROP, validateEvent } from "../events";
 import type { WorldState } from "../state";
 import { initialState } from "../world-state";
 import { FoldError, type ChainMessage, type FoldInput, type FoldOutput, type FoldSnapshot, type MessageResult, type ResolvedFix } from "./chain";
@@ -352,16 +352,19 @@ export class LedgerFold {
       }
       const converted = rec.keep?.[parent]?.convert ?? [];
       const record = rec;
-      const event = (ev: LedgerEvent, ref: EventRef): void => {
-        if (record.undone.some((u) => refEq(u, ref))) return;
+      // The groups this view dropped in the record so far, so a unit tied to one drops with it.
+      const fell = new Set<string>();
+      /** Folds one event; whether a rebased view dropped it. */
+      const event = (ev: LedgerEvent, ref: EventRef): boolean => {
+        if (record.undone.some((u) => refEq(u, ref))) return false;
         if (converged) {
           applyEvent(types, ev, state, ctx());
-          return;
+          return false;
         }
         const failure = validateEvent(types, ev, ctx());
         if (failure && !view) {
           violations.push(`${m.id}: on-path ${ev.type} failed re-validation (${failure.reason})`);
-          return;
+          return false;
         }
         if (failure) {
           if (converted.some((c) => refEq(c, ref))) {
@@ -369,14 +372,16 @@ export class LedgerFold {
           } else {
             notes.push({ kind: "dropped", messageId: m.id, ref, text: failure.reason });
             keep.push({ messageId: m.id, parentPath: parent, ref, status: "dropped", text: failure.reason });
-            return;
+            return true;
           }
         }
         applyEvent(types, ev, state, ctx());
+        return false;
       };
       // Groups on a rebased view land whole or not at all (the reference fold's rule, written apart),
       // and a unit kept apart (`APART_GROUP`) lands only with the unit it stands with: both if both
       // fit, else that unit alone, else neither; where either has a Keep conversion each folds alone.
+      // A unit tied to one the view dropped (`tiedTo`) drops with it, unless Keep converted it.
       const run = (list: readonly LedgerEvent[], refOf: (index: number) => EventRef): void => {
         const unitAt = (i: number): { end: number; unit: { ev: LedgerEvent; ref: EventRef }[] } => {
           const group = list[i]?.group;
@@ -404,15 +409,17 @@ export class LedgerFold {
               return rejection;
             }, null);
         };
-        const drop = (unit: readonly { ref: EventRef }[], reason: string): void => {
+        const drop = (unit: readonly { ref: EventRef }[], reason: string, group: string | undefined): void => {
           for (const u of unit) {
             notes.push({ kind: "dropped", messageId: m.id, ref: u.ref, text: reason });
             keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "dropped", text: reason });
           }
+          if (group !== undefined && unit.length > 0) fell.add(group);
         };
         const isConverted = (unit: readonly { ref: EventRef }[]): boolean => unit.some((u) => converted.some((c) => refEq(c, u.ref)));
         for (let i = 0; i < list.length; ) {
           const { end, unit } = unitAt(i);
+          const group = list[i]?.group;
           const host = view && !converged ? apartHost(list, [i, end]) : null;
           const hosted = host ? unitAt(host[0]).unit : [];
           if (host && !isConverted(unit) && !isConverted(hosted)) {
@@ -423,14 +430,18 @@ export class LedgerFold {
               continue;
             }
             const alone = trial(hosted);
-            drop(unit, together.reason);
+            drop(unit, together.reason, group);
             if (alone === null) for (const u of hosted) applyEvent(types, u.ev, state, ctx());
-            else drop(hosted, alone.reason);
+            else drop(hosted, alone.reason, list[host[0]]?.group);
             continue;
           }
           i = end;
+          if (view && !converged && !isConverted(unit) && tiesOf(unit.map((u) => u.ev)).some((t) => fell.has(t))) {
+            drop(unit, TIED_DROP, group);
+            continue;
+          }
           if (unit.length < 2 || !view || converged) {
-            for (const u of unit) event(u.ev, u.ref);
+            for (const u of unit) if (event(u.ev, u.ref) && group !== undefined) fell.add(group);
             continue;
           }
           const failure = trial(unit);
@@ -442,7 +453,7 @@ export class LedgerFold {
               if (own) keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "converted", text: own.reason });
               applyEvent(types, u.ev, state, ctx());
             }
-          } else drop(unit, failure.reason);
+          } else drop(unit, failure.reason, group);
         }
       };
       // On a view, a GM edit or ✎ fix that keeps what it asked for folds as that request worked out

@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
-import type { JsonObject } from "../../src/shared/json";
+import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 
@@ -137,6 +137,26 @@ describe("a Continue", () => {
     const c = await rig.host.start(chatId, { type: "continue", messageId: reply });
     await rig.host.finish(c, " Two days later, the shop opens again.");
     expect((await chipsOf(rig, chatId, reply)).filter((ch) => ch.kind === "timelapse_offer").map((ch) => ch.label)).toEqual([SKIPPED]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("keeps the offer of the skip the reply it went on from told, beside its own", async () => {
+    const { rig, chatId } = await played("Port Alder", "modern_slice_of_life", "Morning.");
+    const told = { proposals: TWO_DAYS };
+    model(rig, NONE, told);
+    await rig.turn(chatId, "I wait.", "Two days later, the shop opens again.");
+    const reply = headId(rig, chatId);
+    told.proposals = [{ type: "time_advance", minutes: 7 * 24 * 60 }];
+    const c = await rig.host.start(chatId, { type: "continue", messageId: reply });
+    await rig.host.finish(c, " A week after that, the stock sells out.");
+    // What each offer runs: the reply's two days, and the Continue's week.
+    const spans = (await rig.rt.chips.list(chatId, rig.host.userId)).flatMap((x) => {
+      const target = x.payload.target;
+      return x.messageId === reply && x.kind === "timelapse_offer" && isRecord(target) && typeof target.minutes === "number" ? [target.minutes] : [];
+    });
+    expect(spans).toHaveLength(2);
+    expect(spans.filter((m) => m <= 2 * 24 * 60)).toHaveLength(1);
+    expect(spans.filter((m) => m > 6 * 24 * 60)).toHaveLength(1);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

@@ -4,17 +4,22 @@
 import type { Plays } from "./harness";
 
 /**
- * How often a run exercised a funds drop, a grouped drop on a rebased view, a Re-run carrying or
- * dropping a fix, a Re-run dropping a fix whose materialization its new swipe had already made, a
- * Re-run carrying a GM edit that keeps its request, a rebased view holding one, either of those with
- * one already so where it was made (no events of its own), a copy of an earlier build's chat whose
- * starting markers it had to restore, a turn checked on the chain it was planned on after a deletion
- * moved a swipe it saw, a fight's start, acts, turns and end, a turn's planned life changes and
- * tellings, and queued turns and each way one stops early (the suite asserts they happen).
+ * How often a run exercised a funds drop, a grouped drop on a rebased view, a unit kept apart from a
+ * payment (an overdraft link's transfer) dropped there, a Keep conversion of one or of its payment, a
+ * correction dropped with the purchase it was tied to, a Re-run carrying or dropping a fix, a Re-run
+ * dropping a fix whose materialization its new swipe had already made, a Re-run carrying a GM edit
+ * that keeps its request, a rebased view holding one, either of those with one already so where it
+ * was made (no events of its own), a copy of an earlier build's chat whose starting markers it had
+ * to restore, a turn checked on the chain it was planned on after a deletion moved a swipe it saw, a
+ * fight's start, acts, turns and end, a turn's planned life changes and tellings, and queued turns
+ * and each way one stops early (the suite asserts they happen).
  */
 export interface Coverage {
   fundsDrops: number;
   groupDrops: number;
+  apartDrops: number;
+  apartConverts: number;
+  tiedDrops: number;
   carried: number;
   carryDrops: number;
   stripped: number;
@@ -31,12 +36,12 @@ export interface Coverage {
 
 /** A fresh count for a runner or a whole suite. */
 export function noCoverage(): Coverage {
-  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, stripped: 0, askedCarried: 0, askedViews: 0, askedEmpty: 0, earlierCopies: 0, shiftedPlans: 0, fights: { start: 0, act: 0, turn: 0, end: 0 }, lives: { life: 0, told: 0 }, minds: { mind: 0, memory: 0, presence: 0, fix: 0 }, queues: { queued: 0, check: 0, failure: 0, interruption: 0 } };
+  return { fundsDrops: 0, groupDrops: 0, apartDrops: 0, apartConverts: 0, tiedDrops: 0, carried: 0, carryDrops: 0, stripped: 0, askedCarried: 0, askedViews: 0, askedEmpty: 0, earlierCopies: 0, shiftedPlans: 0, fights: { start: 0, act: 0, turn: 0, end: 0 }, lives: { life: 0, told: 0 }, minds: { mind: 0, memory: 0, presence: 0, fix: 0 }, queues: { queued: 0, check: 0, failure: 0, interruption: 0 } };
 }
 
 /** Adds one run's counts to another's: a long run split into shards counts as the whole run. */
 export function addCoverage(into: Coverage, from: Coverage): void {
-  for (const key of ["fundsDrops", "groupDrops", "carried", "carryDrops", "stripped", "askedCarried", "askedViews", "askedEmpty", "earlierCopies", "shiftedPlans"] as const) into[key] += from[key];
+  for (const key of ["fundsDrops", "groupDrops", "apartDrops", "apartConverts", "tiedDrops", "carried", "carryDrops", "stripped", "askedCarried", "askedViews", "askedEmpty", "earlierCopies", "shiftedPlans"] as const) into[key] += from[key];
   for (const k of ["start", "act", "turn", "end"] as const) into.fights[k] += from.fights[k];
   for (const k of ["life", "told"] as const) into.lives[k] += from.lives[k];
   for (const k of ["mind", "memory", "presence", "fix"] as const) into.minds[k] += from.minds[k];
@@ -54,9 +59,14 @@ export function coverageGaps(coverage: Coverage, runs: number): string[] {
     if (count <= 0) gaps.push(kind);
   };
   if (runs >= 100) {
-    // L40/L41: the runs rebase a payment, and a grouped purchase, onto a branch that can't cover it.
+    // L40/L41: the runs rebase a payment, and a grouped purchase, onto a branch that can't cover it;
+    // an overdraft link's transfer drops there with its payment or alone, Keep converts one or its
+    // payment, and a price correction drops with the purchase it was tied to.
     need("fundsDrops", coverage.fundsDrops);
     need("groupDrops", coverage.groupDrops);
+    need("apartDrops", coverage.apartDrops);
+    need("apartConverts", coverage.apartConverts);
+    need("tiedDrops", coverage.tiedDrops);
     // L43: Re-runs carry fixes forward, and drop ones that no longer apply.
     need("carried", coverage.carried);
     need("carryDrops", coverage.carryDrops);

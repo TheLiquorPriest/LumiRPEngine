@@ -284,14 +284,25 @@ export function apartHost(events: readonly (LedgerEvent | undefined)[], [from, t
   return [to, end];
 }
 
+/** The groups a unit is tied to (`EventBase.tiedTo`), every member's. */
+export function tiesOf(unit: readonly { tiedTo?: readonly string[] }[]): string[] {
+  return [...new Set(unit.flatMap((ev) => ev.tiedTo ?? []))];
+}
+
+/** Why a rebased view drops a unit tied to one it dropped (`EventBase.tiedTo`). */
+export const TIED_DROP = "what it was made to put right didn't happen here";
+
 /**
  * Applies, in order, each unit whose events all validate; a unit with any failing member is
  * skipped whole. A unit kept apart (`APART_GROUP`) is tried with the unit it stands with: both
- * apply if both fit, else that unit is tried alone and the one kept apart is skipped. Returns the
- * events applied. Plans, reads and prefix replays use it.
+ * apply if both fit, else that unit is tried alone and the one kept apart is skipped. A unit tied
+ * to one skipped before it (`EventBase.tiedTo`) is skipped too. Returns the events applied. Plans,
+ * reads and prefix replays use it.
  */
 export function applyValidUnits(types: EventTypes, events: readonly LedgerEvent[], state: WorldState, context: (state: Readonly<WorldState>) => ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
+  // The groups of the units skipped so far.
+  const skipped = new Set<string>();
   const fits = (unit: readonly LedgerEvent[]): boolean => {
     const scratch = structuredClone(state);
     return unit.every((ev) => {
@@ -307,6 +318,10 @@ export function applyValidUnits(types: EventTypes, events: readonly LedgerEvent[
       out.push(ev);
     }
   };
+  const skip = (unit: readonly LedgerEvent[]): void => {
+    const group = unit[0]?.group;
+    if (group !== undefined) skipped.add(group);
+  };
   const units = eventUnits(events);
   for (let u = 0; u < units.length; u++) {
     const [from, to] = units[u] ?? [0, 0];
@@ -315,17 +330,29 @@ export function applyValidUnits(types: EventTypes, events: readonly LedgerEvent[
     if (host) {
       const hosted = events.slice(host[0], host[1]);
       if (fits([...unit, ...hosted])) apply([...unit, ...hosted]);
-      else if (fits(hosted)) apply(hosted);
+      else {
+        skip(unit);
+        if (fits(hosted)) apply(hosted);
+        else skip(hosted);
+      }
       u++;
+      continue;
+    }
+    if (tiesOf(unit).some((t) => skipped.has(t))) {
+      skip(unit);
       continue;
     }
     if (unit.length > 1) {
       if (fits(unit)) apply(unit);
+      else skip(unit);
       continue;
     }
     for (const ev of unit) {
       const ctx = context(state);
-      if (validateEvent(types, ev, ctx)) break;
+      if (validateEvent(types, ev, ctx)) {
+        skip(unit);
+        break;
+      }
       applyEvent(types, ev, state, ctx);
       out.push(ev);
     }

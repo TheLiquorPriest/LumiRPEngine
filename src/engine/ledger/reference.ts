@@ -7,7 +7,7 @@
 import { hashJson, hashParts } from "../../shared/hash";
 import type { EventRef, JournalNote, KeepLine, LedgerEvent, Marker, PathHash, PostEntry, Rec } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
-import { apartHost, applyEvent, applyMarker, validateEvent } from "../events";
+import { apartHost, applyEvent, applyMarker, tiesOf, TIED_DROP, validateEvent } from "../events";
 import type { ReadContext } from "../registry";
 import type { MarkerEnv, UpgradeTypes } from "../upgrade";
 import { initialState } from "../world-state";
@@ -108,12 +108,13 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
       const view = recPath !== null && (recPath !== parent || rec.readElsewhere === true);
       const converted = rec.keep?.[parent]?.convert ?? [];
       const record = rec;
-      const event = (ev: LedgerEvent, ref: EventRef): void => {
-        if (record.undone.some((u) => sameRef(u, ref))) return;
+      /** Folds one event; true when the view drops it. */
+      const event = (ev: LedgerEvent, ref: EventRef): boolean => {
+        if (record.undone.some((u) => sameRef(u, ref))) return false;
         const failure = validateEvent(types, ev, ctx());
         if (failure && !view) {
           violations.push(`${m.id}: on-path ${ev.type} failed re-validation (${failure.reason})`);
-          return;
+          return false;
         }
         if (failure) {
           if (converted.some((c) => sameRef(c, ref))) {
@@ -121,16 +122,20 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
           } else {
             notes.push({ kind: "dropped", messageId: m.id, ref, text: failure.reason });
             keepReport.push({ messageId: m.id, parentPath: parent, ref, status: "dropped", text: failure.reason });
-            return;
+            return true;
           }
         }
         applyEvent(types, ev, state, ctx());
+        return false;
       };
+      // Every group of this record the view has dropped, in fold order.
+      const droppedGroups: string[] = [];
       // A group (contiguous events sharing `group`) on a rebased view lands whole or not at all:
       // tried on a copy first; one failure drops every member, unless Keep converted one of them.
       // A unit kept apart (`APART_GROUP`) is tried with the unit after it that it stands with: both
       // land if both fit; else that unit is tried alone, and the one kept apart drops whatever it
-      // does. With a Keep conversion in either, each is a group like any other.
+      // does. With a Keep conversion in either, each is a group like any other. A unit that names a
+      // dropped group among those it is tied to (`tiedTo`) drops too, unless Keep converted it.
       const run = (list: readonly LedgerEvent[], refOf: (index: number) => EventRef): void => {
         const membersOf = (from: number, to: number): { ev: LedgerEvent; ref: EventRef }[] => {
           const members: { ev: LedgerEvent; ref: EventRef }[] = [];
@@ -152,11 +157,12 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
           }
           return null;
         };
-        const dropAll = (members: readonly { ref: EventRef }[], reason: string): void => {
+        const dropAll = (members: readonly { ref: EventRef }[], reason: string, group: string | undefined): void => {
           for (const x of members) {
             notes.push({ kind: "dropped", messageId: m.id, ref: x.ref, text: reason });
             keepReport.push({ messageId: m.id, parentPath: parent, ref: x.ref, status: "dropped", text: reason });
           }
+          if (members.length > 0 && group !== undefined) droppedGroups.push(group);
         };
         const anyConverted = (members: readonly { ref: EventRef }[]): boolean => members.some((x) => converted.some((c) => sameRef(c, x.ref)));
         let i = 0;
@@ -175,16 +181,21 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
                 for (const x of [...members, ...hosted]) applyEvent(types, x.ev, state, ctx());
                 continue;
               }
-              dropAll(members, together.reason);
+              dropAll(members, together.reason, group);
               const alone = tryOn(hosted);
-              if (alone) dropAll(hosted, alone.reason);
+              if (alone) dropAll(hosted, alone.reason, list[host[0]]?.group);
               else for (const x of hosted) applyEvent(types, x.ev, state, ctx());
               continue;
             }
           }
           i = j;
+          const tied = tiesOf(members.map((x) => x.ev));
+          if (view && !anyConverted(members) && droppedGroups.some((g) => tied.includes(g))) {
+            dropAll(members, TIED_DROP, group);
+            continue;
+          }
           if (members.length <= 1 || !view) {
-            for (const x of members) event(x.ev, x.ref);
+            for (const x of members) if (event(x.ev, x.ref) && group !== undefined) droppedGroups.push(group);
             continue;
           }
           const failure = tryOn(members);
@@ -200,7 +211,7 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
             }
             continue;
           }
-          dropAll(members, failure.reason);
+          dropAll(members, failure.reason, group);
         }
       };
       // On a view, a GM edit or ✎ fix that keeps what it asked for folds as that request worked out

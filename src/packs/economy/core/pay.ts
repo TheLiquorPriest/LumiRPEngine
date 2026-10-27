@@ -569,6 +569,15 @@ function apartFrom(events: LedgerEvent[], unit: readonly LedgerEvent[]): LedgerE
   return group === undefined ? events : events.map((e) => ({ ...e, group: apartOf(group) }));
 }
 
+/**
+ * A correction's unit tied to the units it puts right (`EventBase.tiedTo`), by their groups: a
+ * rebased view that drops any of them drops it too. Groups that aren't there are left out.
+ */
+function tied(unit: LedgerEvent[], groups: readonly (string | undefined)[]): LedgerEvent[] {
+  const to = [...new Set(groups.filter((g): g is string => g !== undefined))];
+  return to.length === 0 ? unit : unit.map((e) => ({ ...e, tiedTo: to }));
+}
+
 /** Folds lines on the same account into one line each (a sale's tax landing with its price). */
 function merged(lines: readonly PostingLine[]): PostingLine[] {
   const out: PostingLine[] = [];
@@ -841,7 +850,10 @@ export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, 
  * policy allows. What a bank posts itself (interest, fees) and what posts against a holder's own
  * outside account (openings, level-1 moves) isn't checked. A payment the story made on an account
  * that can run a debt (`overdraw`, DESIGN §9.5) needs only open accounts: it stands past what they
- * cover, on any path. One it made from cash or savings carries none and is checked as any payment.
+ * cover, on any path. One it made from cash or savings carries none and is checked as any payment;
+ * one an earlier build recorded from them with `overdraw` stands as that build wrote it, since some
+ * of those went past cover on their own path (an Edit amount on a cash purchase), which a stricter
+ * check would break.
  */
 export function postGuard(ctx: ReadContext, lines: readonly PostingLine[], overdraw = false): Rejection | null {
   const s = ctx.state;
@@ -943,7 +955,8 @@ export function carriedCash(ctx: ReadContext, holder: EntityId): number | null {
 /**
  * A purchase that applied, repriced to `cents` in all: the difference to what its posting charged in
  * all (its price and any tax on it) moves between the account that paid and the account that was
- * paid. The purchase is its unit's posting with a purchase journal line, or (a purchase an older
+ * paid, as a correction tied to the purchase's unit, so a rebased view that drops the purchase drops
+ * it too. The purchase is its unit's posting with a purchase journal line, or (a purchase an older
  * build recorded) its unit's one two-line posting. One the story put on an account that runs a debt
  * (`overdraw`) stands at the player's price as it stood at its own, whatever that account covers;
  * from any other account the difference is checked as any payment is.
@@ -970,17 +983,18 @@ export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents:
   const seller = strOf(was?.counterparty);
   const buyer = strOf(was?.payer);
   const overdraw = post.overdraw === true && diff > 0 && runsDebt(ctx, paid.account);
-  return asUnit([{ type: "post", lines, memo: note, ...(overdraw ? { overdraw: true as const } : {}) }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]);
+  return tied(asUnit([{ type: "post", lines, memo: note, ...(overdraw ? { overdraw: true as const } : {}) }, txn(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller })]), [post.group]);
 }
 
 // ---------------------------------------------------------------- what the story paid
 
 /**
  * A payment the story made among a change's events (DESIGN §9.5), found by its journal line's
- * `story`: its posting, the account it drew on and how much, who paid, the account its words named
- * when it went elsewhere, and what it brought on that account (§25.10): the transfer the account's
- * overdraft link made into it, and the fees its bank charged for it (an overdraft fee, a cash
- * advance's fee), `fees` in all.
+ * `story`, or (one an earlier build recorded, its line unmarked) by its posting's `overdraw`: its
+ * posting, the account it drew on and how much, who paid, the account its words named when it went
+ * elsewhere, and what it brought on that account (§25.10): the transfer the account's overdraft link
+ * made into it, and the fees its bank charged for it (an overdraft fee, a cash advance's fee), `fees`
+ * in all.
  */
 interface StoryPayment {
   post: PostEvent;
@@ -993,9 +1007,10 @@ interface StoryPayment {
 }
 
 function storyPayment(ctx: ReadContext, events: readonly LedgerEvent[]): StoryPayment | null {
-  const line = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.story === true);
+  const marked = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.story === true);
+  const post = marked && "data" in marked ? events.find((e): e is PostEvent => e.type === "post" && e.memo === strOf(marked.data.memo)) : events.find((e): e is PostEvent => e.type === "post" && e.overdraw === true);
+  const line = marked ?? events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && post !== undefined && e.data.memo === post.memo);
   const data = line && "data" in line ? line.data : {};
-  const post = events.find((e): e is PostEvent => e.type === "post" && e.memo === strOf(data.memo));
   // The line it paid from: its biggest draw on an account in the world.
   const paid = post?.lines.filter((l) => l.amount < 0 && traitsOf(ctx, l.account) !== null).sort((a, b) => a.amount - b.amount)[0];
   if (!post || !paid) return null;
@@ -1055,10 +1070,13 @@ export function paidFrom(ctx: ReadContext, events: readonly LedgerEvent[], viewe
  * Pay another way (DESIGN §9.5): for a payment the story made, the first of its payer's ways that
  * covers it now: the account its words named, when the payment went elsewhere (the story's own
  * way), then savings, a card, checking, cash; never an account the payment already touched. With it
- * comes the correction that moves the payment there once it has applied, one unit: what it drew goes
- * back to the account it came from and leaves the other way, as one transfer between the payer's own
- * accounts that names the payment, and what it brought on that account goes back too (§25.10): the
- * overdraft link's transfer returns to the link, and the bank's fee for it is refunded.
+ * comes the correction that moves the payment there once it has applied: what it drew goes back to
+ * the account it came from and leaves the other way, as one transfer between the payer's own
+ * accounts that names the payment, tied to the payment's unit; and what it brought on that account
+ * goes back too (§25.10), each its own unit tied to that transfer and to what it reverses: the
+ * overdraft link's transfer returns to the link, and the bank's fee for it is refunded. So a rebased
+ * view that drops the payment drops the whole correction, and one that drops only the link's
+ * transfer gives the link nothing back.
  */
 export function otherWay(ctx: ReadContext, events: readonly LedgerEvent[]): { from: EntityId; repay: LedgerEvent[] } | Rejection {
   const paid = storyPayment(ctx, events);
@@ -1072,15 +1090,16 @@ export function otherWay(ctx: ReadContext, events: readonly LedgerEvent[]): { fr
     { account: way.account, amount: -paid.total },
     { account: paid.account, amount: paid.total },
   ];
+  const moved = tied(asUnit(posting(lines, { memo, kind: "transfer", category: "transfer" })), [paid.post.group]);
   const back = paid.brought.flatMap((p): LedgerEvent[] => {
     const fee = p.lines.some((l) => l.account.startsWith(BANK_PREFIX));
     const reversed = p.lines.map((l) => ({ account: l.account, amount: -l.amount }));
     const note = `${p.memo} ${fee ? "refunded" : "reversed"}`;
     const was = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.memo === p.memo);
     const category = was && "data" in was ? strOf(was.data.category) : "";
-    return [{ type: "post", lines: reversed, memo: note }, txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...(category ? { category } : {}) })];
+    return tied(asUnit([{ type: "post", lines: reversed, memo: note }, txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...(category ? { category } : {}) })]), [p.group, moved[0]?.group]);
   });
-  return { from: way.account, repay: asUnit([...posting(lines, { memo, kind: "transfer", category: "transfer" }), ...back]) };
+  return { from: way.account, repay: [...moved, ...back] };
 }
 
 // ---------------------------------------------------------------- signals and notes

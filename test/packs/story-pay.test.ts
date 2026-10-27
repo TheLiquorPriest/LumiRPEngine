@@ -3,10 +3,11 @@
 // payment past what it covers, and with none a purchase is the payer's with nothing charged while a
 // transfer moves nothing. The way the prose names takes the payment when it can run a debt, and Pay
 // another way can move it back there. Pay another way puts the whole payment right, its overdraft
-// fee and linked transfer included, and a fee alone past the limit doesn't read as nothing covering
-// the payment. On a rebased view only a payment that runs a debt stands past what its account covers:
-// one from cash or savings drops whole, and the overdraft transfer a payment brought stands only
-// with it. Edit amount never takes cash or savings below zero either.
+// fee and linked transfer included, and finds a payment an earlier build recorded by its overdraw;
+// a fee alone past the limit doesn't read as nothing covering the payment. On a rebased view only a
+// payment that runs a debt stands past what its account covers: one from cash or savings drops
+// whole, and the overdraft transfer a payment brought stands only with it. Edit amount never takes
+// cash or savings below zero either.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
@@ -199,6 +200,34 @@ describe("Pay another way puts the whole payment right", () => {
     expect(drawn(bought.applied, "checking")).toBe(total);
     expect(w.state.accounts.checking).toBeLessThan(-10000);
     expect(w.ctx.query("economy.paid_from")(w.ctx, bought.applied, "you")).toMatchObject({ name: "Checking", over: 0, total });
+  });
+});
+
+describe("a payment the story made that an earlier build recorded", () => {
+  /** The events as a build before the `story` mark recorded them: its posting carries `overdraw`, its journal line no mark. */
+  const earlierBuild = (events: readonly LedgerEvent[]): LedgerEvent[] =>
+    events.map((e) => {
+      if (e.type !== "economy.txn" || !("data" in e)) return e;
+      const { story: _story, ...data } = e.data;
+      return { ...e, data };
+    });
+
+  test("Pay another way and its chip find it by its posting's overdraw, as they find one this build made", () => {
+    const w = setup();
+    holding(w, { cash: 1000, checking: 2000, card: -397000, savings: 900000 });
+    const bought = narrated(w, COMPASS).applied;
+    const old = earlierBuild(bought);
+    expect(old.some((e) => e.type === "post" && e.overdraw === true)).toBe(true);
+    expect(old.some((e) => e.type === "economy.txn" && "data" in e && e.data.story !== undefined)).toBe(false);
+    const paid = w.ctx.query("economy.paid_from")(w.ctx, old, "you");
+    expect(paid).toEqual(w.ctx.query("economy.paid_from")(w.ctx, bought, "you"));
+    expect(paid).toMatchObject({ name: "Visa card", credit: true });
+    const way = otherWay(w, old);
+    expect(way).toEqual(otherWay(w, bought));
+    expect(way.from).toBe("savings");
+    const total = drawn(bought, "card");
+    for (const e of way.repay) expect(w.apply(e)).toBeNull();
+    expect([w.state.accounts.card, w.state.accounts.savings]).toEqual([-397000, 900000 - total]);
   });
 });
 

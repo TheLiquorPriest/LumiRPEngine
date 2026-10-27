@@ -54,6 +54,13 @@ export interface ContentId {
  */
 export interface EventBase {
   group?: string;
+  /**
+   * The groups of units before it in its record that this unit was made to put right (an Edit
+   * amount's price correction ties to its purchase, a Pay another way to its payment): a rebased
+   * view that drops any of them drops this unit too, unless Keep converted it, and a plan or replay
+   * that skips one skips it. Every member of a unit names the same groups.
+   */
+  tiedTo?: string[];
 }
 
 /**
@@ -112,7 +119,8 @@ export interface PostEvent extends EventBase {
    * run a debt (§25.10): it stands on any path whatever that account covers, so a pack's funds guard
    * lets it take the account past what it allows, into overdraft or over its credit limit. One the
    * story paid from cash or savings has none, and its funds are checked as ever, as are those of
-   * events recorded before it existed.
+   * events recorded before it existed. An earlier build marked cash and savings payments too; those
+   * stand as it wrote them.
    */
   overdraw?: true;
 }
@@ -415,8 +423,14 @@ export type HeldWrite =
   | { kind: "reread"; id: string; messageId: MessageId; swipeId: number }
   /** Retry read: extracts a stopped head Continue's partial suffix into a `cont` entry (DESIGN §5.1 step 6). */
   | { kind: "retry_read"; id: string; messageId: MessageId; swipeId: number }
-  /** An undo chip: the referenced events of the head record stop folding (`Rec.undone`; DESIGN §11, D4). */
-  | { kind: "undo"; id: string; messageId: MessageId; swipeId: number; refs: EventRef[] };
+  /**
+   * An undo chip: the referenced events of the head record stop folding (`Rec.undone`; DESIGN §11,
+   * D4). `entry` names a post entry by its seq (a ✎ fix's or GM edit's Undo, a confirmed change's)
+   * to take back whole as it stands when the undo is journaled, every event it holds then, so a write
+   * journaled between the tap and the undo (an earlier held Undo, a Re-read) that worked its request
+   * out again can't leave the undo naming the wrong part.
+   */
+  | { kind: "undo"; id: string; messageId: MessageId; swipeId: number; refs: EventRef[]; entry?: number };
 
 export interface HeldEntry {
   write: HeldWrite;

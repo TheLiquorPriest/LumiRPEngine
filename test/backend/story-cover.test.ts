@@ -4,7 +4,9 @@
 // nothing and is a Not tracked receipt. A purchase nothing prices that someone else made is
 // theirs on its chip, never the player character's. On a rebased view the overdraft transfer a
 // payment brought stands only with it, in both folds, and Pay another way puts right only what
-// folded there. Edit amount charges what's typed on a taxed purchase too.
+// folded there. Edit amount charges what's typed on a taxed purchase too. A correction made where
+// the payment stood (Edit amount, Pay another way) goes with it on a version of the story where it
+// didn't, and gives an overdraft link nothing back where only its transfer didn't land.
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
@@ -340,6 +342,71 @@ describe("Edit amount on a purchase that applied by itself", () => {
     const refused = await rig.send({ type: "lre.chip", chatId, chip: chip?.id ?? "", choice: "amount", payload: { cents: 3000 } });
     expect(refused.type).toBe("lre.error");
     expect((await holdings(rig, chatId)).accounts).toEqual(before.accounts);
+  });
+});
+
+describe("a correction made where the payment stood, on a version of the story where it didn't", () => {
+  test("an Edit amount drops with the cash purchase it corrected, alike in both folds: the wallet gets nothing back for a purchase never made", async () => {
+    const { rig, chatId } = await alder("auto", 2000);
+    const cash = (await folded(rig, chatId)).accounts.acct_pov_cash ?? 0;
+    // Paid in cash; on the first swipe the wallet came down to $10.00, short of the whistle's $21.20.
+    const { earlier, later } = await branched(rig, chatId, [{ op: "adjust", account: "acct_pov_cash", cents: 1000 - cash }], [{ type: "purchase", payer: "pov", item: "tin whistle", price: 30, method: "cash" }], "You pay thirty dollars in cash for a tin whistle.");
+    const [chip] = await chipsOf(rig, chatId, "undo");
+    // Where it stood, the whistle really cost $5.00 in all: $16.20 comes back.
+    expect((await tap(rig, chatId, chip, "amount", { cents: 500 })).applied).toBe(true);
+    expect((await folded(rig, chatId)).accounts.acct_pov_cash).toBe(cash - 500);
+    rig.host.navigate(chatId, earlier, 0);
+    await rig.host.settle();
+    const view = await bothFolds(rig, chatId);
+    expect(view.messages.find((m) => m.id === later)?.fold).toBe("view");
+    expect(Object.values(view.state.entities).some((e) => e.name === "tin whistle")).toBe(false);
+    expect(view.state.accounts.acct_pov_cash).toBe(1000);
+    const lines = view.keepReport.filter((k) => k.messageId === later);
+    expect(lines.some((k) => "in" in k.ref && k.ref.in === "post")).toBe(true);
+    expect(lines.every((k) => k.status === "dropped")).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a Pay another way drops with the payment it moved: the account it moved to pays nothing", async () => {
+    const { rig, chatId } = await alder("auto");
+    rig.body(await rig.send({ type: "lre.fix", chatId, entity: "pov", field: "cash", value: 7800 }));
+    // $50.00 in checking and $50.00 left on the card: the compass goes on the card past its limit.
+    await balances(rig, chatId, { acct_pov_checking: 5000, acct_pov_card: -445000 });
+    const savings = (await folded(rig, chatId)).accounts.acct_pov_savings ?? 0;
+    // On the first swipe the card was frozen.
+    const { earlier } = await branched(rig, chatId, [{ op: "effect", effect: "economy.set_status", args: { account: "acct_pov_card", status: "frozen" } }], [COMPASS], "The clerk wraps the compass.");
+    const [chip] = await chipsOf(rig, chatId, "undo");
+    expect((await tap(rig, chatId, chip, "other")).applied).toBe(true);
+    const moved = await folded(rig, chatId);
+    expect([moved.accounts.acct_pov_savings, moved.accounts.acct_pov_card]).toEqual([savings - 17490, -445000]);
+    rig.host.navigate(chatId, earlier, 0);
+    await rig.host.settle();
+    const view = await bothFolds(rig, chatId);
+    expect(Object.values(view.state.entities).some((e) => e.name === "brass ship's compass")).toBe(false);
+    expect([view.state.accounts.acct_pov_savings, view.state.accounts.acct_pov_card]).toEqual([savings, -445000]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a Pay another way gives the overdraft link nothing back where its transfer didn't land, and still moves the payment", async () => {
+    const { rig, chatId } = await alder("auto");
+    // $100.00 in checking, which draws on savings' $50.00 when it runs short.
+    await balances(rig, chatId, { acct_pov_checking: 10000, acct_pov_savings: 5000 }, LINKED);
+    const card = (await folded(rig, chatId)).accounts.acct_pov_card ?? 0;
+    // On the first swipe $40.00 left savings, which then can't spare the $50.00 transfer.
+    const { earlier } = await branched(rig, chatId, [{ op: "adjust", account: "acct_pov_savings", cents: -4000 }], [{ ...COMPASS, method: "debit card" }], "You pay with your debit card and the clerk wraps the compass.");
+    const own = await folded(rig, chatId);
+    expect([own.accounts.acct_pov_checking, own.accounts.acct_pov_savings]).toEqual([10000 + 5000 - 17490, 0]);
+    const [chip] = await chipsOf(rig, chatId, "undo");
+    // Where the transfer landed, the payment moves to the card and the $50.00 goes back to savings.
+    expect((await tap(rig, chatId, chip, "other")).applied).toBe(true);
+    const moved = await folded(rig, chatId);
+    expect([moved.accounts.acct_pov_checking, moved.accounts.acct_pov_savings, moved.accounts.acct_pov_card]).toEqual([10000, 5000, card - 17490]);
+    rig.host.navigate(chatId, earlier, 0);
+    await rig.host.settle();
+    const view = await bothFolds(rig, chatId);
+    // There savings never sent the $50.00: it gets none back, and the payment still moves to the card.
+    expect([view.state.accounts.acct_pov_checking, view.state.accounts.acct_pov_savings, view.state.accounts.acct_pov_card]).toEqual([10000, 1000, card - 17490]);
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
 

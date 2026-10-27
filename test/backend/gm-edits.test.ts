@@ -89,6 +89,9 @@ async function knowsDanny(rig: Rig, chatId: string): Promise<boolean> {
 /** A read that has the player character meet Danny; every other model call answers with nothing. */
 const meetsDanny = (req: QuietRequest): string => ((req.messages[0]?.content ?? "").includes("propose concrete state changes") ? JSON.stringify({ proposals: [{ type: "knows", fact: "danny_okafor" }] }) : "{}");
 
+/** A read that tells of Danny's death; every other model call answers with nothing. */
+const tellsDannysDeath = (req: QuietRequest): string => ((req.messages[0]?.content ?? "").includes("propose concrete state changes") ? JSON.stringify({ proposals: [{ type: "life", entity: "danny_okafor", state: "dead" }] }) : "{}");
+
 /** Edits a reply and reads it again with its Re-read edit chip. */
 async function reread(rig: Rig, chatId: string, messageId: string, text: string): Promise<void> {
   rig.host.editMessage(chatId, messageId, text);
@@ -335,7 +338,7 @@ describe("GM edits", () => {
     // The reply, edited so that it tells of the death and read again: the GM's edit is already so.
     const reply = rig.host.head(chatId);
     if (!reply) throw new Error("no reply");
-    rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes("propose concrete state changes") ? JSON.stringify({ proposals: [{ type: "life", entity: "danny_okafor", state: "dead" }] }) : "{}");
+    rig.host.quietReply = tellsDannysDeath;
     await reread(rig, chatId, reply.id, "Danny collapses in the street and dies.");
     expect(await dead()).toBe(true);
     expect(await fixChips()).toHaveLength(0);
@@ -348,6 +351,37 @@ describe("GM edits", () => {
     expect(chips).toHaveLength(1);
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: chips[0]?.id ?? "", choice: "undo" }));
     expect(await dead()).toBe(false);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("two Undos held behind a Continue each take back what they name as it stands when they land: the edit's, after the read's, takes back all of it", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await portAlder(rig);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { life: { mode: "auto" } } } }));
+    await rig.turn(chatId, "I look around.", "The street is quiet.");
+    const con = async (): Promise<unknown> => (await bothFolds(rig, chatId)).entities.pov?.fields.con ?? null;
+    const dead = async (): Promise<boolean> => lifeOf(await bothFolds(rig, chatId), "danny_okafor") === "dead";
+    const before = await con();
+    await edit(rig, chatId, { op: "life", entity: "danny_okafor", to: "dead" }, { op: "set", entity: "pov", field: "con", value: 30 });
+    expect([await dead(), await con()]).toEqual([true, 30]);
+    // The reply, edited to tell of the death and read again: the edit's first part is already so.
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    rig.host.quietReply = tellsDannysDeath;
+    await reread(rig, chatId, reply.id, "Danny collapses in the street and dies.");
+    rig.host.quietReply = () => "{}";
+    // A Continue streams, and both Undos wait for it: the read's change, then the GM edit's. The first
+    // to land works the edit out whole again; the second takes back all of it, as it stands then.
+    const continuing = await rig.host.start(chatId, { type: "continue", messageId: reply.id });
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
+    for (const kind of ["undo", "fix"]) {
+      const chip = chips.find((c) => c.kind === kind && c.messageId === reply.id);
+      if (!chip) throw new Error(`no ${kind} chip`);
+      expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "undo" })).pending).toBe(true);
+    }
+    await rig.host.finish(continuing, " The street goes still.");
+    await rig.host.settle();
+    expect([await dead(), await con()]).toEqual([false, before]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
