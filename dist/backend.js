@@ -74870,9 +74870,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "9de3f51cdf115125eada2f6c564849e288a567fe64455dc782d565a4c9288a06";
+  const sha256 = "3a3505561b5550392b136a9b38a48399fa599073f9d1dfba60f13517e2fb1df3";
   const tools = ["d7ea5d8f68714fbde356a1b99c522de6", "3a95a1966944ca155e67ff625d472024"].filter((f) => f !== undefined);
-  return { id: "8bd219f4", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "5598d74b", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -78079,7 +78079,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "8bd219f4" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "5598d74b" }), (chatId) => this.messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }
@@ -80456,7 +80456,7 @@ function describeProposal(p, view) {
       return world && p.from !== world.pov && typeof p.from === "string" ? `${s("from")} paid ${amount} to ${s("to")}` : `Paid ${amount} to ${s("to")}`;
     }
     case "give":
-      return `${s("from")} gave ${s("item")} to ${s("to")}`;
+      return named("from") ? `${subject("from")} gave ${s("item")} to ${s("to")}` : `${subject("to")} got ${s("item")}`;
     case "location":
       return `${actor2("entity")} went to ${s("place")}`;
     case "condition": {
