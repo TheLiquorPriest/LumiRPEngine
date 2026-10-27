@@ -45,6 +45,8 @@ export const TIMELAPSE_ACTION = "timelapse";
 /** Off-screen agents caught up per turn (K) and their agent-day budget. */
 export const AGENTS_PER_TURN = 4;
 export const TURN_AGENT_DAYS = 30;
+/** The money's refusals of a typed payment, its defaults rather than an author's locks: money that doesn't cover it, and nothing pricing it. */
+const UNPAID_CODES: ReadonlySet<string> = new Set(["declined", "unpriced"]);
 
 /** `povRoutine` false: the timelapse holds the POV where the story has it (`TimelapseOptions.povRoutine`). */
 export type TurnChip =
@@ -267,12 +269,13 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement, ...(step.needs ? { needs: step.needs } : {}) });
         // A typed action whose plain requirement doesn't hold plays as plain roleplay; hard locks hold it.
         if (typed && missedPlainRequirement(resolution)) resolution = { ...resolution, roleplay: true };
-        // So does one whose payment the money can't cover: what money covers is the engine's default,
-        // not a lock, and the reply's read charges a purchase the story tells (DESIGN §9.5). None of it plays.
-        const uncovered = typed && resolution.ok ? resolution.rejected.find((r) => r.rejection.code === "declined") : undefined;
-        if (uncovered) {
+        // So does one whose payment the money can't make, uncovered or unpriced: what money covers and
+        // what prices a thing are the engine's defaults, not locks, and the reply's read charges or owns
+        // a purchase the story tells (DESIGN §9.5). None of it plays.
+        const unpaid = typed && resolution.ok ? resolution.rejected.find((r) => UNPAID_CODES.has(r.rejection.code)) : undefined;
+        if (unpaid) {
           w.restore(acting);
-          resolution = { ...resolution, ok: false, failed: { code: "declined", reason: uncovered.rejection.reason }, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, adjudged: null, roleplay: true };
+          resolution = { ...resolution, ok: false, failed: { code: unpaid.rejection.code, reason: unpaid.rejection.reason }, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, adjudged: null, roleplay: true };
         }
         scene = sceneKey(w.world, w.state);
         // The rules see the claimed thing's making too, so a world rule can react to its mark.

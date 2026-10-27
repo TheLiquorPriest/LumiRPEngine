@@ -613,6 +613,17 @@ describe("proposal labels", () => {
     expect(describeProposal({ type: "transfer", from: pov, to: "dev", amount: 2000 }, view)).toBe("Paid $20.00 to Dev");
     expect(describeProposal({ type: "transfer", from: pov, to: "dev", amount: 2000, cents: 20 }, view)).toBe("Paid $0.20 to Dev");
   });
+
+  test("a change that leaves out who made it is the player character's, as its channel reads it, never '?'", () => {
+    const view = devAtHome();
+    expect(describeProposal({ type: "location", place: "the old airfield" }, view)).toBe("You went to the old airfield");
+    expect(describeProposal({ type: "take", item: "a lantern" }, view)).toBe("You picked up a lantern");
+    expect(describeProposal({ type: "use_up", item: "a lantern", qty: 2 }, view)).toBe("You used up a lantern ×2");
+    expect(describeProposal({ type: "lose", item: "a lantern", by: "dev" }, view)).toBe("Dev stole a lantern from you");
+    expect(describeProposal({ type: "drop", entity: "dev", item: "a lantern" }, view)).toBe("Dev put down a lantern");
+    // A count names no holder by default: the thing's own count moved.
+    expect(describeProposal({ type: "quantity", item: "a lantern", delta: -1 }, view)).toBe("The count of a lantern went down by 1");
+  });
 });
 
 describe("Scene slot", () => {

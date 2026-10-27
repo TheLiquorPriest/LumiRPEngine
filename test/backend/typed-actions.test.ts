@@ -362,6 +362,18 @@ describe("several actions in one message (the action queue)", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
+  test("a typed Buy that nothing prices plays as plain roleplay too: nothing is bought or charged, its receipt says why, and the rest of the message plays", async () => {
+    const { rig, chatId } = await chat();
+    reading(rig, (text): JsonObject => (text.startsWith("I buy the old sailboat") ? { action: "buy", params: { item: "old sailboat" }, confidence: 0.9, more: [buying("muffin")] } : { action: "buy", params: { item: "muffin" }, confidence: 0.9 }));
+    const told = await nextTurn(rig, chatId, "I buy the old sailboat at the dock, then a muffin.");
+    expect(await bought(rig, chatId, /sailboat/i)).toBe(0);
+    expect(await bought(rig, chatId, /muffin/i)).toBe(1);
+    expect(naming(told.toLowerCase(), "sailboat")).toEqual([]);
+    expect((await roleplayed(rig, chatId)).map((c) => c.label)).toEqual([expect.stringContaining(rig.rt.registry.actions.get("buy")?.label ?? "buy")]);
+    expect((await replyChips(rig, chatId)).some((c) => c.kind === "decline" || c.kind === "choice")).toBe(false);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
   test("a queued action that names nothing in the world plays as plain roleplay with its receipt, and the actions after it still play", async () => {
     const { rig, chatId } = await chat();
     reading(rig, walkThen([{ action: "pay", params: { to: "rena", amount: 6 }, text: "I pay Rena" }, buying("muffin")]));

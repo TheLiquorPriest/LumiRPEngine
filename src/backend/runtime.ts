@@ -3949,6 +3949,9 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
     const who = subject(k);
     return who === "You" ? "Your" : `${who}'s`;
   };
+  // A channel reads a left-out actor as the player character (`strOf(p.entity) || pov`); so does its label.
+  const named = (k: string): boolean => typeof p[k] === "string" && (p[k] as string).trim() !== "";
+  const actor = (k: string): string => (named(k) ? subject(k) : "You");
   const change = (delta: number): string => `${delta >= 0 ? "went up" : "went down"} by ${Math.abs(delta)}`;
   switch (p.type) {
     case "purchase":
@@ -3962,7 +3965,7 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
     case "give":
       return `${s("from")} gave ${s("item")} to ${s("to")}`;
     case "location":
-      return `${subject("entity")} went to ${s("place")}`;
+      return `${actor("entity")} went to ${s("place")}`;
     case "condition": {
       // Sheets: {who, condition, clear?}; a bare field change (entity, field, delta) otherwise.
       if (typeof p.condition !== "string") {
@@ -3976,7 +3979,7 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
       return `${who} ${be(who)} ${p.clear === true ? "no longer" : "now"} ${raw("condition").replace(/_/g, " ")}`;
     }
     case "quantity":
-      return `${whose("entity")} count of ${s("item")} ${change(Number(p.delta))}`;
+      return `${named("entity") ? `${whose("entity")} count of` : "The count of"} ${s("item")} ${change(Number(p.delta))}`;
     case "regard":
       return `${whose("from")} ${s("axis").replace(/_/g, " ")} toward ${s("to")} ${Number(p.delta) >= 0 ? "rose" : "fell"} by ${Math.abs(Number(p.delta))}`;
     case "knows": {
@@ -3986,15 +3989,15 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
     }
     // The reply's item changes (DESIGN §9.4), each by who and what, as the POV may know them.
     case "take":
-      return `${s("entity")} picked up ${s("item")}`;
+      return `${actor("entity")} picked up ${s("item")}`;
     case "drop":
-      return `${s("entity")} put down ${s("item")}`;
+      return `${actor("entity")} put down ${s("item")}`;
     case "use_up":
-      return `${s("entity")} used up ${s("item")}${typeof p.qty === "number" && p.qty > 1 ? ` ×${p.qty}` : ""}`;
+      return `${actor("entity")} used up ${s("item")}${typeof p.qty === "number" && p.qty > 1 ? ` ×${p.qty}` : ""}`;
     case "wear":
-      return `${s("entity")} ${p.off === true ? "took off" : "put on"} ${s("item")}`;
+      return `${actor("entity")} ${p.off === true ? "took off" : "put on"} ${s("item")}`;
     case "lose":
-      return typeof p.by === "string" && p.by !== "" ? `${s("by")} stole ${s("item")} from ${s("entity")}` : `${s("entity")} lost ${s("item")}`;
+      return named("by") ? `${subject("by")} stole ${s("item")} from ${named("entity") ? s("entity") : "you"}` : `${actor("entity")} lost ${s("item")}`;
     case "item_condition":
       return `${s("item")}'s condition ${change(Number(p.delta))}`;
     case "spawn":
