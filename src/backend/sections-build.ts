@@ -83,8 +83,10 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
   const fills: { slot: SlotId; content: string }[] = [];
   const recorded: SlotId[] = [];
   const sources: Source[] = [];
-  // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2).
-  // The Minds section has its own budget and never spends the shared one (DESIGN §24.3).
+  // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2). A
+  // later section over what is left is trimmed by whole lines from its end until it fits, and left
+  // out whole only when not even its header and first line fit. The Minds section has its own
+  // budget and never spends the shared one (DESIGN §24.3).
   let budget = input.budget;
   const mindsBudget = input.mindsBudget;
   const fullMinds = worldMindsOf(world).secrecy === "full";
@@ -167,11 +169,16 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
       // The section's own caps (§6.11): its first lines, then cut from the end to its tokens.
       const capped = feed.maxLines !== undefined ? screened.slice(0, feed.maxLines) : [...screened];
       const markedRoom = feed.maxLines !== undefined ? Math.max(0, feed.maxLines - capped.length) : marked.length;
-      if (feed.maxTokens !== undefined) while (capped.length > 0 && input.cost(renderSection(section.label, section.template, capped.map((l) => l.text))) > feed.maxTokens) capped.pop();
-      const safe = capped.map((l) => l.text);
+      const costOf = (body: readonly { text: string }[]): number => input.cost(renderSection(section.label, section.template, body.map((l) => l.text)));
+      if (feed.maxTokens !== undefined) while (capped.length > 0 && costOf(capped) > feed.maxTokens) capped.pop();
+      // Then the shared budget (§6.2): a section over what is left loses whole lines from its end,
+      // each counted among its cut lines as its caps' are.
+      const kept = [...capped];
+      if (!minds && section.rank > 0) while (kept.length > 1 && costOf(kept) > budget) kept.pop();
+      const safe = kept.map((l) => l.text);
       const facts = marked.slice(0, markedRoom);
       const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
-      const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - capped.length);
+      const cut = (minds ? allMinds.length - mindsFit.length : 0) + (screened.length - kept.length);
       if (safe.length === 0) {
         // A Minds section whose best line alone is over its budget is left out whole.
         if (minds && allMinds.length > 0) {
@@ -186,18 +193,22 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
       const content = renderSection(section.label, section.template, safe);
       input.seen(content);
       const cost = input.cost(content);
-      const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
-      record.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(cut > 0 ? { cut } : {}), delivery: "unchecked" });
-      if (clipped) {
-        outcome(section, feed, "clipped", { tokens: cost, cut });
+      if (minds ? cost > mindsBudget : section.rank > 0 && cost > budget) {
+        // Only a section whose header and first line alone are over what is left is left out whole:
+        // told at its size as its caps leave it, with only their cut.
+        const whole = minds ? cost : costOf(capped);
+        const capsCut = cut - (capped.length - kept.length);
+        record.push({ slot: section.id, label: section.label, tokens: whole, clipped: true, ...(capsCut > 0 ? { cut: capsCut } : {}), delivery: "unchecked" });
+        outcome(section, feed, "clipped", { tokens: whole, cut: capsCut });
         continue;
       }
+      record.push({ slot: section.id, label: section.label, tokens: cost, clipped: false, ...(cut > 0 ? { cut } : {}), delivery: "unchecked" });
       if (!minds) budget -= cost;
       const fill = { slot: section.id, content };
       fills.push(fill);
       filled.add(section.id);
       recorded.push(section.id);
-      sources.push(...capped.flatMap((l) => (l.source ? [l.source] : [])));
+      sources.push(...kept.flatMap((l) => (l.source ? [l.source] : [])));
       outcome(section, feed, "sent", { content, tokens: cost, cut });
       if (safeHints.length > 0 || facts.length > 0) hinted.push({ fill, slot: section.id, label: section.label, template: section.template, lines: safe, marked: facts, hints: safeHints, cost, maxTokens: feed.maxTokens, maxLines: feed.maxLines });
     }

@@ -4,7 +4,7 @@
 // says so.
 
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SECTIONS } from "../../src/backend/book";
+import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import type { Delivered } from "../../src/backend/ledger-io";
 import { markedText } from "../../src/engine/feed";
 import { editRequest } from "../../src/frontend/requests";

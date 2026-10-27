@@ -59,6 +59,7 @@
     "realism": { "$ref": "#/$defs/realism" },
     "time": { "$ref": "#/$defs/time" },
     "sections": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/section" } },
+    "sectionTemplates": { "type": "object", "description": "The world's own wording of the built-in sections it has without listing them in sections, by section id (outcome, montage, scene, people, money, gear, vehicles, quest, outline, stance, minds, place, property): each a template holding {{lines}}, where the section's lines go. Only what differs from the built-in text is stored. Absent: the built-in text.", "propertyNames": { "enum": ["outcome", "montage", "scene", "people", "money", "gear", "vehicles", "quest", "outline", "stance", "minds", "place", "property"] }, "additionalProperties": { "type": "string", "pattern": "\\{\\{lines\\}\\}" } },
     "steps": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/step" } },
     "suppressed": {
       "type": "array",

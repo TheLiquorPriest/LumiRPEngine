@@ -4,7 +4,8 @@
 // rules put secrecy above the order of authority, in the same words with marked facts or without.
 
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SECTIONS, NARRATOR_AUTHORITY, NARRATOR_SECRECY } from "../../src/backend/book";
+import { NARRATOR_AUTHORITY, NARRATOR_SECRECY } from "../../src/backend/book";
+import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import type { Delivered } from "../../src/backend/ledger-io";
 import { MARKED_FACTS_RULE, markedText } from "../../src/engine/feed";
 import type { SectionRenderer } from "../../src/engine/registry";

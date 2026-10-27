@@ -14,6 +14,7 @@ import { MIND_PURPOSES } from "../shared/minds";
 import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
 import type { ActionDef, WorldCurrency, WorldDoc } from "../shared/world";
 import type { DataTable } from "../shared/tables";
+import { builtInSectionsOf, DEFAULT_SECTIONS, sectionTemplateProblem } from "../shared/sections";
 import { compileMaps } from "../shared/maps";
 import { DEFAULT_CURRENCY, ENGINE_VERSION, isHardLock, readSectionFeed, requirementExpr, SECTION_FEED_KEYS, WORLD_FORMAT } from "../shared/world";
 import { applyEvent, validateEvent } from "./events";
@@ -124,10 +125,10 @@ const LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers", "routines
 const PARTS = ["pins", "calendar", "realism", "time", "start"] as const;
 /**
  * Parts a document may leave out: `migrateWorld` fills the currency (Modern US) and the lore lookup
- * table (empty), and a world without a ruleset, map settings, minds config, lore pins or routine
- * settings plays by the defaults.
+ * table (empty), and a world without a ruleset, map settings, minds config, lore pins, routine
+ * settings or section wording plays by the defaults.
  */
-const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins", "routineSettings"] as const;
+const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins", "routineSettings", "sectionTemplates"] as const;
 
 /**
  * Shape checks for an untrusted document, before `migrateWorld` and `lintWorld` read it: every
@@ -310,6 +311,21 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   for (const [id, s] of Object.entries(world.sections)) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0) err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
   }
+  // The world's wording of a built-in section: a text holding `{{lines}}` and no other macro, for a
+  // built-in section the world has without listing it (one it lists uses its own template).
+  const builtIn = new Set(builtInSectionsOf(world).map((s) => s.id));
+  for (const [id, text] of Object.entries(world.sectionTemplates ?? {})) {
+    const path = `sectionTemplates.${id}`;
+    const label = DEFAULT_SECTIONS[id]?.label ?? id;
+    if (typeof text !== "string") {
+      err(path, "section_template", `the wording of "${label}" must be text`);
+      continue;
+    }
+    const problem = hasOwn(DEFAULT_SECTIONS, id) ? sectionTemplateProblem(text) : `there is no built-in section "${id}"`;
+    if (problem !== null) err(path, "section_template", `"${label}": ${problem}`);
+    if (macroHazards(text, ["{{lines}}"]).length > 0) err(path, "section_macro", `"${label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
+    if (hasOwn(DEFAULT_SECTIONS, id) && !builtIn.has(id)) warn(path, "section_template_unused", `"${label}" is the world's own section, so its own template is used and this wording isn't`);
+  }
   // A section only the engine's renderers (its own slot's, or its `include`'s) or the turn itself
   // fill: one neither feeds is skipped every turn, without a word (DESIGN §6, §6.11).
   const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
@@ -346,6 +362,7 @@ export function macrosIn(world: WorldDoc): { path: string; macro: string }[] {
   };
   for (const [id, l] of Object.entries(world.lore)) scan(`lore.${id}.content`, l.content);
   for (const [id, s] of Object.entries(world.sections)) scan(`sections.${id}.template`, s.template);
+  for (const [id, text] of Object.entries(world.sectionTemplates ?? {})) if (typeof text === "string") scan(`sectionTemplates.${id}`, text);
   for (const [id, t] of Object.entries(world.steps)) scan(`steps.${id}.template`, t.template);
   return out;
 }

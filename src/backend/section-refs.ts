@@ -5,7 +5,7 @@
 import type { SlotId } from "../shared/ids";
 import { MINDS_SLOT } from "../shared/minds";
 import type { SectionTemplate } from "../shared/world";
-import { DEFAULT_SECTIONS } from "./book";
+import { DEFAULT_SECTIONS } from "../shared/sections";
 
 /**
  * The labels of the sections the narrator won't have this turn, as the Outline (ranked `rank`) is

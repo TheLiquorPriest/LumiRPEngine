@@ -207,7 +207,8 @@ describe("the Place section lists only things lying there", () => {
     bill.fields.place = "alder_automotive";
     const lying = placeLines(reg.context(world, state), "player")
       .map((l) => l.text)
-      .find((t) => t.startsWith("Lying here:"));
+      .filter((t) => t.startsWith("Lying here:"))
+      .join("\n");
     expect(lying).toContain("Spare relay");
     expect(lying).not.toContain("Alder Automotive (");
     expect(lying).not.toContain("Mobile phone");

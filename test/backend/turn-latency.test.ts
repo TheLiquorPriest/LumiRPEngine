@@ -15,7 +15,7 @@ import { noteOp, refreshOp } from "../../src/packs/minds/ui/ops";
 import { readCharacter } from "../../src/packs/minds/core/state";
 import type { JsonObject } from "../../src/shared/json";
 import type { EditOp } from "../../src/shared/protocol";
-import type { UserSettings } from "../../src/shared/settings";
+import { SETTINGS_DEFAULTS_REV, type UserSettings } from "../../src/shared/settings";
 import { Rig } from "../support/rig";
 
 const MIND = /You are the private mind of (.+?) in the roleplay world/;
@@ -283,7 +283,7 @@ describe("thinking budgets", () => {
       return rig.rt.settings.get(rig.host.userId);
     };
     const lifted = await read({ helper: helper("inherit"), modelUse: { preset: "standard", steps: steps() } });
-    expect([lifted.defaults, lifted.modelUse.steps.memory?.route?.effort, lifted.modelUse.steps.consolidate?.route?.effort]).toEqual([3, "off", "off"]);
+    expect([lifted.defaults, lifted.modelUse.steps.memory?.route?.effort, lifted.modelUse.steps.consolidate?.route?.effort]).toEqual([SETTINGS_DEFAULTS_REV, "off", "off"]);
     const chosenStep = await read({ helper: helper("inherit"), modelUse: { preset: "custom", steps: steps("low") } });
     expect([chosenStep.modelUse.steps.memory?.route?.effort, chosenStep.modelUse.steps.consolidate?.route?.effort]).toEqual(["low", "off"]);
     const chosenHelper = await read({ helper: helper("high"), modelUse: { preset: "standard", steps: steps() } });

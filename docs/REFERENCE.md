@@ -126,7 +126,7 @@ Template placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `gear`, 
 
 ### Sections
 
-The slots a world gets when it defines none, kept in rank order on the section budget.
+The slots a world gets when it defines none, kept in rank order on the section budget. A world words any built-in slot it has without listing it in its `sectionTemplates` part, by slot id: a template holding `{{lines}}`, stored only where it differs from the built-in text.
 
 | Slot | Label | Rank |
 |---|---|---|
@@ -1101,13 +1101,18 @@ Extends `container`.
 | Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
 |---|---|---|---|---|---|---|---|
 | `class` | Vehicle class | text |  |  |  |  |  |
+| `colour` | Colour | text |  |  |  |  |  |
 | `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |
 | `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto |
 | `home` | Home base | ref |  |  |  |  | live from vehicles 3 |
 | `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |
+| `make` | Make | text |  |  |  |  |  |
+| `model` | Model | text |  |  |  |  |  |
 | `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |
+| `plate` | Plate | text |  |  |  |  |  |
 | `status` | Status | enum: ok, needs_service, broken |  | `"ok"` |  |  | live from vehicles 1; bound confirm |
 | `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |
+| `year` | Year | number |  |  |  |  |  |
 
 ### Effects
 

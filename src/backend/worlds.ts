@@ -25,6 +25,7 @@ import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
 import { loreBooksOf, lorePinsOf } from "../shared/lore";
 import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, routineShapeProblems } from "../shared/routines";
 import { needsSettingsOf, needsSettingsProblems, storedNeedsSettings } from "../shared/needs";
+import { sectionTemplatesProblem } from "../shared/sections";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
@@ -559,6 +560,10 @@ export class WorldStore {
     if (!jsonEqual(was.needs, after.needs) && after.needs !== undefined) {
       const problem = needsProblem(after.needs);
       if (problem !== null) throw refusal(["needs"], problem);
+    }
+    if (!jsonEqual(was.sectionTemplates, after.sectionTemplates) && after.sectionTemplates !== undefined) {
+      const problem = sectionTemplatesProblem(after.sectionTemplates);
+      if (problem !== null) throw refusal(["sectionTemplates"], problem);
     }
     const shape = shapeIssues(after);
     if (shape.length > 0 || !isWorldDoc(after)) throw new WorldError("validation", "the patch leaves the world malformed", shape);

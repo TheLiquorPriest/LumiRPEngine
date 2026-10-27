@@ -20,12 +20,14 @@ import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
-import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
+import { fieldDef, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { partyAt, relocate } from "../../../engine/relocate";
 import { isMemberOf } from "../../../engine/selector";
 import { calendarOf, formatClock } from "../../../engine/calendar";
-import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
-import { accessOf } from "../../../engine/access";
+import { sentence, thingDescription, thingDetails, thingName } from "../../../engine/thing-words";
+import { canSeeEntity, canSeeField, canSeePlace, knows } from "../../../engine/visibility";
+import { fieldNoun } from "../../../shared/words";
+import { accessOf, owns } from "../../../engine/access";
 import { siteOf, together } from "../../../engine/presence";
 import type { FeedLine } from "../../../engine/registry";
 import type { FeedScope } from "../../../shared/world";
@@ -81,6 +83,12 @@ export const VEHICLE: KindDef = {
   extends: "container",
   pack: "vehicles",
   fields: {
+    // What it is, as its author or the GM tells it: the Vehicles section names each one it has.
+    make: { type: "text", label: "Make" },
+    model: { type: "text", label: "Model" },
+    year: { type: "number", label: "Year" },
+    colour: { type: "text", label: "Colour" },
+    plate: { type: "text", label: "Plate" },
     // Named for the vehicle, so Build doesn't read it as one of the world's own classifications.
     class: { type: "text", label: "Vehicle class" },
     status: { type: "enum", label: "Status", values: ["ok", "needs_service", "broken"], default: "ok", domain: "vehicles", level: 1, bound: { mode: "confirm" } },
@@ -104,16 +112,28 @@ function burnsFuel(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId
   return row !== undefined && strOf(row.fuel_type, "gasoline") !== "none";
 }
 
-/** At most this many other people's vehicles at the POV's site are told, the rest counted. */
-const OTHERS_CAP = 8;
+/**
+ * A vehicle's fields its Vehicles line tells its own way, not as `label value`: its class by the
+ * table's name for it, its fuel with the range it gives, its status, and its last service as when
+ * the next is due.
+ */
+const TOLD_APART: Readonly<Record<string, true>> = { class: true, fuel_pct: true, status: true, last_service: true };
 
 /**
  * The Vehicles section (DESIGN §6, §6.11, §9.3): what the player character may use, his own; from
  * level 2 his groups' (his family's), with whose they are; from level 3 the ones assigned or lent
- * to him; the ones away from his site folded into one line. Then other people's vehicles at his
- * site, with whose they are. Owners are named only as he may know them. In `scene` scope a vehicle
- * here he can't see is added, marked, when its owner is with him and can see it (a secret one never:
- * no one can), its place as the owner may know it; in `gm`, every one at his site, by real name.
+ * to him. Each one he may use gets a line with everything the world keeps of it that he may see:
+ * where it is and whose, its class, every field its kind defines that it has set, by the kind's
+ * labels (make, model, year, colour, plate, odometer or engine hours, condition from level 3, its
+ * value), fuel and range and its status from level 2, when its next service is due from level 4,
+ * who is aboard and its cargo by name (for one at his site; what a thing in it holds only when the
+ * vehicle or the thing is his, or he knows of what it holds), and its description. Then other
+ * people's vehicles at his site that he can see, each with whose it is and what anyone sees of it
+ * (its class, its fields of no realism domain, its description). The ones he may use away from his
+ * site come last, each named with where it is, so a section trimmed to the budget loses those
+ * first. Owners are named only as he may know them. In `scene` scope a vehicle here he can't see is
+ * added, marked, when its owner is with him and can see it (a secret one never: no one can), its
+ * place as the owner may know it; in `gm`, every one at his site, by real name.
  */
 export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const pov = ctx.world.pov;
@@ -126,9 +146,28 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const site = siteOf(ctx.world, here);
   const ownerName = (owner: EntityId): string => (see(pov, owner) ? (own(ctx.state.entities, owner)?.name ?? "someone") : "someone");
   const placeText = (place: PlaceId | null): string => (!place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere");
-  const lines: FeedLine[] = [];
+  // Its class by the table's name for it, under the kind's label for the field ("vehicle class Midsize pickup").
+  const classText = (v: EntityId, kind: string): string[] => {
+    const name = classRow(ctx, v)?.name;
+    if (typeof name !== "string" || name.trim() === "" || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "class")) return [];
+    return [`${fieldNoun(fieldDef(ctx.registry, ctx.world, kind, "class")?.label, "class").noun} ${name.trim()}`];
+  };
+  // What is in a holder, as far as he can see.
+  const contents = (holder: EntityId): EntityId[] =>
+    Object.keys(ctx.state.entities)
+      .sort()
+      .filter((id) => !isGone(ctx.state, id) && see(pov, id) && own(ctx.state.entities, id)?.relations.some((r) => r.type === "in" && r.to === holder));
+  // A thing in a vehicle by name, with what it holds only where he may look: in his own vehicle or
+  // his own thing, or a thing in it he knows of. Another's bag in a car lent to him stays shut, as
+  // People and Place never tell what is inside another's things.
+  const named = (id: EntityId, depth: number, mine: boolean): string => {
+    const open = mine || owns(ctx.state, pov, id);
+    const inner = depth >= 8 ? [] : contents(id).filter((x) => open || knows(ctx.state, pov, x)).map((x) => named(x, depth + 1, mine));
+    return `${thingName(ctx, id)}${inner.length > 0 ? ` (holding ${inner.join(", ")})` : ""}`;
+  };
+  const usable: FeedLine[] = [];
+  const away: FeedLine[] = [];
   const others: { v: EntityId; owner: EntityId | null; place: PlaceId | null }[] = [];
-  const away = new Map<string, number>();
   for (const v of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, v);
     if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v)) continue;
@@ -142,31 +181,49 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       continue;
     }
     if (owner !== pov && !see(pov, v)) continue;
+    const elsewhere = site !== null && siteOf(ctx.world, place) !== site;
     // The narrator hears where it is as the player may: a place the POV can't see is somewhere.
-    const where = placeText(place);
-    if (site !== null && siteOf(ctx.world, place) !== site) {
-      away.set(where, (away.get(where) ?? 0) + 1);
-      continue;
-    }
-    const parts = [`${e.name}: ${where}`];
+    const head = [placeText(place), ...(level === 1 ? [] : [whose]), ...(elsewhere ? ["away from here"] : [])];
+    const parts = classText(v, e.kind);
     if (level === 1) parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
     else {
-      parts.push(whose);
       if (burnsFuel(ctx, v)) {
         const range = rangeLeft(ctx, v);
         parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? `, about ${Math.round(range.value)} ${range.unit} left` : ""}`);
       }
       if (e.fields.status !== "ok" && e.fields.status !== undefined) parts.push(String(e.fields.status).replace(/_/g, " "));
     }
-    lines.push({ text: `${parts.join(", ")}.`, known: "pov" });
+    // Its wear is told from Vehicles 3, as the Garage shows it.
+    parts.push(...thingDetails(ctx, v, (field) => TOLD_APART[field] === true || (field === "condition" && level < 3)));
+    const interval = level >= 4 ? serviceInterval(ctx, v) : null;
+    if (interval !== null && canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "last_service")) {
+      const unit = domainOf(ctx, v) === "road" ? "mi" : "h";
+      const due = Math.round(numOf(e.fields.last_service) + interval).toLocaleString("en-US");
+      parts.push(usage(ctx, v) > numOf(e.fields.last_service) + interval ? `service overdue (it was due at ${due} ${unit})` : `next service due at ${due} ${unit}`);
+    }
+    // Who and what is in it only for one at his site: one away from here he can't see into.
+    const inside = elsewhere ? [] : contents(v);
+    const aboard = inside.filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => (id === pov ? "you" : (own(ctx.state.entities, id)?.name ?? id)));
+    const cargo = inside.filter((id) => !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => named(id, 0, owns(ctx.state, pov, v)));
+    const description = thingDescription(ctx, v);
+    const text = [
+      `${e.name}: ${[head.join(", "), ...parts].join("; ")}.`,
+      ...(aboard.length > 0 ? [`Aboard: ${aboard.join(", ")}.`] : []),
+      ...(cargo.length > 0 ? [`Cargo: ${cargo.join(", ")}.`] : []),
+      ...(description ? [sentence(description)] : []),
+    ].join(" ");
+    (elsewhere ? away : usable).push({ text, known: "pov" });
   }
-  const elsewhere = [...away].sort(([a, n], [b, m]) => m - n || a.localeCompare(b));
-  const total = elsewhere.reduce((sum, [, n]) => sum + n, 0);
-  if (total > 0) lines.push({ text: `${total} more ${total === 1 ? "vehicle" : "vehicles"} you may use, away from here: ${elsewhere.map(([where, n]) => `${n} ${where}`).join(", ")}.`, known: "pov" });
-  // Other people's vehicles at his site: the ones he can see with whose they are; past the cap, a count.
-  const seen = others.filter((o) => see(pov, o.v));
-  for (const o of seen.slice(0, OTHERS_CAP)) lines.push({ text: `${own(ctx.state.entities, o.v)?.name ?? o.v}: ${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}.`, known: "pov" });
-  if (seen.length > OTHERS_CAP) lines.push({ text: `And ${seen.length - OTHERS_CAP} more vehicles here.`, known: "pov" });
+  // Other people's vehicles at his site: every one he can see, with whose it is and what anyone sees of it.
+  const seen = others
+    .filter((o) => see(pov, o.v))
+    .map((o): FeedLine => {
+      const e = own(ctx.state.entities, o.v);
+      const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field, def) => TOLD_APART[field] === true || def.domain !== undefined)] : [];
+      const description = thingDescription(ctx, o.v);
+      return { text: `${e?.name ?? o.v}: ${[`${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}`, ...looks].join("; ")}.${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
+    });
+  const lines = [...usable, ...seen, ...away];
   if (scope === "player") return lines;
   for (const o of others.filter((x) => !see(pov, x.v))) {
     const name = own(ctx.state.entities, o.v)?.name ?? o.v;

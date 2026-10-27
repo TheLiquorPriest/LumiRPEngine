@@ -9,39 +9,15 @@
 
 import type { ChatId, SlotId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
-import { isRecord } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { SectionTemplate, SlotPosition, WorldDoc, WorldIndex } from "../shared/world";
-import { MINDS_SECTION_TEMPLATE, MINDS_SLOT } from "../shared/minds";
+import { builtInSectionsOf } from "../shared/sections";
 import { MARKED_FACTS_RULE } from "../engine/feed";
 import type { HostBookEntry, HostEntryPlacement, HostPort } from "./host";
 import { NARRATOR_OUTLET, outletOf } from "./preset-binding";
 import type { WorldStore } from "./worlds";
-
-/**
- * Sections a world gets when it defines none (DESIGN §4.2 slot list); lower rank is kept first. Each
- * opens with what it is and how the narrator uses it, so the narrator writes from the sections
- * without inferring what they mean. None of them outranks the player or the story, and none of them
- * lifts secrecy: the narrator rules say what comes first (`narratorRules`).
- */
-export const DEFAULT_SECTIONS: Record<SlotId, SectionTemplate> = {
-  outcome: { id: "outcome", label: "Outcome", rank: 0, template: "What the player character's actions did this turn, in the order they played, as the engine settled them. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences (\"you\" is the player character). Narrate them as having happened this turn, with the results, rolls and amounts these lines give.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  montage: { id: "montage", label: "Montage", rank: 1, template: "What happened while time passed, in order, as the engine played it out. Narrate the interval as a summary of these lines, in their order. A line that gives the player's own words for this time comes first: narrate what they say happens, and fit the other lines around it.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  scene: { id: "scene", label: "Scene", rank: 2, template: "Where the player character is now, when, and what they can perceive there. Describe the scene from these facts.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  people: { id: "people", label: "People", rank: 3, template: "The people with the player character, as the player character knows them, and what each is doing. Call them by these names.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  money: { id: "money", label: "Money", rank: 4, template: "The player character's money as it stands now. Use these amounts whenever money comes up.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  gear: { id: "gear", label: "Gear", rank: 5, template: "What the player character carries, wears and has to hand, as it stands now.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: "The player character's vehicles, where they are and their state. Use these facts whenever a vehicle comes up.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  quest: { id: "quest", label: "Quest", rank: 7, template: "The player character's quests and goals, as far as they know them. Let the reply follow from these; never reveal a step they haven't reached.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
-  outline: { id: "outline", label: "Outline", rank: 8, template: "The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one; what a beat leaves open is yours to fill in.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  stance: { id: "stance", label: "Stance", rank: 9, template: "The narrator knows only what the player character knows. These lines say how the people here behave; never state what a cue only hints at.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  // Character minds (DESIGN §24.3): on their own token budget, apart from the section budget.
-  [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: MINDS_SECTION_TEMPLATE, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  // Where the POV is and what it owns (DESIGN §6.11): ranked after the other facts, so the first left out on a small budget.
-  place: { id: "place", label: "Place", rank: 11, template: "The place the player character is in: what it is like, what is here and where it leads. Describe it from these lines.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  property: { id: "property", label: "Property", rank: 12, template: "Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says \"yours\"; otherwise they only use, keep or benefit from it. Use these facts whenever it comes up.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
-};
 
 /** Where the narrator rules come from, and how the engine's sections are marked in the prompt. */
 const NARRATOR_SOURCE = "These rules come from LumiRPEngine, the engine that keeps this roleplay's world; its sections in this prompt each start with their name in square brackets.";
@@ -83,12 +59,17 @@ export function narratorRules(preset: string | null): string {
   return ["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_SECRECY, NARRATOR_AUTHORITY, ...(preset ? [PRESET_RULES_LEAD, preset] : [])].join("\n");
 }
 
-/** A world's sections in rank order: its own, else the defaults. The Minds section is every world's, so a world with sections of its own gets the default one when it has none. */
+/**
+ * A world's sections in rank order: its own, then the built-in ones it has without listing them
+ * (`builtInSectionsOf`), each in the world's own wording when `sectionTemplates` gives one.
+ */
 export function sectionsOf(world: WorldDoc): SectionTemplate[] {
-  const own = Object.values(world.sections);
-  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
-  const list = own.length > 0 ? (own.some((s) => s.id === MINDS_SLOT) || !minds ? own : [...own, minds]) : Object.values(DEFAULT_SECTIONS);
-  return list.sort((a, b) => a.rank - b.rank);
+  const wording = world.sectionTemplates ?? {};
+  const builtIn = builtInSectionsOf(world).map((s) => {
+    const text = hasOwn(wording, s.id) ? wording[s.id] : undefined;
+    return typeof text === "string" ? { ...s, template: text } : s;
+  });
+  return [...Object.values(world.sections), ...builtIn].sort((a, b) => a.rank - b.rank);
 }
 
 /**

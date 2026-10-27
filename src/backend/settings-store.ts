@@ -92,7 +92,8 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       consolidate: step(true, ["reply"], UNREASONED_ROUTE),
     },
     budgets: { pre: { calls: 2, lookup: { calls: 4 } }, post: { calls: 2, lookup: { calls: 3 } } },
-    tokens: { sections: 4000 },
+    // Detailed sections on a busy scene: a starter's busiest place is about 2,300 tokens, and a room whose lore is told whole (8 to 10 entries, about 3,000) beside a full garage and the rest comes to about 6,000; Lean trims to its 2,000.
+    tokens: { sections: 8000 },
   },
   full: {
     steps: {
@@ -108,7 +109,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       consolidate: step(true, ["reply"], UNREASONED_ROUTE),
     },
     budgets: { pre: { calls: 8, lookup: { calls: 6 } }, post: { calls: 4, lookup: { calls: 4 } } },
-    tokens: { sections: 8000 },
+    tokens: { sections: 12000 },
   },
 };
 
@@ -142,6 +143,11 @@ const LIFTED = {
     [600, MODEL_USE_PRESETS.standard.tokens.sections],
     [1000, MODEL_USE_PRESETS.full.tokens.sections],
   ]),
+  /** The section budgets before sections told their facts whole (revisions 2 and 3), each lifted to its preset's new one. */
+  wholeSections: new Map([
+    [4000, MODEL_USE_PRESETS.standard.tokens.sections],
+    [8000, MODEL_USE_PRESETS.full.tokens.sections],
+  ]),
   /** The Minds section's own budget (`minds.tokens`), which shipped at the sections' values. */
   minds: new Map([
     [300, MINDS_PRESETS.lean.tokens],
@@ -155,16 +161,18 @@ const LIFTED = {
  * its new one. A file from before revision 2 (`defaults` absent) has the values `LIFTED` lists; one
  * from before revision 3 has the steps that no longer reason (`UNREASONED_STEPS`) set to reasoning
  * off where it left their effort to a helper model at its default effort (Inherit): an effort the
- * user chose, the step's or the helper model's, stays. Only plain values are touched; anything
- * malformed is left to `conform`.
+ * user chose, the step's or the helper model's, stays; one from revision 2 or 3 has a section budget
+ * still at Standard's or Full's old default lifted to its new one, since the sections now tell their
+ * facts whole (a file from before revision 2 already lifts to the new ones). Only plain values are
+ * touched; anything malformed is left to `conform`.
  */
 function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
   const out = JSON.parse(JSON.stringify(raw)) as JsonObject;
   const rev = typeof out.defaults === "number" ? out.defaults : 0;
   if (rev >= SETTINGS_DEFAULTS_REV) return out;
   const mu = isRecord(out.modelUse) ? out.modelUse : null;
+  const lift = (map: ReadonlyMap<number, number>, n: number): number => map.get(n) ?? n;
   if (rev < 2) {
-    const lift = (map: ReadonlyMap<number, number>, n: number): number => map.get(n) ?? n;
     if (mu && isRecord(mu.steps)) {
       for (const s of Object.values(mu.steps)) {
         if (!isRecord(s)) continue;
@@ -182,7 +190,7 @@ function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
     }
     if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number") mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
     if (isRecord(out.minds) && typeof out.minds.tokens === "number") out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
-  }
+  } else if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number") mu.tokens.sections = lift(LIFTED.wholeSections, mu.tokens.sections);
   const helperEffort = isRecord(out.helper) ? out.helper.effort : undefined;
   if (rev < 3 && mu && isRecord(mu.steps) && (helperEffort === undefined || helperEffort === DEFAULT_HELPER.effort)) {
     for (const purpose of UNREASONED_STEPS) {

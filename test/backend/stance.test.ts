@@ -4,7 +4,8 @@
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
-import { DEFAULT_SECTIONS, sectionTokens } from "../../src/backend/book";
+import { sectionTokens } from "../../src/backend/book";
+import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import { factLines } from "../../src/backend/turn-steps";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { placeOfEntity } from "../../src/engine/scope";

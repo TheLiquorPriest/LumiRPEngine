@@ -23,7 +23,7 @@ import { Icon } from "../icons";
 import type { PanelProps } from "../registry";
 import { STEP_LABEL } from "../../shared/steps";
 import type { MindCallTrace } from "../../shared/minds";
-import { FIDELITIES, MIND_PURPOSES } from "../../shared/minds";
+import { FIDELITIES, MIND_PURPOSES, MINDS_SLOT } from "../../shared/minds";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
 const POLICY_LABEL: Record<LorePolicy, string> = { none: "lore off", prefetch: "prefetch", lookup: "lookups", "prefetch+lookup": "prefetch and lookups" };
@@ -105,11 +105,15 @@ const ACTIVATION: Record<ContextView["generations"][number]["activation"], { tex
   unconfirmed: { text: "Not confirmed", tone: "warn" },
 };
 
-/** Why a section's row is short: left out over the section budget, or (the Minds section) lines left out over its own. */
+/**
+ * Why a section's row is short: left out over the section budget, or lines left out, a section's
+ * from its end over its caps or the section budget, and the Minds section's over its own budget.
+ */
 export function sectionNote(s: ContextView["generations"][number]["sections"][number]): string | undefined {
   if (s.cut === undefined) return s.clipped ? "Left out: over the section budget" : undefined;
-  if (s.clipped) return "Left out: over its own budget";
-  return `${s.cut} line${s.cut === 1 ? "" : "s"} left out: over its own budget`;
+  const minds = s.slot === MINDS_SLOT;
+  if (s.clipped) return minds ? "Left out: over its own budget" : "Left out: over the section budget";
+  return `${s.cut} line${s.cut === 1 ? "" : "s"} left out: ${minds ? "over its own budget" : "over its caps or the section budget"}`;
 }
 
 /** The model calls replies make: this turn's, the average and the 95th percentile. */

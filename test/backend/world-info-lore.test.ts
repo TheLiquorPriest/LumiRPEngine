@@ -4,7 +4,7 @@
 // entry an engine section carried, such as the Place section's lore, is switched off for that prompt.
 
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SECTIONS } from "../../src/backend/book";
+import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import type { HostBookEntryInput, QuietRequest, WorldInfoCandidate } from "../../src/backend/host";
 import type { Delivered } from "../../src/backend/ledger-io";
 import { toChain } from "../../src/backend/ledger-io";
@@ -467,12 +467,12 @@ describe("the Place section's lore", () => {
     expect(alone(rig, ids[0] ?? "")).toBe(false);
   });
 
-  test("a long entry about the town doesn't push the place's own description out of the section", async () => {
+  test("an entry about the town too long for the budget is left out whole, never cut, and the place's own description stays", async () => {
     const long = Array.from({ length: 2000 }, (_, i) => `In year ${i} the town grew by a street.`).join(" ");
     const { rig, chatId } = await bookChat((_here, world) => [about(world.places[world.start.place]?.parent ?? world.start.place, long)], true);
     await rig.turn(chatId, "I wait.", "Gulls call.");
     expect(place(rig)).toContain("Harbor Hardware");
-    expect(place(rig)).toContain("In year 0 the town grew");
+    expect(place(rig)).not.toContain("In year 0 the town grew");
   });
 
   test("a secret place entry stays out of the section and the prompt until its gate holds", async () => {

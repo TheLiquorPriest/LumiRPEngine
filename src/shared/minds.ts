@@ -890,10 +890,6 @@ export type SkipEventData = { from: number; to: number; beats: { at: number; rea
 export const MINDS_SLOT = "minds";
 export const MINDS_OUTLET = "lre_minds";
 
-/** The Minds section's default template: it says each mind is scoped to its character, and depicted, never stated. */
-export const MINDS_SECTION_TEMPLATE =
-  "Each mind below is scoped to what that character knows and is blind to everyone else's. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.\n{{lines}}";
-
 // ---------------------------------------------------------------- the GM view and its controls
 
 /** One character in the GM view's minds panel (DESIGN §24.9): everything, secrets included. */

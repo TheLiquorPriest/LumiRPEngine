@@ -53,6 +53,60 @@ describe("the Place section", () => {
   });
 });
 
+describe("the Place section tells what is here whole, never a summary", () => {
+  // A room's lore listing its whole inventory: far past the old 480-character share.
+  const INVENTORY = Array.from({ length: 40 }, (_, i) => `shelf ${i + 1} holds a labelled jar of screws`).join("; ");
+
+  test("a lore entry with a long room inventory reaches the section whole, and so does every other entry about the place", () => {
+    const out = lines(
+      (w) => {
+        w.lore.storeroom = { id: "storeroom", title: "The storeroom shelves", content: `The room's inventory: ${INVENTORY}; and a broom by the door.`, keys: [], links: ["apartment"] };
+        for (let i = 0; i < 8; i++) w.lore[`note${i}`] = { id: `note${i}`, title: `Apartment note ${i}`, content: `Note ${i} about the apartment.`, keys: [], links: ["apartment"] };
+      },
+      "place",
+      "player",
+      "place_lore",
+    ).map((l) => l.text);
+    expect(out).toContain(`The storeroom shelves: The room's inventory: ${INVENTORY}; and a broom by the door.`);
+    for (let i = 0; i < 8; i++) expect(out).toContain(`Apartment note ${i}: Note ${i} about the apartment.`);
+  });
+
+  test("more than 12 things lying here are all named, each with whose it is, its count, its condition and its description", () => {
+    const out = lines((w) => {
+      w.realism.levels.gear = 3;
+      for (let i = 1; i <= 15; i++) w.entities[`jar${i}`] = thing(`jar${i}`, `Jar number ${i}`, { place: "apartment", owner: "you", description: `A glass jar marked ${i}.` });
+      w.entities.bolts = thing("bolts", "Box of bolts", { place: "apartment", owner: "maya", qty: 3, condition: 30 });
+    }, "place").map((l) => l.text);
+    for (let i = 1; i <= 15; i++) expect(out.find((l) => l.includes(`Jar number ${i} `))).toContain(`A glass jar marked ${i}.`);
+    expect(out.find((l) => l.includes("Box of bolts"))).toBe("Lying here: Box of bolts ×3 (Maya Chen's; condition worn).");
+    expect(out.join("\n")).not.toMatch(/and \d+ more/);
+  });
+
+  test("every room inside and every way out is named", () => {
+    const out = lines((w) => {
+      for (let i = 1; i <= 9; i++) w.places[`closet${i}`] = { id: `closet${i}`, name: `Closet ${i}`, parent: "apartment", fields: {} };
+    }, "place").map((l) => l.text);
+    const inside = out.find((l) => l.startsWith("Places inside it:")) ?? "";
+    for (let i = 1; i <= 9; i++) expect(inside).toContain(`Closet ${i}`);
+  });
+
+  test("the helpers' facts for a busy room still hold the money, gear and vehicle lines, each line bounded", () => {
+    const world = modernUsWorld("w", "R");
+    for (let i = 1; i <= 40; i++) world.entities[`jar${i}`] = thing(`jar${i}`, `Jar number ${i}`, { place: "apartment", description: `A glass jar marked ${i}.` });
+    world.lore.inventory = { id: "inventory", title: "The apartment's shelves", content: Array.from({ length: 200 }, (_, i) => `shelf ${i} holds a jar`).join("; "), keys: [], links: ["apartment"] };
+    const state = startState(world, reg);
+    const facts = factLines(reg, world, state, []);
+    const ctx = new Working(reg, world, state).ctx;
+    for (const slot of ["money", "gear", "vehicles"]) {
+      const own = reg.renderers.filter((r) => r.slot === slot && !r.hint).flatMap((r) => r.render(ctx));
+      expect(own.length).toBeGreaterThan(0);
+      expect(facts.some((f) => own.includes(f))).toBe(true);
+    }
+    expect(facts.length).toBeLessThanOrEqual(40);
+    expect(Math.max(...facts.map((f) => f.length))).toBeLessThanOrEqual(481);
+  });
+});
+
 describe("what the people here wear and carry", () => {
   const patch = (w: WorldDoc): void => {
     w.entities.lee = { id: "lee", kind: "person", name: "Lee Park", tier: "supporting", fields: { place: "apartment" }, relations: [] };
@@ -66,6 +120,25 @@ describe("what the people here wear and carry", () => {
     expect(text).toContain("Red rain jacket");
     expect(text).toContain("Gym bag");
     expect(text).not.toContain("Roll of fifties");
+  });
+
+  test("every worn and carried thing a person visibly has is told, past six", () => {
+    const text = lines((w) => {
+      patch(w);
+      for (let i = 1; i <= 8; i++) w.entities[`badge${i}`] = thing(`badge${i}`, `Enamel badge ${i}`, { owner: "lee" }, { relations: [{ type: "worn_by", to: "lee" }] });
+    }, "people", "player", "present_gear").map((l) => l.text).join("\n");
+    for (let i = 1; i <= 8; i++) expect(text).toContain(`Enamel badge ${i}`);
+    expect(text).toContain("Gym bag");
+    expect(text).not.toContain("Roll of fifties");
+  });
+});
+
+describe("the Gear section", () => {
+  test("every thing the player character carries is listed with its details and what it is in", () => {
+    const out = lines((w) => {
+      for (let i = 1; i <= 14; i++) w.entities[`card${i}`] = thing(`card${i}`, `Punch card ${i}`, { owner: "you", description: `A punch card from shop ${i}.` }, { relations: [{ type: "in", to: "wallet" }] });
+    }, "gear").map((l) => l.text);
+    for (let i = 1; i <= 14; i++) expect(out).toContain(`Carrying: Punch card ${i} (in Wallet): A punch card from shop ${i}.`);
   });
 });
 
@@ -141,13 +214,13 @@ describe("whose a thing lying here is", () => {
       w.entities.key = thing("key", "Brass key", { place: "apartment", owner: "maya" });
       w.entities.drill = thing("drill", "Cordless drill", { place: "apartment", owner: "rosa" });
     };
-    const here = (patch: (w: WorldDoc) => void): string => lines(patch, "place").map((l) => l.text).find((l) => l.includes("Brass key")) ?? "";
-    expect(here(base)).toContain("Maya Chen");
+    const here = (patch: (w: WorldDoc) => void, name: string): string => lines(patch, "place").map((l) => l.text).find((l) => l.includes(name)) ?? "";
+    expect(here(base, "Brass key")).toContain("Maya Chen");
     const lent = here((w) => {
       base(w);
       w.entities.you?.relations.push({ type: "uses", to: "drill" });
-    });
-    expect(lent).not.toEqual(here(base));
+    }, "Cordless drill");
+    expect(lent).not.toEqual(here(base, "Cordless drill"));
   });
 });
 
@@ -161,6 +234,21 @@ describe("secrets stay off every player surface", () => {
     expect(playerSurfaces(patch)).not.toContain("stolen paintings");
     expect(lines(patch, "place", "scene").map((l) => l.text).join("\n")).not.toContain("stolen paintings");
     expect(lines(patch, "place", "gm").filter((l) => l.text.includes("stolen paintings")).map((l) => l.known)).toEqual(["gm"]);
+  });
+
+  test("the details the sections now tell show what he may know and nothing hidden: no Known by field he doesn't know, hidden cargo or thing, or a shut secret about the place", () => {
+    const patch = (w: WorldDoc): void => {
+      w.kinds.crate = { id: "crate", label: "Crate", extends: "item", fields: { stencil: { type: "text", label: "Stencil" }, manifest: { type: "text", label: "Manifest", visibility: "known_by" } } };
+      w.entities.crate = { id: "crate", kind: "crate", name: "Wooden crate", tier: "background", fields: { place: "apartment", stencil: "PROPERTY OF THE DOCKS", manifest: "Smuggled watches" }, relations: [] };
+      w.entities.ledger = thing("ledger", "Hidden ledger", { place: "apartment" }, { visibility: "secret" });
+      w.entities.spare = thing("spare", "Spare tire", { owner: "you" }, { relations: [{ type: "in", to: "truck" }] });
+      w.entities.parcel = thing("parcel", "Sealed parcel", { owner: "you" }, { relations: [{ type: "in", to: "truck" }], visibility: "secret" });
+      w.lore.floorboard = { id: "floorboard", title: "Under the floorboard", content: "A loose floorboard hides a stack of forged deeds.", keys: [], links: ["apartment"], secret: true, gate: "false" };
+    };
+    const shown = playerSurfaces(patch);
+    expect(shown).toContain("stencil PROPERTY OF THE DOCKS");
+    expect(shown).toContain("Cargo: Spare tire.");
+    for (const hidden of ["Smuggled watches", "Hidden ledger", "Sealed parcel", "forged deeds"]) expect(shown).not.toContain(hidden);
   });
 
   test("a secret safehouse his faction owns is in no player line, fact line or {{property}}, and only the GM scope tells it", () => {

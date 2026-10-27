@@ -47,6 +47,8 @@ import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { TableEditor } from "./table-editor";
 import { TiersEditor } from "./tiers-editor";
 import { isVarsKey, VarsPanel } from "../settings/prompt-editor";
+import { DEFAULT_SECTIONS, sectionTemplateProblem } from "../../shared/sections";
+import { BuiltInSectionEditor, builtInSection, SectionTemplateField, sectionRows } from "./section-template";
 
 /** The world's content in the story's own groups. */
 const GROUPS: readonly { title: string; collections: readonly WorldCollection[] }[] = [
@@ -485,9 +487,9 @@ function WorldHome() {
                 icon={COLLECTION_INFO[collection].icon}
                 title={COLLECTION_INFO[collection].label}
                 subtitle={COLLECTION_INFO[collection].hint}
-                value={Object.keys(doc[collection] ?? {}).length}
+                value={collection === "sections" ? sectionRows(doc).length : Object.keys(doc[collection] ?? {}).length}
                 valueTone="muted"
-                badge={<IssueBadge issues={lintAt(draft.lint, collection)} />}
+                badge={<IssueBadge issues={collection === "sections" ? [...lintAt(draft.lint, collection), ...lintAt(draft.lint, "sectionTemplates")] : lintAt(draft.lint, collection)} />}
                 chevron
                 onClick={() => go(app, { view: "collection", worldId: draft.worldId, collection })}
               />
@@ -534,7 +536,7 @@ function CollectionView(props: { collection: WorldCollection }) {
   const bulk = props.collection === "entities" || props.collection === "places" ? props.collection : null;
   const doc = draft.doc;
   const info = COLLECTION_INFO[props.collection];
-  const items = Object.entries(doc[props.collection] as Record<string, unknown>).map(([id, value]) => ({ id, value, label: itemLabel(props.collection, id, value, doc.places) }));
+  const items = props.collection === "sections" ? sectionRows(doc) : Object.entries(doc[props.collection] as Record<string, unknown>).map(([id, value]) => ({ id, value, label: itemLabel(props.collection, id, value, doc.places), path: `${props.collection}.${id}`, note: undefined as string | undefined }));
   const q = query.trim().toLowerCase();
   const shown = items.filter((item) => !q || item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q));
   // Those picked still in the draft (a change elsewhere can remove one), in the list's order.
@@ -577,6 +579,7 @@ function CollectionView(props: { collection: WorldCollection }) {
       />
       {adding ? <NewItem worldId={draft.worldId} collection={props.collection} taken={new Set(items.map((item) => item.id))} onDone={() => setAdding(false)} /> : null}
       {canAdd ? null : <p class="lre-build-note">New data tables come from packs; open one to edit this world's copy of it.</p>}
+      {props.collection === "sections" ? <p class="lre-build-note">{Object.keys(doc.sections).length === 0 ? "This world lists no sections of its own, so it has every built-in one: open one to change its guidance. A world that lists its own gets only those, and the built-in Minds." : "This world lists its own sections, so it has only those and the built-in Minds."}</p> : null}
       {items.length > 8 ? (
         <div class="lre-build-search">
           <Icon name="search" size={16} />
@@ -600,10 +603,10 @@ function CollectionView(props: { collection: WorldCollection }) {
               <ListRow
                 key={item.id}
                 title={item.label}
-                subtitle={detail(item.value)}
+                subtitle={item.note ?? detail(item.value)}
                 id={item.id}
                 leading={selection.on ? <PickBox label={`Select ${item.label}`} checked={selection.ids.includes(item.id)} /> : undefined}
-                badge={<IssueBadge issues={lintAt(draft.lint, `${props.collection}.${item.id}`)} />}
+                badge={<IssueBadge issues={lintAt(draft.lint, item.path)} />}
                 chevron={!selection.on}
                 onClick={() => (selection.on ? selection.toggle(item.id) : go(app, { view: "item", worldId: draft.worldId, collection: props.collection, id: item.id }))}
               />
@@ -672,6 +675,8 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
   const formDoc = useMemo(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds), relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
   const path = `${props.collection}.${id}`;
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
+  // A section's guidance must keep `{{lines}}`, where its lines go: its field says so, and Save waits for it.
+  const unusable = props.collection === "sections" && sectionTemplateProblem(typeof value.template === "string" ? value.template : "") !== null;
   // A pack's entry shows the pack's own config fields, when its ui registers them, above the JSON.
   const PackConfig = props.collection === "packs" ? app.catalog.configs.get(id) : undefined;
   // A new item isn't in the draft until Create: leaving its page asks first.
@@ -704,6 +709,7 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
           </Banner>
         ))}
       {PackConfig ? <PackConfig world={props.world} config={isRecord(value.config) ? value.config : {}} lint={lintAt(draft?.lint ?? [], `${path}.config`)} onChange={(config) => setValue({ ...value, config })} /> : null}
+      {props.collection === "sections" ? <SectionTemplateField value={typeof value.template === "string" ? value.template : ""} defaultText={hasOwn(DEFAULT_SECTIONS, id) ? (DEFAULT_SECTIONS[id]?.template ?? null) : null} issues={lintAt(draft?.lint ?? [], `${path}.template`)} disabled={busy} onChange={(template) => setValue({ ...value, template })} /> : null}
       {/* A thing's page leaves out what only a person has (life, cues, their Lumiverse card, their own day). */}
       <SchemaFields specs={props.collection === "entities" ? entityFormSpecs(formDoc, value) : COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields }} onChange={setValue} />
       {/* A thing can be hidden until searched for (DESIGN §7); an entity or a place lists what the world puts in it or there. */}
@@ -740,7 +746,7 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
       {props.collection === "steps" && isVarsKey(value.purpose) ? <VarsPanel step={value.purpose} output={value.output === "effects" ? "effects" : undefined} /> : null}
       {props.children}
       <SaveBar>
-        <Button variant="primary" disabled={!changed && !isNew} busy={busy} onClick={save}>
+        <Button variant="primary" disabled={(!changed && !isNew) || unusable} busy={busy} onClick={save}>
           {isNew ? "Create" : "Save to draft"}
         </Button>
         <Button variant="ghost" disabled={busy || !changed} onClick={() => setValue(initial)}>
@@ -759,6 +765,9 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   const registered = app.catalog.editors.get(props.collection);
   // A person opens the Character page, never the generic editor (DESIGN §13 characters); a new entity is made in the generic one first.
   const character = opensCharacterPage({ ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) }, props.collection, props.id);
+  // A built-in section the world has without listing it opens its guidance, saved as the world's wording of it.
+  const builtIn = props.collection === "sections" && props.id !== null && !hasOwn(draft.doc.sections, props.id) ? builtInSection(draft.doc, props.id) : null;
+  if (builtIn) return <BuiltInSectionEditor key={builtIn.id} world={draft.doc} collection={props.collection} id={props.id} send={send} section={builtIn} />;
   const Editor = registered ? registered.component : character ? CharacterPage : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }

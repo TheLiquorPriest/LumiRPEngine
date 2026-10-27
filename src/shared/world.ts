@@ -1257,6 +1257,12 @@ export interface WorldDoc {
   realism: RealismDefaults;
   time: TimeDefaults;
   sections: Record<SlotId, SectionTemplate>;
+  /**
+   * The world's own wording of the built-in sections it has without listing them (`shared/sections`
+   * `builtInSectionsOf`), by section id: each a template holding `{{lines}}`. Only what differs from
+   * the built-in text is stored; absent, the built-in text.
+   */
+  sectionTemplates?: Record<SlotId, string>;
   steps: Record<StepTemplateId, StepTemplateDef>;
   /** Sources of adopted user entries (a retired design, DESIGN §4.2): kept for the format; nothing reads them. */
   suppressed: SuppressedSource[];

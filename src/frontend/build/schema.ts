@@ -479,10 +479,10 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "bool", key: "adjudicate", label: "Checks roll while it's in progress", hint: "Marked for a world whose checks roll only where marked" },
   ],
   tables: [{ kind: "json", key: "rows", label: "Rows" }],
+  // A section's guidance (its template) is its own field, above these (`SectionTemplateField`).
   sections: [
     { kind: "text", key: "label", label: "Label" },
     { kind: "number", key: "rank", label: "Rank (lower is reserved first)", step: 1 },
-    { kind: "text", key: "template", label: "Template", multiline: true },
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
     // The section's feed (DESIGN §6.11): the world's defaults, which the GM can set per chat.
     { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v) => v !== false },
@@ -743,7 +743,7 @@ export function newItem(collection: WorldCollection, id: string, world: Pick<Wor
     case "tables":
       return { id, pack: "", schema: `lre-table/${id}/v1`, revision: "", label: shown, columns: {}, rows: {} };
     case "sections":
-      return { id, label: shown, rank: 50, template: "", position: { type: "native" } };
+      return { id, label: shown, rank: 50, template: "{{lines}}", position: { type: "native" } };
     case "steps":
       return { id, purpose: "brief", template: "", output: "text", signals: [] };
     case "packs":

@@ -20,10 +20,11 @@ const PARTS: readonly WorldPart[] = ["calendar", "realism", "tiers", "time", "ru
 /** The world's own top-level fields, which the World part edits. */
 const META_FIELDS: readonly string[] = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "lifeStates", "currency", "mapSettings"];
 
-/** The editor an issue path opens: `entities.npc_dev.fields.cash` → entities / npc_dev; a pin's (`lorePins.characters.<id>`, `lorePins.places.<id>`) → the character's or place's page, where its pins are. */
+/** The editor an issue path opens: `entities.npc_dev.fields.cash` → entities / npc_dev; a pin's (`lorePins.characters.<id>`, `lorePins.places.<id>`) → the character's or place's page, where its pins are; a built-in section's wording (`sectionTemplates.<id>`) → that section's page. */
 export function issueTarget(path: string): { collection: WorldCollection; id: string } | null {
   const [head, id, pinned] = path.split(".");
   if (head === "lorePins" && pinned) return id === "characters" ? { collection: "entities", id: pinned } : id === "places" ? { collection: "places", id: pinned } : null;
+  if (head === "sectionTemplates" && id) return { collection: "sections", id };
   const collection = COLLECTIONS.find((c) => c === head);
   return collection && id ? { collection, id } : null;
 }

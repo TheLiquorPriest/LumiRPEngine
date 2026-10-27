@@ -26,6 +26,7 @@ import type { FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/
 import { effectLists } from "../../../engine/ruleset-lint";
 import { GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { carriedBy, contentsOf, findPiece, fitProblem, fixedOf, goesIn, grants, hasItem, holderOf, holdProblem, holdsAs, isInside, kindGoesIn, kindHoldsAs, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
+import { sentence, thingName, thingText } from "../../../engine/thing-words";
 import { canSeeEntity, isDiscoverable, knows } from "../../../engine/visibility";
 import { together } from "../../../engine/presence";
 import type { FeedScope } from "../../../shared/world";
@@ -35,15 +36,6 @@ import containers from "./tables/modern-us/containers.json";
 import items from "./tables/modern-us/items.json";
 import kits from "./tables/modern-us/kits.json";
 import slots from "./tables/modern-us/slots.json";
-
-/** What a thing reads as in a gear line: its name, a count above one, and from Gear 3 a kit's pieces present. */
-function gearLabel(ctx: ReadContext, id: EntityId, level: number): string {
-  const e = own(ctx.state.entities, id);
-  if (!e) return id;
-  const qty = numOf(e.fields.qty, 1);
-  const kit = level >= 3 ? kitStatus(ctx, id) : null;
-  return `${e.name}${qty > 1 ? ` ×${qty}` : ""}${kit ? ` (${kit.present} of its ${kit.total} pieces)` : ""}`;
-}
 
 /** What a holder wears or has equipped. */
 function wornBy(ctx: ReadContext, who: EntityId): EntityId[] {
@@ -64,8 +56,10 @@ const WORN_LEAD: Record<"pockets" | "hand" | "worn", string> = { pockets: "In yo
 
 /**
  * The Gear section (DESIGN §6, §6.11): what the POV carries (only notable things at Gear 1), from
- * Gear 3 what it wears, and what it has lent and borrowed; only what it can see. In `gm` scope,
- * something it carries without knowing (a thing planted on it) is added, marked.
+ * Gear 3 what it wears, and what it has lent and borrowed; only what it can see. Each thing has a
+ * line of its own with its details as the POV may see them (`thingText`: a count, a kit's pieces,
+ * its kind's fields, its description), and a thing inside another says what it is in. In `gm`
+ * scope, something it carries without knowing (a thing planted on it) is added, marked.
  */
 export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const pov = ctx.world.pov;
@@ -76,12 +70,16 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   // From Gear 3, what is worn, in a pocket or in hand is told where it is, and not again as carried.
   const worn = level >= 3 ? wornBy(ctx, pov).filter(see) : [];
   const shown = carried.filter((id) => see(id) && !worn.includes(id) && (level >= 2 || own(ctx.state.entities, id)?.fields.notable === true));
+  // What a carried thing is in, when that is something other than the POV itself.
+  const inside = (id: EntityId): string[] => {
+    const holder = holderOf(ctx.state, id);
+    return holder !== null && holder !== pov && see(holder) ? [`in ${own(ctx.state.entities, holder)?.name ?? holder}`] : [];
+  };
   const lines: FeedLine[] = [];
   for (const as of ["worn", "pockets", "hand"] as const) {
-    const here = worn.filter((id) => wornAs(ctx, id, pov) === as);
-    if (here.length > 0) lines.push({ text: `${WORN_LEAD[as]}: ${here.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+    for (const id of worn.filter((w) => wornAs(ctx, w, pov) === as)) lines.push({ text: sentence(`${WORN_LEAD[as]}: ${thingText(ctx, id)}`), known: "pov" });
   }
-  if (shown.length > 0) lines.push({ text: `${worn.length > 0 ? "Also carrying" : "Carrying"}: ${shown.slice(0, 12).map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "pov" });
+  for (const id of shown) lines.push({ text: sentence(`${worn.length > 0 ? "Also carrying" : "Carrying"}: ${thingText(ctx, id, inside(id))}`), known: "pov" });
   for (const g of grants(ctx.state)) {
     if (!see(g.thing)) continue;
     if (g.owner === pov) lines.push({ text: `You lent ${own(ctx.state.entities, g.thing)?.name ?? g.thing} to ${see(g.borrower) ? (own(ctx.state.entities, g.borrower)?.name ?? g.borrower) : "someone"}${g.overdue ? " (overdue: it should have come back by now)" : ""}.`, known: "pov" });
@@ -89,13 +87,10 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   }
   if (scope === "gm") {
     const unknown = [...carried, ...wornBy(ctx, pov)].filter((id) => !see(id));
-    if (unknown.length > 0) lines.push({ text: `On you without your knowing: ${unknown.map((id) => gearLabel(ctx, id, level)).join(", ")}.`, known: "gm" });
+    if (unknown.length > 0) lines.push({ text: `On you without your knowing: ${unknown.map((id) => thingName(ctx, id, level)).join(", ")}.`, known: "gm" });
   }
   return lines;
 }
-
-/** At most this many things are told of each person with the POV. */
-const PRESENT_GEAR_CAP = 6;
 
 /**
  * The authored effects that move a thing, by the argument naming what they move and the one naming
@@ -188,10 +183,11 @@ function authoredMoves(world: WorldDoc): { things: Map<string, string>; holders:
 }
 
 /**
- * What each person with the POV that it can see visibly wears and carries (DESIGN §6.11): worn and
- * equipped things and what they hold in hand, never what is in a bag or a pocket. Only what the POV
- * can see. In `scene` scope, a thing on them the POV can't see but they can (by the visibility rules,
- * so never a secret one), marked as theirs to know; in `gm`, any other thing on them too.
+ * What each person with the POV that it can see visibly wears and carries (DESIGN §6.11): every
+ * worn and equipped thing and everything they hold in hand, never what is in a bag or a pocket. Only
+ * what the POV can see. In `scene` scope, a thing on them the POV can't see but they can (by the
+ * visibility rules, so never a secret one), marked as theirs to know; in `gm`, any other thing on
+ * them too.
  */
 export function presentGearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const pov = ctx.world.pov;
@@ -208,9 +204,9 @@ export function presentGearLines(ctx: ReadContext, scope: FeedScope): FeedLine[]
       const e = own(ctx.state.entities, id);
       return !!e && e.kind !== "account" && e.fields.slot !== "pocket" && !worn.includes(id);
     });
-    const say = (ids: readonly EntityId[]): string => ids.slice(0, PRESENT_GEAR_CAP).map((id) => gearLabel(ctx, id, level)).join(", ");
+    const say = (ids: readonly EntityId[]): string => ids.map((id) => thingName(ctx, id, level)).join(", ");
     const wornSeen = worn.filter((id) => see(pov, id));
-    const heldSeen = held.filter((id) => see(pov, id)).slice(0, Math.max(0, PRESENT_GEAR_CAP - wornSeen.length));
+    const heldSeen = held.filter((id) => see(pov, id));
     const parts = [...(wornSeen.length > 0 ? [`wears ${say(wornSeen)}`] : []), ...(heldSeen.length > 0 ? [`carries ${say(heldSeen)}`] : [])];
     if (parts.length > 0) lines.push({ text: `${person.name} ${parts.join("; ")}.`, known: "pov" });
     if (scope === "player") continue;

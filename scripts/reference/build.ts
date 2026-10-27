@@ -10,7 +10,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { DEFAULT_SECTIONS } from "../../src/backend/book";
+import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import { CORE_EFFECTS } from "../../src/engine/effects";
 import { coreEventTypes } from "../../src/engine/events";
 import { MATH_FUNCTIONS } from "../../src/engine/expr";
@@ -242,7 +242,7 @@ function builtInSection(engine: PackRecord): string[] {
   out.push("### Proposals", "", ...table(["Proposal", "Bound by"], sortedBy(engine.proposals, (p) => p.type).map((p) => [code(p.type), code(p.boundField)])), "");
   out.push("### Step purposes", "", ...table(["Purpose", "Outputs a world template may declare"], sortedBy(Object.entries(STEP_OUTPUTS), ([p]) => p).map(([purpose, outputs]) => [code(purpose), outputs.map(code).join(", ")])), "");
   out.push(`Signals: ${codes([...STEP_SIGNALS].sort(byText))}, and ${code("every_n:<k>")}.`, "", `Template placeholders: ${codes([...STEP_PLACEHOLDERS].sort(byText))}.`, "");
-  out.push("### Sections", "", "The slots a world gets when it defines none, kept in rank order on the section budget.", "");
+  out.push("### Sections", "", `The slots a world gets when it defines none, kept in rank order on the section budget. A world words any built-in slot it has without listing it in its ${code("sectionTemplates")} part, by slot id: a template holding ${code("{{lines}}")}, stored only where it differs from the built-in text.`, "");
   out.push(...table(["Slot", "Label", "Rank"], Object.values(DEFAULT_SECTIONS).sort((a, b) => a.rank - b.rank).map((s) => [code(s.id), s.label, String(s.rank)])), "");
   out.push("### Realism", "", `Domains: ${codes([...DOMAINS])}; each at a level from 0 to 4.`, "", `Detail bands: ${BANDS.map((b) => `${code(b)} (${BAND_LABEL[b]})`).join(", ")}.`, "", `Interrupt classes: ${codes([...INTERRUPT_CLASSES])}.`, "");
   out.push("### Lore pins", "");

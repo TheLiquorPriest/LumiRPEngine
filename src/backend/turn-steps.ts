@@ -44,13 +44,19 @@ import { inMinorUnits, type Steps } from "./steps";
 
 // ---------------------------------------------------------------- facts the steps see
 
+/** The most fact lines the helpers read, and the most characters of each. */
+const FACT_LINES = 40;
+const FACT_LINE_CHARS = 480;
+
 /**
  * Player-visible fact lines (the engine's slot renders, minus the turn's own), leak-checked. Stance
  * is left out: its cues are hints for the narrator to play, and a prose helper given one could state
  * it (DESIGN §6.6). So is every other hint (People's usual routines): background for the narrator,
  * which a helper would read as fact. So is the Minds section: under
  * `full` it carries each mind whole, which only the narrator may read, to depict and never state
- * (DESIGN §24.3).
+ * (DESIGN §24.3). The narrator's sections tell everything whole (§6.11); the helpers read a bounded
+ * view: at most `FACT_LINES` lines, shared out one at a time in renderer order so a busy room or
+ * garage never crowds money, gear or quests out, each cut at a word to `FACT_LINE_CHARS`.
  */
 export function factLines(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, secrets: readonly string[]): string[] {
   // Every renderer reads the same state: one read pass (DESIGN §9.6).
@@ -63,16 +69,38 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
     out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
     // People names the POV first; the line above already does, so its own line comes in only for the needs it adds.
     const named = `${povLead(pov?.name ?? world.pov)}.`;
+    const seen = new Set(out);
+    const each: string[][] = [];
     for (const r of registry.renderers) {
       if (r.hint || r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT) continue;
+      const mine: string[] = [];
       try {
-        for (const line of r.render(ctx)) if (line !== named && findLeaks(line, secrets).length === 0 && !out.includes(line)) out.push(line);
+        for (const line of r.render(ctx)) {
+          if (line === named || findLeaks(line, secrets).length > 0) continue;
+          const text = line.length <= FACT_LINE_CHARS ? line : `${line.slice(0, FACT_LINE_CHARS).replace(/\s+\S*$/, "")}…`;
+          if (seen.has(text)) continue;
+          seen.add(text);
+          mine.push(text);
+        }
       } catch {
         // A renderer that can't render this state contributes nothing.
       }
-      if (out.length >= 40) break;
+      each.push(mine);
     }
-    return out.slice(0, 40);
+    // One line from each renderer in turn while there is room: each keeps its first lines.
+    const take = each.map(() => 0);
+    for (let room = FACT_LINES - out.length, gave = true; room > 0 && gave; ) {
+      gave = false;
+      each.forEach((lines, i) => {
+        if (room > 0 && (take[i] ?? 0) < lines.length) {
+          take[i] = (take[i] ?? 0) + 1;
+          room--;
+          gave = true;
+        }
+      });
+    }
+    each.forEach((lines, i) => out.push(...lines.slice(0, take[i] ?? 0)));
+    return out;
   });
 }
 

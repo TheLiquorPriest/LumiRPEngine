@@ -331,9 +331,11 @@ export interface UserSettings {
   v: 1;
   /**
    * Which shipped defaults the file was last read against: a file from before the defaults rose
-   * for reasoning models (absent) has every value still at an old default lifted to the new one,
-   * and one from before memory, consolidation and the time skip's steps stopped reasoning (2) has
-   * those steps lifted to reasoning off where they were left to the helper model's.
+   * for reasoning models (absent) has every value still at an old default lifted to the new one;
+   * one from before memory, consolidation and the time skip's steps stopped reasoning (2) has those
+   * steps lifted to reasoning off where they were left to the helper model's; and one from before
+   * the sections told their facts whole (2 or 3) has a section budget still at Standard's or Full's
+   * old default lifted to its new one.
    */
   defaults: typeof SETTINGS_DEFAULTS_REV;
   /** The helper model, apart from the presets: picking one never changes it. */
@@ -368,7 +370,7 @@ export interface UserSettings {
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */
-export const SETTINGS_DEFAULTS_REV = 3;
+export const SETTINGS_DEFAULTS_REV = 4;
 
 /** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
 export interface JobSettings {

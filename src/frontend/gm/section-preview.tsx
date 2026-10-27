@@ -40,7 +40,7 @@ export function previewNotes(s: SectionPreview, budget: SectionsPreview["budget"
   if (s.status !== "off" && s.scope !== "player") notes.push(`Whose knowledge: ${SCOPE_LABEL[s.scope].toLowerCase()}.`);
   if (s.marked > 0) notes.push(`${s.marked} ${s.marked === 1 ? "fact" : "facts"} your character doesn't know, each marked for the narrator.`);
   if (s.hints > 0) notes.push(`${s.hints} background ${s.hints === 1 ? "hint" : "hints"} at the end.`);
-  if (s.cut > 0) notes.push(`${s.cut} ${s.cut === 1 ? "line" : "lines"} left out by its caps.`);
+  if (s.cut > 0) notes.push(`${s.cut} ${s.cut === 1 ? "line" : "lines"} left out ${s.slot === "minds" ? "over its own budget" : "by its caps or the section budget"}.`);
   const turn = TURN_WRITES[s.slot];
   if (turn && s.status !== "off") notes.push(turn);
   return notes;
