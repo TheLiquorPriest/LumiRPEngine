@@ -80,19 +80,23 @@ function openPuzzleTitles(ctx: ReadContext): string[] {
     });
 }
 
-/** A ref param's kind in words: its kind's label ("person"), or "anyone or anything" for a ref of any kind. */
+/** A ref param's kinds in words: its kind's label ("person"), else its selector's kinds ("person, business, trust or household"), else "anyone or anything" for a ref of any kind. */
 function kindWords(reg: Registry, world: WorldDoc, def: ParamDef): string {
-  if (def.ref === undefined) return "anyone or anything";
-  return (own(world.kinds, def.ref)?.label ?? reg.kinds.get(def.ref)?.label ?? def.ref).toLowerCase();
+  const kinds = def.ref !== undefined ? [def.ref] : (def.of?.kind ?? []);
+  if (kinds.length === 0) return "anyone or anything";
+  const words = kinds.map((k) => (own(world.kinds, k)?.label ?? reg.kinds.get(k)?.label ?? k).toLowerCase());
+  return words.length === 1 ? words[0]! : `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
 }
 
 /**
  * A param in words, or null when it is required and nothing can fill it: a required ref lists the
  * ids that may fill it (each named once, in the scene: `named` gathers them), as the palette offers
- * them; an optional one, which the palette never lists, takes an id of its kind named elsewhere; a
- * place ref points at the places, listed apart; a text param naming a table row lists the rows'
- * ids, inside the param's own parentheses, so the next param can't read as a row; Attempt's stat
- * lists the stats, and Buy's item what is sold here, as the palette offers them.
+ * them; one that pays an outside account (`ParamDef.outside`) takes anyone or anything besides, in
+ * the input's own words, so it is never left with nothing to fill it; an optional one, which the
+ * palette never lists, takes an id of its kind named elsewhere; a place ref points at the places,
+ * listed apart; a text param naming a table row lists the rows' ids, inside the param's own
+ * parentheses, so the next param can't read as a row; Attempt's stat lists the stats, and Buy's item
+ * what is sold here, as the palette offers them.
  */
 function paramWords(ctx: ReadContext, action: ActionDef, name: string, def: ParamDef, mayKnow: (id: EntityId) => boolean, places: number, named: Set<EntityId>): string | null {
   const { registry: reg, world, state } = ctx;
@@ -102,11 +106,16 @@ function paramWords(ctx: ReadContext, action: ActionDef, name: string, def: Para
     if (def.ref === "place") return places > 0 ? `${head} (a place id from Places)` : def.optional ? `${head} (no place you know of)` : null;
     if (def.optional) return `${head} (${kindWords(reg, world, def)}: an id named above${label})`;
     const ids = paramCandidates(reg, world, state, action, name).filter(mayKnow);
-    // A param a claim may fill (DESIGN §9.4) keeps its action for a thing the player says they have that nothing lists.
+    // A param a claim may fill (DESIGN §9.4) keeps its action for a thing the player says they have
+    // that nothing lists; one that pays an outside account for a receiver the story hasn't
+    // established (DESIGN §9.4 typed money) takes anyone or anything else, in the input's own words
+    // ("the tip jar", "the busker"), so such a payment is read as one, never left out.
     const claimed = def.claim ? "one nothing lists, in the input's own words" : null;
-    if (ids.length === 0) return claimed ? `${head} (${kindWords(reg, world, def)}: ${claimed})` : null;
+    const paid = def.outside !== undefined && claimed === null;
+    if (ids.length === 0) return paid ? `${head} (anyone or anything, in the input's own words)` : claimed ? `${head} (${kindWords(reg, world, def)}: ${claimed})` : null;
     for (const id of ids) named.add(id);
-    return `${head} (${kindWords(reg, world, def)}: ${ids.join(" | ")}${claimed ? `, or ${claimed}` : ""})`;
+    const open = claimed ?? (paid ? "anyone or anything else, in the input's own words" : null);
+    return `${head} (${kindWords(reg, world, def)}: ${ids.join(" | ")}${open ? `, or ${open}` : ""})`;
   }
   // A list of refs (Go's `with`) takes ids of the scene's people the input brings along: "with Danny"
   // names one, "we" all of them; nobody when the player goes alone, as when no one is here.

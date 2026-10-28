@@ -1,10 +1,11 @@
 // The engine feed (DESIGN §6.11): a section's switch, caps and sources as the world sets them, the
 // GM's per-chat settings over them with their Undo, and the scopes: the player's never names a
 // secret, the GM's names it marked for the narrator only, and no player surface gets it. The narrator
-// rules put secrecy above the order of authority, in the same words with marked facts or without.
+// rules give the order of authority first, then what marked facts mean, in the same words with marked
+// facts or without.
 
 import { describe, expect, test } from "bun:test";
-import { NARRATOR_AUTHORITY, NARRATOR_SECRECY } from "../../src/backend/book";
+import { NARRATOR_AUTHORITY, NARRATOR_SOURCE } from "../../src/backend/book";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import type { Delivered } from "../../src/backend/ledger-io";
 import { MARKED_FACTS_RULE, markedText } from "../../src/engine/feed";
@@ -155,7 +156,7 @@ describe("feed scopes", () => {
     expect(JSON.stringify(await rig.rt.view(chatId, rig.host.userId))).not.toContain(SECRET);
   });
 
-  test("the narrator rules put secrecy before the order of authority, in the same words whether or not the turn carries marked facts", async () => {
+  test("the narrator rules give the order of authority before what marked facts mean, in the same words whether or not the turn carries marked facts", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await alder(rig, null, secretHere);
     const label = DEFAULT_SECTIONS.people?.label ?? "People";
@@ -169,12 +170,9 @@ describe("feed scopes", () => {
     await rig.turn(chatId, "I look around again.", "Still quiet.");
     expect(sent(rig).get(label)).toContain(marked);
     expect(rules()).toBe(plain);
-    const secrecy = plain.indexOf(NARRATOR_SECRECY);
-    expect(secrecy).toBeGreaterThan(0);
-    expect(secrecy).toBeLessThan(plain.indexOf(NARRATOR_AUTHORITY));
-    // The rule for marked facts is part of it, even on a turn that carries none.
-    expect(plain.indexOf(MARKED_FACTS_RULE)).toBeGreaterThan(secrecy);
-    expect(plain.indexOf(MARKED_FACTS_RULE)).toBeLessThan(plain.indexOf(NARRATOR_AUTHORITY));
+    // The order of authority comes right after where the rules come from, and the guidance for
+    // marked facts follows the order it works under, even on a turn that carries none.
+    expect(plain.startsWith(["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_AUTHORITY, MARKED_FACTS_RULE].join("\n"))).toBe(true);
   });
 
   test("a scene-scope fact reaches the narrator marked, and no player surface, Journal line or panel", async () => {

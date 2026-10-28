@@ -799,29 +799,33 @@ export function transferParty(ctx: ReadContext, id: EntityId, side: "from" | "to
 }
 
 /**
- * Money from one party to another, each at its own level. Two sides of one holder move money
- * between two of their accounts. Cash handed over (`method` "cash") comes from the payer's carried
- * cash when it covers, else the usual source, and lands in the payee's carried cash, else the usual
- * deposit account. A transfer the story made (`story`, DESIGN §9.5) never declines for cover, and
- * from level 2 never takes cash or savings below zero: from an account that neither covers it nor can
- * run a debt it comes the payer's way instead (`chooseSource`), and with no way at all it moves
- * nothing (`NO_WAY_TO_PAY`).
+ * Money from one party to another, each at its own level, or to an outside account (`to` its id:
+ * `world`, the catch-all a Pay to a receiver the story hasn't established pays, DESIGN §9.4 typed
+ * money), paid as any payee outside the world is. Two sides of one holder move money between two of
+ * their accounts. Cash handed over (`method` "cash") comes from the payer's carried cash when it
+ * covers, else the usual source, and lands in the payee's carried cash, else the usual deposit
+ * account. A transfer the story made (`story`, DESIGN §9.5) never declines for cover, and from level
+ * 2 never takes cash or savings below zero: from an account that neither covers it nor can run a
+ * debt it comes the payer's way instead (`chooseSource`), and with no way at all it moves nothing
+ * (`NO_WAY_TO_PAY`).
  */
 export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, method: PayMethod = "auto", story = false): LedgerEvent[] | Rejection {
   const payer = transferParty(ctx, from, "from");
   if ("code" in payer) return payer;
-  const payee = transferParty(ctx, to, "to");
-  if ("code" in payee) return payee;
+  const outside = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? outsideAccount(to) : null;
+  const payee = outside === null ? transferParty(ctx, to, "to") : null;
+  if (payee !== null && "code" in payee) return payee;
   const paying: PayMethod = method === "cash" ? "auto" : method;
-  const cash = method === "cash" ? (cashAccount(ctx, payee.holder) ?? undefined) : undefined;
-  const sameSide = payer.holder === payee.holder || (payee.account !== undefined && canSpend(ctx.state, payee.account, payer.holder) && rightsOf(ctx.state, payee.account, payer.holder)?.worth === true);
-  if (!sameSide) {
-    const deposit = payee.account ?? cash;
+  const cash = method === "cash" && payee !== null ? (cashAccount(ctx, payee.holder) ?? undefined) : undefined;
+  const sameSide = payee !== null && (payer.holder === payee.holder || (payee.account !== undefined && canSpend(ctx.state, payee.account, payer.holder) && rightsOf(ctx.state, payee.account, payer.holder)?.worth === true));
+  if (payee === null || !sameSide) {
+    const deposit = payee?.account ?? cash;
     const source = payer.account ?? (method === "cash" ? (cashAccount(ctx, payer.holder) ?? undefined) : undefined);
     // From level 2 the story's payment names its cash even when the cash doesn't cover it, so the way it goes instead remembers it (`chooseSource`).
     const storyNamed = story && ctx.levelOf(payer.holder, "money") >= 2;
     const fromCash = storyNamed || (method === "cash" && source !== undefined && availableOf(ctx, source) >= Math.round(cents)) ? source : payer.account;
-    return charge(hooks, ctx, payer.holder, cents, memo, { payee: payee.holder, method: paying, kind: "transfer", ...(fromCash ? { source: fromCash } : {}), ...(deposit ? { deposit } : {}), overdraft: false, story });
+    const side = payee !== null ? { payee: payee.holder } : outside !== null ? { counterparty: outside } : {};
+    return charge(hooks, ctx, payer.holder, cents, memo, { ...side, method: paying, kind: "transfer", ...(fromCash ? { source: fromCash } : {}), ...(deposit ? { deposit } : {}), overdraft: false, story });
   }
   if (!payer.account && !payee.account) return reject("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
   const level = ctx.levelOf(payer.holder, "money");

@@ -7,13 +7,14 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { tableChoices } from "../shared/tables";
 import type { ActionDef, ParamDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
+import { EXTERNAL_ACCOUNT_PREFIX } from "./events";
 import { namesHiddenOrSecretLore } from "./lore";
 import { optionalQuery, own } from "./pack-kit";
 import { playerLines, povMayKnow } from "./player-events";
 import type { Registry } from "./registry-impl";
-import { findAction, type Resolution } from "./resolve";
+import { findAction, outsideOf, type Resolution } from "./resolve";
 import type { WorldState } from "./state";
-import { canSeePlace, findLeaks, playerTrack, unrevealedSecrets } from "./visibility";
+import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets } from "./visibility";
 
 /** A game-time span in words: "45 min", "2.5 hours", "30 days". */
 export function spanText(minutes: number): string {
@@ -93,7 +94,21 @@ function pickReader(registry: Registry, world: WorldDoc, state: Readonly<WorldSt
     const words = (def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null) ?? asTyped(value);
     return words === null ? null : { words, label: false };
   };
-  return { nameOf, asTyped, text };
+  // Whom a param that pays pays (DESIGN §9.4 typed money): the player's own words for what they named
+  // when it was paid in another's place (`words`), held to what was heard as their other words are;
+  // else a party the POV can see by name, as the Money views name a payee; else, on a surface the
+  // player reads, the outside account by its key in words ("World"), which a narrator's surface
+  // leaves unsaid.
+  const payee = (def: ParamDef, value: JsonValue | undefined, words: string | undefined): string | null => {
+    if (words !== undefined) return screened(words);
+    if (typeof value !== "string" || value === "") return null;
+    const entity = own(state.entities, value);
+    if (entity) return canSeeEntity(registry, world, state, world.pov, value) ? entity.name : null;
+    if (value !== outsideOf(def)) return nameOf(value) ?? asTyped(value);
+    const key = value.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? value.slice(EXTERNAL_ACCOUNT_PREFIX.length).replace(/[_:]+/g, " ").trim() : "";
+    return typed === "" || key === "" ? null : `${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+  };
+  return { nameOf, asTyped, text, payee };
 }
 
 /**
@@ -111,9 +126,11 @@ function pickReader(registry: Registry, world: WorldDoc, state: Readonly<WorldSt
  * written or as typed, are left out when they carry a secret or name anything hidden
  * (`namesHiddenOrSecretLore`) that `heard` doesn't say too: a model's read may write a hidden person
  * into a free-text pick ("Vex Morrow" for "whoever was in the shop last night"), while the player's
- * own words read the same whether or not someone hidden goes by them.
+ * own words read the same whether or not someone hidden goes by them. A receiver a param that pays
+ * paid in another's place reads as the player's own words for what they named (`said`, DESIGN §9.4
+ * typed money: "the tip jar"), else as whom it pays.
  */
-export function actionWords(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, typed = "", heard = typed): string {
+export function actionWords(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, typed = "", heard = typed, said: Readonly<Record<string, string>> = {}): string {
   const read = pickReader(registry, world, state, typed, heard);
   // A count of the action's thing (`qty`) reads with it ("2 coffees"), never apart as a number with its label.
   const count = action.params[COUNT_PARAM]?.type === "number" && typeof params[COUNT_PARAM] === "number" ? params[COUNT_PARAM] : null;
@@ -124,7 +141,7 @@ export function actionWords(registry: Registry, world: WorldDoc, state: Readonly
     const value = params[name];
     if (value === undefined || value === null || value === "" || (name === COUNT_PARAM && counted !== undefined)) continue;
     let word: string | null = null;
-    if (def.type === "ref") word = read.nameOf(value) ?? (typeof value === "string" ? read.asTyped(value) : null);
+    if (def.type === "ref") word = def.outside !== undefined ? read.payee(def, value, said[name]) : (read.nameOf(value) ?? (typeof value === "string" ? read.asTyped(value) : null));
     else if (def.type === "list" && def.ref !== undefined) {
       const names = (Array.isArray(value) ? value : []).map(read.nameOf).filter((n): n is string => n !== null);
       if (names.length > 0) word = `with ${names.join(" and ")}`;

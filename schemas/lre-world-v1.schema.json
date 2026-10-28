@@ -496,7 +496,7 @@
       "type": "object",
       "required": ["type"],
       "additionalProperties": false,
-      "properties": { "type": { "$ref": "#/$defs/fieldType" }, "label": { "type": "string" }, "ref": { "$ref": "#/$defs/id" }, "optional": { "type": "boolean" }, "of": { "$ref": "#/$defs/selector" }, "table": { "$ref": "#/$defs/id", "description": "a text param naming a row of this data table (a skill, a save)" }, "claim": { "enum": ["held", "here"], "description": "a ref param a thing the player says they have may fill: it appears in the actor's hands (held) or where the actor is (here)" } }
+      "properties": { "type": { "$ref": "#/$defs/fieldType" }, "label": { "type": "string" }, "ref": { "$ref": "#/$defs/id" }, "optional": { "type": "boolean" }, "of": { "$ref": "#/$defs/selector" }, "table": { "$ref": "#/$defs/id", "description": "a text param naming a row of this data table (a skill, a save)" }, "claim": { "enum": ["held", "here"], "description": "a ref param a thing the player says they have may fill: it appears in the actor's hands (held) or where the actor is (here)" }, "outside": { "type": "string", "minLength": 1, "description": "a ref param that names whom money goes to: one that names nothing that fits (a thing, a name nothing has, someone the player character can't know) pays this outside account instead, by its key (world: the economy's catch-all, shown as World)" } }
     },
     "check": {
       "title": "a check",

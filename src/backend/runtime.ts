@@ -50,7 +50,7 @@ import { kindIs, placeOfEntity, placeWithin } from "../engine/scope";
 import { placeKey, placeMenu, placeSaid } from "../engine/place-names";
 import { heardPlace } from "../engine/narration-channels";
 import type { EntityState, WorldState } from "../engine/state";
-import { actionOdds, companionCandidates, findAction, paramCandidates, playsAsRoleplay, type Resolution } from "../engine/resolve";
+import { actionOdds, companionCandidates, findAction, outsideOf, paramCandidates, playsAsRoleplay, type Resolution } from "../engine/resolve";
 import { allowedSkills, inferredOf, inferredRead, rolledByTry, skillSources, TRY_ACTION, tryJudged } from "../engine/inferred";
 import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
@@ -95,7 +95,7 @@ import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, applyRead, type EnginePipeline, type PlanProse, type PreparedRead, type ProposalOutcome, type ReadChip, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
-import { agentsActHere, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, slotVars, type EarlierMessage, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
+import { agentsActHere, factLines, handedCash, judge, noFacts, npcChoose, paidOutside, payeeOf, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, slotVars, type EarlierMessage, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION } from "./view";
 import { actionWords, compactSpan, editedText, spanText } from "../engine/action-words";
 import { WorldStore } from "./worlds";
@@ -1548,13 +1548,18 @@ export class Runtime implements TurnHooks {
     }
     const chosen = result.action ? all.find((a) => a.id === result.action) : undefined;
     const params = chosen ? playable(chosen, result.params, render.world, [text]) : result.params;
-    // An action whose params name nothing in the world that fits, as the POV knows it ("I pay Rena"
-    // where Rena is no one in it), is dropped on its own, the first as much as a queued one, and
+    // An action whose params name nothing in the world that fits, as the POV knows it ("I chat with
+    // Rena" where Rena is no one in it), is dropped on its own, the first as much as a queued one, and
     // plays as plain roleplay: its reply's receipt says why (DESIGN §9.4). The rest of the message
     // still plays: an incidental action that names nothing never displaces the move the turn is
     // about. With nothing left to play, the turn is plain roleplay. A thing the player says they have
     // that the world doesn't ("I pour Theresa a coffee" with no coffee) is a claim the chat's policy
-    // decides (`claimFor`): made real, asked about first (money always is), or dropped as above.
+    // decides (`claimFor`): made real, asked about first (money always is), or dropped as above. Money
+    // is paid to whom it names as the player character knows them: a party they can see, a known
+    // thing's owner, else the action's outside account, the world's catch-all, for a receiver the
+    // story hasn't established ("I drop $5 in the tip jar"); and, when neither the read nor the
+    // player's words say how, in cash for one in front of them that their cash covers (`paidOutside`,
+    // `handedCash`, DESIGN §9.4 typed money).
     const policy = claimsOf(render.world, render.state);
     const steps: ReadStep[] = [];
     // Whether a step that rolls its own check was kept: a Try something after it is never kept (DESIGN
@@ -1567,25 +1572,30 @@ export class Runtime implements TurnHooks {
         dropAnswer(def, answered);
         return;
       }
-      const given = answered;
+      const paid = paidOutside(this.registry, def, answered, render.world, render.state, mayKnow, text);
+      // A pick from the engine's own controls keeps the way of paying it was given (its pay order).
+      const given = picked ? paid.params : handedCash(this.registry, def, answered, paid.params, render.world, render.state, mayKnow);
+      const forWords = Object.keys(paid.said).length > 0 ? { said: paid.said } : {};
       // The staged action is the player's pick in the engine's own controls, held to its requirements (DESIGN §11).
       const pick = picked ? { picked: true as const } : {};
       // The player character's own thing that the world keeps elsewhere is a tracking gap, not a veto:
       // it goes to the claims policy rather than failing and stopping the message (DESIGN §9.4).
       const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state, mayKnow);
       if (!ref) {
-        steps.push({ action: def.id, params: given, text: words, ...pick });
+        steps.push({ action: def.id, params: given, text: words, ...forWords, ...pick });
         rolls ||= checkOf(render.world, def.check) !== null;
         return;
       }
-      const verdict = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: given, unfit: ref, said, thing, policy, mayKnow });
+      // The claim reads the params as the read gave them, so a thing it finds the POV knows plays them
+      // again, its receivers paid outside with the player's words as before (`paidOutside`).
+      const verdict = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: answered, unfit: ref, said, thing, policy, mayKnow });
       // A thing the POV may know by those words keeps its own rules: the action takes it, and fits or fails as it would.
       if (verdict?.kind === "known") return take(def, verdict.params, words, undefined, said, picked);
-      if (verdict?.kind === "real") steps.push({ action: def.id, params: given, text: words, claim: verdict.claim, ...pick });
+      if (verdict?.kind === "real") steps.push({ action: def.id, params: given, text: words, claim: verdict.claim, ...forWords, ...pick });
       // Money is paid over with the economy's Pay in the read's place (`play`): cash the player
       // character carries with nothing added, else once what they lack is.
       else if (verdict?.kind === "play") steps.push({ ...verdict.play, text: words, ...pick });
-      else if (verdict?.kind === "ask") steps.push({ ...(verdict.play ?? { action: def.id, params: given }), text: words, claim: verdict.claim, ask: { kind: "claim", question: verdict.question, detail: verdict.detail }, ...pick });
+      else if (verdict?.kind === "ask") steps.push({ ...(verdict.play ?? { action: def.id, params: given, ...forWords }), text: words, claim: verdict.claim, ask: { kind: "claim", question: verdict.question, detail: verdict.detail }, ...pick });
       else {
         this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
         // The receipt may echo the player's own words for what the read named, so it reads alike
@@ -2469,9 +2479,9 @@ export class Runtime implements TurnHooks {
     return this.bridges.get(chatId)?.answerAsk(text, index, keep) ?? false;
   }
 
-  /** Play or Edit on the intent gate (DESIGN §5.1 preview gates): the read plays, with `params` when the player edited them, on the Regenerate that follows. */
-  passIntent(chatId: ChatId, text: string, params?: JsonObject): boolean {
-    return this.bridges.get(chatId)?.passIntent(text, params) ?? false;
+  /** Play or Edit on the intent gate (DESIGN §5.1 preview gates): the read plays, with `params` (and the player's `said` words for the receivers they pay outside) when the player edited them, on the Regenerate that follows. */
+  passIntent(chatId: ChatId, text: string, params?: JsonObject, said?: Record<string, string>): boolean {
+    return this.bridges.get(chatId)?.passIntent(text, params, said) ?? false;
   }
 
   /**
@@ -2480,11 +2490,14 @@ export class Runtime implements TurnHooks {
    * may know of (`unfitRef`), so no request path plays a guessed id of a hidden thing. `know` is what
    * counts as known: `read`, a typed read's own rule (`povMayKnow`), for edited details; `seen`, what
    * the player's own surfaces may offer (`canSeeEntity`: the player's accounts and payments too), for
-   * a palette, panel or tool request. `skip` is a claim's param, which the claim makes real. Null when every ref fits.
+   * a palette, panel or tool request. `skip` is a claim's param, which the claim makes real. On the
+   * read, a receiver a param that pays pays someone else for (`payeeOf`, DESIGN §9.4 typed money:
+   * the owner of a thing, or World for one the story hasn't established) fits, as the typed read pays
+   * them; a palette, panel or tool request names whom the player picked. Null when every ref fits.
    */
   requestRefusal(world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, know: "read" | "seen", skip?: string): string | null {
     const mayKnow = (id: EntityId): boolean => (know === "read" ? povMayKnow(this.registry, world, state, id) : id === world.pov || canSeeEntity(this.registry, world, state, world.pov, id));
-    const unfit = unfitRef(this.registry, action, params, world, state, mayKnow, skip);
+    const unfit = unfitRef(this.registry, action, params, world, state, mayKnow, skip, know === "read");
     return unfit ? `${action.label}: ${unfitReason(this.registry, world, state, unfit, "", unrevealedSecrets(this.registry, world, state), mayKnow)}` : null;
   }
 
@@ -2494,7 +2507,9 @@ export class Runtime implements TurnHooks {
    * Actions palette offers the player character for it (`paramCandidates`, and `companionCandidates`
    * for who comes along), so a hand-made request can't aim it where the palette never would. A pick
    * the read made itself stands; so does a claim's param (`claim`) left as read, which the claim makes
-   * real. A claim's param the edit changed is a pick like any other, checked as one.
+   * real. A claim's param the edit changed is a pick like any other, checked as one. A receiver a
+   * param that pays pays someone else for (`payeeOf`, DESIGN §9.4 typed money) is no pick of the
+   * palette's, and plays as the read would play it (`editedPaid`).
    */
   editRefusal(world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, read: JsonObject, claim?: string): string | null {
     const kept = (name: string): boolean => JSON.stringify(params[name] ?? null) === JSON.stringify(read[name] ?? null);
@@ -2505,6 +2520,7 @@ export class Runtime implements TurnHooks {
     for (const [name, def] of Object.entries(action.params)) {
       const value = params[name];
       if (value === undefined || value === null || value === "" || kept(name)) continue;
+      if (def.type === "ref" && payeeOf(this.registry, action, params, def, value, world, state, mayKnow) !== null) continue;
       if (def.type === "ref" && !(typeof value === "string" && paramCandidates(this.registry, world, state, action, name).includes(value))) return why(name, def, value);
       if (def.type === "list" && def.ref !== undefined) {
         const along = companionCandidates(this.registry, world, state, action, name);
@@ -2516,11 +2532,45 @@ export class Runtime implements TurnHooks {
   }
 
   /**
+   * The intent gate's Edit's params with each receiver the read paid in another's place kept where the
+   * edit leaves it unpicked (DESIGN §5.1, §9.4 typed money): World, a thing's owner or a party beyond
+   * the scene is no pick the Actions palette offers, so an Edit of the amount alone keeps whom the
+   * read pays, and the way of paying the read gave ("from my savings"), which the palette doesn't carry.
+   */
+  keptPayees(action: ActionDef, params: JsonObject, read: JsonObject): JsonObject {
+    const out: JsonObject = { ...params };
+    const blank = (v: JsonValue | undefined): boolean => v === undefined || v === null || v === "";
+    const pays = Object.values(action.params).some((def) => def.outside !== undefined);
+    for (const [name, def] of Object.entries(action.params)) {
+      const was = read[name];
+      if ((def.outside !== undefined || (pays && name === "method")) && blank(out[name]) && !blank(was)) out[name] = was;
+    }
+    return out;
+  }
+
+  /**
+   * The intent gate's Edit as it plays (DESIGN §5.1, §9.4 typed money): its params with each receiver
+   * paid as the read pays it (`paidOutside`) and its way of paying as the purchase implies when none
+   * is given (`handedCash`), and the player's own words for what each param paid in another's place
+   * named: the read's for one the edit left as read, which judge it as the read did, else those of
+   * the player's message (`text`).
+   */
+  editedPaid(world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, params: JsonObject, read: InterpretOutput, text: string): { params: JsonObject; said: Record<string, string> } {
+    const mayKnow = (id: EntityId): boolean => povMayKnow(this.registry, world, state, id);
+    const paid = paidOutside(this.registry, action, params, world, state, mayKnow, text);
+    const kept = Object.fromEntries(Object.entries(read.said ?? {}).filter(([name]) => JSON.stringify(params[name] ?? null) === JSON.stringify(read.params[name] ?? null)));
+    return { params: handedCash(this.registry, action, { ...params, ...kept }, paid.params, world, state, mayKnow), said: { ...kept, ...paid.said } };
+  }
+
+  /**
    * The intent gate's Edit (DESIGN §5.1): the Actions palette opened at the read action with its picks
    * already made, when the palette offers that action here; only the picks it could offer travel to
    * the page, and a text pick only as the card shows it (`editedText`, the player's message `typed`),
-   * so a read's free text never carries a secret or a hidden name there. Null when the palette has no
-   * such action, so Edit isn't offered.
+   * so a read's free text never carries a secret or a hidden name there. A receiver the read paid in
+   * another's place (World, a thing's owner, a party the player character can see beyond the scene,
+   * DESIGN §9.4 typed money) travels as read, though the palette offers no pick for it, and an Edit
+   * that leaves it unpicked keeps it (`keptPayees`). Null when the palette has no such action, so Edit
+   * isn't offered.
    */
   private intentEdit(world: WorldDoc, state: WorldState, action: ActionDef, params: JsonObject, typed: string): ChipInput | null {
     if (!palette(world, state, this.registry).entries.some((e) => e.action === action.id)) return null;
@@ -2530,7 +2580,8 @@ export class Runtime implements TurnHooks {
       const value = params[name];
       if (value === undefined || value === null) continue;
       if (def.type === "ref") {
-        if (typeof value === "string" && paramCandidates(this.registry, world, state, action, name).includes(value)) picks[name] = value;
+        const paid = def.outside !== undefined && typeof value === "string" && (value === outsideOf(def) || canSeeEntity(this.registry, world, state, world.pov, value));
+        if (typeof value === "string" && (paid || paramCandidates(this.registry, world, state, action, name).includes(value))) picks[name] = value;
       } else if (def.type === "list" && def.ref !== undefined) {
         const along = companionCandidates(this.registry, world, state, action, name);
         if (Array.isArray(value)) picks[name] = value.filter((id): id is string => typeof id === "string" && along.includes(id));
@@ -2567,13 +2618,13 @@ export class Runtime implements TurnHooks {
       return { label: `Play Timelapse: ${span}?`, detail: lines.join("\n"), edit, what: `Timelapse ${span}` };
     }
     const action = read.action ?? "";
-    const head = this.stepWords(world, state, action, read.params, text);
+    const head = this.stepWords(world, state, action, read.params, text, read.said);
     const queue = read.queue ?? [];
     const offer = bridge.offerFor(text);
     const asks = offer?.type === "duration" && offer.minutes > settings.time.askBeyondMinutes;
     const lines = [
       ...(read.text ? [`“${read.text}”`] : []),
-      ...queue.map((q) => `Then ${this.stepWords(world, state, q.action, q.params, text)}${q.text ? ` — “${q.text}”` : ""}`),
+      ...queue.map((q) => `Then ${this.stepWords(world, state, q.action, q.params, text, q.said)}${q.text ? ` — “${q.text}”` : ""}`),
       ...(offer ? [`Then time passes: ${skipWords(this.registry, world, state, offer, false)}. ${asks ? "That's longer than a skip runs without asking, so it's offered once these have played." : "The reply tells it after these."}`] : []),
       ...bridge.unfitOf(text).map((u) => `Left out: ${u.label}, ${u.reason}.`),
       ...(rest ? [`Not read as an action: “${rest}”`] : []),
@@ -2585,11 +2636,12 @@ export class Runtime implements TurnHooks {
   /**
    * One action of a read in words, as the intent gate's card names it (DESIGN §5.1): its label and what
    * it acts on ("Take: letter", "Go to: Bluebird Coffee, with Danny Okafor"), the player's own words
-   * where the world has no name for a pick (`typed`); an inferred check by its skill, what is attempted
-   * (unless it names anything hidden the player's message doesn't), whom it opposes as the player
-   * character may know them, and how it looks.
+   * where the world has no name for a pick (`typed`), and for a receiver paid in another's place
+   * (`said`, DESIGN §9.4 typed money: "Pay: the tip jar, $5.00"); an inferred check by its skill, what
+   * is attempted (unless it names anything hidden the player's message doesn't), whom it opposes as the
+   * player character may know them, and how it looks.
    */
-  private stepWords(world: WorldDoc, state: WorldState, action: ActionId, params: JsonObject, typed: string): string {
+  private stepWords(world: WorldDoc, state: WorldState, action: ActionId, params: JsonObject, typed: string, said: Readonly<Record<string, string>> = {}): string {
     if (action === TRY_ACTION) {
       const verdict = inferredRead(this.registry, world, state, params);
       if (!verdict.ok) return "Try something";
@@ -2599,7 +2651,7 @@ export class Runtime implements TurnHooks {
     }
     const def = (hasOwn(world.actions, action) ? world.actions[action] : undefined) ?? this.registry.actions.get(action);
     if (!def) return "an action";
-    const picks = actionWords(this.registry, world, state, def, params, typed);
+    const picks = actionWords(this.registry, world, state, def, params, typed, typed, said);
     return picks !== "" ? `${def.label}: ${picks}` : def.label;
   }
 
@@ -2856,9 +2908,9 @@ export class Runtime implements TurnHooks {
     // The World Info entries the delivered lines carry (§6.11): that entry can stay out of the prompt.
     const sources = built.sources;
     // The narrator rules, for world chats only: at the preset's `{{outlet::lre_narrator}}`, else
-    // before the character, apart from the section budget. Every turn has them: secrecy first, one
-    // text in every world whether or not the turn carries marked facts (§6.8, §6.11), then the order
-    // of authority (DESIGN D36), then the preset's own rules, as the player's.
+    // before the character, apart from the section budget. Every turn has them: the order of
+    // authority first (DESIGN D36), then what marked facts mean, one text in every world whether or
+    // not the turn carries marked facts (§6.8, §6.11), then the preset's own rules, as the player's.
     const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
     if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null) });
     this.countLater(input.userId, uncounted);
@@ -3633,22 +3685,26 @@ function playable(action: ActionDef, params: JsonObject, world: WorldDoc, said: 
  * else, made up or hidden alike, as one nothing has, in the player's own words for it (`text`, whole
  * words only: "Rena isn't anyone you know"), else, with none of theirs (a request, with no `text`) or
  * too long for a name, "it names no one you know"; or that it has none. Neither reads otherwise for
- * someone hidden going by those words.
+ * someone hidden going by those words. A param that pays (`ParamDef.outside`, DESIGN §9.4 typed
+ * money) takes someone, as a person's does, and a payment that pays no one for another reason than
+ * whom it names gives that reason (`UnfitRef.reason`: "it needs an amount", "Piggy bank is yours").
  */
 function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, unfit: UnfitRef, text: string, secrets: readonly string[], mayKnow: (id: EntityId) => boolean): string {
   const { def, value } = unfit;
   const place = def.ref === "place";
-  const person = !place && def.ref !== undefined && kindIs(reg, world, def.ref, "person");
+  const person = !place && (def.ref !== undefined ? kindIs(reg, world, def.ref, "person") : def.outside !== undefined || (def.of?.kind ?? []).some((k) => kindIs(reg, world, k, "person")));
   if (value === undefined || value === null || value === "") return place ? "it needs a place" : person ? "it needs someone" : "it needs something";
   const none = place ? "it names no place you know" : person ? "it names no one you know" : "it names nothing you know";
+  if (unfit.reason !== undefined) return findLeaks(unfit.reason, secrets).length > 0 ? none : unfit.reason;
   const id = typeof value === "string" ? value : "";
-  // Only a param of one kind refuses a real thing the POV knows, for being another.
+  // Only a param of one kind, or one that pays, refuses a real thing the POV knows, for being another.
   const real = own(state.entities, id);
   const seen = real && canSeeEntity(reg, world, state, world.pov, id) ? real : undefined;
   const placeDef = seen ? undefined : own(world.places, id);
   const known = seen ? (mayKnow(id) ? seen.name : null) : placeDef && canSeePlace(reg, world, state, world.pov, id) ? placeDef.name : null;
-  if (known !== null && def.ref !== undefined) {
+  if (known !== null && (def.ref !== undefined || def.outside !== undefined)) {
     if (known.length > 80 || findLeaks(known, secrets).length > 0) return none;
+    if (def.ref === undefined) return `${known} isn't someone to pay`;
     const kind = place ? "place" : (reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase();
     return `${known} isn't ${/^[aeiou]/i.test(kind) ? "an" : "a"} ${kind}`;
   }

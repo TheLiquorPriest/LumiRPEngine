@@ -135,6 +135,8 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
         if (place !== "held" && place !== "here") err(at, "claims", `${a.label}'s ${p.label ?? name} says a claimed thing appears "${String(place)}"; it should be "held" (in the actor's hands) or "here" (where the actor is).`);
         else if (p.type !== "ref") warn(at, "claims", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so no claimed thing ever fills it.`);
       }
+      // An outside account stands in for whom a ref param pays when it names nothing that fits (DESIGN §9.4 typed money); any other param never pays it.
+      if (p.outside !== undefined && p.type !== "ref") warn(`actions.${id}.params.${name}.outside`, "outside", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so it never pays the outside account "${p.outside}".`);
       if (p.of === undefined) continue;
       if (p.type !== "ref") warn(`actions.${id}.params.${name}.of`, "selector", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so its selector never applies.`);
       for (const problem of selectorProblems(reg, world, p.of)) err(`actions.${id}.params.${name}.of`, "refs", `${a.label}'s ${p.label ?? name} selector ${problem}.`);

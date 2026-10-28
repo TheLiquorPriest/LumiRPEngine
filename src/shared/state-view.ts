@@ -257,6 +257,8 @@ export interface PaletteOption {
    * holds `{[param]: id}`; the UI sends the merged params of the whole picked chain.
    */
   next?: { param: string; label: string; options: PaletteOption[] };
+  /** The option picks a person (a ref target of a person's kind), for a picker that takes only people where its action takes others too (the Money panel's, from Pay's). */
+  person?: true;
 }
 
 export interface PaletteEntry {

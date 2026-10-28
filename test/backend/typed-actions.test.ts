@@ -107,35 +107,36 @@ async function nextTurn(rig: Rig, chatId: string, text: string): Promise<string>
 }
 
 describe("a typed action that names nothing in the world", () => {
-  const pay = (to: string) => () => ({ action: "pay", params: { to, amount: 6 }, confidence: 0.9 });
+  // Chat with takes only someone the world has; Pay pays a receiver the story hasn't established to World (typed-money-world.test.ts).
+  const chatWith = (target: string) => () => ({ action: "chat_with", params: { target }, confidence: 0.9 });
   const nothing = () => ({ action: null, params: {}, confidence: 0.9 });
 
-  test("'I pay Rena for the latte' charges nothing and plays as plain roleplay: its receipt says why and asks nothing, and no reply is told it didn't happen", async () => {
+  test("'I chat with Rena' plays as plain roleplay: its receipt says why and asks nothing, and no reply is told it didn't happen", async () => {
     const { rig, chatId } = await chat();
-    reading(rig, pay("rena"));
+    reading(rig, chatWith("rena"));
     const before = await history(rig, chatId);
-    const told = await nextTurn(rig, chatId, "I pay Rena for the latte.");
+    const told = await nextTurn(rig, chatId, "I chat with Rena about the latte.");
     expect(await history(rig, chatId)).toEqual(before);
     const receipts = await roleplayed(rig, chatId);
     expect(receipts).toHaveLength(1);
     // The receipt names the action and the name as the player typed it, with nothing to answer.
-    expect(`${receipts[0]?.label} ${receipts[0]?.detail}`).toContain("Pay");
+    expect(`${receipts[0]?.label} ${receipts[0]?.detail}`).toContain("Chat with");
     expect(receipts[0]?.detail).toContain("Rena");
     expect(receipts[0]?.actions).toEqual([]);
     // Neither this reply nor the next hears anything of it.
     reading(rig, nothing);
-    expect([...naming(told, "Pay"), ...naming(await nextTurn(rig, chatId, "I look around."), "Pay")]).toEqual([]);
+    expect([...naming(told, "Chat with"), ...naming(await nextTurn(rig, chatId, "I look around."), "Chat with")]).toEqual([]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
   test("a name the player typed reads the same on the receipt, made up or hidden, and no reply hears of it", async () => {
     const played = async (extra: { hidden?: string; secretAlias?: string }): Promise<{ detail: string; told: string[] }> => {
       const { rig, chatId } = await chat(extra);
-      reading(rig, pay("vex_morrow"));
-      const now = await nextTurn(rig, chatId, "I pay Vex Morrow for the latte.");
+      reading(rig, chatWith("vex_morrow"));
+      const now = await nextTurn(rig, chatId, "I chat with Vex Morrow about the latte.");
       const detail = (await roleplayed(rig, chatId))[0]?.detail ?? "";
       reading(rig, nothing);
-      return { detail, told: [...naming(now, "Pay"), ...naming(await nextTurn(rig, chatId, "I look around."), "Pay")] };
+      return { detail, told: [...naming(now, "Chat with"), ...naming(await nextTurn(rig, chatId, "I look around."), "Chat with")] };
     };
     const none = await played({});
     expect(none.detail).toStartWith("Vex Morrow isn't anyone you know");
@@ -146,8 +147,8 @@ describe("a typed action that names nothing in the world", () => {
 
   test("a name the player didn't type is never repeated on the receipt", async () => {
     const made = await chat();
-    reading(made.rig, pay("Lena"));
-    await made.rig.turn(made.chatId, "I pay the barista for the latte.", "You hand the barista a few bills.");
+    reading(made.rig, chatWith("Lena"));
+    await made.rig.turn(made.chatId, "I chat with the barista about the latte.", "You lean on the counter.");
     const madeChips = await replyChips(made.rig, made.chatId);
     expect((await roleplayed(made.rig, made.chatId))[0]?.detail).toStartWith("It names no one you know");
     for (const c of madeChips) expect(`${c.label} ${c.detail ?? ""}`).not.toContain("Lena");
@@ -167,8 +168,8 @@ describe("a typed action that names nothing in the world", () => {
 
   test("a Continue and a Re-read edit of the reply keep its receipt", async () => {
     const { rig, chatId } = await chat();
-    reading(rig, pay("rena"));
-    await rig.turn(chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
+    reading(rig, chatWith("rena"));
+    await rig.turn(chatId, "I chat with Rena about the latte.", "You look around for Rena.");
     const head = rig.host.head(chatId);
     if (!head) throw new Error("no reply");
     const g = await rig.host.start(chatId, { type: "continue" });
@@ -184,8 +185,8 @@ describe("a typed action that names nothing in the world", () => {
 
   test("after a swipe delete, a swipe made later at the old index doesn't take the receipt of the reply that moved", async () => {
     const { rig, chatId } = await chat();
-    reading(rig, pay("rena"));
-    await rig.turn(chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
+    reading(rig, chatWith("rena"));
+    await rig.turn(chatId, "I chat with Rena about the latte.", "You look around for Rena.");
     const head = rig.host.head(chatId)?.id ?? "";
     await rig.host.finish(await rig.host.start(chatId, { type: "swipe", messageId: head }), "You look around for Rena.");
     rig.host.deleteSwipe(chatId, head, 0);
@@ -316,8 +317,8 @@ describe("a second action in the same message", () => {
 
   test("when the first action names nothing in the world, what comes after it is still offered", async () => {
     const { rig, chatId } = await chat();
-    reading(rig, () => ({ action: "pay", params: { to: "rena", amount: 6 }, confidence: 0.9, next: "I buy a muffin", then: { minutes: 60 } }));
-    await rig.turn(chatId, "I pay Rena for the latte, buy a muffin and wait an hour.", "You hand Rena a few bills.");
+    reading(rig, () => ({ action: "chat_with", params: { target: "rena" }, confidence: 0.9, next: "I buy a muffin", then: { minutes: 60 } }));
+    await rig.turn(chatId, "I chat with Rena, buy a muffin and wait an hour.", "You look around for Rena.");
     const chips = await replyChips(rig, chatId);
     expect(await roleplayed(rig, chatId)).toHaveLength(1);
     expect(chips.find((c) => c.kind === "choice")?.label).toBe("I buy a muffin");
@@ -376,8 +377,8 @@ describe("several actions in one message (the action queue)", () => {
 
   test("a queued action that names nothing in the world plays as plain roleplay with its receipt, and the actions after it still play", async () => {
     const { rig, chatId } = await chat();
-    reading(rig, walkThen([{ action: "pay", params: { to: "rena", amount: 6 }, text: "I pay Rena" }, buying("muffin")]));
-    await rig.turn(chatId, "I walk to Bluebird Coffee, pay Rena and buy a muffin.", "You look around for Rena.");
+    reading(rig, walkThen([{ action: "chat_with", params: { target: "rena" }, text: "I chat with Rena" }, buying("muffin")]));
+    await rig.turn(chatId, "I walk to Bluebird Coffee, chat with Rena and buy a muffin.", "You look around for Rena.");
     const { state, world } = await folded(rig, chatId);
     expect(placeOfEntity(state, world.pov)).toBe("bluebird_coffee");
     const chips = await replyChips(rig, chatId);
@@ -466,17 +467,17 @@ describe("an incidental action before the move a turn is about (#30)", () => {
 
   test("two actions that name nothing get a receipt each, the walk still plays, and no reply hears of either", async () => {
     const { rig, chatId } = await chat();
-    reading(rig, reads(wear("work jacket"), { action: "pay", params: { to: "rena", amount: 6 }, text: "I pay Rena" }, walk));
-    await rig.turn(chatId, "I pull on my work jacket, pay Rena and walk down to Alder Automotive.", "You head down the hill to the garage.");
+    reading(rig, reads(wear("work jacket"), { action: "chat_with", params: { target: "rena" }, text: "I chat with Rena" }, walk));
+    await rig.turn(chatId, "I pull on my work jacket, chat with Rena and walk down to Alder Automotive.", "You head down the hill to the garage.");
     expect(await at(rig, chatId)).toBe("alder_automotive");
     const receipts = await roleplayed(rig, chatId);
     expect(receipts).toHaveLength(2);
     expect(receipts[0]?.label).toStartWith(rig.rt.registry.actions.get("wear")?.label ?? "wear");
-    expect(receipts[1]?.label).toStartWith(rig.rt.registry.actions.get("pay")?.label ?? "pay");
+    expect(receipts[1]?.label).toStartWith(rig.rt.registry.actions.get("chat_with")?.label ?? "chat_with");
     expect(receipts[0]?.detail).toMatch(/work jacket/i);
     expect(receipts[1]?.detail).toContain("Rena");
     const told = await nextTurn(rig, chatId, "I look around.");
-    expect([...naming(told, "Wear"), ...naming(told, "Pay")]).toEqual([]);
+    expect([...naming(told, "Wear"), ...naming(told, "Chat with")]).toEqual([]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
@@ -521,20 +522,20 @@ describe("an incidental action before the move a turn is about (#30)", () => {
 });
 
 describe("a new reply after a reply (Send with nothing typed)", () => {
-  test("repeats nothing the message before it left: no receipt, no rest of the message and no Timelapse offer, and no reply hears of the pay", async () => {
+  test("repeats nothing the message before it left: no receipt, no rest of the message and no Timelapse offer, and no reply hears of the chat", async () => {
     const { rig, chatId } = await chat();
-    // The pay names nobody in the world, the muffin is left to say, and an hour is let pass after them.
-    const paid: JsonObject = { action: "pay", params: { to: "rena", amount: 6 }, confidence: 0.9, next: "I buy a muffin", then: { minutes: 60 } };
-    reading(rig, (text) => (text.startsWith("I pay") ? paid : { action: null, params: {}, confidence: 0.9 }));
-    await rig.turn(chatId, "I pay Rena for the latte, buy a muffin and wait an hour.", "You hand Rena a few bills.");
+    // The chat names nobody in the world, the muffin is left to say, and an hour is let pass after them.
+    const chatted: JsonObject = { action: "chat_with", params: { target: "rena" }, confidence: 0.9, next: "I buy a muffin", then: { minutes: 60 } };
+    reading(rig, (text) => (text.startsWith("I chat") ? chatted : { action: null, params: {}, confidence: 0.9 }));
+    await rig.turn(chatId, "I chat with Rena, buy a muffin and wait an hour.", "You look around for Rena.");
     expect((await replyChips(rig, chatId)).map((c) => c.kind)).toEqual(expect.arrayContaining(["untracked", "choice", "timelapse_offer"]));
-    // The new reply hears nothing of the pay, and offers nothing of the message again.
+    // The new reply hears nothing of the chat, and offers nothing of the message again.
     const g = await rig.host.start(chatId, { type: "normal" });
-    const told = naming(rig.host.section("Outcome"), "Pay");
+    const told = naming(rig.host.section("Outcome"), "Chat with");
     await rig.host.finish(g, "The cafe hums along.");
     const repeated = (await replyChips(rig, chatId)).filter((c) => c.kind === "untracked" || c.kind === "choice" || c.kind === "timelapse_offer").map((c) => c.kind);
     // Nor does the reply after that.
-    const toldAgain = naming(await nextTurn(rig, chatId, "I look around."), "Pay");
+    const toldAgain = naming(await nextTurn(rig, chatId, "I look around."), "Chat with");
     expect({ repeated, told, toldAgain }).toEqual({ repeated: [], told: [], toldAgain: [] });
   });
 

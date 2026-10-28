@@ -68,9 +68,17 @@ export function markedText(line: FeedLine): string {
   return line.known === "scene" ? `${line.text} [unknown to you; known to ${line.who ?? "others here"}]` : `${line.text} [unknown to you; GM only]`;
 }
 
-/** The narrator rule that goes with marked facts (DESIGN §6.11). */
+/**
+ * What the narrator is told of marked facts (DESIGN §6.8, §6.11), the one source of it: knowledge
+ * guidance under the order of authority, since the player's own directives come first. The marks
+ * `markedText` writes say who knows a fact, so every character stays consistent with what they know
+ * until the story or the player makes it known; and since knowledge barriers matter for the reply the
+ * player reads, a marked fact isn't told to them unless they direct it or the story brings it out.
+ * The same text in every world and on every turn, marked facts or not, so the prompt tells nothing of
+ * whether a world keeps secrets.
+ */
 export const MARKED_FACTS_RULE =
-  "Facts marked [unknown to you] are not known to the player character. Use them only to steer the story and the people in it; never reveal them, narrate them as known, or let the player character act on them.";
+  "What each person knows, under that order: a fact marked [unknown to you; known to …] or [unknown to you; GM only] is one the player character doesn't know, and the mark says who does. Keep every character consistent with what they know: no one says, acts on or is narrated as knowing a fact they don't, until the story reveals it to them or the player's own instructions make it known. Unless the player's own instructions say otherwise, don't tell a marked fact in the narration or have the reply reveal it; it becomes known only through what the story has already established or what the player character does or finds. Marked facts are for steering the story and the people who do know them.";
 
 /** The `engine.feed` event: one section's override in this chat, replaced whole (`to: null` clears it). */
 export const feedEvent: EventTypeDef<PackEvent> = {

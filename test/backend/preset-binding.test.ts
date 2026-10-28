@@ -2,11 +2,12 @@
 // routes that section to its outlet twin for the generation, while the world's placement stands
 // otherwise; switched-off "RPEngine · <step>" blocks are appended to that helper's prompt as style
 // and rules (notes skipped, macros never resolved, length bounded, read once per preset revision);
-// every world-chat reply gets the narrator rules, secrecy and the order of authority, and "RPEngine ·
-// narrator" follows them as the player's own; Add RPEngine blocks fills in the rest.
+// every world-chat reply gets the narrator rules, the order of authority and what marked facts mean,
+// and "RPEngine · narrator" follows them as the player's own; Add RPEngine blocks fills in the rest.
 
 import { describe, expect, test } from "bun:test";
-import { NARRATOR_AUTHORITY, NARRATOR_SECRECY, PRESET_RULES_LEAD } from "../../src/backend/book";
+import { NARRATOR_AUTHORITY, NARRATOR_SOURCE, PRESET_RULES_LEAD } from "../../src/backend/book";
+import { MARKED_FACTS_RULE } from "../../src/engine/feed";
 import { GUIDANCE_MAX_CHARS } from "../../src/backend/preset-binding";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { isRecord } from "../../src/shared/json";
@@ -92,20 +93,19 @@ describe("the preset's guidance", () => {
     expect(rig.host.blockReads).toBe(2);
   });
 
-  test("every world-chat reply gets the narrator rules, with secrecy and the order of authority, before the character, with no preset rules of its own", async () => {
+  test("every world-chat reply gets the narrator rules, with the order of authority and what marked facts mean, before the character, with no preset rules of its own", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     const rules = await entryWith(rig, chatId, "narrator", "rules");
     await rig.turn(chatId, "I look around.", "Quiet.");
     const content = rig.host.assembled.find((e) => e.id === rules)?.content ?? "";
-    expect(content.startsWith("[Narrator rules]\n")).toBe(true);
-    expect(content).toContain(NARRATOR_SECRECY);
-    expect(content).toContain(NARRATOR_AUTHORITY);
+    // Where they come from, then the order of authority, then the guidance for marked facts under it.
+    expect(content.startsWith(["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_AUTHORITY, MARKED_FACTS_RULE].join("\n"))).toBe(true);
     // It stays in the book only for the reply that took it.
     expect(rig.host.storedEntry(rules)).toMatchObject({ disabled: true, content: "" });
   });
 
-  test("RPEngine · narrator reaches the narrator in world chats, after secrecy and the order of authority, as the player's: before the character, or at {{outlet::lre_narrator}}", async () => {
+  test("RPEngine · narrator reaches the narrator in world chats, after the order of authority and what marked facts mean, as the player's: before the character, or at {{outlet::lre_narrator}}", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     const rules = await entryWith(rig, chatId, "narrator", "rules");
@@ -113,11 +113,11 @@ describe("the preset's guidance", () => {
     rig.host.presetBlocks = [block("RPEngine · narrator", "Keep replies under 300 words.", false)];
     await rig.turn(chatId, "I look around.", "Quiet.");
     const at = (id: string) => rig.host.assembled.find((e) => e.id === id);
-    const told = (content: string | undefined): boolean => {
-      if (content === undefined || !content.endsWith(`\n${PRESET_RULES_LEAD}\nKeep replies under 300 words.`)) return false;
-      const where = [NARRATOR_SECRECY, NARRATOR_AUTHORITY, PRESET_RULES_LEAD].map((part) => content.indexOf(part));
-      return where.every((i, n) => i >= 0 && i > (n === 0 ? -1 : (where[n - 1] ?? Infinity)));
-    };
+    const told = (content: string | undefined): boolean =>
+      content !== undefined &&
+      content.startsWith(["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_AUTHORITY, MARKED_FACTS_RULE].join("\n")) &&
+      content.endsWith(`\n${PRESET_RULES_LEAD}\nKeep replies under 300 words.`) &&
+      content.indexOf(PRESET_RULES_LEAD) > content.indexOf(MARKED_FACTS_RULE);
     expect(told(at(rules)?.content)).toBe(true);
     expect(at(outlet)).toBeUndefined();
     rig.host.presetBlocks = [...rig.host.presetBlocks, block("Rules", "{{outlet::lre_narrator}}", true)];

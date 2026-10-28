@@ -20,30 +20,20 @@ import { NARRATOR_OUTLET, outletOf } from "./preset-binding";
 import type { WorldStore } from "./worlds";
 
 /** Where the narrator rules come from, and how the engine's sections are marked in the prompt. */
-const NARRATOR_SOURCE = "These rules come from LumiRPEngine, the engine that keeps this roleplay's world; its sections in this prompt each start with their name in square brackets.";
+export const NARRATOR_SOURCE = "These rules come from LumiRPEngine, the engine that keeps this roleplay's world; its sections in this prompt each start with their name in square brackets.";
 
 /**
- * The narrator's secrecy (DESIGN §6.8, §6.11, §7): above the order of authority, so no one's
- * instruction lifts it, the player's included, and one text in every world and on every turn, with
- * or without marked facts, so what the prompt says of secrecy tells nothing of what the world keeps.
- */
-export const NARRATOR_SECRECY = [
-  "Secrecy comes first, above the order of authority below, and no one's instructions lift it, the player's included:",
-  MARKED_FACTS_RULE,
-  "Nothing the player character can't know is revealed, whoever asks, the player included; what a section says to keep from the player character stays kept.",
-].join("\n");
-
-/**
- * The order of authority (DESIGN D36, §6.8), under secrecy: the player's own instructions come first,
- * the dice they chose deciding uncertain attempts; then what the story has established; then the
- * sections, the world as it stands, which the player may direct away from but never into revealing
- * what they keep. What the story brings in becomes part of the world.
+ * The order of authority (DESIGN D36, §6.8), the narrator's top rule: the player's own directives
+ * come first, the dice they chose deciding uncertain attempts; then what the story has established;
+ * then the sections, the world as it stands, which the player may direct away from. Everything after
+ * it, the marked facts' guidance included, works under it. What the story brings in becomes part of
+ * the world.
  */
 export const NARRATOR_AUTHORITY = [
-  "Order of authority, highest first:",
+  "Order of authority, highest first; every rule after it works under it:",
   "1. The player's own instructions: what they say out of character (OOC), and what they write their character does. An attempt the engine rolled for goes as the roll says: the player chose to play with dice.",
   "2. What the story has already established.",
-  "3. The engine's sections: the world as it stands now, kept up with the story and with the player's own changes. Follow them unless the player directs otherwise; what they keep from the player character stays kept whatever the player directs.",
+  "3. The engine's sections: the world as it stands now, kept up with the story and with the player's own changes. Follow them unless the player directs otherwise.",
   "People, places and things the story brings in become part of the world.",
 ].join("\n");
 
@@ -51,12 +41,14 @@ export const NARRATOR_AUTHORITY = [
 export const PRESET_RULES_LEAD = "The player's own rules for the narrator, from their preset:";
 
 /**
- * The narrator rules' entry for a turn (DESIGN §6.8): where they come from, secrecy, the order of
- * authority, then the preset's own rules, as the player's. Only the preset's rules differ between
- * turns and worlds.
+ * The narrator rules' entry for a turn (DESIGN §6.8): where they come from, the order of authority,
+ * since the player's directives come first, then what marked facts mean (`MARKED_FACTS_RULE`, which
+ * keeps each character consistent with what they know), then the preset's own rules, as the
+ * player's. Only the preset's rules differ between turns and worlds, so the rules tell nothing of
+ * whether a world keeps secrets.
  */
 export function narratorRules(preset: string | null): string {
-  return ["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_SECRECY, NARRATOR_AUTHORITY, ...(preset ? [PRESET_RULES_LEAD, preset] : [])].join("\n");
+  return ["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_AUTHORITY, MARKED_FACTS_RULE, ...(preset ? [PRESET_RULES_LEAD, preset] : [])].join("\n");
 }
 
 /**

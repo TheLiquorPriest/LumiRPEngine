@@ -304,7 +304,7 @@ describe("what a party's roles allow", () => {
     // As the backend says: the shop's money, by an account or as itself, may not pay the party or what's theirs.
     const theirs = ["pov", "wallet", "chk", "sav"];
     const v = view({ accounts: [cash, mine, savings], businesses: [{ ...shop("owner"), accounts: ["till", "reserve", "lift"], managed: [till, reserve, loan] }], paysFor: [{ from: "till", to: theirs }, { from: "reserve", to: theirs }, { from: "shop", to: theirs }] });
-    const palette: PaletteView = { entries: [{ action: "pay", label: "Pay", group: "pay", options: [{ label: "Mara", params: { to: "mara" } }] }], timelapse: null };
+    const palette: PaletteView = { entries: [{ action: "pay", label: "Pay", group: "pay", options: [{ label: "Mara", params: { to: "mara" }, person: true }] }], timelapse: null };
     const ids = (payers: string[]): string[] => flowTargets(v, palette, payers).map((t) => t.id);
     // From the business's checking: the business's other accounts and other people, none of the party's own.
     expect(ids(["till"])).toEqual(["reserve", "lift", "mara"]);

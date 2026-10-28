@@ -255,7 +255,9 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
         if (next.length > 0) options.push({ label: nameOf(target), params, next: { param: "piece", label: paramLabel(action, "piece", world, registry), options: next } });
         continue;
       }
-      options.push(pick(params, target ? nameOf(target) : action.label));
+      // A person is marked as one, for a picker that takes only people (the Money panel's tenant, buyer and hire).
+      const person = target !== null && kindIs(registry, world, state.entities[target]?.kind ?? "", "person");
+      options.push({ ...pick(params, target ? nameOf(target) : action.label), ...(person ? { person: true as const } : {}) });
     }
     if (options.length === 0) continue;
     // Who comes along (Go's With): the scene's people the POV can see, ticked in the sheet.

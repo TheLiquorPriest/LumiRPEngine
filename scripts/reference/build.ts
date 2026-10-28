@@ -186,8 +186,8 @@ function formulaRows(formulas: readonly { name: string; fn: Formula }[]): string
 
 function actionRows(actions: readonly ActionDef[]): string[] {
   const rows = sortedBy(actions, (a) => a.id).map((a) => {
-    // A ref param a player's claim may fill says where the claimed thing appears (DESIGN §9.4).
-    const params = Object.entries(a.params).map(([name, p]) => `${name}${p.optional ? "?" : ""}: ${p.type === "ref" && p.ref ? `ref → ${p.ref}` : p.type}${p.claim ? `, claim: ${p.claim}` : ""}`);
+    // A ref param a player's claim may fill says where the claimed thing appears, and one that pays an outside account for a receiver the story hasn't established names it (DESIGN §9.4).
+    const params = Object.entries(a.params).map(([name, p]) => `${name}${p.optional ? "?" : ""}: ${p.type === "ref" && p.ref ? `ref → ${p.ref}` : p.type}${p.claim ? `, claim: ${p.claim}` : ""}${p.outside ? `, outside: ${p.outside}` : ""}`);
     const check = a.check === undefined ? "" : typeof a.check === "string" ? code(a.check) : code(a.check.dice);
     return [code(a.id), a.label, a.description ?? "", params.length === 0 ? "" : params.map(code).join(", "), check, codes(Object.keys(a.outcomes).sort(byText)), code(a.duration), (a.lexicon ?? []).join(", ")];
   });

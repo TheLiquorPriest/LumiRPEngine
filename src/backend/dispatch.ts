@@ -1218,10 +1218,13 @@ export class Dispatcher {
           const action = read?.action ? ((hasOwn(world.actions, read.action) ? world.actions[read.action] : undefined) ?? this.rt.registry.actions.get(read.action)) : undefined;
           if (!read || !action) throw new RequestError("not_found", "the read has lapsed");
           const sent = payload.params as JsonObject;
-          const params = Object.fromEntries(Object.entries(sent).filter(([key]) => hasOwn(action.params, key)));
+          // A receiver the read paid in another's place is no pick the palette offers, so an Edit that leaves it unpicked keeps it (DESIGN §9.4 typed money).
+          const params = this.rt.keptPayees(action, Object.fromEntries(Object.entries(sent).filter(([key]) => hasOwn(action.params, key))), read.params);
           const refused = this.rt.editRefusal(world, state, action, params, read.params, read.claim?.param);
           if (refused) throw new RequestError("validation", refused);
-          return { applied: this.rt.passIntent(chatId, text, params), pending: false };
+          // The receiver and the way of paying play as the read plays them (DESIGN §9.4 typed money).
+          const paid = this.rt.editedPaid(world, state, action, params, read, text);
+          return { applied: this.rt.passIntent(chatId, text, paid.params, paid.said), pending: false };
         }
         const edited = choice === "edit" ? (typeof payload?.text === "string" ? payload.text : null) : undefined;
         if (edited === null) throw new RequestError("bad_request", "Edit needs the edited text");

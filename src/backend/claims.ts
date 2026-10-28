@@ -1,10 +1,11 @@
 // Player claims at the read (DESIGN §9.4): what becomes of a typed action's ref param that names a
 // thing the world doesn't have, as the POV sees it. Only a param that takes claims (`ParamDef.claim`)
 // and holds words the player typed can be one. A thing the POV may know by those words keeps its
-// own rules, and cash the player character carries is handed over as it is. The chat's policy
-// decides the rest: made real, asked about first (under Make it real too, when its catalog price is
-// over the world's claim cap under a capped policy, or it is money they lack, a key, a weapon or a
-// document), or dropped to play as plain roleplay with its receipt.
+// own rules, and cash the player character carries is handed over as it is: to whom the action
+// gives it, or, when the story hasn't established them, to the world's catch-all (DESIGN §9.4 typed
+// money). The chat's policy decides the rest: made real, asked about first (under Make it real too,
+// when its catalog price is over the world's claim cap under a capped policy, or it is money they
+// lack, a key, a weapon or a document), or dropped to play as plain roleplay with its receipt.
 
 import type { ClaimPlace, ClaimsPolicy } from "../shared/claims";
 import type { ActionId, EntityId } from "../shared/ids";
@@ -25,10 +26,13 @@ import { claimCap, FOOD_AND_DRINK, priceOf } from "../packs/economy/core/model";
 import { cashGift } from "../packs/gear/core/index";
 import { isInside } from "../packs/gear/core/model";
 import type { ThingSort } from "./steps";
-import { unfitRef, type UnfitRef } from "./turn-steps";
+import { namesOf, paidOutside, takes, unfitRef, type UnfitRef } from "./turn-steps";
 
-/** An action that plays in the read's place, held to the needs of the one the player's words named (`needs`, DESIGN §9.4). */
-type InPlace = { action: ActionId; params: JsonObject; needs: Needs };
+/**
+ * An action that plays in the read's place, held to the needs of the one the player's words named
+ * (`needs`, DESIGN §9.4), with the player's own words for a receiver it pays outside (`said`).
+ */
+type InPlace = { action: ActionId; params: JsonObject; needs: Needs; said?: Record<string, string> };
 
 export type ClaimVerdict =
   /** A thing the POV may know goes by those words: the action takes it, and keeps its own rules. */
@@ -135,17 +139,20 @@ export function claimFor(input: ClaimInput): ClaimVerdict | null {
   const named = mineElsewhere(world, state, unfit.value, mayKnow) ? unfit.value : null;
   // A hidden thing's id counts as nothing (it is absent as the POV sees it); a known one keeps its decline.
   if (!named && ((own(state.entities, unfit.value) && mayKnow(unfit.value)) || own(world.places, unfit.value))) return null;
-  // A claim makes a thing, never a person or a place: the action's other params must fit.
-  if (unfitRef(registry, action, input.params, world, state, mayKnow, unfit.param)) return null;
   const name = named ? (own(state.entities, named)?.name ?? null) : typedName(unfit.value, input.said);
+  // Money (a cash phrase, or the sort `money`) is the economy's, whatever the preset.
+  const cash = name === null ? null : cashGift(name, world.currency);
+  const money = name !== null && (cash !== null || input.thing === "money");
+  // A claim makes a thing, never a person or a place: the action's other params must fit. Money is
+  // handed over as the economy's Pay, so its recipient is judged as the Pay's receiver is (`asPaid`):
+  // whomever the Pay pays fits (a party, a thing's owner, the world's catch-all, `moneyClaim`).
+  if (unfitRef(registry, money ? asPaid(registry, world, action, unfit.param) : action, input.params, world, state, mayKnow, unfit.param)) return null;
   if (name === null) return null;
   const known = named ? null : knownBy(registry, world, state, name, mayKnow);
   if (known === "place") return { kind: "hold" };
   if (known !== null) return { kind: "known", params: { ...input.params, [unfit.param]: known } };
   const verb = (action.lexicon?.[0] ?? action.label).toLowerCase();
-  // Money (a cash phrase, or the sort `money`) is the economy's, whatever the preset.
-  const cash = cashGift(name, world.currency);
-  if (cash !== null || input.thing === "money") return moneyClaim(input, at, kind, cash?.amount ?? null, verb);
+  if (money) return moneyClaim(input, at, kind, cash?.amount ?? null, verb);
   const ctx = registry.context(world, state);
   if (input.policy.mode === "hold" || !optionalService(ctx, "gear.claim") || ctx.levelOf(world.pov, "gear") === 0) return { kind: "hold" };
   const title = `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
@@ -180,27 +187,37 @@ export function claimFor(input: ClaimInput): ClaimVerdict | null {
 }
 
 /**
- * Money the player says they have (DESIGN §9.4). It goes to the person the action gives it to as the
- * economy's Pay, in cash, and only as that action could: its needs on everything but the money still
- * hold the Pay (`needs`, Give's `at(to, here)`) as it plays. Cash the player character carries is no
- * claim at all, so a Pay it covers plays as read, in every mode. Only what they lack is asked about
- * first, in every mode but Hold me to the world, as a key is, since it buys anything: Add puts what
- * their carried cash lacks of the amount in it as the Pay plays (`economy.claim_cash`), and the Pay
- * hands the whole amount over. Money said without an amount or given to no one, or in a world that
- * keeps no money for the player character, has nothing to carry it, and plays as plain roleplay. The
- * recipient and the amount live only in the Pay's params, which the needs and the claim read as it
- * plays (`shared`, `amountParam`), so the intent gate's Edit of either is what they hold it to.
+ * Money the player says they have (DESIGN §9.4). It goes as the economy's Pay, in cash, to whom the
+ * Pay pays the recipient the action gives it to (`paidOutside`, DESIGN §9.4 typed money): a party the
+ * player character can see, a known thing's owner, else World, the world's catch-all. It goes only as
+ * that action could: its needs on everything but the money still hold the Pay (`needs`) as it plays,
+ * and on whom it went to only while the Pay pays the very one the read named and the action takes
+ * them (Give's `at(to, here)` for a person), so cash goes only to someone here. A receiver paid in
+ * another's place, or one the action doesn't take (a business, a thing's owner elsewhere, World), has
+ * none: there is no one to hand it to, and the money goes all the same. Cash the player character
+ * carries is no claim at all, so a Pay it covers plays as read, in every mode. Only what they lack is
+ * asked about first, in every mode but Hold me to the world, as a key is, since it buys anything: Add
+ * puts what their carried cash lacks of the amount in it as the Pay plays (`economy.claim_cash`), and
+ * the Pay hands the whole amount over. Money said without an amount or given to no one, or in a world
+ * that keeps no money for the player character, has nothing to carry it, and plays as plain roleplay.
+ * The recipient and the amount live only in the Pay's params, which the needs and the claim read as
+ * it plays (`shared`, `amountParam`), so the intent gate's Edit of either is what they hold it to.
  */
 function moneyClaim(input: ClaimInput, at: ClaimPlace, kind: string, amount: number | null, verb: string): ClaimVerdict {
   const { registry, world, state, action, unfit } = input;
   const ctx = registry.context(world, state);
   const pay = findAction(registry, world, "pay");
-  const to = Object.entries(action.params).find(([name, def]) => name !== unfit.param && def.type === "ref" && def.ref !== undefined && kindIs(registry, world, def.ref, "person"))?.[0];
+  const to = recipientOf(registry, world, action, unfit.param);
   const recipient = to === undefined ? undefined : input.params[to];
   const cents = amount === null ? 0 : Math.round(amount * 10 ** world.currency.decimals);
   if (!pay || to === undefined || typeof recipient !== "string" || !(cents > 0) || !optionalService(ctx, "economy.claim_cash") || ctx.levelOf(world.pov, "money") === 0) return { kind: "hold" };
-  const needs: Needs = { action: action.id, params: Object.fromEntries(Object.entries(input.params).filter(([name]) => name !== unfit.param && name !== to)), shared: { [to]: "to" } };
-  const play: InPlace = { action: pay.id, params: { to: recipient, amount: cents, method: "cash" }, needs };
+  // `said` ends with the player's message: the only words the card and the Outcome may name the receiver by.
+  const paid = paidOutside(registry, pay, { to: recipient, amount: cents, method: "cash" }, world, state, input.mayKnow, input.said.at(-1) ?? "");
+  const given = own(action.params, to);
+  const named = pay.params.to ? namesOf(registry, world, state, pay.params.to, recipient, input.mayKnow) : null;
+  const handed = named !== null && named === paid.params.to && given !== undefined && takes(registry, world, state, given, named);
+  const needs: Needs = { action: action.id, params: Object.fromEntries(Object.entries(input.params).filter(([name]) => name !== unfit.param && name !== to)), shared: handed ? { [to]: "to" } : {} };
+  const play: InPlace = { action: pay.id, params: paid.params, needs, ...(Object.keys(paid.said).length > 0 ? { said: paid.said } : {}) };
   const carried = Math.max(0, optionalQuery(ctx, "economy.carried_cash")?.(ctx, world.pov) ?? 0);
   if (carried >= cents) return { kind: "play", play };
   if (input.policy.mode === "hold") return { kind: "hold" };
@@ -213,6 +230,23 @@ function moneyClaim(input: ClaimInput, at: ClaimPlace, kind: string, amount: num
     detail: "Money you say you have and don't carry always asks first.",
     play,
   };
+}
+
+/** The param a money claim's recipient fills (`moneyClaim`): the action's first person ref but the claim's own. */
+function recipientOf(registry: Registry, world: WorldDoc, action: ActionDef, claim: string): string | undefined {
+  return Object.entries(action.params).find(([name, def]) => name !== claim && def.type === "ref" && def.ref !== undefined && kindIs(registry, world, def.ref, "person"))?.[0];
+}
+
+/**
+ * `action` with the param a money claim's recipient fills judged as the economy's Pay judges its
+ * receiver (DESIGN §9.4 typed money): any party the POV may know, a known thing's owner, or Pay's
+ * outside account for a receiver the story hasn't established, as the Pay that plays in the action's
+ * place pays them (`moneyClaim`).
+ */
+function asPaid(registry: Registry, world: WorldDoc, action: ActionDef, claim: string): ActionDef {
+  const to = recipientOf(registry, world, action, claim);
+  const paid = findAction(registry, world, "pay")?.params.to;
+  return to === undefined || paid === undefined || own(action.params, to) === undefined ? action : { ...action, params: { ...action.params, [to]: paid } };
 }
 
 /**

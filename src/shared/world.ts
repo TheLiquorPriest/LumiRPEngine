@@ -472,6 +472,19 @@ export interface ParamDef {
    * hands (`held`) or where the actor is (`here`), under the chat's claims policy.
    */
   claim?: ClaimPlace;
+  /**
+   * A ref param that names whom money goes to, and the outside account it pays when that is no one the
+   * story has established, as the POV sees it (DESIGN §9.4 typed money): a thing nothing lists ("the
+   * tip jar"), a name nothing has, or a guessed id of someone the POV can't know, which reads as one
+   * nothing has. The account's key (`world`, the economy's catch-all, shown as "World"), or its whole
+   * id. A party the param takes (its `ref` and `of`) and the POV can see is paid as themselves,
+   * wherever they are; a thing or a place the POV knows pays whoever it belongs to
+   * (`economy.payee_of`) when the param takes them and the POV can see them, else the account, and
+   * the player character's own thing pays no one. Paid in place of what it named, the intent gate's
+   * card and the Outcome name it in the player's own words. A read missing another param the action
+   * needs (a payment with no amount) pays no one, so it plays as roleplay as ever.
+   */
+  outside?: string;
 }
 
 /**

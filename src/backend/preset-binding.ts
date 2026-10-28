@@ -135,7 +135,7 @@ const STARTER: Record<GuidanceTarget, string> = {
   skip: "It finds the moments worth stopping at inside a time skip. Say how often this preset wants a skip interrupted.",
   consolidate: "It folds a character's older notes into their summary. Say what a summary should keep in this preset's story.",
   narrator:
-    "In world chats the engine gives this to the narrator before the character, or where an enabled block holds {{outlet::lre_narrator}}, after its own rules: secrecy first, which nothing here lifts, then the player's instructions, then what the story has established, then the engine's sections. Write how this preset's narrator uses the sections: what to show of them, what to stress, what to leave in the background.",
+    "In world chats the engine gives this to the narrator before the character, or where an enabled block holds {{outlet::lre_narrator}}, after its own rules: the player's instructions first, then what the story has established, then the engine's sections, and what marked facts mean under that order. Write how this preset's narrator uses the sections: what to show of them, what to stress, what to leave in the background.",
 };
 
 function starterText(target: GuidanceTarget): string {

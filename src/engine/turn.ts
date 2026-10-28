@@ -86,6 +86,8 @@ interface TurnStep {
   judgement: Judgement | null;
   claim: Claim | null;
   needs: Needs | null;
+  /** The player's own words for what its params paid in another's place named (`InterpretOutput.said`), which its picks in words name the receiver by. */
+  said: Record<string, string> | null;
 }
 
 /**
@@ -234,7 +236,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
       timelapse = outcome;
     }
   } else {
-    const steps: TurnStep[] = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null, needs: intent.needs ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null, needs: q.needs ?? null }))] : [];
+    const steps: TurnStep[] = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null, needs: intent.needs ?? null, said: intent.said ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null, needs: q.needs ?? null, said: q.said ?? null }))] : [];
     const heard = input.userTexts.join("\n");
     // With no action the loop runs once all the same: a fight under way takes its turns, and the turn its tick.
     for (let i = 0; i < Math.max(1, steps.length); i++) {
@@ -259,6 +261,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         const typed = i > 0 || intent?.picked !== true;
         // An action played in the place of the one the player's words named (money handed over, as
         // Pay) is held to that one's needs too; when they don't hold, nothing is made for it.
+        const def = findAction(reg, w.world, step.action);
         const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs, step.params) : null;
         // A thing the player said they had comes into being where the action expects it, just
         // before the action, which takes it; money goes into their cash, which the action pays over
@@ -268,8 +271,8 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         const params = claimed && step.claim && step.claim.cents === undefined ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
         // Its picks in words as the POV knows them now, before the action gives away or uses up what it
         // names; the turn's own message counts as said, since the narrator reads it anyway (DESIGN §7).
-        const def = findAction(reg, w.world, step.action);
-        before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard) : "";
+        // A receiver paid in another's place reads as the player's own words for it (`said`, DESIGN §9.4 typed money).
+        before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard, step.said ?? {}) : "";
         const acting = w.mark();
         // An inferred check plays as Try something, carrying the world's own check (DESIGN §11).
         resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement, ...(step.needs ? { needs: step.needs } : {}) });

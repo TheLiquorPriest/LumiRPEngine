@@ -9,12 +9,13 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import { heldBy } from "../shared/finance";
-import { isHardLock, requirementExpr, spanRecords, type ActionDef, type CheckDef, type EffectSpec, type Expr, type WorldDoc } from "../shared/world";
+import { isHardLock, requirementExpr, spanRecords, type ActionDef, type CheckDef, type EffectSpec, type Expr, type ParamDef, type WorldDoc } from "../shared/world";
 import { tableRowKey } from "../shared/tables";
 import { plainRolling } from "../shared/adjudication";
 import { approachShift, closeCall, fightRound, judgedOutcome, oddsSignature, outcomeChoices, passOutcome, policyFor, ratingOf, tryKey, verdictOf, type Adjudged, type Judgement, type Verdict } from "./adjudication";
 import { checkCounts, checkOdds, checkOf, oddsOf, readyCheck, rollCheck, rollVars, type CheckRoll } from "./checks";
 import { ENGINE_EVENTS } from "./engine-pack";
+import { EXTERNAL_ACCOUNT_PREFIX } from "./events";
 import { applyEffects } from "./effects";
 import { identifiers, type EnvVars, type ExprEnv, type Value } from "./expr";
 import { materializeAll } from "./materialize";
@@ -98,6 +99,17 @@ export function findAction(reg: Registry, world: WorldDoc, id: ActionId): Action
   return own(world.actions, id) ?? reg.actions.get(id);
 }
 
+/**
+ * The outside account a ref param pays when it names nothing that fits (`ParamDef.outside`, DESIGN
+ * §9.4 typed money): the account its key names, or the id it gives; null for a param that pays none.
+ * The typed read puts it in the param's place (`paidOutside`), and the action binds it as given.
+ */
+export function outsideOf(def: ParamDef | undefined): string | null {
+  const key = def?.type === "ref" ? (def.outside ?? "") : "";
+  if (key === "") return null;
+  return key.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? key : `${EXTERNAL_ACCOUNT_PREFIX}${key}`;
+}
+
 interface Prepared {
   action: ActionDef;
   actor: EntityId;
@@ -122,6 +134,12 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
     }
     if (def.type === "ref") {
       const id = String(raw);
+      // The outside account a param pays for a receiver the story hasn't established, as the read put it (`outsideOf`).
+      if (id === outsideOf(def)) {
+        bindings[name] = id;
+        params[name] = id;
+        continue;
+      }
       const target = own(state.entities, id);
       if (!target) {
         if (own(world.places, id)) {

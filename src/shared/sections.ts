@@ -14,8 +14,8 @@ export const LINES_MARKER = "{{lines}}";
  * Sections a world gets when it defines none (DESIGN §4.2 slot list); lower rank is kept first. Each
  * opens with what it holds and how the narrator uses it: the lines are the specific record to write
  * from, used as given, so the narrator neither infers what they mean nor summarizes them. None of
- * them outranks the player or the story, and none of them lifts secrecy: the narrator rules say what
- * comes first (`narratorRules`).
+ * them outranks the player or the story: the narrator rules give the order of authority first
+ * (`narratorRules`).
  */
 export const DEFAULT_SECTIONS: Record<SlotId, SectionTemplate> = {
   outcome: { id: "outcome", label: "Outcome", rank: 0, template: "What the player character's actions did this turn, in the order they played, as the engine settled them: the authoritative record of this turn's results. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences (\"you\" is the player character). Narrate each as having happened this turn, with the exact results, rolls, amounts and changes its line gives; never soften, round or swap them for vaguer ones.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },

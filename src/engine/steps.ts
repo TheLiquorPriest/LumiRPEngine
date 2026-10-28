@@ -132,6 +132,8 @@ export interface QueuedAction {
   claim?: Claim;
   /** The action the player's words named, when this one plays in its place. */
   needs?: Needs;
+  /** The player's own words for what its params paid in another's place named (`InterpretOutput.said`). */
+  said?: Record<string, string>;
 }
 
 export interface InterpretOutput {
@@ -156,6 +158,13 @@ export interface InterpretOutput {
   claim?: Claim;
   /** The action the player's words named, when the first action plays in its place. */
   needs?: Needs;
+  /**
+   * The player's own words for what each of the first action's params paid in another's place named
+   * (`ParamDef.outside`, DESIGN §9.4 typed money), by param ("the tip jar" for a Pay's `to`): the
+   * intent gate's card and the Outcome name the receiver by them (`actionWords`), so each says what
+   * the payment was for. A param whose words the message doesn't say has none.
+   */
+  said?: Record<string, string>;
   /**
    * The first action was picked in the engine's own controls (the Actions sheet, a panel, the map, a
    * chip), not typed: its requirements hold it as they always have, while a typed action whose plain

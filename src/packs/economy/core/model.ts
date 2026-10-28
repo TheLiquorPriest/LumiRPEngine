@@ -54,6 +54,14 @@ export function external(id: string): string {
 }
 
 /**
+ * The world's catch-all outside account (DESIGN §9.4 typed money): typed money paid to a receiver the
+ * story hasn't established (a thing, a name nothing has, someone the player character can't know)
+ * goes to it, as the economy's Pay declares (`ParamDef.outside`), so the money leaves the payer and
+ * the books still balance. Shown as "World".
+ */
+export const WORLD_ACCOUNT = external("world");
+
+/**
  * The outside account an outside payee's name stands for, the same whoever pays it: the name's key
  * (`payeeKey`: lower case, `:` kept between its parts, any other run of characters as `_`), an
  * outside account id read as its name. So "Harbor Gym" is `economy.external:harbor_gym`, and
@@ -68,6 +76,7 @@ export function outsideAccount(name: string): string {
 /** The foundation's and the modules' own outside payees by key, as a person reads them. */
 const OUTSIDE_NAMES: Readonly<Record<string, string>> = {
   market: "Shops",
+  world: "World",
   insurer: "Insurer",
   "tax:federal": "Federal tax",
   "tax:state": "State tax",

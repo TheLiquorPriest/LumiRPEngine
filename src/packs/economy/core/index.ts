@@ -21,7 +21,7 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import { FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, isOwnerRole, ownersIn, heldBy, type FinanceFeature, type FinanceView, type MoneySummary, type PartyKind } from "../../../shared/finance";
+import { FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, isOwnerRole, ownersIn, heldBy, PARTY_KINDS, type FinanceFeature, type FinanceView, type MoneySummary, type PartyKind } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { minorUnitPlural } from "../../../shared/money";
 import { calendarOf } from "../../../engine/calendar";
@@ -41,9 +41,11 @@ import { currentScore } from "./credit";
 import { allFlows, businessDay, livingCost, occurrences, splitAmount } from "./flows";
 import { EVENTS, isOpened, reject } from "./journal";
 import { financeKinds } from "./kinds";
+import { businessAt } from "./employment";
 import { type CatalogName, catalogName, itemName, stem } from "./items";
 import {
   CORRECTION_ACCOUNT,
+  WORLD_ACCOUNT,
   accountsOf,
   availableOf,
   balance,
@@ -249,6 +251,8 @@ declare module "../../../engine/registry" {
     "economy.carried_cash": (ctx: ReadContext, who: EntityId) => number | null;
     /** Who pays for a narrated purchase (DESIGN §9.5): its payer, the holder of an account or card it names as one, or the owner of a thing it names; the player character when it names no one. */
     "economy.purchaser": (ctx: ReadContext, purchase: JsonObject) => EntityId;
+    /** Whom money given to a thing or a place goes to (DESIGN §9.4 typed money): a thing's owner (its `owner`, else the first of its `owners`), a place's business (`businessAt`); null for neither. */
+    "economy.payee_of": (ctx: ReadContext, id: string) => EntityId | null;
   }
 }
 
@@ -502,6 +506,11 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     return !priced && own(ctx.state.entities, payer) !== undefined && ctx.levelOf(payer, "money") >= 1;
   });
   r.query("economy.purchaser", (ctx, p) => purchaser(p, ctx).payer);
+  r.query("economy.payee_of", (ctx, id) => {
+    const thing = own(ctx.state.entities, id);
+    if (thing) return strOf(thing.fields.owner) || (ownersIn(thing.fields)[0]?.party ?? null);
+    return own(ctx.world.places, id) ? businessAt(ctx, id) : null;
+  });
 
   // Ledger 1.10: a posting folds only if the accounts it draws on can pay it, or the story made it on an account that can run a debt (`overdraw`).
   r.guard({ type: "post", validate: (e, ctx) => (e.type === "post" ? postGuard(ctx, e.lines, e.overdraw === true) : null) });
@@ -790,8 +799,9 @@ function registerActions(r: CoreRegistry): void {
   // The phone's actions are the player's own bookkeeping, done alone: a panel tap records them at once (`mechanical`).
   const phone = { duration: "2", observable: "checks their phone", mechanical: true } as const;
   r.action({ id: "buy", label: "Buy", description: "Buy something: food, drinks, goods or a service, here or delivered.", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
-  // Paid with a way the player names ("in cash"), else their pay order; money they said they had is handed over in cash (DESIGN §9.4).
-  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment", method: "=params.method" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
+  // Paid with a way the player names ("in cash"), else the way the purchase implies (the read's, else cash for a receiver in front of them that their cash covers), else their pay order; money they said they had is handed over in cash (DESIGN §9.4).
+  // Any party the player character can see is paid as themselves: a person, a business, a household, a trust (`PARTY_KINDS`). A thing or a place they know pays whoever it belongs to (`economy.payee_of`: a shop's tip jar pays the shop), else World, the world's catch-all, as does a receiver the story hasn't established (`outside`, DESIGN §9.4 typed money).
+  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", of: { kind: [...PARTY_KINDS] }, outside: WORLD_ACCOUNT }, amount: { type: "money" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings); when the input doesn't say, as the purchase implies: cash into a jar, to a busker or at a counter, card online or by phone" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment", method: "=params.method" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
   r.action({ id: "move_money", label: "Transfer between accounts", description: "Move money between your own accounts: checking, savings, cash.", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
   r.action({ id: "pay_card", label: "Pay card or loan", description: "Pay off some or all of a card or loan balance.", pack: "economy", params: { card: { type: "ref", ref: "account" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, card)", "is_credit(card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", from: "=params.from", cents: "=amount > 0 ? amount : 0 - balance(card)", who: "self" } }] }, lexicon: ["pay off the card", "pay the card", "pay my credit card", "make a loan payment"], ...phone });
   r.action({ id: "withdraw_cash", label: "Withdraw cash", description: "Take cash out of a bank account.", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });

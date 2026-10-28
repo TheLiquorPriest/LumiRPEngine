@@ -362,10 +362,14 @@ export function fallbackSources(view: FinanceView, from: string, to: string): Ac
   return viewAccounts(view).filter((a) => a.id !== from && backs.includes(a.id) && pays(a) && !paysForThem(view, [a.id], to));
 }
 
-/** The people the player may name (a payee, a tenant, a hire): the palette's Pay targets, which list only people the POV knows. */
+/**
+ * The people the player may name (a payee, a tenant, a buyer, a hire): the palette's Pay targets the
+ * POV knows that are people (`person`). Pay takes a business, a household or a trust too (DESIGN §9.4
+ * typed money), which none of these pickers' actions take, so they're left out.
+ */
 export function knownPeople(palette: PaletteView | null): { id: string; label: string }[] {
   const pay = palette?.entries.find((e) => e.action === "pay");
-  return (pay?.options ?? []).flatMap((o) => (typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []));
+  return (pay?.options ?? []).flatMap((o) => (o.person === true && typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []));
 }
 
 /**

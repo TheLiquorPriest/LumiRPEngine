@@ -339,7 +339,7 @@ export class TurnBridge implements TurnModel {
     const queue = rest.map(queued);
     const confidence = read.lead ? (read.probabilities[read.lead] ?? 1) : 1;
     const probabilities = !first || first.action === read.lead ? read.probabilities : { [first.action]: confidence, none: 1 - confidence };
-    const intent: InterpretOutput | null = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...(first?.text ? { text: first.text } : {}), ...(first?.claim ? { claim: first.claim } : {}), ...(first?.needs ? { needs: first.needs } : {}), ...(lead?.picked ? { picked: true } : {}), ...(read.then ? { then: read.then } : {}), ...(queue.length > 0 ? { queue } : {}) };
+    const intent: InterpretOutput | null = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...(first?.text ? { text: first.text } : {}), ...(first?.claim ? { claim: first.claim } : {}), ...(first?.needs ? { needs: first.needs } : {}), ...(first?.said ? { said: first.said } : {}), ...(lead?.picked ? { picked: true } : {}), ...(read.then ? { then: read.then } : {}), ...(queue.length > 0 ? { queue } : {}) };
     if (read.dropped.length > 0) this.setUnfit(userText, read.dropped, intent);
     else this.setIntent(userText, intent, true);
   }
@@ -361,7 +361,7 @@ export class TurnBridge implements TurnModel {
   answerAsk(userText: string, index: number, keep: boolean): boolean {
     const read = this.held.get(userText);
     if (!read?.steps[index]?.ask) return false;
-    const steps = keep ? read.steps.map((s, i): ReadStep => (i === index ? { action: s.action, params: s.params, text: s.text, ...(s.claim ? { claim: s.claim } : {}), ...(s.needs ? { needs: s.needs } : {}), ...(s.picked ? { picked: true } : {}) } : s)) : read.steps.filter((_, i) => i !== index);
+    const steps = keep ? read.steps.map((s, i): ReadStep => (i === index ? { action: s.action, params: s.params, text: s.text, ...(s.claim ? { claim: s.claim } : {}), ...(s.needs ? { needs: s.needs } : {}), ...(s.said ? { said: s.said } : {}), ...(s.picked ? { picked: true } : {}) } : s)) : read.steps.filter((_, i) => i !== index);
     this.setRead(userText, { ...read, steps });
     return true;
   }
@@ -527,15 +527,16 @@ export class TurnBridge implements TurnModel {
   /**
    * The player let this text's read play from the intent gate (Play, or Edit with its params). A real
    * pick the edit made for the claim's param wins over the claim (DESIGN §9.4): the claimed thing is
-   * made only while that param stays as read.
+   * made only while that param stays as read. An Edit's `said` are the player's words for the params
+   * it pays outside (DESIGN §9.4 typed money), as `Runtime.editedPaid` gives them.
    */
-  passIntent(userText: string, params?: JsonObject): boolean {
+  passIntent(userText: string, params?: JsonObject, said: Record<string, string> = {}): boolean {
     const intent = this.intents.get(userText);
     if (!intent) return false;
     if (params) {
-      const { claim, ...rest } = intent;
+      const { claim, said: _read, ...rest } = intent;
       const kept = claim !== undefined && JSON.stringify(params[claim.param] ?? null) === JSON.stringify(intent.params[claim.param] ?? null);
-      this.intents.set(userText, { ...rest, params, ...(claim && kept ? { claim } : {}) });
+      this.intents.set(userText, { ...rest, params, ...(claim && kept ? { claim } : {}), ...(Object.keys(said).length > 0 ? { said } : {}) });
     }
     this.intentsPassed.add(userText);
     if (this.intentsPassed.size > 64) this.intentsPassed.delete(this.intentsPassed.values().next().value ?? "");

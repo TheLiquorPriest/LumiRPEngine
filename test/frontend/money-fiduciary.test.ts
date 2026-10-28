@@ -20,7 +20,7 @@ function hub(w: Working): FinanceView {
 }
 
 /** Riverton's people, as the palette's Pay offers them. */
-const PALETTE: PaletteView = { entries: [{ action: "pay", label: "Pay", group: "pay", options: ["maya", "rosa", "jordan"].map((id) => ({ label: id, params: { to: id } })) }], timelapse: null };
+const PALETTE: PaletteView = { entries: [{ action: "pay", label: "Pay", group: "pay", options: ["maya", "rosa", "jordan"].map((id) => ({ label: id, params: { to: id }, person: true as const })) }], timelapse: null };
 
 /** Whether the backend refuses the effect. */
 function refuses(w: Working, type: string, args: JsonObject): boolean {
