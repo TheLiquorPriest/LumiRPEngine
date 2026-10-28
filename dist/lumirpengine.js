@@ -917,7 +917,7 @@ var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activit
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "1c22fa49";
+var BUILD = "df7e39bf";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

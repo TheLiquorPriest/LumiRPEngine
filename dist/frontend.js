@@ -35515,6 +35515,10 @@ var TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdM
 // src/packs/economy/core/model.ts
 var CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
 var BANK_PREFIX = `${EXTERNAL_ACCOUNT_PREFIX}bank:`;
+function external(id) {
+  return `${EXTERNAL_ACCOUNT_PREFIX}${id}`;
+}
+var WORLD_ACCOUNT = external("world");
 var WEALTH_BANDS = [
   { label: "broke", min: -Infinity, max: 1e4, typical: 5000 },
   { label: "poor", min: 1e4, max: 200000, typical: 45000 },
@@ -38732,7 +38736,7 @@ function fallbackSources(view, from, to) {
 }
 function knownPeople(palette) {
   const pay = palette?.entries.find((e3) => e3.action === "pay");
-  return (pay?.options ?? []).flatMap((o4) => typeof o4.params.to === "string" ? [{ id: o4.params.to, label: o4.label }] : []);
+  return (pay?.options ?? []).flatMap((o4) => o4.person === true && typeof o4.params.to === "string" ? [{ id: o4.params.to, label: o4.label }] : []);
 }
 function hireable(business, people) {
   return people.filter((p3) => !business.selfDealing.includes(p3.value) && !business.employees.some((j3) => j3.workerId === p3.value && j3.status !== "ended"));

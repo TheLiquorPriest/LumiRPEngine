@@ -3503,6 +3503,7 @@ function isCredit(c) {
   return CLASS_TRAITS[c].revolving || CLASS_TRAITS[c].installment;
 }
 var LEGACY_TYPE_CLASS = Object.freeze({ cash: "cash", checking: "checking", savings: "savings", card: "credit_card", loan: "loan", brokerage: "brokerage" });
+var PARTY_KINDS = ["person", "business", "trust", "household"];
 var OWNER_ROLES = ["owner", "joint", "custodian", "beneficiary", "trustee", "authorized_user"];
 var ROLE_RIGHTS = Object.freeze({
   owner: { spend: true, worth: true, sees: true, manage: true },
@@ -6735,7 +6736,7 @@ function markedText(line) {
     return line.text;
   return line.known === "scene" ? `${line.text} [unknown to you; known to ${line.who ?? "others here"}]` : `${line.text} [unknown to you; GM only]`;
 }
-var MARKED_FACTS_RULE = "Facts marked [unknown to you] are not known to the player character. Use them only to steer the story and the people in it; never reveal them, narrate them as known, or let the player character act on them.";
+var MARKED_FACTS_RULE = "What each person knows, under that order: a fact marked [unknown to you; known to \u2026] or [unknown to you; GM only] is one the player character doesn't know, and the mark says who does. Keep every character consistent with what they know: no one says, acts on or is narrated as knowing a fact they don't, until the story reveals it to them or the player's own instructions make it known. Unless the player's own instructions say otherwise, don't tell a marked fact in the narration or have the reply reveal it; it becomes known only through what the story has already established or what the player character does or finds. Marked facts are for steering the story and the people who do know them.";
 var feedEvent = {
   type: FEED_EVENT,
   validate: (e) => {
@@ -14773,12 +14774,14 @@ var BANK_PREFIX = `${EXTERNAL_ACCOUNT_PREFIX}bank:`;
 function external(id) {
   return `${EXTERNAL_ACCOUNT_PREFIX}${id}`;
 }
+var WORLD_ACCOUNT = external("world");
 function outsideAccount(name) {
   const bare = name.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? name.slice(EXTERNAL_ACCOUNT_PREFIX.length) : name;
   return external(payeeKey(bare) || "outside");
 }
 var OUTSIDE_NAMES = {
   market: "Shops",
+  world: "World",
   insurer: "Insurer",
   "tax:federal": "Federal tax",
   "tax:state": "State tax",
@@ -19715,18 +19718,20 @@ function transfer(hooks, ctx, from, to, cents, memo, method = "auto", story = fa
   const payer = transferParty(ctx, from, "from");
   if ("code" in payer)
     return payer;
-  const payee = transferParty(ctx, to, "to");
-  if ("code" in payee)
+  const outside = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? outsideAccount(to) : null;
+  const payee = outside === null ? transferParty(ctx, to, "to") : null;
+  if (payee !== null && "code" in payee)
     return payee;
   const paying = method === "cash" ? "auto" : method;
-  const cash = method === "cash" ? cashAccount(ctx, payee.holder) ?? undefined : undefined;
-  const sameSide = payer.holder === payee.holder || payee.account !== undefined && canSpend(ctx.state, payee.account, payer.holder) && rightsOf(ctx.state, payee.account, payer.holder)?.worth === true;
-  if (!sameSide) {
-    const deposit = payee.account ?? cash;
+  const cash = method === "cash" && payee !== null ? cashAccount(ctx, payee.holder) ?? undefined : undefined;
+  const sameSide = payee !== null && (payer.holder === payee.holder || payee.account !== undefined && canSpend(ctx.state, payee.account, payer.holder) && rightsOf(ctx.state, payee.account, payer.holder)?.worth === true);
+  if (payee === null || !sameSide) {
+    const deposit = payee?.account ?? cash;
     const source2 = payer.account ?? (method === "cash" ? cashAccount(ctx, payer.holder) ?? undefined : undefined);
     const storyNamed = story && ctx.levelOf(payer.holder, "money") >= 2;
     const fromCash = storyNamed || method === "cash" && source2 !== undefined && availableOf(ctx, source2) >= Math.round(cents) ? source2 : payer.account;
-    return charge(hooks, ctx, payer.holder, cents, memo, { payee: payee.holder, method: paying, kind: "transfer", ...fromCash ? { source: fromCash } : {}, ...deposit ? { deposit } : {}, overdraft: false, story });
+    const side = payee !== null ? { payee: payee.holder } : outside !== null ? { counterparty: outside } : {};
+    return charge(hooks, ctx, payer.holder, cents, memo, { ...side, method: paying, kind: "transfer", ...fromCash ? { source: fromCash } : {}, ...deposit ? { deposit } : {}, overdraft: false, story });
   }
   if (!payer.account && !payee.account)
     return reject6("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
@@ -23569,6 +23574,12 @@ function registerRest(r, hooks) {
     return !priced && own(ctx.state.entities, payer) !== undefined && ctx.levelOf(payer, "money") >= 1;
   });
   r.query("economy.purchaser", (ctx, p) => purchaser(p, ctx).payer);
+  r.query("economy.payee_of", (ctx, id) => {
+    const thing = own(ctx.state.entities, id);
+    if (thing)
+      return strOf(thing.fields.owner) || (ownersIn(thing.fields)[0]?.party ?? null);
+    return own(ctx.world.places, id) ? businessAt(ctx, id) : null;
+  });
   r.guard({ type: "post", validate: (e, ctx) => e.type === "post" ? postGuard(ctx, e.lines, e.overdraw === true) : null });
   r.formula("wealth", (ctx, who) => wealthOf(hooks, ctx, String(who ?? ctx.world.pov)));
   r.formula("can_afford", (ctx, who, cents) => ctx.query("can_afford")(ctx, String(who ?? ctx.world.pov), Number(cents ?? 0)));
@@ -23861,7 +23872,7 @@ function registerEffects(r, hooks) {
 function registerActions(r) {
   const phone = { duration: "2", observable: "checks their phone", mechanical: true };
   r.action({ id: "buy", label: "Buy", description: "Buy something: food, drinks, goods or a service, here or delivered.", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
-  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment", method: "=params.method" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
+  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", of: { kind: [...PARTY_KINDS] }, outside: WORLD_ACCOUNT }, amount: { type: "money" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings); when the input doesn't say, as the purchase implies: cash into a jar, to a busker or at a counter, card online or by phone" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment", method: "=params.method" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
   r.action({ id: "move_money", label: "Transfer between accounts", description: "Move money between your own accounts: checking, savings, cash.", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
   r.action({ id: "pay_card", label: "Pay card or loan", description: "Pay off some or all of a card or loan balance.", pack: "economy", params: { card: { type: "ref", ref: "account" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, card)", "is_credit(card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", from: "=params.from", cents: "=amount > 0 ? amount : 0 - balance(card)", who: "self" } }] }, lexicon: ["pay off the card", "pay the card", "pay my credit card", "make a loan payment"], ...phone });
   r.action({ id: "withdraw_cash", label: "Withdraw cash", description: "Take cash out of a bank account.", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
@@ -24276,6 +24287,12 @@ function frozenPredicates(reg, world, domain, level) {
 function findAction(reg, world, id) {
   return own(world.actions, id) ?? reg.actions.get(id);
 }
+function outsideOf(def) {
+  const key = def?.type === "ref" ? def.outside ?? "" : "";
+  if (key === "")
+    return null;
+  return key.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? key : `${EXTERNAL_ACCOUNT_PREFIX}${key}`;
+}
 function prepare(reg, world, state, req) {
   const action = typeof req.action === "string" ? findAction(reg, world, req.action) : req.action;
   if (!action)
@@ -24295,6 +24312,11 @@ function prepare(reg, world, state, req) {
     }
     if (def.type === "ref") {
       const id = String(raw);
+      if (id === outsideOf(def)) {
+        bindings[name] = id;
+        params[name] = id;
+        continue;
+      }
       const target = own(state.entities, id);
       if (!target) {
         if (own(world.places, id)) {
@@ -60005,9 +60027,22 @@ function pickReader(registry, world, state2, typed, heard) {
     const words4 = (def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null) ?? asTyped(value);
     return words4 === null ? null : { words: words4, label: false };
   };
-  return { nameOf: nameOf6, asTyped, text: text5 };
+  const payee = (def, value, words4) => {
+    if (words4 !== undefined)
+      return screened(words4);
+    if (typeof value !== "string" || value === "")
+      return null;
+    const entity = own(state2.entities, value);
+    if (entity)
+      return canSeeEntity(registry, world, state2, world.pov, value) ? entity.name : null;
+    if (value !== outsideOf(def))
+      return nameOf6(value) ?? asTyped(value);
+    const key = value.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? value.slice(EXTERNAL_ACCOUNT_PREFIX.length).replace(/[_:]+/g, " ").trim() : "";
+    return typed === "" || key === "" ? null : `${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+  };
+  return { nameOf: nameOf6, asTyped, text: text5, payee };
 }
-function actionWords(registry, world, state2, action, params, typed = "", heard = typed) {
+function actionWords(registry, world, state2, action, params, typed = "", heard = typed, said2 = {}) {
   const read = pickReader(registry, world, state2, typed, heard);
   const count = action.params[COUNT_PARAM]?.type === "number" && typeof params[COUNT_PARAM] === "number" ? params[COUNT_PARAM] : null;
   const counted = count === null ? undefined : Object.keys(action.params).find((name) => name !== COUNT_PARAM && (action.params[name]?.type === "ref" || action.params[name]?.type === "text"));
@@ -60019,7 +60054,7 @@ function actionWords(registry, world, state2, action, params, typed = "", heard 
       continue;
     let word = null;
     if (def.type === "ref")
-      word = read.nameOf(value) ?? (typeof value === "string" ? read.asTyped(value) : null);
+      word = def.outside !== undefined ? read.payee(def, value, said2[name]) : read.nameOf(value) ?? (typeof value === "string" ? read.asTyped(value) : null);
     else if (def.type === "list" && def.ref !== undefined) {
       const names = (Array.isArray(value) ? value : []).map(read.nameOf).filter((n) => n !== null);
       if (names.length > 0)
@@ -60283,7 +60318,7 @@ function planTurn(input) {
       timelapse = outcome;
     }
   } else {
-    const steps = intent2?.action ? [{ action: intent2.action, params: intent2.params, judgement: intent2.judgement ?? null, claim: intent2.claim ?? null, needs: intent2.needs ?? null }, ...(intent2.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null, needs: q.needs ?? null }))] : [];
+    const steps = intent2?.action ? [{ action: intent2.action, params: intent2.params, judgement: intent2.judgement ?? null, claim: intent2.claim ?? null, needs: intent2.needs ?? null, said: intent2.said ?? null }, ...(intent2.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null, needs: q.needs ?? null, said: q.said ?? null }))] : [];
     const heard = input.userTexts.join(`
 `);
     for (let i = 0;i < Math.max(1, steps.length); i++) {
@@ -60300,13 +60335,13 @@ function planTurn(input) {
       const before = { picks: "", from: placeOfEntity(w.state, w.world.pov), fields: { ...own(w.state.entities, w.world.pov)?.fields } };
       if (step) {
         const typed = i > 0 || intent2?.picked !== true;
+        const def = findAction(reg, w.world, step.action);
         const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs, step.params) : null;
         const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim"), step.params) : null;
         if (claimed && step.claim)
           made = { entity: claimed.entity, name: claimed.cents !== undefined ? formatMoney(claimed.cents, w.world.currency) : step.claim.name, events: claimed.events, ...claimed.cents !== undefined ? { cents: claimed.cents } : {} };
         const params = claimed && step.claim && step.claim.cents === undefined ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
-        const def = findAction(reg, w.world, step.action);
-        before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard) : "";
+        before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard, step.said ?? {}) : "";
         const acting = w.mark();
         resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement, ...step.needs ? { needs: step.needs } : {} });
         if (typed && missedPlainRequirement(resolution))
@@ -60778,6 +60813,8 @@ function lintStructure(world, reg) {
         else if (p.type !== "ref")
           warn(at, "claims", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so no claimed thing ever fills it.`);
       }
+      if (p.outside !== undefined && p.type !== "ref")
+        warn(`actions.${id}.params.${name}.outside`, "outside", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so it never pays the outside account "${p.outside}".`);
       if (p.of === undefined)
         continue;
       if (p.type !== "ref")
@@ -66256,7 +66293,7 @@ var STARTER = {
   memory: "It writes down, as each character, what they will remember of a reply. Say what this preset's characters hold on to: slights, kindnesses, money, promises.",
   skip: "It finds the moments worth stopping at inside a time skip. Say how often this preset wants a skip interrupted.",
   consolidate: "It folds a character's older notes into their summary. Say what a summary should keep in this preset's story.",
-  narrator: "In world chats the engine gives this to the narrator before the character, or where an enabled block holds {{outlet::lre_narrator}}, after its own rules: secrecy first, which nothing here lifts, then the player's instructions, then what the story has established, then the engine's sections. Write how this preset's narrator uses the sections: what to show of them, what to stress, what to leave in the background."
+  narrator: "In world chats the engine gives this to the narrator before the character, or where an enabled block holds {{outlet::lre_narrator}}, after its own rules: the player's instructions first, then what the story has established, then the engine's sections, and what marked facts mean under that order. Write how this preset's narrator uses the sections: what to show of them, what to stress, what to leave in the background."
 };
 function starterText(target) {
   const helper = target === "narrator" ? "the narrator" : `its ${target} helper`;
@@ -66316,23 +66353,17 @@ class PresetBinding {
 
 // src/backend/book.ts
 var NARRATOR_SOURCE = "These rules come from LumiRPEngine, the engine that keeps this roleplay's world; its sections in this prompt each start with their name in square brackets.";
-var NARRATOR_SECRECY = [
-  "Secrecy comes first, above the order of authority below, and no one's instructions lift it, the player's included:",
-  MARKED_FACTS_RULE,
-  "Nothing the player character can't know is revealed, whoever asks, the player included; what a section says to keep from the player character stays kept."
-].join(`
-`);
 var NARRATOR_AUTHORITY = [
-  "Order of authority, highest first:",
+  "Order of authority, highest first; every rule after it works under it:",
   "1. The player's own instructions: what they say out of character (OOC), and what they write their character does. An attempt the engine rolled for goes as the roll says: the player chose to play with dice.",
   "2. What the story has already established.",
-  "3. The engine's sections: the world as it stands now, kept up with the story and with the player's own changes. Follow them unless the player directs otherwise; what they keep from the player character stays kept whatever the player directs.",
+  "3. The engine's sections: the world as it stands now, kept up with the story and with the player's own changes. Follow them unless the player directs otherwise.",
   "People, places and things the story brings in become part of the world."
 ].join(`
 `);
 var PRESET_RULES_LEAD = "The player's own rules for the narrator, from their preset:";
 function narratorRules(preset) {
-  return ["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_SECRECY, NARRATOR_AUTHORITY, ...preset ? [PRESET_RULES_LEAD, preset] : []].join(`
+  return ["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_AUTHORITY, MARKED_FACTS_RULE, ...preset ? [PRESET_RULES_LEAD, preset] : []].join(`
 `);
 }
 function sectionsOf(world) {
@@ -70982,7 +71013,8 @@ function palette(world, state2, registry) {
           options.push({ label: nameOf7(target), params, next: { param: "piece", label: paramLabel(action, "piece", world, registry), options: next } });
         continue;
       }
-      options.push(pick(params, target ? nameOf7(target) : action.label));
+      const person2 = target !== null && kindIs(registry, world, state2.entities[target]?.kind ?? "", "person");
+      options.push({ ...pick(params, target ? nameOf7(target) : action.label), ...person2 ? { person: true } : {} });
     }
     if (options.length === 0)
       continue;
@@ -71675,9 +71707,11 @@ function openPuzzleTitles(ctx) {
   });
 }
 function kindWords(reg, world, def) {
-  if (def.ref === undefined)
+  const kinds = def.ref !== undefined ? [def.ref] : def.of?.kind ?? [];
+  if (kinds.length === 0)
     return "anyone or anything";
-  return (own(world.kinds, def.ref)?.label ?? reg.kinds.get(def.ref)?.label ?? def.ref).toLowerCase();
+  const words7 = kinds.map((k) => (own(world.kinds, k)?.label ?? reg.kinds.get(k)?.label ?? k).toLowerCase());
+  return words7.length === 1 ? words7[0] : `${words7.slice(0, -1).join(", ")} or ${words7.at(-1)}`;
 }
 function paramWords(ctx, action, name, def, mayKnow, places2, named) {
   const { registry: reg, world, state: state2 } = ctx;
@@ -71690,11 +71724,13 @@ function paramWords(ctx, action, name, def, mayKnow, places2, named) {
       return `${head} (${kindWords(reg, world, def)}: an id named above${label})`;
     const ids2 = paramCandidates(reg, world, state2, action, name).filter(mayKnow);
     const claimed = def.claim ? "one nothing lists, in the input's own words" : null;
+    const paid = def.outside !== undefined && claimed === null;
     if (ids2.length === 0)
-      return claimed ? `${head} (${kindWords(reg, world, def)}: ${claimed})` : null;
+      return paid ? `${head} (anyone or anything, in the input's own words)` : claimed ? `${head} (${kindWords(reg, world, def)}: ${claimed})` : null;
     for (const id of ids2)
       named.add(id);
-    return `${head} (${kindWords(reg, world, def)}: ${ids2.join(" | ")}${claimed ? `, or ${claimed}` : ""})`;
+    const open = claimed ?? (paid ? "anyone or anything else, in the input's own words" : null);
+    return `${head} (${kindWords(reg, world, def)}: ${ids2.join(" | ")}${open ? `, or ${open}` : ""})`;
   }
   if (def.type === "list" && def.ref !== undefined) {
     const ids2 = companionCandidates(reg, world, state2, action, name).filter(mayKnow);
@@ -72602,10 +72638,10 @@ async function interpret(steps, text5, context, actions, config3, userId, signal
     ...actions.some((a) => a.id === TIMELAPSE_ACTION) ? [
       `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. Its "text" is what the input says happens in that time, in the input's own words ("I sort the stock"), left out when it says nothing happens. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then". The one exception is in-character input that, before the out-of-character instruction, gets the player character out of bed or up from a rest with a catalog action ("I get out of bed and make coffee. (OOC: skip an hour.)"): read that action, and any actions after it, as usual, and the time as their "then". What the out-of-character instruction itself says happens ("OOC: skip to morning, I get up", "OOC: over the next two hours, I walk to the gym") still fills the time.`
     ] : [],
-    `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null. An incidental action that fits none, or names someone or somewhere nothing lists, is left out: it never hides the actions after it.`,
+    `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null. An incidental action that fits none, or names someone or somewhere nothing lists where its param takes only what is listed, is left out: it never hides the actions after it.`,
     `An action on a thing the player says they have that nothing lists ("I pour Theresa a coffee" with no coffee listed) is still read, in order with the rest: its param holds the thing in the input's own words ("coffee"), and "thing" says what sort of thing it is: "food", "drink", "weapon", "key", "document", "money" or "other".`,
     `When the input and its context still leave it unclear which action or which target is meant, give "action": null and a short "reason"; never guess.`,
-    `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
+    `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, or anyone or anything a param takes in the input's own words ("I drop a coin in the tip jar": its receiver is "the tip jar"), which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
     `Read every action in the input, in order, not only the first. Return the first as "action" with its "params" and its "text": that action written as the player would type it, with whatever and whoever it involves ("I take the envelope from the clerk"). If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
     `If the input lets time pass after its last action, in character ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM") or out of character after the input gets the player character out of bed or up from a rest, add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
     `If the input itself plainly states, as settled fact, a lasting change to someone's week (the player character's own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he's started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input's words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: any place the input names for it, as a place id, or in the input's own words when nothing lists it ("the community pool"); left out only when the input names none (for "move", the new home), "with"?: people's ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input's own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone's thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".`
@@ -72682,7 +72718,7 @@ ${rules.map((r) => `- ${r}`).join(`
   }).slice(0, SAID_ROUTINES_MAX);
   return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...lead !== "" ? { text: lead } : {}, ...thing ? { thing } : {}, ...then ? { then } : {}, ...queue.length > 0 ? { queue } : {}, ...next.length > 0 ? { next } : {}, ...reason2 !== "" ? { reason: reason2 } : {}, ...routine.length > 0 ? { routine } : {} };
 }
-var SAID_METHOD = /\b(?:with|on|using|use|used|by|from|in)\s+(?:(?:my|the|his|her|their|our|a)\s+)?(credit card|debit card|cash|savings)\b(?![ -](?:holder|register|machine|drawer|box|reader|terminal|slot|case|sleeve|wallet))/gi;
+var SAID_METHOD = /\b(?:with|on|using|use|used|by|from|in)\s+(?:(?:my|the|his|her|their|our|a)\s+)?(credit card|debit card|card|cash|savings)\b(?![ -](?:holder|register|machine|drawer|box|reader|terminal|slot|case|sleeve|wallet))/gi;
 var NEGATED = /(?:\bnot|\bno|\bnever|n't|\binstead of|\brather than|\bthan)(?:\s+(?:pay|paying|paid))?\s*$/i;
 function saidPayMethod(text5) {
   const said2 = [...text5.matchAll(SAID_METHOD)].filter((m) => !NEGATED.test(text5.slice(0, m.index))).at(-1)?.[1]?.toLowerCase();
@@ -73278,18 +73314,26 @@ function planFacts(world, before, after, plan2) {
     timelapse: !!plan2?.timelapse
   };
 }
-function unfitRef(registry, action, params, world, state2, mayKnow, skip2) {
+function unfitRef(registry, action, params, world, state2, mayKnow, skip2, outside = true) {
   for (const [name, def] of Object.entries(action.params)) {
     if (def.type !== "ref" || name === skip2)
       continue;
     const value = params[name];
-    if (value === undefined || value === null || value === "") {
+    if (unset(value)) {
       if (!def.optional)
         return { param: name, def, value };
       continue;
     }
     if (!safeKey(value))
       return { param: name, def, value };
+    if (def.outside !== undefined) {
+      if (outside && payeeOf(registry, action, params, def, value, world, state2, mayKnow) !== null)
+        continue;
+      if (takes2(registry, world, state2, def, value) && seesParty(registry, world, state2, value) && missingOf(action, params) === null)
+        continue;
+      const reason2 = unpaidWhy(registry, action, params, def, value, world, state2, mayKnow);
+      return { param: name, def, value, ...reason2 !== null ? { reason: reason2 } : {} };
+    }
     const entity = hasOwn(state2.entities, value) ? state2.entities[value] : undefined;
     if (entity) {
       if (!mayKnow(value) || def.ref && !kindIs(registry, world, entity.kind, def.ref))
@@ -73300,6 +73344,125 @@ function unfitRef(registry, action, params, world, state2, mayKnow, skip2) {
       return { param: name, def, value };
   }
   return null;
+}
+function unset(value) {
+  return value === undefined || value === null || value === "";
+}
+function takes2(registry, world, state2, def, id) {
+  const entity = hasOwn(state2.entities, id) ? state2.entities[id] : undefined;
+  return entity !== undefined && (def.ref === undefined || kindIs(registry, world, entity.kind, def.ref)) && (def.of === undefined || selectorMatches(registry, world, state2, def.of, id));
+}
+function seesParty(registry, world, state2, id) {
+  return id === world.pov || canSeeEntity(registry, world, state2, world.pov, id);
+}
+function missingOf(action, params) {
+  const name = Object.keys(action.params).find((n) => {
+    const p = action.params[n];
+    return p !== undefined && !p.optional && p.outside === undefined && unset(params[n]);
+  });
+  if (name === undefined)
+    return null;
+  const def = action.params[name];
+  return def?.type === "money" ? "an amount" : `a ${(def?.label ?? name.replace(/_/g, " ")).toLowerCase()}`;
+}
+function payeeOf(registry, action, params, def, value, world, state2, mayKnow) {
+  const account2 = outsideOf(def);
+  if (account2 === null || !safeKey(value))
+    return null;
+  if (value === account2)
+    return account2;
+  if (missingOf(action, params) !== null)
+    return null;
+  const named = namesOf(registry, world, state2, def, value, mayKnow);
+  if (named === null)
+    return account2;
+  if (hasOwn(state2.entities, named)) {
+    if (takes2(registry, world, state2, def, named))
+      return !seesParty(registry, world, state2, named) ? account2 : named === value ? null : named;
+    if (!mayKnow(named))
+      return account2;
+  } else if (!canSeePlace(registry, world, state2, world.pov, named))
+    return account2;
+  const owner = ownerOf2(registry, world, state2, named);
+  if (owner === world.pov)
+    return null;
+  return owner !== null && takes2(registry, world, state2, def, owner) && seesParty(registry, world, state2, owner) ? owner : account2;
+}
+function ownerOf2(registry, world, state2, id) {
+  const ctx = registry.context(world, state2);
+  return optionalQuery(ctx, "economy.payee_of")?.(ctx, id) ?? null;
+}
+function namesOf(registry, world, state2, def, value, mayKnow) {
+  return hasOwn(state2.entities, value) || hasOwn(world.places, value) ? value : namedBy(registry, world, state2, def, value, mayKnow);
+}
+function namedBy(registry, world, state2, def, words7, mayKnow) {
+  const plain4 = (text5) => text5.toLowerCase().replace(/[_\s]+/g, " ").trim().replace(/^the /, "");
+  const said2 = plain4(words7);
+  if (said2 === "")
+    return null;
+  const fits2 = Object.keys(state2.entities).filter((id) => plain4(state2.entities[id]?.name ?? "") === said2 && (takes2(registry, world, state2, def, id) ? seesParty(registry, world, state2, id) : mayKnow(id)));
+  return fits2.length === 1 ? fits2[0] ?? null : null;
+}
+function unpaidWhy(registry, action, params, def, value, world, state2, mayKnow) {
+  const missing = missingOf(action, params);
+  if (missing !== null)
+    return `it needs ${missing}`;
+  const named = namesOf(registry, world, state2, def, value, mayKnow);
+  const thing = named !== null && hasOwn(state2.entities, named) && mayKnow(named) ? state2.entities[named] : undefined;
+  return thing && named !== null && ownerOf2(registry, world, state2, named) === world.pov ? `${thing.name} is yours` : null;
+}
+function paidOutside(registry, action, params, world, state2, mayKnow, text5) {
+  const out = { ...params };
+  const said2 = {};
+  for (const [name, def] of Object.entries(action.params)) {
+    const value = params[name];
+    const payee = def.type === "ref" ? payeeOf(registry, action, params, def, value, world, state2, mayKnow) : null;
+    if (payee === null || payee === value)
+      continue;
+    out[name] = payee;
+    const words7 = typeof value === "string" ? saidFor(value, text5) : null;
+    if (words7 !== null)
+      said2[name] = words7;
+  }
+  return { params: out, said: said2 };
+}
+function saidFor(value, text5) {
+  const words7 = value.replace(/_+/g, " ").trim().split(/\s+/).filter((w) => w !== "");
+  if (words7.length === 0 || value.length > 80)
+    return null;
+  const pattern = words7.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+  const typed = new RegExp(`(?<![\\p{L}\\p{N}])${pattern}(?![\\p{L}\\p{N}])`, "iu").exec(text5)?.[0]?.replace(/\s+/g, " ");
+  return typed === undefined || typed.length > 80 ? null : typed;
+}
+var PAY_METHOD = "method";
+function handedCash(registry, action, read, paid, world, state2, mayKnow) {
+  const method = hasOwn(action.params, PAY_METHOD) ? action.params[PAY_METHOD] : undefined;
+  if (method?.type !== "text" || !unset(paid[PAY_METHOD]))
+    return paid;
+  const money4 = Object.keys(action.params).find((name) => action.params[name]?.type === "money");
+  const cents = money4 === undefined ? undefined : paid[money4];
+  if (typeof cents !== "number" || !(cents > 0))
+    return paid;
+  if (!Object.entries(action.params).some(([name, def]) => def.type === "ref" && def.outside !== undefined && inFront(registry, world, state2, def, read[name], mayKnow)))
+    return paid;
+  const ctx = registry.context(world, state2);
+  const carried = optionalQuery(ctx, "economy.carried_cash")?.(ctx, world.pov) ?? 0;
+  return carried >= cents ? { ...paid, [PAY_METHOD]: "cash" } : paid;
+}
+function inFront(registry, world, state2, def, value, mayKnow) {
+  if (!safeKey(value))
+    return false;
+  const named = namesOf(registry, world, state2, def, value, mayKnow);
+  if (named === null)
+    return true;
+  const here = placeOfEntity(state2, world.pov) ?? null;
+  const near = (id) => together(world, here, placeOfEntity(state2, id) ?? null);
+  if (hasOwn(state2.entities, named)) {
+    if (takes2(registry, world, state2, def, named))
+      return !seesParty(registry, world, state2, named) || kindIs(registry, world, state2.entities[named]?.kind ?? "", "person") && near(named);
+    return !mayKnow(named) || near(named);
+  }
+  return !canSeePlace(registry, world, state2, world.pov, named);
 }
 function noFacts(turn = 0) {
   return { typed: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn, earlier: { messages: [], hideJson: true } };
@@ -75068,9 +75231,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "a423007b2f5fac6529744f64e8894676562c04e1aa4d443894d4f95e3eec65cc";
+  const sha256 = "2e65e0aaf26745f06c26e41f36b1752fa0e871af92aa2f02f71cc76ff98f22d7";
   const tools = ["d7ea5d8f68714fbde356a1b99c522de6", "3a95a1966944ca155e67ff625d472024"].filter((f) => f !== undefined);
-  return { id: "1c22fa49", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "df7e39bf", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -76681,9 +76844,11 @@ function claimFor(input) {
   const named = mineElsewhere(world, state2, unfit.value, mayKnow) ? unfit.value : null;
   if (!named && (own(state2.entities, unfit.value) && mayKnow(unfit.value) || own(world.places, unfit.value)))
     return null;
-  if (unfitRef(registry, action, input.params, world, state2, mayKnow, unfit.param))
-    return null;
   const name = named ? own(state2.entities, named)?.name ?? null : typedName(unfit.value, input.said);
+  const cash = name === null ? null : cashGift(name, world.currency);
+  const money4 = name !== null && (cash !== null || input.thing === "money");
+  if (unfitRef(registry, money4 ? asPaid(registry, world, action, unfit.param) : action, input.params, world, state2, mayKnow, unfit.param))
+    return null;
   if (name === null)
     return null;
   const known = named ? null : knownBy(registry, world, state2, name, mayKnow);
@@ -76692,8 +76857,7 @@ function claimFor(input) {
   if (known !== null)
     return { kind: "known", params: { ...input.params, [unfit.param]: known } };
   const verb = (action.lexicon?.[0] ?? action.label).toLowerCase();
-  const cash = cashGift(name, world.currency);
-  if (cash !== null || input.thing === "money")
+  if (money4)
     return moneyClaim(input, at2, kind, cash?.amount ?? null, verb);
   const ctx = registry.context(world, state2);
   if (input.policy.mode === "hold" || !optionalService(ctx, "gear.claim") || ctx.levelOf(world.pov, "gear") === 0)
@@ -76722,13 +76886,17 @@ function moneyClaim(input, at2, kind, amount, verb) {
   const { registry, world, state: state2, action, unfit } = input;
   const ctx = registry.context(world, state2);
   const pay = findAction(registry, world, "pay");
-  const to = Object.entries(action.params).find(([name, def]) => name !== unfit.param && def.type === "ref" && def.ref !== undefined && kindIs(registry, world, def.ref, "person"))?.[0];
+  const to = recipientOf(registry, world, action, unfit.param);
   const recipient = to === undefined ? undefined : input.params[to];
   const cents = amount === null ? 0 : Math.round(amount * 10 ** world.currency.decimals);
   if (!pay || to === undefined || typeof recipient !== "string" || !(cents > 0) || !optionalService(ctx, "economy.claim_cash") || ctx.levelOf(world.pov, "money") === 0)
     return { kind: "hold" };
-  const needs = { action: action.id, params: Object.fromEntries(Object.entries(input.params).filter(([name]) => name !== unfit.param && name !== to)), shared: { [to]: "to" } };
-  const play = { action: pay.id, params: { to: recipient, amount: cents, method: "cash" }, needs };
+  const paid = paidOutside(registry, pay, { to: recipient, amount: cents, method: "cash" }, world, state2, input.mayKnow, input.said.at(-1) ?? "");
+  const given = own(action.params, to);
+  const named = pay.params.to ? namesOf(registry, world, state2, pay.params.to, recipient, input.mayKnow) : null;
+  const handed = named !== null && named === paid.params.to && given !== undefined && takes2(registry, world, state2, given, named);
+  const needs = { action: action.id, params: Object.fromEntries(Object.entries(input.params).filter(([name]) => name !== unfit.param && name !== to)), shared: handed ? { [to]: "to" } : {} };
+  const play = { action: pay.id, params: paid.params, needs, ...Object.keys(paid.said).length > 0 ? { said: paid.said } : {} };
   const carried = Math.max(0, optionalQuery(ctx, "economy.carried_cash")?.(ctx, world.pov) ?? 0);
   if (carried >= cents)
     return { kind: "play", play };
@@ -76743,6 +76911,14 @@ function moneyClaim(input, at2, kind, amount, verb) {
     detail: "Money you say you have and don't carry always asks first.",
     play
   };
+}
+function recipientOf(registry, world, action, claim2) {
+  return Object.entries(action.params).find(([name, def]) => name !== claim2 && def.type === "ref" && def.ref !== undefined && kindIs(registry, world, def.ref, "person"))?.[0];
+}
+function asPaid(registry, world, action, claim2) {
+  const to = recipientOf(registry, world, action, claim2);
+  const paid = findAction(registry, world, "pay")?.params.to;
+  return to === undefined || paid === undefined || own(action.params, to) === undefined ? action : { ...action, params: { ...action.params, [to]: paid } };
 }
 function mineElsewhere(world, state2, id, mayKnow) {
   const e = own(state2.entities, id);
@@ -77675,7 +77851,7 @@ class TurnBridge {
     const queue = rest.map(queued);
     const confidence = read.lead ? read.probabilities[read.lead] ?? 1 : 1;
     const probabilities = !first || first.action === read.lead ? read.probabilities : { [first.action]: confidence, none: 1 - confidence };
-    const intent2 = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...first?.text ? { text: first.text } : {}, ...first?.claim ? { claim: first.claim } : {}, ...first?.needs ? { needs: first.needs } : {}, ...lead?.picked ? { picked: true } : {}, ...read.then ? { then: read.then } : {}, ...queue.length > 0 ? { queue } : {} };
+    const intent2 = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...first?.text ? { text: first.text } : {}, ...first?.claim ? { claim: first.claim } : {}, ...first?.needs ? { needs: first.needs } : {}, ...first?.said ? { said: first.said } : {}, ...lead?.picked ? { picked: true } : {}, ...read.then ? { then: read.then } : {}, ...queue.length > 0 ? { queue } : {} };
     if (read.dropped.length > 0)
       this.setUnfit(userText, read.dropped, intent2);
     else
@@ -77694,7 +77870,7 @@ class TurnBridge {
     const read = this.held.get(userText);
     if (!read?.steps[index]?.ask)
       return false;
-    const steps = keep ? read.steps.map((s, i) => i === index ? { action: s.action, params: s.params, text: s.text, ...s.claim ? { claim: s.claim } : {}, ...s.needs ? { needs: s.needs } : {}, ...s.picked ? { picked: true } : {} } : s) : read.steps.filter((_, i) => i !== index);
+    const steps = keep ? read.steps.map((s, i) => i === index ? { action: s.action, params: s.params, text: s.text, ...s.claim ? { claim: s.claim } : {}, ...s.needs ? { needs: s.needs } : {}, ...s.said ? { said: s.said } : {}, ...s.picked ? { picked: true } : {} } : s) : read.steps.filter((_, i) => i !== index);
     this.setRead(userText, { ...read, steps });
     return true;
   }
@@ -77826,14 +78002,14 @@ class TurnBridge {
     }
     return events3;
   }
-  passIntent(userText, params) {
+  passIntent(userText, params, said2 = {}) {
     const intent2 = this.intents.get(userText);
     if (!intent2)
       return false;
     if (params) {
-      const { claim: claim2, ...rest } = intent2;
+      const { claim: claim2, said: _read, ...rest } = intent2;
       const kept2 = claim2 !== undefined && JSON.stringify(params[claim2.param] ?? null) === JSON.stringify(intent2.params[claim2.param] ?? null);
-      this.intents.set(userText, { ...rest, params, ...claim2 && kept2 ? { claim: claim2 } : {} });
+      this.intents.set(userText, { ...rest, params, ...claim2 && kept2 ? { claim: claim2 } : {}, ...Object.keys(said2).length > 0 ? { said: said2 } : {} });
     }
     this.intentsPassed.add(userText);
     if (this.intentsPassed.size > 64)
@@ -78289,7 +78465,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1c22fa49" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "df7e39bf" }), (chatId) => this.messages.forget(chatId));
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
   }
@@ -78852,23 +79028,25 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
         dropAnswer(def, answered);
         return;
       }
-      const given = answered;
+      const paid = paidOutside(this.registry, def, answered, render.world, render.state, mayKnow, text6);
+      const given = picked ? paid.params : handedCash(this.registry, def, answered, paid.params, render.world, render.state, mayKnow);
+      const forWords = Object.keys(paid.said).length > 0 ? { said: paid.said } : {};
       const pick = picked ? { picked: true } : {};
       const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow) ?? outOfHand(def, given, render.world, render.state, mayKnow);
       if (!ref) {
-        steps.push({ action: def.id, params: given, text: words7, ...pick });
+        steps.push({ action: def.id, params: given, text: words7, ...forWords, ...pick });
         rolls ||= checkOf(render.world, def.check) !== null;
         return;
       }
-      const verdict2 = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: given, unfit: ref, said: said2, thing, policy, mayKnow });
+      const verdict2 = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: answered, unfit: ref, said: said2, thing, policy, mayKnow });
       if (verdict2?.kind === "known")
         return take(def, verdict2.params, words7, undefined, said2, picked);
       if (verdict2?.kind === "real")
-        steps.push({ action: def.id, params: given, text: words7, claim: verdict2.claim, ...pick });
+        steps.push({ action: def.id, params: given, text: words7, claim: verdict2.claim, ...forWords, ...pick });
       else if (verdict2?.kind === "play")
         steps.push({ ...verdict2.play, text: words7, ...pick });
       else if (verdict2?.kind === "ask")
-        steps.push({ ...verdict2.play ?? { action: def.id, params: given }, text: words7, claim: verdict2.claim, ask: { kind: "claim", question: verdict2.question, detail: verdict2.detail }, ...pick });
+        steps.push({ ...verdict2.play ?? { action: def.id, params: given, ...forWords }, text: words7, claim: verdict2.claim, ask: { kind: "claim", question: verdict2.question, detail: verdict2.detail }, ...pick });
       else {
         this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
         dropped.push({ label: def.label, reason: unfitReason(this.registry, render.world, render.state, ref, text6, secrets, mayKnow) });
@@ -79523,12 +79701,12 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
   answerAsk(chatId, text6, index, keep) {
     return this.bridges.get(chatId)?.answerAsk(text6, index, keep) ?? false;
   }
-  passIntent(chatId, text6, params) {
-    return this.bridges.get(chatId)?.passIntent(text6, params) ?? false;
+  passIntent(chatId, text6, params, said2) {
+    return this.bridges.get(chatId)?.passIntent(text6, params, said2) ?? false;
   }
   requestRefusal(world, state2, action, params, know, skip2) {
     const mayKnow = (id) => know === "read" ? povMayKnow(this.registry, world, state2, id) : id === world.pov || canSeeEntity(this.registry, world, state2, world.pov, id);
-    const unfit = unfitRef(this.registry, action, params, world, state2, mayKnow, skip2);
+    const unfit = unfitRef(this.registry, action, params, world, state2, mayKnow, skip2, know === "read");
     return unfit ? `${action.label}: ${unfitReason(this.registry, world, state2, unfit, "", unrevealedSecrets(this.registry, world, state2), mayKnow)}` : null;
   }
   editRefusal(world, state2, action, params, read, claim2) {
@@ -79542,6 +79720,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       const value = params[name];
       if (value === undefined || value === null || value === "" || kept2(name))
         continue;
+      if (def.type === "ref" && payeeOf(this.registry, action, params, def, value, world, state2, mayKnow) !== null)
+        continue;
       if (def.type === "ref" && !(typeof value === "string" && paramCandidates(this.registry, world, state2, action, name).includes(value)))
         return why(name, def, value);
       if (def.type === "list" && def.ref !== undefined) {
@@ -79553,6 +79733,23 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     }
     return null;
   }
+  keptPayees(action, params, read) {
+    const out = { ...params };
+    const blank = (v) => v === undefined || v === null || v === "";
+    const pays = Object.values(action.params).some((def) => def.outside !== undefined);
+    for (const [name, def] of Object.entries(action.params)) {
+      const was = read[name];
+      if ((def.outside !== undefined || pays && name === "method") && blank(out[name]) && !blank(was))
+        out[name] = was;
+    }
+    return out;
+  }
+  editedPaid(world, state2, action, params, read, text6) {
+    const mayKnow = (id) => povMayKnow(this.registry, world, state2, id);
+    const paid = paidOutside(this.registry, action, params, world, state2, mayKnow, text6);
+    const kept2 = Object.fromEntries(Object.entries(read.said ?? {}).filter(([name]) => JSON.stringify(params[name] ?? null) === JSON.stringify(read.params[name] ?? null)));
+    return { params: handedCash(this.registry, action, { ...params, ...kept2 }, paid.params, world, state2, mayKnow), said: { ...kept2, ...paid.said } };
+  }
   intentEdit(world, state2, action, params, typed) {
     if (!palette(world, state2, this.registry).entries.some((e) => e.action === action.id))
       return null;
@@ -79563,7 +79760,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       if (value === undefined || value === null)
         continue;
       if (def.type === "ref") {
-        if (typeof value === "string" && paramCandidates(this.registry, world, state2, action, name).includes(value))
+        const paid = def.outside !== undefined && typeof value === "string" && (value === outsideOf(def) || canSeeEntity(this.registry, world, state2, world.pov, value));
+        if (typeof value === "string" && (paid || paramCandidates(this.registry, world, state2, action, name).includes(value)))
           picks[name] = value;
       } else if (def.type === "list" && def.ref !== undefined) {
         const along = companionCandidates(this.registry, world, state2, action, name);
@@ -79594,13 +79792,13 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
 `), edit, what: `Timelapse ${span2}` };
     }
     const action = read.action ?? "";
-    const head = this.stepWords(world, state2, action, read.params, text6);
+    const head = this.stepWords(world, state2, action, read.params, text6, read.said);
     const queue = read.queue ?? [];
     const offer = bridge.offerFor(text6);
     const asks = offer?.type === "duration" && offer.minutes > settings.time.askBeyondMinutes;
     const lines2 = [
       ...read.text ? [`\u201C${read.text}\u201D`] : [],
-      ...queue.map((q) => `Then ${this.stepWords(world, state2, q.action, q.params, text6)}${q.text ? ` \u2014 \u201C${q.text}\u201D` : ""}`),
+      ...queue.map((q) => `Then ${this.stepWords(world, state2, q.action, q.params, text6, q.said)}${q.text ? ` \u2014 \u201C${q.text}\u201D` : ""}`),
       ...offer ? [`Then time passes: ${skipWords(this.registry, world, state2, offer, false)}. ${asks ? "That's longer than a skip runs without asking, so it's offered once these have played." : "The reply tells it after these."}`] : [],
       ...bridge.unfitOf(text6).map((u) => `Left out: ${u.label}, ${u.reason}.`),
       ...rest ? [`Not read as an action: \u201C${rest}\u201D`] : []
@@ -79609,7 +79807,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     return { label: `Play ${head}${queue.length > 0 ? `, then ${queue.length} more` : ""}?`, detail: lines2.join(`
 `), edit: def ? this.intentEdit(world, state2, def, read.params, text6) : null, what: head };
   }
-  stepWords(world, state2, action, params, typed) {
+  stepWords(world, state2, action, params, typed, said2 = {}) {
     if (action === TRY_ACTION) {
       const verdict2 = inferredRead(this.registry, world, state2, params);
       if (!verdict2.ok)
@@ -79621,7 +79819,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const def = (hasOwn(world.actions, action) ? world.actions[action] : undefined) ?? this.registry.actions.get(action);
     if (!def)
       return "an action";
-    const picks = actionWords(this.registry, world, state2, def, params, typed);
+    const picks = actionWords(this.registry, world, state2, def, params, typed, typed, said2);
     return picks !== "" ? `${def.label}: ${picks}` : def.label;
   }
   thenLine(chatId, said2, seed, world, state2, settings, secrets) {
@@ -80355,18 +80553,22 @@ function playable(action, params, world, said2) {
 function unfitReason(reg, world, state2, unfit, text6, secrets, mayKnow) {
   const { def, value } = unfit;
   const place = def.ref === "place";
-  const person2 = !place && def.ref !== undefined && kindIs(reg, world, def.ref, "person");
+  const person2 = !place && (def.ref !== undefined ? kindIs(reg, world, def.ref, "person") : def.outside !== undefined || (def.of?.kind ?? []).some((k) => kindIs(reg, world, k, "person")));
   if (value === undefined || value === null || value === "")
     return place ? "it needs a place" : person2 ? "it needs someone" : "it needs something";
   const none = place ? "it names no place you know" : person2 ? "it names no one you know" : "it names nothing you know";
+  if (unfit.reason !== undefined)
+    return findLeaks(unfit.reason, secrets).length > 0 ? none : unfit.reason;
   const id = typeof value === "string" ? value : "";
   const real2 = own(state2.entities, id);
   const seen = real2 && canSeeEntity(reg, world, state2, world.pov, id) ? real2 : undefined;
   const placeDef = seen ? undefined : own(world.places, id);
   const known = seen ? mayKnow(id) ? seen.name : null : placeDef && canSeePlace(reg, world, state2, world.pov, id) ? placeDef.name : null;
-  if (known !== null && def.ref !== undefined) {
+  if (known !== null && (def.ref !== undefined || def.outside !== undefined)) {
     if (known.length > 80 || findLeaks(known, secrets).length > 0)
       return none;
+    if (def.ref === undefined)
+      return `${known} isn't someone to pay`;
     const kind = place ? "place" : (reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase();
     return `${known} isn't ${/^[aeiou]/i.test(kind) ? "an" : "a"} ${kind}`;
   }
@@ -81963,11 +82165,12 @@ class Dispatcher {
           if (!read || !action)
             throw new RequestError("not_found", "the read has lapsed");
           const sent2 = payload.params;
-          const params = Object.fromEntries(Object.entries(sent2).filter(([key]) => hasOwn(action.params, key)));
+          const params = this.rt.keptPayees(action, Object.fromEntries(Object.entries(sent2).filter(([key]) => hasOwn(action.params, key))), read.params);
           const refused = this.rt.editRefusal(world, state2, action, params, read.params, read.claim?.param);
           if (refused)
             throw new RequestError("validation", refused);
-          return { applied: this.rt.passIntent(chatId, text6, params), pending: false };
+          const paid = this.rt.editedPaid(world, state2, action, params, read, text6);
+          return { applied: this.rt.passIntent(chatId, text6, paid.params, paid.said), pending: false };
         }
         const edited = choice === "edit" ? typeof payload?.text === "string" ? payload.text : null : undefined;
         if (edited === null)

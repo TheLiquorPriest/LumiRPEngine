@@ -4337,6 +4337,7 @@ function isCredit(c) {
   return CLASS_TRAITS[c].revolving || CLASS_TRAITS[c].installment;
 }
 var LEGACY_TYPE_CLASS = Object.freeze({ cash: "cash", checking: "checking", savings: "savings", card: "credit_card", loan: "loan", brokerage: "brokerage" });
+var PARTY_KINDS = ["person", "business", "trust", "household"];
 var OWNER_ROLES = ["owner", "joint", "custodian", "beneficiary", "trustee", "authorized_user"];
 var ROLE_RIGHTS = Object.freeze({
   owner: { spend: true, worth: true, sees: true, manage: true },
@@ -8660,6 +8661,12 @@ class Working {
 function findAction(reg, world, id) {
   return own(world.actions, id) ?? reg.actions.get(id);
 }
+function outsideOf(def) {
+  const key = def?.type === "ref" ? def.outside ?? "" : "";
+  if (key === "")
+    return null;
+  return key.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? key : `${EXTERNAL_ACCOUNT_PREFIX}${key}`;
+}
 function prepare(reg, world, state, req) {
   const action = typeof req.action === "string" ? findAction(reg, world, req.action) : req.action;
   if (!action)
@@ -8679,6 +8686,11 @@ function prepare(reg, world, state, req) {
     }
     if (def.type === "ref") {
       const id = String(raw);
+      if (id === outsideOf(def)) {
+        bindings[name] = id;
+        params[name] = id;
+        continue;
+      }
       const target = own(state.entities, id);
       if (!target) {
         if (own(world.places, id)) {
@@ -10357,6 +10369,8 @@ function lintStructure(world, reg) {
         else if (p.type !== "ref")
           warn(at, "claims", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so no claimed thing ever fills it.`);
       }
+      if (p.outside !== undefined && p.type !== "ref")
+        warn(`actions.${id}.params.${name}.outside`, "outside", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so it never pays the outside account "${p.outside}".`);
       if (p.of === undefined)
         continue;
       if (p.type !== "ref")
@@ -12384,9 +12398,22 @@ function pickReader(registry, world, state, typed, heard) {
     const words4 = (def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null) ?? asTyped(value);
     return words4 === null ? null : { words: words4, label: false };
   };
-  return { nameOf: nameOf3, asTyped, text: text3 };
+  const payee = (def, value, words4) => {
+    if (words4 !== undefined)
+      return screened(words4);
+    if (typeof value !== "string" || value === "")
+      return null;
+    const entity = own(state.entities, value);
+    if (entity)
+      return canSeeEntity(registry, world, state, world.pov, value) ? entity.name : null;
+    if (value !== outsideOf(def))
+      return nameOf3(value) ?? asTyped(value);
+    const key = value.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? value.slice(EXTERNAL_ACCOUNT_PREFIX.length).replace(/[_:]+/g, " ").trim() : "";
+    return typed === "" || key === "" ? null : `${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+  };
+  return { nameOf: nameOf3, asTyped, text: text3, payee };
 }
-function actionWords(registry, world, state, action, params, typed = "", heard = typed) {
+function actionWords(registry, world, state, action, params, typed = "", heard = typed, said = {}) {
   const read = pickReader(registry, world, state, typed, heard);
   const count = action.params[COUNT_PARAM]?.type === "number" && typeof params[COUNT_PARAM] === "number" ? params[COUNT_PARAM] : null;
   const counted = count === null ? undefined : Object.keys(action.params).find((name) => name !== COUNT_PARAM && (action.params[name]?.type === "ref" || action.params[name]?.type === "text"));
@@ -12398,7 +12425,7 @@ function actionWords(registry, world, state, action, params, typed = "", heard =
       continue;
     let word = null;
     if (def.type === "ref")
-      word = read.nameOf(value) ?? (typeof value === "string" ? read.asTyped(value) : null);
+      word = def.outside !== undefined ? read.payee(def, value, said[name]) : read.nameOf(value) ?? (typeof value === "string" ? read.asTyped(value) : null);
     else if (def.type === "list" && def.ref !== undefined) {
       const names = (Array.isArray(value) ? value : []).map(read.nameOf).filter((n) => n !== null);
       if (names.length > 0)
@@ -12765,7 +12792,7 @@ function planTurn(input) {
       timelapse = outcome;
     }
   } else {
-    const steps = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null, needs: intent.needs ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null, needs: q.needs ?? null }))] : [];
+    const steps = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null, needs: intent.needs ?? null, said: intent.said ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null, needs: q.needs ?? null, said: q.said ?? null }))] : [];
     const heard = input.userTexts.join(`
 `);
     for (let i = 0;i < Math.max(1, steps.length); i++) {
@@ -12782,13 +12809,13 @@ function planTurn(input) {
       const before = { picks: "", from: placeOfEntity(w.state, w.world.pov), fields: { ...own(w.state.entities, w.world.pov)?.fields } };
       if (step) {
         const typed = i > 0 || intent?.picked !== true;
+        const def = findAction(reg, w.world, step.action);
         const unmet = step.needs ? unmetNeeds(reg, w.world, w.state, step.needs, step.params) : null;
         const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim"), step.params) : null;
         if (claimed && step.claim)
           made = { entity: claimed.entity, name: claimed.cents !== undefined ? formatMoney(claimed.cents, w.world.currency) : step.claim.name, events: claimed.events, ...claimed.cents !== undefined ? { cents: claimed.cents } : {} };
         const params = claimed && step.claim && step.claim.cents === undefined ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
-        const def = findAction(reg, w.world, step.action);
-        before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard) : "";
+        before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard, step.said ?? {}) : "";
         const acting = w.mark();
         resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement, ...step.needs ? { needs: step.needs } : {} });
         if (typed && missedPlainRequirement(resolution))
@@ -16165,12 +16192,14 @@ var BANK_PREFIX = `${EXTERNAL_ACCOUNT_PREFIX}bank:`;
 function external(id) {
   return `${EXTERNAL_ACCOUNT_PREFIX}${id}`;
 }
+var WORLD_ACCOUNT = external("world");
 function outsideAccount(name) {
   const bare = name.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? name.slice(EXTERNAL_ACCOUNT_PREFIX.length) : name;
   return external(payeeKey(bare) || "outside");
 }
 var OUTSIDE_NAMES = {
   market: "Shops",
+  world: "World",
   insurer: "Insurer",
   "tax:federal": "Federal tax",
   "tax:state": "State tax",
@@ -21102,18 +21131,20 @@ function transfer(hooks, ctx, from, to, cents, memo, method = "auto", story = fa
   const payer = transferParty(ctx, from, "from");
   if ("code" in payer)
     return payer;
-  const payee = transferParty(ctx, to, "to");
-  if ("code" in payee)
+  const outside = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? outsideAccount(to) : null;
+  const payee = outside === null ? transferParty(ctx, to, "to") : null;
+  if (payee !== null && "code" in payee)
     return payee;
   const paying = method === "cash" ? "auto" : method;
-  const cash = method === "cash" ? cashAccount(ctx, payee.holder) ?? undefined : undefined;
-  const sameSide = payer.holder === payee.holder || payee.account !== undefined && canSpend(ctx.state, payee.account, payer.holder) && rightsOf(ctx.state, payee.account, payer.holder)?.worth === true;
-  if (!sameSide) {
-    const deposit = payee.account ?? cash;
+  const cash = method === "cash" && payee !== null ? cashAccount(ctx, payee.holder) ?? undefined : undefined;
+  const sameSide = payee !== null && (payer.holder === payee.holder || payee.account !== undefined && canSpend(ctx.state, payee.account, payer.holder) && rightsOf(ctx.state, payee.account, payer.holder)?.worth === true);
+  if (payee === null || !sameSide) {
+    const deposit = payee?.account ?? cash;
     const source2 = payer.account ?? (method === "cash" ? cashAccount(ctx, payer.holder) ?? undefined : undefined);
     const storyNamed = story && ctx.levelOf(payer.holder, "money") >= 2;
     const fromCash = storyNamed || method === "cash" && source2 !== undefined && availableOf(ctx, source2) >= Math.round(cents) ? source2 : payer.account;
-    return charge(hooks, ctx, payer.holder, cents, memo, { payee: payee.holder, method: paying, kind: "transfer", ...fromCash ? { source: fromCash } : {}, ...deposit ? { deposit } : {}, overdraft: false, story });
+    const side = payee !== null ? { payee: payee.holder } : outside !== null ? { counterparty: outside } : {};
+    return charge(hooks, ctx, payer.holder, cents, memo, { ...side, method: paying, kind: "transfer", ...fromCash ? { source: fromCash } : {}, ...deposit ? { deposit } : {}, overdraft: false, story });
   }
   if (!payer.account && !payee.account)
     return reject6("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
@@ -24956,6 +24987,12 @@ function registerRest(r, hooks) {
     return !priced && own(ctx.state.entities, payer) !== undefined && ctx.levelOf(payer, "money") >= 1;
   });
   r.query("economy.purchaser", (ctx, p) => purchaser(p, ctx).payer);
+  r.query("economy.payee_of", (ctx, id) => {
+    const thing = own(ctx.state.entities, id);
+    if (thing)
+      return strOf(thing.fields.owner) || (ownersIn(thing.fields)[0]?.party ?? null);
+    return own(ctx.world.places, id) ? businessAt(ctx, id) : null;
+  });
   r.guard({ type: "post", validate: (e, ctx) => e.type === "post" ? postGuard(ctx, e.lines, e.overdraw === true) : null });
   r.formula("wealth", (ctx, who) => wealthOf(hooks, ctx, String(who ?? ctx.world.pov)));
   r.formula("can_afford", (ctx, who, cents) => ctx.query("can_afford")(ctx, String(who ?? ctx.world.pov), Number(cents ?? 0)));
@@ -25248,7 +25285,7 @@ function registerEffects(r, hooks) {
 function registerActions(r) {
   const phone = { duration: "2", observable: "checks their phone", mechanical: true };
   r.action({ id: "buy", label: "Buy", description: "Buy something: food, drinks, goods or a service, here or delivered.", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
-  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment", method: "=params.method" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
+  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", of: { kind: [...PARTY_KINDS] }, outside: WORLD_ACCOUNT }, amount: { type: "money" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings); when the input doesn't say, as the purchase implies: cash into a jar, to a busker or at a counter, card online or by phone" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment", method: "=params.method" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
   r.action({ id: "move_money", label: "Transfer between accounts", description: "Move money between your own accounts: checking, savings, cash.", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
   r.action({ id: "pay_card", label: "Pay card or loan", description: "Pay off some or all of a card or loan balance.", pack: "economy", params: { card: { type: "ref", ref: "account" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, card)", "is_credit(card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", from: "=params.from", cents: "=amount > 0 ? amount : 0 - balance(card)", who: "self" } }] }, lexicon: ["pay off the card", "pay the card", "pay my credit card", "make a loan payment"], ...phone });
   r.action({ id: "withdraw_cash", label: "Withdraw cash", description: "Take cash out of a bank account.", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
