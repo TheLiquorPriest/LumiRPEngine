@@ -49,6 +49,7 @@ export function holdingsView(ctx: ReadContext, who: EntityId, witness: readonly 
         ...h,
         fact,
         claim: f?.claim ?? fact,
+        ...(f?.matters !== undefined ? { matters: f.matters } : {}),
         kind: f?.kind ?? parseFactId(fact)?.kind ?? "claim",
         truth: f?.truth ?? "open",
         byName: h.by === null ? null : name(h.by),

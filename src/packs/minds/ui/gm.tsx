@@ -1084,6 +1084,7 @@ function Holdings(props: { ctx: Ctx; who: Knower; open(change: Change): void }) 
             subtitle={
               <span class="lre-gm-minds-lines">
                 <span>{`${howWords(h)} · since ${h.sinceText}`}</span>
+                {h.matters !== undefined ? <span>{`Matters: ${h.matters}`}</span> : null}
                 <span>{beliefWords(h)}</span>
                 {h.evidenceShown.length > 0 ? <span>{`Rests on: ${h.evidenceShown.map((e) => e.text).join("; ")}`}</span> : null}
               </span>
@@ -1133,7 +1134,10 @@ function HoldingPage(props: { ctx: Ctx; who: Knower; holding: MindsGmHolding | n
       >
         <Section>
           {holding ? (
-            <p class="lre-gm-minds-prose">{holding.claim}</p>
+            <>
+              <p class="lre-gm-minds-prose">{holding.claim}</p>
+              {holding.matters !== undefined ? <p class="lre-gm-minds-prose">{`Matters: ${holding.matters}`}</p> : null}
+            </>
           ) : (
             <Field label="What they hold" for={ids.fact} help={chosen ? `${TRUTH_LABEL[chosen.truth]}, as you hold it.` : "The chat holds no fact they don't."}>
               <select id={ids.fact} class="lre-input" value={fact} disabled={ctx.busy || choices.length === 0} onChange={(event) => setFact(event.currentTarget.value)}>

@@ -27,6 +27,7 @@ import type { WorldState } from "../../src/engine/state";
 import { findLeaks, unrevealedSecretFacts, unrevealedSecrets } from "../../src/engine/visibility";
 import { Working } from "../../src/engine/working";
 import { factsOf, holdingsOf, isSuspicion, knowersOf, rankedHoldings, type InPlay } from "../../src/packs/minds/core/knowledge";
+import { knowledgeLines } from "../../src/packs/minds/core/knowledge-section";
 import { readCharacter, readSlice } from "../../src/packs/minds/core/state";
 import { Rig } from "../support/rig";
 
@@ -52,6 +53,11 @@ const KNOWLEDGE = "You keep track of who knows what in the roleplay world";
 
 /** Every event type that records knowledge. */
 const KNOWLEDGE_EVENTS: readonly string[] = [MINDS_EVENTS.fact, MINDS_EVENTS.learn, MINDS_EVENTS.forget, MINDS_EVENTS.keep, MINDS_EVENTS.settle, MINDS_EVENTS.knowledge];
+
+/** A scripted answer whose new facts each say why they matter, as the answer format asks, unless a fact says so already or a test leaves it out. */
+function saying(answer: JsonObject): JsonObject {
+  return Array.isArray(answer.facts) ? { ...answer, facts: answer.facts.map((f) => (isRecord(f) && f.matters === undefined ? { ...f, matters: "It changes what someone here does next" } : f)) } : answer;
+}
 
 /** What each mind, memory and knowledge call was given, in the order asked. */
 interface Seen {
@@ -82,7 +88,7 @@ function models(rig: Rig, knowledge: (context: string) => JsonObject, memory: (n
     }
     if (system.startsWith(KNOWLEDGE)) {
       seen.knowledge.push(context);
-      return JSON.stringify(knowledge(context));
+      return JSON.stringify(saying(knowledge(context)));
     }
     if (system.includes("You map a player's typed input")) return JSON.stringify({ action: null, params: {}, confidence: 0.9 });
     return JSON.stringify({ proposals: [] });
@@ -216,6 +222,8 @@ describe("Port Alder's third letter (assess-knowledge §6.7)", () => {
     // Marcus's memory says he told them too: with knowledge tracked, telling is the knowledge step's alone.
     const seen = models(rig, onReply({ "THIRD-LETTER": ANSWER }), (name): JsonObject => (name === "Marcus Delgado" ? { told: [{ to: ["Danny Okafor", "Jordan Ellis"], what: "MEMORY-TOLD the letters came from the township" }] } : {}));
     const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
+    // Five facts in one turn: past the default of three new facts a turn.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { factsPerTurn: 6 } } } }));
     await rig.turn(chatId, "I lean over Marcus's shoulder to read the letter.", "Marcus slits open the third envelope at the counter. Danny reads it over your shoulder: signed 'A friend', it gives Marcus until the end of the month. Marcus says the first one said only 'Ask about April', and that he burned the first two. THIRD-LETTER");
     const first = await stateOf(rig, chatId);
     const slice = readSlice(first.state);
@@ -320,7 +328,7 @@ function shopTurn(rig: Rig, world: WorldDoc, state: Readonly<WorldState>, settin
 
 describe("the engine's checks on the knowledge step's answer", () => {
   const SEDAN = "A black sedan idled outside the shop at dawn";
-  const WATCHED = { ref: "n1", claim: "Someone has been watching the shop", about: ["Marcus Delgado"] };
+  const WATCHED = { ref: "n1", claim: "Someone has been watching the shop", matters: "Marcus would act on it", about: ["Marcus Delgado"] };
 
   test("no one witnesses where they weren't, a teller holds what they tell, an inference rests on what its person holds or saw, confidence runs from 0 to 1, the player character never infers, and an inference under the threshold is a suspicion", async () => {
     const rig = new Rig({ shipped: true, minds: true });
@@ -334,7 +342,7 @@ describe("the engine's checks on the knowledge step's answer", () => {
     const turn = shopTurn(rig, world, state);
     const scene = knowledgeBatches(turn);
     expect(scene).toEqual([[POV, MARCUS, DANNY]]);
-    const check = (raw: JsonObject) => checkKnowledge(turn, scene[0] ?? [], raw);
+    const check = (raw: JsonObject) => checkKnowledge(turn, scene[0] ?? [], saying(raw));
     const watched = claimFactId(WATCHED.claim, turn.messageId);
 
     // Perception: Priya, at the marina, witnessed nothing; Danny, there, did.
@@ -449,8 +457,9 @@ describe("what each mind, the narrator and the player see", () => {
     await atShop(rig, chatId);
     await rig.turn(chatId, "Anything else?", "They get back to work.");
     const everyone = rig.host.section("Who knows what");
-    for (const line of [`- You: ${TAPED} (saw it)`, `- Danny Okafor: ${TAPED} (saw it)`, `- Marcus Delgado: ${TAPED} (saw it)`]) expect(everyone).toContain(line);
-    // What only Danny holds goes in marked as his; Marcus's secret as a secret known to him alone.
+    // What everyone here holds alike is one line; what only Danny holds goes in marked as his; Marcus's secret as a secret known to him alone.
+    expect(everyone).toContain(`- Everyone here: ${TAPED} (saw it)`);
+    for (const name of ["You", "Danny Okafor", "Marcus Delgado"]) expect(everyone).not.toContain(`- ${name}: ${TAPED}`);
     expect(everyone).toContain(`- Danny Okafor: ${SEDAN} (saw it) [unknown to you; known to Danny Okafor]`);
     expect(everyone).toMatch(/- Marcus Delgado: Alder Automotive is about \$112,000 behind[^\n]*\(from the start\); keeps it from everyone \[secret; known to Marcus Delgado\]/);
     rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "feed", section: "knowledge", to: { scope: "player" } }] }));
@@ -889,7 +898,7 @@ describe("the review's fixes (Increment 0)", () => {
     const { state, world } = await stateOf(rig, chatId);
     const turn = shopTurn(rig, world, state);
     const scene = knowledgeBatches(turn)[0] ?? [];
-    const sawSedan = { facts: [{ ref: "s", claim: SEDAN }], learned: [{ who: ["Marcus Delgado", "Danny Okafor"], fact: "s", how: "witnessed" }] };
+    const sawSedan = saying({ facts: [{ ref: "s", claim: SEDAN }], learned: [{ who: ["Marcus Delgado", "Danny Okafor"], fact: "s", how: "witnessed" }] });
 
     // M2: an inference less sure than Marcus's holding leaves it; a surer one replaces it and keeps it from everyone still.
     const weaker = checkKnowledge(turn, scene, { ...sawSedan, inferred: [{ who: "Marcus Delgado", fact: DEBT, confidence: 0.3, evidence: ["s"] }] });
@@ -898,7 +907,7 @@ describe("the review's fixes (Increment 0)", () => {
     expect(learnings(surer.events).find((l) => l.fact === DEBT)).toEqual(expect.objectContaining({ how: "inferred", confidence: 0.8, keptFrom: "everyone" }));
 
     // M3: Danny's guess, told on, is no surer for the telling: the player character only suspects it.
-    const guessed = checkKnowledge(turn, scene, { ...sawSedan, facts: [...sawSedan.facts, { ref: "r", claim: RUMOUR }], inferred: [{ who: "Danny Okafor", fact: "r", confidence: 0.4, evidence: ["s"] }] });
+    const guessed = checkKnowledge(turn, scene, saying({ ...sawSedan, facts: [...(sawSedan.facts as JsonObject[]), { ref: "r", claim: RUMOUR }], inferred: [{ who: "Danny Okafor", fact: "r", confidence: 0.4, evidence: ["s"] }] }));
     const w = new Working(rig.rt.registry, world, state);
     w.applyAll(guessed.events);
     const rumour = claimFactId(RUMOUR, turn.messageId);
@@ -915,12 +924,12 @@ describe("the review's fixes (Increment 0)", () => {
     const one = { ...turn, settings: { ...KNOWLEDGE_DEFAULTS, factsPerChat: 1 } };
     const spent: KnowledgeSpent = { facts: new Set(), learnings: 0, witnessed: new Set() };
     expect(checkKnowledge(one, [MARCUS], sawSedan, spent).refused).toEqual([]);
-    const again = checkKnowledge(one, [DANNY], { ...sawSedan, facts: [...sawSedan.facts, { ref: "r", claim: RUMOUR }] }, spent);
+    const again = checkKnowledge(one, [DANNY], saying({ ...sawSedan, facts: [...(sawSedan.facts as JsonObject[]), { ref: "r", claim: RUMOUR }] }), spent);
     expect(again.refused).toEqual([expect.stringContaining(RUMOUR)]);
 
     // S1: what the player character would learn carrying the secret's words is a reveal of that secret, whose chip never words it.
     const truth = world.tracks.s_shop_trouble?.stages.truth?.truth ?? "";
-    const overheard = checkKnowledge({ ...turn, reply: truth, settings: { ...KNOWLEDGE_DEFAULTS, claimChars: truth.length + 40 } }, scene, { facts: [{ ref: "d", claim: `Jordan overheard it: ${truth}` }], learned: [{ who: ["you"], fact: "d", how: "witnessed" }] });
+    const overheard = checkKnowledge({ ...turn, reply: truth, settings: { ...KNOWLEDGE_DEFAULTS, claimChars: truth.length + 40 } }, scene, saying({ facts: [{ ref: "d", claim: `Jordan overheard it: ${truth}` }], learned: [{ who: ["you"], fact: "d", how: "witnessed" }] }));
     expect(overheard.proposals.map((p) => [p.type, p.learn.fact])).toEqual([["reveal", DEBT]]);
   });
 });
@@ -1011,7 +1020,7 @@ describe("the re-review's fixes (Increment 0)", () => {
     // The reply holds every secret's words, so only the coverage check decides what each claim reveals.
     const turn = { ...shopTurn(rig, world, state), reply: `${truth} ${HARBOR} ${SHELF}` };
     const scene = knowledgeBatches(turn)[0] ?? [];
-    const told = (claim: string) => checkKnowledge(turn, scene, { facts: [{ ref: "c", claim }], learned: [{ who: ["you"], fact: "c", how: "witnessed" }] });
+    const told = (claim: string) => checkKnowledge(turn, scene, saying({ facts: [{ ref: "c", claim }], learned: [{ who: ["you"], fact: "c", how: "witnessed" }] }));
     // The long truth whole, read before it is cut to a claim: a reveal of its stage.
     expect(told(truth).proposals.map((p) => [p.type, p.learn.fact])).toEqual([["reveal", DEBT]]);
     const part = told(OWES);
@@ -1059,13 +1068,17 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     const quit = factOf(state, QUIT);
     // Marcus and Danny were there throughout, Priya at the marina: the two of them and the player character hold it.
     expect(knowersOf(readSlice(state), quit).sort()).toEqual([DANNY, MARCUS, POV].sort());
+    // A revelation said aloud is still a fact: the step's default wording leaves out only what said or done in plain view isn't one.
+    const system = rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").startsWith(KNOWLEDGE)).at(-1)?.messages[0]?.content ?? "";
+    expect(system).toContain("Something said or done in plain view is a fact only when it is one of these; the rest the story holds.");
     expect(holdingsOf(readSlice(state), POV)[quit]).toMatchObject({ how: "witnessed", belief: "true" });
     expect((await chipsOf(rig, chatId)).some((c) => c.kind === "undo" && c.label.startsWith(`Learned: ${QUIT}`))).toBe(true);
     expect(whatYouKnow(rig, chatId)?.items.map((i) => i.claim)).toEqual([QUIT]);
     await atShop(rig, chatId);
     await rig.turn(chatId, "So.", "Nobody says much.");
     const told = rig.host.section("Who knows what") ?? "";
-    expect(told).toContain(`- You: ${QUIT} (saw it)`);
+    // Everyone here holds it alike, the player character included: one line says so.
+    expect(told).toContain(`- Everyone here: ${QUIT} (saw it)`);
     expect(told).not.toContain("unknown to you");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
@@ -1095,7 +1108,7 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     const { state, world } = await stateOf(rig, chatId);
     const turn = shopTurn(rig, world, state);
     const scene = knowledgeBatches(turn)[0] ?? [];
-    const saw = (extra: JsonObject): JsonObject => ({ facts: [{ ref: "s", claim: SEDAN }], learned: [{ fact: "s", how: "witnessed", ...extra }] });
+    const saw = (extra: JsonObject): JsonObject => saying({ facts: [{ ref: "s", claim: SEDAN }], learned: [{ fact: "s", how: "witnessed", ...extra }] });
     expect(learnersOf(checkKnowledge(turn, scene, saw({})))).toEqual([DANNY, MARCUS, POV].sort());
     expect(learnersOf(checkKnowledge(turn, scene, saw({ missed: ["Marcus Delgado"] })))).toEqual([DANNY, POV].sort());
     // Danny left partway: he witnessed none of it.
@@ -1136,11 +1149,16 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("the step's default wording asks only for what matters to someone, and the user's own wording reaches the call", async () => {
+  test("the step's default wording asks only for the few facts that would change what someone does, says, hides or believes, each saying why it matters, and the user's own wording reaches the call", async () => {
     for (const text of [MIND_PROMPT_DEFAULTS.knowledge, KNOWLEDGE_TEXTS.stepAnswer]) {
-      expect(text).toContain("matter");
-      expect(text).toContain("small talk");
+      expect(text).toContain("usually none and at most one or two");
+      expect(text).toContain("Small talk, advice and description are never facts");
+      // Plain view rules out only what isn't one of those facts: a revelation or a promise said aloud still is one.
+      expect(text).toContain("Something said or done in plain view is a fact only when it is one of these; the rest the story holds.");
+      expect(text).not.toContain("Nothing someone simply said or did in plain view");
+      expect(text).toContain("matters");
     }
+    expect(KNOWLEDGE_DEFAULTS.factsPerTurn).toBe(3);
     expect(KNOWLEDGE_ANSWER_SHAPE).toContain('"missed"');
     const rig = new Rig({ shipped: true, minds: true });
     models(rig, () => ({}));
@@ -1162,7 +1180,7 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     // Names resolve as a turn's do: by id, whole name, or a word of a name no one else has (three Kowalczyks share theirs).
     const turn = { ...shopTurn(rig, world, state), named: (name: string) => personNamed(rig.rt.registry, world, state, name) };
     const scene = knowledgeBatches(turn)[0] ?? [];
-    const whisper = (missed: JsonValue): KnowledgeChecked => checkKnowledge(turn, scene, { facts: [{ ref: "w", claim: WHISPER }], learned: [{ fact: "w", how: "witnessed", missed }] });
+    const whisper = (missed: JsonValue): KnowledgeChecked => checkKnowledge(turn, scene, saying({ facts: [{ ref: "w", claim: WHISPER }], learned: [{ fact: "w", how: "witnessed", missed }] }));
     for (const missed of [["the player"], ["Jordan Elis"], ["Kowalczyk"], ["Danny Okafor", "Marcus Delgad"], [42], { who: "you" }] as JsonValue[]) {
       const out = whisper(missed);
       expect([out.proposals, learnings(out.events)]).toEqual([[], []]);
@@ -1196,17 +1214,17 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
     await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
     const { state, world } = await stateOf(rig, chatId);
-    const base = shopTurn(rig, world, state);
+    const base = shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, factsPerTurn: 6 });
     const crowd = { ...base, presence: { ...base.presence, said: { ...base.presence.said, who: [MARCUS, DANNY, PRIYA] } } };
     const scene = knowledgeBatches(crowd)[0] ?? [];
     expect(scene.length).toBe(4);
-    const said = ["the lift needs a new seal", "the parts order is late again", "the tow truck is low on diesel", "the bay door sticks in the cold", "the coffee maker gave out", "the inspection moved to Thursday"].map((what, i) => ({ ref: `f${i}`, claim: `Marcus said ${what}` }));
+    const said = ["the lift needs a new seal", "the parts order is late again", "the tow truck is low on diesel", "the bay door sticks in the cold", "the coffee maker gave out", "the inspection moved to Thursday"].map((what, i) => ({ ref: `f${i}`, claim: `Marcus said ${what}`, matters: "Danny would act on it" }));
     const answer: JsonObject = { facts: said, learned: [...said.map((f) => ({ fact: f.ref, how: "witnessed" })), { who: ["Danny Okafor"], fact: DEBT, how: "told", by: "Marcus Delgado" }] };
     const out = checkKnowledge(crowd, scene, answer);
     expect(out.refused).toEqual([]);
     expect(learnersOf(out).length).toBe(6 * 4 + 1);
     expect(learnings(out.events).find((l) => l.fact === DEBT)).toEqual(expect.objectContaining({ who: [DANNY], how: "told", by: MARCUS }));
-    const tight = checkKnowledge({ ...crowd, settings: { ...KNOWLEDGE_DEFAULTS, learningsPerTurn: 2 } }, scene, answer);
+    const tight = checkKnowledge({ ...crowd, settings: { ...KNOWLEDGE_DEFAULTS, factsPerTurn: 6, learningsPerTurn: 2 } }, scene, answer);
     expect(learnersOf(tight).length).toBe(2 * 4);
     expect(tight.refused.length).toBe(5);
   });
@@ -1217,11 +1235,11 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
     await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
     const { state, world } = await stateOf(rig, chatId);
-    const base = shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, batch: "character" });
+    const base = shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, batch: "character", factsPerTurn: 6 });
     const own = { ...base, presence: { ...base.presence, said: { ...base.presence.said, who: [MARCUS, PRIYA, DANNY] } } };
     const calls = knowledgeBatches(own);
     expect(calls).toEqual([[POV], [MARCUS], [PRIYA], [DANNY]]);
-    const said = ["the lift needs a new seal", "the parts order is late again", "the tow truck is low on diesel", "the bay door sticks in the cold", "the coffee maker gave out", "the inspection moved to Thursday"].map((what, i) => ({ ref: `f${i}`, claim: `Marcus said ${what}` }));
+    const said = ["the lift needs a new seal", "the parts order is late again", "the tow truck is low on diesel", "the bay door sticks in the cold", "the coffee maker gave out", "the inspection moved to Thursday"].map((what, i) => ({ ref: `f${i}`, claim: `Marcus said ${what}`, matters: "Danny would act on it" }));
     const six = { facts: said, learned: said.map((f) => ({ fact: f.ref, how: "witnessed" })) };
     const spent: KnowledgeSpent = { facts: new Set(), learnings: 0, witnessed: new Set() };
     // Danny's call, the last, also has Marcus telling him his secret.
@@ -1229,5 +1247,109 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     expect(outs.flatMap((o) => o.refused)).toEqual([]);
     expect(spent.learnings).toBe(6 + 1);
     expect(learnings(outs.at(-1)?.events ?? []).find((l) => l.fact === DEBT)).toEqual(expect.objectContaining({ who: [DANNY], how: "told", by: MARCUS }));
+  });
+
+  test("a new fact says why it matters and to whom: one that doesn't is refused with a log and nothing rests on it, the answer's earlier formats are read as before, and the reason is kept with the fact for GM → Minds", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const OFFER = "Danny offered to sleep at the shop until the deadline passes";
+    const WHY = "Marcus will count on Danny being there at night";
+    models(rig, onReply({ "OFFER-MARK": { facts: [{ ref: "o", claim: OFFER, matters: WHY, about: ["Danny Okafor"] }], learned: [{ fact: "o", how: "witnessed" }] } }));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "I ask who's locking up tonight.", "Danny offers to sleep at the shop until the deadline passes. OFFER-MARK");
+    const { state, world } = await stateOf(rig, chatId);
+    const offer = factOf(state, OFFER);
+    expect(factsOf(readSlice(state))[offer]?.matters).toBe(WHY);
+    const gm = rig.body(await rig.send({ type: "lre.gm", chatId })).minds as MindsGmView;
+    expect(gm.characters.find((c) => c.entity === DANNY)?.holdings.find((h) => h.fact === offer)).toMatchObject({ claim: OFFER, matters: WHY });
+    expect(rig.rt.ledger.errors).toEqual([]);
+
+    // A new fact with no reason, or a blank one, is refused, and so is a learning of it: nothing is recorded.
+    const turn = shopTurn(rig, world, state);
+    const scene = knowledgeBatches(turn)[0] ?? [];
+    const TRUCK = "Danny told Jordan to park the truck under the light";
+    const bare = checkKnowledge(turn, scene, { facts: [{ ref: "t", claim: TRUCK }, { ref: "u", claim: `${TRUCK} again`, matters: "  " }], learned: [{ fact: "t", how: "witnessed" }] });
+    expect([bare.events, bare.proposals]).toEqual([[], []]);
+    expect(bare.refused).toEqual([`a new fact that doesn't say why it matters, or to whom: "${TRUCK}"`, `a new fact that doesn't say why it matters, or to whom: "${TRUCK} again"`, `a learning of a fact the step didn't give or make, or not witnessed or told: "t"`]);
+
+    // The first format's witnessed learning, naming each witness, of a new fact that says why it matters.
+    const first = checkKnowledge(turn, scene, { facts: [{ ref: "t", claim: TRUCK, matters: "Jordan gets the blame if it's stolen" }], learned: [{ who: ["Danny Okafor"], fact: "t", how: "witnessed" }] });
+    expect([first.refused, learnersOf(first)]).toEqual([[], [DANNY]]);
+    const truck = claimFactId(TRUCK, turn.messageId);
+    expect(first.events.find((e) => e.type === MINDS_EVENTS.fact && "data" in e)).toMatchObject({ data: { fact: { id: truck, claim: TRUCK, matters: "Jordan gets the blame if it's stolen" } } });
+    // The second format's, naming who missed it, of a fact the chat holds: restated or by its id, it needs no reason.
+    const w = new Working(rig.rt.registry, world, state);
+    w.applyAll(first.events);
+    const later = shopTurn(rig, world, w.state);
+    for (const answer of [{ facts: [{ ref: "t", claim: TRUCK }], learned: [{ fact: "t", how: "witnessed", missed: ["Marcus Delgado"] }] }, { learned: [{ fact: truck, how: "witnessed", missed: ["Marcus Delgado"] }] }] as JsonObject[]) {
+      const out = checkKnowledge(later, scene, answer);
+      expect([out.refused, learnersOf(out)]).toEqual([[], [POV]]);
+    }
+  });
+
+  test("Who knows what tells a fact everyone here holds alike, the player character included, as one line, and a fact one of them keeps from someone as one line each", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig);
+    await atShop(rig, chatId);
+    const { state, world } = await stateOf(rig, chatId);
+    const OFFER = "Danny offered to sleep at the shop until the deadline passes";
+    const ROOM = "Danny lost his room at the boarding house";
+    const fact = (claim: string): KnowledgeFact => ({ id: claimFactId(claim, null), kind: "claim", claim, about: [DANNY], truth: "true", matters: "It changes where Danny sleeps" });
+    const learn = (who: string[], f: KnowledgeFact, keptFrom?: string[]): LedgerEvent => ({ type: MINDS_EVENTS.learn, data: { who, fact: f.id, how: "witnessed", by: null, evidence: [], belief: "true", confidence: 1, msg: null, at: state.clock, ...(keptFrom ? { keptFrom } : {}) } });
+    const offer = fact(OFFER);
+    const room = fact(ROOM);
+    const events: LedgerEvent[] = [{ type: MINDS_EVENTS.fact, data: { fact: offer as unknown as JsonObject } }, { type: MINDS_EVENTS.fact, data: { fact: room as unknown as JsonObject } }, learn([POV, MARCUS, DANNY], offer), learn([POV, MARCUS], room), learn([DANNY], room, [PRIYA])];
+    const w = new Working(rig.rt.registry, world, state);
+    w.applyAll(events);
+    const lines = knowledgeLines(rig.rt.registry.context(world, w.state), "scene");
+    expect(lines.filter((l) => l.text.includes(OFFER))).toEqual([{ text: `Everyone here: ${OFFER} (saw it)`, known: "pov", group: offer.id }]);
+    // Danny keeps it from Priya: everyone's line is their own.
+    expect(lines.filter((l) => l.text.includes(ROOM)).map((l) => l.text)).toEqual([`You: ${ROOM} (saw it)`, `Danny Okafor: ${ROOM} (saw it); keeps it from Priya Nair`, `Marcus Delgado: ${ROOM} (saw it)`]);
+    // The player character's own scope has only their lines.
+    expect(knowledgeLines(rig.rt.registry.context(world, w.state), "player").map((l) => l.text)).toEqual(expect.arrayContaining([`You: ${OFFER} (saw it)`, `You: ${ROOM} (saw it)`]));
+    // Priya there too, but unseen and so never named, without the fact: no one line speaks for everyone
+    // here, so it goes person by person, naming only those the section names.
+    const hidden = structuredClone(w.state);
+    const priya = hidden.entities[PRIYA];
+    if (!priya) throw new Error("no Priya");
+    priya.fields.place = SHOP;
+    priya.fields.visibility = "secret";
+    const unseen = knowledgeLines(rig.rt.registry.context(world, hidden), "scene").filter((l) => l.text.includes(OFFER));
+    expect(unseen.map((l) => l.text)).toEqual([`You: ${OFFER} (saw it)`, `Danny Okafor: ${OFFER} (saw it)`, `Marcus Delgado: ${OFFER} (saw it)`]);
+    // Holding it as they all do, she leaves it one line.
+    const knowing = new Working(rig.rt.registry, world, hidden);
+    knowing.applyAll([learn([PRIYA], offer)]);
+    expect(knowledgeLines(rig.rt.registry.context(world, knowing.state), "scene").filter((l) => l.text.includes(OFFER)).map((l) => l.text)).toEqual([`Everyone here: ${OFFER} (saw it)`]);
+    // In play, the narrator reads the line in the user's own wording.
+    await rig.rt.ledger.write(chatId, rig.host.userId, { kind: "post", id: "offer", target: "head", entry: { kind: "fix", events } });
+    await rig.host.settle();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { prompts: { everyoneHere: "All present: {{line}}" } } } } }));
+    await atShop(rig, chatId);
+    await rig.turn(chatId, "Anything else?", "Quiet.");
+    const told = rig.host.section("Who knows what") ?? "";
+    expect(told).toContain(`- All present: ${OFFER} (saw it)`);
+    expect(told).toContain(`- Danny Okafor: ${ROOM} (saw it); keeps it from Priya Nair`);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a fact recorded before facts said why they matter folds as it was, with no reason, the same in a fresh runtime", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig);
+    const now = (await stateOf(rig, chatId)).state.clock;
+    const SHUTTER = "Marcus fixed the shutter latch himself";
+    const old: KnowledgeFact = { id: claimFactId(SHUTTER, null), kind: "claim", claim: SHUTTER, about: [MARCUS], truth: "true" };
+    const events: LedgerEvent[] = [
+      { type: MINDS_EVENTS.fact, data: { fact: old as unknown as JsonObject } },
+      { type: MINDS_EVENTS.learn, data: { who: [MARCUS], fact: old.id, how: "witnessed", by: null, evidence: [], belief: "true", confidence: 1, msg: null, at: now } },
+    ];
+    await rig.rt.ledger.write(chatId, rig.host.userId, { kind: "post", id: "shutter", target: "head", entry: { kind: "fix", events } });
+    await rig.host.settle();
+    const folded = readSlice((await stateOf(rig, chatId)).state).knowledge;
+    expect(folded?.facts[old.id]).toEqual(old);
+    expect(Object.keys(folded?.facts[old.id] ?? {})).not.toContain("matters");
+    const fresh = new Rig({ host: rig.host, shipped: true, minds: true });
+    expect(readSlice((await stateOf(fresh, chatId)).state).knowledge).toEqual(folded);
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

@@ -9,10 +9,12 @@
 //              from, or not at all, as its knowledge says. Of each fact in play the player character
 //              holds, the section says who here doesn't know it.
 // It goes a fact at a time, each line's `group` its fact: who holds it (the player character first,
-// then each person here, in id order), then who here doesn't know it; the facts in the order they
-// bear on the moment (`byPlay`, each at its best place on anyone's list). The section's caps and
-// budget keep or leave out a fact's lines whole, so they leave out the least relevant facts first and
-// never tell a fact by half.
+// then each person here, in id order), then who here doesn't know it; or, for a fact everyone
+// physically there holds alike (seen or not, acting or not), the player character included and kept
+// from no one, one line, "Everyone here: …" (`everyoneHere`). The facts go in the order they bear on
+// the moment (`byPlay`, each at its best place on anyone's list). The section's caps and budget keep
+// or leave out a fact's lines whole, so they leave out the least relevant facts first and never tell
+// a fact by half.
 // Its limits and wording are the user's (Settings → Minds → Knowledge), given by the engine run
 // (`minds.knowing`). A chat that doesn't track knowledge, or holds none, has no lines. Each claim
 // goes in with any secret mark its text carries left out (`applyMarks`).
@@ -33,14 +35,20 @@ import { canSeeEntity, loreGateReader } from "../../../engine/visibility";
 import { byPlay, holdingLine, holdingsOf, keptFromIt, latestTurns, rankedHoldings, type HoldingWords, type InPlay } from "./knowledge";
 import { readSlice } from "./state";
 
-/** The people in the player character's scene it can see, each acting, in id order. */
-export function presentPeople(ctx: ReadContext): EntityId[] {
+/** Everyone in the player character's scene, whether it can see them or not and whether they act or not, in id order. */
+function peopleThere(ctx: ReadContext): EntityId[] {
   const { registry: reg, world, state } = ctx;
   const here = placeOfEntity(state, world.pov);
   if (here === null) return [];
   return Object.keys(state.entities)
     .sort()
-    .filter((id) => id !== world.pov && together(world, here, placeOfEntity(state, id)) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && acts(world, state, id) && canSeeEntity(reg, world, state, world.pov, id));
+    .filter((id) => id !== world.pov && together(world, here, placeOfEntity(state, id)) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id));
+}
+
+/** The people in the player character's scene it can see, each acting, in id order. */
+export function presentPeople(ctx: ReadContext): EntityId[] {
+  const { registry: reg, world, state } = ctx;
+  return peopleThere(ctx).filter((id) => acts(world, state, id) && canSeeEntity(reg, world, state, world.pov, id));
 }
 
 /**
@@ -82,6 +90,8 @@ export function knowledgeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const claim = (fact: KnowledgeFact | undefined, id: FactId): string => applyMarks(fact?.claim ?? id, { world, state }, "omit");
   // Each one's most relevant holdings: the player character's, then each person here's but in the player character's own scope.
   const others = scope === "player" ? [] : people;
+  // Everyone physically there, seen or not and acting or not: "Everyone here" speaks for all of them.
+  const there = others.length > 0 ? peopleThere(ctx) : [];
   const listed = [pov, ...others].flatMap((who) => rankedHoldings(slice, who, play).slice(0, settings.perPerson).map((h) => ({ who, h })));
   const povHolds = holdingsOf(slice, pov);
   const out: FeedLine[] = [];
@@ -93,6 +103,21 @@ export function knowledgeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const yours = own(povHolds, id);
     const fact = holders[0]?.h.fact;
     const kept = yours !== undefined && secret(id, fact) && !revealsFact(id, yours, threshold) ? { keptFrom: yours.keptFrom ?? ("everyone" as const), known: [pov] } : null;
+    // A fact everyone here holds alike, the player character included (each one's line the same, and
+    // kept from no one), is one line: everyone here holds it. Everyone physically there must hold it so,
+    // those the section doesn't name too, so the line never claims it of someone who doesn't; else the
+    // fact goes person by person, which names no one the section doesn't.
+    if (yours !== undefined && kept === null && others.length > 0) {
+      const line = holdingLine(claim(fact, id), yours, words);
+      const alike = [pov, ...there].every((who) => {
+        const h = own(holdingsOf(slice, who), id);
+        return h !== undefined && h.keptFrom === undefined && holdingLine(claim(fact, id), h, words) === line;
+      });
+      if (alike) {
+        out.push({ text: fillText(knowledgeText(settings, "everyoneHere"), { line }), known: "pov", group: id });
+        continue;
+      }
+    }
     for (const { who, h } of holders) {
       const text = fillText(knowledgeText(settings, "person"), { name: who === pov ? "You" : name(who), line: holdingLine(claim(h.fact, id), h.holding, words) });
       if (yours !== undefined) out.push(kept ? { text, known: "pov", secret: { keptFrom: kept.keptFrom, known: [...new Set([...kept.known, who])] }, group: id } : { text, known: "pov", group: id });

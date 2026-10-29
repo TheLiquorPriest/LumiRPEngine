@@ -448,7 +448,8 @@ export function isFact(v: JsonValue | undefined): v is KnowledgeFact & JsonObjec
     typeof v.truth === "string" &&
     (FACT_TRUTHS as readonly string[]).includes(v.truth) &&
     (source === undefined || (isRecord(source) && (source.msg === null || str(source.msg)) && finite(source.at))) &&
-    (v.textHash === undefined || (str(v.textHash) && v.textHash !== ""))
+    (v.textHash === undefined || (str(v.textHash) && v.textHash !== "")) &&
+    (v.matters === undefined || (str(v.matters) && v.matters.trim() !== ""))
   );
 }
 
@@ -482,7 +483,7 @@ export function holdingOf(v: Holding, self: EntityId): Holding {
 }
 
 function factOf(v: KnowledgeFact): KnowledgeFact {
-  return { id: v.id, kind: v.kind, claim: v.claim, about: [...v.about], truth: v.truth, ...(v.source ? { source: { msg: v.source.msg, at: v.source.at } } : {}), ...(v.textHash !== undefined ? { textHash: v.textHash } : {}) };
+  return { id: v.id, kind: v.kind, claim: v.claim, about: [...v.about], truth: v.truth, ...(v.source ? { source: { msg: v.source.msg, at: v.source.at } } : {}), ...(v.textHash !== undefined ? { textHash: v.textHash } : {}), ...(v.matters !== undefined ? { matters: v.matters } : {}) };
 }
 
 /** The holding a learning gives each learner, as its data carries it (`since` is its message and clock). */

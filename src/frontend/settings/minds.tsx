@@ -189,7 +189,7 @@ const LIMIT_FIELD: Record<KnowledgeLimit, { label: string; note: string; step: n
   claimChars: { label: "A fact's claim (characters)", note: "The longest claim the knowledge step records; a longer one is cut.", step: 10 },
   factsPerChat: { label: "Facts made in play, per chat", note: "Past it, the knowledge step makes no new fact; people still learn the ones there are.", step: 1 },
   holdersPerFact: { label: "People who may hold one fact", note: "Past it, no one else learns that fact from the knowledge step.", step: 1 },
-  factsPerTurn: { label: "New facts a turn", note: "The most new facts one turn's knowledge step records.", step: 1 },
+  factsPerTurn: { label: "New facts a turn", note: "The most new facts one turn's knowledge step records, each saying why it matters and to whom; most turns need none.", step: 1 },
   learningsPerTurn: { label: "Learnings a turn", note: "The most learnings one turn's knowledge step records: each person told something counts one, and each fact seen or heard counts one however many were there.", step: 1 },
   inPlayTurns: { label: "A fact stays in play for (turns)", note: "A fact is in play while someone learned it within this many of the latest turns, or while it's about someone or somewhere here.", step: 1 },
 };
@@ -225,7 +225,7 @@ const TEXT_GROUP_TITLE: Record<TextGroup, string> = {
 const TEXT_GROUP_NOTE: Record<TextGroup, string> = {
   mind: "The heading and lead over the facts a mind holds.",
   holding: "Each line a mind, the narrator and the knowledge step read for a fact someone holds, and the words for how they came by it.",
-  narrator: "How Who knows what names a person's facts, and what they don't know.",
+  narrator: "How Who knows what names a person's facts, what everyone here holds alike, and what someone doesn't know.",
   step: "The headings of what the knowledge step is given.",
 };
 
@@ -246,6 +246,7 @@ const TEXT_FIELD: Record<KnowledgeTextId, { group: TextGroup; label: string }> =
   guessed: { group: "holding", label: "How: a guess" },
   person: { group: "narrator", label: "A person's line" },
   notKnown: { group: "narrator", label: "What someone doesn't know" },
+  everyoneHere: { group: "narrator", label: "What everyone here holds alike" },
   stepHappened: { group: "step", label: "What happened" },
   stepPresent: { group: "step", label: "Who could perceive it" },
   stepPeople: { group: "step", label: "What each already knows" },

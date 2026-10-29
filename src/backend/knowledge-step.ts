@@ -1,14 +1,16 @@
 // The minds' knowledge step (DESIGN §24.11): after the reply, beside the read, who learned what that
-// matters to them. The story itself is what everyone there knows of a scene; this records only what
-// matters to someone (a secret, a revelation, a lie, what they would act on…), as its default wording
-// says. One call per scene by default, or one per character (Settings → Minds → Knowledge), for everyone
+// matters to them. The story itself is what everyone there knows of a scene; this records only the
+// few facts that would change what someone does, says, hides or believes (a secret, a revelation, a
+// lie, what they would act on…), each saying why it matters and to whom, as its default wording says.
+// One call per scene by default, or one per character (Settings → Minds → Knowledge), for everyone
 // who could perceive the turn: the player character and whoever was there with them.
 //
 //   knowledgeContext  what the call reads: what happened (the player's message, the reply, the turn's
 //                     events and what the read found in it), who could perceive it and from when,
 //                     the facts in play by id, and each person's holdings, witness log (by ref) and
 //                     traits, within the user's tokens (`stepTokens`).
-//   checkKnowledge    its answer, checked as the engine checks every proposal: a witnessing reaches
+//   checkKnowledge    its answer, checked as the engine checks every proposal: a new fact says why it
+//                     matters and to whom; a witnessing reaches
 //                     everyone there throughout but whom the answer says missed it, and no one there
 //                     for only part of the turn; a teller holds what they tell; an inference rests only
 //                     on facts its person holds and lines of their own witness log; a confidence runs
@@ -244,22 +246,30 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
     const claim = capText(str(f.claim), settings.claimChars);
     if (claim === "") continue;
     const id = claimFactId(claim, turn.messageId);
+    if (!facts.has(id)) {
+      // A new fact says why it matters and to whom; one that doesn't is no fact worth keeping.
+      const matters = capText(str(f.matters), settings.claimChars);
+      if (matters === "") {
+        refuse(`a new fact that doesn't say why it matters, or to whom: "${claim}"`);
+        continue;
+      }
+      if (!spent.facts.has(id) && (spent.facts.size >= settings.factsPerTurn || claims + spent.facts.size >= settings.factsPerChat)) {
+        refuse(`a new fact past the limit of new facts a turn or a chat: "${claim}"`);
+        continue;
+      }
+      const about = [...new Set(list(f.about).flatMap((n) => {
+        const name = str(n);
+        const person = name === "" ? null : who(name);
+        const place = person ? null : Object.keys(world.places).find((p) => p === name || own(world.places, p)?.name.toLowerCase() === name.toLowerCase());
+        return person ? [person] : place ? [place] : [];
+      }))];
+      const truth: FactTruth = (FACT_TRUTHS as readonly string[]).includes(str(f.truth)) ? (str(f.truth) as FactTruth) : "true";
+      facts.set(id, { id, kind: "claim", claim, about, truth, source: { msg: turn.messageId, at }, matters });
+      spent.facts.add(id);
+    }
+    // Only a fact the turn may name is the answer's to refer to by its ref.
     if (str(f.ref) !== "") refs.set(str(f.ref), id);
     written.set(id, str(f.claim));
-    if (facts.has(id)) continue;
-    if (!spent.facts.has(id) && (spent.facts.size >= settings.factsPerTurn || claims + spent.facts.size >= settings.factsPerChat)) {
-      refuse(`a new fact past the limit of new facts a turn or a chat: "${claim}"`);
-      continue;
-    }
-    const about = [...new Set(list(f.about).flatMap((n) => {
-      const name = str(n);
-      const person = name === "" ? null : who(name);
-      const place = person ? null : Object.keys(world.places).find((p) => p === name || own(world.places, p)?.name.toLowerCase() === name.toLowerCase());
-      return person ? [person] : place ? [place] : [];
-    }))];
-    const truth: FactTruth = (FACT_TRUTHS as readonly string[]).includes(str(f.truth)) ? (str(f.truth) as FactTruth) : "true";
-    facts.set(id, { id, kind: "claim", claim, about, truth, source: { msg: turn.messageId, at } });
-    spent.facts.add(id);
   }
   const factOf = (v: JsonValue | undefined): FactId | null => {
     const id = str(v);
