@@ -872,7 +872,8 @@ var STEP_LABEL = {
   mind: "Character minds",
   memory: "Character memory",
   skip: "Time-skip beats",
-  consolidate: "Memory consolidation"
+  consolidate: "Memory consolidation",
+  knowledge: "Who knows what"
 };
 var STEP_OUTPUT_LABEL = {
   text: "Text: instructions for the step's call",
@@ -916,6 +917,7 @@ var STEP_VARS = {
   mind: { phase: "with the minds", vars: MIND_VARS },
   memory: { phase: "with the minds", vars: MIND_VARS },
   consolidate: { phase: "with the minds", vars: MIND_VARS },
+  knowledge: { phase: "with the minds", vars: MIND_VARS, note: "A scene's call thinks for no one: character is empty." },
   skip: { phase: "as a time skip starts", vars: MIND_VARS, note: "The beats think for no one: character is empty." },
   skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] }
 };
@@ -977,7 +979,8 @@ var PROMPT_EFFECT = {
   mind: "Replaces the built-in instructions; the answer format stays.",
   memory: "Replaces the built-in instructions; the answer format stays.",
   skip: "Replaces the built-in instructions; the answer format stays.",
-  consolidate: "Replaces the built-in instructions; the answer format stays."
+  consolidate: "Replaces the built-in instructions; the answer format stays.",
+  knowledge: "Replaces the built-in instructions; the answer format stays."
 };
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
@@ -991,7 +994,8 @@ var STEP_OUTPUTS = {
   mind: ["text"],
   memory: ["text"],
   skip: ["text"],
-  consolidate: ["text"]
+  consolidate: ["text"],
+  knowledge: ["text"]
 };
 
 // src/shared/lore.ts
@@ -1011,6 +1015,7 @@ function loreSourceOf(raw) {
     return { kind: "ai", status: raw.status };
   return { kind: "authored" };
 }
+var OLD_SECRECY_FIELDS = ["secret", "gate", "audience", "holders"];
 function loreBooksOf(world) {
   const raw = world.loreBooks;
   return Array.isArray(raw) ? [...new Set(raw.filter((id) => typeof id === "string" && id.trim() !== ""))] : [];
@@ -2400,6 +2405,112 @@ function obj(value) {
   return isRecord(value) ? value : null;
 }
 
+// src/shared/secret-marks.ts
+var SECRET_MARK_WORDING = {
+  known: "{{text}} [secret; known to {{known}}]",
+  kept: "{{text}} [secret; kept from {{kept}}]",
+  both: "{{text}} [secret; known to {{known}}; kept from {{kept}}]",
+  everyone: "everyone",
+  rule: "A fact marked as a secret, written {{forms}}, is known to the people its mark says it is known to and kept from the people it says it is kept from ({{everyone}}: everyone it isn't known to). Treat it as a marked fact: no one it is kept from says, acts on or is narrated as knowing it, and unless the player's own instructions say otherwise, the narration and the reply don't tell or reveal it; it becomes known only through what the story has already established or what the player character does or finds."
+};
+var NOT_IN_NAME = /[,;():{}\\\r\n]/;
+var isEveryone = (name) => name.trim().toLowerCase() === "everyone";
+var sameName = (a3, b3) => a3.trim().replace(/\s+/g, " ").toLowerCase() === b3.trim().replace(/\s+/g, " ").toLowerCase();
+var POV_WORDS = /^(you|the player character|player character)$/i;
+function nameMatcher(world, state) {
+  const named = new Map;
+  for (const source of [world, state]) {
+    if (!source)
+      continue;
+    for (const [id, e3] of Object.entries(source.entities)) {
+      const name = typeof e3?.name === "string" ? e3.name.trim().replace(/\s+/g, " ").toLowerCase() : "";
+      const names = named.get(id) ?? [];
+      if (name !== "" && !names.includes(name))
+        names.push(name);
+      named.set(id, names);
+    }
+  }
+  const pov = state?.pov ?? world.pov;
+  return (written) => {
+    const raw = written.trim();
+    if (pov !== undefined && POV_WORDS.test(raw))
+      return [pov];
+    if (named.has(raw))
+      return [raw];
+    const n2 = raw.replace(/\s+/g, " ").toLowerCase();
+    const byId = [...named.keys()].filter((id) => id.toLowerCase() === n2);
+    if (byId.length === 1)
+      return byId;
+    const ids = [...named.entries()];
+    const whole = ids.filter(([, names]) => names.includes(n2)).map(([id]) => id);
+    if (whole.length > 0 || n2.includes(" "))
+      return whole;
+    return ids.filter(([, names]) => names.some((name) => name.split(" ").includes(n2))).map(([id]) => id);
+  };
+}
+function resolveMarkNames(world, state, mark) {
+  const match = nameMatcher(world, state);
+  const unresolved = [];
+  const resolve = (names) => {
+    const out = [];
+    for (const name of names) {
+      const [id, ...more] = match(name);
+      if (id === undefined || more.length > 0) {
+        if (!unresolved.includes(name))
+          unresolved.push(name);
+      } else if (!out.includes(id))
+        out.push(id);
+    }
+    return out;
+  };
+  return { knownTo: resolve(mark.knownTo), keptFrom: mark.keptFrom === "everyone" ? "everyone" : resolve(mark.keptFrom), unresolved };
+}
+function markNameIssues(world, state, mark, path) {
+  const match = nameMatcher(world, state);
+  const nameOf = (id) => (state && Object.hasOwn(state.entities, id) ? state.entities[id]?.name : undefined) ?? (Object.hasOwn(world.entities, id) ? world.entities[id]?.name : undefined) ?? id;
+  const issues = [];
+  const check = (names, kept) => {
+    for (const name of names) {
+      const ids = match(name);
+      if (ids.length === 1)
+        continue;
+      const who = ids.length === 0 ? "names no one in this world" : `could be any of ${ids.map(nameOf).join(", ")}`;
+      const means = kept ? "the narrator is told the secret is kept from the player character too, in case it is them" : "no one holds the secret by it";
+      issues.push({ severity: "warning", path, code: ids.length === 0 ? "mark_name_unresolved" : "mark_name_ambiguous", message: `"${name}" ${who}: ${means}. Give a full name, or pick the person.` });
+    }
+  };
+  check(mark.knownTo, false);
+  if (mark.keptFrom !== "everyone")
+    check(mark.keptFrom, true);
+  return issues;
+}
+function secretMarkProblem(input) {
+  const text = input.text.trim();
+  if (text === "")
+    return "a secret needs its text";
+  if (text.includes("{{") || text.includes("}}"))
+    return "a secret's text can't hold {{ or }}: the host would end the mark there, and the rest would reach the prompt";
+  if (/\\[{}]/.test(text))
+    return "a secret's text can't hold a backslash before a brace: the host reads it as an escape and runs the mark on";
+  if (text.endsWith("}") || text.endsWith("\\"))
+    return "a secret's text can't end with } or \\: the host would end the mark a character early, or run it on";
+  const names = [...input.knownTo, ...input.keptFrom === "everyone" ? [] : input.keptFrom];
+  for (const raw of names) {
+    const name = raw.trim();
+    if (name === "")
+      return "a name is empty";
+    if (NOT_IN_NAME.test(name))
+      return `"${name}" can't be a name in a mark: a name holds no commas, semicolons, brackets, braces, colon, backslash or line break`;
+  }
+  if (input.knownTo.some(isEveryone))
+    return "a secret can't be known to everyone";
+  const kept = input.keptFrom === "everyone" ? [] : input.keptFrom;
+  if (kept.some(isEveryone) && kept.length > 1)
+    return '"everyone" stands alone after "kept from"';
+  const both = input.knownTo.find((n2) => kept.some((k2) => sameName(k2, n2)));
+  return both === undefined ? null : `${both.trim()} is named as knowing it and as kept from it`;
+}
+
 // src/frontend/gm/gate.ts
 function revealTruth(ui) {
   return ui.gm.revealed ? ui : { ...ui, gm: { ...ui.gm, revealed: true } };
@@ -2886,23 +2997,6 @@ async function discardDraft(app) {
     app.drafts.set({ ...draft, base: message.body.base, doc: message.body.draft, lint: message.body.lint, version: message.body.version, dirty: message.body.stored, reloaded: false });
 }
 
-// src/shared/ids.ts
-var DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"];
-var DOMAIN_LABEL = {
-  money: "Money",
-  gear: "Gear",
-  vehicles: "Vehicles",
-  castlife: "Cast life",
-  relationships: "Relationships",
-  space: "Space & travel",
-  calendar: "Calendar & time",
-  weather: "Weather",
-  sheets: "Sheets & checks"
-};
-var LEVEL_LABEL = { 0: "Off", 1: "Narrative", 2: "Simple", 3: "Detailed", 4: "Simulation" };
-var BANDS = ["principal", "supporting", "background"];
-var INTERRUPT_CLASSES = ["invitation", "bill", "decline", "incident", "quest", "rule", "arrival", "overdue", "needs", "weather"];
-
 // src/frontend/scroll.ts
 function scrollParent(el) {
   for (let node = el.parentElement;node; node = node.parentElement) {
@@ -3212,615 +3306,22 @@ function Chip(props) {
   }, undefined, false, undefined, this);
 }
 
-// src/frontend/build/expr-editor.tsx
-var WORD_OPERATORS = ["and", "or", "not"];
-var OPERATOR_GROUPS = [
-  {
-    title: "Arithmetic",
-    keys: [
-      ["+", "Plus"],
-      ["-", "Minus"],
-      ["*", "Times"],
-      ["/", "Divided by"],
-      ["%", "Remainder"],
-      ["(", "Open bracket"],
-      [")", "Close bracket"]
-    ]
-  },
-  {
-    title: "Compare",
-    keys: [
-      ["==", "Equals"],
-      ["!=", "Doesn't equal"],
-      ["<", "Less than"],
-      ["<=", "At most"],
-      [">", "More than"],
-      [">=", "At least"]
-    ]
-  },
-  {
-    title: "Logic",
-    keys: [
-      ["and", "And"],
-      ["or", "Or"],
-      ["not", "Not"],
-      ["?", "Then"],
-      [":", "Otherwise"]
-    ]
-  }
-];
-function exprFunctions(functions, mode) {
-  const names = new Set(functions);
-  for (const name of EFFECT_ONLY_FUNCTIONS) {
-    if (mode === "effect")
-      names.add(name);
-    else
-      names.delete(name);
-  }
-  return [...names].sort();
-}
-function exprCompletions(word, identifiers, functions) {
-  if (word === "")
-    return [];
-  const ids = identifiers.filter((id) => id.startsWith(word) && id !== word);
-  const calls = functions.filter((name) => name.startsWith(word)).map((name) => `${name}(`);
-  return [...ids, ...calls].slice(0, 8);
-}
-function checkBalance(text) {
-  const stack = [];
-  const pairs = { ")": "(", "]": "[", "}": "{" };
-  let quote = null;
-  for (let i3 = 0;i3 < text.length; i3 += 1) {
-    const ch = text[i3] ?? "";
-    if (quote) {
-      if (ch === "\\")
-        i3 += 1;
-      else if (ch === quote)
-        quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'")
-      quote = ch;
-    else if (ch === "(" || ch === "[" || ch === "{")
-      stack.push(ch);
-    else if (ch === ")" || ch === "]" || ch === "}") {
-      if (stack.pop() !== pairs[ch])
-        return { ok: false, message: `Unexpected ${ch} at ${i3 + 1}` };
-    }
-  }
-  if (quote)
-    return { ok: false, message: "Unclosed string" };
-  if (stack.length > 0)
-    return { ok: false, message: `${stack.length} unclosed ${stack.at(-1)}` };
-  return { ok: true, message: null };
-}
-var KEYWORDS = { and: true, or: true, not: true, true: true, false: true, null: true };
-var CLOCK_WORDS = {
-  clock: "the time",
-  minute: "the minute of the day",
-  hour: "the hour",
-  day: "the day number",
-  weekday: "the weekday",
-  date: "the day of the month",
-  month: "the month",
-  year: "the year",
-  daypart: "the part of the day"
+// src/shared/ids.ts
+var DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"];
+var DOMAIN_LABEL = {
+  money: "Money",
+  gear: "Gear",
+  vehicles: "Vehicles",
+  castlife: "Cast life",
+  relationships: "Relationships",
+  space: "Space & travel",
+  calendar: "Calendar & time",
+  weather: "Weather",
+  sheets: "Sheets & checks"
 };
-var BINDING_WORDS = { actor: "the actor", target: "the target" };
-var DOMAIN_IDS = DOMAINS;
-var NAME_START = /[A-Za-z_]/;
-var NAME_PART = /\w/;
-function formulaNames(text) {
-  const out = [];
-  const skipSpace = (from) => {
-    let j3 = from;
-    while (/\s/.test(text.charAt(j3)))
-      j3 += 1;
-    return j3;
-  };
-  const nameEnd = (from) => {
-    let j3 = from + 1;
-    while (NAME_PART.test(text.charAt(j3)))
-      j3 += 1;
-    return j3;
-  };
-  let i3 = 0;
-  while (i3 < text.length) {
-    const c3 = text.charAt(i3);
-    if (c3 === '"' || c3 === "'") {
-      i3 += 1;
-      while (i3 < text.length && text.charAt(i3) !== c3)
-        i3 += text.charAt(i3) === "\\" ? 2 : 1;
-      i3 += 1;
-    } else if (NAME_START.test(c3)) {
-      let end = nameEnd(i3);
-      const path = [text.slice(i3, end)];
-      for (;; ) {
-        const dot = skipSpace(end);
-        if (text.charAt(dot) !== "." || /[0-9]/.test(text.charAt(dot + 1)))
-          break;
-        const start = skipSpace(dot + 1);
-        if (!NAME_START.test(text.charAt(start)))
-          break;
-        end = nameEnd(start);
-        path.push(text.slice(start, end));
-      }
-      out.push({ path, call: path.length === 1 && text.charAt(skipSpace(end)) === "(" });
-      i3 = end;
-    } else {
-      i3 += 1;
-    }
-  }
-  return out;
-}
-function fieldLabel(doc, field, kind) {
-  if (!doc)
-    return;
-  const preferred = kind !== undefined && hasOwn(doc.kinds, kind) ? doc.kinds[kind] : undefined;
-  for (const def of preferred ? [preferred, ...Object.values(doc.kinds)] : Object.values(doc.kinds)) {
-    const label = hasOwn(def.fields, field) ? def.fields[field]?.label : undefined;
-    if (label)
-      return label;
-  }
-  return;
-}
-function fieldWords(doc, path, kind) {
-  const [field = "", ...deeper] = path;
-  const label = fieldLabel(doc, field, kind);
-  const words = label === undefined ? field : /^[A-Z](?![A-Z])/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
-  return [words, ...deeper].join(".");
-}
-function nameOf(doc, id) {
-  if (!doc)
-    return;
-  if (hasOwn(doc.entities, id))
-    return doc.entities[id]?.name || undefined;
-  if (hasOwn(doc.places, id))
-    return doc.places[id]?.name || undefined;
-  if (hasOwn(doc.tracks, id))
-    return doc.tracks[id]?.label || undefined;
-  return fieldLabel(doc, id);
-}
-function readOf(path, doc) {
-  const id = path.join(".");
-  const [head = "", ...rest] = path;
-  const [second = ""] = rest;
-  if (head === "self")
-    return rest.length === 0 ? { id, label: "self", what: "self" } : { id, label: `own ${fieldWords(doc, rest)}`, what: "own field" };
-  const binding = hasOwn(BINDING_WORDS, head) ? BINDING_WORDS[head] : undefined;
-  if (binding !== undefined)
-    return { id, label: rest.length === 0 ? binding : `${binding}'s ${fieldWords(doc, rest)}`, what: "param" };
-  if (head === "pov") {
-    const kind = doc && hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov]?.kind : undefined;
-    return { id, label: rest.length === 0 ? "the POV character" : `the POV character's ${fieldWords(doc, rest, kind)}`, what: "pov" };
-  }
-  if (head === "here")
-    return { id, label: rest.length === 0 ? "the current place" : `the ${fieldWords(doc, rest)} here`, what: "here" };
-  if (head === "stage" && rest.length === 1) {
-    const track2 = (doc && hasOwn(doc.tracks, second) ? doc.tracks[second]?.label : undefined) || second;
-    return { id, label: `the stage of “${track2}”`, what: "track stage" };
-  }
-  if (head === "level" && rest.length === 1 && DOMAIN_IDS.includes(second))
-    return { id, label: `the ${second} level`, what: "level" };
-  if (rest.length === 0 && hasOwn(CLOCK_WORDS, head))
-    return { id, label: CLOCK_WORDS[head] ?? head, what: "the clock" };
-  if (doc && hasOwn(doc.entities, head)) {
-    const entity = doc.entities[head];
-    const name = entity?.name || head;
-    return rest.length === 0 ? { id, label: name, what: "entity" } : { id, label: `${name}'s ${fieldWords(doc, rest, entity?.kind)}`, what: "entity field" };
-  }
-  if (doc && hasOwn(doc.places, head)) {
-    const name = doc.places[head]?.name || head;
-    return rest.length === 0 ? { id, label: name, what: "place" } : { id, label: `${name}'s ${fieldWords(doc, rest)}`, what: "place field" };
-  }
-  if (doc && rest.length === 0) {
-    if (hasOwn(doc.tracks, head))
-      return { id, label: `the track “${doc.tracks[head]?.label || head}”`, what: "track" };
-    if (hasOwn(doc.checks, head))
-      return { id, label: `the ${head} check`, what: "check" };
-    if (Object.values(doc.kinds).some((def) => hasOwn(def.fields, head)))
-      return { id, label: `own ${fieldWords(doc, path)}`, what: "own field" };
-  }
-  return { id, label: id, what: "param" };
-}
-function exprReads(text, doc) {
-  const reads = [];
-  const functions = [];
-  for (const { path, call } of formulaNames(text)) {
-    const head = path[0] ?? "";
-    if (hasOwn(KEYWORDS, head))
-      continue;
-    if (call) {
-      if (!functions.includes(head))
-        functions.push(head);
-    } else {
-      const id = path.join(".");
-      if (!reads.some((read) => read.id === id))
-        reads.push(readOf(path, doc));
-    }
-  }
-  return { reads, functions };
-}
-function exprSummary(text, doc) {
-  const { reads, functions } = exprReads(text, doc);
-  const labels = [...new Set(reads.map((read) => read.label))];
-  const [reading = "", using = ""] = [labels, functions].map((words) => words.length <= 1 ? words[0] ?? "" : `${words.slice(0, -1).join(", ")} and ${words.at(-1) ?? ""}`);
-  const sentence = reading === "" ? "Reads nothing" : `Reads ${reading}`;
-  return using === "" ? `${sentence}.` : `${sentence}; uses ${using}.`;
-}
-function ExprReadout(props) {
-  if (props.text.trim() === "")
-    return null;
-  return /* @__PURE__ */ u3("p", {
-    class: "lre-expr-readout",
-    children: exprSummary(props.text, props.doc)
-  }, undefined, false, undefined, this);
-}
-function withToken(value, start, end, token, replace) {
-  const before = value.slice(0, Math.max(0, start - replace));
-  const text = WORD_OPERATORS.includes(token) ? ` ${token} ` : token;
-  return { value: before + text + value.slice(end), caret: before.length + text.length };
-}
-function useFormula(value, onChange, mobile) {
-  const input = T2(null);
-  const typing = T2(false);
-  const [caret, setCaret] = d2(null);
-  const word = /[A-Za-z_][\w.]*$/.exec(value.slice(0, Math.min(caret ?? value.length, value.length)))?.[0] ?? "";
-  const track2 = () => setCaret(input.current?.selectionStart ?? null);
-  return {
-    input,
-    word,
-    track: track2,
-    press: () => {
-      typing.current = document.activeElement === input.current;
-    },
-    edit: (text) => {
-      onChange(text);
-      track2();
-    },
-    insert: (token, replace = 0) => {
-      const el = input.current;
-      const next = withToken(value, el?.selectionStart ?? value.length, el?.selectionEnd ?? value.length, token, replace);
-      const focus = !mobile || typing.current;
-      typing.current = false;
-      onChange(next.value);
-      setCaret(next.caret);
-      queueMicrotask(() => {
-        if (focus)
-          el?.focus({ preventScroll: true });
-        el?.setSelectionRange(next.caret, next.caret);
-      });
-    }
-  };
-}
-function Suggestions(props) {
-  const tokens = exprCompletions(props.word, props.identifiers, props.functions);
-  if (tokens.length === 0)
-    return null;
-  return /* @__PURE__ */ u3("div", {
-    class: props.scroll ? "lre-form-chips lre-expr-suggest scroll" : "lre-form-chips lre-expr-suggest",
-    role: "group",
-    "aria-label": "Suggestions",
-    children: tokens.map((token) => {
-      const name = token.endsWith("(") ? undefined : nameOf(props.doc, token);
-      const shown = name !== undefined && name.toLowerCase().replace(/[_\s]+/g, " ").trim() !== token.toLowerCase().replace(/_/g, " ") ? name : undefined;
-      return /* @__PURE__ */ u3(Chip, {
-        label: shown !== undefined ? `${token}, ${shown}` : undefined,
-        onPress: () => props.onPick(token),
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-expr-token",
-            children: token
-          }, undefined, false, undefined, this),
-          shown !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-expr-chip-name",
-            children: shown
-          }, undefined, false, undefined, this) : null
-        ]
-      }, token, true, undefined, this);
-    })
-  }, undefined, false, undefined, this);
-}
-function KeyGroup(props) {
-  const id = P2();
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-expr-group",
-    role: "group",
-    "aria-labelledby": id,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        id,
-        class: "lre-expr-group-title",
-        children: props.title
-      }, undefined, false, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function KeyFilter(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-build-search",
-    children: [
-      /* @__PURE__ */ u3(Icon, {
-        name: "search",
-        size: 16
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("input", {
-        class: "lre-input",
-        type: "search",
-        placeholder: props.label,
-        "aria-label": props.label,
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: false,
-        value: props.value,
-        onInput: (event) => props.onInput(event.currentTarget.value),
-        onKeyDown: (event) => {
-          if (event.key !== "Escape" || props.value === "")
-            return;
-          event.preventDefault();
-          props.onInput("");
-        }
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function Palette(props) {
-  const [callQuery, setCallQuery] = d2("");
-  const [nameQuery, setNameQuery] = d2("");
-  const names = b2(() => props.identifiers.map((id) => ({ id, name: nameOf(props.doc, id) })), [props.identifiers, props.doc]);
-  const callNeedle = callQuery.trim().toLowerCase();
-  const nameNeedle = nameQuery.trim().toLowerCase();
-  const calls = props.functions.filter((name) => name.toLowerCase().includes(callNeedle));
-  const shown = names.filter((n2) => n2.id.toLowerCase().includes(nameNeedle) || (n2.name ?? "").toLowerCase().includes(nameNeedle));
-  return /* @__PURE__ */ u3("div", {
-    class: props.inline ? "lre-expr-palette inline" : "lre-expr-palette",
-    children: [
-      OPERATOR_GROUPS.map((group) => /* @__PURE__ */ u3(KeyGroup, {
-        title: group.title,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-expr-keys",
-          children: group.keys.map(([token, name]) => /* @__PURE__ */ u3("button", {
-            type: "button",
-            class: "lre-expr-key",
-            "aria-label": name,
-            title: name,
-            onClick: () => props.onInsert(token),
-            children: token
-          }, token, false, undefined, this))
-        }, undefined, false, undefined, this)
-      }, group.title, false, undefined, this)),
-      props.functions.length > 0 ? /* @__PURE__ */ u3(KeyGroup, {
-        title: "Functions",
-        children: [
-          /* @__PURE__ */ u3(KeyFilter, {
-            label: "Find a function",
-            value: callQuery,
-            onInput: setCallQuery
-          }, undefined, false, undefined, this),
-          calls.length > 0 ? /* @__PURE__ */ u3("div", {
-            class: "lre-expr-words",
-            children: calls.map((name) => /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-expr-key",
-              onClick: () => props.onInsert(`${name}(`),
-              children: [
-                name,
-                "("
-              ]
-            }, name, true, undefined, this))
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
-            class: "lre-expr-none",
-            children: "No function matches."
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null,
-      names.length > 0 ? /* @__PURE__ */ u3(KeyGroup, {
-        title: "Names",
-        children: [
-          names.length > 8 ? /* @__PURE__ */ u3(KeyFilter, {
-            label: "Find a name",
-            value: nameQuery,
-            onInput: setNameQuery
-          }, undefined, false, undefined, this) : null,
-          shown.length > 0 ? /* @__PURE__ */ u3("div", {
-            class: "lre-expr-words",
-            children: shown.map((n2) => /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-expr-key name",
-              onClick: () => props.onInsert(n2.id),
-              children: [
-                n2.name !== undefined ? /* @__PURE__ */ u3("span", {
-                  children: n2.name
-                }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
-                  class: "lre-expr-token",
-                  children: n2.id
-                }, undefined, false, undefined, this),
-                n2.name !== undefined ? /* @__PURE__ */ u3(IdText, {
-                  id: n2.id
-                }, undefined, false, undefined, this) : null
-              ]
-            }, n2.id, true, undefined, this))
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
-            class: "lre-expr-none",
-            children: "No name matches."
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function ExprPage(props) {
-  const formula = useFormula(props.value, props.onChange, props.mobile);
-  A(() => {
-    const timer = setTimeout(() => {
-      const el = formula.input.current;
-      if (!el)
-        return;
-      el.focus({ preventScroll: true });
-      el.setSelectionRange(el.value.length, el.value.length);
-      formula.track();
-    }, 0);
-    return () => clearTimeout(timer);
-  }, []);
-  return /* @__PURE__ */ u3(FormSheet, {
-    title: props.label,
-    subtitle: props.hint,
-    onClose: props.onClose,
-    actions: /* @__PURE__ */ u3(Button, {
-      variant: "primary",
-      size: "sm",
-      onClick: () => props.onClose(),
-      children: "Done"
-    }, undefined, false, undefined, this),
-    children: /* @__PURE__ */ u3("div", {
-      class: "lre-expr-page",
-      onPointerDown: formula.press,
-      children: [
-        /* @__PURE__ */ u3("div", {
-          class: "lre-expr-compose",
-          children: [
-            /* @__PURE__ */ u3("textarea", {
-              ref: formula.input,
-              class: props.invalid ? "lre-input lre-expr-input page invalid" : "lre-input lre-expr-input page",
-              rows: 6,
-              spellcheck: false,
-              autocapitalize: "off",
-              autocorrect: "off",
-              "aria-label": props.label,
-              value: props.value,
-              onInput: (event) => formula.edit(event.currentTarget.value),
-              onKeyUp: formula.track,
-              onClick: formula.track
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Suggestions, {
-              word: formula.word,
-              identifiers: props.identifiers,
-              functions: props.functions,
-              doc: props.doc,
-              scroll: props.mobile,
-              onPick: (token) => formula.insert(token, formula.word.length)
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(ExprReadout, {
-              text: props.value,
-              doc: props.doc
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Issues, {
-              issues: props.issues
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
-        /* @__PURE__ */ u3(Palette, {
-          functions: props.functions,
-          identifiers: props.identifiers,
-          doc: props.doc,
-          onInsert: (token) => formula.insert(token)
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function ExprEditor(props) {
-  const app = useApp();
-  const mobile = useSelect(app.host.viewport, isMobile);
-  const [tools, setTools] = d2(false);
-  const [page, setPage] = d2(false);
-  const functions = b2(() => exprFunctions(props.functions, props.mode ?? "formula"), [props.functions, props.mode]);
-  const formula = useFormula(props.value, props.onChange, mobile);
-  const balance = checkBalance(props.value);
-  const invalid = !balance.ok || props.lint.length > 0;
-  const issues = balance.message ? [{ severity: "error", path: "", code: "balance", message: balance.message }, ...props.lint] : props.lint;
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
-    "data-lre-expr": true,
-    onPointerDown: formula.press,
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "label lre-expr-head",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-expr-label",
-            children: [
-              props.label,
-              props.optional ? /* @__PURE__ */ u3("span", {
-                class: "lre-form-optional",
-                children: " · optional"
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            class: "lre-expr-actions",
-            children: [
-              /* @__PURE__ */ u3(IconButton, {
-                icon: "function",
-                label: "Operators and functions",
-                pressed: mobile ? undefined : tools,
-                onClick: () => mobile ? setPage(true) : setTools(!tools)
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(IconButton, {
-                icon: "expand",
-                label: "Open the formula editor",
-                onClick: () => setPage(true)
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("textarea", {
-        ref: formula.input,
-        class: invalid ? "lre-input lre-expr-input invalid" : "lre-input lre-expr-input",
-        rows: 2,
-        spellcheck: false,
-        autocapitalize: "off",
-        autocorrect: "off",
-        "aria-label": props.label,
-        value: props.value,
-        onInput: (event) => formula.edit(event.currentTarget.value),
-        onKeyUp: formula.track,
-        onClick: formula.track
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Suggestions, {
-        word: formula.word,
-        identifiers: props.identifiers,
-        functions,
-        doc: props.doc,
-        scroll: mobile,
-        onPick: (token) => formula.insert(token, formula.word.length)
-      }, undefined, false, undefined, this),
-      tools && !mobile ? /* @__PURE__ */ u3(Palette, {
-        functions,
-        identifiers: props.identifiers,
-        doc: props.doc,
-        inline: true,
-        onInsert: (token) => formula.insert(token)
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3(ExprReadout, {
-        text: props.value,
-        doc: props.doc
-      }, undefined, false, undefined, this),
-      props.hint ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: props.hint
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3(Issues, {
-        issues
-      }, undefined, false, undefined, this),
-      page ? /* @__PURE__ */ u3(ExprPage, {
-        label: props.label,
-        hint: props.hint,
-        value: props.value,
-        identifiers: props.identifiers,
-        functions,
-        doc: props.doc,
-        issues,
-        invalid,
-        mobile,
-        onChange: props.onChange,
-        onClose: () => setPage(false)
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
+var LEVEL_LABEL = { 0: "Off", 1: "Narrative", 2: "Simple", 3: "Detailed", 4: "Simulation" };
+var BANDS = ["principal", "supporting", "background"];
+var INTERRUPT_CLASSES = ["invitation", "bill", "decline", "incident", "quest", "rule", "arrival", "overdue", "needs", "weather"];
 
 // src/shared/tiers.ts
 var BAND_LABEL = { principal: "Leads", supporting: "Supporting", background: "Background" };
@@ -4249,7 +3750,7 @@ var COLLECTION_SPECS = {
     { kind: "number", key: "rank", label: "Rank (lower is reserved first)", step: 1 },
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
     { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v3) => v3 !== false },
-    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: SCOPE_LABEL, optional: true, hint: "Unset, it's what your character knows. The wider choices also tell the narrator what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
+    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: SCOPE_LABEL, optional: true, hint: "Unset, it follows the narrator's knowledge: a chat's own choice, else the world's (World → The narrator's knowledge), else the player's Settings → Narrator. Set, it reads what your character knows, also what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
     { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
     { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
     { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" }
@@ -4353,6 +3854,7 @@ var PART_SPECS = {
   meta: [
     { kind: "text", key: "name", label: "World name" },
     { kind: "ref", key: "pov", label: "Point of view", collection: "entities" },
+    { kind: "narrator", key: "narrator", label: "The narrator's knowledge" },
     {
       kind: "object",
       key: "start",
@@ -5186,6 +4688,1454 @@ function RealismThisChat(props) {
         disabled: busy || pending !== null,
         onChange: claims
       }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/shared/minds.ts
+var FIDELITIES = ["live", "near", "far", "background"];
+var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
+  here: 45,
+  nearby: 20,
+  mentioned: 40,
+  regard: 10,
+  knows: 10,
+  owner: 15,
+  track: 8,
+  roles: { antagonist: 20 },
+  rule: 5,
+  pending: 15,
+  band: { principal: 15, supporting: 5, background: 0 },
+  recent: 10
+});
+var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
+var DEFAULT_MINDS_MEMORY = Object.freeze({
+  witness: { show: 8 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
+  notes: { show: 8, keep: 24 },
+  commitments: { show: 8 },
+  salience: { halfLifeDays: 7, floor: 0.5 },
+  consolidate: { enabled: true, periodDays: 1 }
+});
+var DEFAULT_WORLD_MINDS = Object.freeze({
+  secrecy: "full",
+  weights: DEFAULT_FIDELITY_WEIGHTS,
+  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
+  always: null,
+  never: null,
+  memory: DEFAULT_MINDS_MEMORY,
+  holdings: {}
+});
+var MINDS_RANGES = {
+  weight: [-100, 200],
+  threshold: [0, 1000],
+  show: [0, 64],
+  keep: [1, 64],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
+  halfLifeDays: [0.1, 3650],
+  floor: [0, 5],
+  periodDays: [0.1, 365]
+};
+var num2 = (v3, [lo, hi], fallback) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= lo && v3 <= hi ? v3 : fallback;
+var whole = (v3, range, fallback) => Math.round(num2(v3, range, fallback));
+var wholeOrNone = (v3, range, fallback) => v3 === "none" ? "none" : typeof v3 === "number" && Number.isFinite(v3) && v3 >= range[0] && v3 <= range[1] ? Math.round(v3) : fallback;
+var obj2 = (v3) => isRecord(v3) ? v3 : {};
+function selectorOrNull(v3) {
+  if (!isRecord(v3))
+    return null;
+  const out = {};
+  const list2 = (x2) => Array.isArray(x2) && x2.every((s3) => typeof s3 === "string") ? x2.slice(0, 200) : undefined;
+  const ids = list2(v3.ids);
+  const kind = list2(v3.kind);
+  const tier = list2(v3.tier);
+  const memberOf = list2(v3.memberOf);
+  const tag = list2(v3.tag);
+  if (ids)
+    out.ids = ids;
+  if (kind)
+    out.kind = kind;
+  if (tier)
+    out.tier = tier;
+  if (memberOf)
+    out.memberOf = memberOf;
+  if (tag)
+    out.tag = tag;
+  if (isRecord(v3.class)) {
+    const classes = {};
+    for (const [facet, values] of Object.entries(v3.class)) {
+      const vs = list2(values);
+      if (safeKey(facet) && vs)
+        classes[facet] = vs;
+    }
+    out.class = classes;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
+  const m2 = obj2(raw);
+  const witness = obj2(m2.witness);
+  const recall = obj2(m2.recall);
+  const notes = obj2(m2.notes);
+  const commitments = obj2(m2.commitments);
+  const salience = obj2(m2.salience);
+  const consolidate = obj2(m2.consolidate);
+  return {
+    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
+    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
+    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
+    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+  };
+}
+function worldMindsOf(world) {
+  const raw = obj2(world.minds);
+  const w3 = obj2(raw.weights);
+  const band = obj2(w3.band);
+  const d3 = DEFAULT_FIDELITY_WEIGHTS;
+  const weight = (v3, fallback) => num2(v3, MINDS_RANGES.weight, fallback);
+  const roles = {};
+  const rawRoles = isRecord(w3.roles) ? w3.roles : d3.roles;
+  for (const [value, points] of Object.entries(rawRoles))
+    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
+      roles[value] = weight(points, 0);
+  const t3 = obj2(raw.thresholds);
+  const far = num2(t3.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num2(t3.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num2(t3.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  return {
+    secrecy: raw.secrecy === "brief" ? "brief" : "full",
+    weights: {
+      here: weight(w3.here, d3.here),
+      nearby: weight(w3.nearby, d3.nearby),
+      mentioned: weight(w3.mentioned, d3.mentioned),
+      regard: weight(w3.regard, d3.regard),
+      knows: weight(w3.knows, d3.knows),
+      owner: weight(w3.owner, d3.owner),
+      track: weight(w3.track, d3.track),
+      roles,
+      rule: weight(w3.rule, d3.rule),
+      pending: weight(w3.pending, d3.pending),
+      band: { principal: weight(band.principal, d3.band.principal), supporting: weight(band.supporting, d3.band.supporting), background: weight(band.background, d3.band.background) },
+      recent: weight(w3.recent, d3.recent)
+    },
+    thresholds: { live, near, far },
+    always: selectorOrNull(raw.always),
+    never: selectorOrNull(raw.never),
+    memory: memoryConfigOf(raw.memory),
+    holdings: authoredHoldingsOf(raw.holdings)
+  };
+}
+var AUTHORED_FACT_KINDS = ["lore", "track", "field"];
+function keptFromOf(v3, self = null) {
+  if (v3 === "everyone")
+    return "everyone";
+  if (!Array.isArray(v3))
+    return null;
+  const ids = [...new Set(v3.filter((id) => typeof id === "string" && id !== "" && id !== self))];
+  return ids.length > 0 ? ids : null;
+}
+function isConfidence(v3) {
+  return typeof v3 === "number" && Number.isFinite(v3) && v3 >= 0 && v3 <= 1;
+}
+function authoredHoldingsOf(raw) {
+  const out = {};
+  for (const [who, facts] of Object.entries(obj2(raw))) {
+    if (!safeKey(who) || who === "" || !isRecord(facts))
+      continue;
+    const held = {};
+    for (const [fact, v3] of Object.entries(facts)) {
+      const ref = safeKey(fact) ? parseFactId(fact) : null;
+      if (!ref || !AUTHORED_FACT_KINDS.includes(ref.kind) || !isRecord(v3))
+        continue;
+      const keptFrom = keptFromOf(v3.keptFrom, who);
+      held[fact] = { belief: HOLDING_BELIEFS.includes(v3.belief) ? v3.belief : "true", confidence: isConfidence(v3.confidence) ? v3.confidence : 1, ...keptFrom ? { keptFrom } : {} };
+    }
+    if (Object.keys(held).length > 0)
+      out[who] = held;
+  }
+  return out;
+}
+function limitOf(limit) {
+  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate", "knowledge"];
+function isMindPurpose(purpose) {
+  return MIND_PURPOSES.includes(purpose);
+}
+function worldMindTemplate(world, purpose) {
+  return Object.values(world.steps).filter((t3) => t3.purpose === purpose && t3.template.trim() !== "").sort((a3, b3) => a3.id.localeCompare(b3.id))[0];
+}
+var MIND_SOURCES = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life", "knowledge"];
+var DEFAULT_MIND_READS = Object.freeze({
+  pinned: { on: true, tokens: "none" },
+  activated: { on: true, tokens: 1600 },
+  reply: { on: true, tokens: "none" },
+  message: { on: true, tokens: "none" },
+  history: { on: false, messages: 8, tokens: 3000 },
+  summary: { on: false, tokens: "none" },
+  memory: { on: false, tokens: "none" },
+  thoughts: { on: false, tokens: "none" },
+  recall: { on: false },
+  routine: { on: true, tokens: 400 },
+  plans: { on: true, tokens: 400 },
+  life: { on: false, tokens: "none" },
+  knowledge: { on: true }
+});
+var KNOWLEDGE_BATCHES = ["scene", "character"];
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 6, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER] };
+var KNOWLEDGE_LIMITS = ["claimChars", "mindTokens", "narratorTokens", "stepTokens", "factsPerChat", "holdersPerFact", "factsPerTurn", "learningsPerTurn", "inPlayTurns", "perPerson"];
+function knowledgeLimitRange(limit) {
+  return limit === "claimChars" ? KNOWLEDGE_RANGES.claimChars : limit.endsWith("Tokens") ? KNOWLEDGE_RANGES.tokens : KNOWLEDGE_RANGES.count;
+}
+var KNOWLEDGE_TEXTS = Object.freeze({
+  mindTitle: "What you know",
+  mindLead: "The facts you hold and how you came by them. You know only these and what is in front of you: never act on, hint at or guess anything that isn't here.",
+  known: "{{claim}} ({{how}})",
+  suspected: "Suspects: {{claim}} ({{how}}, about {{percent}}% sure)",
+  disbelieved: "Doesn't believe: {{claim}} ({{how}})",
+  unsure: "Unsure whether: {{claim}} ({{how}})",
+  keeps: "keeps it from {{whom}}",
+  everyone: "everyone",
+  authored: "from the start",
+  witnessed: "saw it",
+  told: "told by {{by}}",
+  inferred: "worked it out",
+  guessed: "a guess",
+  person: "{{name}}: {{line}}",
+  notKnown: "{{name}} doesn't know: {{claim}}",
+  stepHappened: "What happened this turn",
+  stepPresent: "Who could perceive it",
+  stepPeople: "What each of them already knows, and has witnessed lately",
+  stepFacts: "Facts in play (reuse these by id)",
+  stepPerson: "{{name}} (id: {{id}})",
+  stepYou: '{{name}} (id: {{id}}; the player character, "you")',
+  stepSaid: "{{name}} said or did: {{text}}",
+  stepStory: "The story, as written: {{text}}",
+  stepThroughout: "there throughout",
+  stepLeft: "there from the start, then left behind partway",
+  stepCame: "came in during the turn, or was met at its end: perceived only what came after",
+  stepOpen: "(an open question)",
+  stepFalse: "(false)",
+  stepPinned: "Pinned lore",
+  stepTraits: "Is like:",
+  stepHolds: "Holds:",
+  stepNothing: "nothing the story tracks yet",
+  stepWitnessed: "Witnessed lately:",
+  stepSomeone: "someone",
+  stepAnswer: [
+    "- facts: the new facts this turn establishes or raises, each one short sentence, with a ref of your own (n1, n2…) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
+    '- learned: who came to know a fact this turn, and how: witnessed (they saw it, heard it said aloud or read it themselves, so they were there for it) or told (by: who told them, who must already know it). Name the player character "you". keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.',
+    "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
+    "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`)
+});
+var KNOWLEDGE_TEXT_IDS = Object.keys(KNOWLEDGE_TEXTS);
+var MINDS_PRESETS = Object.freeze({
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+});
+function defaultMindsSettings(preset = "standard") {
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS) };
+}
+var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
+var MIND_PROMPT_MAX = 20000;
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
+var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+function planInForce(p3) {
+  return p3.source !== "mind";
+}
+var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
+var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MIND_APPROACHES = ["reactive", "proactive"];
+var MIND_TEXT_CAPS = {
+  monologue: 1200,
+  depiction: 600,
+  intent: 300,
+  gmIntent: 600,
+  reaction: 200,
+  reactions: 4,
+  plans: 4,
+  planWhat: 160,
+  mood: 40,
+  interrupt: 200,
+  note: 300,
+  notes: 4,
+  commitment: 240,
+  commitments: 3,
+  summary: 900,
+  told: 240,
+  tolds: 3,
+  reason: 160
+};
+var HOLDING_HOWS = ["authored", "witnessed", "told", "inferred", "guessed"];
+var HOLDING_BELIEFS = ["true", "false", "uncertain"];
+var escapePart = (s3) => s3.replace(/%/g, "%25").replace(/:/g, "%3A");
+var unescapePart = (s3) => s3.replace(/%(25|3A)/gi, (m2) => m2 === "%25" ? "%" : ":");
+function factId(ref) {
+  switch (ref.kind) {
+    case "lore":
+      return `lore:${escapePart(ref.lore)}`;
+    case "wi":
+      return `wi:${escapePart(ref.book)}:${escapePart(ref.entry)}${ref.mark === null ? "" : `:${ref.mark}`}`;
+    case "track":
+      return `track:${escapePart(ref.track)}:${escapePart(ref.stage)}`;
+    case "field":
+      return `field:${escapePart(ref.entity)}:${escapePart(ref.field)}`;
+    case "claim":
+      return `claim:${escapePart(ref.hash)}`;
+  }
+}
+function parseFactId(id) {
+  const [kind = "", ...raw] = id.split(":");
+  if (raw.length === 0 || raw.some((p3) => p3 === ""))
+    return null;
+  const [a3 = "", b3 = "", c3 = ""] = raw.map(unescapePart);
+  switch (kind) {
+    case "lore":
+      return raw.length === 1 ? { kind: "lore", lore: a3 } : null;
+    case "wi":
+      if (raw.length === 2)
+        return { kind: "wi", book: a3, entry: b3, mark: null };
+      return raw.length === 3 && /^\d+$/.test(c3) && Number.isSafeInteger(Number(c3)) ? { kind: "wi", book: a3, entry: b3, mark: Number(c3) } : null;
+    case "track":
+      return raw.length === 2 ? { kind: "track", track: a3, stage: b3 } : null;
+    case "field":
+      return raw.length === 2 ? { kind: "field", entity: a3, field: b3 } : null;
+    case "claim":
+      return raw.length === 1 ? { kind: "claim", hash: a3 } : null;
+    default:
+      return null;
+  }
+}
+function witnessRef(entry) {
+  return `witness:${hashParts("minds.witness", String(entry.at), entry.how, entry.by ?? "", entry.place ?? "", entry.what).slice(0, 10)}`;
+}
+var MINDS_SLOT = "minds";
+var KNOWLEDGE_SLOT = "knowledge";
+var KNOWN_PANEL = "minds.known";
+var MIND_PROMPT_DEFAULTS = Object.freeze({
+  mind: [
+    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
+    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
+  ].join(`
+`),
+  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
+  ].join(`
+`),
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
+  knowledge: [
+    "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
+    "Record only what the turn as written gives each person. Someone learns by witnessing what happens in front of them (seeing it, hearing it said aloud, reading it) or by being told it; whoever wasn't there witnessed nothing, and whoever tells something must already know it. Someone may also work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
+    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it; make a new one only for what the turn establishes or raises. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold."
+  ].join(`
+`)
+});
+var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"who": ["a name"], "fact": "a fact id or n1", "how": "witnessed", "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
+var MIND_ANSWER_FORMATS = Object.freeze({
+  mind: [
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
+    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
+    "- intent: what they mean to do next, in one sentence.",
+    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    "- mood: one or two words.",
+    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
+  ].join(`
+`),
+  memory: [
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
+    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
+    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
+    "- told: what they told whom in this turn, in a few words each.",
+    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
+  knowledge: `${KNOWLEDGE_ANSWER_SHAPE}
+${KNOWLEDGE_TEXTS.stepAnswer}`
+});
+var MEMORY_ANSWER_V2 = MIND_ANSWER_FORMATS.memory.replace(', "told": [{"to": ["a name"], "what": "..."}]', "").split(`
+`).filter((line) => !line.startsWith("- told:")).join(`
+`);
+
+// src/shared/settings.ts
+var REASONING_CHOICES = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
+var HELPER_MAX_TOKENS = 8192;
+var SAMPLING_PARAMS = [
+  { key: "temperature", label: "Temperature", min: 0, max: 2, step: 0.05, integer: false, fallback: 1 },
+  { key: "top_p", label: "Top P", min: 0, max: 1, step: 0.01, integer: false, fallback: 1 },
+  { key: "top_k", label: "Top K", min: 0, max: 1000, step: 1, integer: true, fallback: 40 },
+  { key: "frequency_penalty", label: "Frequency penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 },
+  { key: "presence_penalty", label: "Presence penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 }
+];
+var DEFAULT_HELPER = Object.freeze({ connectionId: null, model: null, effort: "inherit", maxTokens: HELPER_MAX_TOKENS, params: Object.freeze({}) });
+function helperCallOf(config, helper) {
+  const route = config?.route;
+  const own = route?.connectionId ?? null;
+  return {
+    connectionId: own ?? helper.connectionId,
+    model: own !== null ? route?.model ?? null : helper.model,
+    effort: route?.effort ?? helper.effort,
+    maxTokens: config?.maxTokens ?? helper.maxTokens,
+    params: { ...helper.params, ...route?.params }
+  };
+}
+var UNREASONED_STEPS = ["memory", "consolidate", "knowledge", "skip"];
+var UNREASONED_ROUTE = Object.freeze({ provider: "helper", connectionId: null, model: null, effort: "off" });
+var LORE_POLICIES = ["none", "prefetch", "lookup", "prefetch+lookup"];
+var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
+function stepLoreOf(config) {
+  return config?.lore ?? DEFAULT_STEP_LORE;
+}
+function stepConfigOf(steps, purpose) {
+  const saved = steps[purpose];
+  if (isMindPurpose(purpose))
+    return saved ?? { enabled: purpose !== "skip", signals: [], ...UNREASONED_STEPS.includes(purpose) ? { route: { ...UNREASONED_ROUTE } } : {} };
+  if (purpose !== "puzzle.answer")
+    return saved ?? { enabled: false, signals: [] };
+  const signals = ["always"];
+  return saved ? saved.signals.length > 0 ? saved : { ...saved, signals } : { enabled: true, signals };
+}
+var DEFAULT_RECENT = Object.freeze({ on: true, messages: 8, tokens: 3000 });
+var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
+function recentOf(purpose, config) {
+  return config?.recent ?? (purpose === "interpret" ? DEFAULT_RECENT : RECENT_OFF);
+}
+var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
+var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
+var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
+var TIMELAPSE_REACH_MINUTES = 366 * 1440;
+var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition", "learn", "reveal"];
+var EXTRACTION_DEFAULTS = Object.freeze({
+  time_advance: "auto",
+  location: "auto",
+  condition: "auto",
+  routine: "auto",
+  regard: "confirm",
+  transfer: "confirm",
+  spawn: "confirm",
+  life: "confirm",
+  knows: "confirm",
+  give: "confirm",
+  purchase: "confirm",
+  take: "confirm",
+  drop: "confirm",
+  use_up: "confirm",
+  wear: "confirm",
+  lose: "confirm",
+  item_condition: "confirm",
+  learn: "auto",
+  reveal: "confirm"
+});
+var EXTRACTION_LEARNING = Object.freeze({
+  promoteAt: 0.9,
+  minProposals: 30,
+  window: 30,
+  demoteUndoRate: 0.1
+});
+var NARRATOR_KNOWLEDGE = ["scene", "pov"];
+var NARRATOR_SECRETS = ["marked", "omit"];
+var NARRATOR_DEFAULTS = Object.freeze({ knowledge: "scene", secrets: "marked" });
+var NARRATOR_KNOWLEDGE_LABEL = { scene: "Everyone in the scene", pov: "Your character's only" };
+var NARRATOR_SECRETS_LABEL = { marked: "Marked", omit: "Left out" };
+var SECRET_MARK_NEEDS = { known: ["{{text}}", "{{known}}"], kept: ["{{text}}", "{{kept}}"], both: ["{{text}}", "{{known}}", "{{kept}}"], everyone: [], rule: ["{{forms}}"] };
+function secretMarkProblem2(part, text) {
+  if (text.trim() === "")
+    return "It can't be empty.";
+  if (text.length > MIND_PROMPT_MAX)
+    return `At most ${MIND_PROMPT_MAX.toLocaleString("en-US")} characters.`;
+  const missing = SECRET_MARK_NEEDS[part].filter((p3) => !text.includes(p3));
+  return missing.length > 0 ? `It needs ${missing.join(" and ")}.` : null;
+}
+function narratorViewOf(raw) {
+  if (!isRecord(raw))
+    return null;
+  const knowledge = NARRATOR_KNOWLEDGE.find((k2) => k2 === raw.knowledge);
+  const secrets = NARRATOR_SECRETS.find((s3) => s3 === raw.secrets);
+  return knowledge && secrets ? { knowledge, secrets } : null;
+}
+var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
+
+// src/frontend/settings/prompt-editor.tsx
+function isVarsKey(v3) {
+  return typeof v3 === "string" && hasOwn(STEP_VARS, v3);
+}
+function PlaceholderList(props) {
+  return /* @__PURE__ */ u3("dl", {
+    class: "lre-minds-vars-list",
+    children: props.vars.map((v3) => /* @__PURE__ */ u3("div", {
+      class: "lre-minds-var",
+      "data-lre-var": v3.name,
+      children: [
+        /* @__PURE__ */ u3("dt", {
+          children: /* @__PURE__ */ u3("code", {
+            children: `{{${v3.name}}}`
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("dd", {
+          children: v3.holds
+        }, undefined, false, undefined, this)
+      ]
+    }, v3.name, true, undefined, this))
+  }, undefined, false, undefined, this);
+}
+function VarsPanel(props) {
+  const row = props.output === "effects" ? { ...STEP_VARS.extract, note: undefined } : STEP_VARS[props.step];
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-vars",
+    "data-lre-vars": props.step,
+    children: /* @__PURE__ */ u3(Disclosure, {
+      summary: `Placeholders (${row.phase})`,
+      children: [
+        row.vars.length === 0 ? /* @__PURE__ */ u3("p", {
+          class: "lre-minds-note",
+          children: "No placeholders: the prompt is sent as you write it."
+        }, undefined, false, undefined, this) : null,
+        row.vars.length > 0 ? /* @__PURE__ */ u3(PlaceholderList, {
+          vars: row.vars.map((name) => ({ name, holds: VAR_TEXT[name] ?? "" }))
+        }, undefined, false, undefined, this) : null,
+        row.note ? /* @__PURE__ */ u3("p", {
+          class: "lre-minds-note",
+          children: row.note
+        }, undefined, false, undefined, this) : null,
+        row.vars.length > 0 ? /* @__PURE__ */ u3("p", {
+          class: "lre-minds-note",
+          children: "Each holds only what your character may know: a line that would give away a secret is left out."
+        }, undefined, false, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function OwnVarsPanel(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-vars",
+    "data-lre-vars": "own",
+    children: /* @__PURE__ */ u3(Disclosure, {
+      summary: "Placeholders",
+      children: props.vars.length === 0 ? /* @__PURE__ */ u3("p", {
+        class: "lre-minds-note",
+        children: "No placeholders: it is used as you write it."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(PlaceholderList, {
+        vars: props.vars
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function PromptEditor(props) {
+  const noun = props.noun ?? "prompt";
+  const saved = props.value ?? props.builtIn ?? "";
+  const [text, setText] = d2(saved);
+  A(() => setText(saved), [saved]);
+  const save = props.save(text);
+  const tooLong = text.length > props.max;
+  const problem = tooLong || !props.problem ? null : props.problem(text);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-prompt",
+    "data-lre-minds-prompt": props.id,
+    children: /* @__PURE__ */ u3(Disclosure, {
+      summary: /* @__PURE__ */ u3("span", {
+        class: "lre-minds-prompt-head",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-minds-prompt-text",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-minds-prompt-title",
+                children: props.label
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-minds-prompt-sub",
+                children: props.note
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          props.value !== undefined ? /* @__PURE__ */ u3(Badge, {
+            tone: "accent",
+            children: "Your own"
+          }, undefined, false, undefined, this) : props.builtIn !== undefined ? /* @__PURE__ */ u3(Badge, {
+            children: "Built-in"
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+            children: "None added"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      children: [
+        /* @__PURE__ */ u3("textarea", {
+          class: "lre-input lre-minds-prompt-input",
+          rows: props.rows ?? 10,
+          "aria-label": `${props.label} ${noun}`,
+          placeholder: props.builtIn === undefined ? "Nothing added: the built-in instructions run alone." : undefined,
+          value: text,
+          disabled: props.busy,
+          onInput: (event) => setText(event.currentTarget.value)
+        }, undefined, false, undefined, this),
+        tooLong ? /* @__PURE__ */ u3("div", {
+          class: "lre-set-warn",
+          role: "note",
+          children: [
+            /* @__PURE__ */ u3(Icon, {
+              name: "alert",
+              size: 16
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              children: [
+                "Too long: at most ",
+                props.max.toLocaleString(),
+                " characters."
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null,
+        problem ? /* @__PURE__ */ u3("div", {
+          class: "lre-set-warn",
+          role: "note",
+          children: [
+            /* @__PURE__ */ u3(Icon, {
+              name: "alert",
+              size: 16
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              children: problem
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null,
+        /* @__PURE__ */ u3("div", {
+          class: "lre-minds-actions",
+          children: [
+            /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              variant: "primary",
+              disabled: props.busy || save === null || text === saved,
+              onClick: () => save && props.patch(save),
+              children: "Save"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              variant: "ghost",
+              disabled: props.busy || text === saved,
+              onClick: () => setText(saved),
+              children: "Revert"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              icon: "undo",
+              disabled: props.busy || props.value === undefined,
+              onClick: () => props.patch(props.save(null) ?? {}),
+              children: "Reset to the default"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        typeof props.vars === "string" ? /* @__PURE__ */ u3(VarsPanel, {
+          step: props.vars
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(OwnVarsPanel, {
+          vars: props.vars
+        }, undefined, false, undefined, this),
+        props.builtIn !== undefined ? /* @__PURE__ */ u3("div", {
+          class: "lre-minds-default",
+          "data-lre-built-in": "replaced",
+          children: /* @__PURE__ */ u3(Disclosure, {
+            summary: `The built-in ${noun} (read-only)`,
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-minds-note",
+                children: `Your ${noun} starts from this and replaces it; Reset to the default goes back to it.`
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("pre", {
+                class: "lre-minds-code",
+                children: props.builtIn
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this) : props.adds !== undefined ? /* @__PURE__ */ u3("div", {
+          class: "lre-minds-default",
+          "data-lre-built-in": "added",
+          children: /* @__PURE__ */ u3(Disclosure, {
+            summary: "The built-in instructions (read-only)",
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-minds-note",
+                children: "Your prompt goes before these, which it can't change. They're made fresh each turn from the scene, so here is what they hold:"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("pre", {
+                class: "lre-minds-code",
+                children: props.adds
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this) : null,
+        props.children
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
+// src/frontend/settings/narrator.tsx
+var MARK_PARTS = Object.keys(SECRET_MARK_NEEDS);
+var KNOWLEDGE_CHOICES = NARRATOR_KNOWLEDGE.map((value) => ({ value, label: NARRATOR_KNOWLEDGE_LABEL[value] }));
+var SECRETS_CHOICES = NARRATOR_SECRETS.map((value) => ({ value, label: NARRATOR_SECRETS_LABEL[value] }));
+var KNOWLEDGE_HELP = {
+  scene: "What every person in the scene knows, with what your character doesn't know marked for the narrator.",
+  pov: "Only what your character knows."
+};
+var SECRETS_HELP = {
+  marked: "A line carrying a secret's words goes in marked as a secret, with whom it is known to or kept from.",
+  omit: "A line carrying a secret's words is left out."
+};
+function narratorViewSummary(view) {
+  return `${NARRATOR_KNOWLEDGE_LABEL[view.knowledge]} · secrets ${NARRATOR_SECRETS_LABEL[view.secrets].toLowerCase()}`;
+}
+function NarratorViewControl(props) {
+  const { knowledge, secrets } = props.value;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-narrator-view": true,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Whose knowledge the narrator gets"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Seg, {
+            label: "Whose knowledge the narrator gets",
+            value: knowledge,
+            options: KNOWLEDGE_CHOICES,
+            disabled: props.disabled,
+            onChange: (next) => props.onChange({ knowledge: next, secrets })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: KNOWLEDGE_HELP[knowledge]
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Secrets"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Seg, {
+            label: "Secrets",
+            value: secrets,
+            options: SECRETS_CHOICES,
+            disabled: props.disabled,
+            onChange: (next) => props.onChange({ knowledge, secrets: next })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: SECRETS_HELP[secrets]
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function secretMarkPatch(part, text) {
+  if (text === null || text.trim() === "" || text.trim() === SECRET_MARK_WORDING[part].trim())
+    return { narrator: { marks: { [part]: null } } };
+  return secretMarkProblem2(part, text) === null ? { narrator: { marks: { [part]: text } } } : null;
+}
+var MARK_LABEL = {
+  known: "Known to some",
+  kept: "Kept from some",
+  both: "Known to some, kept from others",
+  everyone: "The word for everyone",
+  rule: "What the narrator is told a mark means"
+};
+var MARK_NOTE = {
+  known: "A secret some people know, marked with who knows it.",
+  kept: "A secret marked with whom it is kept from.",
+  both: "A secret marked with both who knows it and whom it is kept from.",
+  everyone: "Used for {{kept}} when a secret is kept from everyone.",
+  rule: "The sentence in the narrator's rules that explains a secret's mark, every turn."
+};
+var MARK_MAY_HOLD = { rule: ["{{everyone}}"] };
+var MARK_VAR_HOLDS = {
+  text: "The secret's words.",
+  known: "Who knows it, names joined with commas.",
+  kept: "Whom it is kept from, names joined with commas, or the word for everyone when it's kept from everyone.",
+  forms: 'Each way a secret is marked in your wording above, "…" for its words and names, joined with "or".',
+  everyone: "The word for everyone, as above."
+};
+function NarratorPage(props) {
+  const { narrator, busy } = props;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack lre-minds-set",
+    "data-lre-settings-page": "narrator",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-set-lead",
+        children: "What the narrator is told each turn: whose knowledge, and what of a secret."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-minds-body",
+          children: [
+            /* @__PURE__ */ u3(NarratorViewControl, {
+              value: narrator,
+              disabled: busy,
+              onChange: (next) => props.patch({ narrator: { knowledge: next.knowledge, secrets: next.secrets } })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("p", {
+              class: "lre-minds-note",
+              children: "This is your default. A world's own (Build → World) and a chat's own choice (GM → This chat → Knowledge) come before it. A change applies from each chat's next turn."
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "How a secret is marked",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-minds-prompts",
+          children: [
+            /* @__PURE__ */ u3("p", {
+              class: "lre-minds-note lre-minds-prompts-lead",
+              children: "When secrets are marked, a line carrying a secret's words goes to the narrator in these words, and the narrator's rules explain them in the last. Each part needs its placeholders."
+            }, undefined, false, undefined, this),
+            MARK_PARTS.map((part) => /* @__PURE__ */ u3(PromptEditor, {
+              id: `mark-${part}`,
+              label: MARK_LABEL[part],
+              note: MARK_NOTE[part],
+              noun: "wording",
+              builtIn: SECRET_MARK_WORDING[part],
+              value: narrator.marks[part],
+              max: MIND_PROMPT_MAX,
+              vars: [...SECRET_MARK_NEEDS[part], ...MARK_MAY_HOLD[part] ?? []].map((p3) => p3.replace(/^\{\{|\}\}$/g, "")).map((name) => ({ name, holds: MARK_VAR_HOLDS[name] ?? "" })),
+              rows: part === "rule" ? 6 : 3,
+              busy,
+              save: (text) => secretMarkPatch(part, text),
+              problem: (text) => text.trim() === "" ? null : secretMarkProblem2(part, text),
+              patch: props.patch
+            }, part, false, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/expr-editor.tsx
+var WORD_OPERATORS = ["and", "or", "not"];
+var OPERATOR_GROUPS = [
+  {
+    title: "Arithmetic",
+    keys: [
+      ["+", "Plus"],
+      ["-", "Minus"],
+      ["*", "Times"],
+      ["/", "Divided by"],
+      ["%", "Remainder"],
+      ["(", "Open bracket"],
+      [")", "Close bracket"]
+    ]
+  },
+  {
+    title: "Compare",
+    keys: [
+      ["==", "Equals"],
+      ["!=", "Doesn't equal"],
+      ["<", "Less than"],
+      ["<=", "At most"],
+      [">", "More than"],
+      [">=", "At least"]
+    ]
+  },
+  {
+    title: "Logic",
+    keys: [
+      ["and", "And"],
+      ["or", "Or"],
+      ["not", "Not"],
+      ["?", "Then"],
+      [":", "Otherwise"]
+    ]
+  }
+];
+function exprFunctions(functions, mode) {
+  const names = new Set(functions);
+  for (const name of EFFECT_ONLY_FUNCTIONS) {
+    if (mode === "effect")
+      names.add(name);
+    else
+      names.delete(name);
+  }
+  return [...names].sort();
+}
+function exprCompletions(word, identifiers, functions) {
+  if (word === "")
+    return [];
+  const ids = identifiers.filter((id) => id.startsWith(word) && id !== word);
+  const calls = functions.filter((name) => name.startsWith(word)).map((name) => `${name}(`);
+  return [...ids, ...calls].slice(0, 8);
+}
+function checkBalance(text) {
+  const stack = [];
+  const pairs = { ")": "(", "]": "[", "}": "{" };
+  let quote = null;
+  for (let i3 = 0;i3 < text.length; i3 += 1) {
+    const ch = text[i3] ?? "";
+    if (quote) {
+      if (ch === "\\")
+        i3 += 1;
+      else if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'")
+      quote = ch;
+    else if (ch === "(" || ch === "[" || ch === "{")
+      stack.push(ch);
+    else if (ch === ")" || ch === "]" || ch === "}") {
+      if (stack.pop() !== pairs[ch])
+        return { ok: false, message: `Unexpected ${ch} at ${i3 + 1}` };
+    }
+  }
+  if (quote)
+    return { ok: false, message: "Unclosed string" };
+  if (stack.length > 0)
+    return { ok: false, message: `${stack.length} unclosed ${stack.at(-1)}` };
+  return { ok: true, message: null };
+}
+var KEYWORDS = { and: true, or: true, not: true, true: true, false: true, null: true };
+var CLOCK_WORDS = {
+  clock: "the time",
+  minute: "the minute of the day",
+  hour: "the hour",
+  day: "the day number",
+  weekday: "the weekday",
+  date: "the day of the month",
+  month: "the month",
+  year: "the year",
+  daypart: "the part of the day"
+};
+var BINDING_WORDS = { actor: "the actor", target: "the target" };
+var DOMAIN_IDS = DOMAINS;
+var NAME_START = /[A-Za-z_]/;
+var NAME_PART = /\w/;
+function formulaNames(text) {
+  const out = [];
+  const skipSpace = (from) => {
+    let j3 = from;
+    while (/\s/.test(text.charAt(j3)))
+      j3 += 1;
+    return j3;
+  };
+  const nameEnd = (from) => {
+    let j3 = from + 1;
+    while (NAME_PART.test(text.charAt(j3)))
+      j3 += 1;
+    return j3;
+  };
+  let i3 = 0;
+  while (i3 < text.length) {
+    const c3 = text.charAt(i3);
+    if (c3 === '"' || c3 === "'") {
+      i3 += 1;
+      while (i3 < text.length && text.charAt(i3) !== c3)
+        i3 += text.charAt(i3) === "\\" ? 2 : 1;
+      i3 += 1;
+    } else if (NAME_START.test(c3)) {
+      let end = nameEnd(i3);
+      const path = [text.slice(i3, end)];
+      for (;; ) {
+        const dot = skipSpace(end);
+        if (text.charAt(dot) !== "." || /[0-9]/.test(text.charAt(dot + 1)))
+          break;
+        const start = skipSpace(dot + 1);
+        if (!NAME_START.test(text.charAt(start)))
+          break;
+        end = nameEnd(start);
+        path.push(text.slice(start, end));
+      }
+      out.push({ path, call: path.length === 1 && text.charAt(skipSpace(end)) === "(" });
+      i3 = end;
+    } else {
+      i3 += 1;
+    }
+  }
+  return out;
+}
+function fieldLabel(doc, field, kind) {
+  if (!doc)
+    return;
+  const preferred = kind !== undefined && hasOwn(doc.kinds, kind) ? doc.kinds[kind] : undefined;
+  for (const def of preferred ? [preferred, ...Object.values(doc.kinds)] : Object.values(doc.kinds)) {
+    const label = hasOwn(def.fields, field) ? def.fields[field]?.label : undefined;
+    if (label)
+      return label;
+  }
+  return;
+}
+function fieldWords(doc, path, kind) {
+  const [field = "", ...deeper] = path;
+  const label = fieldLabel(doc, field, kind);
+  const words = label === undefined ? field : /^[A-Z](?![A-Z])/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
+  return [words, ...deeper].join(".");
+}
+function nameOf(doc, id) {
+  if (!doc)
+    return;
+  if (hasOwn(doc.entities, id))
+    return doc.entities[id]?.name || undefined;
+  if (hasOwn(doc.places, id))
+    return doc.places[id]?.name || undefined;
+  if (hasOwn(doc.tracks, id))
+    return doc.tracks[id]?.label || undefined;
+  return fieldLabel(doc, id);
+}
+function readOf(path, doc) {
+  const id = path.join(".");
+  const [head = "", ...rest] = path;
+  const [second = ""] = rest;
+  if (head === "self")
+    return rest.length === 0 ? { id, label: "self", what: "self" } : { id, label: `own ${fieldWords(doc, rest)}`, what: "own field" };
+  const binding = hasOwn(BINDING_WORDS, head) ? BINDING_WORDS[head] : undefined;
+  if (binding !== undefined)
+    return { id, label: rest.length === 0 ? binding : `${binding}'s ${fieldWords(doc, rest)}`, what: "param" };
+  if (head === "pov") {
+    const kind = doc && hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov]?.kind : undefined;
+    return { id, label: rest.length === 0 ? "the POV character" : `the POV character's ${fieldWords(doc, rest, kind)}`, what: "pov" };
+  }
+  if (head === "here")
+    return { id, label: rest.length === 0 ? "the current place" : `the ${fieldWords(doc, rest)} here`, what: "here" };
+  if (head === "stage" && rest.length === 1) {
+    const track2 = (doc && hasOwn(doc.tracks, second) ? doc.tracks[second]?.label : undefined) || second;
+    return { id, label: `the stage of “${track2}”`, what: "track stage" };
+  }
+  if (head === "level" && rest.length === 1 && DOMAIN_IDS.includes(second))
+    return { id, label: `the ${second} level`, what: "level" };
+  if (rest.length === 0 && hasOwn(CLOCK_WORDS, head))
+    return { id, label: CLOCK_WORDS[head] ?? head, what: "the clock" };
+  if (doc && hasOwn(doc.entities, head)) {
+    const entity = doc.entities[head];
+    const name = entity?.name || head;
+    return rest.length === 0 ? { id, label: name, what: "entity" } : { id, label: `${name}'s ${fieldWords(doc, rest, entity?.kind)}`, what: "entity field" };
+  }
+  if (doc && hasOwn(doc.places, head)) {
+    const name = doc.places[head]?.name || head;
+    return rest.length === 0 ? { id, label: name, what: "place" } : { id, label: `${name}'s ${fieldWords(doc, rest)}`, what: "place field" };
+  }
+  if (doc && rest.length === 0) {
+    if (hasOwn(doc.tracks, head))
+      return { id, label: `the track “${doc.tracks[head]?.label || head}”`, what: "track" };
+    if (hasOwn(doc.checks, head))
+      return { id, label: `the ${head} check`, what: "check" };
+    if (Object.values(doc.kinds).some((def) => hasOwn(def.fields, head)))
+      return { id, label: `own ${fieldWords(doc, path)}`, what: "own field" };
+  }
+  return { id, label: id, what: "param" };
+}
+function exprReads(text, doc) {
+  const reads = [];
+  const functions = [];
+  for (const { path, call } of formulaNames(text)) {
+    const head = path[0] ?? "";
+    if (hasOwn(KEYWORDS, head))
+      continue;
+    if (call) {
+      if (!functions.includes(head))
+        functions.push(head);
+    } else {
+      const id = path.join(".");
+      if (!reads.some((read) => read.id === id))
+        reads.push(readOf(path, doc));
+    }
+  }
+  return { reads, functions };
+}
+function exprSummary(text, doc) {
+  const { reads, functions } = exprReads(text, doc);
+  const labels = [...new Set(reads.map((read) => read.label))];
+  const [reading = "", using = ""] = [labels, functions].map((words) => words.length <= 1 ? words[0] ?? "" : `${words.slice(0, -1).join(", ")} and ${words.at(-1) ?? ""}`);
+  const sentence = reading === "" ? "Reads nothing" : `Reads ${reading}`;
+  return using === "" ? `${sentence}.` : `${sentence}; uses ${using}.`;
+}
+function ExprReadout(props) {
+  if (props.text.trim() === "")
+    return null;
+  return /* @__PURE__ */ u3("p", {
+    class: "lre-expr-readout",
+    children: exprSummary(props.text, props.doc)
+  }, undefined, false, undefined, this);
+}
+function withToken(value, start, end, token, replace) {
+  const before = value.slice(0, Math.max(0, start - replace));
+  const text = WORD_OPERATORS.includes(token) ? ` ${token} ` : token;
+  return { value: before + text + value.slice(end), caret: before.length + text.length };
+}
+function useFormula(value, onChange, mobile) {
+  const input = T2(null);
+  const typing = T2(false);
+  const [caret, setCaret] = d2(null);
+  const word = /[A-Za-z_][\w.]*$/.exec(value.slice(0, Math.min(caret ?? value.length, value.length)))?.[0] ?? "";
+  const track2 = () => setCaret(input.current?.selectionStart ?? null);
+  return {
+    input,
+    word,
+    track: track2,
+    press: () => {
+      typing.current = document.activeElement === input.current;
+    },
+    edit: (text) => {
+      onChange(text);
+      track2();
+    },
+    insert: (token, replace = 0) => {
+      const el = input.current;
+      const next = withToken(value, el?.selectionStart ?? value.length, el?.selectionEnd ?? value.length, token, replace);
+      const focus = !mobile || typing.current;
+      typing.current = false;
+      onChange(next.value);
+      setCaret(next.caret);
+      queueMicrotask(() => {
+        if (focus)
+          el?.focus({ preventScroll: true });
+        el?.setSelectionRange(next.caret, next.caret);
+      });
+    }
+  };
+}
+function Suggestions(props) {
+  const tokens = exprCompletions(props.word, props.identifiers, props.functions);
+  if (tokens.length === 0)
+    return null;
+  return /* @__PURE__ */ u3("div", {
+    class: props.scroll ? "lre-form-chips lre-expr-suggest scroll" : "lre-form-chips lre-expr-suggest",
+    role: "group",
+    "aria-label": "Suggestions",
+    children: tokens.map((token) => {
+      const name = token.endsWith("(") ? undefined : nameOf(props.doc, token);
+      const shown = name !== undefined && name.toLowerCase().replace(/[_\s]+/g, " ").trim() !== token.toLowerCase().replace(/_/g, " ") ? name : undefined;
+      return /* @__PURE__ */ u3(Chip, {
+        label: shown !== undefined ? `${token}, ${shown}` : undefined,
+        onPress: () => props.onPick(token),
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-expr-token",
+            children: token
+          }, undefined, false, undefined, this),
+          shown !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-expr-chip-name",
+            children: shown
+          }, undefined, false, undefined, this) : null
+        ]
+      }, token, true, undefined, this);
+    })
+  }, undefined, false, undefined, this);
+}
+function KeyGroup(props) {
+  const id = P2();
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-expr-group",
+    role: "group",
+    "aria-labelledby": id,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        id,
+        class: "lre-expr-group-title",
+        children: props.title
+      }, undefined, false, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function KeyFilter(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-search",
+    children: [
+      /* @__PURE__ */ u3(Icon, {
+        name: "search",
+        size: 16
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        type: "search",
+        placeholder: props.label,
+        "aria-label": props.label,
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: false,
+        value: props.value,
+        onInput: (event) => props.onInput(event.currentTarget.value),
+        onKeyDown: (event) => {
+          if (event.key !== "Escape" || props.value === "")
+            return;
+          event.preventDefault();
+          props.onInput("");
+        }
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Palette(props) {
+  const [callQuery, setCallQuery] = d2("");
+  const [nameQuery, setNameQuery] = d2("");
+  const names = b2(() => props.identifiers.map((id) => ({ id, name: nameOf(props.doc, id) })), [props.identifiers, props.doc]);
+  const callNeedle = callQuery.trim().toLowerCase();
+  const nameNeedle = nameQuery.trim().toLowerCase();
+  const calls = props.functions.filter((name) => name.toLowerCase().includes(callNeedle));
+  const shown = names.filter((n2) => n2.id.toLowerCase().includes(nameNeedle) || (n2.name ?? "").toLowerCase().includes(nameNeedle));
+  return /* @__PURE__ */ u3("div", {
+    class: props.inline ? "lre-expr-palette inline" : "lre-expr-palette",
+    children: [
+      OPERATOR_GROUPS.map((group) => /* @__PURE__ */ u3(KeyGroup, {
+        title: group.title,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-expr-keys",
+          children: group.keys.map(([token, name]) => /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-expr-key",
+            "aria-label": name,
+            title: name,
+            onClick: () => props.onInsert(token),
+            children: token
+          }, token, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, group.title, false, undefined, this)),
+      props.functions.length > 0 ? /* @__PURE__ */ u3(KeyGroup, {
+        title: "Functions",
+        children: [
+          /* @__PURE__ */ u3(KeyFilter, {
+            label: "Find a function",
+            value: callQuery,
+            onInput: setCallQuery
+          }, undefined, false, undefined, this),
+          calls.length > 0 ? /* @__PURE__ */ u3("div", {
+            class: "lre-expr-words",
+            children: calls.map((name) => /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-expr-key",
+              onClick: () => props.onInsert(`${name}(`),
+              children: [
+                name,
+                "("
+              ]
+            }, name, true, undefined, this))
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
+            class: "lre-expr-none",
+            children: "No function matches."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      names.length > 0 ? /* @__PURE__ */ u3(KeyGroup, {
+        title: "Names",
+        children: [
+          names.length > 8 ? /* @__PURE__ */ u3(KeyFilter, {
+            label: "Find a name",
+            value: nameQuery,
+            onInput: setNameQuery
+          }, undefined, false, undefined, this) : null,
+          shown.length > 0 ? /* @__PURE__ */ u3("div", {
+            class: "lre-expr-words",
+            children: shown.map((n2) => /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-expr-key name",
+              onClick: () => props.onInsert(n2.id),
+              children: [
+                n2.name !== undefined ? /* @__PURE__ */ u3("span", {
+                  children: n2.name
+                }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+                  class: "lre-expr-token",
+                  children: n2.id
+                }, undefined, false, undefined, this),
+                n2.name !== undefined ? /* @__PURE__ */ u3(IdText, {
+                  id: n2.id
+                }, undefined, false, undefined, this) : null
+              ]
+            }, n2.id, true, undefined, this))
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
+            class: "lre-expr-none",
+            children: "No name matches."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function ExprPage(props) {
+  const formula = useFormula(props.value, props.onChange, props.mobile);
+  A(() => {
+    const timer = setTimeout(() => {
+      const el = formula.input.current;
+      if (!el)
+        return;
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(el.value.length, el.value.length);
+      formula.track();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+  return /* @__PURE__ */ u3(FormSheet, {
+    title: props.label,
+    subtitle: props.hint,
+    onClose: props.onClose,
+    actions: /* @__PURE__ */ u3(Button, {
+      variant: "primary",
+      size: "sm",
+      onClick: () => props.onClose(),
+      children: "Done"
+    }, undefined, false, undefined, this),
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-expr-page",
+      onPointerDown: formula.press,
+      children: [
+        /* @__PURE__ */ u3("div", {
+          class: "lre-expr-compose",
+          children: [
+            /* @__PURE__ */ u3("textarea", {
+              ref: formula.input,
+              class: props.invalid ? "lre-input lre-expr-input page invalid" : "lre-input lre-expr-input page",
+              rows: 6,
+              spellcheck: false,
+              autocapitalize: "off",
+              autocorrect: "off",
+              "aria-label": props.label,
+              value: props.value,
+              onInput: (event) => formula.edit(event.currentTarget.value),
+              onKeyUp: formula.track,
+              onClick: formula.track
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Suggestions, {
+              word: formula.word,
+              identifiers: props.identifiers,
+              functions: props.functions,
+              doc: props.doc,
+              scroll: props.mobile,
+              onPick: (token) => formula.insert(token, formula.word.length)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(ExprReadout, {
+              text: props.value,
+              doc: props.doc
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Issues, {
+              issues: props.issues
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3(Palette, {
+          functions: props.functions,
+          identifiers: props.identifiers,
+          doc: props.doc,
+          onInsert: (token) => formula.insert(token)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function ExprEditor(props) {
+  const app = useApp();
+  const mobile = useSelect(app.host.viewport, isMobile);
+  const [tools, setTools] = d2(false);
+  const [page, setPage] = d2(false);
+  const functions = b2(() => exprFunctions(props.functions, props.mode ?? "formula"), [props.functions, props.mode]);
+  const formula = useFormula(props.value, props.onChange, mobile);
+  const balance = checkBalance(props.value);
+  const invalid = !balance.ok || props.lint.length > 0;
+  const issues = balance.message ? [{ severity: "error", path: "", code: "balance", message: balance.message }, ...props.lint] : props.lint;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    "data-lre-expr": true,
+    onPointerDown: formula.press,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "label lre-expr-head",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-expr-label",
+            children: [
+              props.label,
+              props.optional ? /* @__PURE__ */ u3("span", {
+                class: "lre-form-optional",
+                children: " · optional"
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-expr-actions",
+            children: [
+              /* @__PURE__ */ u3(IconButton, {
+                icon: "function",
+                label: "Operators and functions",
+                pressed: mobile ? undefined : tools,
+                onClick: () => mobile ? setPage(true) : setTools(!tools)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(IconButton, {
+                icon: "expand",
+                label: "Open the formula editor",
+                onClick: () => setPage(true)
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("textarea", {
+        ref: formula.input,
+        class: invalid ? "lre-input lre-expr-input invalid" : "lre-input lre-expr-input",
+        rows: 2,
+        spellcheck: false,
+        autocapitalize: "off",
+        autocorrect: "off",
+        "aria-label": props.label,
+        value: props.value,
+        onInput: (event) => formula.edit(event.currentTarget.value),
+        onKeyUp: formula.track,
+        onClick: formula.track
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Suggestions, {
+        word: formula.word,
+        identifiers: props.identifiers,
+        functions,
+        doc: props.doc,
+        scroll: mobile,
+        onPick: (token) => formula.insert(token, formula.word.length)
+      }, undefined, false, undefined, this),
+      tools && !mobile ? /* @__PURE__ */ u3(Palette, {
+        functions,
+        identifiers: props.identifiers,
+        doc: props.doc,
+        inline: true,
+        onInsert: (token) => formula.insert(token)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(ExprReadout, {
+        text: props.value,
+        doc: props.doc
+      }, undefined, false, undefined, this),
+      props.hint ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: props.hint
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Issues, {
+        issues
+      }, undefined, false, undefined, this),
+      page ? /* @__PURE__ */ u3(ExprPage, {
+        label: props.label,
+        hint: props.hint,
+        value: props.value,
+        identifiers: props.identifiers,
+        functions,
+        doc: props.doc,
+        issues,
+        invalid,
+        mobile,
+        onChange: props.onChange,
+        onClose: () => setPage(false)
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
 }
@@ -7831,6 +8781,35 @@ function ClaimsInput(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function NarratorInput(props) {
+  const view = narratorViewOf(props.value);
+  const set = props.value !== undefined && props.value !== null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    "data-lre-narrator": "world",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(HostSwitch, {
+        label: "This world sets what the narrator knows",
+        checked: set,
+        onChange: (on) => props.onChange(on ? { ...NARRATOR_DEFAULTS } : null)
+      }, undefined, false, undefined, this),
+      view ? /* @__PURE__ */ u3(NarratorViewControl, {
+        value: view,
+        onChange: (next) => props.onChange({ knowledge: next.knowledge, secrets: next.secrets })
+      }, undefined, false, undefined, this) : !set ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: "Not set: each chat follows its own choice (GM → This chat → Knowledge), else the player's Settings → Narrator."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Issues, {
+        issues: props.issues
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function boolChecked(spec, value) {
   return spec.reads ? spec.reads(value) : value === true;
 }
@@ -8188,6 +9167,13 @@ function FieldInput(props) {
         issues,
         onChange: props.onChange
       }, undefined, false, undefined, this);
+    case "narrator":
+      return /* @__PURE__ */ u3(NarratorInput, {
+        label: spec.label,
+        value: props.value,
+        issues,
+        onChange: props.onChange
+      }, undefined, false, undefined, this);
     case "tier":
       return /* @__PURE__ */ u3(RefInput, {
         label: spec.label,
@@ -8525,117 +9511,337 @@ function loreSpec(key) {
   return spec;
 }
 var SECRET_GATE_SPEC = { kind: "expr", key: "gate", label: loreSpec("gate").label };
-var HOLDERS_SPEC = loreSpec("holders");
 var LINKS_SPEC = loreSpec("links");
+var KNOWN_TO_SPEC = { kind: "refs", key: "knownTo", label: "Known to", collections: ["entities"] };
+var KEPT_FROM_SPEC = { kind: "refs", key: "keptFrom", label: "The people it is kept from", collections: ["entities"] };
+var SECRET_LINE_SPEC = { kind: "text", key: "text", label: "The secret line", multiline: true };
 function sentence(text) {
   const said = `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
   return /[.!?]$/.test(said) ? said : `${said}.`;
-}
-function useGateProblem(secret, gate) {
-  const app = useApp();
-  const [problem, setProblem] = d2(null);
-  const asked = T2(0);
-  A(() => {
-    const ask = ++asked.current;
-    if (!secret) {
-      setProblem(null);
-      return;
-    }
-    const timer = setTimeout(() => {
-      app.request({ type: "lre.lore", op: "check", fields: { secret: true, gate } }).then((body) => {
-        if (ask === asked.current)
-          setProblem(body?.problem ?? null);
-      });
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [secret, gate]);
-  return problem;
 }
 function idsOf(value) {
   const ids = Array.isArray(value) ? value.filter((v3) => typeof v3 === "string") : [];
   return ids.length > 0 ? ids : undefined;
 }
-function EntryFields(props) {
-  const [fields, setFields] = d2(props.entry.lore ?? {});
-  const visibilityId = P2();
-  A(() => setFields(props.entry.lore ?? {}), [props.entry.id, JSON.stringify(props.entry.lore ?? {})]);
-  const secret = loreIsSecret(fields);
-  const gate = fields.gate ?? "";
-  const problem = useGateProblem(secret, gate);
-  const balanced = checkBalance(gate).ok;
-  const refused = secret && (!balanced || problem !== null);
-  const identifiers = b2(() => worldIdentifiers(props.doc), [props.doc]);
-  const issues = secret && balanced && problem !== null ? [{ severity: "error", path: "book.gate", code: "gate", message: sentence(problem) }] : [];
-  const ctx = { doc: props.doc, lint: issues, path: "book", identifiers, functions: props.functions };
-  const set = (patch) => setFields({ ...fields, ...patch });
-  const bookOf = (bookId) => `“${props.labels[bookId] ?? "another book"}”`;
-  const copy = props.entry.copyOf;
-  if (copy?.kept) {
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-form-lore-fields",
-      "data-lre-book-entry": props.entry.id,
-      children: /* @__PURE__ */ u3(Banner, {
-        tone: "info",
+var NO_NAMES = { knownTo: [], keptFrom: "everyone" };
+function pickedNames(doc, names) {
+  const resolved = resolveMarkNames(doc, null, { knownTo: [...names], keptFrom: "everyone" });
+  return [...resolved.knownTo, ...resolved.unresolved];
+}
+function namesWords(doc, names) {
+  return listWords(pickedNames(doc, names).map((n2) => hasOwn(doc.entities, n2) ? doc.entities[n2]?.name || n2 : n2));
+}
+function markWho(doc, mark) {
+  const known = mark.knownTo.length > 0 ? `Known to ${namesWords(doc, mark.knownTo)}` : null;
+  const kept = mark.keptFrom === "everyone" ? [] : mark.keptFrom;
+  const everyone = kept.length === 0;
+  if (known === null)
+    return everyone ? "Kept from everyone" : `Kept from ${namesWords(doc, kept)}`;
+  return `${known}; ${everyone ? "kept from everyone else" : `kept from ${namesWords(doc, kept)}`}`;
+}
+var ANY_TEXT = "secret";
+function markProblem(names, text) {
+  if (names.keptFrom !== "everyone" && names.keptFrom.length === 0)
+    return "pick whom it is kept from, or keep it from everyone but those who know it";
+  return secretMarkProblem({ text, knownTo: names.knownTo, keptFrom: names.keptFrom });
+}
+function MarkNamesFields(props) {
+  const keptId = P2();
+  const { names, ctx } = props;
+  const picked = names.keptFrom !== "everyone";
+  const all = [...names.knownTo, ...names.keptFrom === "everyone" ? [] : names.keptFrom];
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(FieldInput, {
+        spec: KNOWN_TO_SPEC,
+        value: names.knownTo,
+        ctx,
+        path: ctx.path,
+        parent: {},
+        onChange: (next) => props.onChange({ ...names, knownTo: idsOf(next) ?? [] })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
         children: [
-          "This entry is a copy of a secret entry in ",
-          bookOf(copy.bookId),
-          ", so it is kept off with it, even after either is edited: it comes on for a prompt once that one's gate holds, and back on for good when that one is made public. Change its secrecy there."
+          /* @__PURE__ */ u3("label", {
+            class: "label",
+            for: keptId,
+            children: "Kept from"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            id: keptId,
+            class: "lre-input",
+            value: picked ? "picked" : "everyone",
+            onChange: (event) => props.onChange({ ...names, keptFrom: event.currentTarget.value === "picked" ? [] : "everyone" }),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "everyone",
+                children: "Everyone but those who know it"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("option", {
+                value: "picked",
+                children: "Only the people picked"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
         ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this);
-  }
-  const twins = [...new Set((props.entry.twins ?? []).map((t3) => bookOf(t3.bookId)))];
+      }, undefined, true, undefined, this),
+      picked ? /* @__PURE__ */ u3(FieldInput, {
+        spec: KEPT_FROM_SPEC,
+        value: names.keptFrom,
+        ctx,
+        path: ctx.path,
+        parent: {},
+        onChange: (next) => props.onChange({ ...names, keptFrom: idsOf(next) ?? [] })
+      }, undefined, false, undefined, this) : null,
+      all.some((n2) => !hasOwn(ctx.doc.entities, n2)) ? /* @__PURE__ */ u3("p", {
+        class: "lre-build-note",
+        children: "A name marked missing names no one in this world, or more than one person: the mark keeps it as written. Remove it, or leave it for someone the story adds."
+      }, undefined, false, undefined, this) : null,
+      props.problem !== null ? /* @__PURE__ */ u3(Issues, {
+        issues: [{ severity: "error", path: "mark", code: "mark", message: sentence(props.problem) }]
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function MarkRow(props) {
+  const { mark, index, ctx } = props;
+  const [names, setNames] = d2(null);
+  const problem = names ? markProblem(names, mark.text) : null;
+  const issues = markNameIssues(ctx.doc, null, mark, `mark.${index}`);
+  const open = () => setNames({ knownTo: pickedNames(ctx.doc, mark.knownTo), keptFrom: mark.keptFrom === "everyone" ? "everyone" : pickedNames(ctx.doc, mark.keptFrom) });
+  return /* @__PURE__ */ u3(ActionRow, {
+    title: mark.text,
+    subtitle: markWho(ctx.doc, mark),
+    tone: issues.length > 0 ? "warn" : undefined,
+    value: issues.length > 0 ? /* @__PURE__ */ u3(Badge, {
+      tone: "warn",
+      children: "Check its names"
+    }, undefined, false, undefined, this) : undefined,
+    actions: /* @__PURE__ */ u3(M, {
+      children: [
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          variant: "ghost",
+          disabled: props.busy,
+          onClick: () => names ? setNames(null) : open(),
+          children: names ? "Cancel" : "Change names"
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          disabled: props.busy,
+          onClick: () => props.onMark({ kind: "public", mark: index }, () => setNames(null)),
+          children: "Make public"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this),
+    children: [
+      issues.length > 0 ? /* @__PURE__ */ u3(Issues, {
+        issues
+      }, undefined, false, undefined, this) : null,
+      names ? /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3(MarkNamesFields, {
+            names,
+            ctx,
+            problem,
+            onChange: setNames
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-actions",
+            children: /* @__PURE__ */ u3(Button, {
+              variant: "primary",
+              disabled: props.busy || problem !== null,
+              onClick: () => props.onMark({ kind: "names", mark: index, knownTo: names.knownTo, keptFrom: names.keptFrom }, () => setNames(null)),
+              children: "Save the names"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function OldSecrecy(props) {
+  const { lore, doc } = props;
+  const secret = loreIsSecret(lore);
+  const who = (ids) => listWords(ids.map((id) => hasOwn(doc.entities, id) ? doc.entities[id]?.name || id : id));
+  const standing = props.marked ? "Its text holds secret marks, so these fields no longer count: its marks say who knows what." : secret ? "An earlier build keeps this entry secret by these fields, stored switched off: it reaches no prompt until its gate holds." : "These fields aren't set to secret, so they keep nothing back.";
+  return /* @__PURE__ */ u3(FormGroup, {
+    title: "Secrecy from an earlier build",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-build-note",
+        children: [
+          standing,
+          " They can't be changed here: the book's secrecy moves to secret marks on the secrecy page in Build → Lore."
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Secret",
+        v: secret ? "Yes" : "No"
+      }, undefined, false, undefined, this),
+      lore.gate !== undefined && lore.gate.trim() !== "" ? /* @__PURE__ */ u3(Row, {
+        k: "Gate",
+        v: /* @__PURE__ */ u3("span", {
+          class: "lre-expr-token",
+          children: lore.gate
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      lore.holders && lore.holders.length > 0 ? /* @__PURE__ */ u3(Row, {
+        k: "Whose own secret it is",
+        v: who(lore.holders)
+      }, undefined, false, undefined, this) : null,
+      lore.audience && lore.audience.length > 0 ? /* @__PURE__ */ u3(Row, {
+        k: "Helpers that may read it before the gate holds",
+        v: listWords(lore.audience.map((p3) => STEP_LABEL[p3]))
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function ownFields(lore) {
+  return { ...lore?.visibility ? { visibility: lore.visibility } : {}, ...lore?.links ? { links: lore.links } : {}, ...lore?.aliases ? { aliases: lore.aliases } : {} };
+}
+function EntryFields(props) {
+  const { entry } = props;
+  const [fields, setFields] = d2(ownFields(entry.lore));
+  const [adding, setAdding] = d2(null);
+  const [line, setLine] = d2("");
+  const [names, setNames] = d2(NO_NAMES);
+  const visibilityId = P2();
+  A(() => setFields(ownFields(entry.lore)), [entry.id, JSON.stringify(entry.lore ?? {})]);
+  const identifiers = b2(() => worldIdentifiers(props.doc), [props.doc]);
+  const ctx = { doc: props.doc, lint: [], path: "book", identifiers, functions: props.functions };
+  const set = (patch) => setFields({ ...fields, ...patch });
+  const marks = entry.marks ?? [];
+  const old = entry.lore && OLD_SECRECY_FIELDS.some((key) => entry.lore?.[key] !== undefined) ? entry.lore : null;
+  const held = marks.length === 0 && (entry.lore !== undefined && loreIsSecret(entry.lore) || entry.copyOf !== undefined);
+  const problem = adding === null ? null : markProblem(names, adding === "secret" ? ANY_TEXT : line);
+  const shown = adding === "add" && line.trim() === "" ? null : problem;
+  const start = (kind) => {
+    setAdding(kind);
+    setLine("");
+    setNames(NO_NAMES);
+  };
+  const send = () => props.onMark(adding === "secret" ? { kind: "secret", knownTo: names.knownTo, keptFrom: names.keptFrom } : { kind: "add", text: line, knownTo: names.knownTo, keptFrom: names.keptFrom }, () => setAdding(null));
   return /* @__PURE__ */ u3("div", {
     class: "lre-form-lore-fields",
-    "data-lre-book-entry": props.entry.id,
+    "data-lre-book-entry": entry.id,
     children: [
-      copy ? /* @__PURE__ */ u3(Banner, {
+      entry.copyOf ? /* @__PURE__ */ u3(Banner, {
         tone: "info",
         children: [
-          "It was kept secret as a copy of an entry in ",
-          bookOf(copy.bookId),
-          ", which is no longer secret: make it public here to switch it back on."
+          "An earlier build switched this entry off as a copy of a secret entry in “",
+          props.labels[entry.copyOf.bookId] ?? "another book",
+          "”. It stays as it is until its book's secrecy moves to secret marks on the secrecy page in Build → Lore, which puts it back as it stood."
         ]
       }, undefined, true, undefined, this) : null,
-      /* @__PURE__ */ u3(CheckField, {
-        label: "Make this entry secret",
-        help: "It is stored switched off: it reaches no prompt and no helper until its gate holds.",
-        checked: secret,
-        onChange: (on) => set({ secret: on })
-      }, undefined, false, undefined, this),
-      twins.length > 0 ? /* @__PURE__ */ u3("p", {
-        class: "lre-build-note",
-        "data-lre-book-twins": true,
-        children: props.entry.lore && loreIsSecret(props.entry.lore) ? `The same text in ${listWords(twins)} is kept off with it, and comes back on with it.` : `The same text is in ${listWords(twins)}: making this entry secret keeps ${twins.length === 1 ? "that one" : "those"} off too, and making it public again switches them back on.`
-      }, undefined, false, undefined, this) : null,
-      secret ? /* @__PURE__ */ u3(M, {
+      entry.unreadable && entry.unreadable.length > 0 ? /* @__PURE__ */ u3(Banner, {
+        tone: "warn",
+        title: "A secret mark that can't be read",
         children: [
-          /* @__PURE__ */ u3(FieldInput, {
-            spec: SECRET_GATE_SPEC,
-            value: fields.gate,
-            ctx,
-            path: ctx.path,
-            parent: {},
-            onChange: (next) => set({ gate: typeof next === "string" && next !== "" ? next : undefined })
+          /* @__PURE__ */ u3("p", {
+            children: "This text starts like a secret mark but can't be read as one, so it is left out of every prompt and helper. Fix it in the entry's text in World Info:"
           }, undefined, false, undefined, this),
-          gate.trim() === "" || refused ? /* @__PURE__ */ u3(GateExamples, {
-            doc: props.doc,
-            onPick: (formula) => set({ gate: formula })
-          }, undefined, false, undefined, this) : null,
-          /* @__PURE__ */ u3(FieldInput, {
-            spec: HOLDERS_SPEC,
-            value: fields.holders,
-            ctx,
-            path: ctx.path,
-            parent: {},
-            onChange: (next) => set({ holders: idsOf(next) })
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(SecretAudience, {
-            audience: fields.audience ?? [],
-            onChange: (next) => set({ audience: next.length > 0 ? next : undefined })
+          /* @__PURE__ */ u3("ul", {
+            children: entry.unreadable.map((u4, i3) => /* @__PURE__ */ u3("li", {
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-expr-token",
+                  children: u4.raw
+                }, undefined, false, undefined, this),
+                ": ",
+                sentence(u4.problem)
+              ]
+            }, i3, true, undefined, this))
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this) : null,
+      marks.length > 0 ? /* @__PURE__ */ u3(FormGroup, {
+        title: "Secret marks",
+        aside: entry.whole ? /* @__PURE__ */ u3(Badge, {
+          tone: "gm",
+          children: "Whole entry"
+        }, undefined, false, undefined, this) : undefined,
+        children: [
+          entry.whole ? /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: "Its whole text is one secret, so the whole entry is: the narrator is told it marked as a secret, or not at all, as the chat's narrator view says, and of the characters only those who know it have it in mind."
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(ActionRows, {
+            label: "Secret marks",
+            children: marks.map((mark, i3) => /* @__PURE__ */ u3(MarkRow, {
+              mark,
+              index: i3,
+              ctx,
+              busy: props.busy,
+              onMark: props.onMark
+            }, `${i3}:${mark.text}`, false, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      old ? /* @__PURE__ */ u3(OldSecrecy, {
+        lore: old,
+        marked: marks.length > 0,
+        doc: props.doc
+      }, undefined, false, undefined, this) : null,
+      held ? null : adding === null ? /* @__PURE__ */ u3("div", {
+        class: "lre-form-pins-actions",
+        children: [
+          marks.length === 0 && (entry.unreadable ?? []).length === 0 && entry.chars > 0 ? /* @__PURE__ */ u3(Button, {
+            disabled: props.busy,
+            onClick: () => start("secret"),
+            children: "Make this entry secret"
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Button, {
+            disabled: props.busy,
+            onClick: () => start("add"),
+            children: "Add a secret line"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : /* @__PURE__ */ u3(FormGroup, {
+        title: adding === "secret" ? "Make this entry secret" : "Add a secret line",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: [
+              adding === "secret" ? "Its whole text becomes one secret mark, written into the entry in its book." : "The line goes at the end of the entry's text as a secret mark, written into its book.",
+              " The narrator is told a secret marked as one, or not at all, as the chat's narrator view says; of the characters, only those who know it have it in mind."
+            ]
+          }, undefined, true, undefined, this),
+          adding === "add" ? /* @__PURE__ */ u3(FieldInput, {
+            spec: SECRET_LINE_SPEC,
+            value: line,
+            ctx,
+            path: ctx.path,
+            parent: {},
+            onChange: (next) => setLine(typeof next === "string" ? next : "")
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(MarkNamesFields, {
+            names,
+            ctx,
+            problem: shown,
+            onChange: setNames
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-actions",
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                variant: "primary",
+                disabled: props.busy || problem !== null,
+                onClick: send,
+                children: adding === "secret" ? "Make it secret" : "Add the line"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                variant: "ghost",
+                disabled: props.busy,
+                onClick: () => setAdding(null),
+                children: "Cancel"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-field",
         children: [
@@ -8686,11 +9892,11 @@ function EntryFields(props) {
         children: [
           /* @__PURE__ */ u3(Button, {
             variant: "primary",
-            disabled: props.busy || refused,
+            disabled: props.busy,
             onClick: () => props.onSave(fields),
             children: "Save to the book"
           }, undefined, false, undefined, this),
-          props.entry.lore ? /* @__PURE__ */ u3(Button, {
+          Object.keys(ownFields(entry.lore)).length > 0 ? /* @__PURE__ */ u3(Button, {
             variant: "ghost",
             disabled: props.busy,
             onClick: () => props.onSave(null),
@@ -8725,6 +9931,37 @@ function BookEntriesSection() {
     if (body?.entries)
       setEntries(body.entries);
   });
+  const mark = (entryId, change, done) => run(async () => {
+    const body = await app.request({ type: "lre.lore", op: "mark", bookId: book, entryId, change });
+    if (!body?.entries)
+      return;
+    setEntries(body.entries);
+    done();
+  });
+  const badge = (e3) => {
+    if (e3.whole)
+      return /* @__PURE__ */ u3(Badge, {
+        tone: "gm",
+        children: "Whole entry secret"
+      }, undefined, false, undefined, this);
+    if (e3.marks)
+      return /* @__PURE__ */ u3(Badge, {
+        tone: "gm",
+        children: e3.marks.length === 1 ? "1 secret line" : `${e3.marks.length} secret lines`
+      }, undefined, false, undefined, this);
+    if (e3.lore && loreIsSecret(e3.lore))
+      return /* @__PURE__ */ u3(Badge, {
+        tone: "gm",
+        children: "Secret, earlier build"
+      }, undefined, false, undefined, this);
+    if (e3.lore)
+      return /* @__PURE__ */ u3(Badge, {
+        children: "Lore fields"
+      }, undefined, false, undefined, this);
+    return e3.disabled ? /* @__PURE__ */ u3(Badge, {
+      children: "Off in its book"
+    }, undefined, false, undefined, this) : undefined;
+  };
   return /* @__PURE__ */ u3("div", {
     "data-lre-book-entries": true,
     children: /* @__PURE__ */ u3(Section, {
@@ -8734,7 +9971,7 @@ function BookEntriesSection() {
         children: [
           /* @__PURE__ */ u3("p", {
             class: "lre-build-note",
-            children: "An entry of a book the chat reads is lore as it is. Give it the fields a world entry has, or make it secret: it stays switched off, out of every prompt and helper, until its gate holds."
+            children: "An entry of a book the chat reads is lore as it is. Give it the fields a world entry has, or keep some or all of it secret: a secret mark in its text says who knows it. LRE writes into a book only when you press for it here."
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("label", {
             for: bookId,
@@ -8760,18 +9997,11 @@ function BookEntriesSection() {
             label: "Entries",
             children: entries.map((e3) => /* @__PURE__ */ u3(ActionRow, {
               title: e3.title,
-              subtitle: e3.copyOf?.kept ? `Kept off with a secret in “${labels[e3.copyOf.bookId] ?? "another book"}”` : undefined,
-              value: e3.lore && loreIsSecret(e3.lore) ? /* @__PURE__ */ u3(Badge, {
-                tone: "gm",
-                children: "Secret"
-              }, undefined, false, undefined, this) : e3.lore ? /* @__PURE__ */ u3(Badge, {
-                children: "Lore fields"
-              }, undefined, false, undefined, this) : e3.disabled ? /* @__PURE__ */ u3(Badge, {
-                children: "Off in its book"
-              }, undefined, false, undefined, this) : undefined,
+              subtitle: e3.unreadable ? "Holds a secret mark that can't be read" : e3.copyOf ? `Switched off by an earlier build as a copy of a secret in “${labels[e3.copyOf.bookId] ?? "another book"}”` : undefined,
+              value: badge(e3),
               actions: /* @__PURE__ */ u3(IconButton, {
                 icon: open === e3.id ? "close" : "edit",
-                label: open === e3.id ? `Close ${e3.title}` : `Edit ${e3.title}'s lore fields`,
+                label: open === e3.id ? `Close ${e3.title}` : `Edit ${e3.title}'s lore and secrets`,
                 onClick: () => setOpen(open === e3.id ? null : e3.id)
               }, undefined, false, undefined, this),
               children: open === e3.id ? /* @__PURE__ */ u3(EntryFields, {
@@ -8780,7 +10010,8 @@ function BookEntriesSection() {
                 functions: draft.functions,
                 labels,
                 busy,
-                onSave: (fields) => save(e3.id, fields)
+                onSave: (fields) => save(e3.id, fields),
+                onMark: (change, done) => mark(e3.id, change, done)
               }, undefined, false, undefined, this) : null
             }, e3.id, false, undefined, this))
           }, undefined, false, undefined, this) : null
@@ -9286,242 +10517,6 @@ function CheckView(props) {
     ]
   }, undefined, true, undefined, this);
 }
-
-// src/shared/minds.ts
-var FIDELITIES = ["live", "near", "far", "background"];
-var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
-  here: 45,
-  nearby: 20,
-  mentioned: 40,
-  regard: 10,
-  knows: 10,
-  owner: 15,
-  track: 8,
-  roles: { antagonist: 20 },
-  rule: 5,
-  pending: 15,
-  band: { principal: 15, supporting: 5, background: 0 },
-  recent: 10
-});
-var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
-var DEFAULT_MINDS_MEMORY = Object.freeze({
-  witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 4000 },
-  notes: { show: 8, keep: 24 },
-  commitments: { show: 8 },
-  salience: { halfLifeDays: 7, floor: 0.5 },
-  consolidate: { enabled: true, periodDays: 1 }
-});
-var DEFAULT_WORLD_MINDS = Object.freeze({
-  secrecy: "brief",
-  weights: DEFAULT_FIDELITY_WEIGHTS,
-  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
-  always: null,
-  never: null,
-  memory: DEFAULT_MINDS_MEMORY
-});
-var MINDS_RANGES = {
-  weight: [-100, 200],
-  threshold: [0, 1000],
-  show: [0, 64],
-  keep: [1, 64],
-  recallTokens: [0, Number.MAX_SAFE_INTEGER],
-  halfLifeDays: [0.1, 3650],
-  floor: [0, 5],
-  periodDays: [0.1, 365]
-};
-var num2 = (v3, [lo, hi], fallback) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= lo && v3 <= hi ? v3 : fallback;
-var whole = (v3, range, fallback) => Math.round(num2(v3, range, fallback));
-var wholeOrNone = (v3, range, fallback) => v3 === "none" ? "none" : typeof v3 === "number" && Number.isFinite(v3) && v3 >= range[0] && v3 <= range[1] ? Math.round(v3) : fallback;
-var obj2 = (v3) => isRecord(v3) ? v3 : {};
-function selectorOrNull(v3) {
-  if (!isRecord(v3))
-    return null;
-  const out = {};
-  const list2 = (x2) => Array.isArray(x2) && x2.every((s3) => typeof s3 === "string") ? x2.slice(0, 200) : undefined;
-  const ids = list2(v3.ids);
-  const kind = list2(v3.kind);
-  const tier = list2(v3.tier);
-  const memberOf = list2(v3.memberOf);
-  const tag = list2(v3.tag);
-  if (ids)
-    out.ids = ids;
-  if (kind)
-    out.kind = kind;
-  if (tier)
-    out.tier = tier;
-  if (memberOf)
-    out.memberOf = memberOf;
-  if (tag)
-    out.tag = tag;
-  if (isRecord(v3.class)) {
-    const classes = {};
-    for (const [facet, values] of Object.entries(v3.class)) {
-      const vs = list2(values);
-      if (safeKey(facet) && vs)
-        classes[facet] = vs;
-    }
-    out.class = classes;
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
-  const m2 = obj2(raw);
-  const witness = obj2(m2.witness);
-  const recall = obj2(m2.recall);
-  const notes = obj2(m2.notes);
-  const commitments = obj2(m2.commitments);
-  const salience = obj2(m2.salience);
-  const consolidate = obj2(m2.consolidate);
-  return {
-    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
-    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
-    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
-    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
-    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
-    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
-  };
-}
-function worldMindsOf(world) {
-  const raw = obj2(world.minds);
-  const w3 = obj2(raw.weights);
-  const band = obj2(w3.band);
-  const d3 = DEFAULT_FIDELITY_WEIGHTS;
-  const weight = (v3, fallback) => num2(v3, MINDS_RANGES.weight, fallback);
-  const roles = {};
-  const rawRoles = isRecord(w3.roles) ? w3.roles : d3.roles;
-  for (const [value, points] of Object.entries(rawRoles))
-    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
-      roles[value] = weight(points, 0);
-  const t3 = obj2(raw.thresholds);
-  const far = num2(t3.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
-  const near = Math.max(far, num2(t3.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
-  const live = Math.max(near, num2(t3.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
-  return {
-    secrecy: raw.secrecy === "full" ? "full" : "brief",
-    weights: {
-      here: weight(w3.here, d3.here),
-      nearby: weight(w3.nearby, d3.nearby),
-      mentioned: weight(w3.mentioned, d3.mentioned),
-      regard: weight(w3.regard, d3.regard),
-      knows: weight(w3.knows, d3.knows),
-      owner: weight(w3.owner, d3.owner),
-      track: weight(w3.track, d3.track),
-      roles,
-      rule: weight(w3.rule, d3.rule),
-      pending: weight(w3.pending, d3.pending),
-      band: { principal: weight(band.principal, d3.band.principal), supporting: weight(band.supporting, d3.band.supporting), background: weight(band.background, d3.band.background) },
-      recent: weight(w3.recent, d3.recent)
-    },
-    thresholds: { live, near, far },
-    always: selectorOrNull(raw.always),
-    never: selectorOrNull(raw.never),
-    memory: memoryConfigOf(raw.memory)
-  };
-}
-function limitOf(limit) {
-  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
-}
-var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
-function isMindPurpose(purpose) {
-  return MIND_PURPOSES.includes(purpose);
-}
-function worldMindTemplate(world, purpose) {
-  return Object.values(world.steps).filter((t3) => t3.purpose === purpose && t3.template.trim() !== "").sort((a3, b3) => a3.id.localeCompare(b3.id))[0];
-}
-var MIND_SOURCES = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life"];
-var DEFAULT_MIND_READS = Object.freeze({
-  pinned: { on: true, tokens: "none" },
-  activated: { on: true, tokens: 1600 },
-  reply: { on: true, tokens: "none" },
-  message: { on: true, tokens: "none" },
-  history: { on: false, messages: 8, tokens: 3000 },
-  summary: { on: false, tokens: "none" },
-  memory: { on: false, tokens: "none" },
-  thoughts: { on: false, tokens: "none" },
-  recall: { on: false },
-  routine: { on: true, tokens: 400 },
-  plans: { on: true, tokens: 400 },
-  life: { on: false, tokens: "none" }
-});
-var MINDS_PRESETS = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
-});
-function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
-}
-var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
-var MIND_PROMPT_MAX = 20000;
-var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
-var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
-function planInForce(p3) {
-  return p3.source !== "mind";
-}
-var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
-var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
-var MIND_APPROACHES = ["reactive", "proactive"];
-var MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  gmIntent: 600,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160
-};
-var MINDS_SLOT = "minds";
-var MIND_PROMPT_DEFAULTS = Object.freeze({
-  mind: [
-    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
-    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
-  ].join(`
-`),
-  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
-  skip: [
-    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
-    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
-  ].join(`
-`),
-  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
-});
-var MIND_ANSWER_FORMATS = Object.freeze({
-  mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
-    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
-    "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- mood: one or two words.",
-    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
-  ].join(`
-`),
-  memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
-    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
-    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
-    "- told: what they told whom in this turn, in a few words each.",
-    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
-    "Use empty lists for anything the turn didn't give."
-  ].join(`
-`),
-  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
-});
 
 // src/shared/routines.ts
 var ROUTINE_BLOCK_KINDS = ["fixed", "flexible", "optional"];
@@ -15342,7 +16337,8 @@ var MIND_STEP_HINT = {
   mind: "Every character's mind reads these, after what is pinned to them, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
   memory: "Each character's memory after the reply reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
   skip: "The call that looks for a time skip's beats reads these, and so does every mind at a beat, after what is pinned to them and to every mind; within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
-  consolidate: "Each memory consolidation reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads)."
+  consolidate: "Each memory consolidation reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+  knowledge: "The knowledge step after the reply reads these, within the pinned lore a mind reads (Settings → Minds → What a mind reads)."
 };
 var WHOLE_BOOK = "lre:whole-book";
 function LorePinsSection(props) {
@@ -18129,6 +19125,24 @@ function mindsPromptPatch(purpose, text) {
   const own = text === null || text.trim() === "" || text.trim() === MIND_PROMPT_DEFAULTS[purpose].trim() ? null : text;
   return { minds: { prompts: { [purpose]: own } } };
 }
+function knowledgePatch(change) {
+  return { minds: { knowledge: { ...change } } };
+}
+function knowledgeLimitPatch(limit, value) {
+  return { minds: { knowledge: { [limit]: value } } };
+}
+function knowledgePlaceholders(id) {
+  return [...new Set(KNOWLEDGE_TEXTS[id].match(/\{\{\w+\}\}/g) ?? [])];
+}
+function missingPlaceholders(id, text) {
+  return knowledgePlaceholders(id).filter((p3) => !text.includes(p3));
+}
+function knowledgeTextPatch(id, text) {
+  if (text !== null && text.trim() !== "" && (text.length > MIND_PROMPT_MAX || missingPlaceholders(id, text).length > 0))
+    return null;
+  const own = text === null || text.trim() === "" || text.trim() === KNOWLEDGE_TEXTS[id].trim() ? null : text;
+  return { minds: { knowledge: { prompts: { [id]: own } } } };
+}
 var MEMORY_FIELDS = [
   { part: "witness", key: "show", label: "Witness log lines a mind sees", range: MINDS_RANGES.show, integer: true },
   { part: "recall", key: "recent", label: "Recall: latest turns they were there for", range: MINDS_RANGES.show, integer: true },
@@ -18169,6 +19183,9 @@ var PLAN_STATUS_LABEL = { open: "Open", done: "Done", dropped: "Dropped" };
 var COMMITMENT_KIND_LABEL = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
 var COMMITMENT_STATUS_LABEL = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
 var APPROACH_LABEL = { reactive: "Reactive", proactive: "Proactive" };
+var HOW_LABEL = { authored: "From the start", witnessed: "Witnessed", told: "Told", inferred: "Inferred", guessed: "Guessed" };
+var BELIEF_LABEL = { true: "Takes it as true", false: "Takes it as false", uncertain: "Unsure" };
+var TRUTH_LABEL = { true: "True", false: "False", open: "An open question" };
 function narratorGets(secrecy, mind) {
   const full = secrecy === "full";
   const shown = full || !mind.withheld;
@@ -18243,6 +19260,33 @@ function planOp(entity, id, draft) {
   const value = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: withIds, priority: draft.priority, status: draft.status, ...money && draft.cents !== null ? { cents: draft.cents } : {} };
   return { op: "mind_memory", entity, part: "plan", id, value };
 }
+function holdingDraft(now, h3) {
+  const some = h3 && Array.isArray(h3.keptFrom) ? h3.keptFrom : [];
+  return {
+    how: h3?.how ?? "witnessed",
+    by: h3?.by ?? null,
+    evidence: [...h3?.evidence ?? []],
+    belief: h3?.belief ?? "true",
+    confidence: String(Math.round((h3?.confidence ?? 1) * 100)),
+    kept: h3?.keptFrom === "everyone" ? "everyone" : some.length > 0 ? "some" : "none",
+    keptFrom: [...some],
+    since: h3 ? { msg: h3.since.msg, at: h3.since.at } : { msg: null, at: now }
+  };
+}
+function holdingOp(entity, fact, draft) {
+  const percent = wholeIn(draft.confidence, 0, 100);
+  if (percent === null || draft.how === "told" && draft.by === null || draft.by === entity)
+    return null;
+  const some = [...new Set(draft.keptFrom.filter((id) => id !== entity))];
+  if (draft.kept === "some" && some.length === 0)
+    return null;
+  const keptFrom = draft.kept === "everyone" ? "everyone" : draft.kept === "some" ? some : null;
+  const holding = { how: draft.how, by: draft.by, evidence: [...new Set(draft.evidence)], since: { msg: draft.since.msg, at: draft.since.at }, belief: draft.belief, confidence: percent / 100, ...keptFrom ? { keptFrom } : {} };
+  return { op: "mind_knowledge", entity, fact, holding };
+}
+function forgetOp(entity, fact) {
+  return { op: "mind_knowledge", entity, fact, holding: null };
+}
 
 // src/frontend/build/minds-editor.tsx
 var SECRECY_EXPLAINED = {
@@ -18268,7 +19312,7 @@ var WEIGHT_LABEL = {
   recent: "Seen with the player lately"
 };
 var BAND_LABEL2 = { principal: "Tier band: leads", supporting: "Tier band: supporting", background: "Tier band: background" };
-var GROUPED = ["minds.secrecy", "minds.thresholds", "minds.weights", "minds.always", "minds.never", "minds.memory"];
+var GROUPED = ["minds.secrecy", "minds.thresholds", "minds.weights", "minds.always", "minds.never", "minds.memory", "minds.holdings"];
 function mindsPartValue(config) {
   if (JSON.stringify(config) === JSON.stringify(DEFAULT_WORLD_MINDS))
     return {};
@@ -18431,6 +19475,193 @@ function MindTemplates(props) {
           ]
         }, purpose, true, undefined, this);
       })
+    ]
+  }, undefined, true, undefined, this);
+}
+function fieldWords2(doc, kind, field) {
+  const def = hasOwn(doc.kinds, kind) ? doc.kinds[kind] : undefined;
+  const label = def && hasOwn(def.fields, field) ? def.fields[field]?.label : undefined;
+  return label ?? field.replace(/_/g, " ");
+}
+function startFacts(doc) {
+  const lore = Object.values(doc.lore).map((e3) => ({ value: factId({ kind: "lore", lore: e3.id }), label: e3.title || e3.id, sublabel: e3.secret ? "Secret lore" : "Lore" }));
+  const stages = Object.values(doc.tracks).flatMap((t3) => Object.entries(t3.stages).map(([id, s3]) => ({ value: factId({ kind: "track", track: t3.id, stage: id }), label: `${t3.label}: ${s3.label}`, sublabel: s3.truth ? `Its truth: ${s3.truth}` : "A stage of a track" })));
+  const fields = Object.values(doc.entities).filter((e3) => kindIs(doc, e3.kind, "person")).flatMap((e3) => Object.keys(e3.fields).map((f3) => ({ value: factId({ kind: "field", entity: e3.id, field: f3 }), label: `${e3.name}: ${fieldWords2(doc, e3.kind, f3)}`, sublabel: "A person's field" })));
+  return [...lore, ...stages, ...fields].sort((a3, b3) => a3.label.localeCompare(b3.label));
+}
+var KEPT_CHOICES = [
+  { value: "none", label: "No one" },
+  { value: "everyone", label: "Everyone" },
+  { value: "some", label: "Some people" }
+];
+function StartHolding(props) {
+  const { value: h3, disabled } = props;
+  const named = Array.isArray(h3.keptFrom) ? h3.keptFrom : [];
+  const [some, setSome] = d2(named.length > 0);
+  const kept = h3.keptFrom === "everyone" ? "everyone" : named.length > 0 || some ? "some" : "none";
+  const others = props.people.filter((p3) => p3.value !== props.holder && !named.includes(p3.value));
+  const nameOf3 = (id) => props.people.find((p3) => p3.value === id)?.label ?? id;
+  const keep = (keptFrom) => props.onChange(keptFrom === undefined ? { belief: h3.belief, confidence: h3.confidence } : { ...h3, keptFrom });
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-role",
+    "data-lre-minds-held": props.label,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-minds-role-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-minds-subhead",
+            children: props.label
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Seg, {
+            label: `What ${nameOf3(props.holder)} makes of it`,
+            value: h3.belief,
+            disabled,
+            options: HOLDING_BELIEFS.map((b3) => ({ value: b3, label: BELIEF_LABEL[b3] })),
+            onChange: (belief) => props.onChange({ ...h3, belief })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(NumberStepper, {
+            label: "How sure, from 0 to 1",
+            value: h3.confidence,
+            min: 0,
+            max: 1,
+            step: 0.05,
+            disabled,
+            onChange: (confidence) => props.onChange({ ...h3, confidence })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Seg, {
+            label: "Whom they keep it from",
+            value: kept,
+            disabled,
+            options: KEPT_CHOICES,
+            onChange: (choice) => {
+              setSome(choice === "some");
+              if (choice === "everyone")
+                keep("everyone");
+              else if (choice === "none" || h3.keptFrom === "everyone")
+                keep(undefined);
+            }
+          }, undefined, false, undefined, this),
+          kept === "some" ? /* @__PURE__ */ u3(M, {
+            children: [
+              named.length > 0 ? /* @__PURE__ */ u3("div", {
+                class: "lre-form-chips",
+                children: named.map((id) => /* @__PURE__ */ u3(Chip, {
+                  removeLabel: `Remove ${nameOf3(id)}`,
+                  disabled,
+                  onRemove: () => keep(named.length > 1 ? named.filter((x2) => x2 !== id) : undefined),
+                  children: nameOf3(id)
+                }, id, false, undefined, this))
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3(AddPicker, {
+                label: "Keep it from",
+                options: others,
+                placeholder: "Keep it from…",
+                disabled,
+                onAdd: (id) => keep([...named, id])
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
+          /* @__PURE__ */ u3(Issues, {
+            issues: props.lint
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(IconButton, {
+        icon: "trash",
+        label: `Remove ${props.label}`,
+        disabled,
+        onClick: () => props.onChange(null)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function StartHoldings(props) {
+  const { doc, value, disabled } = props;
+  const facts = b2(() => startFacts(doc), [doc]);
+  const people = b2(() => Object.values(doc.entities).filter((e3) => kindIs(doc, e3.kind, "person")).map((e3) => ({ value: e3.id, label: e3.id === doc.pov ? `${e3.name} (the player character)` : e3.name })).sort((a3, b3) => a3.label.localeCompare(b3.label)), [doc]);
+  const [who, setWho] = d2("");
+  const nameOf3 = (id) => people.find((p3) => p3.value === id)?.label ?? id;
+  const factName = (id) => facts.find((f3) => f3.value === id)?.label ?? id;
+  const heldBy = (id) => hasOwn(value, id) ? value[id] ?? {} : {};
+  const put = (holder, fact, next) => {
+    const held = { ...heldBy(holder) };
+    if (next)
+      held[fact] = next;
+    else
+      delete held[fact];
+    const all = { ...value };
+    if (Object.keys(held).length > 0)
+      all[holder] = held;
+    else
+      delete all[holder];
+    props.onChange(all);
+  };
+  return /* @__PURE__ */ u3(FormGroup, {
+    title: "What they know from the start",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-minds-note",
+        children: "The lore, the stages of tracks and the people's fields each person holds when a chat starts: what they make of each, how sure they are, and whom they keep it from. It seeds what everyone, the player character included, knows in every chat, and what they learn in play goes on from there. A World Info entry's own secret marks say who holds them."
+      }, undefined, false, undefined, this),
+      Object.keys(value).sort((a3, b3) => nameOf3(a3).localeCompare(nameOf3(b3))).map((holder) => /* @__PURE__ */ u3("div", {
+        class: "lre-minds-tpl",
+        "data-lre-minds-holder": holder,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-minds-tpl-text",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-minds-subhead",
+                children: nameOf3(holder)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(IdText, {
+                id: holder
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: props.lint.filter((i3) => i3.path === `minds.holdings.${holder}`)
+          }, undefined, false, undefined, this),
+          Object.entries(heldBy(holder)).map(([fact, h3]) => /* @__PURE__ */ u3(StartHolding, {
+            people,
+            holder,
+            label: factName(fact),
+            value: h3,
+            lint: lintAt(props.lint, `minds.holdings.${holder}.${fact}`),
+            disabled,
+            onChange: (next) => put(holder, fact, next)
+          }, fact, false, undefined, this))
+        ]
+      }, holder, true, undefined, this)),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-minds-tpl",
+        "data-lre-minds-holdings-add": "",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-minds-subhead",
+            children: "Add something someone knows"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(RefPicker, {
+            label: "Who knows it",
+            value: who,
+            options: people,
+            placeholder: "Choose someone…",
+            disabled,
+            onChange: setWho
+          }, undefined, false, undefined, this),
+          who !== "" ? /* @__PURE__ */ u3(AddPicker, {
+            label: "What they know",
+            options: facts.filter((f3) => !hasOwn(heldBy(who), f3.value)),
+            placeholder: "Add what they know…",
+            disabled,
+            onAdd: (fact) => put(who, fact, { belief: "true", confidence: 1 })
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Issues, {
+        issues: props.lint.filter((i3) => i3.path === "minds.holdings")
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -18676,6 +19907,13 @@ function MindsEditor() {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(StartHoldings, {
+        doc: draft.doc,
+        value: value.holdings,
+        lint: lintAt(draft.lint, "minds.holdings"),
+        disabled: busy,
+        onChange: (holdings) => setValue({ ...value, holdings })
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(MindTemplates, {
         doc: draft.doc,
         worldId: draft.worldId,
@@ -18947,6 +20185,13 @@ function LoreList(props) {
               subtitle: "The same, from text you paste",
               chevron: true,
               onClick: () => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(ListRow, {
+              icon: "lock",
+              title: "Secrecy in your World Info",
+              subtitle: "Move your books' secrets from LumiRPEngine's old fields to secret marks in their text, book by book, with a restore",
+              chevron: true,
+              onClick: () => go(app, { view: "secrecy", worldId: draft.worldId })
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -19358,6 +20603,518 @@ function LoreEditor(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/lore-secrecy.tsx
+var STEPS = ["Look at what moves", "Apply", "Check, then confirm"];
+var MARK_EXAMPLE = "{{// Secret (known to Marcus): …}}";
+var GROUPS = [
+  { kind: "mark", title: "Become secret marks", note: "Each one's whole text goes into one secret mark. Lumiverse leaves a mark out of every prompt, and LumiRPEngine gives the narrator what it holds, marked as a secret." },
+  { kind: "marked", title: "Marked already", note: "Their text holds secret marks already, and LumiRPEngine reads those instead of their old fields. Their text stays as it is." },
+  { kind: "twin", title: "Twins become secret marks", note: "Copies of a secret's text that LumiRPEngine kept switched off with it. Each one's text goes into the same secret mark as its secret's, so Lumiverse leaves it out of any prompt LumiRPEngine doesn't mark, and then it goes back on or off as its note says it stood." },
+  { kind: "fields", title: "Old fields only", note: "Entries that keep nothing secret but still carry LumiRPEngine's old secrecy fields, which Confirm takes off. Their links, aliases and Known by stay." },
+  { kind: "refused", title: "Can't become a mark", note: "Their text can't be held in a mark, so they keep LumiRPEngine's old secrecy, and a copy of a secret stays switched off. Change the text in Lumiverse's World Info panel, then look again." }
+];
+var FIELD_WORDS = { secret: "secret switch", gate: "gate", audience: "list of helpers that read it early", holders: "holders" };
+function when(ms) {
+  return ms === null ? "" : new Date(ms).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function listWords2(words2) {
+  return words2.length <= 1 ? words2[0] ?? "" : `${words2.slice(0, -1).join(", ")} and ${words2.at(-1) ?? ""}`;
+}
+function sentence2(text) {
+  const said = text.trim();
+  return said === "" ? said : `${said[0]?.toUpperCase() ?? ""}${said.slice(1)}${/[.!?]$/.test(said) ? "" : "."}`;
+}
+function MoveSteps(props) {
+  return /* @__PURE__ */ u3("ol", {
+    class: "lre-secrecy-steps",
+    "aria-label": "The move's steps",
+    children: STEPS.map((words2, i3) => {
+      const state = i3 < props.at ? "done" : i3 === props.at ? "now" : "next";
+      return /* @__PURE__ */ u3("li", {
+        "data-lre-step": state,
+        "aria-current": state === "now" ? "step" : undefined,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-secrecy-step-n",
+            "aria-hidden": "true",
+            children: state === "done" ? /* @__PURE__ */ u3(Icon, {
+              name: "check",
+              size: 12
+            }, undefined, false, undefined, this) : i3 + 1
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            children: [
+              words2,
+              state === "done" ? /* @__PURE__ */ u3("span", {
+                class: "lre-sr",
+                children: " (done)"
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, words2, true, undefined, this);
+    })
+  }, undefined, false, undefined, this);
+}
+function EntryRow(props) {
+  const { e: e3, view } = props;
+  const moved = view.plan.state !== "legacy";
+  const notes = [];
+  let subtitle = "";
+  if (e3.kind === "refused") {
+    subtitle = sentence2(e3.reason ?? "its text can't be held in a mark");
+    notes.push(e3.original ? "A copy of a secret: it keeps LumiRPEngine's old secrecy and stays switched off, so its text reaches no prompt." : "It keeps LumiRPEngine's old secrecy, gate and all.");
+  } else if (e3.kind === "mark" || e3.kind === "marked") {
+    subtitle = e3.kind === "marked" ? "Read by the marks in its text" : e3.knownTo && e3.knownTo.length > 0 ? `Known to ${listWords2(e3.knownTo.map(view.nameOf))}; kept from everyone else` : "Kept from everyone";
+    const lost = [e3.gate !== undefined ? `its gate, “${e3.gate}”, no longer opens it` : "", e3.audience && e3.audience.length > 0 ? `${listWords2(e3.audience.map((p3) => STEP_LABEL[p3]))} no longer ${e3.audience.length === 1 ? "reads" : "read"} it before then` : ""].filter((w3) => w3 !== "");
+    if (lost.length > 0)
+      notes.push(e3.kind === "mark" ? `Once it is a mark, ${listWords2(lost)}: a mark has no gate and no early readers.` : `Its marks have no gate and no early readers, so ${listWords2(lost)}.`);
+  } else if (e3.kind === "twin") {
+    const original = e3.original;
+    const title = original && original.bookId === view.plan.bookId ? view.plan.entries.find((x2) => x2.id === original.entryId)?.title : undefined;
+    subtitle = original ? `A copy of ${title !== undefined ? `“${title}”` : `a secret in “${view.bookName(original.bookId)}”`}` : "A copy of a secret";
+    notes.push(e3.knownTo && e3.knownTo.length > 0 ? `It becomes the same mark as its secret, known to ${listWords2(e3.knownTo.map(view.nameOf))}.` : "It becomes the same mark as its secret, kept from everyone.");
+    if (e3.was)
+      notes.push(`Its note says it was switched ${e3.was.off ? "off" : "on"}${e3.was.fields ? ", with LumiRPEngine fields of its own" : ""}, so it goes back that way.`);
+  } else
+    subtitle = `Confirm takes off its old ${listWords2((e3.removes ?? []).map((key) => FIELD_WORDS[key] ?? key))}`;
+  if (moved && e3.now === "changed")
+    notes.push(e3.kind === "mark" && e3.marked === false ? "Changed since the move, and its text holds no secret mark now: as it stands, it is no secret." : "Changed since the move.");
+  if (moved && e3.now === "gone")
+    notes.push("Deleted from the book since the move: Restore can't put it back.");
+  if (e3.error)
+    notes.push(`${e3.error.step === "apply" ? "Not moved" : e3.error.step === "confirm" ? "Its old fields are still on" : "Not put back"}: ${sentence2(e3.error.message)}`);
+  const value = e3.error ? /* @__PURE__ */ u3(Badge, {
+    tone: "neg",
+    children: e3.error.step === "apply" ? "Not moved" : "Failed"
+  }, undefined, false, undefined, this) : moved && e3.now === "gone" ? /* @__PURE__ */ u3(Badge, {
+    tone: "neg",
+    children: "Gone"
+  }, undefined, false, undefined, this) : moved && e3.now === "changed" ? /* @__PURE__ */ u3(Badge, {
+    tone: "warn",
+    children: "Changed"
+  }, undefined, false, undefined, this) : e3.off ? /* @__PURE__ */ u3(Badge, {
+    children: "Off"
+  }, undefined, false, undefined, this) : undefined;
+  return /* @__PURE__ */ u3(ActionRow, {
+    title: e3.title,
+    subtitle,
+    value,
+    children: [
+      e3.mark !== undefined && (e3.kind === "mark" || e3.kind === "twin") ? /* @__PURE__ */ u3("div", {
+        class: "lre-build-entry lre-secrecy-mark",
+        children: e3.mark
+      }, undefined, false, undefined, this) : null,
+      notes.map((note) => /* @__PURE__ */ u3("p", {
+        class: "lre-build-note",
+        children: note
+      }, note, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+function MoveView(props) {
+  const plan2 = props.plan;
+  const moved = plan2.state !== "legacy";
+  const moving = plan2.entries.filter((e3) => e3.kind !== "refused");
+  const off = plan2.entries.filter((e3) => e3.switchedOff);
+  const changed = plan2.entries.filter((e3) => e3.now === "changed");
+  const gone = plan2.entries.filter((e3) => e3.now === "gone");
+  if (!moved && plan2.entries.length === 0) {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-secrecy-move",
+      "data-lre-secrecy-book": plan2.bookId,
+      children: /* @__PURE__ */ u3(Empty, {
+        icon: "check",
+        children: "Nothing in this book holds LumiRPEngine's old secrecy: there is nothing to move."
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  const restore = props.asking ? /* @__PURE__ */ u3(Banner, {
+    tone: "warn",
+    title: "Restore secrecy as it was?",
+    actions: /* @__PURE__ */ u3(M, {
+      children: [
+        /* @__PURE__ */ u3(Button, {
+          variant: "danger",
+          busy: props.busy,
+          onClick: () => props.onStep("restore"),
+          children: "Restore"
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          variant: "ghost",
+          disabled: props.busy,
+          onClick: () => props.onAsk(false),
+          children: "Cancel"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this),
+    children: [
+      /* @__PURE__ */ u3("p", {
+        children: [
+          "Every entry the move of ",
+          when(plan2.applied),
+          " listed goes back exactly as it stood before it: its text, its keywords, whether it is switched on, and LumiRPEngine's fields."
+        ]
+      }, undefined, true, undefined, this),
+      changed.length > 0 ? /* @__PURE__ */ u3("p", {
+        children: [
+          "Changed since the move: ",
+          listWords2(changed.map((e3) => `“${e3.title}”`)),
+          ". Restore replaces those changes, and keeps a copy of each in the backup."
+        ]
+      }, undefined, true, undefined, this) : null,
+      gone.length > 0 ? /* @__PURE__ */ u3("p", {
+        children: [
+          "Deleted since the move: ",
+          listWords2(gone.map((e3) => `“${e3.title}”`)),
+          ". Restore can't put back what was deleted."
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this) : null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-secrecy-move",
+    "data-lre-secrecy-book": plan2.bookId,
+    "data-lre-secrecy-state": plan2.state,
+    children: [
+      moving.length > 0 || moved ? /* @__PURE__ */ u3(MoveSteps, {
+        at: plan2.state === "confirmed" ? 3 : moved ? 2 : 1
+      }, undefined, false, undefined, this) : null,
+      plan2.damaged !== null ? /* @__PURE__ */ u3(Banner, {
+        tone: "warn",
+        title: "Its backup couldn't be read",
+        children: [
+          "So the book reads as never moved. LumiRPEngine kept the file as “",
+          plan2.damaged,
+          "”."
+        ]
+      }, undefined, true, undefined, this) : null,
+      plan2.state === "legacy" && plan2.restored !== null ? /* @__PURE__ */ u3(Banner, {
+        tone: "info",
+        title: `Put back on ${when(plan2.restored)}`,
+        children: [
+          "The book stands as it did before its move of ",
+          when(plan2.applied),
+          ". Apply moves it again."
+        ]
+      }, undefined, true, undefined, this) : null,
+      plan2.state === "applied" ? /* @__PURE__ */ u3(Banner, {
+        tone: "info",
+        title: `Moved on ${when(plan2.applied)}`,
+        children: "LumiRPEngine reads this book's secrets from their marks now. Check the book reads right, here and in a turn or two of a chat: its old fields stay on the entries until you confirm, and the backup stays either way."
+      }, undefined, false, undefined, this) : null,
+      plan2.state === "confirmed" ? /* @__PURE__ */ u3(Banner, {
+        tone: "info",
+        icon: "check",
+        title: "Done",
+        children: [
+          "Moved on ",
+          when(plan2.applied),
+          " and confirmed on ",
+          when(plan2.confirmed),
+          ": the old fields are off. LumiRPEngine keeps the backup, so Restore secrecy as it was still puts the book back as it stood before the move."
+        ]
+      }, undefined, true, undefined, this) : null,
+      plan2.state === "restoring" ? /* @__PURE__ */ u3(Banner, {
+        tone: "neg",
+        title: "The restore didn't finish",
+        children: "Some entries weren't put back; each says why below. Restore again to finish it."
+      }, undefined, false, undefined, this) : null,
+      off.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-secrecy-group",
+        "data-lre-secrecy-off": true,
+        children: [
+          /* @__PURE__ */ u3("h4", {
+            class: "lre-secrecy-group-title",
+            children: [
+              "Switched off by LumiRPEngine (",
+              off.length,
+              ")"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: "LumiRPEngine stored these secrets switched off, and nothing says how each stood before, so the move leaves them off. Switch one on in Lumiverse's World Info panel if it should fire."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ActionRows, {
+            label: "Switched off by LumiRPEngine",
+            children: off.map((e3) => /* @__PURE__ */ u3(ActionRow, {
+              title: e3.title,
+              value: e3.off ? /* @__PURE__ */ u3(Badge, {
+                children: "Off"
+              }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+                tone: "pos",
+                children: "On"
+              }, undefined, false, undefined, this),
+              subtitle: e3.off ? moved ? "Still off" : "Stays off" : "Switched on since"
+            }, e3.id, false, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      GROUPS.map((group) => {
+        const entries = plan2.entries.filter((e3) => e3.kind === group.kind);
+        if (entries.length === 0)
+          return null;
+        return /* @__PURE__ */ u3("div", {
+          class: "lre-secrecy-group",
+          "data-lre-secrecy-kind": group.kind,
+          children: [
+            /* @__PURE__ */ u3("h4", {
+              class: "lre-secrecy-group-title",
+              children: [
+                group.title,
+                " (",
+                entries.length,
+                ")"
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3("p", {
+              class: "lre-build-note",
+              children: group.note
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(ActionRows, {
+              label: group.title,
+              children: entries.map((e3) => /* @__PURE__ */ u3(EntryRow, {
+                e: e3,
+                view: props
+              }, e3.id, false, undefined, this))
+            }, undefined, false, undefined, this)
+          ]
+        }, group.kind, true, undefined, this);
+      }),
+      restore,
+      plan2.state === "legacy" ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-build-actions",
+            children: /* @__PURE__ */ u3(Button, {
+              variant: "primary",
+              busy: props.busy,
+              disabled: moving.length === 0,
+              onClick: () => props.onStep("apply"),
+              children: "Apply to this book"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: moving.length === 0 ? "Nothing here can move: each secret keeps its old secrecy until its text can be held in a mark." : "Before it changes anything, LumiRPEngine keeps a copy of every entry listed here as it stands now, so Restore secrecy as it was can put each one back exactly."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : props.asking ? null : /* @__PURE__ */ u3("div", {
+        class: "lre-build-actions",
+        children: [
+          plan2.state === "applied" ? /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            busy: props.busy,
+            onClick: () => props.onStep("confirm"),
+            children: "It reads right: take the old fields off"
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Button, {
+            variant: "secondary",
+            disabled: props.busy,
+            onClick: () => props.onAsk(true),
+            children: plan2.state === "restoring" ? "Restore again…" : "Restore secrecy as it was…"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BookMove(props) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  const [asking, setAsking] = d2(false);
+  const step = (op) => run(async () => {
+    const body = await app.request({ type: "lre.secrecy", op, bookId: props.plan.bookId, version: props.plan.version });
+    setAsking(false);
+    const book = body?.book;
+    if (!book) {
+      props.onStale();
+      return;
+    }
+    props.onPlan(book);
+    if (op === "apply")
+      app.toast(`Moved “${book.name}” to secret marks: check it reads right, then confirm.`, "info");
+    if (op === "confirm" && book.state === "confirmed")
+      app.toast(`Took LumiRPEngine's old fields off “${book.name}”.`, "info");
+    if (op === "restore" && book.state === "legacy")
+      app.toast(`Put “${book.name}” back as it stood before its move.`, "info");
+  });
+  return /* @__PURE__ */ u3(MoveView, {
+    plan: props.plan,
+    nameOf: props.nameOf,
+    bookName: props.bookName,
+    busy,
+    asking,
+    onStep: step,
+    onAsk: setAsking
+  }, undefined, false, undefined, this);
+}
+function standingOf(read) {
+  if (!read)
+    return { words: "Looking at it…" };
+  if ("failed" in read)
+    return { words: `Couldn't read it: ${read.failed}`, badge: { tone: "neg", text: "Not read" } };
+  const plan2 = read.plan;
+  if (plan2.state === "applied")
+    return { words: `Moved on ${when(plan2.applied)}: check it, then confirm`, badge: { tone: "warn", text: "Check it" } };
+  if (plan2.state === "confirmed")
+    return { words: `Moved, and confirmed on ${when(plan2.confirmed)}`, badge: { tone: "pos", text: "Done" } };
+  if (plan2.state === "restoring")
+    return { words: "Its restore didn't finish", badge: { tone: "neg", text: "Restore again" } };
+  const moving = plan2.entries.filter((e3) => e3.kind !== "refused").length;
+  const refused = plan2.entries.length - moving;
+  const said = [moving > 0 ? `${moving} ${moving === 1 ? "entry" : "entries"} to move` : "", refused > 0 ? `${refused} can't move` : "", plan2.restored !== null ? `Put back on ${when(plan2.restored)}` : ""].filter((w3) => w3 !== "");
+  return { words: said.length === 0 ? "Nothing to move" : said.join(" · "), ...moving > 0 ? { badge: { tone: "accent", text: "To move" } } : {} };
+}
+function SecrecyPage() {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d3) => d3);
+  const [books, setBooks] = d2(null);
+  const [reads, setReads] = d2({});
+  const [open, setOpen] = d2(null);
+  const labels = b2(() => bookLabels(books ?? []), [books]);
+  const look = async (bookId) => {
+    const m2 = await app.send({ type: "lre.secrecy", op: "preview", bookId });
+    const read = m2.type === "lre.result" && m2.request === "lre.secrecy" && m2.body.book ? { plan: m2.body.book } : { failed: m2.type === "lre.error" ? m2.message : "no answer came" };
+    setReads((was) => ({ ...was, [bookId]: read }));
+  };
+  A(() => {
+    let live = true;
+    (async () => {
+      const found = (await app.request({ type: "lre.secrecy", op: "books" }))?.books ?? [];
+      if (!live)
+        return;
+      setBooks(found);
+      for (const b3 of found) {
+        if (!live)
+          return;
+        await look(b3.id);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!draft)
+    return null;
+  const doc = draft.doc;
+  const own = new Set(loreBooksOf(doc));
+  const ordered = [...books ?? []].sort((a3, b3) => Number(own.has(b3.id)) - Number(own.has(a3.id)));
+  const nameOf3 = (id) => doc.entities[id]?.name ?? id;
+  const bookName = (id) => labels[id] ?? "another book";
+  const row = (b3) => {
+    const read = reads[b3.id];
+    const title = labels[b3.id] ?? b3.name;
+    const standing = standingOf(read);
+    const plan2 = read && "plan" in read ? read.plan : null;
+    return /* @__PURE__ */ u3(ActionRow, {
+      title,
+      subtitle: own.has(b3.id) ? `This world reads it · ${standing.words}` : standing.words,
+      value: standing.badge ? /* @__PURE__ */ u3(Badge, {
+        tone: standing.badge.tone,
+        children: standing.badge.text
+      }, undefined, false, undefined, this) : undefined,
+      actions: plan2 ? /* @__PURE__ */ u3(IconButton, {
+        icon: open === b3.id ? "close" : "chevron-down",
+        label: open === b3.id ? `Close ${title}` : `Open ${title}`,
+        onClick: () => setOpen(open === b3.id ? null : b3.id)
+      }, undefined, false, undefined, this) : undefined,
+      children: open === b3.id && plan2 ? /* @__PURE__ */ u3(BookMove, {
+        plan: plan2,
+        nameOf: nameOf3,
+        bookName,
+        onPlan: (next) => setReads((was) => ({ ...was, [b3.id]: { plan: next } })),
+        onStale: () => void look(b3.id)
+      }, undefined, false, undefined, this) : null
+    }, b3.id, false, undefined, this);
+  };
+  const listed = [];
+  const quiet = [];
+  for (const b3 of ordered) {
+    const read = reads[b3.id];
+    (read && "plan" in read && read.plan.state === "legacy" && read.plan.entries.length === 0 ? quiet : listed).push(b3);
+  }
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-page",
+    "data-lre-secrecy": true,
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: "Secrecy in your World Info",
+        subtitle: "Your books' secrets, moved from LumiRPEngine's old fields to secret marks, book by book"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "What a move does",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            /* @__PURE__ */ u3("p", {
+              class: "lre-build-note",
+              children: [
+                "LumiRPEngine used to keep a secret by storing fields of its own on the entry and switching the entry off, and kept each copy of a secret's text switched off with it. Now a secret is a mark in the entry's own text, ",
+                /* @__PURE__ */ u3("code", {
+                  class: "lre-build-mono",
+                  children: MARK_EXAMPLE
+                }, undefined, false, undefined, this),
+                ": Lumiverse leaves a mark out of every prompt, and LumiRPEngine gives the narrator what it holds, marked as a secret."
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3("ol", {
+              class: "lre-build-notes",
+              children: [
+                /* @__PURE__ */ u3("li", {
+                  children: "Look at what moves: open a book to see what its move would do. Looking writes nothing."
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("li", {
+                  children: "Apply: LumiRPEngine first keeps a copy of every entry it lists, then writes each secret's mark and puts each twin back as it stood. Entries it switched off stay off, listed for you to switch on."
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("li", {
+                  children: "Check, then confirm: once the book reads right, Confirm takes LumiRPEngine's old fields off its entries. The copy stays."
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3("p", {
+              class: "lre-build-note",
+              children: "Restore secrecy as it was puts a book back exactly as it stood before its move, whenever you press it. Books you haven't moved keep their old secrecy, as before."
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Your books",
+        aside: books ? /* @__PURE__ */ u3(Badge, {
+          children: books.length
+        }, undefined, false, undefined, this) : undefined,
+        children: books === null ? /* @__PURE__ */ u3(Empty, {
+          icon: "hourglass",
+          children: "Loading your books…"
+        }, undefined, false, undefined, this) : books.length === 0 ? /* @__PURE__ */ u3(Empty, {
+          icon: "book",
+          children: "You have no World Info books."
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            listed.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
+              label: "Your books",
+              children: listed.map(row)
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
+              class: "lre-build-note",
+              children: "None of your books holds LumiRPEngine's old secrecy."
+            }, undefined, false, undefined, this),
+            quiet.length > 0 ? /* @__PURE__ */ u3(Disclosure, {
+              summary: `${quiet.length} ${quiet.length === 1 ? "book" : "books"} with nothing to move`,
+              children: /* @__PURE__ */ u3(ActionRows, {
+                label: "Books with nothing to move",
+                children: quiet.map(row)
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -21645,7 +23402,7 @@ function InferredForm(props) {
             value: p3.when,
             labels: INFER_WHEN_LABEL,
             disabled: off,
-            onChange: (when) => set({ when })
+            onChange: (when2) => set({ when: when2 })
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Choice, {
             label: "Who rolls",
@@ -21781,7 +23538,7 @@ function InferredForm(props) {
 }
 
 // src/frontend/build/profile-picker.tsx
-var GROUPS = [
+var GROUPS2 = [
   { id: "fields", label: "Fields" },
   { id: "checks", label: "Checks" },
   { id: "actions", label: "Actions" },
@@ -21829,7 +23586,7 @@ function ProfilePicker(props) {
         class: "lre-build-note",
         children: profile.summary
       }, undefined, false, undefined, this),
-      GROUPS.map((group) => {
+      GROUPS2.map((group) => {
         const items = added.filter((i3) => i3.group === group.id);
         if (items.length === 0)
           return null;
@@ -24409,181 +26166,6 @@ function TiersEditor(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/frontend/settings/prompt-editor.tsx
-function isVarsKey(v3) {
-  return typeof v3 === "string" && hasOwn(STEP_VARS, v3);
-}
-function VarsPanel(props) {
-  const row = props.output === "effects" ? { ...STEP_VARS.extract, note: undefined } : STEP_VARS[props.step];
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-minds-vars",
-    "data-lre-vars": props.step,
-    children: /* @__PURE__ */ u3(Disclosure, {
-      summary: `Placeholders (${row.phase})`,
-      children: [
-        row.vars.length === 0 ? /* @__PURE__ */ u3("p", {
-          class: "lre-minds-note",
-          children: "No placeholders: the prompt is sent as you write it."
-        }, undefined, false, undefined, this) : null,
-        row.vars.length > 0 ? /* @__PURE__ */ u3("dl", {
-          class: "lre-minds-vars-list",
-          children: row.vars.map((name) => /* @__PURE__ */ u3("div", {
-            class: "lre-minds-var",
-            "data-lre-var": name,
-            children: [
-              /* @__PURE__ */ u3("dt", {
-                children: /* @__PURE__ */ u3("code", {
-                  children: `{{${name}}}`
-                }, undefined, false, undefined, this)
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("dd", {
-                children: VAR_TEXT[name] ?? ""
-              }, undefined, false, undefined, this)
-            ]
-          }, name, true, undefined, this))
-        }, undefined, false, undefined, this) : null,
-        row.note ? /* @__PURE__ */ u3("p", {
-          class: "lre-minds-note",
-          children: row.note
-        }, undefined, false, undefined, this) : null,
-        row.vars.length > 0 ? /* @__PURE__ */ u3("p", {
-          class: "lre-minds-note",
-          children: "Each holds only what your character may know: a line that would give away a secret is left out."
-        }, undefined, false, undefined, this) : null
-      ]
-    }, undefined, true, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function PromptEditor(props) {
-  const saved = props.value ?? props.builtIn ?? "";
-  const [text, setText] = d2(saved);
-  A(() => setText(saved), [saved]);
-  const save = props.save(text);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-minds-prompt",
-    "data-lre-minds-prompt": props.id,
-    children: /* @__PURE__ */ u3(Disclosure, {
-      summary: /* @__PURE__ */ u3("span", {
-        class: "lre-minds-prompt-head",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-minds-prompt-text",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-minds-prompt-title",
-                children: props.label
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("span", {
-                class: "lre-minds-prompt-sub",
-                children: props.note
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          props.value !== undefined ? /* @__PURE__ */ u3(Badge, {
-            tone: "accent",
-            children: "Your own"
-          }, undefined, false, undefined, this) : props.builtIn !== undefined ? /* @__PURE__ */ u3(Badge, {
-            children: "Built-in"
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
-            children: "None added"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      children: [
-        /* @__PURE__ */ u3("textarea", {
-          class: "lre-input lre-minds-prompt-input",
-          rows: 10,
-          "aria-label": `${props.label} prompt`,
-          placeholder: props.builtIn === undefined ? "Nothing added: the built-in instructions run alone." : undefined,
-          value: text,
-          disabled: props.busy,
-          onInput: (event) => setText(event.currentTarget.value)
-        }, undefined, false, undefined, this),
-        text.length > props.max ? /* @__PURE__ */ u3("div", {
-          class: "lre-set-warn",
-          role: "note",
-          children: [
-            /* @__PURE__ */ u3(Icon, {
-              name: "alert",
-              size: 16
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              children: [
-                "Too long: at most ",
-                props.max.toLocaleString(),
-                " characters."
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, undefined, true, undefined, this) : null,
-        /* @__PURE__ */ u3("div", {
-          class: "lre-minds-actions",
-          children: [
-            /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              variant: "primary",
-              disabled: props.busy || save === null || text === saved,
-              onClick: () => save && props.patch(save),
-              children: "Save"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              variant: "ghost",
-              disabled: props.busy || text === saved,
-              onClick: () => setText(saved),
-              children: "Revert"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              icon: "undo",
-              disabled: props.busy || props.value === undefined,
-              onClick: () => props.patch(props.save(null) ?? {}),
-              children: "Reset to the default"
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
-        /* @__PURE__ */ u3(VarsPanel, {
-          step: props.vars
-        }, undefined, false, undefined, this),
-        props.builtIn !== undefined ? /* @__PURE__ */ u3("div", {
-          class: "lre-minds-default",
-          "data-lre-built-in": "replaced",
-          children: /* @__PURE__ */ u3(Disclosure, {
-            summary: "The built-in prompt (read-only)",
-            children: [
-              /* @__PURE__ */ u3("p", {
-                class: "lre-minds-note",
-                children: "Your prompt starts from this and replaces it; Reset to the default goes back to it."
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("pre", {
-                class: "lre-minds-code",
-                children: props.builtIn
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        }, undefined, false, undefined, this) : props.adds !== undefined ? /* @__PURE__ */ u3("div", {
-          class: "lre-minds-default",
-          "data-lre-built-in": "added",
-          children: /* @__PURE__ */ u3(Disclosure, {
-            summary: "The built-in instructions (read-only)",
-            children: [
-              /* @__PURE__ */ u3("p", {
-                class: "lre-minds-note",
-                children: "Your prompt goes before these, which it can't change. They're made fresh each turn from the scene, so here is what they hold:"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("pre", {
-                class: "lre-minds-code",
-                children: props.adds
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        }, undefined, false, undefined, this) : null,
-        props.children
-      ]
-    }, undefined, true, undefined, this)
-  }, undefined, false, undefined, this);
-}
-
 // src/shared/sections.ts
 var LINES_MARKER = "{{lines}}";
 var DEFAULT_SECTIONS = {
@@ -24605,21 +26187,25 @@ var DEFAULT_SECTIONS = {
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
   outline: { id: "outline", label: "Outline", rank: 8, template: `The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one and keeping the specific people, things, places and amounts it names; what a beat leaves open is yours to fill in.
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  stance: { id: "stance", label: "Stance", rank: 9, template: `The narrator knows only what the player character knows. These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.
+  stance: { id: "stance", label: "Stance", rank: 9, template: `These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: `Each mind below is scoped to what that character knows and is blind to everyone else's. Let each shape that character's own choices, words and manner this turn, as specifically as it says. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   place: { id: "place", label: "Place", rank: 11, template: `The place the player character is in: what it is like, what is here, where it leads, and the lore about it. These lines are the authoritative inventory of the place: name each thing, room, way out and detail as given whenever the prose touches it, and never reduce them to a summary or a generic stand-in ("some furniture", "various goods").
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
   property: { id: "property", label: "Property", rank: 12, template: `Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says "yours"; otherwise they only use, keep or benefit from it. These lines are the authoritative record: use each property's name, place and details as given whenever it comes up.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } }
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  [KNOWLEDGE_SLOT]: { id: KNOWLEDGE_SLOT, label: "Who knows what", rank: 13, template: `Who knows what among the people here, a fact at a time, the player character ("You") first among those who hold it: the authoritative record of what each person holds and how they came by it. Each person acts and speaks only from what their own lines give them: never let anyone use, hint at or guess a fact their lines don't give them, nor know what a line says they don't. "Suspects" is a guess they aren't sure of; "keeps it from" is something they won't reveal to those named.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } }
 };
 function builtInSectionsOf(world) {
   const own = Object.keys(world.sections);
   if (own.length === 0)
     return Object.values(DEFAULT_SECTIONS);
-  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
-  return minds && !own.includes(MINDS_SLOT) ? [minds] : [];
+  return [MINDS_SLOT, KNOWLEDGE_SLOT].flatMap((slot) => {
+    const section = DEFAULT_SECTIONS[slot];
+    return section && !own.includes(slot) ? [section] : [];
+  });
 }
 function sectionTemplateProblem(text) {
   return text.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
@@ -24737,7 +26323,7 @@ function BuiltInSectionEditor(props) {
 }
 
 // src/frontend/build/build.tsx
-var GROUPS2 = [
+var GROUPS3 = [
   { title: "People & things", collections: ["entities", "kinds", "classifications", "relations"] },
   { title: "Places", collections: ["places", "maps", "routes", "grids"] },
   { title: "Daily life", collections: ["routines", "schedules"] },
@@ -24815,6 +26401,11 @@ function BuildPage(props) {
           part: route.part
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this);
+    case "secrecy":
+      return /* @__PURE__ */ u3(WithDraft, {
+        worldId: route.worldId,
+        children: /* @__PURE__ */ u3(SecrecyPage, {}, undefined, false, undefined, this)
+      }, undefined, false, undefined, this);
   }
 }
 function IssueBadge(props) {
@@ -24878,7 +26469,7 @@ function WithDraft(props) {
   }
   const errors = draft.lint.filter((issue) => issue.severity === "error").length;
   const warnings = draft.lint.filter((issue) => issue.severity === "warning").length;
-  const up = route.view === "world" ? { route: { view: "worlds" }, label: "Worlds" } : route.view === "item" ? { route: { view: "collection", worldId: props.worldId, collection: route.collection }, label: COLLECTION_INFO[route.collection].label } : { route: { view: "world", worldId: props.worldId }, label: draft.doc.name };
+  const up = route.view === "world" ? { route: { view: "worlds" }, label: "Worlds" } : route.view === "item" ? { route: { view: "collection", worldId: props.worldId, collection: route.collection }, label: COLLECTION_INFO[route.collection].label } : route.view === "secrecy" ? { route: { view: "collection", worldId: props.worldId, collection: "lore" }, label: COLLECTION_INFO.lore.label } : { route: { view: "world", worldId: props.worldId }, label: draft.doc.name };
   const blocked = errors > 0 ? `${errors} error${errors === 1 ? "" : "s"} block the commit` : undefined;
   return /* @__PURE__ */ u3("div", {
     class: "lre-build",
@@ -25309,7 +26900,7 @@ function WorldHome() {
           }, part, false, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      GROUPS2.map((group) => /* @__PURE__ */ u3(Section, {
+      GROUPS3.map((group) => /* @__PURE__ */ u3(Section, {
         title: group.title,
         flush: true,
         children: /* @__PURE__ */ u3(List, {
@@ -25742,7 +27333,7 @@ function partValue(doc, part) {
     case "time":
       return doc.time;
     case "meta":
-      return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}), currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) };
+      return { name: doc.name, pov: doc.pov, narrator: doc.narrator ? { ...doc.narrator } : null, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}), currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) };
   }
 }
 function PartView(props) {
@@ -26293,81 +27884,6 @@ function InferredThisChat(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/shared/settings.ts
-var REASONING_CHOICES = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
-var HELPER_MAX_TOKENS = 8192;
-var SAMPLING_PARAMS = [
-  { key: "temperature", label: "Temperature", min: 0, max: 2, step: 0.05, integer: false, fallback: 1 },
-  { key: "top_p", label: "Top P", min: 0, max: 1, step: 0.01, integer: false, fallback: 1 },
-  { key: "top_k", label: "Top K", min: 0, max: 1000, step: 1, integer: true, fallback: 40 },
-  { key: "frequency_penalty", label: "Frequency penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 },
-  { key: "presence_penalty", label: "Presence penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 }
-];
-var DEFAULT_HELPER = Object.freeze({ connectionId: null, model: null, effort: "inherit", maxTokens: HELPER_MAX_TOKENS, params: Object.freeze({}) });
-function helperCallOf(config, helper) {
-  const route = config?.route;
-  const own = route?.connectionId ?? null;
-  return {
-    connectionId: own ?? helper.connectionId,
-    model: own !== null ? route?.model ?? null : helper.model,
-    effort: route?.effort ?? helper.effort,
-    maxTokens: config?.maxTokens ?? helper.maxTokens,
-    params: { ...helper.params, ...route?.params }
-  };
-}
-var UNREASONED_STEPS = ["memory", "consolidate", "skip"];
-var UNREASONED_ROUTE = Object.freeze({ provider: "helper", connectionId: null, model: null, effort: "off" });
-var LORE_POLICIES = ["none", "prefetch", "lookup", "prefetch+lookup"];
-var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
-function stepLoreOf(config) {
-  return config?.lore ?? DEFAULT_STEP_LORE;
-}
-function stepConfigOf(steps, purpose) {
-  const saved = steps[purpose];
-  if (isMindPurpose(purpose))
-    return saved ?? { enabled: purpose !== "skip", signals: [], ...UNREASONED_STEPS.includes(purpose) ? { route: { ...UNREASONED_ROUTE } } : {} };
-  if (purpose !== "puzzle.answer")
-    return saved ?? { enabled: false, signals: [] };
-  const signals = ["always"];
-  return saved ? saved.signals.length > 0 ? saved : { ...saved, signals } : { enabled: true, signals };
-}
-var DEFAULT_RECENT = Object.freeze({ on: true, messages: 8, tokens: 3000 });
-var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
-function recentOf(purpose, config) {
-  return config?.recent ?? (purpose === "interpret" ? DEFAULT_RECENT : RECENT_OFF);
-}
-var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
-var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
-var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
-var TIMELAPSE_REACH_MINUTES = 366 * 1440;
-var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition"];
-var EXTRACTION_DEFAULTS = Object.freeze({
-  time_advance: "auto",
-  location: "auto",
-  condition: "auto",
-  routine: "auto",
-  regard: "confirm",
-  transfer: "confirm",
-  spawn: "confirm",
-  life: "confirm",
-  knows: "confirm",
-  give: "confirm",
-  purchase: "confirm",
-  take: "confirm",
-  drop: "confirm",
-  use_up: "confirm",
-  wear: "confirm",
-  lose: "confirm",
-  item_condition: "confirm"
-});
-var EXTRACTION_LEARNING = Object.freeze({
-  promoteAt: 0.9,
-  minProposals: 30,
-  window: 30,
-  demoteUndoRate: 0.1
-});
-var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
-
 // src/frontend/time-controls.tsx
 function speedRows(speedThrough) {
   return [...new Set([...SPEED_ACTIVITIES, ...Object.keys(speedThrough)])].map((activity) => ({ activity, policy: hasOwn(speedThrough, activity) ? speedThrough[activity] ?? null : null }));
@@ -26825,7 +28341,7 @@ function PinsAndUpgrade(props) {
 }
 
 // src/shared/words.ts
-function listWords2(words3) {
+function listWords3(words3) {
   return words3.length <= 1 ? words3[0] ?? "" : `${words3.slice(0, -1).join(", ")} and ${words3[words3.length - 1] ?? ""}`;
 }
 function possessive(name) {
@@ -26854,8 +28370,8 @@ function feedSentence(label, to) {
     return `The ${label} section is left out of the prompt in this chat`;
   const caps = [to.maxLines !== undefined ? `${to.maxLines} ${to.maxLines === 1 ? "line" : "lines"}` : null, to.maxTokens !== undefined ? `${to.maxTokens} tokens` : null].filter((c3) => c3 !== null);
   const parts = [
-    SCOPE_TELLS[to.scope ?? "player"],
-    caps.length > 0 ? `cut to at most ${listWords2(caps)}` : "with no cap",
+    to.scope ? SCOPE_TELLS[to.scope] : "follows the narrator's knowledge",
+    caps.length > 0 ? `cut to at most ${listWords3(caps)}` : "with no cap",
     to.include ? `from ${to.include.length === 1 ? "the 1 source" : `the ${to.include.length} sources`} picked for it` : null
   ].filter((p3) => p3 !== null);
   return `In this chat, the ${label} section ${parts.join(", ")}`;
@@ -26887,10 +28403,10 @@ function previewNotes(s3, budget) {
     notes.push(s3.slot === "minds" ? `Too big for the Minds budget of ${budget.minds} tokens, so it stays out.` : `Too big for what is left of the section budget of ${budget.sections} tokens, so it stays out.`);
   if (s3.status === "sent" && s3.tokens !== null)
     notes.push(`About ${s3.tokens} tokens, of a section budget of ${budget.sections}.`);
-  if (s3.status !== "off" && s3.scope !== "player")
+  if (s3.status !== "off")
     notes.push(`Whose knowledge: ${SCOPE_LABEL[s3.scope].toLowerCase()}.`);
   if (s3.marked > 0)
-    notes.push(`${s3.marked} ${s3.marked === 1 ? "fact" : "facts"} your character doesn't know, each marked for the narrator.`);
+    notes.push(`${s3.marked} ${s3.marked === 1 ? "line" : "lines"} marked for the narrator: what your character doesn't know, or a secret.`);
   if (s3.hints > 0)
     notes.push(`${s3.hints} background ${s3.hints === 1 ? "hint" : "hints"} at the end.`);
   if (s3.cut > 0)
@@ -26981,12 +28497,99 @@ function PreviewAll(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/gm/chat-knowledge.tsx
+function narratorInForce(knowledge) {
+  return knowledge.narrator.chat ?? knowledge.narrator.world ?? knowledge.narrator.user;
+}
+function knowledgeSummary(knowledge) {
+  return `Tracking ${knowledge.tracking.chat ?? knowledge.tracking.user ? "on" : "off"} · ${narratorViewSummary(narratorInForce(knowledge))}`;
+}
+function KnowledgeThisChat(props) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  if (!props.controls)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "eye",
+      children: "Knowledge settings appear once the chat has started."
+    }, undefined, false, undefined, this);
+  const { tracking, narrator } = props.controls.knowledge;
+  const send = (change) => run(async () => {
+    if (await app.request({ type: "lre.chat.knowledge", chatId: props.chatId, ...change }))
+      app.toast("Saved for this chat: it applies from the next turn.", "info");
+  });
+  const ownTracking = tracking.chat !== null;
+  const ownNarrator = narrator.chat !== null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-knowledge": "chat",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-gm-note",
+        children: "What this chat keeps track of, and what its narrator is told. A change applies from the next turn; a Branch of the chat keeps these."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Knowledge tracking",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          "data-lre-knowledge-tracking": true,
+          children: [
+            /* @__PURE__ */ u3("p", {
+              class: "lre-gm-note",
+              children: "Whether the engine works out from each reply who learned what."
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(HostSwitch, {
+              label: "This chat has its own setting",
+              checked: ownTracking,
+              disabled: busy,
+              onChange: (on) => send({ knowledge: on ? tracking.user : null })
+            }, undefined, false, undefined, this),
+            tracking.chat !== null ? /* @__PURE__ */ u3(HostSwitch, {
+              label: "Track who knows what in this chat",
+              checked: tracking.chat,
+              disabled: busy,
+              onChange: (on) => send({ knowledge: on })
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: `It follows your Settings → Minds → Knowledge, now ${tracking.user ? "On" : "Off"}.`
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "What the narrator knows",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          "data-lre-knowledge-narrator": true,
+          children: [
+            /* @__PURE__ */ u3(HostSwitch, {
+              label: "This chat has its own choice",
+              checked: ownNarrator,
+              disabled: busy,
+              onChange: (on) => send({ narrator: on ? { ...narrator.world ?? narrator.user } : null })
+            }, undefined, false, undefined, this),
+            narrator.chat !== null ? /* @__PURE__ */ u3(NarratorViewControl, {
+              value: narrator.chat,
+              disabled: busy,
+              onChange: (next) => send({ narrator: next })
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: narrator.world ? `It follows the world's default (Build → World): ${narratorViewSummary(narrator.world)}.` : `It follows your Settings → Narrator: ${narratorViewSummary(narrator.user)}.`
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/gm/feed.tsx
+var FOLLOWS_NARRATOR = "The narrator's knowledge";
+var FOLLOW = "narrator";
 function feedSummary(feed) {
   if (feed.enabled === false)
     return "Left out of the prompt";
   const caps = [feed.maxLines !== undefined ? `${feed.maxLines} lines` : null, feed.maxTokens !== undefined ? `${feed.maxTokens} tokens` : null].filter((c3) => c3 !== null);
-  const parts = ["In the prompt", SCOPE_LABEL[feed.scope ?? "player"], caps.length > 0 ? `at most ${caps.join(", ")}` : "no cap"];
+  const parts = ["In the prompt", feed.scope ? SCOPE_LABEL[feed.scope] : FOLLOWS_NARRATOR, caps.length > 0 ? `at most ${caps.join(", ")}` : "no cap"];
   if (feed.include)
     parts.push(`${feed.include.length} picked ${feed.include.length === 1 ? "source" : "sources"}`);
   return parts.join(" · ");
@@ -27004,7 +28607,7 @@ function chatFeedOf(draft, picked, own) {
   const to = {};
   if (draft.enabled === false)
     to.enabled = false;
-  if (draft.scope && draft.scope !== "player")
+  if (draft.scope)
     to.scope = draft.scope;
   if (draft.maxLines !== undefined)
     to.maxLines = draft.maxLines;
@@ -27051,10 +28654,14 @@ function SectionFeedForm(props) {
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(HostSelect, {
         label: "Whose knowledge",
-        value: draft.scope ?? "player",
-        options: FEED_SCOPES.map((s3) => ({ value: s3, label: SCOPE_LABEL[s3] })),
-        onChange: (v3) => set({ scope: FEED_SCOPES.find((s3) => s3 === v3) ?? "player" })
+        value: draft.scope ?? FOLLOW,
+        options: [{ value: FOLLOW, label: FOLLOWS_NARRATOR }, ...FEED_SCOPES.map((s3) => ({ value: s3, label: SCOPE_LABEL[s3] }))],
+        onChange: (v3) => set({ scope: FEED_SCOPES.find((s3) => s3 === v3) })
       }, undefined, false, undefined, this),
+      draft.scope === undefined && props.narrator ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: `The narrator's knowledge in this chat: ${NARRATOR_KNOWLEDGE_LABEL[props.narrator.knowledge]} (GM → This chat → Knowledge).`
+      }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(HostSwitch, {
         checked: draft.maxLines !== undefined,
         label: "Cap its lines",
@@ -27226,6 +28833,7 @@ function FeedThisChat(props) {
             chatId: props.chatId,
             row,
             sources: props.controls?.sources ?? [],
+            narrator: props.controls ? narratorInForce(props.controls.knowledge) : null,
             onDone: (made) => {
               setNotice(made);
               pages.back();
@@ -27326,6 +28934,13 @@ function ThisChat(props) {
                   onClick: () => pages.open("sections")
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(ListRow, {
+                  icon: "eye",
+                  title: "Knowledge",
+                  subtitle: controls ? knowledgeSummary(controls.knowledge) : "Knowledge tracking, and what the narrator knows",
+                  chevron: true,
+                  onClick: () => pages.open("knowledge")
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(ListRow, {
                   icon: "layers",
                   title: "Pins and upgrade",
                   subtitle: "World revision, tables and generators",
@@ -27413,6 +29028,16 @@ function ThisChat(props) {
           chatId: view.chatId,
           controls,
           chips: view.chips
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : page === "knowledge" ? /* @__PURE__ */ u3(GmPage, {
+        name: "knowledge",
+        title: "Knowledge",
+        subtitle: "This chat",
+        backLabel: "This chat",
+        onBack: pages.back,
+        children: /* @__PURE__ */ u3(KnowledgeThisChat, {
+          chatId: view.chatId,
+          controls
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : page === "pins" ? /* @__PURE__ */ u3(GmPage, {
         name: "pins",
@@ -27926,7 +29551,8 @@ var PROMPT_NOTE = {
   mind: "One call per character, as that character: what they think, how they come across, what they mean to do.",
   memory: "After the reply, per character who heard your message, at the levels you pick: the notes, commitments and plans they take from it.",
   skip: "Before a time skip: further moments in it worth stopping at.",
-  consolidate: "Folds a character's faded and surplus notes into their summary."
+  consolidate: "Folds a character's faded and surplus notes into their summary.",
+  knowledge: "After the reply, one call per scene, or one per character as set in Knowledge: who learned what, what they worked out and what they now doubt."
 };
 function Note(props) {
   return /* @__PURE__ */ u3("p", {
@@ -27947,7 +29573,8 @@ var READ_LABEL = {
   recall: "Turns they were there for",
   routine: "Their usual routine",
   plans: "Their plans",
-  life: "Their life: money, the day and commitments"
+  life: "Their life: money, the day and commitments",
+  knowledge: "What they know: their own holdings"
 };
 var READ_NOTE = {
   pinned: "What Build pins to the character, then to every mind (Build → Pinned lore, Character minds), then to their place and each place around it, nearest first; a pinned World Info book or entry is read from the book each time. Within the limit every entry comes whole; the Context panel says what didn't fit.",
@@ -27961,19 +29588,22 @@ var READ_NOTE = {
   recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
   routine: "What they usually do, from their routine and schedules as the world and the story set them, while their routine isn't off: theirs to weigh, never what they must do. A private block only when it's their own, and never social life the planner made up.",
   plans: "What they mean to do later, soonest first, with when, where and who else is in it: the plans the story's turns stated for them and the ones you set in GM mode. A plan shared by several people is each one's. Never the day the planner lays.",
-  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings) and their commitments. None of it is the story as it stands."
+  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings) and their commitments. None of it is the story as it stands.",
+  knowledge: "While the chat tracks knowledge, the facts they hold and how they came by them (saw it, were told, worked it out), in place of the secrets in who they are. Its limit is Knowledge's What they know tokens."
 };
-var READ_GROUP = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", plans: "usual", life: "own" };
-var GROUP_TITLE = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do and mean to do", own: "Their own memory and life" };
+var READ_GROUPS = ["story", "known", "chat", "usual", "own"];
+var READ_GROUP = { pinned: "story", activated: "story", reply: "story", message: "story", knowledge: "known", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", plans: "usual", life: "own" };
+var GROUP_TITLE = { story: "The story as it stands", known: "What they know", chat: "The chat as you see it", usual: "What they usually do and mean to do", own: "Their own memory and life" };
 var GROUP_NOTE = {
   story: null,
+  known: "On unless you turn it off: what they know and how, so they act on that and no more. It reads nothing while the chat doesn't track knowledge.",
   chat: "Off unless you turn it on: it tells a mind of turns its character wasn't there for.",
   usual: "On unless you turn them off: their routine as context, and the plans the story made for them, so they can keep to their days and to what they agreed without the planner deciding for them.",
   own: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind."
 };
 function ReadSources(props) {
   return /* @__PURE__ */ u3(M, {
-    children: ["story", "chat", "usual", "own"].map((group) => {
+    children: READ_GROUPS.map((group) => {
       const note = GROUP_NOTE[group];
       return /* @__PURE__ */ u3("div", {
         class: "lre-minds-group",
@@ -27989,6 +29619,7 @@ function ReadSources(props) {
             source,
             reads: props.reads,
             memory: props.memory,
+            knowledge: props.knowledge,
             busy: props.busy,
             patch: props.patch
           }, source, false, undefined, this))
@@ -28105,7 +29736,19 @@ function ReadRow(props) {
         memory: props.memory,
         busy,
         patch: props.patch
-      }, undefined, false, undefined, this) : null : /* @__PURE__ */ u3(M, {
+      }, undefined, false, undefined, this) : null : source === "knowledge" ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(KnowledgeLimitStepper, {
+            limit: "mindTokens",
+            knowledge: props.knowledge,
+            busy,
+            patch: props.patch
+          }, undefined, false, undefined, this),
+          props.knowledge.enabled ? null : /* @__PURE__ */ u3(Note, {
+            children: "Track who knows what is off (Knowledge, below), so this reads nothing unless a chat turns it on in GM → This chat."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : /* @__PURE__ */ u3(M, {
         children: [
           source === "history" ? /* @__PURE__ */ u3(LimitField, {
             label: `${READ_LABEL.history} (messages)`,
@@ -28148,6 +29791,319 @@ function MindPromptEditor(props) {
     patch: props.patch
   }, undefined, false, undefined, this);
 }
+var BATCH_LABEL = { scene: "One call per scene", character: "One call per character" };
+var LIMIT_FIELD = {
+  mindTokens: { label: "What they know, for each mind (tokens)", note: "What a mind reads of the facts it holds. What a mind reads shows it on its What they know row too.", step: 100 },
+  narratorTokens: { label: "Who knows what, for the narrator (tokens)", note: "The narrator's Who knows what: who here knows, suspects or doesn't know the facts in play.", step: 100 },
+  perPerson: { label: "Who knows what: facts per person", note: "The narrator gets each person's most relevant facts, up to this many.", step: 1 },
+  stepTokens: { label: "The knowledge step's context (tokens)", note: "What happened, who could perceive it, what each of them already knows and has seen lately, and the facts in play.", step: 100 },
+  claimChars: { label: "A fact's claim (characters)", note: "The longest claim the knowledge step records; a longer one is cut.", step: 10 },
+  factsPerChat: { label: "Facts made in play, per chat", note: "Past it, the knowledge step makes no new fact; people still learn the ones there are.", step: 1 },
+  holdersPerFact: { label: "People who may hold one fact", note: "Past it, no one else learns that fact from the knowledge step.", step: 1 },
+  factsPerTurn: { label: "New facts a turn", note: "The most new facts one turn's knowledge step records.", step: 1 },
+  learningsPerTurn: { label: "Learnings a turn", note: "The most times one turn's knowledge step records someone coming to know a fact.", step: 1 },
+  inPlayTurns: { label: "A fact stays in play for (turns)", note: "A fact is in play while someone learned it within this many of the latest turns, or while it's about someone or somewhere here.", step: 1 }
+};
+var OPEN_LIMITS = ["mindTokens", "narratorTokens", "perPerson", "stepTokens"];
+function KnowledgeLimitStepper(props) {
+  const [min, max] = knowledgeLimitRange(props.limit);
+  const field = LIMIT_FIELD[props.limit];
+  return /* @__PURE__ */ u3(NumberStepper, {
+    label: field.label,
+    value: props.knowledge[props.limit],
+    min,
+    max,
+    step: field.step,
+    integer: true,
+    disabled: props.busy,
+    onChange: (value) => props.patch(knowledgeLimitPatch(props.limit, value))
+  }, undefined, false, undefined, this);
+}
+function KnowledgeLimitRow(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-override",
+    "data-lre-knowledge-limit": props.limit,
+    children: [
+      /* @__PURE__ */ u3(KnowledgeLimitStepper, {
+        limit: props.limit,
+        knowledge: props.knowledge,
+        busy: props.busy,
+        patch: props.patch
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Note, {
+        children: LIMIT_FIELD[props.limit].note
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var TEXT_GROUPS = ["mind", "holding", "narrator", "step"];
+var TEXT_GROUP_TITLE = {
+  mind: "What a mind reads",
+  holding: "How a fact someone holds reads",
+  narrator: "The narrator's Who knows what",
+  step: "The knowledge step's context"
+};
+var TEXT_GROUP_NOTE = {
+  mind: "The heading and lead over the facts a mind holds.",
+  holding: "Each line a mind, the narrator and the knowledge step read for a fact someone holds, and the words for how they came by it.",
+  narrator: "How Who knows what names a person's facts, and what they don't know.",
+  step: "The headings of what the knowledge step is given."
+};
+var TEXT_FIELD = {
+  mindTitle: { group: "mind", label: "Heading" },
+  mindLead: { group: "mind", label: "Lead" },
+  known: { group: "holding", label: "A fact they know" },
+  suspected: { group: "holding", label: "A fact they suspect" },
+  disbelieved: { group: "holding", label: "A fact they don't believe" },
+  unsure: { group: "holding", label: "A fact they're unsure of" },
+  keeps: { group: "holding", label: "Whom they keep it from" },
+  everyone: { group: "holding", label: "Kept from everyone" },
+  authored: { group: "holding", label: "How: known from the start" },
+  witnessed: { group: "holding", label: "How: saw it" },
+  told: { group: "holding", label: "How: told by someone" },
+  inferred: { group: "holding", label: "How: worked it out" },
+  guessed: { group: "holding", label: "How: a guess" },
+  person: { group: "narrator", label: "A person's line" },
+  notKnown: { group: "narrator", label: "What someone doesn't know" },
+  stepHappened: { group: "step", label: "What happened" },
+  stepPresent: { group: "step", label: "Who could perceive it" },
+  stepPeople: { group: "step", label: "What each already knows" },
+  stepFacts: { group: "step", label: "Facts in play" },
+  stepPerson: { group: "step", label: "A person" },
+  stepYou: { group: "step", label: "The player character" },
+  stepSaid: { group: "step", label: "What the player character said or did" },
+  stepStory: { group: "step", label: "The story, as written" },
+  stepThroughout: { group: "step", label: "Present: throughout" },
+  stepLeft: { group: "step", label: "Present: left partway" },
+  stepCame: { group: "step", label: "Present: came in during the turn" },
+  stepOpen: { group: "step", label: "An open question" },
+  stepFalse: { group: "step", label: "A false fact" },
+  stepPinned: { group: "step", label: "Pinned lore" },
+  stepTraits: { group: "step", label: "Who they are" },
+  stepHolds: { group: "step", label: "What they hold" },
+  stepNothing: { group: "step", label: "Holding nothing yet" },
+  stepWitnessed: { group: "step", label: "What they witnessed lately" },
+  stepSomeone: { group: "step", label: "A teller with no name" },
+  stepAnswer: { group: "step", label: "What each list of the answer holds" }
+};
+function KnowledgeTextField(props) {
+  const { id, busy } = props;
+  const input = P2();
+  const shipped = KNOWLEDGE_TEXTS[id];
+  const saved = props.value ?? shipped;
+  const [text, setText] = d2(saved);
+  A(() => setText(saved), [saved]);
+  const save = knowledgeTextPatch(id, text);
+  const placeholders = knowledgePlaceholders(id);
+  const missing = text.trim() === "" ? [] : missingPlaceholders(id, text);
+  const error = text.length > MIND_PROMPT_MAX ? `Too long: at most ${MIND_PROMPT_MAX.toLocaleString()} characters.` : missing.length > 0 ? `Keep ${missing.join(", ")}: the engine fills ${missing.length === 1 ? "it" : "each"} in.` : null;
+  const label = TEXT_FIELD[id].label;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-tpl",
+    "data-lre-knowledge-text": id,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-minds-tpl-head",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-minds-tpl-text",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                class: "lre-minds-subhead",
+                for: input,
+                children: label
+              }, undefined, false, undefined, this),
+              placeholders.length > 0 ? /* @__PURE__ */ u3("span", {
+                class: "lre-minds-note",
+                children: [
+                  "Keep ",
+                  placeholders.join(", "),
+                  "."
+                ]
+              }, undefined, true, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          props.value !== undefined ? /* @__PURE__ */ u3(Badge, {
+            tone: "accent",
+            children: "Your own"
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+            children: "Shipped"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("textarea", {
+        id: input,
+        class: "lre-input lre-minds-text-input",
+        rows: shipped.length > 80 ? 3 : 1,
+        value: text,
+        disabled: busy,
+        onInput: (event) => setText(event.currentTarget.value)
+      }, undefined, false, undefined, this),
+      error ? /* @__PURE__ */ u3("div", {
+        class: "lre-set-warn",
+        role: "note",
+        children: [
+          /* @__PURE__ */ u3(Icon, {
+            name: "alert",
+            size: 16
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            children: error
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-minds-actions",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "primary",
+            disabled: busy || save === null || text === saved,
+            onClick: () => save && props.patch(save),
+            children: "Save"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "ghost",
+            disabled: busy || text === saved,
+            onClick: () => setText(saved),
+            children: "Revert"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            icon: "undo",
+            label: `Reset ${label} to the shipped text`,
+            disabled: busy || props.value === undefined,
+            onClick: () => props.patch(knowledgeTextPatch(id, null) ?? {}),
+            children: "Reset"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function KnowledgeSection(props) {
+  const { knowledge: k2, busy } = props;
+  const set = (change) => props.patch(knowledgePatch(change));
+  const [lo, hi] = KNOWLEDGE_RANGES.threshold;
+  return /* @__PURE__ */ u3(Section, {
+    title: "Knowledge",
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-minds-body",
+      "data-lre-knowledge-settings": "",
+      children: [
+        /* @__PURE__ */ u3(HostSwitch, {
+          label: "Track who knows what",
+          checked: k2.enabled,
+          disabled: busy,
+          onChange: (enabled) => set({ enabled })
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Note, {
+          children: "On, each character holds the facts they know. After each reply the knowledge step works out who learned what; minds read what they know, the narrator gets Who knows what, and Play shows What you know. A chat's own switch in GM → This chat wins."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(NumberStepper, {
+          label: "Suspicion threshold (%)",
+          value: Math.round(k2.threshold * 100),
+          min: lo * 100,
+          max: hi * 100,
+          step: 5,
+          integer: true,
+          disabled: busy,
+          onChange: (percent2) => set({ threshold: percent2 / 100 })
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Note, {
+          children: "A fact someone holds less surely than this is a suspicion, not something they know."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-minds-group",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "lre-minds-group-title",
+              children: "The knowledge step"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Seg, {
+              label: "The knowledge step",
+              value: k2.batch,
+              options: KNOWLEDGE_BATCHES.map((b3) => ({ value: b3, label: BATCH_LABEL[b3] })),
+              disabled: busy,
+              onChange: (batch) => set({ batch })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Note, {
+              children: "One call per scene works out everyone who could perceive the turn at once. One call per character asks about each of them alone: closer reading, a call each."
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-minds-group",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "lre-minds-group-title",
+              children: "Limits"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("div", {
+              class: "lre-minds-overrides",
+              children: OPEN_LIMITS.map((limit) => /* @__PURE__ */ u3(KnowledgeLimitRow, {
+                limit,
+                knowledge: k2,
+                busy,
+                patch: props.patch
+              }, limit, false, undefined, this))
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Disclosure, {
+              summary: "More limits",
+              children: /* @__PURE__ */ u3("div", {
+                class: "lre-minds-overrides",
+                children: KNOWLEDGE_LIMITS.filter((limit) => !OPEN_LIMITS.includes(limit)).map((limit) => /* @__PURE__ */ u3(KnowledgeLimitRow, {
+                  limit,
+                  knowledge: k2,
+                  busy,
+                  patch: props.patch
+                }, limit, false, undefined, this))
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-minds-group",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "lre-minds-group-title",
+              children: "Texts"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Note, {
+              children: "The words knowledge sends a model, besides the knowledge step's own prompt (under Prompts). Yours replaces the shipped text; Reset goes back to it."
+            }, undefined, false, undefined, this),
+            TEXT_GROUPS.map((group) => /* @__PURE__ */ u3(Disclosure, {
+              summary: /* @__PURE__ */ u3("span", {
+                class: "lre-minds-summary",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    children: TEXT_GROUP_TITLE[group]
+                  }, undefined, false, undefined, this),
+                  KNOWLEDGE_TEXT_IDS.some((id) => TEXT_FIELD[id].group === group && k2.prompts[id] !== undefined) ? /* @__PURE__ */ u3(Badge, {
+                    tone: "accent",
+                    children: "Yours"
+                  }, undefined, false, undefined, this) : null
+                ]
+              }, undefined, true, undefined, this),
+              children: [
+                /* @__PURE__ */ u3(Note, {
+                  children: TEXT_GROUP_NOTE[group]
+                }, undefined, false, undefined, this),
+                KNOWLEDGE_TEXT_IDS.filter((id) => TEXT_FIELD[id].group === group).map((id) => /* @__PURE__ */ u3(KnowledgeTextField, {
+                  id,
+                  value: k2.prompts[id],
+                  busy,
+                  patch: props.patch
+                }, id, false, undefined, this))
+              ]
+            }, group, true, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
 function MindsSection(props) {
   const { minds, busy } = props;
   const policy = (change) => props.patch(mindsPolicyPatch(change));
@@ -28172,7 +30128,7 @@ function MindsSection(props) {
               onChange: (enabled) => policy({ enabled })
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(Note, {
-              children: "Picking a Model use preset sets everything here but what a mind reads, your prompts and memory overrides; changing any of the rest makes it Custom."
+              children: "Picking a Model use preset sets everything here but what a mind reads, knowledge, your prompts and memory overrides; changing any of the rest makes it Custom."
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -28310,6 +30266,7 @@ function MindsSection(props) {
                 /* @__PURE__ */ u3(ReadSources, {
                   reads: minds.reads,
                   memory: minds.memory,
+                  knowledge: minds.knowledge,
                   busy,
                   patch: props.patch
                 }, undefined, false, undefined, this)
@@ -28375,6 +30332,11 @@ function MindsSection(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3(KnowledgeSection, {
+        knowledge: minds.knowledge,
+        busy,
+        patch: props.patch
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
         title: "Memory",
         children: /* @__PURE__ */ u3("div", {
@@ -28585,7 +30547,9 @@ var EXTRACTION_LABEL = {
   use_up: "Using things up",
   wear: "Putting on or taking off",
   lose: "Losing things, or having them stolen",
-  item_condition: "Wear and damage to things"
+  item_condition: "Wear and damage to things",
+  learn: "What you learn (who knows what)",
+  reveal: "Secrets the story reveals to you"
 };
 var MODE_OPTIONS = [
   { value: "auto", label: "Auto" },
@@ -28757,7 +30721,8 @@ var STEP_PLAIN = {
   mind: "Before the reply: one call per character, as that character: what they think, how they come across, what they mean to do.",
   memory: "After the reply: the notes, commitments and plans each character who heard your message takes from it, at the levels you pick.",
   skip: "Before a time skip, once you turn it on: further moments in it worth stopping at.",
-  consolidate: "Folds a character's faded and surplus notes into their summary."
+  consolidate: "Folds a character's faded and surplus notes into their summary.",
+  knowledge: "After the reply: who learned what, what they worked out and what they now doubt, one call per scene or per character as set in Settings → Minds → Knowledge."
 };
 var PHASES = ["pre", "post"];
 var PHASE_LABEL = { pre: "Before the reply", post: "After the reply" };
@@ -29314,13 +31279,13 @@ function stepBuiltIn(purpose) {
     return { use: "added", text: ADDED_BEFORE[purpose] };
   if (purpose === "skip")
     return { use: "replaced", text: SKIP_PLAN_PROMPT };
-  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate")
+  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate" || purpose === "knowledge")
     return { use: "replaced", text: MIND_PROMPT_DEFAULTS[purpose] };
   return { use: "replaced", text: purpose === "brief" || purpose === "outline" || purpose === "choices" ? PROSE_PROMPTS[purpose] : DECISION_PROMPTS[purpose] };
 }
 function StepPrompts(props) {
   const { purpose, busy } = props;
-  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate")
+  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate" || purpose === "knowledge")
     return /* @__PURE__ */ u3(MindPromptEditor, {
       purpose,
       value: props.prompts[purpose],
@@ -29617,7 +31582,7 @@ function StepCard(props) {
 }
 
 // src/frontend/settings/timeouts.tsx
-var GROUPS3 = [
+var GROUPS4 = [
   { group: "turn", title: "Turns", lead: "How long the engine may work on a turn before the reply, and after it." },
   { group: "app", title: "This tab", lead: "How long LumiRPEngine's tab waits for the engine." },
   { group: "work", title: "Jobs and background work", lead: "Build's model jobs, minds runs you start, and the engine's work in the background." }
@@ -29717,7 +31682,7 @@ function TimeoutsSection(props) {
         class: "lre-set-lead",
         children: "Every wait the engine keeps is yours to set, in seconds, with no ceiling; No limit lifts one where that can't break anything. Picking a Model use preset never changes these."
       }, undefined, false, undefined, this),
-      GROUPS3.map(({ group, title, lead }) => /* @__PURE__ */ u3(Section, {
+      GROUPS4.map(({ group, title, lead }) => /* @__PURE__ */ u3(Section, {
         title,
         flush: true,
         children: /* @__PURE__ */ u3("div", {
@@ -29786,6 +31751,7 @@ var PAGE2 = {
   model: { title: "Model use", subtitle: "How much the engine asks a model", icon: "bolt" },
   steps: { title: "Steps and connections", subtitle: "Which model runs each step", icon: "branch" },
   minds: { title: "Minds", subtitle: "How characters think and remember", icon: "sparkle" },
+  narrator: { title: "Narrator", subtitle: "What the narrator knows, and how a secret is marked", icon: "eye" },
   timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
   realism: { title: "Realism", subtitle: "For new chats", icon: "layers" },
   checks: { title: "Checks", subtitle: "For new chats", icon: "dice" },
@@ -29798,8 +31764,8 @@ var PAGE2 = {
   diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" },
   mcp: { title: "MCP server", subtitle: "Your agent's lumirpengine, and how it follows updates", icon: "branch" }
 };
-var GROUPS4 = [
-  { title: "Getting started", pages: ["helper", "model", "steps", "minds", "timeouts"] },
+var GROUPS5 = [
+  { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -29808,7 +31774,8 @@ var GROUPS4 = [
   { title: "About", pages: ["caveats", "diagnostics"] }
 ];
 var STATIC_CAVEATS = [
-  "Lumiverse's World Info works as usual in world chats, but for two cases: an entry LumiRPEngine keeps secret stays off until its gate holds, and an entry whose text a section already carries that turn (such as the lore about where your character is, in the Place section) is left out.",
+  "Lumiverse's World Info works as usual in world chats. A secret mark in an entry's text ({{// Secret …: …}}) reaches the narrator marked as a secret, or not at all, as the chat's narrator view says; when LumiRPEngine fails on a prompt or runs out of time for it, Lumiverse strips the mark itself, so the secret stays out. An entry an earlier build keeps secret stays switched off in its book until that book's secrecy moves to marks (Build → Lore); one you switched back on yourself goes into such a prompt unmarked.",
+  "Moving a book's secrecy to marks (Build → Lore → Secrecy in your World Info) writes each copy of a secret's text that an earlier build kept switched off as the same secret mark before it switches the copy back as it stood, so Lumiverse strips it from any prompt LumiRPEngine doesn't mark, even in a chat that reads the copy's book and not the secret's. A copy whose text a mark can't hold stays switched off.",
   "Realism, checks and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat in GM → This chat.",
   "Undo covers the latest reply; earlier changes go through Keep or Discard."
 ];
@@ -29821,6 +31788,8 @@ function summaryOf(page, data, caveats, showIds, connections) {
       return { subtitle: `${humanize(settings.modelUse.preset)} preset` };
     case "minds":
       return { subtitle: settings.minds.enabled ? `On · ${settings.minds.liveLimit === "none" ? "no Live limit" : `up to ${settings.minds.liveLimit} Live a turn`}` : "Off" };
+    case "narrator":
+      return { subtitle: narratorViewSummary(settings.narrator) };
     case "timeouts":
       return { subtitle: `Engine run ${limitText(settings.timeouts.engineRunMs)} · reading the reply ${limitText(settings.timeouts.postReplyMs)}` };
     case "steps": {
@@ -29870,7 +31839,7 @@ function Home(props) {
         title: "Settings",
         subtitle: "Yours, for every world chat"
       }, undefined, false, undefined, this),
-      GROUPS4.map((group) => /* @__PURE__ */ u3(Section, {
+      GROUPS5.map((group) => /* @__PURE__ */ u3(Section, {
         title: group.title,
         flush: true,
         children: /* @__PURE__ */ u3(List, {
@@ -30061,6 +32030,10 @@ function Settings() {
     busy
   }, undefined, false, undefined, this) : page === "minds" ? /* @__PURE__ */ u3(MindsSection, {
     minds: settings.minds,
+    patch,
+    busy
+  }, undefined, false, undefined, this) : page === "narrator" ? /* @__PURE__ */ u3(NarratorPage, {
+    narrator: settings.narrator,
     patch,
     busy
   }, undefined, false, undefined, this) : page === "timeouts" ? /* @__PURE__ */ u3(TimeoutsSection, {
@@ -35389,7 +37362,7 @@ var events = [
           const level = LEVELS4.find((n2) => n2 === v3);
           clauses.push(v3 === null ? `has ${area} detail from their tier again` : `now has ${area} detail at level ${String(v3)}${level !== undefined ? ` (${LEVEL_LABEL[level]})` : ""}`);
         }
-      return `${own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity")} ${listWords2(clauses)}`;
+      return `${own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity")} ${listWords3(clauses)}`;
     }
   },
   {
@@ -35419,7 +37392,7 @@ var events = [
     describe: (e3, ctx, viewer) => {
       const classes = classOf(e3.data.class) ?? {};
       const name = own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity");
-      const valuesOf = (f3, values) => values.length > 0 ? listWords2(values.map((v3) => own(f3.values, v3)?.label ?? v3)) : "none";
+      const valuesOf = (f3, values) => values.length > 0 ? listWords3(values.map((v3) => own(f3.values, v3)?.label ?? v3)) : "none";
       const facetLine = (f3, values) => `${possessive(name)} ${fieldNoun(f3.label, "").noun} is now ${valuesOf(f3, values)}`;
       if (viewer !== undefined) {
         const was = classOf(e3.data.was);
@@ -35435,7 +37408,7 @@ var events = [
       });
       const tags = tagList(e3.data.tags) ?? [];
       if (tags.length > 0)
-        parts.push(`${possessive(name)} tags are now ${listWords2(tags)}`);
+        parts.push(`${possessive(name)} tags are now ${listWords3(tags)}`);
       return parts.length > 0 ? parts.join("; ") : `${name} now has no classes and no tags`;
     }
   },
@@ -35498,7 +37471,7 @@ var events = [
       const name = own(ctx.state.entities, id)?.name ?? id;
       const who = Array.isArray(e3.data.who) ? e3.data.who.filter((x2) => typeof x2 === "string") : [];
       if (viewer === undefined)
-        return `${listWords2(who.map((w3) => own(ctx.state.entities, w3)?.name ?? w3))} now ${who.length === 1 ? "knows" : "know"} that ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
+        return `${listWords3(who.map((w3) => own(ctx.state.entities, w3)?.name ?? w3))} now ${who.length === 1 ? "knows" : "know"} that ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
       return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
     }
   }
@@ -45134,8 +47107,10 @@ function GmMindsSection(props) {
   const liveNear = view.characters.filter((c3) => c3.fidelity.level === "live" || c3.fidelity.level === "near").length;
   const page = pages.page;
   const selected = page === null ? undefined : view.characters.find((c3) => c3.entity === page);
+  const knower = view.knowledge.pov;
+  const povKnows = knower !== null && page === knower.entity ? knower : undefined;
   A(() => {
-    if (page !== null && selected === undefined)
+    if (page !== null && selected === undefined && povKnows === undefined)
       pages.back();
   });
   const q2 = query.trim().toLowerCase();
@@ -45150,7 +47125,7 @@ function GmMindsSection(props) {
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
-        hidden: selected !== undefined,
+        hidden: selected !== undefined || povKnows !== undefined,
         children: [
           view.enabled ? null : /* @__PURE__ */ u3(Banner, {
             tone: "info",
@@ -45178,6 +47153,20 @@ function GmMindsSection(props) {
               }, undefined, true, undefined, this)
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
+          knower && !picking.on ? /* @__PURE__ */ u3(Section, {
+            title: "The player character",
+            flush: true,
+            children: /* @__PURE__ */ u3(List, {
+              children: /* @__PURE__ */ u3(ListRow, {
+                icon: "user",
+                title: knower.name,
+                subtitle: "What they know; the player decides for them, so they have no mind",
+                value: `${knower.holdings.length} held`,
+                chevron: true,
+                onClick: () => pages.open(knower.entity)
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
           /* @__PURE__ */ u3(RunCard, {
             minds,
             busy: props.busy
@@ -45309,6 +47298,11 @@ function GmMindsSection(props) {
         ctx,
         c: selected,
         onBack: pages.back
+      }, undefined, false, undefined, this) : null,
+      povKnows ? /* @__PURE__ */ u3(KnowerPages, {
+        ctx,
+        who: { ...povKnows, witness: [] },
+        onBack: pages.back
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -45320,7 +47314,8 @@ function CharacterPages2(props) {
   const plan2 = change?.kind === "plan" && change.id !== null ? c3.plans.find((p3) => p3.id === change.id) : undefined;
   const commitment = change?.kind === "commitment" && change.id !== null ? c3.commitments.find((x2) => x2.id === change.id) : undefined;
   const note = change?.kind === "note" && change.id !== null ? c3.notes.find((n2) => n2.id === change.id) : undefined;
-  const gone = change !== null && "id" in change && change.id !== null && plan2 === undefined && commitment === undefined && note === undefined;
+  const holding2 = change?.kind === "holding" && change.fact !== null ? c3.holdings.find((h3) => h3.fact === change.fact) : undefined;
+  const gone = change !== null && (("id" in change) && change.id !== null && plan2 === undefined && commitment === undefined && note === undefined || change.kind === "holding" && change.fact !== null && holding2 === undefined);
   A(() => {
     if (gone)
       changes.back();
@@ -45397,6 +47392,11 @@ function CharacterPages2(props) {
                 ctx,
                 c: c3
               }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Holdings, {
+                ctx,
+                who: c3,
+                open: changes.open
+              }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(PinnedLore, {
                 gm: ctx.gm,
                 chatId: ctx.chatId,
@@ -45468,7 +47468,13 @@ function CharacterPages2(props) {
         c: c3,
         note: note ?? null,
         onBack: changes.back
-      }, change.id ?? "", false, undefined, this) : null
+      }, change.id ?? "", false, undefined, this) : null,
+      change?.kind === "holding" && (change.fact === null || holding2) ? /* @__PURE__ */ u3(HoldingPage2, {
+        ctx,
+        who: c3,
+        holding: holding2 ?? null,
+        onBack: changes.back
+      }, change.fact ?? "", false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
 }
@@ -46569,12 +48575,424 @@ function PlanPage(props) {
     ]
   }, undefined, true, undefined, this);
 }
+var HOW_ICON = { authored: "scroll", witnessed: "eye", told: "message", inferred: "sparkle", guessed: "help" };
+function howWords(h3) {
+  if (h3.byName === null)
+    return HOW_LABEL[h3.how];
+  return h3.how === "told" ? `Told by ${h3.byName}` : `${HOW_LABEL[h3.how]}, from ${h3.byName}`;
+}
+function beliefWords(h3) {
+  const kept = h3.keptFromNames === "everyone" ? " · kept from everyone" : h3.keptFromNames.length > 0 ? ` · kept from ${h3.keptFromNames.join(", ")}` : "";
+  return `${BELIEF_LABEL[h3.belief]}, ${Math.round(h3.confidence * 100)}% sure${kept}`;
+}
+function Holdings(props) {
+  const { ctx, who } = props;
+  const facts = ctx.view.knowledge.facts;
+  const unheld = facts.filter((f3) => !who.holdings.some((h3) => h3.fact === f3.id)).length;
+  return /* @__PURE__ */ u3(Section, {
+    title: "What they know",
+    aside: /* @__PURE__ */ u3(Badge, {
+      children: `${who.holdings.length} held`
+    }, undefined, false, undefined, this),
+    flush: true,
+    children: [
+      who.holdings.length === 0 ? /* @__PURE__ */ u3(None2, {
+        children: "Nothing recorded."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(List, {
+        children: [
+          who.holdings.map((h3) => /* @__PURE__ */ u3(ListRow, {
+            id: h3.fact,
+            icon: HOW_ICON[h3.how],
+            title: h3.claim,
+            subtitle: /* @__PURE__ */ u3("span", {
+              class: "lre-gm-minds-lines",
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  children: `${howWords(h3)} · since ${h3.sinceText}`
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  children: beliefWords(h3)
+                }, undefined, false, undefined, this),
+                h3.evidenceShown.length > 0 ? /* @__PURE__ */ u3("span", {
+                  children: `Rests on: ${h3.evidenceShown.map((e3) => e3.text).join("; ")}`
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this),
+            badge: h3.suspicion ? /* @__PURE__ */ u3(Badge, {
+              tone: "warn",
+              children: "Suspicion"
+            }, undefined, false, undefined, this) : h3.truth !== "true" ? /* @__PURE__ */ u3(Badge, {
+              children: TRUTH_LABEL[h3.truth]
+            }, undefined, false, undefined, this) : undefined,
+            chevron: true,
+            disabled: ctx.busy,
+            onClick: () => props.open({ kind: "holding", fact: h3.fact })
+          }, h3.fact, false, undefined, this)),
+          /* @__PURE__ */ u3(ListRow, {
+            icon: "plus",
+            title: "Add a holding",
+            subtitle: unheld > 0 ? undefined : facts.length === 0 ? "The chat holds no facts yet" : "They hold every fact the chat has",
+            disabled: ctx.busy || unheld === 0,
+            onClick: () => props.open({ kind: "holding", fact: null })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function HoldingPage2(props) {
+  const { ctx, who, holding: holding2 } = props;
+  const knowledge = ctx.view.knowledge;
+  const choices = knowledge.facts.filter((f3) => f3.id === holding2?.fact || !who.holdings.some((h3) => h3.fact === f3.id));
+  const [fact, setFact] = d2(() => holding2?.fact ?? choices[0]?.id ?? "");
+  const [draft, setDraft] = d2(() => holdingDraft(ctx.view.now, holding2 ?? undefined));
+  const ids = { fact: P2(), how: P2(), by: P2(), confidence: P2(), grounds: P2() };
+  const chosen = knowledge.facts.find((f3) => f3.id === fact);
+  const op = chosen ? holdingOp(who.entity, fact, draft) : null;
+  const grounds = [...who.holdings.filter((h3) => h3.fact !== fact).map((h3) => ({ ref: h3.fact, text: h3.claim })), ...who.witness.map((w3) => ({ ref: witnessRef(w3), text: `${w3.what} (${w3.clock})` }))];
+  const groundText = (ref) => grounds.find((g2) => g2.ref === ref)?.text ?? holding2?.evidenceShown.find((e3) => e3.ref === ref)?.text ?? ref;
+  const left = grounds.filter((g2) => !draft.evidence.includes(g2.ref));
+  const percent2 = Number(draft.confidence);
+  const sureOff = draft.confidence.trim() === "" || !Number.isInteger(percent2) || percent2 < 0 || percent2 > 100;
+  const threshold2 = Math.round(knowledge.threshold * 100);
+  return /* @__PURE__ */ u3(ChangePage2, {
+    name: "mind-holding",
+    title: holding2 ? "Edit holding" : "Add a holding",
+    c: who,
+    onBack: props.onBack,
+    children: [
+      /* @__PURE__ */ u3("form", {
+        class: "lre-stack",
+        "data-lre-minds-form": "holding",
+        onSubmit: (event) => {
+          event.preventDefault();
+          if (op)
+            send(ctx, op, props.onBack);
+        },
+        children: [
+          /* @__PURE__ */ u3(Section, {
+            children: [
+              holding2 ? /* @__PURE__ */ u3("p", {
+                class: "lre-gm-minds-prose",
+                children: holding2.claim
+              }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Field, {
+                label: "What they hold",
+                for: ids.fact,
+                help: chosen ? `${TRUTH_LABEL[chosen.truth]}, as you hold it.` : "The chat holds no fact they don't.",
+                children: /* @__PURE__ */ u3("select", {
+                  id: ids.fact,
+                  class: "lre-input",
+                  value: fact,
+                  disabled: ctx.busy || choices.length === 0,
+                  onChange: (event) => setFact(event.currentTarget.value),
+                  children: choices.map((f3) => /* @__PURE__ */ u3("option", {
+                    value: f3.id,
+                    children: f3.claim
+                  }, f3.id, false, undefined, this))
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Field, {
+                label: "How they came by it",
+                for: ids.how,
+                children: /* @__PURE__ */ u3("select", {
+                  id: ids.how,
+                  class: "lre-input",
+                  value: draft.how,
+                  disabled: ctx.busy,
+                  onChange: (event) => setDraft({ ...draft, how: event.currentTarget.value }),
+                  children: HOLDING_HOWS.map((h3) => /* @__PURE__ */ u3("option", {
+                    value: h3,
+                    children: HOW_LABEL[h3]
+                  }, h3, false, undefined, this))
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Field, {
+                label: "Who told them",
+                for: ids.by,
+                help: draft.how === "told" ? "A told holding names who told them." : "No one, unless someone gave it to them.",
+                children: /* @__PURE__ */ u3("select", {
+                  id: ids.by,
+                  class: "lre-input",
+                  value: draft.by ?? "",
+                  disabled: ctx.busy,
+                  onChange: (event) => setDraft({ ...draft, by: event.currentTarget.value || null }),
+                  children: [
+                    /* @__PURE__ */ u3("option", {
+                      value: "",
+                      children: "No one"
+                    }, undefined, false, undefined, this),
+                    ctx.people.filter((p3) => p3.id !== who.entity).map((p3) => /* @__PURE__ */ u3("option", {
+                      value: p3.id,
+                      children: p3.name
+                    }, p3.id, false, undefined, this))
+                  ]
+                }, undefined, true, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Field, {
+                label: "What they make of it",
+                children: /* @__PURE__ */ u3(Seg, {
+                  label: "What they make of it",
+                  value: draft.belief,
+                  options: HOLDING_BELIEFS.map((b3) => ({ value: b3, label: BELIEF_LABEL[b3] })),
+                  onChange: (belief) => setDraft({ ...draft, belief })
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Field, {
+                label: "How sure (percent)",
+                for: ids.confidence,
+                help: `Under ${threshold2}% it is a suspicion (Settings → Minds → Knowledge).${!sureOff && percent2 < threshold2 ? " This one is." : ""}`,
+                error: sureOff ? "A whole number from 0 to 100." : null,
+                children: /* @__PURE__ */ u3("input", {
+                  id: ids.confidence,
+                  class: sureOff ? "lre-input invalid" : "lre-input",
+                  inputMode: "numeric",
+                  value: draft.confidence,
+                  onInput: (event) => setDraft({ ...draft, confidence: event.currentTarget.value })
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Field, {
+                label: "Whom they keep it from",
+                children: /* @__PURE__ */ u3(Seg, {
+                  label: "Whom they keep it from",
+                  value: draft.kept,
+                  options: [
+                    { value: "none", label: "No one" },
+                    { value: "everyone", label: "Everyone" },
+                    { value: "some", label: "Some people" }
+                  ],
+                  onChange: (kept) => setDraft({ ...draft, kept })
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              draft.kept === "some" ? /* @__PURE__ */ u3(PeopleField, {
+                label: "Kept from",
+                value: draft.keptFrom,
+                people: ctx.people,
+                exclude: who.entity,
+                disabled: ctx.busy,
+                onChange: (keptFrom) => setDraft({ ...draft, keptFrom })
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3(Field, {
+                label: "What it rests on",
+                for: left.length > 0 ? ids.grounds : undefined,
+                help: "Other facts they hold, and what they witnessed or were told.",
+                children: [
+                  draft.evidence.length > 0 ? /* @__PURE__ */ u3("div", {
+                    class: "lre-form-chips",
+                    children: draft.evidence.map((ref) => /* @__PURE__ */ u3(Chip, {
+                      removeLabel: `Remove ${groundText(ref)}`,
+                      disabled: ctx.busy,
+                      onRemove: () => setDraft({ ...draft, evidence: draft.evidence.filter((r3) => r3 !== ref) }),
+                      children: groundText(ref)
+                    }, ref, false, undefined, this))
+                  }, undefined, false, undefined, this) : null,
+                  left.length > 0 ? /* @__PURE__ */ u3("select", {
+                    id: ids.grounds,
+                    class: "lre-input",
+                    value: "",
+                    disabled: ctx.busy,
+                    onChange: (event) => event.currentTarget.value && setDraft({ ...draft, evidence: [...draft.evidence, event.currentTarget.value] }),
+                    children: [
+                      /* @__PURE__ */ u3("option", {
+                        value: "",
+                        children: "Add what it rests on…"
+                      }, undefined, false, undefined, this),
+                      left.map((g2) => /* @__PURE__ */ u3("option", {
+                        value: g2.ref,
+                        children: g2.text
+                      }, g2.ref, false, undefined, this))
+                    ]
+                  }, undefined, true, undefined, this) : null
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Submit2, {
+            ctx,
+            ready: op !== null,
+            icon: holding2 ? "check" : "plus",
+            invalid: chosen ? "A told holding names who told them, never themselves; how sure is a whole percent; keeping it from some people names them." : "Pick a fact they don't hold yet.",
+            children: holding2 ? "Save" : "Add holding"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      holding2 ? /* @__PURE__ */ u3(DeleteItem, {
+        ctx,
+        op: forgetOp(who.entity, holding2.fact),
+        noun: "holding",
+        onDone: props.onBack
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function KnowerPages(props) {
+  const { ctx, who } = props;
+  const changes = usePages();
+  const change = changes.page;
+  const holding2 = change?.kind === "holding" && change.fact !== null ? who.holdings.find((h3) => h3.fact === change.fact) : undefined;
+  const gone = change?.kind === "holding" && change.fact !== null && holding2 === undefined;
+  A(() => {
+    if (gone)
+      changes.back();
+  });
+  const was = T2(change);
+  A(() => {
+    const before = was.current;
+    was.current = change;
+    const root = changes.host.ref.current;
+    if (before === null || change !== null || !root || root.contains(document.activeElement))
+      return;
+    root.querySelector(".lre-page-header button")?.focus();
+  }, [change]);
+  return /* @__PURE__ */ u3("div", {
+    ref: changes.host.ref,
+    class: "lre-gm-page lre-gm-pages lre-gm-minds-pages",
+    onKeyDown: changes.host.onKeyDown,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-list",
+        hidden: change !== null,
+        children: /* @__PURE__ */ u3(GmPage, {
+          name: "mind-knower",
+          title: who.name,
+          subtitle: /* @__PURE__ */ u3(M, {
+            children: [
+              "The player character",
+              /* @__PURE__ */ u3(IdText, {
+                id: who.entity
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          backLabel: "Minds",
+          actions: /* @__PURE__ */ u3(SheetLink, {
+            entity: who.entity
+          }, undefined, false, undefined, this),
+          onBack: props.onBack,
+          children: /* @__PURE__ */ u3("div", {
+            class: "lre-gm-minds",
+            "data-lre-gm-minds": who.entity,
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-gm-note",
+                children: "The player decides for them, so they have no mind. What they know is what the story, the world's author and you have given them; nothing here reaches Play until the story tells them."
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Holdings, {
+                ctx,
+                who,
+                open: changes.open
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      change?.kind === "holding" && (change.fact === null || holding2) ? /* @__PURE__ */ u3(HoldingPage2, {
+        ctx,
+        who,
+        holding: holding2 ?? null,
+        onBack: changes.back
+      }, change.fact ?? "", false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/minds/ui/known.tsx
+function decodeKnownView(value) {
+  if (!isRecord(value) || typeof value.tracking !== "boolean")
+    return null;
+  return {
+    tracking: value.tracking,
+    items: list(value.items, (i3) => typeof i3.key === "string" && typeof i3.claim === "string" ? {
+      key: i3.key,
+      claim: i3.claim,
+      how: oneOf(i3.how, HOLDING_HOWS, "authored"),
+      byName: typeof i3.byName === "string" ? i3.byName : null,
+      sinceText: str(i3.sinceText),
+      belief: oneOf(i3.belief, HOLDING_BELIEFS, "true"),
+      confidence: num(i3.confidence),
+      suspicion: i3.suspicion === true,
+      open: i3.open === true,
+      keptFrom: i3.keptFrom === "everyone" ? "everyone" : Array.isArray(i3.keptFrom) ? strings(i3.keptFrom) : null
+    } : null)
+  };
+}
+function howText(item) {
+  const how = { authored: "From the start", witnessed: "You saw it", told: item.byName ? `Told by ${item.byName}` : "You were told", inferred: "You worked it out", guessed: "A guess" };
+  return how[item.how];
+}
+var BELIEF_BADGE = { true: null, false: "You don't believe it", uncertain: "Unsure" };
+function keptText(keptFrom) {
+  if (keptFrom === null || keptFrom !== "everyone" && keptFrom.length === 0)
+    return null;
+  if (keptFrom === "everyone")
+    return "You keep it from everyone";
+  const names = keptFrom.length === 1 ? keptFrom[0] : `${keptFrom.slice(0, -1).join(", ")} and ${keptFrom.at(-1) ?? ""}`;
+  return `You keep it from ${names}`;
+}
+function KnownPanel(props) {
+  const view = decodeKnownView(props.view);
+  if (props.view !== null && props.view !== undefined && !view)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.view
+    }, undefined, false, undefined, this);
+  if (view && !view.tracking) {
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "eye-off",
+      title: "Knowledge tracking is off for this chat",
+      children: "Turn it on in Settings → Minds → Knowledge, or for this chat in GM → This chat."
+    }, undefined, false, undefined, this);
+  }
+  if (!view || view.items.length === 0)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "book",
+      children: "You haven't learned anything the story tracks yet."
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack lre-world",
+    "data-lre-panel": "minds.known",
+    children: /* @__PURE__ */ u3(Section, {
+      children: /* @__PURE__ */ u3(ActionRows, {
+        label: "What you know",
+        children: view.items.map((item) => {
+          const belief = BELIEF_BADGE[item.belief];
+          const kept = keptText(item.keptFrom);
+          const badges = item.suspicion || item.open || belief !== null;
+          return /* @__PURE__ */ u3(ActionRow, {
+            title: item.claim,
+            subtitle: [howText(item), item.sinceText].filter((part) => part !== "").join(" · "),
+            children: badges || kept ? /* @__PURE__ */ u3("div", {
+              class: "lre-known-tags",
+              "data-lre-known": item.key,
+              children: [
+                item.suspicion ? /* @__PURE__ */ u3(Badge, {
+                  tone: "warn",
+                  children: "Suspicion"
+                }, undefined, false, undefined, this) : null,
+                item.open ? /* @__PURE__ */ u3(Badge, {
+                  tone: "accent",
+                  children: "Open question"
+                }, undefined, false, undefined, this) : null,
+                belief !== null ? /* @__PURE__ */ u3(Badge, {
+                  children: belief
+                }, undefined, false, undefined, this) : null,
+                kept ? /* @__PURE__ */ u3("span", {
+                  class: "lre-known-kept",
+                  children: kept
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this) : null
+          }, item.key, false, undefined, this);
+        })
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
 
 // src/packs/minds/ui/index.ts
 var minds = {
   id: "minds",
   register(r3) {
     r3.gm({ id: "minds.gm", label: "Minds", icon: "sparkle", order: 20, component: GmMindsSection });
+    r3.panel({ id: KNOWN_PANEL, label: "What you know", order: 85, home: "story", component: KnownPanel });
   }
 };
 var ui_default6 = minds;
@@ -51799,7 +54217,7 @@ function ObjectivesEditor(props) {
               functions: props.functions,
               doc: props.world,
               lint: lintAt(props.lint, `${props.path}.objectives.${i3}`),
-              onChange: (when) => put(i3, { ...parts, when })
+              onChange: (when2) => put(i3, { ...parts, when: when2 })
             }, undefined, false, undefined, this)
           ]
         }, i3, true, undefined, this);
@@ -51949,7 +54367,7 @@ function StageSheet(props) {
                 functions: props.functions,
                 doc: props.world,
                 lint: exprLint(`${path}.next.${i3}.when`),
-                onChange: (when) => set({ ...stage, next: stage.next.map((x2, j3) => j3 === i3 ? { ...x2, when } : x2) })
+                onChange: (when2) => set({ ...stage, next: stage.next.map((x2, j3) => j3 === i3 ? { ...x2, when: when2 } : x2) })
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("div", {
                 class: "lre-inline",
@@ -51992,7 +54410,7 @@ function StageSheet(props) {
                 functions: props.functions,
                 doc: props.world,
                 lint: exprLint(`${path}.fail.when`),
-                onChange: (when) => set({ ...stage, fail: { to: stage.fail?.to ?? "", when } })
+                onChange: (when2) => set({ ...stage, fail: { to: stage.fail?.to ?? "", when: when2 } })
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(RefPicker, {
                 label: "Then goes to",
@@ -55045,8 +57463,10 @@ var REQUEST_TYPES = {
   "lre.world": true,
   "lre.ui": true,
   "lre.map": true,
+  "lre.chat.knowledge": true,
   "lre.job": true,
   "lre.lore": true,
+  "lre.secrecy": true,
   "lre.preset": true,
   "lre.diag": true,
   "lre.minds": true,
@@ -55536,6 +57956,16 @@ textarea.lre-input.lre-build-prose{font-family:inherit;font-size:var(--lre-fs-md
 .lre-build-profile-head{display:flex;align-items:center;gap:var(--lre-s2);font-size:var(--lre-fs-sm);font-weight:500}
 .lre-build-chips{display:flex;flex-wrap:wrap;gap:6px}
 .lre-build-profile-conflict{display:flex;flex-direction:column;gap:var(--lre-s1);font-size:var(--lre-fs-sm)}
+.lre-secrecy-steps{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s3);margin:0;padding:0;list-style:none;font-size:var(--lre-fs-sm);color:var(--lre-muted)}
+.lre-secrecy-steps>li{display:inline-flex;align-items:center;gap:var(--lre-s1);min-width:0}
+.lre-secrecy-steps>li[data-lre-step="now"]{color:var(--lre-fg);font-weight:600}
+.lre-secrecy-steps>li[data-lre-step="done"]{color:var(--lre-pos)}
+.lre-secrecy-step-n{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid currentColor;border-radius:var(--lre-r-pill);font-size:var(--lre-fs-xs);font-variant-numeric:tabular-nums}
+.lre-secrecy-steps>li[data-lre-step="now"]>.lre-secrecy-step-n{border-color:transparent;background:var(--lre-accent-soft);color:var(--lre-accent-text)}
+.lre-secrecy-move{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;padding-top:var(--lre-s2)}
+.lre-secrecy-group{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
+.lre-secrecy-group-title{margin:0;font-size:var(--lre-fs-sm);font-weight:600}
+.lre-secrecy-mark{max-height:12em;overflow:auto;font-family:var(--lre-mono)}
 `;
 
 // src/frontend/styles/character.ts
@@ -56334,6 +58764,11 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-minds-tpl-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-height:var(--lre-tap);min-width:0}
 .lre-minds-tpl-text{flex:1 1 12rem;min-width:0;display:flex;flex-direction:column;gap:2px}
 .lre-minds-tpl-head>.lre-btn{flex:none}
+/* Settings → Minds → Knowledge: a knowledge text's wording (settings/minds.tsx) */
+textarea.lre-input.lre-minds-text-input{min-height:var(--lre-tap);font-family:var(--lre-font);font-size:var(--lre-fs-md);line-height:1.45}
+/* Play → What you know (packs/minds/ui/known.tsx) */
+.lre-known-tags{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s2);min-width:0}
+.lre-known-kept{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
 /* GM → Minds (packs/minds/ui/gm.tsx): the list, a character's page and the change pages over it */
 .lre-gm-minds-pages{animation:none}
 .lre-gm-minds{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}

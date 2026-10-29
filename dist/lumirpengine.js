@@ -163,12 +163,13 @@ var DEFAULT_MINDS_MEMORY = Object.freeze({
   consolidate: { enabled: true, periodDays: 1 }
 });
 var DEFAULT_WORLD_MINDS = Object.freeze({
-  secrecy: "brief",
+  secrecy: "full",
   weights: DEFAULT_FIDELITY_WEIGHTS,
   thresholds: DEFAULT_FIDELITY_THRESHOLDS,
   always: null,
   never: null,
-  memory: DEFAULT_MINDS_MEMORY
+  memory: DEFAULT_MINDS_MEMORY,
+  holdings: {}
 });
 var MINDS_RANGES = {
   weight: [-100, 200],
@@ -192,15 +193,63 @@ var DEFAULT_MIND_READS = Object.freeze({
   recall: { on: false },
   routine: { on: true, tokens: 400 },
   plans: { on: true, tokens: 400 },
-  life: { on: false, tokens: "none" }
+  life: { on: false, tokens: "none" },
+  knowledge: { on: true }
 });
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 6, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER] };
+var KNOWLEDGE_TEXTS = Object.freeze({
+  mindTitle: "What you know",
+  mindLead: "The facts you hold and how you came by them. You know only these and what is in front of you: never act on, hint at or guess anything that isn't here.",
+  known: "{{claim}} ({{how}})",
+  suspected: "Suspects: {{claim}} ({{how}}, about {{percent}}% sure)",
+  disbelieved: "Doesn't believe: {{claim}} ({{how}})",
+  unsure: "Unsure whether: {{claim}} ({{how}})",
+  keeps: "keeps it from {{whom}}",
+  everyone: "everyone",
+  authored: "from the start",
+  witnessed: "saw it",
+  told: "told by {{by}}",
+  inferred: "worked it out",
+  guessed: "a guess",
+  person: "{{name}}: {{line}}",
+  notKnown: "{{name}} doesn't know: {{claim}}",
+  stepHappened: "What happened this turn",
+  stepPresent: "Who could perceive it",
+  stepPeople: "What each of them already knows, and has witnessed lately",
+  stepFacts: "Facts in play (reuse these by id)",
+  stepPerson: "{{name}} (id: {{id}})",
+  stepYou: '{{name}} (id: {{id}}; the player character, "you")',
+  stepSaid: "{{name}} said or did: {{text}}",
+  stepStory: "The story, as written: {{text}}",
+  stepThroughout: "there throughout",
+  stepLeft: "there from the start, then left behind partway",
+  stepCame: "came in during the turn, or was met at its end: perceived only what came after",
+  stepOpen: "(an open question)",
+  stepFalse: "(false)",
+  stepPinned: "Pinned lore",
+  stepTraits: "Is like:",
+  stepHolds: "Holds:",
+  stepNothing: "nothing the story tracks yet",
+  stepWitnessed: "Witnessed lately:",
+  stepSomeone: "someone",
+  stepAnswer: [
+    "- facts: the new facts this turn establishes or raises, each one short sentence, with a ref of your own (n1, n2…) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
+    '- learned: who came to know a fact this turn, and how: witnessed (they saw it, heard it said aloud or read it themselves, so they were there for it) or told (by: who told them, who must already know it). Name the player character "you". keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.',
+    "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
+    "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`)
+});
+var KNOWLEDGE_TEXT_IDS = Object.keys(KNOWLEDGE_TEXTS);
 var MINDS_PRESETS = Object.freeze({
   lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
   standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS) };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var MIND_PROMPT_DEFAULTS = Object.freeze({
@@ -215,8 +264,15 @@ var MIND_PROMPT_DEFAULTS = Object.freeze({
     "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
   ].join(`
 `),
-  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
+  knowledge: [
+    "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
+    "Record only what the turn as written gives each person. Someone learns by witnessing what happens in front of them (seeing it, hearing it said aloud, reading it) or by being told it; whoever wasn't there witnessed nothing, and whoever tells something must already know it. Someone may also work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
+    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it; make a new one only for what the turn establishes or raises. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold."
+  ].join(`
+`)
 });
+var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"who": ["a name"], "fact": "a fact id or n1", "how": "witnessed", "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
@@ -240,8 +296,13 @@ var MIND_ANSWER_FORMATS = Object.freeze({
   ].join(`
 `),
   skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
+  knowledge: `${KNOWLEDGE_ANSWER_SHAPE}
+${KNOWLEDGE_TEXTS.stepAnswer}`
 });
+var MEMORY_ANSWER_V2 = MIND_ANSWER_FORMATS.memory.replace(', "told": [{"to": ["a name"], "what": "..."}]', "").split(`
+`).filter((line) => !line.startsWith("- told:")).join(`
+`);
 
 // src/shared/timeouts.ts
 var MIN = 60000;
@@ -917,7 +978,7 @@ var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activit
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "df7e39bf";
+var BUILD = "6c4351fe";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

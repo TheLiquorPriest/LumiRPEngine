@@ -64,6 +64,7 @@ var STEP_VARS = {
   mind: { phase: "with the minds", vars: MIND_VARS },
   memory: { phase: "with the minds", vars: MIND_VARS },
   consolidate: { phase: "with the minds", vars: MIND_VARS },
+  knowledge: { phase: "with the minds", vars: MIND_VARS, note: "A scene's call thinks for no one: character is empty." },
   skip: { phase: "as a time skip starts", vars: MIND_VARS, note: "The beats think for no one: character is empty." },
   skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] }
 };
@@ -121,7 +122,8 @@ var STEP_OUTPUTS = {
   mind: ["text"],
   memory: ["text"],
   skip: ["text"],
-  consolidate: ["text"]
+  consolidate: ["text"],
+  knowledge: ["text"]
 };
 
 // src/shared/hash.ts
@@ -366,7 +368,7 @@ function hashJson(value) {
 
 // src/shared/minds.ts
 var FIDELITIES = ["live", "near", "far", "background"];
-var WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory"];
+var WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory", "holdings"];
 var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
   here: 45,
   nearby: 20,
@@ -391,12 +393,13 @@ var DEFAULT_MINDS_MEMORY = Object.freeze({
   consolidate: { enabled: true, periodDays: 1 }
 });
 var DEFAULT_WORLD_MINDS = Object.freeze({
-  secrecy: "brief",
+  secrecy: "full",
   weights: DEFAULT_FIDELITY_WEIGHTS,
   thresholds: DEFAULT_FIDELITY_THRESHOLDS,
   always: null,
   never: null,
-  memory: DEFAULT_MINDS_MEMORY
+  memory: DEFAULT_MINDS_MEMORY,
+  holdings: {}
 });
 var MINDS_RANGES = {
   weight: [-100, 200],
@@ -476,7 +479,7 @@ function worldMindsOf(world) {
   const near = Math.max(far, num(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
   const live = Math.max(near, num(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
   return {
-    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    secrecy: raw.secrecy === "brief" ? "brief" : "full",
     weights: {
       here: weight(w.here, d.here),
       nearby: weight(w.nearby, d.nearby),
@@ -494,10 +497,41 @@ function worldMindsOf(world) {
     thresholds: { live, near, far },
     always: selectorOrNull(raw.always),
     never: selectorOrNull(raw.never),
-    memory: memoryConfigOf(raw.memory)
+    memory: memoryConfigOf(raw.memory),
+    holdings: authoredHoldingsOf(raw.holdings)
   };
 }
-var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+var AUTHORED_FACT_KINDS = ["lore", "track", "field"];
+function keptFromOf(v, self = null) {
+  if (v === "everyone")
+    return "everyone";
+  if (!Array.isArray(v))
+    return null;
+  const ids = [...new Set(v.filter((id) => typeof id === "string" && id !== "" && id !== self))];
+  return ids.length > 0 ? ids : null;
+}
+function isConfidence(v) {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+}
+function authoredHoldingsOf(raw) {
+  const out = {};
+  for (const [who, facts] of Object.entries(obj(raw))) {
+    if (!safeKey(who) || who === "" || !isRecord(facts))
+      continue;
+    const held = {};
+    for (const [fact, v] of Object.entries(facts)) {
+      const ref = safeKey(fact) ? parseFactId(fact) : null;
+      if (!ref || !AUTHORED_FACT_KINDS.includes(ref.kind) || !isRecord(v))
+        continue;
+      const keptFrom = keptFromOf(v.keptFrom, who);
+      held[fact] = { belief: HOLDING_BELIEFS.includes(v.belief) ? v.belief : "true", confidence: isConfidence(v.confidence) ? v.confidence : 1, ...keptFrom ? { keptFrom } : {} };
+    }
+    if (Object.keys(held).length > 0)
+      out[who] = held;
+  }
+  return out;
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate", "knowledge"];
 function isMindPurpose(purpose) {
   return MIND_PURPOSES.includes(purpose);
 }
@@ -516,15 +550,70 @@ var DEFAULT_MIND_READS = Object.freeze({
   recall: { on: false },
   routine: { on: true, tokens: 400 },
   plans: { on: true, tokens: 400 },
-  life: { on: false, tokens: "none" }
+  life: { on: false, tokens: "none" },
+  knowledge: { on: true }
 });
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 6, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER] };
+var KNOWLEDGE_TEXTS = Object.freeze({
+  mindTitle: "What you know",
+  mindLead: "The facts you hold and how you came by them. You know only these and what is in front of you: never act on, hint at or guess anything that isn't here.",
+  known: "{{claim}} ({{how}})",
+  suspected: "Suspects: {{claim}} ({{how}}, about {{percent}}% sure)",
+  disbelieved: "Doesn't believe: {{claim}} ({{how}})",
+  unsure: "Unsure whether: {{claim}} ({{how}})",
+  keeps: "keeps it from {{whom}}",
+  everyone: "everyone",
+  authored: "from the start",
+  witnessed: "saw it",
+  told: "told by {{by}}",
+  inferred: "worked it out",
+  guessed: "a guess",
+  person: "{{name}}: {{line}}",
+  notKnown: "{{name}} doesn't know: {{claim}}",
+  stepHappened: "What happened this turn",
+  stepPresent: "Who could perceive it",
+  stepPeople: "What each of them already knows, and has witnessed lately",
+  stepFacts: "Facts in play (reuse these by id)",
+  stepPerson: "{{name}} (id: {{id}})",
+  stepYou: '{{name}} (id: {{id}}; the player character, "you")',
+  stepSaid: "{{name}} said or did: {{text}}",
+  stepStory: "The story, as written: {{text}}",
+  stepThroughout: "there throughout",
+  stepLeft: "there from the start, then left behind partway",
+  stepCame: "came in during the turn, or was met at its end: perceived only what came after",
+  stepOpen: "(an open question)",
+  stepFalse: "(false)",
+  stepPinned: "Pinned lore",
+  stepTraits: "Is like:",
+  stepHolds: "Holds:",
+  stepNothing: "nothing the story tracks yet",
+  stepWitnessed: "Witnessed lately:",
+  stepSomeone: "someone",
+  stepAnswer: [
+    "- facts: the new facts this turn establishes or raises, each one short sentence, with a ref of your own (n1, n2\u2026) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
+    '- learned: who came to know a fact this turn, and how: witnessed (they saw it, heard it said aloud or read it themselves, so they were there for it) or told (by: who told them, who must already know it). Name the player character "you". keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.',
+    "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
+    "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`)
+});
+var KNOWLEDGE_TEXT_IDS = Object.keys(KNOWLEDGE_TEXTS);
+function knowledgeText(settings, id) {
+  const own = settings.prompts[id];
+  return own !== undefined && own.trim() !== "" ? own : KNOWLEDGE_TEXTS[id];
+}
+function fillText(text, values) {
+  return text.replace(/\{\{(\w+)\}\}/g, (whole2, key) => hasOwn(values, key) ? values[key] ?? whole2 : whole2);
+}
 var MINDS_PRESETS = Object.freeze({
   lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
   standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS) };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
@@ -562,6 +651,100 @@ var MIND_TEXT_CAPS = {
   tolds: 3,
   reason: 160
 };
+var FACT_KINDS = ["lore", "wi", "track", "field", "claim"];
+var FACT_TRUTHS = ["true", "false", "open"];
+var HOLDING_HOWS = ["authored", "witnessed", "told", "inferred", "guessed"];
+var HOLDING_BELIEFS = ["true", "false", "uncertain"];
+function knowledgeTracked(slice) {
+  const k = isRecord(slice) ? slice.knowledge : undefined;
+  return !(isRecord(k) && k.off === true);
+}
+function knowledgeThreshold(slice) {
+  const k = isRecord(slice) ? slice.knowledge : undefined;
+  return isRecord(k) && isConfidence(k.threshold) ? k.threshold : KNOWLEDGE_DEFAULTS.threshold;
+}
+function revealsFact(fact, h, threshold) {
+  if (h.belief !== "true" || !(h.confidence >= threshold))
+    return false;
+  const kind = parseFactId(fact)?.kind;
+  return !(h.how === "authored" && (kind === "track" || kind === "lore"));
+}
+function heldSecrets(slice, who) {
+  const out = { stages: {}, lore: [] };
+  if (!knowledgeTracked(slice) || !isRecord(slice) || !isRecord(slice.knowledge))
+    return out;
+  const holdings = isRecord(slice.knowledge.holdings) && hasOwn(slice.knowledge.holdings, who) ? slice.knowledge.holdings[who] : undefined;
+  if (!isRecord(holdings))
+    return out;
+  const threshold = knowledgeThreshold(slice);
+  for (const [fact, h] of Object.entries(holdings)) {
+    if (!isRecord(h) || typeof h.how !== "string" || typeof h.belief !== "string" || typeof h.confidence !== "number" || !revealsFact(fact, h, threshold))
+      continue;
+    const ref = parseFactId(fact);
+    if (ref?.kind === "track")
+      out.stages[ref.track] = [...hasOwn(out.stages, ref.track) ? out.stages[ref.track] ?? [] : [], ref.stage];
+    else if (ref?.kind === "lore")
+      out.lore.push(ref.lore);
+    else if (ref?.kind === "wi")
+      out.lore.push(liveLoreIdOfWiFact(fact) ?? fact);
+  }
+  return out;
+}
+var escapePart = (s) => s.replace(/%/g, "%25").replace(/:/g, "%3A");
+var unescapePart = (s) => s.replace(/%(25|3A)/gi, (m) => m === "%25" ? "%" : ":");
+function factId(ref) {
+  switch (ref.kind) {
+    case "lore":
+      return `lore:${escapePart(ref.lore)}`;
+    case "wi":
+      return `wi:${escapePart(ref.book)}:${escapePart(ref.entry)}${ref.mark === null ? "" : `:${ref.mark}`}`;
+    case "track":
+      return `track:${escapePart(ref.track)}:${escapePart(ref.stage)}`;
+    case "field":
+      return `field:${escapePart(ref.entity)}:${escapePart(ref.field)}`;
+    case "claim":
+      return `claim:${escapePart(ref.hash)}`;
+  }
+}
+function parseFactId(id) {
+  const [kind = "", ...raw] = id.split(":");
+  if (raw.length === 0 || raw.some((p) => p === ""))
+    return null;
+  const [a = "", b = "", c = ""] = raw.map(unescapePart);
+  switch (kind) {
+    case "lore":
+      return raw.length === 1 ? { kind: "lore", lore: a } : null;
+    case "wi":
+      if (raw.length === 2)
+        return { kind: "wi", book: a, entry: b, mark: null };
+      return raw.length === 3 && /^\d+$/.test(c) && Number.isSafeInteger(Number(c)) ? { kind: "wi", book: a, entry: b, mark: Number(c) } : null;
+    case "track":
+      return raw.length === 2 ? { kind: "track", track: a, stage: b } : null;
+    case "field":
+      return raw.length === 2 ? { kind: "field", entity: a, field: b } : null;
+    case "claim":
+      return raw.length === 1 ? { kind: "claim", hash: a } : null;
+    default:
+      return null;
+  }
+}
+var LIVE_BOOK_LORE = /^book:(.+)\/([^/#]+)(?:#(\d+))?$/;
+function wiFactIdOfLiveLore(loreId) {
+  const m = LIVE_BOOK_LORE.exec(loreId);
+  if (!m)
+    return null;
+  const n = m[3] === undefined ? null : Number(m[3]);
+  if (n !== null && (!Number.isSafeInteger(n) || n < 1))
+    return null;
+  return factId({ kind: "wi", book: m[1] ?? "", entry: m[2] ?? "", mark: n === null ? null : n - 1 });
+}
+function liveLoreIdOfWiFact(factIdText) {
+  const ref = parseFactId(factIdText);
+  return ref?.kind === "wi" ? `book:${ref.book}/${ref.entry}${ref.mark === null ? "" : `#${ref.mark + 1}`}` : null;
+}
+function isWitnessRef(ref) {
+  return /^witness:[0-9a-f]{10}$/.test(ref);
+}
 var MINDS_EVENTS = {
   round: "minds.round",
   mind: "minds.mind",
@@ -576,9 +759,18 @@ var MINDS_EVENTS = {
   pin: "minds.pin",
   refresh: "minds.refresh",
   intent: "minds.intent",
-  skip: "minds.skip"
+  skip: "minds.skip",
+  fact: "minds.fact",
+  learn: "minds.learn",
+  forget: "minds.forget",
+  keep: "minds.keep",
+  settle: "minds.settle",
+  knowledge: "minds.knowledge"
 };
+var KNOWLEDGE_CHANGES = ["learn", "reveal"];
 var MINDS_SLOT = "minds";
+var KNOWLEDGE_SLOT = "knowledge";
+var KNOWN_PANEL = "minds.known";
 var MIND_PROMPT_DEFAULTS = Object.freeze({
   mind: [
     "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
@@ -591,8 +783,15 @@ var MIND_PROMPT_DEFAULTS = Object.freeze({
     "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
   ].join(`
 `),
-  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
+  knowledge: [
+    "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
+    "Record only what the turn as written gives each person. Someone learns by witnessing what happens in front of them (seeing it, hearing it said aloud, reading it) or by being told it; whoever wasn't there witnessed nothing, and whoever tells something must already know it. Someone may also work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
+    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it; make a new one only for what the turn establishes or raises. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold."
+  ].join(`
+`)
 });
+var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"who": ["a name"], "fact": "a fact id or n1", "how": "witnessed", "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
@@ -616,8 +815,13 @@ var MIND_ANSWER_FORMATS = Object.freeze({
   ].join(`
 `),
   skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
+  knowledge: `${KNOWLEDGE_ANSWER_SHAPE}
+${KNOWLEDGE_TEXTS.stepAnswer}`
 });
+var MEMORY_ANSWER_V2 = MIND_ANSWER_FORMATS.memory.replace(', "told": [{"to": ["a name"], "what": "..."}]', "").split(`
+`).filter((line) => !line.startsWith("- told:")).join(`
+`);
 
 // src/shared/ids.ts
 var DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"];
@@ -700,21 +904,25 @@ var DEFAULT_SECTIONS = {
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
   outline: { id: "outline", label: "Outline", rank: 8, template: `The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one and keeping the specific people, things, places and amounts it names; what a beat leaves open is yours to fill in.
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  stance: { id: "stance", label: "Stance", rank: 9, template: `The narrator knows only what the player character knows. These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.
+  stance: { id: "stance", label: "Stance", rank: 9, template: `These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: `Each mind below is scoped to what that character knows and is blind to everyone else's. Let each shape that character's own choices, words and manner this turn, as specifically as it says. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   place: { id: "place", label: "Place", rank: 11, template: `The place the player character is in: what it is like, what is here, where it leads, and the lore about it. These lines are the authoritative inventory of the place: name each thing, room, way out and detail as given whenever the prose touches it, and never reduce them to a summary or a generic stand-in ("some furniture", "various goods").
 {{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
   property: { id: "property", label: "Property", rank: 12, template: `Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says "yours"; otherwise they only use, keep or benefit from it. These lines are the authoritative record: use each property's name, place and details as given whenever it comes up.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } }
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  [KNOWLEDGE_SLOT]: { id: KNOWLEDGE_SLOT, label: "Who knows what", rank: 13, template: `Who knows what among the people here, a fact at a time, the player character ("You") first among those who hold it: the authoritative record of what each person holds and how they came by it. Each person acts and speaks only from what their own lines give them: never let anyone use, hint at or guess a fact their lines don't give them, nor know what a line says they don't. "Suspects" is a guess they aren't sure of; "keeps it from" is something they won't reveal to those named.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } }
 };
 function builtInSectionsOf(world) {
   const own = Object.keys(world.sections);
   if (own.length === 0)
     return Object.values(DEFAULT_SECTIONS);
-  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
-  return minds && !own.includes(MINDS_SLOT) ? [minds] : [];
+  return [MINDS_SLOT, KNOWLEDGE_SLOT].flatMap((slot) => {
+    const section = DEFAULT_SECTIONS[slot];
+    return section && !own.includes(slot) ? [section] : [];
+  });
 }
 function sectionTemplateProblem(text) {
   return text.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
@@ -2045,7 +2253,9 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   use_up: "confirm",
   wear: "confirm",
   lose: "confirm",
-  item_condition: "confirm"
+  item_condition: "confirm",
+  learn: "auto",
+  reveal: "confirm"
 });
 var EXTRACTION_LEARNING = Object.freeze({
   promoteAt: 0.9,
@@ -2053,6 +2263,16 @@ var EXTRACTION_LEARNING = Object.freeze({
   window: 30,
   demoteUndoRate: 0.1
 });
+var NARRATOR_KNOWLEDGE = ["scene", "pov"];
+var NARRATOR_SECRETS = ["marked", "omit"];
+var NARRATOR_DEFAULTS = Object.freeze({ knowledge: "scene", secrets: "marked" });
+function narratorViewOf(raw) {
+  if (!isRecord(raw))
+    return null;
+  const knowledge = NARRATOR_KNOWLEDGE.find((k) => k === raw.knowledge);
+  const secrets = NARRATOR_SECRETS.find((s) => s === raw.secrets);
+  return knowledge && secrets ? { knowledge, secrets } : null;
+}
 var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 
 // src/engine/read-pass.ts
@@ -2160,7 +2380,7 @@ function feedSentence(label, to) {
     return `The ${label} section is left out of the prompt in this chat`;
   const caps = [to.maxLines !== undefined ? `${to.maxLines} ${to.maxLines === 1 ? "line" : "lines"}` : null, to.maxTokens !== undefined ? `${to.maxTokens} tokens` : null].filter((c) => c !== null);
   const parts = [
-    SCOPE_TELLS[to.scope ?? "player"],
+    to.scope ? SCOPE_TELLS[to.scope] : "follows the narrator's knowledge",
     caps.length > 0 ? `cut to at most ${listWords(caps)}` : "with no cap",
     to.include ? `from ${to.include.length === 1 ? "the 1 source" : `the ${to.include.length} sources`} picked for it` : null
   ].filter((p) => p !== null);
@@ -4513,14 +4733,17 @@ var PROSE_STEPS = ["brief", "outline", "choices", "extract"];
 function loreIsSecret(entry) {
   return entry.secret !== undefined && entry.secret !== false;
 }
-function lorePhrases(content) {
+function loreParts(content) {
   const out = [];
   for (const part of content.split(/[.!?\u2026;:\n]+|\s[\u2014\u2013-]\s|\u2014/)) {
     const phrase = part.replace(/^[\s"'\u201C\u201D\u2018\u2019()[\]*_]+|[\s"'\u201C\u201D\u2018\u2019()[\]*_,]+$/g, "").replace(/\s+/g, " ");
-    if (phrase.length >= 16 && phrase.split(" ").length >= 4 && !out.includes(phrase))
+    if (phrase !== "" && !out.includes(phrase))
       out.push(phrase);
   }
   return out;
+}
+function lorePhrases(content) {
+  return loreParts(content).filter((phrase) => phrase.length >= 16 && phrase.split(" ").length >= 4);
 }
 function loreSourceOf(raw) {
   if (!isRecord(raw))
@@ -4671,6 +4894,11 @@ function povPlace(reg, world, state) {
 function trackKnown(reg, world, state, pov, t) {
   return t.owner === pov || t.owner !== undefined && knows(state, pov, t.owner) || granted(reg, world, state, pov, t.knownBy);
 }
+function revealedStages(state, who, id) {
+  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  const held = own(heldSecrets(state.packs.minds, who).stages, id) ?? [];
+  return [...revealed, ...held.filter((s) => !revealed.includes(s))];
+}
 function trackShown(reg, world, state, pov, id) {
   const t = own(world.tracks, id);
   if (!t)
@@ -4678,7 +4906,7 @@ function trackShown(reg, world, state, pov, id) {
   const visibility = visibilityOf(t.visibility);
   if (visibility === "public")
     return true;
-  if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0)
+  if (revealedStages(state, pov, id).length > 0)
     return true;
   return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
 }
@@ -4686,7 +4914,7 @@ function trackKeepsSecret(reg, world, state, pov, id) {
   const t = own(world.tracks, id);
   if (!t)
     return false;
-  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  const revealed = revealedStages(state, pov, id);
   return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
 }
 function ownersCue(reg, world, state, pov, id) {
@@ -4794,7 +5022,7 @@ function playerTrack(reg, world, state, pov, id) {
   const stage = own(t.stages, stageId);
   if (!stage)
     return null;
-  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  const revealed = revealedStages(state, pov, id);
   const truths = revealed.map((s) => own(t.stages, s)?.truth).filter((x) => typeof x === "string");
   const secret = visibility === "secret";
   const dormant = stageId === t.start && (stage.objectives ?? []).length === 0 && stage.answer === undefined;
@@ -4855,9 +5083,8 @@ function storyLocked(env, action) {
 }
 function unrevealedTruths(world, state) {
   const out = [];
-  const slice = readEngineSlice(state);
   for (const [id, t] of Object.entries(world.tracks)) {
-    const revealed = own(slice.revealed, id) ?? [];
+    const revealed = revealedStages(state, world.pov, id);
     for (const [sid, s] of Object.entries(t.stages))
       if (s.truth && !revealed.includes(sid))
         out.push(s.truth);
@@ -4877,17 +5104,23 @@ function loreGateReader(reg, world, state) {
     }
   };
 }
-function secretLorePhrases(reg, world, state) {
+function loreFactId(l) {
+  const live = wiFactIdOfLiveLore(l.id);
+  if (live !== null)
+    return live;
+  const source = loreSourceOf(l.source);
+  return source.kind === "book" ? factId({ kind: "wi", book: source.bookId, entry: source.entryId, mark: null }) : factId({ kind: "lore", lore: l.id });
+}
+function unrevealedLore(reg, world, state) {
   const open = loreGateReader(reg, world, state);
-  const out = [];
-  for (const l of Object.values(world.lore))
-    if (loreIsSecret(l) && typeof l.content === "string" && !open(l))
-      out.push(...lorePhrases(l.content));
-  return out;
+  const held = new Set(heldSecrets(state.packs.minds, world.pov).lore);
+  return Object.values(world.lore).filter((l) => loreIsSecret(l) && !open(l) && !held.has(l.id) && !held.has(liveLoreIdOfWiFact(loreFactId(l)) ?? ""));
+}
+function secretLorePhrases(reg, world, state) {
+  return unrevealedLore(reg, world, state).flatMap((l) => typeof l.content === "string" ? lorePhrases(l.content) : []);
 }
 function secretLoreTitles(reg, world, state) {
-  const open = loreGateReader(reg, world, state);
-  return Object.values(world.lore).flatMap((l) => loreIsSecret(l) && typeof l.title === "string" && l.title.trim() !== "" && !open(l) ? [l.title] : []);
+  return unrevealedLore(reg, world, state).flatMap((l) => typeof l.title === "string" && l.title.trim() !== "" ? [l.title] : []);
 }
 function unrevealedSecrets(reg, world, state) {
   return [...unrevealedTruths(world, state), ...secretLorePhrases(reg, world, state)];
@@ -5666,6 +5899,291 @@ function wordedLines(reg, world, state, pov, events, max, player, you = "You") {
   return kept2.map((l) => l.text);
 }
 
+// src/shared/secret-marks.ts
+var SECRET_MARK_WORDING = {
+  known: "{{text}} [secret; known to {{known}}]",
+  kept: "{{text}} [secret; kept from {{kept}}]",
+  both: "{{text}} [secret; known to {{known}}; kept from {{kept}}]",
+  everyone: "everyone",
+  rule: "A fact marked as a secret, written {{forms}}, is known to the people its mark says it is known to and kept from the people it says it is kept from ({{everyone}}: everyone it isn't known to). Treat it as a marked fact: no one it is kept from says, acts on or is narrated as knowing it, and unless the player's own instructions say otherwise, the narration and the reply don't tell or reveal it; it becomes known only through what the story has already established or what the player character does or finds."
+};
+var CANDIDATE = /\{\{(\s*)\/\/(\s*)secret(?![A-Za-z0-9_-])/iy;
+var CLAUSE = /^(known[ \t]+to|kept[ \t]+from)(?:[ \t]+([^]*))?$/i;
+var NOT_IN_NAME = /[,;():{}\\\r\n]/;
+var NONE = { marks: [], unreadable: [] };
+var isEveryone = (name) => name.trim().toLowerCase() === "everyone";
+var sameName = (a, b) => a.trim().replace(/\s+/g, " ").toLowerCase() === b.trim().replace(/\s+/g, " ").toLowerCase();
+function extent(content, start) {
+  let depth = 1;
+  let nested = false;
+  let escaped = false;
+  let pos = start + 2;
+  while (pos < content.length) {
+    const ch = content[pos];
+    const next = content[pos + 1];
+    if (ch === "\\" && (next === "{" || next === "}")) {
+      escaped = true;
+      pos += 2;
+    } else if (ch === "{" && next === "{") {
+      nested = true;
+      depth++;
+      pos += 2;
+    } else if (ch === "}" && next === "}") {
+      depth--;
+      pos += 2;
+      if (depth === 0)
+        return { end: pos, nested, escaped, closed: true };
+    } else
+      pos++;
+  }
+  return { end: content.length, nested, escaped, closed: false };
+}
+function namesOf(text) {
+  const out = [];
+  for (const raw of text.split(",")) {
+    const name = raw.trim().replace(/\s+/g, " ");
+    if (name === "")
+      return "a name is missing in the brackets";
+    if (NOT_IN_NAME.test(name))
+      return `"${name}" can't be a name: a name holds no brackets, braces, colon, semicolon or backslash`;
+    if (!out.some((n) => sameName(n, name)))
+      out.push(name);
+  }
+  return out;
+}
+function clausesOf(text) {
+  const parts = text.split(";").map((p) => p.trim());
+  if (parts.length > 2)
+    return 'the brackets hold at most two parts: "known to \u2026; kept from \u2026"';
+  let knownTo = null;
+  let keptFrom = null;
+  for (const part of parts) {
+    const m = CLAUSE.exec(part);
+    if (!m)
+      return part === "" ? "a part in the brackets is empty" : `"${part}" must start with "known to" or "kept from"`;
+    const names = namesOf(m[2] ?? "");
+    if (typeof names === "string")
+      return names;
+    if (/^known/i.test(m[1] ?? "")) {
+      if (knownTo)
+        return '"known to" is given twice';
+      if (names.some(isEveryone))
+        return "a secret can't be known to everyone";
+      knownTo = names;
+    } else {
+      if (keptFrom)
+        return '"kept from" is given twice';
+      if (names.some(isEveryone) && names.length > 1)
+        return '"everyone" stands alone after "kept from"';
+      keptFrom = names.some(isEveryone) ? "everyone" : names;
+    }
+  }
+  const known = knownTo ?? [];
+  const kept2 = keptFrom ?? "everyone";
+  const both = kept2 === "everyone" ? undefined : known.find((n) => kept2.some((k) => sameName(k, n)));
+  if (both !== undefined)
+    return `${both} is named as knowing it and as kept from it`;
+  return { knownTo: known, keptFrom: kept2 };
+}
+function markOf(raw, head) {
+  const body = raw.slice(0, -2);
+  const skip = (at) => {
+    let pos2 = at;
+    while (body[pos2] === " " || body[pos2] === "\t")
+      pos2++;
+    return pos2;
+  };
+  let pos = skip(head);
+  let names = { knownTo: [], keptFrom: "everyone" };
+  if (body[pos] === "(") {
+    const close = body.indexOf(")", pos + 1);
+    const colon = body.indexOf(":", pos + 1);
+    if (close < 0 || colon >= 0 && colon < close)
+      return "the brackets after Secret aren't closed before the colon";
+    names = clausesOf(body.slice(pos + 1, close));
+    pos = skip(close + 1);
+  }
+  if (body[pos] !== ":")
+    return 'Secret needs a colon before its text, with any names in brackets before that: "{{// Secret (known to NAME): TEXT}}"';
+  if (/[\r\n]/.test(body.slice(0, pos)))
+    return "everything before the colon must be on one line";
+  if (typeof names === "string")
+    return names;
+  const text = body.slice(pos + 1).trim();
+  if (text === "")
+    return "it has no text after the colon";
+  return { text, ...names };
+}
+function scan(content) {
+  if (!content.includes("{{") || !/\/\/\s*secret/i.test(content))
+    return NONE;
+  const out = { marks: [], unreadable: [] };
+  let depth = 0;
+  let pos = 0;
+  while (pos < content.length) {
+    const ch = content[pos];
+    const next = content[pos + 1];
+    if (ch === "\\" && (next === "{" || next === "}")) {
+      pos += 2;
+      continue;
+    }
+    if (ch === "}" && next === "}") {
+      if (depth > 0)
+        depth--;
+      pos += 2;
+      continue;
+    }
+    if (ch !== "{" || next !== "{") {
+      pos++;
+      continue;
+    }
+    CANDIDATE.lastIndex = pos;
+    const head = CANDIDATE.exec(content);
+    if (!head) {
+      depth++;
+      pos += 2;
+      continue;
+    }
+    const at = extent(content, pos);
+    const raw = content.slice(pos, at.end);
+    const unreadable = (problem) => {
+      out.unreadable.push({ start: pos, end: at.end, raw, problem });
+    };
+    if (/[\r\n]/.test(head[1] ?? ""))
+      unreadable("a line break between {{ and // leaves it in every prompt: the host doesn't read it as a comment");
+    else if (depth > 0)
+      unreadable("it stands inside another macro, which the host drops it from");
+    else if (!at.closed)
+      unreadable("it has no closing }}, so the host hides the rest of the entry with it");
+    else if (at.nested)
+      unreadable("it holds {{ or }}, which a secret mark can't: the host may end it elsewhere");
+    else if (at.escaped)
+      unreadable("it holds a backslash before a brace, which a secret mark can't: the host may end it elsewhere");
+    else if (/[\r\n]/.test(head[2] ?? ""))
+      unreadable("everything before the colon must be on one line");
+    else {
+      const mark = markOf(raw, head[0].length);
+      if (typeof mark === "string")
+        unreadable(mark);
+      else
+        out.marks.push({ start: pos, end: at.end, raw, ...mark });
+    }
+    pos = at.end;
+  }
+  return out;
+}
+function parseSecretMarks(content) {
+  return scan(content).marks;
+}
+function renderSecretMarks(content, render) {
+  const { marks, unreadable } = scan(content);
+  if (marks.length === 0 && unreadable.length === 0)
+    return content;
+  const spans = [...marks.map((mark, i) => ({ mark, n: i + 1, start: mark.start, end: mark.end })), ...unreadable.map((u) => ({ mark: null, n: 0, start: u.start, end: u.end }))].sort((a, b) => a.start - b.start);
+  let out = "";
+  let at = 0;
+  for (const span of spans) {
+    out += content.slice(at, span.start) + (span.mark ? render(span.mark, span.n) : "");
+    at = span.end;
+  }
+  return out + content.slice(at);
+}
+function publicText(content) {
+  return renderSecretMarks(content, () => "");
+}
+var POV_WORDS = /^(you|the player character|player character)$/i;
+function nameMatcher(world, state) {
+  const named = new Map;
+  for (const source of [world, state]) {
+    if (!source)
+      continue;
+    for (const [id, e] of Object.entries(source.entities)) {
+      const name = typeof e?.name === "string" ? e.name.trim().replace(/\s+/g, " ").toLowerCase() : "";
+      const names = named.get(id) ?? [];
+      if (name !== "" && !names.includes(name))
+        names.push(name);
+      named.set(id, names);
+    }
+  }
+  const pov = state?.pov ?? world.pov;
+  return (written) => {
+    const raw = written.trim();
+    if (pov !== undefined && POV_WORDS.test(raw))
+      return [pov];
+    if (named.has(raw))
+      return [raw];
+    const n = raw.replace(/\s+/g, " ").toLowerCase();
+    const byId = [...named.keys()].filter((id) => id.toLowerCase() === n);
+    if (byId.length === 1)
+      return byId;
+    const ids = [...named.entries()];
+    const whole3 = ids.filter(([, names]) => names.includes(n)).map(([id]) => id);
+    if (whole3.length > 0 || n.includes(" "))
+      return whole3;
+    return ids.filter(([, names]) => names.some((name) => name.split(" ").includes(n))).map(([id]) => id);
+  };
+}
+function resolveMarkNames(world, state, mark) {
+  const match = nameMatcher(world, state);
+  const unresolved = [];
+  const resolve = (names) => {
+    const out = [];
+    for (const name of names) {
+      const [id, ...more] = match(name);
+      if (id === undefined || more.length > 0) {
+        if (!unresolved.includes(name))
+          unresolved.push(name);
+      } else if (!out.includes(id))
+        out.push(id);
+    }
+    return out;
+  };
+  return { knownTo: resolve(mark.knownTo), keptFrom: mark.keptFrom === "everyone" ? "everyone" : resolve(mark.keptFrom), unresolved };
+}
+function markNameIssues(world, state, mark, path) {
+  const match = nameMatcher(world, state);
+  const nameOf2 = (id) => (state && Object.hasOwn(state.entities, id) ? state.entities[id]?.name : undefined) ?? (Object.hasOwn(world.entities, id) ? world.entities[id]?.name : undefined) ?? id;
+  const issues = [];
+  const check = (names, kept2) => {
+    for (const name of names) {
+      const ids = match(name);
+      if (ids.length === 1)
+        continue;
+      const who = ids.length === 0 ? "names no one in this world" : `could be any of ${ids.map(nameOf2).join(", ")}`;
+      const means = kept2 ? "the narrator is told the secret is kept from the player character too, in case it is them" : "no one holds the secret by it";
+      issues.push({ severity: "warning", path, code: ids.length === 0 ? "mark_name_unresolved" : "mark_name_ambiguous", message: `"${name}" ${who}: ${means}. Give a full name, or pick the person.` });
+    }
+  };
+  check(mark.knownTo, false);
+  if (mark.keptFrom !== "everyone")
+    check(mark.keptFrom, true);
+  return issues;
+}
+function secretMarkText(text, known, kept2, wording = SECRET_MARK_WORDING) {
+  const keptFrom = kept2 === "everyone" || kept2.length === 0 ? null : kept2.join(", ");
+  const template = known.length === 0 ? wording.kept : keptFrom === null ? wording.known : wording.both;
+  const values = { text, known: known.join(", "), kept: keptFrom ?? wording.everyone };
+  return template.replace(/\{\{(text|known|kept)\}\}/g, (whole3, key) => values[key] ?? whole3);
+}
+function renderMark(mark, resolved, nameOf2, mode, wording = SECRET_MARK_WORDING) {
+  if (mode === "omit")
+    return "";
+  const known = [...resolved.knownTo.map(nameOf2), ...mark.knownTo.filter((n) => resolved.unresolved.includes(n))];
+  const kept2 = resolved.keptFrom === "everyone" || mark.keptFrom === "everyone" ? "everyone" : [...resolved.keptFrom.map(nameOf2), ...mark.keptFrom.filter((n) => resolved.unresolved.includes(n))];
+  return secretMarkText(mark.text, known, kept2, wording);
+}
+function applyMarks(text, reader, view) {
+  if (view === "omit")
+    return publicText(text);
+  const holder = view === "marked" ? null : view.slice("holder:".length);
+  const name = (source, id) => source && Object.hasOwn(source.entities, id) ? source.entities[id]?.name : undefined;
+  const nameOf2 = (id) => name(reader.state, id) ?? name(reader.world, id) ?? id;
+  return renderSecretMarks(text, (mark) => {
+    const resolved = resolveMarkNames(reader.world, reader.state, mark);
+    return holder !== null && !resolved.knownTo.includes(holder) ? "" : renderMark(mark, resolved, nameOf2, "marked", reader.wording);
+  });
+}
+
 // src/engine/cues.ts
 var SECRET_KINDS = ["lore", "track", "flag"];
 function readCue(raw) {
@@ -5743,7 +6261,7 @@ function namesHiddenOrSecretLore(reg, world, state, text, heard = "") {
 }
 function loreSnippet(tokens, entry, budget, keep = "start") {
   const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
-  const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
+  const body = publicText(typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
   const whole3 = title === "" ? body : `${title}: ${body}`;
   const cost = tokens(whole3);
   if (cost <= budget)
@@ -9238,6 +9756,9 @@ function lintLore(world) {
     for (const holder of holders)
       if (typeof holder !== "string" || !hasOwn(world.entities, holder))
         push("warning", `lore.${id}.holders`, "missing_ref", `"${String(holder)}" is not an entity: the secret is no one's`);
+    if (typeof l.content === "string")
+      for (const mark of parseSecretMarks(l.content))
+        issues.push(...markNameIssues(world, null, mark, `lore.${id}.content`));
     const visibility = l.visibility;
     if (visibility !== undefined && visibility !== "public" && visibility !== "known_by")
       push("warning", `lore.${id}.visibility`, "unknown_visibility", `"${String(visibility)}" isn't a lore visibility: no helper reads the entry`);
@@ -10458,6 +10979,14 @@ function lintStructure(world, reg) {
   const cap = world.spawnCap;
   if (cap !== undefined && !(typeof cap === "number" && Number.isInteger(cap) && cap >= 0 && cap <= MAX_SPAWN_CAP))
     err("spawnCap", "spawn_cap", `The number of people replies may introduce must be a whole number from 0 to ${MAX_SPAWN_CAP}.`);
+  const narrator = world.narrator;
+  if (narrator !== undefined && narratorViewOf(narrator) === null)
+    err("narrator", "narrator", `The narrator's knowledge needs both parts: knowledge "scene" or "pov", and secrets "marked" or "omit". As it is, the world's chats follow each player's Settings.`);
+  if (isRecord(narrator)) {
+    for (const key of Object.keys(narrator))
+      if (key !== "knowledge" && key !== "secrets")
+        warn(`narrator.${key}`, "narrator_key", `The narrator's knowledge has no part "${key}", only knowledge and secrets; it is ignored.`);
+  }
   for (const { path, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       if (spec.type !== "spawn")
@@ -14387,10 +14916,7 @@ function placeLoreLines(ctx, scope) {
   const lineOf = (entry, known) => {
     const title = typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : entry.id;
     const whole4 = loreSnippet((text3) => text3.length, { title, content: entry.content }, Number.POSITIVE_INFINITY);
-    if (!whole4)
-      return [];
-    const source = loreSourceOf(entry.source);
-    return [{ text: whole4.text, known, ...source.kind === "book" && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {} }];
+    return whole4 ? [{ text: whole4.text, known }] : [];
   };
   const lines = found.filter((f) => f.read).flatMap((f) => lineOf(f.entry, "pov"));
   if (scope !== "gm")
@@ -32801,6 +33327,7 @@ var core_default11 = combatPack;
 // src/packs/minds/core/state.ts
 var PACK5 = "minds";
 var EMPTY_SLICE = { round: 0, on: false, chars: {}, presence: [] };
+var EMPTY_KNOWLEDGE = { facts: {}, holdings: {} };
 function emptyCharacter() {
   return { mind: null, plans: [], notes: [], commitments: [], witness: [], summary: "", pin: null, refresh: false, lastPresent: null, consolidated: null };
 }
@@ -32809,7 +33336,7 @@ function readSlice(state2) {
   if (!raw)
     return EMPTY_SLICE;
   const s = raw;
-  return { round: s.round ?? 0, on: s.on ?? false, chars: s.chars ?? {}, presence: s.presence ?? [] };
+  return { round: s.round ?? 0, on: s.on ?? false, chars: s.chars ?? {}, presence: s.presence ?? [], ...s.knowledge ? { knowledge: s.knowledge } : {} };
 }
 function readCharacter(state2, id) {
   return own(readSlice(state2).chars, id) ?? emptyCharacter();
@@ -32832,6 +33359,18 @@ function writeCharacter(state2, id) {
   const c = own(s.chars, id) ?? emptyCharacter();
   s.chars[id] = c;
   return c;
+}
+function readKnowledge(state2) {
+  const k = readSlice(state2).knowledge;
+  return k ? { facts: k.facts ?? {}, holdings: k.holdings ?? {} } : EMPTY_KNOWLEDGE;
+}
+function writeKnowledge(state2) {
+  const s = writeSlice(state2);
+  const k = s.knowledge ?? {};
+  k.facts ??= {};
+  k.holdings ??= {};
+  s.knowledge = k;
+  return s.knowledge;
 }
 function putPlan(c, plan2) {
   const i = c.plans.findIndex((p) => p.id === plan2.id);
@@ -33264,7 +33803,214 @@ var skip = {
   },
   describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `The time skip stopped at ${Array.isArray(e.data.beats) ? e.data.beats.length : 0} beats for the minds`
 };
-var MINDS_EVENT_DEFS = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, intent, skip];
+var someIds = (v) => ids(v) && v.every((id) => id !== "");
+function isFact(v) {
+  if (!isRecord(v) || !str13(v.id) || typeof v.kind !== "string" || !FACT_KINDS.includes(v.kind) || parseFactId(v.id)?.kind !== v.kind)
+    return false;
+  const source = v.source;
+  return str13(v.claim) && v.claim.trim() !== "" && someIds(v.about) && typeof v.truth === "string" && FACT_TRUTHS.includes(v.truth) && (source === undefined || isRecord(source) && (source.msg === null || str13(source.msg)) && finite2(source.at)) && (v.textHash === undefined || str13(v.textHash) && v.textHash !== "");
+}
+function isHolding(v) {
+  if (!isRecord(v) || typeof v.how !== "string" || !HOLDING_HOWS.includes(v.how))
+    return false;
+  const since = v.since;
+  return (v.by === null || str13(v.by) && v.by !== "") && (v.how !== "told" || v.by !== null) && texts(v.evidence) && v.evidence.every((ref) => isWitnessRef(ref) || parseFactId(ref) !== null) && isRecord(since) && (since.msg === null || str13(since.msg)) && finite2(since.at) && typeof v.belief === "string" && HOLDING_BELIEFS.includes(v.belief) && isConfidence(v.confidence) && (v.keptFrom === undefined || v.keptFrom === "everyone" || someIds(v.keptFrom));
+}
+function holdingOf(v, self) {
+  const keptFrom = keptFromOf(v.keptFrom, self);
+  return { how: v.how, by: v.by, evidence: [...new Set(v.evidence)], since: { msg: v.since.msg, at: v.since.at }, belief: v.belief, confidence: v.confidence, ...keptFrom ? { keptFrom } : {} };
+}
+function factOf2(v) {
+  return { id: v.id, kind: v.kind, claim: v.claim, about: [...v.about], truth: v.truth, ...v.source ? { source: { msg: v.source.msg, at: v.source.at } } : {}, ...v.textHash !== undefined ? { textHash: v.textHash } : {} };
+}
+function learnedHolding(d) {
+  return { how: d.how ?? null, by: d.by ?? null, evidence: d.evidence ?? null, since: { msg: d.msg ?? null, at: d.at ?? null }, belief: d.belief ?? null, confidence: d.confidence ?? null, ...d.keptFrom !== undefined ? { keptFrom: d.keptFrom } : {} };
+}
+function knowers(ctx, v) {
+  if (!someIds(v) || v.length === 0 || new Set(v).size !== v.length)
+    return bad("a knowledge event names who, each once");
+  return v.every((id) => own(ctx.state.entities, id) !== undefined) ? v : { code: "missing_entity", reason: "a knowledge event names someone who isn't in the world" };
+}
+function holds(state2, who, fact) {
+  return own(own(readKnowledge(state2).holdings, who) ?? {}, fact) !== undefined;
+}
+function claimOf(ctx, fact) {
+  const f = str13(fact) ? own(readKnowledge(ctx.state).facts, fact) : undefined;
+  return f ? `\u201C${f.claim}\u201D` : "a fact";
+}
+function namesOf2(ctx, who) {
+  return listWords(ids(who) ? who.map((id) => nameOf5(ctx, id)) : []);
+}
+var HOW_WORDS = { authored: "from the start", witnessed: "witnessed", told: "told", inferred: "inferred", guessed: "a guess" };
+var BELIEF_WORDS = { true: "taken as true", false: "taken as false", uncertain: "unsure" };
+var knowledgeFact = {
+  type: MINDS_EVENTS.fact,
+  validate: (e) => isFact(e.data.fact) ? null : bad("a fact needs an id in its kind's form, a claim, what it's about and its truth, and any source and text hash well formed"),
+  apply: (e, state2) => {
+    const v = e.data.fact;
+    if (isFact(v))
+      writeKnowledge(state2).facts[v.id] = factOf2(v);
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : isFact(e.data.fact) ? `A fact for the minds: \u201C${e.data.fact.claim}\u201D` : "A fact for the minds"
+};
+function learnedWitness(d) {
+  if (!d.witness || d.how !== "witnessed" && d.how !== "told")
+    return null;
+  return { at: d.at, what: d.witness.what, how: d.how === "told" ? "told" : "saw", by: d.how === "told" ? d.by : null, place: d.witness.place };
+}
+function isLearnedWitness(v) {
+  return isRecord(v) && str13(v.what) && v.what.trim() !== "" && (v.place === null || str13(v.place));
+}
+var learning = {
+  type: MINDS_EVENTS.learn,
+  validate: (e, ctx) => {
+    const d = e.data;
+    const who = knowers(ctx, d.who);
+    if (!Array.isArray(who))
+      return who;
+    const k = readKnowledge(ctx.state);
+    if (!str13(d.fact) || !own(k.facts, d.fact))
+      return { code: "missing_fact", reason: "a learning names a fact the minds don't hold" };
+    const h = learnedHolding(d);
+    if (d.by === undefined || d.msg === undefined || !isHolding(h))
+      return bad("a learning needs how and by whom (one told names its teller), its evidence, its message and clock, the belief, a confidence from 0 to 1 and whom it's kept from, if anyone");
+    if (h.by !== null && (own(ctx.state.entities, h.by) === undefined || who.includes(h.by)))
+      return { code: "missing_entity", reason: "a learning's teller is in the world, and isn't one who learns it" };
+    if (Array.isArray(h.keptFrom) && h.keptFrom.some((id) => own(ctx.state.entities, id) === undefined || who.includes(id)))
+      return { code: "missing_entity", reason: "those a learning is kept from are in the world, and aren't those who learn it" };
+    if (h.evidence.some((ref) => ref === d.fact || !isWitnessRef(ref) && own(k.facts, ref) === undefined))
+      return { code: "missing_fact", reason: "a learning rests on facts the minds hold, never on itself" };
+    if (d.witness !== undefined && (!isLearnedWitness(d.witness) || h.how !== "witnessed" && h.how !== "told"))
+      return bad("a learning's witness line is what was seen or told, and where, for one witnessed or told");
+    return null;
+  },
+  apply: (e, state2) => {
+    const d = e.data;
+    const h = learnedHolding(d);
+    if (!str13(d.fact) || !ids(d.who) || !isHolding(h) || own(readKnowledge(state2).facts, d.fact) === undefined)
+      return;
+    const k = writeKnowledge(state2);
+    const line2 = isLearnedWitness(d.witness) ? learnedWitness({ how: h.how, by: h.by, at: h.since.at, witness: { what: d.witness.what, place: d.witness.place } }) : null;
+    for (const who of d.who) {
+      if (own(state2.entities, who) === undefined)
+        continue;
+      const held3 = own(k.holdings, who) ?? {};
+      held3[d.fact] = holdingOf(h, who);
+      k.holdings[who] = held3;
+      if (line2)
+        addWitness(writeCharacter(state2, who), { ...line2 });
+    }
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const d = e.data;
+    const h = learnedHolding(d);
+    const who = ids(d.who) ? d.who : [];
+    if (!isHolding(h))
+      return `${namesOf2(ctx, who)} learned ${claimOf(ctx, d.fact)}`;
+    const kept2 = h.keptFrom === "everyone" ? "kept from everyone" : h.keptFrom && h.keptFrom.length > 0 ? `kept from ${namesOf2(ctx, h.keptFrom)}` : null;
+    const how = h.how === "told" && h.by !== null ? `told by ${nameOf5(ctx, h.by)}` : HOW_WORDS[h.how];
+    const parts = [how, BELIEF_WORDS[h.belief], `${Math.round(h.confidence * 100)}% sure`, kept2].filter((p) => p !== null);
+    return `${namesOf2(ctx, who)} ${who.length === 1 ? "holds" : "hold"} ${claimOf(ctx, d.fact)} (${parts.join(", ")})`;
+  }
+};
+var forgetting = {
+  type: MINDS_EVENTS.forget,
+  validate: (e, ctx) => {
+    const d = e.data;
+    if (!someIds(d.who) || d.who.length === 0 || new Set(d.who).size !== d.who.length || !str13(d.fact))
+      return bad("forgetting names the fact and who forgets it, each once");
+    const fact = d.fact;
+    return d.who.every((who) => holds(ctx.state, who, fact)) ? null : { code: "missing_holding", reason: "someone it names doesn't hold that fact" };
+  },
+  apply: (e, state2) => {
+    const d = e.data;
+    if (!ids(d.who) || !str13(d.fact) || readSlice(state2).knowledge === undefined)
+      return;
+    const k = writeKnowledge(state2);
+    for (const who of d.who) {
+      const held3 = own(k.holdings, who);
+      if (!held3 || own(held3, d.fact) === undefined)
+        continue;
+      delete held3[d.fact];
+      if (Object.keys(held3).length === 0)
+        delete k.holdings[who];
+    }
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${namesOf2(ctx, e.data.who)} no longer ${ids(e.data.who) && e.data.who.length === 1 ? "holds" : "hold"} ${claimOf(ctx, e.data.fact)}`
+};
+var keeping = {
+  type: MINDS_EVENTS.keep,
+  validate: (e, ctx) => {
+    const { who, fact, keptFrom } = e.data;
+    if (!str13(who) || !str13(fact) || !(keptFrom === "everyone" || someIds(keptFrom)))
+      return bad("keeping names who keeps the fact, the fact, and whom it's kept from: some people or everyone");
+    if (!holds(ctx.state, who, fact))
+      return { code: "missing_holding", reason: "they don't hold that fact" };
+    return keptFrom !== "everyone" && keptFrom.some((id) => id === who || own(ctx.state.entities, id) === undefined) ? { code: "missing_entity", reason: "those a fact is kept from are in the world, and never the one who keeps it" } : null;
+  },
+  apply: (e, state2) => {
+    const d = e.data;
+    if (!str13(d.who) || !str13(d.fact) || !holds(state2, d.who, d.fact))
+      return;
+    const h = own(own(writeKnowledge(state2).holdings, d.who) ?? {}, d.fact);
+    if (!h)
+      return;
+    const keptFrom = keptFromOf(d.keptFrom, d.who);
+    if (keptFrom)
+      h.keptFrom = keptFrom;
+    else
+      delete h.keptFrom;
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const d = e.data;
+    const name = nameOf5(ctx, String(d.who));
+    const keptFrom = keptFromOf(d.keptFrom, String(d.who));
+    if (keptFrom === null)
+      return `${name} no longer keeps ${claimOf(ctx, d.fact)} from anyone`;
+    return `${name} keeps ${claimOf(ctx, d.fact)} from ${keptFrom === "everyone" ? "everyone" : namesOf2(ctx, keptFrom)}`;
+  }
+};
+function isTruth(v) {
+  return typeof v === "string" && FACT_TRUTHS.includes(v);
+}
+var settling = {
+  type: MINDS_EVENTS.settle,
+  validate: (e, ctx) => {
+    if (!str13(e.data.fact) || own(readKnowledge(ctx.state).facts, e.data.fact) === undefined)
+      return { code: "missing_fact", reason: "that fact isn't one the minds hold" };
+    return isTruth(e.data.truth) ? null : bad("a fact's truth is true, false or open");
+  },
+  apply: (e, state2) => {
+    const d = e.data;
+    if (!str13(d.fact) || !isTruth(d.truth) || own(readKnowledge(state2).facts, d.fact) === undefined)
+      return;
+    const f = own(writeKnowledge(state2).facts, d.fact);
+    if (f)
+      f.truth = d.truth;
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${claimOf(ctx, e.data.fact)} is now ${e.data.truth === "open" ? "an open question" : String(e.data.truth)}`
+};
+var tracking = {
+  type: MINDS_EVENTS.knowledge,
+  validate: (e) => typeof e.data.on === "boolean" && (e.data.threshold === undefined || isConfidence(e.data.threshold)) ? null : bad("knowledge tracking is on or off, and a threshold runs from 0 to 1"),
+  apply: (e, state2) => {
+    if (typeof e.data.on !== "boolean")
+      return;
+    if (e.data.on) {
+      if (readSlice(state2).knowledge?.off)
+        delete writeKnowledge(state2).off;
+    } else
+      writeKnowledge(state2).off = true;
+    if (isConfidence(e.data.threshold))
+      writeKnowledge(state2).threshold = e.data.threshold;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `${e.data.on === true ? "Knowledge tracking is on" : "Knowledge tracking is off"}${isConfidence(e.data.threshold) ? `, a holding revealing its fact from ${Math.round(e.data.threshold * 100)}% sure` : ""}`
+};
+var MINDS_EVENT_DEFS = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, intent, skip, knowledgeFact, learning, forgetting, keeping, settling, tracking];
 function mindsOn(ctx) {
   return readSlice(ctx.state).on;
 }
@@ -33373,11 +34119,35 @@ function planFrom(ctx, who, id, v, before) {
     ...shared && v.what === undefined && before?.by !== undefined ? { by: before.by } : {}
   };
 }
+function knowledgeEdit(ctx, op, name) {
+  const k = readKnowledge(ctx.state);
+  if (!own(k.facts, op.fact))
+    return reject16("missing_fact", "the minds hold no such fact");
+  const before = own(own(k.holdings, op.entity) ?? {}, op.fact);
+  if (op.holding === null)
+    return before ? [{ type: MINDS_EVENTS.forget, data: { who: [op.entity], fact: op.fact } }] : reject16("no_change", `${name} doesn't hold that`);
+  const h = op.holding;
+  if (!isHolding(h))
+    return reject16("bad_value", "a holding is how it's held and by whom (one told names its teller), its evidence, since when, the belief, a confidence from 0 to 1 and whom it's kept from");
+  const named = peopleIn(ctx, [...h.by === null ? [] : [h.by], ...Array.isArray(h.keptFrom) ? h.keptFrom : []]);
+  if (!Array.isArray(named))
+    return named;
+  if (h.by === op.entity)
+    return reject16("bad_value", `${name} can't have told themselves`);
+  if (h.evidence.some((ref) => ref === op.fact || !isWitnessRef(ref) && !own(k.facts, ref)))
+    return reject16("missing_fact", "a holding rests on facts the minds hold, never on itself");
+  const next = holdingOf(h, op.entity);
+  if (before && JSON.stringify(holdingOf(before, op.entity)) === JSON.stringify(next))
+    return reject16("no_change", "nothing to change");
+  return [{ type: MINDS_EVENTS.learn, data: { who: [op.entity], fact: op.fact, how: next.how, by: next.by, evidence: next.evidence, belief: next.belief, confidence: next.confidence, ...next.keptFrom ? { keptFrom: next.keptFrom } : {}, msg: next.since.msg, at: next.since.at } }];
+}
 function mindEdit(ctx, op) {
   const { world, state: state2, registry } = ctx;
   const e = own(state2.entities, op.entity);
   if (!e)
     return reject16("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
+  if (op.op === "mind_knowledge")
+    return kindIs(registry, world, e.kind, "person") ? knowledgeEdit(ctx, op, e.name) : reject16("bad_value", `${e.name} isn't a person`);
   if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person"))
     return reject16("no_mind", `${e.name} doesn't have a mind`);
   if (op.op === "mind_pin")
@@ -33599,6 +34369,199 @@ ${texts2.reply}`);
   return out.sort((a, b) => rank[a.level] - rank[b.level] || b.score - a.score || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0));
 }
 
+// src/packs/minds/core/knowledge-channels.ts
+function knowledgeProblem(p, ctx) {
+  const learn = p.learn;
+  if (!Array.isArray(p.facts) || !p.facts.every((f) => isFact(f)))
+    return { code: "bad_proposal", reason: "a knowledge change carries its facts whole" };
+  if (!isRecord(learn) || typeof learn.fact !== "string" || !Array.isArray(learn.who) || learn.who.length !== 1 || learn.who[0] !== ctx.world.pov)
+    return { code: "bad_proposal", reason: "a knowledge change is the player character's own learning" };
+  return null;
+}
+var knowEffect = {
+  type: "minds.know",
+  args: ["facts", "learn"],
+  resolve: (a) => {
+    if (!Array.isArray(a.facts) || !isRecord(a.learn))
+      return { code: "bad_effect", reason: "minds.know needs the facts and the learning" };
+    const facts = a.facts.map((fact) => ({ type: MINDS_EVENTS.fact, data: { fact } }));
+    return [...facts, { type: MINDS_EVENTS.learn, data: a.learn }];
+  }
+};
+var KNOWLEDGE_CHANNELS = KNOWLEDGE_CHANGES.map((type) => ({
+  type,
+  boundField: "knowledge",
+  validate: knowledgeProblem,
+  toEffects: (p) => [{ type: "minds.know", args: { facts: p.facts ?? [], learn: p.learn ?? null } }]
+}));
+
+// src/packs/minds/core/knowledge.ts
+function factsOf(slice2) {
+  return slice2.knowledge?.facts ?? {};
+}
+function holdingsOf(slice2, who) {
+  return own(slice2.knowledge?.holdings ?? {}, who) ?? {};
+}
+function isSuspicion(holding, threshold2) {
+  return holding.confidence < threshold2;
+}
+function trackedHoldings(slice2, who) {
+  return knowledgeTracked(slice2) ? holdingsOf(slice2, who) : {};
+}
+function keptFromIt(holding, who) {
+  return holding.keptFrom === "everyone" || (holding.keptFrom?.includes(who) ?? false);
+}
+function holdingLine(claim2, h, words5) {
+  const text5 = (id) => knowledgeText(words5.texts, id);
+  const how = fillText(text5(h.how), { by: h.by === null ? "" : words5.nameOf(h.by) });
+  const template = h.belief === "false" ? "disbelieved" : h.belief === "uncertain" ? "unsure" : isSuspicion(h, words5.threshold) ? "suspected" : "known";
+  const line2 = fillText(text5(template), { claim: claim2, how, percent: String(Math.round(h.confidence * 100)) });
+  if (h.keptFrom === undefined)
+    return line2;
+  const whom = h.keptFrom === "everyone" ? text5("everyone") : h.keptFrom.map(words5.nameOf).join(", ");
+  return `${line2}; ${fillText(text5("keeps"), { whom })}`;
+}
+function latestTurns(slice2, turns) {
+  const seen = [];
+  for (const p of [...slice2.presence].reverse())
+    if (p.msg !== null)
+      seen.push({ msg: p.msg, at: p.at });
+  for (const held3 of Object.values(slice2.knowledge?.holdings ?? {}).reverse())
+    for (const h of Object.values(held3).reverse())
+      if (h.since.msg !== null)
+        seen.push({ msg: h.since.msg, at: h.since.at });
+  seen.sort((a, b) => b.at - a.at);
+  const out = new Set;
+  for (const s of seen) {
+    if (out.size >= turns)
+      break;
+    out.add(s.msg);
+  }
+  return out;
+}
+function byPlay(a, b) {
+  if (a.secret !== b.secret)
+    return a.secret ? -1 : 1;
+  return Number(b.about) + Number(b.recent) - Number(a.about) - Number(a.recent) || b.holding.since.at - a.holding.since.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+function rankedHoldings(slice2, who, play) {
+  const facts = factsOf(slice2);
+  return Object.entries(trackedHoldings(slice2, who)).map(([id, holding]) => {
+    const fact = own(facts, id);
+    return {
+      id,
+      fact,
+      holding,
+      secret: holding.keptFrom !== undefined || play.secret(id, fact),
+      about: fact?.about.some((x) => play.here.includes(x)) ?? false,
+      recent: holding.since.msg !== null && play.recent.has(holding.since.msg)
+    };
+  }).sort(byPlay);
+}
+
+// src/packs/minds/core/knowledge-section.ts
+function presentPeople(ctx) {
+  const { registry: reg, world, state: state2 } = ctx;
+  const here = placeOfEntity(state2, world.pov);
+  if (here === null)
+    return [];
+  return Object.keys(state2.entities).sort().filter((id) => id !== world.pov && together(world, here, placeOfEntity(state2, id)) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id) && acts(world, state2, id) && canSeeEntity(reg, world, state2, world.pov, id));
+}
+function worldSecrets(ctx) {
+  const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
+  const revealed = readEngineSlice(ctx.state).revealed;
+  return (id, fact) => {
+    const ref = fact ? parseFactId(id) : null;
+    if (ref?.kind === "wi")
+      return true;
+    if (ref?.kind === "lore") {
+      const lore = own(ctx.world.lore, ref.lore);
+      return lore !== undefined && loreIsSecret(lore) && !open(lore);
+    }
+    if (ref?.kind === "track")
+      return !!own(ctx.world.tracks, ref.track)?.stages[ref.stage]?.truth && !(own(revealed, ref.track) ?? []).includes(ref.stage);
+    return false;
+  };
+}
+function knowledgeLines(ctx, scope) {
+  const { world, state: state2 } = ctx;
+  const slice2 = readSlice(state2);
+  if (!knowledgeTracked(slice2) || slice2.knowledge === undefined)
+    return [];
+  const settings = ctx.query("minds.knowing")(ctx);
+  const pov = world.pov;
+  const name = (id) => own(state2.entities, id)?.name ?? own(world.entities, id)?.name ?? id;
+  const threshold2 = knowledgeThreshold(slice2);
+  const words5 = { texts: settings, threshold: threshold2, nameOf: name };
+  const people = presentPeople(ctx);
+  const place = placeOfEntity(state2, pov);
+  const secret = worldSecrets(ctx);
+  const play = { here: [pov, ...people, ...place ? [place] : []], recent: latestTurns(slice2, settings.inPlayTurns), secret };
+  const claim2 = (fact, id) => applyMarks(fact?.claim ?? id, { world, state: state2 }, "omit");
+  const others = scope === "player" ? [] : people;
+  const listed2 = [pov, ...others].flatMap((who) => rankedHoldings(slice2, who, play).slice(0, settings.perPerson).map((h) => ({ who, h })));
+  const povHolds = holdingsOf(slice2, pov);
+  const out = [];
+  for (const id of new Set([...listed2].sort((a, b) => byPlay(a.h, b.h)).map((x) => x.h.id))) {
+    const holders = listed2.filter((x) => x.h.id === id);
+    const yours = own(povHolds, id);
+    const fact = holders[0]?.h.fact;
+    const kept2 = yours !== undefined && secret(id, fact) && !revealsFact(id, yours, threshold2) ? { keptFrom: yours.keptFrom ?? "everyone", known: [pov] } : null;
+    for (const { who, h } of holders) {
+      const text5 = fillText(knowledgeText(settings, "person"), { name: who === pov ? "You" : name(who), line: holdingLine(claim2(h.fact, id), h.holding, words5) });
+      if (yours !== undefined)
+        out.push(kept2 ? { text: text5, known: "pov", secret: { keptFrom: kept2.keptFrom, known: [...new Set([...kept2.known, who])] }, group: id } : { text: text5, known: "pov", group: id });
+      else if (keptFromIt(h.holding, pov) || secret(id, h.fact)) {
+        const keeps = h.holding.keptFrom;
+        out.push({ text: text5, known: "scene", who: name(who), secret: { keptFrom: keeps === "everyone" ? "everyone" : [...new Set([...keeps ?? [], pov])], known: [who] }, group: id });
+      } else
+        out.push({ text: text5, known: "scene", who: name(who), group: id });
+    }
+    const mine = holders.find((x) => x.who === pov)?.h;
+    if (mine && (mine.secret || mine.about || mine.recent))
+      for (const who of others) {
+        if (own(holdingsOf(slice2, who), id) !== undefined)
+          continue;
+        const text5 = fillText(knowledgeText(settings, "notKnown"), { name: name(who), claim: claim2(mine.fact, id) });
+        out.push(kept2 ? { text: text5, known: "pov", secret: kept2, group: id } : { text: text5, known: "pov", group: id });
+      }
+  }
+  return out;
+}
+
+// src/packs/minds/core/known.ts
+var UNWORDED = "Something you can't put into words yet";
+function buildKnownView(ctx) {
+  const { world, state: state2, registry: reg } = ctx;
+  const slice2 = readSlice(state2);
+  if (!knowledgeTracked(slice2))
+    return { tracking: false, items: [] };
+  const facts = factsOf(slice2);
+  const cal = calendarOf(world);
+  const secrets = unrevealedSecrets(reg, world, state2);
+  const hidden = hiddenNameCheck(reg, world, state2, world.pov, { stages: false });
+  const name = (id) => povMayKnow(reg, world, state2, id) ? own(state2.entities, id)?.name ?? id : "someone";
+  const worded = (text5) => findLeaks(text5, secrets).length > 0 || hidden(text5) ? UNWORDED : text5;
+  const secret = worldSecrets(ctx);
+  const sure = knowledgeThreshold(slice2);
+  const items = Object.entries(holdingsOf(slice2, world.pov)).sort(([a, x], [b, y]) => y.since.at - x.since.at || (a < b ? -1 : 1)).map(([fact, h]) => {
+    const f = own(facts, fact);
+    return {
+      key: hashParts("lre.known", fact),
+      claim: secret(fact, f) && !revealsFact(fact, h, sure) ? UNWORDED : worded(applyMarks(f?.claim ?? "", { world, state: state2 }, "omit")),
+      how: h.how,
+      byName: h.by === null ? null : name(h.by),
+      sinceText: formatClock(cal, h.since.at),
+      belief: h.belief,
+      confidence: h.confidence,
+      suspicion: isSuspicion(h, sure),
+      open: f?.truth === "open",
+      keptFrom: h.keptFrom === undefined ? null : h.keptFrom === "everyone" ? "everyone" : h.keptFrom.map(name)
+    };
+  }).filter((item) => item.claim.trim() !== "");
+  return { tracking: true, items };
+}
+
 // src/packs/minds/core/lint.ts
 var WEIGHT_KEYS = ["here", "nearby", "mentioned", "regard", "knows", "owner", "track", "rule", "pending", "recent"];
 var MEMORY_PARTS = {
@@ -33617,14 +34580,14 @@ function configIssues(world, registry) {
   const err = (path, message) => void out.push({ severity: "error", path, code: "minds.config", message });
   const warn = (path, message) => void out.push({ severity: "warning", path, code: "minds.config", message });
   if (!isRecord(raw)) {
-    err("minds", "The minds config is an object (secrecy, weights, thresholds, always, never, memory); the defaults play instead.");
+    err("minds", "The minds config is an object (secrecy, weights, thresholds, always, never, memory, holdings); the defaults play instead.");
     return out;
   }
   for (const key of Object.keys(raw))
     if (!WORLD_MINDS_KEYS.includes(key))
       warn(`minds.${key}`, `"${key}" isn't part of the minds config; nothing reads it.`);
   if (raw.secrecy !== undefined && raw.secrecy !== "full" && raw.secrecy !== "brief")
-    err("minds.secrecy", 'Secrecy is "full" (the narrator gets each mind to depict) or "brief" (a leak-checked depiction only); "brief" plays instead.');
+    err("minds.secrecy", 'Secrecy is "full" (the narrator gets each mind to depict) or "brief" (a leak-checked depiction only); "full", the default, plays instead.');
   const number = (path, v, [lo, hi], whole4) => {
     if (v === undefined)
       return;
@@ -33712,6 +34675,86 @@ function configIssues(world, registry) {
   }
   return out;
 }
+function missingRef(world, registry, ref) {
+  if (ref.kind === "lore")
+    return hasOwn(world.lore, ref.lore) ? null : `The world has no lore entry "${ref.lore}".`;
+  if (ref.kind === "track") {
+    const track = hasOwn(world.tracks, ref.track) ? world.tracks[ref.track] : undefined;
+    if (!track)
+      return `The world has no track "${ref.track}".`;
+    return hasOwn(track.stages, ref.stage) ? null : `The track "${track.label}" has no stage "${ref.stage}".`;
+  }
+  if (ref.kind === "field") {
+    const e = hasOwn(world.entities, ref.entity) ? world.entities[ref.entity] : undefined;
+    if (!e)
+      return `The world has no entity "${ref.entity}".`;
+    const defined = hasOwn(e.fields, ref.field) || registry !== undefined && fieldDef(registry, world, e.kind, ref.field) !== undefined;
+    return defined ? null : `${e.name} has no field "${ref.field}".`;
+  }
+  return null;
+}
+function holdingIssues(world, raw, registry) {
+  if (raw === undefined)
+    return [];
+  const out = [];
+  const err = (path, message) => void out.push({ severity: "error", path, code: "minds.holdings", message });
+  const warn = (path, message) => void out.push({ severity: "warning", path, code: "minds.holdings", message });
+  if (!isRecord(raw)) {
+    err("minds.holdings", "What people hold from the start is an object of facts by person; no one holds anything from the start instead.");
+    return out;
+  }
+  const person2 = (id) => {
+    const e = hasOwn(world.entities, id) ? world.entities[id] : undefined;
+    return e !== undefined && (registry === undefined || kindIs(registry, world, e.kind, "person"));
+  };
+  for (const [who, facts] of Object.entries(raw)) {
+    const at = `minds.holdings.${who}`;
+    if (!hasOwn(world.entities, who))
+      err(at, `The world has no one "${who}", so these holdings are never read.`);
+    else if (!person2(who))
+      err(at, `${world.entities[who]?.name ?? who} isn't a person, so these holdings are never read.`);
+    if (!isRecord(facts)) {
+      err(at, "Each person's holdings are an object of facts by id; they hold nothing from the start instead.");
+      continue;
+    }
+    for (const [fact, v] of Object.entries(facts)) {
+      const path = `${at}.${fact}`;
+      const ref = parseFactId(fact);
+      if (!ref || !AUTHORED_FACT_KINDS.includes(ref.kind)) {
+        err(path, "A fact held from the start is lore:<entry>, track:<track>:<stage> or field:<entity>:<field>; this one is left out.");
+        continue;
+      }
+      const missing = missingRef(world, registry, ref);
+      if (missing)
+        warn(path, `${missing} The holding seeds a fact nothing refers to.`);
+      if (!isRecord(v)) {
+        err(path, "A holding is an object (belief, confidence, keptFrom); this one is left out.");
+        continue;
+      }
+      for (const key of Object.keys(v))
+        if (key !== "belief" && key !== "confidence" && key !== "keptFrom")
+          warn(`${path}.${key}`, `"${key}" isn't part of a holding; nothing reads it.`);
+      if (v.belief !== undefined && !HOLDING_BELIEFS.includes(v.belief))
+        err(`${path}.belief`, 'A belief is "true", "false" or "uncertain"; "true" plays instead.');
+      if (v.confidence !== undefined && !isConfidence(v.confidence))
+        err(`${path}.confidence`, "A confidence is a number from 0 to 1; 1 plays instead.");
+      const kept2 = v.keptFrom;
+      if (kept2 === undefined || kept2 === "everyone")
+        continue;
+      if (!Array.isArray(kept2) || !kept2.every((id) => typeof id === "string")) {
+        err(`${path}.keptFrom`, 'Whom it is kept from is "everyone" or a list of people; it is kept from no one instead.');
+        continue;
+      }
+      for (const id of kept2) {
+        if (id === who)
+          warn(`${path}.keptFrom`, "No one keeps a fact from themselves; that name is passed over.");
+        else if (!person2(id))
+          err(`${path}.keptFrom`, `"${id}" isn't a person in the world; that name is passed over.`);
+      }
+    }
+  }
+  return out;
+}
 function stepIssues(world) {
   const out = [];
   for (const [id, t] of Object.entries(world.steps).sort(([a], [b]) => a.localeCompare(b))) {
@@ -33729,6 +34772,7 @@ function stepIssues(world) {
 }
 var MINDS_LINTS = [
   { code: "minds.config", check: (world, registry) => configIssues(world, registry) },
+  { code: "minds.holdings", check: (world, registry) => isRecord(world.minds) ? holdingIssues(world, world.minds.holdings, registry) : [] },
   { code: "minds.steps", check: (world) => stepIssues(world) }
 ];
 
@@ -33777,13 +34821,13 @@ function mindLines(ctx) {
         parts.push(`Shows: ${clause(m.depiction)}.`);
       if (m.interrupt)
         parts.push(`Interrupts the skip: ${clause(m.interrupt)}.`);
-      out.push({ entity: id, line: parts.join(" ") });
+      out.push({ entity: id, name, line: parts.join(" ") });
       continue;
     }
     if (m.withheld || m.depiction.trim() === "" || !safe(m.depiction))
       continue;
     const interrupt = m.interrupt && safe(m.interrupt) ? ` Interrupts the skip: ${clause(m.interrupt)}.` : "";
-    out.push({ entity: id, line: `${name}: ${clause(m.depiction)}.${interrupt}` });
+    out.push({ entity: id, name, line: `${name}: ${clause(m.depiction)}.${interrupt}` });
   }
   return out;
 }
@@ -33811,7 +34855,13 @@ var mindsPack = {
     r.query("minds.on", mindsOn);
     r.query("minds.intent", (ctx, who) => (readCharacter(ctx.state, who).intent?.text ?? "") !== "");
     r.query("minds.fidelity", (ctx, texts2) => fidelityOf(ctx, texts2));
+    r.query("minds.knowing", () => KNOWLEDGE_DEFAULTS);
     r.renderer({ slot: MINDS_SLOT, label: "What the characters' minds are on", render: (ctx) => mindLines(ctx).map((l) => l.line) });
+    r.renderer({ slot: KNOWLEDGE_SLOT, label: "Who knows what", render: (ctx) => knowledgeLines(ctx, "player").map((l) => l.text), feed: knowledgeLines });
+    r.view({ panel: KNOWN_PANEL, build: (ctx) => buildKnownView(ctx) });
+    r.effect(knowEffect);
+    for (const channel of KNOWLEDGE_CHANNELS)
+      r.proposal(channel);
     for (const rule of MINDS_LINTS)
       r.lint(rule);
   }
