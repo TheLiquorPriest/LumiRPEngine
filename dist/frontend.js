@@ -26364,8 +26364,8 @@ var READ_TOOL_TEXTS = [
     family: "time",
     tier: "read",
     note: "Reads the date and time.",
-    text: "The time now: the date and time of day in the world's calendar, the part of the day, today's holidays, and whether the clock is paused.",
-    args: []
+    text: "The time now: the date and time of day in the world's calendar, local to a place, the part of the day, that day's holidays, and whether the clock is paused.",
+    args: [{ path: "place", text: "Where, for its local time: a place's id or name; leave it out for where the player character is." }]
   },
   {
     name: "time_day",

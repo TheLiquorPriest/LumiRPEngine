@@ -7656,8 +7656,8 @@ var READ_TOOL_TEXTS = [
     family: "time",
     tier: "read",
     note: "Reads the date and time.",
-    text: "The time now: the date and time of day in the world's calendar, the part of the day, today's holidays, and whether the clock is paused.",
-    args: []
+    text: "The time now: the date and time of day in the world's calendar, local to a place, the part of the day, that day's holidays, and whether the clock is paused.",
+    args: [{ path: "place", text: "Where, for its local time: a place's id or name; leave it out for where the player character is." }]
   },
   {
     name: "time_day",
@@ -65008,6 +65008,8 @@ class LedgerCore {
   env;
   folder;
   startsChecked = false;
+  addedFrom = new Map;
+  seen = new Map;
   constructor(journal, env, folder) {
     this.journal = journal;
     this.env = env;
@@ -65078,8 +65080,10 @@ class LedgerCore {
     const j = this.journal;
     if (j.chain.length === 0 && Object.keys(j.messages).length === 0)
       this.bootstrap(observed);
-    if (deletedSwipe)
+    if (deletedSwipe) {
       this.shiftSwipes(deletedSwipe.messageId, deletedSwipe.swipeId);
+      this.addedFrom.delete(deletedSwipe.messageId);
+    }
     if (!this.startsChecked) {
       this.startsChecked = true;
       this.restoreStartMarkers(observed);
@@ -65088,7 +65092,29 @@ class LedgerCore {
     for (const [index, old] of j.chain.entries())
       if (!now.has(old.id))
         this.moveMarkersOnDelete(old, index, observed);
+    this.noteAdded(observed);
     this.classify(observed);
+  }
+  noteAdded(observed) {
+    const snapshot = new Map(this.journal.chain.map((e) => [e.id, { swipeId: e.swipeId, count: e.swipeCount }]));
+    const seen = new Map;
+    for (const m of observed) {
+      if (m.isUser)
+        continue;
+      seen.set(m.id, { swipeId: m.swipeId, count: m.swipes.length });
+      const prev = this.seen.get(m.id) ?? snapshot.get(m.id);
+      if (prev && m.swipes.length === prev.count + 1 && m.swipeId === m.swipes.length - 1 && prev.swipeId < prev.count)
+        this.addedFrom.set(m.id, { swipe: m.swipeId, from: prev.swipeId });
+    }
+    this.seen = seen;
+  }
+  swipeAdded(messageId, swipe, from) {
+    if (from >= 0 && from < swipe)
+      this.addedFrom.set(messageId, { swipe, from });
+  }
+  addedSwipeFrom(messageId, swipe) {
+    const added = this.addedFrom.get(messageId);
+    return added?.swipe === swipe ? added.from : undefined;
   }
   classify(observed) {
     const before = new Map(this.journal.chain.map((e) => [e.id, e]));
@@ -65229,6 +65255,10 @@ class LedgerCore {
         else
           p.renarrateOf.swipeId = source;
       }
+      if (p.rerunOf?.messageId === messageId) {
+        const source = shift(p.rerunOf.swipeId);
+        p.rerunOf.swipeId = source === GONE_SWIPE ? deleted - 1 : source;
+      }
     }
     const jm = this.journal.messages[messageId];
     if (!jm)
@@ -65360,13 +65390,17 @@ class LedgerCore {
         pending.captured = contentId(activeText(head));
       }
     }
-    if (input.kind === "renarrate" && input.targetMessageId && input.targetSwipeId !== null) {
+    if ((input.kind === "renarrate" || input.kind === "swipe" || input.kind === "regenerate") && input.targetMessageId && input.targetSwipeId !== null) {
       const target = this.chain(observed).find((m) => m.id === input.targetMessageId);
-      for (let s = input.targetSwipeId - 1;s >= 0; s--) {
-        const rec = target?.ledger?.swipes[String(s)];
-        if (rec && target && !isTombstoned(j.tombstones, target.id, rec)) {
-          pending.renarrateOf = { messageId: target.id, swipeId: s };
-          break;
+      const from = Math.min(this.addedSwipeFrom(input.targetMessageId, input.targetSwipeId) ?? input.targetSwipeId - 1, input.targetSwipeId - 1);
+      if (target && from >= 0) {
+        pending.rerunOf = { messageId: target.id, swipeId: from };
+        for (let s = from;s >= 0 && input.kind === "renarrate"; s--) {
+          const rec = target.ledger?.swipes[String(s)];
+          if (rec && !isTombstoned(j.tombstones, target.id, rec)) {
+            pending.renarrateOf = { messageId: target.id, swipeId: s };
+            break;
+          }
         }
       }
     }
@@ -65434,6 +65468,10 @@ class LedgerCore {
       p.renarrateOf = from.renarrateOf;
     else
       delete p.renarrateOf;
+    if (from.rerunOf)
+      p.rerunOf = from.rerunOf;
+    else
+      delete p.rerunOf;
     if (from.copies)
       p.copies = from.copies;
     if (from.undone)
@@ -65600,18 +65638,19 @@ class LedgerCore {
     }
     return out;
   }
-  rerunFixes(target, swipeId, parents) {
-    for (let s = swipeId - 1;s >= 0; s--) {
-      const source = target.ledger?.swipes[String(s)];
-      if (!source || isTombstoned(this.journal.tombstones, target.id, source))
+  rerunFixes(target, source, swipeId, parents) {
+    const from = source?.messageId === target.id ? Math.min(source.swipeId, swipeId - 1) : swipeId - 1;
+    for (let s = from;s >= 0; s--) {
+      const rec = target.ledger?.swipes[String(s)];
+      if (!rec || isTombstoned(this.journal.tombstones, target.id, rec))
         continue;
-      const fixes = source.post.filter((e) => e.kind === "fix" && parents.some((parent) => isLive(e.at, parent, turnPath(source))));
-      return fixes.length > 0 ? { source, fixes } : null;
+      const fixes = rec.post.filter((e) => e.kind === "fix" && parents.some((parent) => isLive(e.at, parent, turnPath(rec))));
+      return fixes.length > 0 ? { source: rec, fixes } : null;
     }
     return null;
   }
-  carryFixes(rec, target, swipeId, prefix) {
-    const found = target ? this.rerunFixes(target, swipeId, [prefix.parent]) : null;
+  carryFixes(rec, target, source, swipeId, prefix) {
+    const found = target ? this.rerunFixes(target, source, swipeId, [prefix.parent]) : null;
     if (!target || !found)
       return;
     this.carryOnto(rec, target, found.fixes, found.source.undone, prefix);
@@ -65624,8 +65663,8 @@ class LedgerCore {
     if (carried.dropped.length > 0)
       rec.dropped = [...rec.dropped ?? [], ...carried.dropped];
   }
-  leaveFixes(rec, target, swipeId, parents) {
-    const found = target ? this.rerunFixes(target, swipeId, parents) : null;
+  leaveFixes(rec, target, source, swipeId, parents) {
+    const found = target ? this.rerunFixes(target, source, swipeId, parents) : null;
     if (!found)
       return;
     const left = pausedDrops(found.fixes, found.source.undone);
@@ -65834,10 +65873,10 @@ class LedgerCore {
       if (prefix && read)
         rec.events.push(...this.read(prefix.state, prefix.world, readSeed(p.seed), content));
       if (prefix && carries)
-        this.carryFixes(rec, target, swipeId, start.length > 0 && rec.events.length === 0 ? this.prefixState(at.out, target, rec) ?? prefix : prefix);
+        this.carryFixes(rec, target, p.rerunOf, swipeId, start.length > 0 && rec.events.length === 0 ? this.prefixState(at.out, target, rec) ?? prefix : prefix);
     } else if (rerun && paused) {
       const inForce2 = (at?.out ?? this.fold(observed.slice(0, index))).messages.at(-1)?.path ?? ROOT_PATH;
-      this.leaveFixes(rec, target, swipeId, [p.parentPath, inForce2]);
+      this.leaveFixes(rec, target, p.rerunOf, swipeId, [p.parentPath, inForce2]);
     }
     const ledger = this.ledgerFor(messageId, observed[index]);
     ledger.swipes[String(swipeId)] = rec;
@@ -66255,7 +66294,7 @@ function giveWay() {
 
 // src/backend/stored-json.ts
 var CORRUPT_SUFFIX = ".corrupt-";
-async function readStoredJson(host, path2, userId, what, valid) {
+async function readStoredJson(host, path2, userId, what, valid, damaged) {
   const text5 = await host.storage.read(path2, userId);
   if (text5 === null)
     return;
@@ -66264,11 +66303,13 @@ async function readStoredJson(host, path2, userId, what, valid) {
     raw = JSON.parse(text5);
   } catch {
     await setAside(host, path2, userId, what, "unreadable");
+    damaged?.();
     return;
   }
   if (valid(raw))
     return raw;
   await setAside(host, path2, userId, what, "malformed");
+  damaged?.();
   return;
 }
 async function setAside(host, path2, userId, what, why) {
@@ -66976,8 +67017,9 @@ function isPendingTurn(p) {
     return false;
   if (p.captured !== undefined && !isContent(p.captured))
     return false;
-  if (p.renarrateOf !== undefined && !(isRecord(p.renarrateOf) && typeof p.renarrateOf.messageId === "string" && isInt(p.renarrateOf.swipeId)))
-    return false;
+  for (const source of [p.renarrateOf, p.rerunOf])
+    if (source !== undefined && !(isRecord(source) && typeof source.messageId === "string" && isInt(source.swipeId)))
+      return false;
   if (p.undone !== undefined && !isRefs(p.undone))
     return false;
   if (p.prompts !== undefined && typeof p.prompts !== "string")
@@ -67108,6 +67150,7 @@ class LedgerService {
   generating = new Set;
   unbumped = new Set;
   guarding = 0;
+  shown = new Map;
   constructor(host, resolveEnv, folder, forgetMessages = () => {
     return;
   }) {
@@ -67121,19 +67164,24 @@ class LedgerService {
     this.unsubscribe.push(h.on("FRONTEND_SESSION_CLOSED", (e, userId) => this.sessionClosed(e.frontendSessionId, userId)), h.on("MESSAGE_SENT", (e, userId) => {
       this.mirror(e.chatId, e.message);
       this.onMessage(e.chatId, userId, e.message.id, "sent");
+      this.show(e.chatId, e.message);
     }), h.on("MESSAGE_EDITED", (e, userId) => {
       this.mirror(e.chatId, e.message);
-      if (this.lateReply(e.chatId, userId, e.message))
-        return;
-      this.onMessage(e.chatId, userId, e.message.id, "edited");
+      if (!this.lateReply(e.chatId, userId, e.message))
+        this.onMessage(e.chatId, userId, e.message.id, "edited");
+      this.show(e.chatId, e.message);
     }), h.on("MESSAGE_SWIPED", (e, userId) => {
+      const from = e.action === "added" ? this.shown.get(e.chatId)?.get(e.message.id) : undefined;
       this.mirror(e.chatId, e.message);
-      if (e.action === "updated" && e.swipeId === e.message.swipeId && this.lateReply(e.chatId, userId, e.message))
-        return;
-      this.onSwiped(e.chatId, userId, e.message.id, e.action, e.swipeId);
+      if (!(e.action === "updated" && e.swipeId === e.message.swipeId && this.lateReply(e.chatId, userId, e.message)))
+        this.onSwiped(e.chatId, userId, e.message.id, e.action, e.swipeId, from);
+      this.show(e.chatId, e.message);
     }), h.on("MESSAGE_DELETED", (e, userId) => {
+      this.shown.get(e.chatId)?.delete(e.messageId);
       this.unmirror(e.chatId, e.messageId);
       this.onMessage(e.chatId, userId, e.messageId, "deleted");
+    }), h.on("CHAT_DELETED", (e) => {
+      this.shown.delete(e.chatId);
     }), h.on("GENERATION_STARTED", (e, userId) => {
       this.generating.add(e.generationId);
       this.started.delete(e.chatId);
@@ -67701,7 +67749,8 @@ class LedgerService {
       const target = halt.target ? observed.find((m) => m.id === halt.target) : undefined;
       const blank = target !== undefined && target.swipes.length > 1 && target.swipes.at(-1) === "";
       if (target && blank) {
-        await this.host.chats.setSwipes(chatId, target.id, target.swipes.slice(0, -1), Math.min(target.swipeId, target.swipes.length - 2), userId).catch((error) => this.diag?.error(at, "restart", error, "the stopped Regenerate's empty swipe stays"));
+        const shown3 = core.addedSwipeFrom(target.id, target.swipes.length - 1) ?? Math.min(target.swipeId, target.swipes.length - 2);
+        await this.host.chats.setSwipes(chatId, target.id, target.swipes.slice(0, -1), shown3, userId).catch((error) => this.diag?.error(at, "restart", error, "the stopped Regenerate's empty swipe stays"));
       }
       const head = observed.findLast((m) => !m.isUser);
       const swipeId = target ? target.swipes.length - (blank ? 1 : 0) : halt.type === "continue" ? head?.swipeId ?? null : 0;
@@ -67808,6 +67857,13 @@ class LedgerService {
     if (this.inFlight.get(chatId) === flight)
       this.inFlight.delete(chatId);
   }
+  show(chatId, message) {
+    if (message.isUser || !(this.chats.has(chatId) || this.opening.has(chatId)))
+      return;
+    const replies = this.shown.get(chatId) ?? new Map;
+    replies.set(message.id, message.swipeId);
+    this.shown.set(chatId, replies);
+  }
   mirror(chatId, message) {
     const list = this.gates.get(chatId)?.mirror;
     if (!list)
@@ -67878,8 +67934,12 @@ class LedgerService {
     const adopted = Object.values(core.journal.pending).some((p) => p.planned);
     return prepared?.turn && prepared.generationId !== null && !adopted ? core.renderPlanned(observed, prepared.turn) : core.renderState(observed);
   }
-  forget(chatId) {
+  unload(chatId) {
     this.chats.delete(chatId);
+    this.shown.delete(chatId);
+  }
+  forget(chatId) {
+    this.unload(chatId);
     for (const key of [...this.notWorld])
       if (key.endsWith(`\x00${chatId}`))
         this.notWorld.delete(key);
@@ -67936,7 +67996,7 @@ class LedgerService {
     for (const id of [...this.chats.keys()]) {
       if (keep(id) || this.busy(id))
         continue;
-      this.chats.delete(id);
+      this.unload(id);
       gone.push(id);
     }
     return gone;
@@ -67974,11 +68034,13 @@ class LedgerService {
       core.sync(observed);
     });
   }
-  onSwiped(chatId, userId, messageId, action, swipeId) {
+  onSwiped(chatId, userId, messageId, action, swipeId, from) {
     this.run(chatId, userId, (core, observed) => {
       if (action === "updated")
         this.markSaved(core, observed, messageId, "edited");
       core.sync(observed, action === "deleted" ? { messageId, swipeId } : undefined);
+      if (action === "added" && from !== undefined)
+        core.swipeAdded(messageId, swipeId, from);
     });
   }
   markSaved(core, observed, messageId, kind) {
@@ -68041,7 +68103,7 @@ class LedgerService {
           break;
         if (id === chatId || this.busy(id))
           continue;
-        this.chats.delete(id);
+        this.unload(id);
         chars -= s.chars.journal + s.chars.snapshots;
       }
       return slot;
@@ -68051,6 +68113,8 @@ class LedgerService {
       return await open;
     } finally {
       this.opening.delete(chatId);
+      if (!this.chats.has(chatId))
+        this.shown.delete(chatId);
     }
   }
   async run(chatId, userId, op, write) {
@@ -78795,9 +78859,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "a16198500584bcc9d5e21a509bbfac5eaf8f1037239e948b1ba75957355d35af";
+  const sha256 = "a3838defc387a7ac37fb222f3996ed195b23a2d75606374c15d34cfc1c430d33";
   const tools = ["5ca8a6ecfcb445de79568df75ce1a851", "8cbe8a340efbca329a1053f6c445d270"].filter((f) => f !== undefined);
-  return { id: "a7c86509", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "8cd74cd8", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -79661,17 +79725,20 @@ class AgentAccounts {
     if (pending)
       return pending;
     const load = (async () => {
-      const raw = await readStoredJson(this.host, ACCEPTANCE_PATH, userId, "acceptance runs", (r) => isRecord(r) && r.v === 1);
+      let damaged = false;
+      const raw = await readStoredJson(this.host, ACCEPTANCE_PATH, userId, "acceptance runs", (r) => isRecord(r) && r.v === 1, () => damaged = true);
       const file = isRecord(raw) ? raw : {};
-      const u = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, held: new Map, window: new Map, calibration: new Map, refusesTools: new Set, writing: Promise.resolve() };
+      const u = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map, window: new Map, calibration: new Map, refusesTools: new Set, writing: Promise.resolve() };
       this.users.set(userId, u);
+      if (damaged)
+        this.save(userId, u);
       return u;
     })().finally(() => this.loading.delete(userId));
     this.loading.set(userId, load);
     return load;
   }
   save(userId, u) {
-    const text5 = JSON.stringify({ v: 1, run: u.run, last: u.last, ...u.guard !== undefined ? { connections: u.guard } : {} });
+    const text5 = JSON.stringify({ v: 1, run: u.run, last: u.last, ...u.guard !== undefined ? { connections: u.guard } : {}, ...u.lost ? { lost: true } : {} });
     const write = u.writing.then(async () => {
       await this.host.storage.write(`${ACCEPTANCE_PATH}.tmp`, text5, userId);
       await this.host.storage.move(`${ACCEPTANCE_PATH}.tmp`, ACCEPTANCE_PATH, userId);
@@ -79683,18 +79750,34 @@ class AgentAccounts {
     await (this.users.get(userId)?.writing ?? Promise.resolve());
   }
   async guard(userId) {
-    return (await this.user(userId)).guard?.map((c) => ({ ...c }));
+    const u = await this.user(userId);
+    const setAside2 = u.setAside;
+    u.setAside = false;
+    return { connections: u.guard?.map((c) => ({ ...c })), lost: u.lost, setAside: setAside2 };
   }
   async keepGuard(userId, connections) {
     const u = await this.user(userId);
-    const was = u.guard;
+    const was = { guard: u.guard, lost: u.lost, setAside: u.setAside };
     u.guard = connections.map((c) => ({ ...c }));
+    u.lost = false;
+    u.setAside = false;
     try {
       await this.save(userId, u);
     } catch (error) {
-      u.guard = was;
+      Object.assign(u, was);
       throw error;
     }
+  }
+  async guarded(userId) {
+    let u;
+    try {
+      u = await this.user(userId);
+    } catch (error) {
+      throw new AgentStop("acceptance", `the acceptance runs' file couldn't be read (${error instanceof Error ? error.message : String(error)}), so which connections they guard isn't known: no agent call goes until it can be read`);
+    }
+    if (u.lost)
+      throw new AgentStop("acceptance", "the acceptance runs' file was damaged and set aside, and your settings kept no copy of the connections they guard, so which they guard isn't known: no agent call goes until you set them again in Settings \u2192 Agents \u2192 Acceptance runs");
+    return u;
   }
   view(run2, u, settings) {
     const guarded = settings.acceptance.connections;
@@ -79763,8 +79846,8 @@ class AgentAccounts {
   }
   async reserve(input) {
     const { userId, settings } = input;
-    const u = await this.user(userId);
-    const guarded = settings.acceptance.connections;
+    const u = await this.guarded(userId);
+    const guarded = u.guard ?? settings.acceptance.connections;
     if (input.connection === null && guarded.some((c) => c.only))
       throw new AgentStop("acceptance", "the call's connection is the default one, which couldn't be read, and a connection is kept for acceptance runs: it might be that one");
     const connection = input.connection ?? "";
@@ -81640,6 +81723,9 @@ function undoModeChange(learning2, change2) {
   stats.learned = change2.from;
   stats.holdUntil = stats.accepted + stats.rejected + EXTRACTION_LEARNING.minProposals;
 }
+function hasGuardCopy(raw) {
+  return isRecord(raw) && isRecord(raw.agents) && isRecord(raw.agents.acceptance) && Array.isArray(raw.agents.acceptance.connections);
+}
 
 class SettingsStore {
   host;
@@ -81656,37 +81742,54 @@ class SettingsStore {
     this.guards = guards;
   }
   async get(userId) {
+    return (await this.read(userId)).settings;
+  }
+  async read(userId) {
     const known = this.settings.get(userId);
     if (known)
-      return known;
+      return { settings: known, kept: true };
     const raw = await readStoredJson(this.host, SETTINGS_PATH, userId, "settings", (r) => isRecord(r) && r.v === 1);
     const settings = normalize(migrateMarkWording(raw ?? null));
-    await this.withGuard(userId, settings);
-    this.settings.set(userId, settings);
+    const kept2 = await this.withGuard(userId, settings, hasGuardCopy(raw));
+    if (kept2)
+      this.settings.set(userId, settings);
     this.loaded(userId, settings);
-    return settings;
+    return { settings, kept: kept2 };
   }
-  async withGuard(userId, settings) {
+  async withGuard(userId, settings, copy) {
     if (!this.guards)
-      return;
-    const kept2 = await this.guards.get(userId);
-    if (kept2 !== undefined)
-      settings.agents.acceptance.connections = kept2.map((c) => ({ ...c }));
-    else if (settings.agents.acceptance.connections.length > 0) {
-      await this.guards.set(userId, settings.agents.acceptance.connections).catch((error) => this.host.log("warn", `[LumiRPEngine] the connections acceptance runs guard weren't moved beside the runs (${error instanceof Error ? error.message : String(error)}); they are read from the settings until they are`, userId));
+      return true;
+    let read;
+    try {
+      read = await this.guards.get(userId);
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] the acceptance runs' file couldn't be read (${error instanceof Error ? error.message : String(error)}): which connections they guard isn't known, and no agent call goes until it can be read`, userId);
+      return false;
     }
+    if (read.connections !== undefined) {
+      settings.agents.acceptance.connections = read.connections.map((c) => ({ ...c }));
+      return true;
+    }
+    if (read.lost && !(read.setAside && copy))
+      return false;
+    if (read.lost || settings.agents.acceptance.connections.length > 0) {
+      await this.guards.set(userId, settings.agents.acceptance.connections).catch((error) => this.host.log("warn", `[LumiRPEngine] the connections acceptance runs guard weren't kept beside the runs (${error instanceof Error ? error.message : String(error)}); they are read from the settings until they are`, userId));
+    }
+    return true;
   }
   async set(userId, patch, check) {
-    const current2 = await this.get(userId);
+    const { settings: current2, kept: kept2 } = await this.read(userId);
     const merged2 = normalize(mergePatch(JSON.parse(JSON.stringify(current2)), patch));
     const next = expandPresets(merged2, patch);
     next.prompts = promptsWritten(current2.prompts, next.prompts);
     check?.(current2, next);
-    if (this.guards && JSON.stringify(next.agents.acceptance.connections) !== JSON.stringify(current2.agents.acceptance.connections))
+    const guard = JSON.stringify(next.agents.acceptance.connections) !== JSON.stringify(current2.agents.acceptance.connections);
+    if (this.guards && guard)
       await this.guards.set(userId, next.agents.acceptance.connections);
     await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(storedForm(next)), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
-    this.settings.set(userId, next);
+    if (kept2 || guard)
+      this.settings.set(userId, next);
     this.revisions.set(userId, this.revision(userId) + 1);
     this.loaded(userId, next);
     return next;
@@ -83500,7 +83603,8 @@ function rerunSource(core, observed, plan2) {
   const target = core.chain(observed).find((m) => m.id === plan2.messageId);
   if (!target)
     return;
-  for (let s = plan2.swipeId;s >= 0; s--) {
+  const from = plan2.rerunOf?.messageId === target.id ? Math.min(plan2.rerunOf.swipeId, plan2.swipeId) : plan2.swipeId;
+  for (let s = from;s >= 0; s--) {
     const rec = target.ledger?.swipes[String(s)];
     if (rec && !isTombstoned(core.journal.tombstones, target.id, rec))
       return { messageId: target.id, swipeId: s };
@@ -83600,7 +83704,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "a7c86509" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "8cd74cd8" }), (chatId) => this.messages.forget(chatId));
     this.sessions = new Sessions(this.blobs, this.ledger);
     this.chatAgents = new ChatAgentMeta(this.host, this.chatMeta);
     this.sweep = new Sweep({ host: this.host, blobs: this.blobs, retention: async (userId) => (await this.settings.get(userId)).retention, turning: (userId) => this.ledger.turning(userId), journals: (userId) => this.ledger.journals(userId), transcripts: (chatId, userId) => this.diag.transcripts(chatId, userId) });
@@ -86904,7 +87008,13 @@ function jsonTextOf(text7) {
     return;
   }
 }
+function argGiven(args, key) {
+  const v = args[key];
+  return v !== undefined && !(typeof v === "string" && v.trim() === "");
+}
 function objectArg(args, key) {
+  if (!argGiven(args, key))
+    return null;
   const raw = args[key];
   const v = typeof raw === "string" ? jsonTextOf(raw) : raw;
   return isRecord(v) ? v : null;
@@ -87738,7 +87848,7 @@ var CHECKS_TOOLS = [
         return badValue(view, ODDS, "action", said2, actions.map((a) => a.id).sort());
       const params = {};
       const given = objectArg(args, "params");
-      if (args.params !== undefined && given === null)
+      if (argGiven(args, "params") && given === null)
         return missing(view, ODDS, "params");
       for (const [name, value] of Object.entries(given ?? {})) {
         const v = paramValue(view, own(action.params, name), value);
@@ -88054,14 +88164,14 @@ var DAY3 = "time_day";
 function clockWords(view, at2) {
   return formatClock(calendarOf(view.world), at2, placeOffset(view.world, at2, placeOfEntity(view.state, view.pov)));
 }
-function clockAnswer(view) {
+function clockAnswer(view, place2) {
   const { world, state: state2 } = view;
   const level2 = view.knowledge === "pov" ? view.ctx.levelOf(view.pov, "calendar") : null;
   const shows = (from) => level2 === null || level2 >= from;
   if (!shows(1))
     return null;
   const cal = calendarOf(world);
-  const offset = shows(3) ? placeOffset(world, state2.clock, placeOfEntity(state2, view.pov)) : 0;
+  const offset = shows(3) ? placeOffset(world, state2.clock, place2) : 0;
   return {
     time: shows(2) ? formatClock(cal, state2.clock, offset) : undefined,
     minutes: shows(2) ? state2.clock : undefined,
@@ -88106,11 +88216,17 @@ var TIME_TOOLS = [
     name: CLOCK,
     family: "time",
     tier: "read",
-    parameters: () => objectSchema({}),
-    run: async (_args, env) => {
+    parameters: (world) => objectSchema({ place: text6(placeEnum(world)) }),
+    run: async (args, env) => {
       const view = await env.reader.view();
-      const answer = view.read(() => clockAnswer(view));
-      return answer ? view.answer(answer) : view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
+      const said2 = textArg(args, "place");
+      return view.read(() => {
+        const r = said2 === null ? { id: placeOfEntity(view.state, view.pov) } : resolvePlace(view, said2);
+        if ("refused" in r)
+          return r.refused;
+        const answer = clockAnswer(view, r.id);
+        return answer ? view.answer(answer) : view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
+      });
     }
   },
   {
@@ -89151,7 +89267,7 @@ var MONEY_WRITES = [
       if (typeof effect !== "string")
         return effect;
       const given = objectArg(args, "args");
-      if (args.args !== undefined && given === null)
+      if (argGiven(args, "args") && given === null)
         return missing(view, "gm_effect", "args");
       return propose(view, env.writer, gmEdit({ op: "effect", effect, args: given ?? {} }));
     }
@@ -89359,7 +89475,7 @@ var PEOPLE_WRITES = [
       if (typeof to !== "string")
         return to;
       const fields = objectArg(args, "fields");
-      if (args.fields !== undefined && fields === null)
+      if (argGiven(args, "fields") && fields === null)
         return missing(view, "gm_link", "fields");
       const until = args.until;
       return propose(view, env.writer, gmEdit({ op: "link", rel, from, to, ...fields !== null ? { fields } : {}, ...typeof until === "number" ? { until } : {} }));
@@ -89960,7 +90076,7 @@ function refused(rt, ctx, knowledge, rejection, key) {
     return refusal(rejection.code, rejection.gm ?? rejection.reason, key);
   if (knowledge === "everyone")
     return refusal(rejection.code, marker(rt, ctx, ctx.head.state)(rejection.gm ?? rejection.reason), key);
-  return refusal("refused", ctx.view.text(WRITE_NOTE.povRefused, { pov: ctx.view.name(ctx.view.pov) }), key);
+  return refusal(rejection.code === WRITE_REFUSED ? WRITE_REFUSED : "refused", ctx.view.text(WRITE_NOTE.povRefused, { pov: ctx.view.name(ctx.view.pov) }), key);
 }
 function linesOf2(rt, ctx, knowledge, type, after, events3) {
   const reg = rt.registry;
