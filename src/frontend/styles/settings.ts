@@ -1,5 +1,6 @@
 // Settings: the home list, page leads, the model-use preset cards, the call meter table, the
-// per-step cards, the extraction rows and the timeout rows. Built on the tokens and the shared atoms only.
+// per-step cards, the extraction rows, the timeout and agent limit rows, and the drawer's notices.
+// Built on the tokens and the shared atoms only.
 
 export const SETTINGS_CSS = `
 .lre-set{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
@@ -48,6 +49,7 @@ export const SETTINGS_CSS = `
 .lre-set-timeout-cap{flex:none;font-size:var(--lre-fs-sm);font-weight:600;font-variant-numeric:tabular-nums}
 .lre-update-notice{margin-top:var(--lre-s3)}
 .lre-update-notice .lre-list{margin-top:var(--lre-s2)}
+.lre-acceptance-banner{margin-top:var(--lre-s3)}
 [data-lre-mcp-server]{border-bottom:1px solid var(--lre-hairline)}
 [data-lre-mcp-server]:last-child{border-bottom:0}
 [data-lre-mcp-server="cannot"] .lre-set-caveat,[data-lre-mcp-server="old"] .lre-set-caveat{color:var(--lre-muted)}

@@ -221,6 +221,28 @@ describe("lookups", () => {
     expect(after.filter((r) => r.tools !== undefined)).toEqual([]);
   });
 
+  test("a tools call that fails for another lasting reason is asked once in the need form and answers, but the connection keeps its tools", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
+    // LiteLLM's wording, which isn't one the tool-refusal check knows: a failure of the call's own.
+    const unsupported = "litellm.UnsupportedParamsError: openai does not support parameters: ['tools'], for model=local-model. To drop these, set `litellm.drop_params=True`";
+    let failed = 0;
+    rig.host.quietReply = (req) => {
+      if (isStep(req, "interpret") && req.tools && failed++ === 0) throw new Error(unsupported);
+      if (isStep(req, "interpret") && req.messages[0]?.content.includes('{"need"') && !asked(req)) return JSON.stringify({ need: ["timetable"] });
+      return quiet(req);
+    };
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    const interprets = rig.host.quietCalls.filter((r) => isStep(r, "interpret"));
+    // Asked again in the need form, then answered with what it asked for: the step still answers.
+    expect(interprets.map((r) => r.tools !== undefined)).toEqual([true, false, false]);
+    expect(interprets[2]?.messages.at(-1)?.content).toContain("Timetable: Boats leave at 7, 12 and 18.");
+    // Nothing is kept for the connection, so its next lookups offer the tools again.
+    expect(await rig.host.storage.read(TOOL_SUPPORT_PATH, rig.host.userId)).toBeNull();
+    const before = rig.host.quietCalls.length;
+    await rig.turn(chatId, "I wait at the ferry.", "The ferry horn sounds again.");
+    expect(rig.host.quietCalls.slice(before).some((r) => isStep(r, "interpret") && r.tools !== undefined)).toBe(true);
+  });
+
   test("when the phase's lookup budget is spent, a step gets no lookup and answers with its prefetch", async () => {
     const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: { interpret: { lore: { policy: "prefetch+lookup", tokens: 600 } }, brief: { enabled: true, signals: ["always"], lore: { policy: "prefetch+lookup", tokens: 400 } } }, budgets: { pre: { lookup: { calls: 1, ms: 60_000 } } } } }], { ...LORE, timetable: TIMETABLE });
     const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };

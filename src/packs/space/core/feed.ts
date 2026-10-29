@@ -81,7 +81,7 @@ export function sceneLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
 }
 
 /** The ways out of a place: the places one route away, either way a route runs. */
-function waysOut(ctx: ReadContext, here: PlaceId): PlaceId[] {
+export function waysOut(ctx: ReadContext, here: PlaceId): PlaceId[] {
   const out = new Set<PlaceId>();
   for (const r of Object.values(ctx.world.routes)) {
     if (r.from === here) out.add(r.to);

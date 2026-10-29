@@ -10,7 +10,8 @@ import type { JsonObject } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { ChatId, MessageId, UserId, WorldId } from "../shared/ids";
 import { runDir } from "../shared/ids";
-import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MarkerBody, MessageLedger, PendingTurn, PostKind, Rec, RecStatus } from "../shared/ledger";
+import type { SecretMarkWording } from "../shared/secret-marks";
+import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MarkerBody, MessageLedger, PendingTurn, PostKind, Rec, RecSession, RecStatus, RefusedWrite } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { PROTOCOL_VERSION, type GenerateAs, type GeneratePush } from "../shared/protocol";
 import type { Limit } from "../shared/minds";
@@ -146,8 +147,10 @@ interface ChatSlot {
   reasserts: Map<MessageId, { text: string; count: number }>;
   /**
    * The windows the journal held when it was read: turns of a backend that stopped, whose
-   * generations are gone (DESIGN §5.1 step 7). Only these are closed when the chat is opened again;
-   * a generation under way in this backend keeps its window, however often a page resyncs.
+   * generations are gone (DESIGN §5.1 step 7), and the pre-reply windows of its engine runs, whose
+   * turns lived in its memory (P2). Only these are closed when the chat is opened again; a
+   * generation under way in this backend keeps its window, and so does a turn its engine run plans
+   * or that waits here for its reply, however often a page resyncs.
    */
   leftOpen: Set<string>;
   /** The JSON characters of its journal and its snapshots as last read or written: about half of what it holds of them once parsed (`OPEN_CHATS_CHARS`). */
@@ -238,13 +241,13 @@ function isRec(rec: unknown): rec is Rec {
   if (!Array.isArray(rec.post) || !rec.post.every((p) => isRecord(p) && isInt(p.seq) && typeof p.at === "string" && POST_KINDS.includes(p.kind) && Array.isArray(p.events) && p.events.every(isStoredEvent) && (p.edit === undefined || (isRecord(p.edit) && (typeof p.edit.clock === "string" ? p.edit.ops === undefined : Array.isArray(p.edit.ops) && p.edit.clock === undefined))))) return false;
   if (rec.keep !== undefined && !(isRecord(rec.keep) && Object.values(rec.keep).every((k) => isRecord(k) && isRefs(k.convert)))) return false;
   if (rec.dropped !== undefined && !(Array.isArray(rec.dropped) && rec.dropped.every((d) => isRecord(d) && isInt(d.seq) && POST_KINDS.includes(d.kind) && typeof d.reason === "string"))) return false;
-  return (rec.accepted === undefined || isContent(rec.accepted)) && (rec.diag === undefined || typeof rec.diag === "string") && (rec.readElsewhere === undefined || rec.readElsewhere === true);
+  return (rec.accepted === undefined || isContent(rec.accepted)) && (rec.diag === undefined || typeof rec.diag === "string") && (rec.prompts === undefined || typeof rec.prompts === "string") && (rec.readElsewhere === undefined || rec.readElsewhere === true);
 }
 
 const isChainEntry = (v: unknown): boolean => isRecord(v) && typeof v.id === "string" && typeof v.isUser === "boolean" && isInt(v.swipeId) && isInt(v.swipeCount) && isContent(v.content) && typeof v.parentPath === "string";
 
 function isHeldWrite(w: unknown): boolean {
-  if (!isRecord(w) || typeof w.id !== "string") return false;
+  if (!isRecord(w) || typeof w.id !== "string" || !(w.hold === undefined || w.hold === true)) return false;
   switch (w.kind) {
     case "post":
       return w.target === "head" && isRecord(w.entry) && typeof w.entry.kind === "string" && Array.isArray(w.entry.events) && (w.entry.edit === undefined || (isRecord(w.entry.edit) && (typeof w.entry.edit.clock === "string" ? w.entry.edit.ops === undefined : Array.isArray(w.entry.edit.ops) && w.entry.edit.clock === undefined)));
@@ -273,6 +276,7 @@ function isPendingTurn(p: unknown): boolean {
   if (p.captured !== undefined && !isContent(p.captured)) return false;
   if (p.renarrateOf !== undefined && !(isRecord(p.renarrateOf) && typeof p.renarrateOf.messageId === "string" && isInt(p.renarrateOf.swipeId))) return false;
   if (p.undone !== undefined && !isRefs(p.undone)) return false;
+  if (p.prompts !== undefined && typeof p.prompts !== "string") return false;
   return [p.copies, p.dropped].every((list) => list === undefined || (Array.isArray(list) && list.every(isRecord)));
 }
 
@@ -287,7 +291,7 @@ function isJournalMessage(m: unknown): boolean {
 /** A stored journal, checked entry by entry: one junk entry makes every ledger operation throw, so the whole file is damaged. */
 function isJournal(raw: unknown, chatId: ChatId): raw is Journal {
   if (!isRecord(raw) || raw.v !== 1 || raw.chatId !== chatId || typeof raw.seq !== "number" || !Number.isFinite(raw.seq) || typeof raw.started !== "boolean") return false;
-  if (![raw.chain, raw.pauses, raw.tombstones, raw.held].every(Array.isArray) || !isStrings(raw.windows) || !isRecord(raw.messages) || !isRecord(raw.pending)) return false;
+  if (![raw.chain, raw.pauses, raw.tombstones, raw.held].every(Array.isArray) || !isStrings(raw.windows) || (raw.prereply !== undefined && !isStrings(raw.prereply)) || !isRecord(raw.messages) || !isRecord(raw.pending)) return false;
   if (!(raw.chain as unknown[]).every(isChainEntry) || !Object.values(raw.messages).every(isJournalMessage) || !Object.values(raw.pending).every(isPendingTurn)) return false;
   if (!(raw.pauses as unknown[]).every((p) => isRecord(p) && typeof p.messageId === "string" && isContent(p.content))) return false;
   if (!(raw.tombstones as unknown[]).every((t) => isRecord(t) && typeof t.messageId === "string" && isContent(t.swipeHash) && typeof t.recHash === "string")) return false;
@@ -326,6 +330,13 @@ function heldLanded(before: readonly HeldWrite[], journal: Journal): HeldWrite[]
   const still = new Set(journal.held.map((h) => h.write.id));
   const refused = new Set((journal.refused ?? []).map((r) => r.write.id));
   return before.filter((w) => !still.has(w.id) && !refused.has(w.id));
+}
+
+/** Of the writes held before an operation, those it refused as their window closed (P2), with why. */
+function heldRefused(before: readonly HeldWrite[], journal: Journal): RefusedWrite[] {
+  const ids = new Set(before.map((w) => w.id));
+  const still = new Set(journal.held.map((h) => h.write.id));
+  return (journal.refused ?? []).filter((r) => ids.has(r.write.id) && !still.has(r.write.id));
 }
 
 export interface TurnContext {
@@ -423,9 +434,10 @@ export interface TurnHooks {
   readStopped(input: TurnContext): Promise<void>;
   /**
    * Writes that landed, in order (P2): one made at once, or those held behind a reply that landed
-   * as its window closed, however it closed. One the core refused is not among them.
+   * as its window closed, however it closed. One the core refused is not among them: `refused` holds
+   * those held that it refused as their window closed, with why.
    */
-  writesLanded(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; writes: HeldWrite[] }): Promise<void>;
+  writesLanded(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; writes: HeldWrite[]; refused: RefusedWrite[] }): Promise<void>;
   changed(chatId: ChatId, userId: UserId): void;
   /** A swipe or regenerate is a Re-run or a Re-narrate (P3; `settings.swipeDefault` or a one-shot choice). */
   kindOf(input: { chatId: ChatId; userId: UserId; kind: GenerationKind }): Promise<GenerationKind>;
@@ -435,12 +447,14 @@ export interface TurnHooks {
  * What the engine run made for a turn's prompt (DESIGN §6.4): each entry of the world's book and the
  * text it takes, written only by the guard of the generation that takes the turn, and `placed`, what
  * the placement was decided from (the preset the host generates the chat with and the book's
- * Positions), which the write checks first.
+ * Positions), which the write checks first. `wording` is the turn's wording of a secret's mark
+ * (§6.12), which the World Info entries in the same prompt are marked in too.
  */
 export interface Delivered {
   bookId: string;
   fills: ReadonlyMap<string, string>;
   placed: string;
+  wording: SecretMarkWording;
 }
 
 /** One message as the chat's events last showed it: what the guard checks a prepared turn's chain against. */
@@ -627,6 +641,8 @@ export class LedgerService {
   private readonly answered = new Set<string>();
   /** Each user's guard wait (Settings → Timeouts), within Lumiverse's range, as their settings last read. */
   private readonly guardWait = new Map<UserId, number>();
+  /** The users with "Hold writes during the engine run" on (Settings → Writes, P2), as their settings last read. */
+  private readonly holding = new Set<UserId>();
   /** The last epoch given: every new gate and every write takes the next, so no two are the same (`Gate.epoch`). */
   private epochs = 0;
   /** The guard's registered wait; 0 until attached. */
@@ -636,6 +652,11 @@ export class LedgerService {
    * holds, the host may be walking its handler list, so a new registration waits.
    */
   private readonly generating = new Set<string>();
+  /**
+   * The ids of writes a pre-reply window holds (`early`): made during an engine run, they made no turn
+   * stale then, so their landing does (DESIGN §5.1). Every other held write did as it was made.
+   */
+  private readonly unbumped = new Set<string>();
   private guarding = 0;
 
   constructor(
@@ -749,6 +770,17 @@ export class LedgerService {
   }
 
   /**
+   * A user's "Hold writes during the engine run" (Settings → Writes, P2), as their settings
+   * read. On, a turn's pre-reply window holds every write made while its engine run, or the turn it
+   * prepared, is under way. Off, it holds only those flagged `hold` (a GM agent's, a workspace
+   * save), and a chip or ✎ fix lands at once and makes the turn stale, as it always has.
+   */
+  holdWrites(userId: UserId, on: boolean): void {
+    if (on) this.holding.add(userId);
+    else this.holding.delete(userId);
+  }
+
+  /**
    * Registers the guard again when its wait changes (the host replaces a registration); before any
    * user's settings are read, it asks for Lumiverse's longest. The host replaces it inside the handler
    * list its chain walks, which would skip the next extension's handler or run this one twice, so
@@ -835,6 +867,7 @@ export class LedgerService {
    * changes (DESIGN §5.1): its entries are emptied, and the next generation runs the engine again.
    * Age alone never makes it stale. One kept from a failed reply goes quietly: nothing asked for its
    * reply again, so nothing says that reply didn't start, and the chat just loses its retry card.
+   * Either way its run ends without a reply, so what its pre-reply window held lands (P2).
    */
   private dropIfStale(chatId: ChatId): void {
     const gate = this.gates.get(chatId);
@@ -845,6 +878,31 @@ export class LedgerService {
     if (p.kept === null) this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
     else this.hooks?.changed(chatId, gate.userId);
     this.drop(chatId, gate.userId, p);
+    this.endRun(chatId, gate.userId, p);
+  }
+
+  /**
+   * A turn the engine prepared will get no reply (P2): its run's pre-reply window closes on the
+   * chat's queue, and what it held lands there, on the chat as it then stands, or waits on for a reply
+   * under way. A turn kept from a failed reply has none: that reply's window took it over.
+   */
+  private endRun(chatId: ChatId, userId: UserId, p: Pick<Prepared, "id" | "kept">): void {
+    if (p.kept !== null) return;
+    void this.run(chatId, userId, (core, observed) => {
+      core.sync(observed);
+      core.endRun(p.id, observed);
+    });
+  }
+
+  /**
+   * The journal took writes from outside a turn: a turn the engine prepared before them is stale
+   * (DESIGN §5.1), and a later run plans with them.
+   */
+  private wrote(chatId: ChatId): void {
+    const gate = this.gates.get(chatId);
+    if (!gate) return;
+    gate.epoch = ++this.epochs;
+    this.dropIfStale(chatId);
   }
 
   /**
@@ -1192,12 +1250,17 @@ export class LedgerService {
     return "cancel";
   }
 
-  /** The generation the guard let through takes the prepared plan; what the engine run recorded follows it. */
+  /**
+   * The generation the guard let through takes the prepared plan; what the engine run recorded
+   * follows it, and so does what the run's pre-reply window holds, which lands as this turn closes
+   * (P2).
+   */
   private adopt(chatId: ChatId, userId: UserId, p: Prepared, generationId: string): Promise<void> {
-    return this.run(chatId, userId, async (core) => {
+    return this.run(chatId, userId, async (core, observed) => {
       // A kept turn's failed reply closed its turn in diagnostics: its retry is one of its own there.
       if (p.kept !== null) this.diag?.begin({ chatId, userId, turn: generationId }, STEP_LABEL.reply ?? "Waiting for the reply…");
       if (p.turn && !core.adopt(generationId, p.turn)) this.diag?.failed({ chatId, userId, turn: p.kept === null ? p.id : generationId }, "plan", "plan", "the reply's generation couldn't take the prepared plan, so this turn commits without it");
+      if (p.kept === null) core.handOver(p.id, generationId, observed);
       await this.hooks?.adopted(chatId, userId, p.id, generationId);
       if (p.kept === null) this.diag?.rename(chatId, p.id, generationId);
       this.diag?.rest({ chatId, userId }, STEP_LABEL.reply ?? "Waiting for the reply…");
@@ -1259,7 +1322,9 @@ export class LedgerService {
    * book holds them only from here until that prompt is assembled. It takes the book first, then the
    * write checks that what the placement was decided from still holds: `moved` when the preset the
    * host generates the chat with, or the book's Positions, changed since the engine run, and the
-   * engine runs again. A write the host refuses stops the generation, and the chat says why.
+   * engine runs again, whose turn takes over what the run's pre-reply window holds (`prepare`). A
+   * write the host refuses stops the generation, and the chat says why; like a host that stopped
+   * waiting, that ends the run without a reply (P2).
    */
   private async fill(chatId: ChatId, gate: Gate, p: Prepared, generationId: string, signal: AbortSignal): Promise<ContextVerdict | "moved"> {
     p.generationId = generationId;
@@ -1268,6 +1333,7 @@ export class LedgerService {
       // The host stopped waiting: no prompt is assembled for it.
       gate.prepared = null;
       this.letGo(gate.worldId, p.id);
+      this.endRun(chatId, userId, p);
       return "cancel";
     }
     const writing = this.hooks ? this.hooks.fill(chatId, userId, p.delivered) : Promise.resolve<"filled" | "moved">("filled");
@@ -1285,6 +1351,7 @@ export class LedgerService {
     } catch (error) {
       gate.prepared = null;
       this.drop(chatId, userId, p);
+      this.endRun(chatId, userId, p);
       const reason = messageOf(error);
       this.diag?.end({ chatId, userId, turn: p.id }, { status: "failed", reason: `sections: ${reason}` });
       void this.hooks?.failed({ chatId, userId, turn: p.id, step: "sections", reason, as: p.as }).catch((e: unknown) => this.diag?.error({ chatId, userId, turn: p.id }, "guard", e, "the failure flag wasn't shown"));
@@ -1375,6 +1442,15 @@ export class LedgerService {
       const head = observed.findLast((m) => !m.isUser);
       const swipeId = target ? target.swipes.length - (blank ? 1 : 0) : halt.type === "continue" ? (head?.swipeId ?? null) : 0;
       core.prepare({ generationId: halt.id, kind, targetMessageId: target?.id ?? null, targetSwipeId: swipeId }, observed);
+      // Wherever the run stops short of a turn that waits for its reply, it ends without one (P2),
+      // and its pre-reply window closes. Nothing made during the run has reached the journal (writes
+      // wait on this queue), so it closes here at once and they land after it in the order they were
+      // made. What it took over from a turn it replaced lands on the queue instead, on the chain as it
+      // stands then, never on the blank swipe a stopped Regenerate left in `observed`.
+      const ended = (): void => {
+        if (core.journal.held.some((h) => h.waitFor.includes(halt.id))) this.endRun(chatId, userId, { id: halt.id, kept: null });
+        else core.endRun(halt.id, observed);
+      };
       // How the reply starts again, once the run has prepared it or its failure card's Retry asks.
       const as = restartAs(halt.type, observed);
       const flight = this.flight(chatId);
@@ -1397,6 +1473,7 @@ export class LedgerService {
         // Regenerate runs it again.
         const waiting = (outcome: PreOutcome): void => {
           core.take(halt.id);
+          ended();
           this.diag?.end(at, { status: "skipped", reason: outcome.waiting });
         };
         if (pre) return waiting(pre);
@@ -1419,6 +1496,7 @@ export class LedgerService {
         this.failedStep(at);
       } catch (error) {
         core.take(halt.id);
+        ended();
         if (claimed) this.letGo(gate.worldId, halt.id);
         // Cancelled: its own end, not a failure. No flag and no Retry chip; the player's message
         // stays, so Regenerate (or sending again) runs the turn anew.
@@ -1443,7 +1521,10 @@ export class LedgerService {
       gate.prepared = prepared;
       // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
       this.dropIfStale(chatId);
-      if (this.gates.get(chatId)?.prepared !== prepared) return;
+      if (this.gates.get(chatId)?.prepared !== prepared) {
+        ended();
+        return;
+      }
       // A page asked to start it starts it at once; "reopen the chat" is for when no page shows the chat.
       this.diag?.rest(at, as === "send" ? (STEP_LABEL.ready ?? "Ready: press Send for the reply") : holder !== null || !this.host.capabilities.sessions ? (STEP_LABEL.reply ?? "Waiting for the reply…") : (STEP_LABEL.restart ?? "Ready; reopen the chat to continue"));
       // A host that names no page asks every page.
@@ -1505,21 +1586,32 @@ export class LedgerService {
     for (const off of this.unsubscribe.splice(0)) off();
   }
 
-  /** A user write from the frontend (chip confirm, ✎ fix, materialization, marker, Keep/Discard, Re-read); a turn the engine prepared before it is stale. */
+  /**
+   * A user write from the frontend (chip confirm, ✎ fix, materialization, marker, Keep/Discard,
+   * Re-read), or an agent's; a turn the engine prepared before it is stale. One the turn's pre-reply
+   * window holds (P2) is the exception: made while the chat's engine run, or the turn it
+   * prepared, is under way (from the guard's stop until that turn's reply ends), and flagged `hold`
+   * or with the user's "Hold writes during the engine run" on, it waits for the turn and never makes
+   * it stale. Its reply's window closing lands it, or the run ending without a reply (`endRun`).
+   */
   async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<WriteResult> {
     const gate = this.gates.get(chatId);
-    if (gate) {
-      gate.epoch = ++this.epochs;
-      this.dropIfStale(chatId);
-    }
+    const underWay = gate !== undefined && (gate.running !== null || (gate.prepared !== null && gate.prepared.kept === null) || gate.taken !== null);
+    const early = underWay && (w.hold === true || this.holding.has(userId));
+    if (!early) this.wrote(chatId);
     let result: WriteResult = { applied: false, pending: false, reason: "not a world chat" };
     await this.run(
       chatId,
       userId,
       async (core, observed) => {
         core.sync(observed);
-        result = core.write(w, observed);
-        if (result.applied) await this.hooks?.writesLanded({ chatId, userId, core, observed, writes: [w] });
+        result = core.write(w, observed, early);
+        if (early && result.pending) this.unbumped.add(w.id);
+        if (!result.applied) return;
+        // One the window would have held finds its run already ended without a reply: it lands now,
+        // as the run's other writes did, so what was planned before it is stale.
+        if (early) this.wrote(chatId);
+        await this.hooks?.writesLanded({ chatId, userId, core, observed, writes: [w], refused: [] });
       },
       w,
     );
@@ -1531,7 +1623,10 @@ export class LedgerService {
     await this.run(chatId, userId, (core, observed) => {
       core.sync(observed);
       const slot = this.chats.get(chatId);
-      const gone = new Set([...(slot?.leftOpen ?? [])].filter((id) => !this.generating.has(id)));
+      // A turn this backend's engine run plans, or that waits here for its reply, keeps its pre-reply window.
+      const gate = this.gates.get(chatId);
+      const live = [gate?.running, gate?.prepared && gate.prepared.kept === null ? gate.prepared.id : null];
+      const gone = new Set([...(slot?.leftOpen ?? [])].filter((id) => !this.generating.has(id) && !live.includes(id)));
       if (gone.size === 0) return;
       core.restart(observed, gone);
       for (const id of gone) slot?.leftOpen.delete(id);
@@ -1579,7 +1674,48 @@ export class LedgerService {
     const slot = this.chats.get(chatId);
     const gate = this.gates.get(chatId);
     if (slot && (slot.ops > 0 || slot.core.inFlight)) return true;
-    return gate !== undefined && (gate.prepared !== null || gate.halt !== null || gate.taken !== null || gate.running !== null || gate.reading !== null);
+    return gate !== undefined && this.holdsTurn(gate);
+  }
+
+  /** Whether the chat's gate holds a turn: from the guard's stop through its engine run, a prepared turn waiting, the reply that took it, a late reply's read. */
+  private holdsTurn(gate: Gate): boolean {
+    return gate.prepared !== null || gate.halt !== null || gate.taken !== null || gate.running !== null || gate.reading !== null;
+  }
+
+  /**
+   * Whether a turn of the user's is under way in any of their chats (DESIGN §4.4: no sweep runs
+   * meanwhile): a generation in flight or a turn pending in an open chat's journal, a turn its gate
+   * holds, or an engine run or reply read still working.
+   */
+  turning(userId: UserId): boolean {
+    for (const [chatId, slot] of this.chats) if (slot.userId === userId && (slot.core.inFlight || Object.keys(slot.core.journal.pending).length > 0 || this.inFlight.has(chatId))) return true;
+    for (const [chatId, gate] of this.gates) if (gate.userId === userId && (this.holdsTurn(gate) || this.inFlight.has(chatId))) return true;
+    return false;
+  }
+
+  /**
+   * The journals of the user's open chats as they stand (DESIGN §4.4): the sweep reads what they hold
+   * that message metadata may not yet, a record not yet flushed, a held write or a pending turn.
+   */
+  journals(userId: UserId): Journal[] {
+    const out: Journal[] = [];
+    for (const slot of this.chats.values()) if (slot.userId === userId) out.push(slot.core.journal);
+    return out;
+  }
+
+  /**
+   * A turn's agent session blobs written into its record (`LedgerCore.recordSession`) from outside
+   * the turn's own operation, on the chat's queue; a turn's hooks run inside its operation and call
+   * the core they are given. Refused as well while the chat's gate holds a turn, since a prepared
+   * turn waits outside the journal (DESIGN §5.1). Null once written, else why it wasn't.
+   */
+  async recordSession(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, session: RecSession): Promise<string | null> {
+    let refused: string | null = "the chat plays no world";
+    await this.run(chatId, userId, (core, observed) => {
+      const gate = this.gates.get(chatId);
+      refused = gate && this.holdsTurn(gate) ? "the next turn is already under way" : core.recordSession(messageId, swipeId, session, observed);
+    });
+    return refused;
   }
 
   /** The chats a page shows on screen, as the pages last said (hello, resync, `lre.page`). */
@@ -1705,7 +1841,7 @@ export class LedgerService {
       const stored = await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null);
       const snapshots = ChatSnapshots.parse(stored);
       // A stamped journal differs from the stored text, so the next persist writes it.
-      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 } };
+      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...(journal.prereply ?? []), ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 } };
       // The revisions its folds will ask for are loaded before anyone folds it.
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);
@@ -1740,11 +1876,16 @@ export class LedgerService {
           await giveWay();
           const observed = this.observe(chatId, slot.userId, await this.host.chats.messages(chatId, slot.userId));
           await slot.core.prepareWorlds(observed, write);
-          // Writes held behind a reply land as its window closes, whichever op closes it (P2).
+          // Writes held behind a reply, or through an engine run, land as its window closes, whichever op closes it (P2).
           const held = slot.core.journal.held.map((h) => h.write);
           await op(slot.core, observed);
           const landed = held.length > 0 ? heldLanded(held, slot.core.journal) : [];
-          if (landed.length > 0) await this.hooks?.writesLanded({ chatId, userId: slot.userId, core: slot.core, observed, writes: landed });
+          const refused = held.length > 0 ? heldRefused(held, slot.core.journal) : [];
+          if (landed.length > 0 || refused.length > 0) {
+            // Those held through an engine run change the journal only now: a turn prepared before them is stale, as if each had landed at once.
+            if (landed.filter((w) => this.unbumped.delete(w.id)).length > 0) this.wrote(chatId);
+            await this.hooks?.writesLanded({ chatId, userId: slot.userId, core: slot.core, observed, writes: landed, refused });
+          }
           await this.persist(chatId, slot);
           await this.flush(chatId, slot);
           this.hooks?.changed(chatId, slot.userId);

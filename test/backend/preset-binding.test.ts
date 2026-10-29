@@ -6,8 +6,7 @@
 // and "RPEngine · narrator" follows them as the player's own; Add RPEngine blocks fills in the rest.
 
 import { describe, expect, test } from "bun:test";
-import { NARRATOR_AUTHORITY, NARRATOR_SOURCE, PRESET_RULES_LEAD } from "../../src/backend/book";
-import { MARKED_FACTS_RULE } from "../../src/engine/feed";
+import { MARKED_FACTS_RULE, NARRATOR_AUTHORITY, NARRATOR_SOURCE, PRESET_RULES_LEAD } from "../../src/shared/prompts";
 import { GUIDANCE_MAX_CHARS } from "../../src/backend/preset-binding";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { isRecord } from "../../src/shared/json";

@@ -9,6 +9,7 @@ import { hasOwn, isRecord } from "../../src/shared/json";
 import type { ChatRun, HeldWrite } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { EditOp } from "../../src/shared/protocol";
+import { SECRET_MARK_WORDING } from "../../src/shared/secret-marks";
 import type { UserSettings } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
@@ -62,12 +63,20 @@ export class Harness {
   private seeds = 0;
   /** Makes the next swipe or regenerate a Re-narrate (P3), as the swipe-option chip does. */
   renarrateNext = false;
+  /**
+   * Called once, from the next engine run's pre phase, while that run holds the chat's queue: what
+   * it does happens while the engine runs a turn before its reply (DESIGN §4.3 P2). A write it makes
+   * waits on that queue, so it must not be awaited there.
+   */
+  duringRun: ((chatId: ChatId) => Promise<void> | void) | null = null;
   readonly plays: Plays = { queued: 0, check: 0, failure: 0, interruption: 0 };
   /** Each engine run that failed, as `step: reason` (a failed run generates nothing). */
   readonly failures: string[] = [];
   private readonly model: TurnModel;
   private readonly settings: UserSettings;
   private readonly copied: boolean;
+  /** "Hold writes during the engine run" (Settings → Writes), as the user's settings say now; a restart keeps it. */
+  private holding: boolean;
 
   constructor(seedMode: WorldDoc["seedMode"] = "fresh", options: HarnessOptions = {}) {
     // Minds' events ride in the generated turns (DESIGN §24): their reducers fold in both folds.
@@ -79,6 +88,7 @@ export class Harness {
         if (plan.stopped) this.plays[plan.stopped.cause]++;
       });
     this.settings = options.settings ?? defaultSettings();
+    this.holding = this.settings.holdWrites;
     this.copied = options.copy === true;
     this.worlds = testWorlds(seedMode, true, true);
     this.revisions = [...this.worlds.keys()];
@@ -125,10 +135,15 @@ export class Harness {
     );
     const noop = async (): Promise<void> => undefined;
     this.service.hooks = {
-      beforePlan: async () => undefined,
+      beforePlan: async ({ chatId }) => {
+        const during = this.duringRun;
+        this.duringRun = null;
+        await during?.(chatId);
+        return undefined;
+      },
       afterPlan: async () => undefined,
       // No sections here: the engine run plans, and its reply starts again (DESIGN §5.1).
-      deliver: async () => ({ bookId: "", fills: new Map(), placed: "" }),
+      deliver: async () => ({ bookId: "", fills: new Map(), placed: "", wording: SECRET_MARK_WORDING }),
       fill: async () => "filled" as const,
       clear: noop,
       vacate: noop,
@@ -153,8 +168,15 @@ export class Harness {
       },
     };
     this.service.attach();
+    this.service.holdWrites(this.host.userId, this.holding);
     this.host.idle = () => this.service.idle();
     this.host.claimRestart = async (restart) => this.service.claimRestart(restart.chatId, this.host.userId, restart.session, restart.turn);
+  }
+
+  /** Switches "Hold writes during the engine run", as saving Settings → Writes does. */
+  holdWrites(on: boolean): void {
+    this.holding = on;
+    this.service.holdWrites(this.host.userId, on);
   }
 
   async newChat(greeting = "Morning, Sam."): Promise<ChatId> {

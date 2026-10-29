@@ -249,7 +249,7 @@ function within(dayStart: number, fromH: number, toH: number): { from: number; t
 }
 
 /** The planner's option id prefix for an agenda's step: `agenda:<track>`. */
-const AGENDA_OPTION = "agenda:";
+export const AGENDA_OPTION = "agenda:";
 
 /** The activity an agenda's step sets; which agenda it is isn't recorded with it. */
 const AGENDA_ACTIVITY = "agenda";

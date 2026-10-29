@@ -1,18 +1,25 @@
 // Diagnostics (DESIGN §6.9): each chat's ring of records (turns, their steps with their model calls,
-// errors, the engine run's section fills, slow requests), kept in `userStorage/runs/<chatId>/diagnostics.json` and
-// mirrored as lines to the user's `diagnostics.log` with their level and turn; and the in-flight
-// activity line, pushed to the chat's frontends as `lre.activity`.
+// errors, the engine run's section fills, slow requests, agent calls), kept in
+// `userStorage/runs/<chatId>/diagnostics.json` and mirrored as lines to the user's `diagnostics.log`
+// with their level and turn; and the in-flight activity line, pushed to the chat's frontends as
+// `lre.activity`. An agent call's text is a blob (DESIGN §4.4) only its record points to: when
+// transcript retention passes, the record lets go of it and the sweep removes it.
 //
 // The records are GM-level and only ever answer `lre.diag`; the activity line carries a step's label
-// and nothing else, so it is safe on the player's surfaces.
+// (or, for an agent at work outside a turn, the GM assistant answering, its label) and nothing else,
+// so it is safe on the player's surfaces.
 
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import { isRecord } from "../shared/json";
-import type { Activity, DiagCall, DiagLevel, DiagPhase, DiagRecord, DiagSection, DiagStatus } from "../shared/diagnostics";
-import { callLabel, DIAG_PHASES, DIAG_RING, SLOW_MS, STEP_LABEL, suggestFix } from "../shared/diagnostics";
+import type { Activity, DiagAgentCall, DiagCall, DiagLevel, DiagPhase, DiagRecord, DiagSection, DiagStatus, DiagUsage } from "../shared/diagnostics";
+import { callLabel, DIAG_AGENT_OUTCOMES, DIAG_PHASES, DIAG_RING, DIAG_USAGE_FIELDS, SLOW_MS, STEP_LABEL, suggestFix } from "../shared/diagnostics";
+import type { Limit } from "../shared/minds";
+import { limitOf } from "../shared/minds";
 import { PROTOCOL_VERSION } from "../shared/protocol";
+import { blobHash, DAY_MS, isBlobHash, RETENTION_DEFAULTS } from "../shared/stores";
 import type { TimeoutFired } from "../shared/timeouts";
+import type { BlobStore } from "./agents/blobs";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -27,6 +34,17 @@ export interface DiagAt {
 export type DiagVerdict = { status: "skipped" | "failed"; reason: string; fix?: string } | null;
 
 export type DiagHost = Pick<HostPort, "storage" | "log" | "frontend">;
+
+export interface DiagOptions {
+  now?: () => number;
+  /** Records kept per chat, the oldest going first: one number, or the user's (Settings → Diagnostics). */
+  ring?: number | ((userId: UserId) => number);
+  flushMs?: number;
+  /** Where agent calls' texts are kept; without it an agent call is recorded with no text. */
+  blobs?: BlobStore;
+  /** Days an agent call's text is kept after the call (Settings → Agents → Retention); the default's without it. */
+  transcriptDays?: (userId: UserId) => Limit;
+}
 
 interface OpenStep {
   at: DiagAt;
@@ -56,7 +74,7 @@ interface ChatDiag {
 const FORMAT = 1;
 const STATUSES: readonly DiagStatus[] = ["ok", "skipped", "failed"];
 const LEVELS: readonly DiagLevel[] = ["debug", "info", "warn", "error"];
-const KINDS: readonly DiagRecord["kind"][] = ["step", "error", "sections", "slow", "turn"];
+const KINDS: readonly DiagRecord["kind"][] = ["step", "error", "sections", "slow", "turn", "agent"];
 
 function isDiagRecord(raw: unknown): raw is DiagRecord {
   if (!isRecord(raw)) return false;
@@ -72,6 +90,37 @@ function isDiagRecord(raw: unknown): raw is DiagRecord {
     typeof raw.end === "number" &&
     typeof raw.ms === "number"
   );
+}
+
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+
+/** A usage as stored or given: the four counts, and the estimated ones named only when there are some; undefined when it isn't one. */
+function usageOf(raw: unknown): DiagUsage | null | undefined {
+  if (raw === null) return null;
+  if (!isRecord(raw)) return undefined;
+  const { in: sent, cachedIn, out, reasoningOut, estimated } = raw;
+  if (!isCount(sent) || !isCount(cachedIn) || !isCount(out) || !isCount(reasoningOut)) return undefined;
+  const guessed = Array.isArray(estimated) ? DIAG_USAGE_FIELDS.filter((f) => estimated.includes(f)) : [];
+  return { in: sent, cachedIn, out, reasoningOut, ...(guessed.length > 0 ? { estimated: guessed } : {}) };
+}
+
+/** An agent call as stored, or null when it doesn't read as one; a malformed tool list or text ref is left out of it. */
+function agentCallOf(raw: unknown): DiagAgentCall | null {
+  if (!isRecord(raw)) return null;
+  const { role, connection, model, ms, error, tools, text } = raw;
+  const usage = usageOf(raw.usage);
+  const outcome = DIAG_AGENT_OUTCOMES.find((o) => o === raw.outcome);
+  if (typeof role !== "string" || typeof connection !== "string" || typeof model !== "string" || !isCount(ms) || outcome === undefined || usage === undefined) return null;
+  return { role, connection, model, usage, ms, outcome, ...(typeof error === "string" ? { error } : {}), ...(Array.isArray(tools) ? { tools: tools.filter((t): t is string => typeof t === "string") } : {}), ...(isBlobHash(text) ? { text } : {}) };
+}
+
+/** A stored record, or null when it doesn't read as one. A malformed agent call is dropped from its record, which stays; files written before agent calls read as they did. */
+function storedRecord(raw: unknown): DiagRecord | null {
+  if (!isDiagRecord(raw)) return null;
+  if (raw.agent === undefined) return raw;
+  const { agent, ...rest } = raw;
+  const call = agentCallOf(agent);
+  return call ? { ...rest, agent: call } : rest;
 }
 
 export function messageOf(error: unknown): string {
@@ -107,6 +156,8 @@ export class Diagnostics {
   private readonly open = new Map<UserId, OpenStep[]>();
   private readonly turns = new Map<ChatId, Turn>();
   private readonly activities = new Map<ChatId, Activity>();
+  /** Agents at work in each chat outside any turn (the GM assistant answering), latest last. */
+  private readonly working = new Map<ChatId, { id: string; label: string; since: number }[]>();
   /** Model calls under way per user, by purpose, latest last. */
   private readonly inflight = new Map<UserId, string[]>();
   /** Whether the chat has an engine run or reply read Cancel can stop (the ledger's, `LedgerService.cancel`): what the running line offers Cancel by. */
@@ -115,7 +166,7 @@ export class Diagnostics {
 
   constructor(
     private readonly host: DiagHost,
-    private readonly options: { now?: () => number; ring?: number; flushMs?: number } = {},
+    private readonly options: DiagOptions = {},
   ) {
     this.seq = this.now();
   }
@@ -128,15 +179,26 @@ export class Diagnostics {
     return `${runDir(chatId)}diagnostics.json`;
   }
 
+  /**
+   * The chat's stored records, oldest first, after any write of them under way; none when it has no
+   * file or a damaged one (set aside). A storage error is thrown: the sweep must not read a chat it
+   * couldn't read as one that keeps no text.
+   */
+  private async stored(chatId: ChatId, userId: UserId): Promise<DiagRecord[]> {
+    await this.writes.get(chatId);
+    const raw = await readStoredJson(this.host, this.path(chatId), userId, "diagnostics", (r) => isRecord(r) && r.v === FORMAT && Array.isArray(r.records));
+    if (!isRecord(raw) || !Array.isArray(raw.records)) return [];
+    return raw.records.flatMap((r) => storedRecord(r) ?? []);
+  }
+
   private chat(chatId: ChatId, userId: UserId): ChatDiag {
     const known = this.chats.get(chatId);
     if (known?.userId === userId) return known;
     const chat: ChatDiag = { userId, records: [], loaded: Promise.resolve() };
     chat.loaded = (async () => {
-      await this.writes.get(chatId);
-      const raw = await readStoredJson(this.host, this.path(chatId), userId, "diagnostics", (r) => isRecord(r) && r.v === FORMAT && Array.isArray(r.records)).catch(() => null);
-      const stored = isRecord(raw) && Array.isArray(raw.records) ? raw.records.filter(isDiagRecord) : [];
-      chat.records = [...stored, ...chat.records].slice(-this.ring());
+      // A file that can't be read leaves the chat starting afresh, as before.
+      chat.records = [...(await this.stored(chatId, userId).catch((): DiagRecord[] => [])), ...chat.records];
+      this.tidy(chat);
     })();
     this.chats.delete(chatId);
     this.chats.set(chatId, chat);
@@ -144,15 +206,60 @@ export class Diagnostics {
     return chat;
   }
 
-  private ring(): number {
-    return this.options.ring ?? DIAG_RING;
+  private ring(userId: UserId): number {
+    const ring = this.options.ring;
+    return typeof ring === "function" ? ring(userId) : (ring ?? DIAG_RING);
+  }
+
+  /** When an agent call must have ended for its record to keep its text now: transcript retention's days back ("none": always). */
+  private textSince(userId: UserId): number {
+    return this.now() - limitOf(this.options.transcriptDays?.(userId) ?? RETENTION_DEFAULTS.transcriptDays) * DAY_MS;
+  }
+
+  /**
+   * Keeps the chat's records within the user's ring, the oldest going first, and drops each agent
+   * call's text ref once transcript retention has passed since the call, so nothing here points at
+   * the blob any more and the sweep removes it; the records themselves stay. Whether anything changed.
+   */
+  private tidy(chat: ChatDiag): boolean {
+    const ring = this.ring(chat.userId);
+    let changed = chat.records.length > ring;
+    if (changed) chat.records.splice(0, chat.records.length - ring);
+    const since = this.textSince(chat.userId);
+    for (const [i, r] of chat.records.entries()) {
+      if (r.agent?.text === undefined || r.end >= since) continue;
+      const agent = { ...r.agent };
+      delete agent.text;
+      chat.records[i] = { ...r, agent };
+      changed = true;
+    }
+    return changed;
   }
 
   /** The chat's records, oldest first, once its stored ones are read. */
   async records(chatId: ChatId, userId: UserId): Promise<DiagRecord[]> {
     const chat = this.chat(chatId, userId);
     await chat.loaded;
+    if (this.tidy(chat)) this.schedule(chatId);
     return [...chat.records];
+  }
+
+  /**
+   * The hashes of the agent-call texts the chat's records keep now, within the ring and transcript
+   * retention: Diagnostics' references for the sweep, and the only texts `lre.diag`'s `text` reads.
+   * A chat not in memory is read from its stored file and left out of memory; a storage error there
+   * is thrown, never read as a chat that keeps none.
+   */
+  async transcripts(chatId: ChatId, userId: UserId): Promise<string[]> {
+    const known = this.chats.get(chatId);
+    let records: readonly DiagRecord[];
+    if (known?.userId === userId) {
+      await known.loaded;
+      if (this.tidy(known)) this.schedule(chatId);
+      records = known.records;
+    } else records = (await this.stored(chatId, userId)).slice(-this.ring(userId));
+    const since = this.textSince(userId);
+    return [...new Set(records.flatMap((r) => (r.agent?.text !== undefined && r.end >= since ? [r.agent.text] : [])))];
   }
 
   /** Forgets the chat's records, in memory and stored. */
@@ -167,12 +274,15 @@ export class Diagnostics {
     const full: DiagRecord = { seq: ++this.seq, ...record };
     const where = `${record.phase ? `${record.phase}/` : ""}${record.step}`;
     const calls = record.calls && record.calls.length > 0 ? `, ${record.calls.length} call(s) ${record.calls.map((c) => `${c.model} ${c.tokensIn ?? "?"}→${c.tokensOut ?? "?"} ${c.finishReason || "-"}`).join("; ")}` : "";
-    this.host.log(record.level === "debug" ? "debug" : record.level, `[LumiRPEngine] ${at.chatId ? `chat ${at.chatId} ` : ""}${record.kind} ${where} ${record.status} in ${Math.round(record.ms)} ms${record.reason ? `: ${record.reason}` : ""}${calls}`, at.userId, at.turn ?? undefined);
+    const agent = record.agent ? `, ${record.agent.model} ${record.agent.usage?.in ?? "?"}→${record.agent.usage?.out ?? "?"} ${record.agent.outcome}${record.agent.tools?.length ? `, tools ${record.agent.tools.join(", ")}` : ""}` : "";
+    this.host.log(record.level === "debug" ? "debug" : record.level, `[LumiRPEngine] ${at.chatId ? `chat ${at.chatId} ` : ""}${record.kind} ${where} ${record.status} in ${Math.round(record.ms)} ms${record.reason ? `: ${record.reason}` : ""}${calls}${agent}`, at.userId, at.turn ?? undefined);
     if (!at.chatId) return full;
     const chat = this.chat(at.chatId, at.userId);
     chat.records.push(full);
-    if (chat.records.length > this.ring()) chat.records.splice(0, chat.records.length - this.ring());
-    if (record.status === "failed" && at.turn) {
+    const ring = this.ring(at.userId);
+    if (chat.records.length > ring) chat.records.splice(0, chat.records.length - ring);
+    // An agent call is informational until the agent turn loop (Increment 2) decides what a failed one means for its turn.
+    if (record.status === "failed" && at.turn && record.kind !== "agent") {
       const turn = this.turns.get(at.chatId);
       if (turn && turn.at.turn === at.turn && turn.failed === null) turn.failed = where;
     }
@@ -313,6 +423,33 @@ export class Diagnostics {
     this.add({ chatId: null, userId, turn: null }, { kind: "step", level: failure ? "warn" : "debug", turn: null, phase: null, step: call.purpose, status: failure ? "failed" : "ok", start: t - call.ms, end: t, ms: call.ms, calls: [call], ...(failure ? { reason: failure.reason } : {}) });
   }
 
+  /**
+   * One call an agent made (AGENT-LOOP-PLAN §3.5), a record of its own: its role, connection, model,
+   * usage, time, outcome and the tools it called by name. With `text` (its messages and answer) and a
+   * blob store, the text is stored as a blob and the record keeps its hash, which `lre.diag`'s `text`
+   * reads behind the Diagnostics curtain until transcript retention passes; with retention at 0 days
+   * nothing is stored. The record is there before the blob is written, so a sweep meanwhile counts it
+   * referenced; a text that couldn't be written reads as gone.
+   *
+   * Informational: a failed agent call never fails a classic turn or halts its engine run
+   * (`failure`), and never touches the activity line, which carries a step's label only (tool calls
+   * can name what the player hasn't met).
+   */
+  async agentCall(at: DiagAt, phase: DiagPhase | null, call: Omit<DiagAgentCall, "text">, text?: string): Promise<DiagRecord> {
+    const end = this.now();
+    const blobs = this.options.blobs;
+    // A retention of 0 days keeps no text (it would expire as it is recorded), so none is stored.
+    const hash = text !== undefined && blobs && this.textSince(at.userId) < end ? blobHash(text) : undefined;
+    const status: DiagStatus = call.outcome === "ok" ? "ok" : call.outcome === "cancelled" ? "skipped" : "failed";
+    const reason = call.error ?? (call.outcome === "cancelled" ? "cancelled" : call.outcome === "refused" ? "refused by the provider" : undefined);
+    const fix = status === "failed" && reason ? suggestFix(reason) : undefined;
+    const usage = usageOf(call.usage) ?? null;
+    const agent: DiagAgentCall = { role: call.role, connection: call.connection, model: call.model, usage, ms: call.ms, outcome: call.outcome, ...(call.error !== undefined ? { error: call.error } : {}), ...(call.tools && call.tools.length > 0 ? { tools: [...call.tools] } : {}), ...(hash ? { text: hash } : {}) };
+    const record = this.add(at, { kind: "agent", level: status === "failed" ? "warn" : "info", turn: at.turn, phase, step: call.role, status, start: end - call.ms, end, ms: call.ms, ...(reason ? { reason } : {}), ...(fix ? { fix } : {}), agent });
+    if (hash !== undefined && text !== undefined && blobs) await blobs.put(at.userId, text).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${at.chatId}: the ${call.role} agent call's text wasn't stored (${messageOf(error)})`, at.userId, at.turn ?? undefined));
+    return record;
+  }
+
   /** The engine run wrote the turn's sections into the world's book: which reach which outlets, on which path. */
   sections(at: DiagAt, path: string, sections: readonly DiagSection[], start: number): void {
     const end = this.now();
@@ -332,7 +469,8 @@ export class Diagnostics {
    */
   failure(at: DiagAt): { step: string; reason: string } | null {
     for (const r of this.chats.get(at.chatId)?.records ?? []) {
-      if (r.turn !== at.turn) continue;
+      // An agent call is informational until the agent turn loop (Increment 2) decides turn failure.
+      if (r.turn !== at.turn || r.kind === "agent") continue;
       const calls = r.calls ?? [];
       for (const [i, c] of calls.entries()) {
         const failed = c.retried ? null : callFailure([c]);
@@ -381,8 +519,8 @@ export class Diagnostics {
 
   /**
    * The chat's activity line now: while a turn runs, the model calls under way (the latest asked,
-   * minds counted), else the innermost step's label, else the turn's resting one; after a failed
-   * turn, the failure.
+   * minds counted), else the innermost step's label, else the turn's resting one; while an agent works
+   * there outside a turn, its label; after a failed turn, the failure.
    */
   activityOf(chatId: ChatId): Activity | null {
     const turn = this.turns.get(chatId);
@@ -392,7 +530,27 @@ export class Diagnostics {
       const label = asking !== undefined ? callLabel(asking, this.inflight.get(turn.at.userId)?.filter((p) => p === asking).length ?? 1) : (open?.label ?? turn.rest);
       return { chatId, turn: turn.at.turn, state: "running", label, since: turn.start, ...(this.cancellable(chatId) ? { cancellable: true } : {}) };
     }
+    const agent = this.working.get(chatId)?.at(-1);
+    if (agent) return { chatId, turn: null, state: "running", label: agent.label, since: agent.since };
     return this.activities.get(chatId) ?? null;
+  }
+
+  /**
+   * An agent starts work in the chat outside any turn (the GM assistant answering, `id` its run):
+   * while no turn runs there, the line shows `label` and nothing else, since what it reads and calls
+   * can name what the player hasn't met. Its records are its calls' (`agentCall`).
+   */
+  agentWorking(chatId: ChatId, userId: UserId, id: string, label: string): void {
+    this.working.set(chatId, [...(this.working.get(chatId) ?? []).filter((w) => w.id !== id), { id, label, since: this.now() }]);
+    this.send(chatId, userId);
+  }
+
+  /** That agent's work in the chat ended: the line shows again what it would without it. */
+  agentDone(chatId: ChatId, userId: UserId, id: string): void {
+    const rest = (this.working.get(chatId) ?? []).filter((w) => w.id !== id);
+    if (rest.length > 0) this.working.set(chatId, rest);
+    else this.working.delete(chatId);
+    this.send(chatId, userId);
   }
 
   /** Sends the line of each chat whose turn the user's calls belong to. */
@@ -435,6 +593,7 @@ export class Diagnostics {
     const write = (this.writes.get(chatId) ?? Promise.resolve())
       .then(async () => {
         await chat.loaded;
+        this.tidy(chat);
         await this.host.storage.write(`${path}.tmp`, JSON.stringify({ v: FORMAT, records: chat.records }), chat.userId);
         await this.host.storage.move(`${path}.tmp`, path, chat.userId);
       })

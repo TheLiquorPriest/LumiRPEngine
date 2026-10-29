@@ -8,10 +8,13 @@ import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks } from "./inferred";
 import type { AdjudicationDef, StepPurpose } from "./world";
 import type { Limit, MindsSettings } from "./minds";
-import { isMindPurpose, limitIn, MIND_PROMPT_MAX } from "./minds";
+import { isMindPurpose, limitIn } from "./minds";
 import { isRecord } from "./json";
-import type { SecretMarkWording } from "./secret-marks";
 import type { TimeoutSettings } from "./timeouts";
+import type { AgentSettings } from "./agent-settings";
+import type { PromptSettings, SwipeTexts } from "./prompts";
+import type { DiagnosticsSettings } from "./diagnostics";
+import type { RetentionSettings } from "./stores";
 
 /**
  * How hard a model reasons on a call (Lumiverse's per-request reasoning override): `inherit` leaves
@@ -282,6 +285,40 @@ export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundM
 });
 
 /**
+ * What an agent (the GM assistant) may change on its own, per type (AGENT-LOOP-PLAN §6, §15).
+ * They take a mode as the extraction types do and share their pins (`UserSettings.extraction`),
+ * but they are not extraction types: no reply proposes them, so the extract step never lists them.
+ */
+export const AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace"] as const;
+export type AgentChangeType = (typeof AGENT_CHANGE_TYPES)[number];
+
+/** Every type with a mode: what a reply may change, then what an agent may. */
+export type ChangeType = ExtractionType | AgentChangeType;
+export const CHANGE_TYPES: readonly ChangeType[] = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
+
+/** AGENT-LOOP-PLAN §6: despawn, destroy, money adjustment, stage and GM spawn confirm; other GM edits and workspace notes apply. */
+export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>> = Object.freeze({
+  gm_spawn: "confirm",
+  despawn: "confirm",
+  destroy: "confirm",
+  money_adjust: "confirm",
+  stage: "confirm",
+  gm_edit: "auto",
+  workspace: "auto",
+});
+
+/** Each agent change type in plain words, for Settings and for the writer's refusals. */
+export const AGENT_CHANGE_LABEL: Readonly<Record<AgentChangeType, string>> = Object.freeze({
+  gm_spawn: "Adding people or things",
+  despawn: "Removing people",
+  destroy: "Destroying things",
+  money_adjust: "Money adjustments",
+  stage: "Quest and secret stages",
+  gm_edit: "Other GM edits (fields, tiers, minds, routines, sections, the clock)",
+  workspace: "Workspace notes",
+});
+
+/**
  * D4 learning (from D31): promotion learns on the player's own connection. Outcomes come
  * from the confirm and undo chips only: no new surface, no model calls.
  */
@@ -296,8 +333,11 @@ export const EXTRACTION_LEARNING = Object.freeze({
   demoteUndoRate: 0.1,
 });
 
-/** User overrides per type. A set type is pinned: learning still counts it but never flips it. */
-export type ExtractionBounds = Partial<Record<ExtractionType, { mode: BoundMode; maxDelta?: number }>>;
+/**
+ * User overrides per type, extraction and agent change types alike. A set type is pinned: learning
+ * still counts it but never flips it. `maxDelta` bounds an extraction type's change only.
+ */
+export type ExtractionBounds = Partial<Record<ChangeType, { mode: BoundMode; maxDelta?: number }>>;
 
 /**
  * One type's outcomes on one connection. A proposal counts once: `a` when confirmed, or applied
@@ -324,6 +364,11 @@ export interface ExtractionTypeStats {
 export interface ExtractionLearning {
   v: 1;
   connections: Record<string, Partial<Record<ExtractionType, ExtractionTypeStats>>>;
+  /**
+   * Agent-made operations' outcomes, per role id, per connection id, per change type (AGENT-LOOP-PLAN §6:
+   * learning keyed by role × connection × change type). Absent until an agent's change is first counted.
+   */
+  roles?: Record<string, Record<string, Partial<Record<ChangeType, ExtractionTypeStats>>>>;
 }
 
 /**
@@ -354,37 +399,12 @@ export interface NarratorView {
   secrets: NarratorSecrets;
 }
 
-/** Settings → Narrator: the user's default view, and the wording of a secret's mark where they rewrote it. */
-export interface NarratorSettings extends NarratorView {
-  /** The user's own wording of a secret's mark, part by part; a part left out is the shipped text (`SECRET_MARK_WORDING`). */
-  marks: Partial<SecretMarkWording>;
-}
-
 /** The ruling's default (OPEN-DECISIONS core 3): what everyone in the scene knows, secrets included and marked. */
 export const NARRATOR_DEFAULTS: Readonly<NarratorView> = Object.freeze({ knowledge: "scene", secrets: "marked" });
 
 /** Each choice in the words Settings, Build and GM mode show. */
 export const NARRATOR_KNOWLEDGE_LABEL: Readonly<Record<NarratorKnowledge, string>> = { scene: "Everyone in the scene", pov: "Your character's only" };
 export const NARRATOR_SECRETS_LABEL: Readonly<Record<NarratorSecrets, string>> = { marked: "Marked", omit: "Left out" };
-
-/**
- * The placeholders each part of a secret's mark must hold (`secretMarkText`): the secret's text, and
- * the names it is known to or kept from. `everyone` is the word for "kept from everyone", with none.
- * `rule`, the narrator rules' sentence on marks (`secretMarksRule`), needs the forms it explains, and
- * may hold `{{everyone}}`.
- */
-export const SECRET_MARK_NEEDS: Readonly<Record<keyof SecretMarkWording, readonly string[]>> = { known: ["{{text}}", "{{known}}"], kept: ["{{text}}", "{{kept}}"], both: ["{{text}}", "{{known}}", "{{kept}}"], everyone: [], rule: ["{{forms}}"] };
-
-/**
- * Why a wording of one part of a secret's mark can't be kept, or null: some text, with the
- * placeholders the part needs, no longer than any text of the user's own (`MIND_PROMPT_MAX`).
- */
-export function secretMarkProblem(part: keyof SecretMarkWording, text: string): string | null {
-  if (text.trim() === "") return "It can't be empty.";
-  if (text.length > MIND_PROMPT_MAX) return `At most ${MIND_PROMPT_MAX.toLocaleString("en-US")} characters.`;
-  const missing = SECRET_MARK_NEEDS[part].filter((p) => !text.includes(p));
-  return missing.length > 0 ? `It needs ${missing.join(" and ")}.` : null;
-}
 
 /** A narrator view read from outside data (a settings file, a world document, a chat's metadata): null unless both parts are ones it takes. */
 export function narratorViewOf(raw: unknown): NarratorView | null {
@@ -394,17 +414,10 @@ export function narratorViewOf(raw: unknown): NarratorView | null {
   return knowledge && secrets ? { knowledge, secrets } : null;
 }
 
-/** `UserSettings.narrator` as the engine reads it: each part checked, else `base`'s; a wording that can't be kept (`secretMarkProblem`) is left out, so the shipped one stands. */
-export function narratorSettingsOf(raw: unknown, base: Readonly<NarratorSettings>): NarratorSettings {
+/** `UserSettings.narrator` as the engine reads it: each part checked, else `base`'s. */
+export function narratorSettingsOf(raw: unknown, base: Readonly<NarratorView>): NarratorView {
   const n = isRecord(raw) ? raw : {};
-  const marks: Partial<SecretMarkWording> = {};
-  if (isRecord(n.marks)) {
-    for (const part of Object.keys(SECRET_MARK_NEEDS) as (keyof SecretMarkWording)[]) {
-      const text = n.marks[part];
-      if (typeof text === "string" && secretMarkProblem(part, text) === null) marks[part] = text;
-    }
-  } else Object.assign(marks, base.marks);
-  return { knowledge: NARRATOR_KNOWLEDGE.find((k) => k === n.knowledge) ?? base.knowledge, secrets: NARRATOR_SECRETS.find((s) => s === n.secrets) ?? base.secrets, marks };
+  return { knowledge: NARRATOR_KNOWLEDGE.find((k) => k === n.knowledge) ?? base.knowledge, secrets: NARRATOR_SECRETS.find((s) => s === n.secrets) ?? base.secrets };
 }
 
 export interface UserSettings {
@@ -437,6 +450,8 @@ export interface UserSettings {
   inferred: InferredChecks | null;
   extraction: ExtractionBounds;
   swipeDefault: "rerun" | "renarrate";
+  /** What a Re-narrate is sent (Settings → Swipes, DESIGN §6.12): the texts its turn was made with (its prompt set), or the user's current ones. */
+  swipeTexts: SwipeTexts;
   /** World chats hide each reply's `<json>…</json>` block on display, after the preset's own display scripts. World Info skips the block either way (DESIGN §6.7). */
   hideJsonBlocks: boolean;
   /** Character minds (DESIGN §24.6): on or off, the Live limit, refresh policies, memory, the Minds section's budget, prompts and time-skip caps. */
@@ -447,8 +462,28 @@ export interface UserSettings {
   jobs: JobSettings;
   /** Preview gates (Settings → Steps and connections → Preview before playing, DESIGN §5.1): off, a turn plays as soon as it is read. */
   gates: GateSettings;
-  /** The narrator's knowledge (Settings → Narrator, DESIGN §6.11): the user's default, which a world's default and a chat's own choice override, and the wording of a secret's mark. */
-  narrator: NarratorSettings;
+  /** The agent runtime (Settings → Agents; AGENT-LOOP-PLAN §15): thinking in tool loops, budgets, the loop detector, clipping, throttles, caching and acceptance runs. No classic step reads it. */
+  agents: AgentSettings;
+  /** The user's own texts sent to models, and how long one may be (Settings → Agents → Prompts, DESIGN §6.12). */
+  prompts: PromptSettings;
+  /**
+   * Hold writes during the engine run (Settings → Writes, DESIGN §4.3 P2): on, a chip, ✎ fix or any
+   * other change made while the engine works on a turn before its reply waits for that turn, as one
+   * made while the reply streams does, and lands over what it did. Off (the default), it lands at once
+   * and the turn's reply doesn't start, as it always has. A GM agent's writes and workspace saves are
+   * held either way (`HeldWrite.hold`).
+   */
+  holdWrites: boolean;
+  /** How long the agent stores keep what nothing needs (Settings → Agents → Retention, DESIGN §4.4), apart from the presets. */
+  retention: RetentionSettings;
+  /** How many records each chat's diagnostics keep (Settings → Diagnostics, DESIGN §6.9). */
+  diagnostics: DiagnosticsSettings;
+  /**
+   * The narrator's knowledge (Settings → Narrator, DESIGN §6.11): the user's default, which a world's
+   * default and a chat's own choice override. How a secret is marked is the user's own in `prompts`
+   * (the registry's Secret marks texts, §6.12).
+   */
+  narrator: NarratorView;
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */

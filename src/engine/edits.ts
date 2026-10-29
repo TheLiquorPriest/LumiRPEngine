@@ -8,16 +8,21 @@
 // A submit applies all or none and is one `fix` post entry on the head (§4.3), so undo, Keep,
 // swipes, Re-narrate and Re-run treat it like any fix. The entry keeps what it asked for, so one
 // that waited out a reply, or that a read now follows, is resolved again from it (`resolveFix`).
+// An agent's GM edit (AGENT-LOOP-PLAN §4, §15) is such a submit too, and may carry more than the
+// GM editor does: workspace changes (a file written, removed, moved with its pin, pinned or not,
+// DESIGN §4.4) and the clock set as its ✎ fix sets it, each as the events those make, in order.
 
 import { hashParts } from "../shared/hash";
 import type { EntityId, FieldId } from "../shared/ids";
 import { DOMAINS } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
-import type { FixDirective, LedgerEvent, PostEntry } from "../shared/ledger";
+import { type AgentKnowledge, isAgentKnowledge } from "../shared/agent-tools";
+import type { FixDirective, FixOp, LedgerEvent, PostEntry, WorkspaceOp } from "../shared/ledger";
 import type { Holding } from "../shared/minds";
 import type { EditOp } from "../shared/protocol";
 import { EDIT_OPS_MAX } from "../shared/protocol";
+import { isBlobHash, isWorkspacePath } from "../shared/stores";
 import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
 import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../shared/routines";
 import { isBand, tierOf } from "../shared/tiers";
@@ -40,6 +45,7 @@ import type { WorldState } from "./state";
 import { clockFix } from "./time";
 import { moveTrack } from "./tracks";
 import { Working } from "./working";
+import { readersOf, workspaceOf, workspacePins, workspaceReaders, wsDelete, wsPin, wsReaders, wsWrite } from "./workspace";
 
 export interface EditOptions {
   /** The GM editor writes locked fields too; a player's ✎ fix can't. */
@@ -52,10 +58,10 @@ export interface EditOptions {
 
 /**
  * Refusals that mean what an operation asks for is already so: nothing to change, inside it or out
- * of it already, removed or back already, a relation already gone. Resolving an edit again
- * (`again`), such an operation is passed over, since the story already did what it asks.
+ * of it already, removed or back already, a relation or a workspace file already gone. Resolving an
+ * edit again (`again`), such an operation is passed over, since the story already did what it asks.
  */
-const ALREADY_SO: Record<string, true> = { no_change: true, already_inside: true, not_inside: true, gone: true, not_gone: true, missing_relation: true };
+const ALREADY_SO: Record<string, true> = { no_change: true, already_inside: true, not_inside: true, gone: true, not_gone: true, missing_relation: true, missing_file: true };
 
 export type EditOutcome = { events: LedgerEvent[] } | { rejection: Rejection };
 
@@ -380,10 +386,60 @@ function effectOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "effect" 
   return w.events.length === before ? reject("no_change", "nothing to change") : null;
 }
 
-function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: Rng): Rejection | null {
+/**
+ * A workspace change (DESIGN §4.4) as its events. A write sets whose knowledge may read the file
+ * (its readers) with its text: writing the text a file holds already, for the readers it has,
+ * changes nothing. A move is the file written at its new path and removed from its old one, its pin
+ * and its readers going with it; a pin or unpin, or a change of readers, needs the file, and a state
+ * it isn't in already.
+ */
+function workspaceOp(w: Working, op: WorkspaceOp): Rejection | null {
+  const files = workspaceOf(w.state);
+  switch (op.op) {
+    case "ws_write": {
+      if (!isWorkspacePath(op.path) || !isBlobHash(op.hash) || !isAgentKnowledge(op.readers)) return reject("bad_op", "a workspace file's path is names joined by /, its body a stored text, and its readers a knowledge");
+      const held = own(files, op.path);
+      // A new file is the GM's alone until its readers are set.
+      const before = held === undefined ? "gm" : readersOf(w.state, op.path);
+      if (held === op.hash && before === op.readers) return reject("no_change", "the file already holds that text");
+      const events = held === op.hash ? [] : [wsWrite(op.path, op.hash)];
+      if (before !== op.readers) events.push(wsReaders(op.path, op.readers));
+      return applyAll(w, events);
+    }
+    case "ws_delete":
+      // The event's own check refuses a file that isn't there (`missing_file`).
+      return w.apply(wsDelete(op.path));
+    case "ws_move": {
+      const hash = own(files, op.from);
+      if (hash === undefined) return reject("no_file", `no workspace file ${op.from}`);
+      if (!isWorkspacePath(op.to)) return reject("bad_op", "a workspace file's path is names joined by /");
+      if (op.to === op.from) return reject("no_change", "the file is already there");
+      if (own(files, op.to) !== undefined) return reject("file_exists", `there is a workspace file ${op.to} already`);
+      const shared = own(workspaceReaders(w.state), op.from);
+      const events = [wsWrite(op.to, hash), wsDelete(op.from)];
+      if (own(workspacePins(w.state), op.from)) events.push(wsPin(op.to, true));
+      if (shared !== undefined) events.push(wsReaders(op.to, shared));
+      return applyAll(w, events);
+    }
+    case "ws_pin":
+      if (own(files, op.path) === undefined) return reject("no_file", `no workspace file ${op.path}`);
+      if ((own(workspacePins(w.state), op.path) === true) === op.pinned) return reject("no_change", op.pinned ? "the file is pinned already" : "the file isn't pinned");
+      return w.apply(wsPin(op.path, op.pinned));
+    case "ws_readers":
+      if (own(files, op.path) === undefined) return reject("no_file", `no workspace file ${op.path}`);
+      if (!isAgentKnowledge(op.readers)) return reject("bad_op", "a file's readers are a knowledge: pov, everyone or gm");
+      if (readersOf(w.state, op.path) === op.readers) return reject("no_change", "the file is read with that knowledge already");
+      return w.apply(wsReaders(op.path, op.readers));
+  }
+}
+
+function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: Rng): Rejection | null {
   switch (op.op) {
     case "set":
       return setField(reg, w, op.entity, op.field, op.value, opts, rng);
+    case "fix_set":
+      // A field as the player's ✎ fix sets it, under the player's rules whatever the edit's (DESIGN §7.2).
+      return setField(reg, w, op.entity, op.field, op.value, { ...opts, gm: false }, rng);
     case "add":
       return addField(reg, w, op.entity, op.field, op.delta, opts, rng);
     case "link":
@@ -436,6 +492,19 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
     case "feed":
       // A section's settings in this chat (DESIGN §6.11): one event, so its Undo is the fix's.
       return w.apply({ type: FEED_EVENT, data: { section: op.section, to: op.to as JsonObject | null } });
+    case "ws_write":
+    case "ws_delete":
+    case "ws_move":
+    case "ws_pin":
+    case "ws_readers":
+      return workspaceOp(w, op);
+    case "clock": {
+      // The clock set as its ✎ fix sets it (DESIGN §9.2, §12), from where the operations before it leave the story.
+      const fixed = clockFix(reg, w.world, w.state, op.time, opts.runSeed);
+      if ("code" in fixed) return fixed;
+      if (fixed.events.length === 0) return reject("no_change", "the clock already reads that time");
+      return applyAll(w, fixed.events);
+    }
   }
 }
 
@@ -443,7 +512,7 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
  * Resolves operations in order against `state` (each sees the ones before it) into the events of
  * one `fix` entry, or the first operation's rejection; nothing applies unless all do.
  */
-export function resolveEdit(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, ops: readonly EditOp[], opts: EditOptions): EditOutcome {
+export function resolveEdit(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, ops: readonly FixOp[], opts: EditOptions): EditOutcome {
   const w = new Working(reg, world, state);
   const rng = createRng(hashParts("lre.edit", opts.runSeed, JSON.stringify(ops)));
   for (const [i, op] of ops.entries()) {
@@ -461,7 +530,7 @@ export function resolveEdit(reg: Registry, world: WorldDoc, state: Readonly<Worl
   // one edit or one after the other, in either order. Only the edit's own fields count, never what its
   // effects set: a Move brings the party along as idle, which takes no end of theirs. A player's ✎ of
   // the activity takes no old end either.
-  const spans = ops.flatMap((op) => (op.op === "set" && (op.field === "activity_until" || (opts.gm && op.field === "activity")) ? [op.entity] : []));
+  const spans = ops.flatMap((op) => ((op.op === "set" || op.op === "fix_set") && (op.field === "activity_until" || (opts.gm && op.op === "set" && op.field === "activity")) ? [op.entity] : []));
   for (const entity of new Set(spans)) {
     const fields = own(w.state.entities, entity)?.fields;
     if (typeof fields?.activity_until !== "number") continue;
@@ -488,109 +557,145 @@ export function resolveFix(reg: Registry, world: WorldDoc, state: Readonly<World
     const fixed = clockFix(reg, world, state, asked.clock, runSeed);
     return "code" in fixed ? { rejection: fixed } : fixed;
   }
-  const ops = parseEditOps(asked.ops);
+  const ops = parseFixOps(asked.ops);
   return ops ? resolveEdit(reg, world, state, ops, { gm: entry.gm === true, runSeed, again: true }) : null;
 }
 
 const str = (v: unknown): v is string => typeof v === "string";
+
+/** Operations from a request, each read by `one`: null when any is malformed or there are none or too many. */
+function parseOps<T>(raw: unknown, one: (o: Record<string, unknown>) => T | null): T[] | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > EDIT_OPS_MAX) return null;
+  const out: T[] = [];
+  for (const o of raw) {
+    const op = isRecord(o) ? one(o) : null;
+    if (op === null) return null;
+    out.push(op);
+  }
+  return out;
+}
 
 /**
  * Operations from a request, checked for shape (the frontend is outside data): null when any is
  * malformed or there are none or too many. What they name is checked when they resolve.
  */
 export function parseEditOps(raw: unknown): EditOp[] | null {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > EDIT_OPS_MAX) return null;
-  const out: EditOp[] = [];
-  for (const o of raw) {
-    if (!isRecord(o)) return null;
-    const op = ((): EditOp | null => {
-      switch (o.op) {
-        case "set":
-          return str(o.entity) && str(o.field) && o.value !== undefined ? { op: "set", entity: o.entity, field: o.field, value: o.value as JsonValue } : null;
-        case "add":
-          return str(o.entity) && str(o.field) && typeof o.delta === "number" ? { op: "add", entity: o.entity, field: o.field, delta: o.delta } : null;
-        case "link":
-          if (!str(o.rel) || !str(o.from) || !str(o.to) || (o.fields !== undefined && !isRecord(o.fields)) || (o.until !== undefined && typeof o.until !== "number")) return null;
-          return { op: "link", rel: o.rel, from: o.from, to: o.to, ...(isRecord(o.fields) ? { fields: o.fields as JsonObject } : {}), ...(typeof o.until === "number" ? { until: o.until } : {}) };
-        case "unlink":
-          return str(o.rel) && str(o.from) && str(o.to) ? { op: "unlink", rel: o.rel, from: o.from, to: o.to } : null;
-        case "move":
-          return str(o.entity) && str(o.to) ? { op: "move", entity: o.entity, to: o.to } : null;
-        case "put":
-          return str(o.entity) && (o.into === null || str(o.into)) ? { op: "put", entity: o.entity, into: o.into } : null;
-        case "adjust":
-          return str(o.account) && typeof o.cents === "number" ? { op: "adjust", account: o.account, cents: o.cents } : null;
-        case "stage":
-          return str(o.track) && str(o.to) ? { op: "stage", track: o.track, to: o.to } : null;
-        case "entity": {
-          if (!str(o.entity) || (o.tier !== undefined && !str(o.tier)) || (o.agent !== undefined && typeof o.agent !== "boolean")) return null;
-          if (o.levels !== undefined && !(isRecord(o.levels) && Object.values(o.levels).every((v) => v === null || typeof v === "number"))) return null;
-          const levels: Record<string, number | null> = isRecord(o.levels) ? Object.fromEntries(Object.entries(o.levels).map(([d, v]) => [d, typeof v === "number" ? v : null])) : {};
-          return { op: "entity", entity: o.entity, ...(str(o.tier) ? { tier: o.tier } : {}), ...(typeof o.agent === "boolean" ? { agent: o.agent } : {}), ...(isRecord(o.levels) ? { levels } : {}) };
-        }
-        case "classify": {
-          if (!str(o.entity) || !isRecord(o.class) || !Array.isArray(o.tags) || !o.tags.every(str)) return null;
-          const classes: Record<string, string[]> = {};
-          for (const [facet, values] of Object.entries(o.class)) {
-            if (!safeKey(facet) || !Array.isArray(values) || !values.every(str)) return null;
-            classes[facet] = values.filter(str);
-          }
-          return { op: "classify", entity: o.entity, class: classes, tags: o.tags.filter(str) };
-        }
-        case "life":
-          if (!str(o.entity) || (o.to !== undefined && !str(o.to)) || (o.tell !== undefined && !(Array.isArray(o.tell) && o.tell.every(str))) || (o.to === undefined && o.tell === undefined)) return null;
-          return { op: "life", entity: o.entity, ...(str(o.to) ? { to: o.to } : {}), ...(Array.isArray(o.tell) ? { tell: o.tell.filter(str) } : {}) };
-        case "spawn":
-          if (!str(o.kind) || !str(o.name) || [o.id, o.tier, o.place].some((v) => v !== undefined && !str(v)) || (o.agent !== undefined && typeof o.agent !== "boolean")) return null;
-          return { op: "spawn", kind: o.kind, name: o.name, ...(str(o.id) ? { id: o.id } : {}), ...(str(o.tier) ? { tier: o.tier } : {}), ...(str(o.place) ? { place: o.place } : {}), ...(typeof o.agent === "boolean" ? { agent: o.agent } : {}) };
-        case "despawn":
-        case "restore":
-          return str(o.entity) ? { op: o.op, entity: o.entity } : null;
-        case "mind_pin":
-          return str(o.entity) && (o.level === null || o.level === "live" || o.level === "near" || o.level === "far" || o.level === "background") ? { op: "mind_pin", entity: o.entity, level: o.level } : null;
-        case "mind_refresh":
-          return str(o.entity) ? { op: "mind_refresh", entity: o.entity } : null;
-        case "mind_memory":
-          if (!str(o.entity) || (o.part !== "note" && o.part !== "commitment" && o.part !== "plan") || !(o.id === null || str(o.id)) || !(o.value === null || isRecord(o.value))) return null;
-          return { op: "mind_memory", entity: o.entity, part: o.part, id: o.id, value: o.value as JsonObject | null };
-        case "mind_intent":
-          // Each part is optional (absent keeps it), but one of them must be there.
-          if (!str(o.entity) || (o.text !== undefined && !str(o.text)) || (o.approach !== undefined && o.approach !== null && o.approach !== "reactive" && o.approach !== "proactive") || (o.text === undefined && o.approach === undefined)) return null;
-          return { op: "mind_intent", entity: o.entity, ...(str(o.text) ? { text: o.text } : {}), ...(o.approach !== undefined ? { approach: o.approach } : {}) };
-        case "mind_knowledge":
-          // The holding's shape is checked when it resolves, against what the chat knows then.
-          if (!str(o.entity) || !str(o.fact) || !(o.holding === null || isRecord(o.holding))) return null;
-          return { op: "mind_knowledge", entity: o.entity, fact: o.fact, holding: o.holding as unknown as Holding | null };
-        case "routine_follow": {
-          // Each part is optional (absent keeps it), but one of them must be there; null returns it to the world's (the role and the skip life to their level's).
-          const mode = o.mode === undefined || o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
-          const awareness = o.awareness === undefined || o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
-          const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
-          const skips = o.skips === undefined || o.skips === null || SKIP_LIVES.some((s) => s === o.skips);
-          if (!str(o.entity) || !mode || !awareness || !role || !skips || (o.mode === undefined && o.awareness === undefined && o.role === undefined && o.skips === undefined)) return null;
-          return { op: "routine_follow", entity: o.entity, ...(o.mode !== undefined ? { mode: ROUTINE_MODES.find((m) => m === o.mode) ?? null } : {}), ...(o.awareness !== undefined ? { awareness: ROUTINE_AWARENESS.find((a) => a === o.awareness) ?? null } : {}), ...(o.role !== undefined ? { role: ROUTINE_ROLES.find((r) => r === o.role) ?? null } : {}), ...(o.skips !== undefined ? { skips: SKIP_LIVES.find((s) => s === o.skips) ?? null } : {}) };
-        }
-        case "routine_block":
-          // The block's shape is checked when it resolves, against the chat's own sources.
-          if (!str(o.entity) || !str(o.block) || !(o.value === null || isRecord(o.value))) return null;
-          return { op: "routine_block", entity: o.entity, block: o.block, value: o.value as RoutineEntry | null };
-        case "schedule_override":
-          if (!str(o.entity) || !str(o.schedule) || !(o.value === null || isRecord(o.value))) return null;
-          return { op: "schedule_override", entity: o.entity, schedule: o.schedule, value: o.value as ChatScheduleChange | null };
-        case "effect":
-          return str(o.effect) && isRecord(o.args) ? { op: "effect", effect: o.effect, args: o.args as JsonObject } : null;
-        case "feed": {
-          if (!str(o.section) || o.section.trim() === "") return null;
-          if (o.to === null) return { op: "feed", section: o.section, to: null };
-          const to = readSectionFeed(o.to);
-          return to ? { op: "feed", section: o.section, to } : null;
-        }
-        default:
-          return null;
+  return parseOps(raw, parseEditOp);
+}
+
+/**
+ * What a `fix` entry asks for (`FixDirective.ops`), checked for shape as `parseEditOps` checks a
+ * request's: the GM editor's operations, plus an agent's workspace changes and clock sets. A path's
+ * and a hash's form, a file's readers, and a time's, are checked when they resolve. A write stored
+ * before writes named their readers reads as the GM's alone, as a file no write shared is.
+ */
+export function parseFixOps(raw: unknown): FixOp[] | null {
+  return parseOps(raw, (o): FixOp | null => {
+    switch (o.op) {
+      case "ws_write":
+        return str(o.path) && str(o.hash) && (o.readers === undefined || str(o.readers)) ? { op: "ws_write", path: o.path, hash: o.hash, readers: (o.readers ?? "gm") as AgentKnowledge } : null;
+      case "ws_delete":
+        return str(o.path) ? { op: "ws_delete", path: o.path } : null;
+      case "ws_move":
+        return str(o.from) && str(o.to) ? { op: "ws_move", from: o.from, to: o.to } : null;
+      case "ws_pin":
+        return str(o.path) && typeof o.pinned === "boolean" ? { op: "ws_pin", path: o.path, pinned: o.pinned } : null;
+      case "ws_readers":
+        return str(o.path) && str(o.readers) ? { op: "ws_readers", path: o.path, readers: o.readers as AgentKnowledge } : null;
+      case "clock":
+        return str(o.time) ? { op: "clock", time: o.time } : null;
+      case "fix_set":
+        return str(o.entity) && str(o.field) && o.value !== undefined ? { op: "fix_set", entity: o.entity, field: o.field, value: o.value as JsonValue } : null;
+      default:
+        return parseEditOp(o);
+    }
+  });
+}
+
+/** One GM editor operation, checked for shape: null when malformed. */
+function parseEditOp(o: Record<string, unknown>): EditOp | null {
+  switch (o.op) {
+    case "set":
+      return str(o.entity) && str(o.field) && o.value !== undefined ? { op: "set", entity: o.entity, field: o.field, value: o.value as JsonValue } : null;
+    case "add":
+      return str(o.entity) && str(o.field) && typeof o.delta === "number" ? { op: "add", entity: o.entity, field: o.field, delta: o.delta } : null;
+    case "link":
+      if (!str(o.rel) || !str(o.from) || !str(o.to) || (o.fields !== undefined && !isRecord(o.fields)) || (o.until !== undefined && typeof o.until !== "number")) return null;
+      return { op: "link", rel: o.rel, from: o.from, to: o.to, ...(isRecord(o.fields) ? { fields: o.fields as JsonObject } : {}), ...(typeof o.until === "number" ? { until: o.until } : {}) };
+    case "unlink":
+      return str(o.rel) && str(o.from) && str(o.to) ? { op: "unlink", rel: o.rel, from: o.from, to: o.to } : null;
+    case "move":
+      return str(o.entity) && str(o.to) ? { op: "move", entity: o.entity, to: o.to } : null;
+    case "put":
+      return str(o.entity) && (o.into === null || str(o.into)) ? { op: "put", entity: o.entity, into: o.into } : null;
+    case "adjust":
+      return str(o.account) && typeof o.cents === "number" ? { op: "adjust", account: o.account, cents: o.cents } : null;
+    case "stage":
+      return str(o.track) && str(o.to) ? { op: "stage", track: o.track, to: o.to } : null;
+    case "entity": {
+      if (!str(o.entity) || (o.tier !== undefined && !str(o.tier)) || (o.agent !== undefined && typeof o.agent !== "boolean")) return null;
+      if (o.levels !== undefined && !(isRecord(o.levels) && Object.values(o.levels).every((v) => v === null || typeof v === "number"))) return null;
+      const levels: Record<string, number | null> = isRecord(o.levels) ? Object.fromEntries(Object.entries(o.levels).map(([d, v]) => [d, typeof v === "number" ? v : null])) : {};
+      return { op: "entity", entity: o.entity, ...(str(o.tier) ? { tier: o.tier } : {}), ...(typeof o.agent === "boolean" ? { agent: o.agent } : {}), ...(isRecord(o.levels) ? { levels } : {}) };
+    }
+    case "classify": {
+      if (!str(o.entity) || !isRecord(o.class) || !Array.isArray(o.tags) || !o.tags.every(str)) return null;
+      const classes: Record<string, string[]> = {};
+      for (const [facet, values] of Object.entries(o.class)) {
+        if (!safeKey(facet) || !Array.isArray(values) || !values.every(str)) return null;
+        classes[facet] = values.filter(str);
       }
-    })();
-    if (!op) return null;
-    out.push(op);
+      return { op: "classify", entity: o.entity, class: classes, tags: o.tags.filter(str) };
+    }
+    case "life":
+      if (!str(o.entity) || (o.to !== undefined && !str(o.to)) || (o.tell !== undefined && !(Array.isArray(o.tell) && o.tell.every(str))) || (o.to === undefined && o.tell === undefined)) return null;
+      return { op: "life", entity: o.entity, ...(str(o.to) ? { to: o.to } : {}), ...(Array.isArray(o.tell) ? { tell: o.tell.filter(str) } : {}) };
+    case "spawn":
+      if (!str(o.kind) || !str(o.name) || [o.id, o.tier, o.place].some((v) => v !== undefined && !str(v)) || (o.agent !== undefined && typeof o.agent !== "boolean")) return null;
+      return { op: "spawn", kind: o.kind, name: o.name, ...(str(o.id) ? { id: o.id } : {}), ...(str(o.tier) ? { tier: o.tier } : {}), ...(str(o.place) ? { place: o.place } : {}), ...(typeof o.agent === "boolean" ? { agent: o.agent } : {}) };
+    case "despawn":
+    case "restore":
+      return str(o.entity) ? { op: o.op, entity: o.entity } : null;
+    case "mind_pin":
+      return str(o.entity) && (o.level === null || o.level === "live" || o.level === "near" || o.level === "far" || o.level === "background") ? { op: "mind_pin", entity: o.entity, level: o.level } : null;
+    case "mind_refresh":
+      return str(o.entity) ? { op: "mind_refresh", entity: o.entity } : null;
+    case "mind_memory":
+      if (!str(o.entity) || (o.part !== "note" && o.part !== "commitment" && o.part !== "plan") || !(o.id === null || str(o.id)) || !(o.value === null || isRecord(o.value))) return null;
+      return { op: "mind_memory", entity: o.entity, part: o.part, id: o.id, value: o.value as JsonObject | null };
+    case "mind_intent":
+      // Each part is optional (absent keeps it), but one of them must be there.
+      if (!str(o.entity) || (o.text !== undefined && !str(o.text)) || (o.approach !== undefined && o.approach !== null && o.approach !== "reactive" && o.approach !== "proactive") || (o.text === undefined && o.approach === undefined)) return null;
+      return { op: "mind_intent", entity: o.entity, ...(str(o.text) ? { text: o.text } : {}), ...(o.approach !== undefined ? { approach: o.approach } : {}) };
+    case "mind_knowledge":
+      // The holding's shape is checked when it resolves, against what the chat knows then.
+      if (!str(o.entity) || !str(o.fact) || !(o.holding === null || isRecord(o.holding))) return null;
+      return { op: "mind_knowledge", entity: o.entity, fact: o.fact, holding: o.holding as unknown as Holding | null };
+    case "routine_follow": {
+      // Each part is optional (absent keeps it), but one of them must be there; null returns it to the world's (the role and the skip life to their level's).
+      const mode = o.mode === undefined || o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
+      const awareness = o.awareness === undefined || o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
+      const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
+      const skips = o.skips === undefined || o.skips === null || SKIP_LIVES.some((s) => s === o.skips);
+      if (!str(o.entity) || !mode || !awareness || !role || !skips || (o.mode === undefined && o.awareness === undefined && o.role === undefined && o.skips === undefined)) return null;
+      return { op: "routine_follow", entity: o.entity, ...(o.mode !== undefined ? { mode: ROUTINE_MODES.find((m) => m === o.mode) ?? null } : {}), ...(o.awareness !== undefined ? { awareness: ROUTINE_AWARENESS.find((a) => a === o.awareness) ?? null } : {}), ...(o.role !== undefined ? { role: ROUTINE_ROLES.find((r) => r === o.role) ?? null } : {}), ...(o.skips !== undefined ? { skips: SKIP_LIVES.find((s) => s === o.skips) ?? null } : {}) };
+    }
+    case "routine_block":
+      // The block's shape is checked when it resolves, against the chat's own sources.
+      if (!str(o.entity) || !str(o.block) || !(o.value === null || isRecord(o.value))) return null;
+      return { op: "routine_block", entity: o.entity, block: o.block, value: o.value as RoutineEntry | null };
+    case "schedule_override":
+      if (!str(o.entity) || !str(o.schedule) || !(o.value === null || isRecord(o.value))) return null;
+      return { op: "schedule_override", entity: o.entity, schedule: o.schedule, value: o.value as ChatScheduleChange | null };
+    case "effect":
+      return str(o.effect) && isRecord(o.args) ? { op: "effect", effect: o.effect, args: o.args as JsonObject } : null;
+    case "feed": {
+      if (!str(o.section) || o.section.trim() === "") return null;
+      if (o.to === null) return { op: "feed", section: o.section, to: null };
+      const to = readSectionFeed(o.to);
+      return to ? { op: "feed", section: o.section, to } : null;
+    }
+    default:
+      return null;
   }
-  return out;
 }

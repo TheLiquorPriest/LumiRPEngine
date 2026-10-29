@@ -107,7 +107,12 @@ export const COVERAGE: Coverage = {
     get: { tools: ["lre_preset", "lre_preset_add_blocks"] },
     add: { tools: ["lre_preset_add_blocks"] },
   },
-  "lre.diag": { get: { tools: ["lre_diag"] }, clear: { tools: ["lre_diag_clear"] }, dismiss: { tools: ["lre_activity_dismiss"] } },
+  "lre.diag": {
+    get: { tools: ["lre_diag"] },
+    clear: { tools: ["lre_diag_clear"] },
+    dismiss: { tools: ["lre_activity_dismiss"] },
+    text: { excluded: "An agent call's whole text, read one at a time by Diagnostics' Show text behind its curtain; lre_diag with spoilers lists the agent calls themselves (role, model, tokens, outcome, the tools called), which is what a client debugging a chat reads." },
+  },
   "lre.agents": {
     get: { excluded: "The update notice and Settings → MCP server read the MCP servers the extension knows of; an agent's own server state is lre_status." },
     kit: { excluded: "The MCP server's own check for a newer kit of tools, which its core runs on connect and on a timer, never an agent's call." },
@@ -124,4 +129,26 @@ export const COVERAGE: Coverage = {
     restore: { excluded: "Puts the user's World Info book back exactly as it stood before its move: the user's own press on Build's secrecy page, never an agent's call." },
   },
   "lre.cancel": { excluded: "Cancel on the activity line, the player's own stop for a turn in flight in the chat they watch; a tool's turn is the player's chat too, so the page that shows it stops it." },
+  "lre.acceptance": {
+    get: { excluded: "Settings → Agents and the drawer's counter read the acceptance run; an agent learns of a refused call from the call itself." },
+    open: { excluded: "Opening an acceptance run is the user's own GM action in Settings → Agents, refused to outside clients, so no agent arms a connection the runs guard." },
+    close: { excluded: "Closing an acceptance run is the user's own GM action in Settings → Agents, refused to outside clients, as opening one is." },
+  },
+  "lre.assistant": {
+    get: { excluded: "GM → Assistant's thread with the extension's own GM agent, behind the GM gate; an outside agent is an agent already, reading the chat itself with lre_gm and lre_chat_state." },
+    send: { excluded: "Asks the extension's GM agent, on the user's own connection and budgets, from GM → Assistant; an outside agent answers the user itself, through lre_gm and lre_edit." },
+    cancel: { excluded: "Stops the GM agent's answer under way in GM → Assistant: the user's own press on the running row, for an answer only that page asked for." },
+    apply: { excluded: "Applies a change the GM agent proposed in GM → Assistant on the user's own Apply; an outside agent makes its own edits with lre_edit, each with its own Undo." },
+    reject: { excluded: "Turns down a change the GM agent proposed, the user's own No on its card in GM → Assistant; nothing an outside agent does goes through those cards." },
+    clear: { excluded: "Forgets the chat's thread with the GM agent, the user's own press in GM → Assistant; an outside agent keeps no thread there." },
+  },
+  "lre.workspace": {
+    list: { excluded: "GM → Workspace's list of the agents' workspace files; the MCP server's tools reach the workspace when they move onto the agent tool layer (AGENT-LOOP-PLAN §11, Increment 3)." },
+    read: { excluded: "GM → Workspace reads an agent's workspace file for the user; the MCP server's tools reach the workspace when they move onto the agent tool layer (Increment 3)." },
+    write: { excluded: "GM → Workspace's own save of a file the user edited, held while a turn runs; the MCP server's tools write the workspace once they move onto the agent tool layer (Increment 3)." },
+    delete: { excluded: "GM → Workspace's Delete of a file, the user's own press with its Undo; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
+    move: { excluded: "GM → Workspace's Move of a file to another path, the user's own; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
+    pin: { excluded: "GM → Workspace's pin of a file for the agents, the user's own choice; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
+    readers: { excluded: "GM → Workspace's choice of whose knowledge may read a file, the user's own; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
+  },
 };

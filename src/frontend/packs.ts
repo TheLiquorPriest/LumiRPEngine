@@ -1,6 +1,6 @@
 // Every UI pack, in registration order. `core` holds the engine's own panels (Scene and Journal in
-// Play, GM view and Context in GM mode); each domain pack's `ui` registers its panels, editors and
-// chip renderers.
+// Play, GM view and Context in GM mode) and its GM tabs, GM → Assistant and GM → Workspace, after
+// the packs' tabs; each domain pack's `ui` registers its panels, editors and chip renderers.
 
 import calendar from "../packs/calendar/ui";
 import combat from "../packs/combat/ui";
@@ -12,6 +12,8 @@ import sheets from "../packs/sheets/ui";
 import space from "../packs/space/ui";
 import story from "../packs/story/ui";
 import vehicles from "../packs/vehicles/ui";
+import { AssistantSection } from "./gm/assistant";
+import { WorkspaceSection } from "./gm/workspace";
 import { ContextPanel } from "./play/context";
 import { GmPanel } from "./play/gm";
 import { JournalPanel } from "./play/journal";
@@ -25,6 +27,9 @@ const core: UiPackDef = {
     r.panel({ id: "core.journal", label: "Journal", order: 90, home: "story", component: JournalPanel });
     r.panel({ id: "core.gm", label: "GM view", order: 100, home: "gm", component: GmPanel });
     r.panel({ id: "core.context", label: "Context", order: 110, home: "gm", component: ContextPanel });
+    // After Money (30): the agents' tabs, before This chat.
+    r.gm({ id: "core.assistant", label: "Assistant", icon: "message", order: 40, component: AssistantSection });
+    r.gm({ id: "core.workspace", label: "Workspace", icon: "box", order: 50, component: WorkspaceSection });
   },
 };
 

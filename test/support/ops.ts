@@ -11,7 +11,7 @@
 // or removal, L5 off-path commit, L6 P4 re-render, L8 held writes, L13/L14 Continue, L15 stopped
 // Continue, L19 deletion, L34 dry run, L38 assistant edits, L39 user-edit pause, L43 a Re-run
 // carries its fixes, L45 a branch or import folds as its source (an earlier build's chat included), L46 detail materialized once, L49 a
-// request holds on its own path, per
+// request holds on its own path, L50 the pre-reply window, per
 // operation; L31 determinism in properties.test.ts. L4 is the classification these exercise; L10 and
 // L12 are in scenarios.test.ts and reference.test.ts. Pack-dependent invariants arrive with the packs.
 
@@ -29,6 +29,7 @@ import { startMarkersFrom } from "../../src/backend/start-markers";
 import { apartHost, applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, tiesOf, validateEvent, validMarkerBody } from "../../src/engine/events";
 import { touchedField } from "../../src/engine/touched";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
+import type { WriteResult } from "../../src/engine/ledger/journal";
 import { activeRecord, isLive, isTombstoned, turnPath } from "../../src/engine/ledger/path";
 import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRng, type Rng } from "../../src/engine/rng";
@@ -36,6 +37,21 @@ import type { FakeMessage, Generation } from "./fake-host";
 import { noCoverage, type Coverage } from "./coverage";
 import type { Folds, Harness } from "./harness";
 import { openMoney, POV } from "./test-pack";
+
+/**
+ * A write as the player, the GM or an agent makes it. `gm`: a GM-style fix instead (a money
+ * correction, a relation added or removed, a grouped edit), picked by its value; `asked`: a GM edit
+ * as the GM view writes it instead, with its request (the same kinds, `gmEditOps`), not written when
+ * the head refuses it; `open`: a ✎ cash fix on Dev instead, which opens his money first while it
+ * isn't; `life`: a GM life edit instead (a state set, someone told, or both as one unit); `mind`: a
+ * GM minds control instead (a pin, a refresh, a plan added or closed); `tie`: the head's latest
+ * purchase's price corrected instead, as Edit amount records it (`tiedTo` that purchase), not
+ * written when the head holds no purchase; `convert`: Keep converting the dropped line it picks
+ * instead (the chat's latest nearest 1), not written when nothing dropped. `hold`: flagged as a GM
+ * agent's write or a workspace save is, held through an engine run whatever the setting
+ * (`HeldWrite.hold`).
+ */
+type WriteOp = { op: "write"; kind: number; a: number; b: number; gm?: number; asked?: number; open?: number; life?: number; mind?: number; tie?: number; convert?: number; hold?: true };
 
 export type Op =
   /** `linked`: a purchase Dev's account covers part of instead (`LINKED_TEXTS`), with his transfer kept apart before it. */
@@ -52,18 +68,7 @@ export type Op =
   | { op: "deleteMessage"; at: number }
   | { op: "branch"; at: number }
   | { op: "import" }
-  /**
-   * `gm`: a GM-style fix instead (a money correction, a relation added or removed, a grouped edit),
-   * picked by its value; `asked`: a GM edit as the GM view writes it instead, with its request (the
-   * same kinds, `gmEditOps`), not written when the head refuses it; `open`: a ✎ cash fix on Dev
-   * instead, which opens his money first while it isn't; `life`: a GM life edit instead (a state set,
-   * someone told, or both as one unit); `mind`: a GM minds control instead (a pin, a refresh, a plan
-   * added or closed); `tie`: the head's latest purchase's price corrected instead, as Edit amount
-   * records it (`tiedTo` that purchase), not written when the head holds no purchase; `convert`: Keep
-   * converting the dropped line it picks instead (the chat's latest nearest 1), not written when
-   * nothing dropped.
-   */
-  | { op: "write"; kind: number; a: number; b: number; gm?: number; asked?: number; open?: number; life?: number; mind?: number; tie?: number; convert?: number }
+  | WriteOp
   /** A GM-style fix on the head (with `asked`, a GM edit with its request; with `open`, a ✎ cash fix on Dev; with `life`, a GM life edit), then a Re-run of the head with any reply (L43). */
   | { op: "fixRerun"; gm: number; a: number; reply: number; asked?: number; open?: number; opens?: number; life?: number }
   | { op: "dryRun" }
@@ -83,7 +88,14 @@ export type Op =
    */
   | { op: "askedEarlier"; asked: number; a: number; at: number; text: number }
   /** The Undo on a GM edit's chip on the head (picked by `a` among those it shows), as the player presses it: its entry named, taken back whole as it stands when the undo lands. */
-  | { op: "undoAsked"; a: number };
+  | { op: "undoAsked"; a: number }
+  /**
+   * A turn (a new reply, a Re-run of the head or a Continue, by `type`) with `writes` made while the
+   * engine runs it before its reply (DESIGN §4.3 P2), "Hold writes during the engine run" set to
+   * `setting`; with `edit`, an earlier reply edited then too, its event arriving while the engine
+   * still runs (`now`) or after, while the turn waits for its reply; then the reply (or its stop).
+   */
+  | { op: "duringRun"; type: number; writes: WriteOp[]; setting: boolean; edit?: number; now: boolean; stop: boolean; reply: number };
 
 const USER_TEXTS = ["buy:map:30", "buy:lamp:20", "buy:rope:90", "use:map", "use:lamp", "use:rope", "earn:15", "roll", "look around"];
 const REPLIES = ["Okay.", "You find coins. [found:5]", "The lamp slips away. [lose:lamp]", "A windfall! [found:40]", "You drop the map. [lose:map]", "Nothing happens."];
@@ -284,12 +296,39 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     // GM edits that keep their request, and what moves them onto other views, after those, from their own stream.
     const asked = rng.fork("asked");
     ops.push(...generateAsked(asked, 1 + Math.floor(asked.next() * 14)));
-    // Purchases an overdraft link covers part of, and their price corrections, last, from their own stream.
+    // Purchases an overdraft link covers part of, and their price corrections, after those, from their own stream.
     const linked = rng.fork("linked");
     ops.push(...generateLinked(linked, 1 + Math.floor(linked.next() * 14)));
+    // Writes made while the engine runs a turn before its reply, last, from their own stream.
+    const during = rng.fork("during-run");
+    ops.push(...generateDuringRun(during, 1 + Math.floor(during.next() * 6)));
   }
   // Drawn from a stream of its own, so the sequence is otherwise as before.
   if (depth === 0 && rng.fork("earlier-build").next() < 0.25) ops.unshift({ op: "earlierBuild" });
+  return ops;
+}
+
+/**
+ * Writes made while the engine runs a turn before its reply (DESIGN §4.3 P2, L50): a GM agent's or a
+ * workspace save (`hold`) or anyone's, with "Hold writes during the engine run" on or off, at times
+ * with an earlier reply edited then too, which still makes the turn stale; and around them the turns,
+ * Re-runs and swipes they land over. It starts by settling a pause an earlier part left, since a
+ * paused chat refuses every write but Keep and Discard.
+ */
+function generateDuringRun(rng: Rng, length: number): Op[] {
+  const ops: Op[] = [];
+  const r = (): number => rng.next();
+  ops.push({ op: "write", kind: 0.62 + r() * 0.1, a: r(), b: r() });
+  for (let i = 0; i < length; i++) {
+    const roll = r();
+    if (roll < 0.55) {
+      const writes = Array.from({ length: 1 + Math.floor(r() * 3) }, (): WriteOp => ({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}), ...(r() < 0.5 ? { hold: true as const } : {}) }));
+      ops.push({ op: "duringRun", type: r(), writes, setting: r() < 0.5, ...(r() < 0.3 ? { edit: r() } : {}), now: r() < 0.5, stop: r() < 0.2, reply: r() });
+    } else if (roll < 0.75) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false });
+    else if (roll < 0.85) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5 });
+    else if (roll < 0.92) ops.push({ op: "navigate", at: r(), swipe: r() });
+    else ops.push({ op: "write", kind: r(), a: r(), b: r() });
+  }
   return ops;
 }
 
@@ -987,6 +1026,62 @@ export class Runner {
         }
         return;
       }
+      case "duringRun": {
+        const type = op.type < 0.6 ? "normal" : op.type < 0.85 ? "swipe" : "continue";
+        const head = this.head();
+        if (type !== "normal" && !head) return;
+        const core = await this.h.core(chat);
+        const before = type === "swipe" && head ? { ledger: structuredClone(core.journal.messages[head.id]?.ledger), tombstones: structuredClone(core.journal.tombstones) } : null;
+        this.h.holdWrites(op.setting);
+        // The engine run's pre phase, while the run holds the chat's queue: each write is made then,
+        // and waits behind the run, so none is awaited there; and then an earlier reply's edit.
+        const made: { held: boolean; result: Promise<WriteResult> }[] = [];
+        let edited = false;
+        this.h.duringRun = async (chatId) => {
+          for (const inner of op.writes) {
+            const w = await this.writeFor(inner);
+            if (!w) continue;
+            if (inner.hold) w.hold = true;
+            made.push({ held: inner.hold === true || op.setting, result: this.h.service.write(chatId, this.h.host.userId, w) });
+          }
+          // A reply before the turn's own target: its edit changes the chain the turn is planned on.
+          const replies = this.assistants().filter((m) => type === "normal" || m.id !== head?.id);
+          if (op.edit === undefined || replies.length === 0) return;
+          host.editMessage(chatId, pick(replies, op.edit).id, `${pick(EDITS, op.edit)} (${++this.ids})`);
+          edited = true;
+          if (op.now) host.deliverNow();
+        };
+        let g: Generation;
+        if (type === "normal") {
+          host.sendUser(chat, pick(USER_TEXTS, op.reply));
+          await host.settle();
+          g = await host.start(chat, { type: "normal" });
+        } else {
+          g = await host.start(chat, { type, messageId: head?.id ?? "" });
+        }
+        this.h.duringRun = null;
+        const results = await Promise.all(made.map((m) => m.result));
+        const unheld = made.some((m) => !m.held);
+        const started = g.halted === undefined;
+        // L50: what the turn's pre-reply window holds never throws the turn away; a write it doesn't
+        // hold, or an edit of the chain the turn was planned on, does, as it always has.
+        if (!unheld && !edited && !started && made.length > 0) throw new InvariantError("L50", `${chat}: a turn whose writes were all held didn't start its reply`);
+        if ((unheld || edited) && started) throw new InvariantError("L50", `${chat}: a turn started its reply though ${edited ? "a reply before it was edited" : "a write its window doesn't hold was made"} while the engine ran`);
+        // L50: none of what it held is journaled before the turn closes.
+        if (started && made.some((m, i) => m.held && results[i]?.applied === true)) throw new InvariantError("L50", `${chat}: a write held through the engine run was journaled before its turn closed`);
+        const pending = results.some((r) => r.pending);
+        if (started && pending) this.coverage.prereply.held++;
+        if (!started && pending) this.coverage.prereply.ended++;
+        if (!started && (unheld || edited)) this.coverage.prereply.stale++;
+        if (started) {
+          const reply = pick(REPLIES, op.reply);
+          if (op.stop) await host.stop(g, reply.slice(0, 6));
+          else await host.finish(g, reply);
+          if (before && head) await this.checkRerun(chat, head.id, g.swipeId, before.ledger, before.tombstones);
+        }
+        this.h.holdWrites(false);
+        return;
+      }
       case "upgrade": {
         const merge = pick<UpgradePicks>([{}, { [POV]: { fields: { cash: "take" } } }, { [POV]: { entity: "keep" } }, { [POV]: { fields: { cash: "keep", mood: "take" } }, dev: { entity: "take" } }], op.picks);
         const before = (await this.h.folds(chat)).reference.state;
@@ -1433,6 +1528,9 @@ export class Runner {
         }
       }
       if (core.journal.windows.length > 0) throw new InvariantError("P2", `${chatId}: a window is still open between operations`);
+      // L50: every engine run's turn closed or ended by the end of its operation, and with it its pre-reply window; nothing is left held.
+      if ((core.journal.prereply ?? []).length > 0) throw new InvariantError("L50", `${chatId}: a pre-reply window is still open between operations`);
+      if (core.journal.held.length > 0) throw new InvariantError("P2", `${chatId}: a write is still held between operations`);
       const memory = this.memory.get(chatId) ?? { start: null, maxSeq: 0, tombstones: 0 };
       // L9: seq never decreases and never names two different entries (a Re-narrate copy keeps its source's seq, P3).
       if (core.journal.seq < memory.maxSeq) throw new InvariantError("L9", `${chatId}: seq went back from ${memory.maxSeq} to ${core.journal.seq}`);
@@ -1520,6 +1618,7 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
       for (const k of ["life", "told"] as const) coverage.lives[k] += runner.coverage.lives[k];
       for (const k of ["mind", "memory", "presence", "fix"] as const) coverage.minds[k] += runner.coverage.minds[k];
       for (const k of ["queued", "check", "failure", "interruption"] as const) coverage.queues[k] += runner.h.plays[k];
+      for (const k of ["held", "ended", "stale"] as const) coverage.prereply[k] += runner.coverage.prereply[k];
     }
     return null;
   } catch (error) {

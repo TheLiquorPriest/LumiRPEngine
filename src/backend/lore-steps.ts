@@ -318,11 +318,15 @@ export class StepLore {
     this.lookups?.budget.release();
   }
 
-  /** The connection refused the tools: this step asks in the need form instead (the refusal is kept once that works). */
-  refuseTools(): LookupTransport {
+  /**
+   * The call with the lore tools failed for good: this step asks in the need form instead. `refused`:
+   * the connection said it takes no tools, which `keepRefusal` keeps once the need form works; any
+   * other failure is this call's own.
+   */
+  refuseTools(refused: boolean): LookupTransport {
     this.transport = "need";
     this.trace.transport = "need";
-    this.note("The connection refused the lore tools, so the step asked in the need form.");
+    this.note(refused ? "The connection refused the lore tools, so the step asked in the need form." : "The call with the lore tools failed, so the step asked in the need form.");
     return "need";
   }
 

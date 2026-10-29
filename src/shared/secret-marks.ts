@@ -42,6 +42,7 @@
 // (`renderSecretMarks`), it is left out as far as the host's lexing could take it.
 
 import type { EntityId } from "./ids";
+import { neutralizeMacros } from "./macros";
 import type { LintIssue } from "./protocol";
 
 /**
@@ -81,10 +82,12 @@ export interface SecretMarkInput {
 }
 
 /**
- * How the narrator is told a mark (`renderMark` "marked", Settings → Narrator): `known` for a secret
- * with holders kept from everyone else, `kept` for one kept from some (or, with `everyone` as its
- * names, from everyone but its holders, none named), `both` for holders and some it is kept from.
- * `{{text}}` is the mark's text, `{{known}}` and `{{kept}}` the names, joined by commas.
+ * How the narrator is told a mark (`renderMark` "marked"), as a turn resolves it from the prompt
+ * registry's Secret marks texts (`narrator.mark.*` and `narrator.secret_marks`, Settings → Agents →
+ * Prompts → Final output; `markWording`, `backend/prompts.ts`): `known` for a secret with holders kept
+ * from everyone else, `kept` for one kept from some (or, with `everyone` as its names, from everyone
+ * but its holders, none named), `both` for holders and some it is kept from. `{{text}}` is the mark's
+ * text, `{{known}}` and `{{kept}}` the names, joined by commas.
  */
 export interface SecretMarkWording {
   known: string;
@@ -93,14 +96,14 @@ export interface SecretMarkWording {
   /** What `{{kept}}` says of a secret kept from everyone but its holders. */
   everyone: string;
   /**
-   * The narrator rules' sentence on what a mark means (`secretMarksRule` in `engine/feed.ts`):
-   * `{{forms}}` is each form a mark takes in this wording, joined with " or ", and `{{everyone}}` the
-   * word for everyone, so an edited wording is still explained.
+   * The narrator rules' sentence on what a mark means (`narratorRules`): `{{forms}}` is each form a
+   * mark takes in this wording (`secretMarkForms`), joined with " or ", and `{{everyone}}` the word
+   * for everyone, so an edited wording is still explained.
    */
   rule: string;
 }
 
-/** The shipped wording; the user's own overrides each part (Settings → Narrator, with a reset). */
+/** The shipped wording: each of the registry's Secret marks texts as shipped, which the user's own text replaces, with a reset. */
 export const SECRET_MARK_WORDING: Readonly<SecretMarkWording> = {
   known: "{{text}} [secret; known to {{known}}]",
   kept: "{{text}} [secret; kept from {{kept}}]",
@@ -419,6 +422,17 @@ export function secretMarkText(text: string, known: readonly string[], kept: rea
   const template = known.length === 0 ? wording.kept : keptFrom === null ? wording.known : wording.both;
   const values: Readonly<Record<string, string>> = { text, known: known.join(", "), kept: keptFrom ?? wording.everyone };
   return template.replace(/\{\{(text|known|kept)\}\}/g, (whole, key: string) => values[key] ?? whole);
+}
+
+/**
+ * Every form a secret's mark takes in a wording, "…" standing for its text and names: each case
+ * `secretMarkText` writes for the sections and the interceptor (holders or none, kept from some or
+ * from everyone), as a section shows it. The narrator rules' text on secret marks
+ * (`narrator.secret_marks`, `narratorRules`) names them all, so an edited wording is still explained.
+ */
+export function secretMarkForms(wording: SecretMarkWording = SECRET_MARK_WORDING): string[] {
+  const cases: [string[], string[] | "everyone"][] = [[["…"], "everyone"], [[], ["…"]], [[], "everyone"], [["…"], ["…"]]];
+  return [...new Set(cases.map(([known, kept]) => neutralizeMacros(secretMarkText("…", known, kept, wording))))];
 }
 
 /**

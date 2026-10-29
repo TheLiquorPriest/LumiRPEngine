@@ -1,13 +1,16 @@
 // A step's own prompt and the placeholders it may use (DESIGN §5.2): the prompt editor Settings → Minds,
-// Settings → Steps and connections and Settings → Narrator share, and the vars panel shown beside every
-// template editor (those, and Build's step templates), read from the one table of what each step is
-// given (`STEP_VARS`); a text that isn't a step's prompt (a secret's mark) lists its own. Styles: styles/minds.ts.
+// Settings → Steps and connections and Settings → Agents → Prompts share, and the vars panel shown
+// beside every template editor (those, and Build's step templates), read from the one table of what
+// each step is given (`STEP_VARS`), or for a text of the prompts registry from its own placeholders
+// (`PromptDef.vars`, DESIGN §6.12). Styles: styles/minds.ts.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
 import { STEP_VARS, VAR_TEXT } from "../../shared/steps";
+import type { PromptVar } from "../../shared/prompts";
+import { placeholder } from "../../shared/prompts";
 import type { StepPurpose, StepTemplateDef } from "../../shared/world";
 import { Badge, Button, Disclosure } from "../components";
 import { Icon } from "../icons";
@@ -15,8 +18,8 @@ import { Icon } from "../icons";
 /** Which step's placeholders: a purpose, or the skip plan. */
 export type VarsKey = StepPurpose | "skip_plan";
 
-/** A placeholder a text that isn't a step's prompt is filled with, and what it holds. */
-export interface Placeholder {
+/** A placeholder as a vars panel lists it, and what it holds. */
+interface Placeholder {
   name: string;
   holds: string;
 }
@@ -32,7 +35,7 @@ function PlaceholderList(props: { vars: readonly Placeholder[] }) {
       {props.vars.map((v) => (
         <div key={v.name} class="lre-minds-var" data-lre-var={v.name}>
           <dt>
-            <code>{`{{${v.name}}}`}</code>
+            <code>{placeholder(v.name)}</code>
           </dt>
           <dd>{v.holds}</dd>
         </div>
@@ -56,12 +59,13 @@ export function VarsPanel(props: { step: VarsKey; output?: StepTemplateDef["outp
   );
 }
 
-/** A text's own placeholders, for one that isn't a step's prompt. */
-function OwnVarsPanel(props: { vars: readonly Placeholder[] }) {
+/** The placeholders a text of the prompts registry may use, what each holds, and which it must keep (DESIGN §6.12). */
+export function PromptVarsPanel(props: { vars: readonly PromptVar[] }) {
   return (
-    <div class="lre-minds-vars" data-lre-vars="own">
+    <div class="lre-minds-vars" data-lre-vars="prompt">
       <Disclosure summary="Placeholders">
-        {props.vars.length === 0 ? <p class="lre-minds-note">No placeholders: it is used as you write it.</p> : <PlaceholderList vars={props.vars} />}
+        {props.vars.length === 0 ? <p class="lre-minds-note">No placeholders: the text is sent as you write it.</p> : null}
+        {props.vars.length > 0 ? <PlaceholderList vars={props.vars.map((v) => ({ name: v.name, holds: v.required ? `${v.text}; it must stay in the text` : v.text }))} /> : null}
       </Disclosure>
     </div>
   );
@@ -71,19 +75,17 @@ function OwnVarsPanel(props: { vars: readonly Placeholder[] }) {
  * One prompt of the user's own for a step: the text saved, else the built-in to start from, with
  * Save, Revert and Reset. Every step's editor reads alike: a line on what the prompt does, then, folded
  * and read-only, the built-in it replaces (`builtIn`) or, for a step whose prompt goes before
- * instructions it keeps, what those hold (`adds`), since they're made fresh each turn. `save` turns
- * the text (null to reset) into the settings patch, or null when it can't be saved; `problem` says
- * why, under the text. `vars` is a step's placeholders, or a text's own list; `noun` what the text
- * is called, "prompt" unless it's another text sent to a model (a secret's mark, its "wording").
+ * instructions it keeps, what those hold (`adds`), since they're made fresh each turn. `vars` is a
+ * step's (its vars panel) or a registry text's own placeholders; `problems` says what is wrong with
+ * the text as written (a placeholder it doesn't have, one it must keep), each shown under it. `save`
+ * turns the text (null to reset) into the settings patch, or null when it can't be saved.
  */
-export function PromptEditor(props: { id: string; label: string; note: string; builtIn?: string; adds?: string; value: string | undefined; max: number; vars: VarsKey | readonly Placeholder[]; noun?: string; rows?: number; busy: boolean; save(text: string | null): JsonObject | null; problem?(text: string): string | null; patch(patch: JsonObject): void; children?: ComponentChildren }) {
-  const noun = props.noun ?? "prompt";
+export function PromptEditor(props: { id: string; label: string; note: string; builtIn?: string; adds?: string; value: string | undefined; max: number; vars: VarsKey | readonly PromptVar[]; problems?(text: string): readonly string[]; busy: boolean; save(text: string | null): JsonObject | null; patch(patch: JsonObject): void; children?: ComponentChildren }) {
   const saved = props.value ?? props.builtIn ?? "";
   const [text, setText] = useState(saved);
   useEffect(() => setText(saved), [saved]);
   const save = props.save(text);
-  const tooLong = text.length > props.max;
-  const problem = tooLong || !props.problem ? null : props.problem(text);
+  const problems = props.problems ? props.problems(text) : [];
   return (
     <div class="lre-minds-prompt" data-lre-minds-prompt={props.id}>
       <Disclosure
@@ -97,19 +99,19 @@ export function PromptEditor(props: { id: string; label: string; note: string; b
           </span>
         }
       >
-        <textarea class="lre-input lre-minds-prompt-input" rows={props.rows ?? 10} aria-label={`${props.label} ${noun}`} placeholder={props.builtIn === undefined ? "Nothing added: the built-in instructions run alone." : undefined} value={text} disabled={props.busy} onInput={(event) => setText(event.currentTarget.value)} />
-        {tooLong ? (
+        <textarea class="lre-input lre-minds-prompt-input" rows={10} aria-label={`${props.label} prompt`} placeholder={props.builtIn === undefined ? "Nothing added: the built-in instructions run alone." : undefined} value={text} disabled={props.busy} onInput={(event) => setText(event.currentTarget.value)} />
+        {text.length > props.max ? (
           <div class="lre-set-warn" role="note">
             <Icon name="alert" size={16} />
             <span>Too long: at most {props.max.toLocaleString()} characters.</span>
           </div>
         ) : null}
-        {problem ? (
-          <div class="lre-set-warn" role="note">
+        {problems.map((p) => (
+          <div key={p} class="lre-set-warn" role="note" data-lre-prompt-problem>
             <Icon name="alert" size={16} />
-            <span>{problem}</span>
+            <span>{p.charAt(0).toUpperCase() + p.slice(1)}.</span>
           </div>
-        ) : null}
+        ))}
         <div class="lre-minds-actions">
           <Button size="sm" variant="primary" disabled={props.busy || save === null || text === saved} onClick={() => save && props.patch(save)}>
             Save
@@ -121,11 +123,11 @@ export function PromptEditor(props: { id: string; label: string; note: string; b
             Reset to the default
           </Button>
         </div>
-        {typeof props.vars === "string" ? <VarsPanel step={props.vars} /> : <OwnVarsPanel vars={props.vars} />}
+        {typeof props.vars === "string" ? <VarsPanel step={props.vars} /> : <PromptVarsPanel vars={props.vars} />}
         {props.builtIn !== undefined ? (
           <div class="lre-minds-default" data-lre-built-in="replaced">
-            <Disclosure summary={`The built-in ${noun} (read-only)`}>
-              <p class="lre-minds-note">{`Your ${noun} starts from this and replaces it; Reset to the default goes back to it.`}</p>
+            <Disclosure summary="The built-in prompt (read-only)">
+              <p class="lre-minds-note">Your prompt starts from this and replaces it; Reset to the default goes back to it.</p>
               <pre class="lre-minds-code">{props.builtIn}</pre>
             </Disclosure>
           </div>

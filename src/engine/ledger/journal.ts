@@ -22,10 +22,12 @@ import type {
   PendingTurn,
   PostEntry,
   Rec,
+  RecSession,
   RecStatus,
   CarryDrop,
 } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
+import { isBlobHash } from "../../shared/stores";
 import type { WorldDoc } from "../../shared/world";
 import { applyEvent, applyMarker, applyValidUnits, validateEvent, validMarkerBody } from "../events";
 import type { ReadContext } from "../registry";
@@ -528,11 +530,63 @@ export class LedgerCore {
   /**
    * Engine first (DESIGN §5.1): a turn the engine plans before its generation exists, under the
    * engine's own id. It is pending without a window, and only while the engine run plans it: `take`
-   * then hands it out, so no other operation meets it and it is never persisted.
+   * then hands it out, so no other operation meets it and it is never persisted. The run opens its
+   * pre-reply window (P2), apart from `windows`, since a turn being planned is not in flight:
+   * until the generation that takes the turn takes the window over (`handOver`), or the run ends
+   * without a reply (`endRun`), it holds the writes made meanwhile that are held through the run
+   * (`write`'s `early`). One run plans at a time, so a window an earlier run left open is a turn this
+   * one replaces: what it holds waits for this run's turn instead, and never lands while this run's
+   * chain may still show the blank swipe a stopped Regenerate left.
    */
   prepare(input: StartedInput, observed: readonly ChainMessage[]): void {
     this.started(input, observed);
     this.journal.windows = this.journal.windows.filter((w) => w !== input.generationId);
+    for (const run of this.journal.prereply ?? []) this.pass(run, [input.generationId]);
+    this.journal.prereply = [input.generationId];
+  }
+
+  /**
+   * The generation that took a prepared turn takes over its run's pre-reply window (P2): what
+   * the window holds waits for that generation's own window now, so it lands as the turn closes,
+   * over whatever its reply did. Without that window open, it can hold nothing, so the run ends.
+   */
+  handOver(run: GenerationId, generationId: GenerationId, observed: readonly ChainMessage[]): void {
+    if (!this.journal.windows.includes(generationId)) {
+      this.endRun(run, observed);
+      return;
+    }
+    if (!this.shut(run)) return;
+    this.pass(run, [generationId]);
+  }
+
+  /**
+   * A run's turn will get no reply (P2): the run failed, was cancelled or waits on the player, or
+   * its turn went stale or no generation will take it. Its pre-reply window closes, and what it held
+   * lands now, each GM edit or ✎ fix worked out again over the chat as it stands (`land`). A reply
+   * under way holds them on instead, as it holds every write made during it.
+   */
+  endRun(run: GenerationId, observed: readonly ChainMessage[]): void {
+    if (!this.shut(run)) return;
+    if (this.journal.windows.length > 0) {
+      this.pass(run, this.journal.windows);
+      return;
+    }
+    if (this.land(run, observed)) this.snapshot(observed);
+  }
+
+  /** Closes the pre-reply window `run`; false when it wasn't open. */
+  private shut(run: GenerationId): boolean {
+    const open = this.journal.prereply ?? [];
+    if (!open.includes(run)) return false;
+    const rest = open.filter((r) => r !== run);
+    if (rest.length > 0) this.journal.prereply = rest;
+    else delete this.journal.prereply;
+    return true;
+  }
+
+  /** The writes held for window `from` wait for the windows `to` instead. */
+  private pass(from: GenerationId, to: readonly GenerationId[]): void {
+    for (const h of this.journal.held) if (h.waitFor.includes(from)) h.waitFor = [...new Set([...h.waitFor.filter((w) => w !== from), ...to])];
   }
 
   /** The prepared turn `prepare` began, taken out of the journal; null when there is none. */
@@ -545,7 +599,8 @@ export class LedgerCore {
 
   /**
    * The generation the guard let through takes the prepared turn's plan (DESIGN §5.1): its kind,
-   * seed, planned events and start markers, the chain they were folded on, and a Re-narrate's copies.
+   * seed, planned events and start markers, the chain they were folded on, a Re-narrate's copies,
+   * and the prompt set its sections were made from (§6.12).
    * Its own target, window and save tracking stay. False when the generation has no pending turn or
    * the prepared one has no plan (a Continue's).
    */
@@ -559,6 +614,7 @@ export class LedgerCore {
     if (from.copies) p.copies = from.copies;
     if (from.undone) p.undone = from.undone;
     if (from.dropped) p.dropped = from.dropped;
+    if (from.prompts) p.prompts = from.prompts;
     return true;
   }
 
@@ -1035,6 +1091,7 @@ export class LedgerCore {
       intents: {},
     };
     if (at?.elsewhere) rec.readElsewhere = true;
+    if (p.prompts) rec.prompts = p.prompts;
     if (p.copies) {
       // P3: the new reply is read on the same fold prefix as its source's was (its `pre` after the
       // source's markers), and the copies, keeping their seqs and undos, are carried after that read:
@@ -1129,17 +1186,27 @@ export class LedgerCore {
     j.windows = j.windows.filter((w) => w !== generationId);
     // Changes deferred while the turn was in flight are classified now, then held writes land (P2).
     this.classify(observed);
-    for (const h of j.held) h.waitFor = h.waitFor.filter((w) => w !== generationId);
+    this.land(generationId, observed);
+    this.snapshot(observed);
+  }
+
+  /**
+   * Window `window` closed: the writes that waited only for it land now, in the order they were made
+   * (P2). A GM edit or ✎ fix lands over whatever the turn changed (`apply`, `held`). A held
+   * write that can't be made at all is kept with its reason, so the player is told rather than it
+   * vanishing (the view's notice; the GM view has the reason). False when none was waiting.
+   */
+  private land(window: GenerationId, observed: readonly ChainMessage[]): boolean {
+    const j = this.journal;
+    for (const h of j.held) h.waitFor = h.waitFor.filter((w) => w !== window);
     const ready = j.held.filter((h) => h.waitFor.length === 0);
+    if (ready.length === 0) return false;
     j.held = j.held.filter((h) => h.waitFor.length > 0);
-    // A GM edit or ✎ fix lands over whatever the reply changed (`apply`, `held`). A held write that
-    // can't be made at all is kept with its reason, so the player is told rather than it vanishing
-    // (the view's notice; the GM view has the reason).
     for (const h of ready) {
       const reason = this.apply(h.write, observed, true);
       if (reason) this.refuse(h.write, reason, observed);
     }
-    this.snapshot(observed);
+    return true;
   }
 
   private refuse(write: HeldWrite, reason: string, observed: readonly ChainMessage[]): void {
@@ -1160,6 +1227,8 @@ export class LedgerCore {
   /**
    * Restart recovery (DESIGN §5.1 step 7): the windows of `gone`, generations a stopped backend left
    * open, close. A turn under way keeps its pending entry, so its reply is still read and recorded.
+   * So do the pre-reply windows of `gone`: the engine runs a stopped backend left, and the turns they
+   * prepared, lived in its memory only (P2).
    */
   restart(observed: readonly ChainMessage[], gone: ReadonlySet<GenerationId>): void {
     for (const p of Object.values(this.journal.pending)) {
@@ -1171,14 +1240,49 @@ export class LedgerCore {
       if (m && p.messageId && saved !== "" && !hasRecord && p.kind !== "continue" && p.kind !== "impersonate") this.commit(p, p.messageId, saved, "degraded", observed, false);
       this.close(p.generationId, observed);
     }
+    for (const run of [...(this.journal.prereply ?? [])]) if (gone.has(run)) this.endRun(run, observed);
+  }
+
+  /**
+   * Writes a turn's agent session blobs into its record (DESIGN §4.4), at the turn's close: the
+   * record of a swipe of the latest reply, and only while no turn is pending or in flight, since
+   * nothing is written into a record after the next turn is planned. `session` joins what the record
+   * holds, part by part. Outside the path hash, so no path moves and no fold changes. Null once
+   * written, else why it wasn't.
+   */
+  recordSession(messageId: MessageId, swipeId: number, session: RecSession, observed: readonly ChainMessage[]): string | null {
+    if (this.inFlight || Object.keys(this.journal.pending).length > 0) return "the next turn is already under way";
+    const parts: RecSession = {};
+    for (const part of ["segment", "summary", "archived"] as const) {
+      const hash = session[part];
+      if (hash === undefined) continue;
+      if (!isBlobHash(hash)) return `the session's ${part} isn't a stored blob's hash`;
+      parts[part] = hash;
+    }
+    const chain = this.chain(observed);
+    const index = chain.findLastIndex((m) => !m.isUser);
+    const head = chain[index];
+    if (!head || head.id !== messageId) return "the turn's reply is no longer the latest";
+    const stored = head.ledger?.swipes[String(swipeId)];
+    if (!stored || stored.path === "" || isTombstoned(this.journal.tombstones, messageId, stored)) return "the reply has no turn record";
+    const rec = this.ledgerFor(messageId, observed[index]).swipes[String(swipeId)];
+    if (!rec) return "the reply has no turn record";
+    rec.session = { ...rec.session, ...parts };
+    return null;
   }
 
   // ------------------------------------------------------------------ user writes
 
-  write(w: HeldWrite, observed: readonly ChainMessage[]): WriteResult {
+  /**
+   * A user write: journaled now, or held while a window is open (P2) and journaled once every window
+   * open when it was made has closed. `early`: the backend holds it through an engine run as well,
+   * so an open pre-reply window holds it too; without one open, `early` changes nothing.
+   */
+  write(w: HeldWrite, observed: readonly ChainMessage[], early = false): WriteResult {
     if (this.journal.pauses.length > 0 && w.kind !== "keep" && w.kind !== "discard") return { applied: false, pending: false, reason: "paused" };
-    if (this.journal.windows.length > 0) {
-      this.journal.held.push({ write: w, waitFor: [...this.journal.windows] });
+    const waitFor = early ? [...this.journal.windows, ...(this.journal.prereply ?? [])] : [...this.journal.windows];
+    if (waitFor.length > 0) {
+      this.journal.held.push({ write: w, waitFor });
       return { applied: false, pending: true };
     }
     const reason = this.apply(w, observed);

@@ -591,7 +591,7 @@ describe("Who knows what, a fact at a time, as the chat's own narrator knowledge
     /** The section at a cap, one token a line so the cap is a number of lines, with the shared budget no limit. */
     const section = (at: { world: WorldDoc; state: Readonly<WorldState> }, view: NarratorView, cap: number): { scope: string | undefined; lines: string[] } => {
       const { world, state } = at;
-      const built = buildSections({ registry: reg, world, state, secrets: unrevealedSecrets(reg, world, state), narrator: { chat: view, view }, wording: SECRET_MARK_WORDING, budget: Number.MAX_SAFE_INTEGER, mindsBudget: Number.MAX_SAFE_INTEGER, knowledge: { ...KNOWLEDGE_DEFAULTS, narratorTokens: cap }, said: "", planned: { outcome: [], montage: [] }, outline: [], elapsed: null, hasEntry: () => true, cost: (content) => bullets(content).length, seen: () => {}, warn: () => {} });
+      const built = buildSections({ registry: reg, world, state, secrets: unrevealedSecrets(reg, world, state), narrator: { chat: view, view }, wording: SECRET_MARK_WORDING, budget: Number.MAX_SAFE_INTEGER, mindsBudget: Number.MAX_SAFE_INTEGER, texts: {}, knowledge: { ...KNOWLEDGE_DEFAULTS, narratorTokens: cap }, said: "", planned: { outcome: [], montage: [] }, outline: [], elapsed: null, hasEntry: () => true, cost: (content) => bullets(content).length, seen: () => {}, warn: () => {} });
       const out = built.sections.find((s) => s.slot === "knowledge");
       return { scope: out?.scope, lines: bullets(out?.content) };
     };

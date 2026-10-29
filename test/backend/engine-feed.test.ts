@@ -5,9 +5,9 @@
 // with marked facts or without.
 
 import { describe, expect, test } from "bun:test";
-import { NARRATOR_AUTHORITY, NARRATOR_SOURCE } from "../../src/backend/book";
+import { MARKED_FACTS_RULE, NARRATOR_AUTHORITY, NARRATOR_SOURCE } from "../../src/shared/prompts";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
-import { MARKED_FACTS_RULE, markedText } from "../../src/engine/feed";
+import { markedText } from "../../src/engine/feed";
 import { editRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";
 import type { EditOp } from "../../src/shared/protocol";

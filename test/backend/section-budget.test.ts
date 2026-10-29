@@ -24,7 +24,7 @@ function world(): WorldDoc {
 
 /** The sections on the budget, read as the player character knows the world, so only plain lines spend it. */
 function build(w: WorldDoc, budget: number): SectionsBuilt {
-  return buildSections({ registry: reg, world: w, state: startState(w, reg), secrets: [], narrator: { chat: null, view: { knowledge: "pov", secrets: "omit" } }, wording: SECRET_MARK_WORDING, budget, mindsBudget: 1000, said: "", planned: { outcome: ["You look around."], montage: [] }, outline: [], elapsed: 5, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
+  return buildSections({ registry: reg, world: w, state: startState(w, reg), secrets: [], narrator: { chat: null, view: { knowledge: "pov", secrets: "omit" } }, wording: SECRET_MARK_WORDING, budget, mindsBudget: 1000, texts: {}, said: "", planned: { outcome: ["You look around."], montage: [] }, outline: [], elapsed: 5, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
 }
 
 describe("a section over what is left of the section budget", () => {

@@ -38,7 +38,7 @@ import kits from "./tables/modern-us/kits.json";
 import slots from "./tables/modern-us/slots.json";
 
 /** What a holder wears or has equipped. */
-function wornBy(ctx: ReadContext, who: EntityId): EntityId[] {
+export function wornBy(ctx: ReadContext, who: EntityId): EntityId[] {
   return Object.keys(ctx.state.entities)
     .sort()
     .filter((id) => own(ctx.state.entities, id)?.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who));

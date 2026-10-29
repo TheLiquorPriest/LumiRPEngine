@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { formatMoney, requirementExpr } from "../shared/world";
 import { bandTiers } from "../shared/tiers";
-import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
+import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, PostEntry, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
 import type { GenerateAs } from "../shared/protocol";
 import { narratorViewOf, type NarratorView } from "../shared/settings";
@@ -364,9 +364,10 @@ const UNSEEN_NAMES = 3;
 /**
  * A ✎ fix's or GM edit's chip line when the POV may see none of its changes: who it was about, as
  * far as the POV knows them ("About Sam Reyes"), never where they went or what was set; with no one
- * the POV knows, that it happened behind the scenes.
+ * the POV knows, that it happened behind the scenes. An agent's dry run under the player
+ * character's knowledge says the same of a change it can't see (`agents/tools/writer.ts`).
  */
-function unseenFixLine(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, events: readonly LedgerEvent[]): string {
+export function unseenFixLine(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, events: readonly LedgerEvent[]): string {
   const names = knownSubjects(registry, world, state, world.pov, events);
   if (names.length === 0) return "Behind the scenes";
   const more = names.length - UNSEEN_NAMES;
@@ -385,12 +386,16 @@ function refKey(ref: EventRef): string {
  * come apart from the rest (`fixes`, each still holding an event), since each is its own Journal
  * line and Undo chip; one a rebased view worked out again holds what it applied there (the fold's
  * `resolved`), so one already so there reads as nothing made. The change chip and the Journal list
- * these, so an undone purchase, or one an earlier switch dropped, isn't shown as made.
+ * these, so an undone purchase, or one an earlier switch dropped, isn't shown as made. A fix an
+ * agent wrote keeps its `agent` (role, key, label, knowledge), which the workspace's provenance reads.
+ * `agents` lists the agents' writes that stand on the record, in order, each with what it applied:
+ * one worked out to nothing where it landed (already so) too, and none undone or dropped, so the
+ * agents' writer finds a role's latest write for its retry check.
  */
-export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: { action: string; label: string }; gm?: true }[] } {
+export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: { action: string; label: string }; gm?: true; agent?: NonNullable<PostEntry["agent"]> }[]; agents: { seq: number; events: LedgerEvent[]; agent: NonNullable<PostEntry["agent"]> }[] } {
   const result = fold.messages[index];
   // A bare record folds as a plain message, and its live entries apply all the same.
-  if (!result || (result.fold !== "on_path" && result.fold !== "view" && result.fold !== "plain")) return { events: [], post: [], fixes: [] };
+  if (!result || (result.fold !== "on_path" && result.fold !== "view" && result.fold !== "plain")) return { events: [], post: [], fixes: [], agents: [] };
   const skipped = new Set(rec.undone.map(refKey));
   for (const n of fold.notes) if (n.kind === "dropped" && n.messageId === result.id && n.ref && "in" in n.ref) skipped.add(refKey(n.ref));
   const resolved = new Map(fold.resolved.filter((r) => r.messageId === result.id).map((r) => [r.seq, r.events]));
@@ -398,11 +403,12 @@ export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { even
   const live = rec.post
     .filter((p) => isLive(p.at, result.parentPath, recPath))
     .sort((a, b) => a.seq - b.seq)
-    .map((p) => ({ seq: p.seq, kind: p.kind, events: resolved.get(p.seq) ?? p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))), ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}) }));
+    .map((p) => ({ seq: p.seq, kind: p.kind, events: resolved.get(p.seq) ?? p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))), ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}), ...(p.agent ? { agent: p.agent } : {}), standing: !Array.from({ length: Math.max(1, p.events.length) }, (_, i) => refKey({ in: "post", seq: p.seq, index: i })).every((k) => skipped.has(k)) }));
   return {
     events: rec.events.filter((_, i) => !skipped.has(refKey({ in: "events", index: i }))),
     post: live.filter((p) => p.kind !== "fix").flatMap((p) => p.events),
-    fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events, ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}) })),
+    fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events, ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}), ...(p.agent ? { agent: p.agent } : {}) })),
+    agents: live.flatMap((p) => (p.kind === "fix" && p.agent && p.standing ? [{ seq: p.seq, events: p.events, agent: p.agent }] : [])),
   };
 }
 

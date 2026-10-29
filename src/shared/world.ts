@@ -742,6 +742,7 @@ export interface ScheduleDef {
 }
 
 export type TrackKind = "quest" | "secret" | "puzzle" | "agenda";
+export const TRACK_KINDS: readonly TrackKind[] = ["quest", "secret", "puzzle", "agenda"];
 
 export interface StageAnswer {
   expect: string[];

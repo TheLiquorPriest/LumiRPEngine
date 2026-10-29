@@ -102,6 +102,15 @@ export function failureWords(req: Expr): string | null {
   return SHAPES.find((s) => s.fails !== undefined && s.shape.test(req))?.fails ?? null;
 }
 
+/** Why an action couldn't run, for the player: a requirement isn't shown as its expression ("requires to != here"), only in the words its shape has (`failureWords`). */
+export function playerReason(failed: { code: string; reason: string; requirement?: string }): string {
+  if (failed.code !== "requirement") return failed.reason;
+  const req = failed.requirement ?? failed.reason.replace(/^requires\s+/, "");
+  if (/\bto\s*!=\s*here\b/.test(req)) return "You're already there.";
+  const why = failureWords(req);
+  return why ? `Not possible here and now: ${why}.` : "Not possible here and now.";
+}
+
 /**
  * Why the engine didn't play a typed action that played as plain roleplay (DESIGN §11), for its
  * receipt: a requirement in the words its shape has (`failureWords`), never its expression, or the

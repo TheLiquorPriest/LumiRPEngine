@@ -21,6 +21,7 @@ import type {
   HostBookEntry,
   HostBookEntryInput,
   HostCapabilities,
+  HostConnectionProfile,
   HostEventMap,
   HostEventName,
   HostGenerationType,
@@ -30,6 +31,7 @@ import type {
   HostRegexScript,
   ProcessEvent,
   QuietRequest,
+  QuietResult,
   QuietToolCall,
   WorldInfoInput,
   WorldInfoVerdict,
@@ -57,8 +59,11 @@ export interface FakeChat {
 
 type Handler = (payload: never, userId: UserId | null) => void;
 
-/** A scripted quiet call's answer: its text, or its text and tool calls. */
-export type QuietScript = string | { content: string; toolCalls?: QuietToolCall[]; finishReason?: string };
+/**
+ * A scripted quiet call's answer: its text, or its text and tool calls, with what a provider may
+ * pass besides: its reasoning, reasoning carriers and raw usage (the host's `usage`).
+ */
+export type QuietScript = string | ({ content: string; toolCalls?: QuietToolCall[]; finishReason?: string } & Pick<QuietResult, "reasoning" | "thinkingBlocks" | "reasoningDetails" | "usage">);
 
 /** A scripted answer that takes time, ended as the host ends a call: when its signal aborts, with the signal's reason, which `stopped` hears. */
 function untilAborted<T>(answer: Promise<T>, signal: AbortSignal, stopped: (why: string) => void): Promise<T> {
@@ -249,8 +254,13 @@ export class FakeHost implements HostPort {
 
   /** The user's default connection (`connections.list`, `is_default`). */
   activeConnection: { id: string; name: string } | null = null;
-  /** The user's other connection profiles, each with the models its provider lists (null: it can't list them); and their Decisions API profiles. */
-  connectionProfiles: { id: string; name: string; models: string[] | null }[] = [];
+  /**
+   * The user's other connection profiles, each with the models its provider lists (null: it can't
+   * list them), and, for the agent runtime's profile, its provider, cache breakpoints (absent: a
+   * provider that takes none) and a Model Roulette's connections (absent: none); and their Decisions
+   * API profiles.
+   */
+  connectionProfiles: ({ id: string; name: string; models: string[] | null } & Partial<Pick<HostConnectionProfile, "provider" | "cache" | "targets">>)[] = [];
   decisionProfiles: { id: string; name: string }[] = [];
 
   connections: HostPort["connections"] = {
@@ -258,6 +268,12 @@ export class FakeHost implements HostPort {
     list: async () => [...(this.activeConnection ? [this.activeConnection] : []), ...this.connectionProfiles.map(({ id, name }) => ({ id, name }))],
     models: async (connectionId) => this.connectionProfiles.find((c) => c.id === connectionId)?.models ?? null,
     decisionList: async () => [...this.decisionProfiles],
+    profile: async (connectionId) => {
+      const c = connectionId === null ? this.activeConnection : (this.connectionProfiles.find((p) => p.id === connectionId) ?? (this.activeConnection?.id === connectionId ? this.activeConnection : null));
+      if (!c) return null;
+      const own = this.connectionProfiles.find((p) => p.id === c.id);
+      return { id: c.id, name: c.name, provider: own?.provider ?? "fake", model: own?.models?.[0] ?? "", cache: own?.cache ?? null, targets: own?.targets ?? [] };
+    },
   };
 
   /** `mcp_servers`, granted or not; Lumiverse's MCP server profiles, each with what its client holds; and each Spindle read, in order. */
@@ -394,7 +410,18 @@ export class FakeHost implements HostPort {
       if (!this.quietReply) throw new Error("the fake host makes no model calls");
       const scripted = this.quietReply(request);
       const reply = scripted instanceof Promise ? await untilAborted(scripted, signal, (why) => this.quietStopped.push(why)) : scripted;
-      return typeof reply === "string" ? { content: reply, finishReason: "stop", tokens: 0 } : { content: reply.content, finishReason: reply.finishReason ?? (reply.toolCalls ? "tool_calls" : "stop"), tokens: 0, ...(reply.toolCalls ? { toolCalls: reply.toolCalls } : {}) };
+      if (typeof reply === "string") return { content: reply, finishReason: "stop", tokens: 0 };
+      const { content, toolCalls, finishReason, reasoning, thinkingBlocks, reasoningDetails, usage } = reply;
+      return {
+        content,
+        finishReason: finishReason ?? (toolCalls ? "tool_calls" : "stop"),
+        tokens: 0,
+        ...(toolCalls ? { toolCalls } : {}),
+        ...(reasoning !== undefined ? { reasoning } : {}),
+        ...(thinkingBlocks ? { thinkingBlocks } : {}),
+        ...(reasoningDetails ? { reasoningDetails } : {}),
+        ...(usage ? { usage } : {}),
+      };
     },
     decide: async (request) => {
       this.decideCalls.push(request);
@@ -480,6 +507,15 @@ export class FakeHost implements HostPort {
       await this.idle();
     }
     throw new Error("settle: event storm");
+  }
+
+  /**
+   * Delivers the events queued so far at once, without waiting for the backend: what arrives while
+   * one of its operations still runs (an engine run's pre phase), whose handlers queue their own
+   * operations behind it.
+   */
+  deliverNow(): void {
+    for (let next = this.queue.shift(); next; next = this.queue.shift()) for (const h of this.handlers.get(next.event) ?? []) h(next.payload as never, this.userId);
   }
 
   // ------------------------------------------------------------------ chat model

@@ -9,59 +9,51 @@
 
 import type { ChatId, SlotId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
-import { hasOwn, isRecord } from "../shared/json";
+import { isRecord } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { SectionTemplate, SlotPosition, WorldDoc, WorldIndex } from "../shared/world";
 import { builtInSectionsOf } from "../shared/sections";
-import { SECRET_MARK_WORDING, type SecretMarkWording } from "../shared/secret-marks";
-import { MARKED_FACTS_RULE, secretMarksRule } from "../engine/feed";
+import type { PromptTexts } from "../shared/prompts";
+import { NARRATOR_RULE_IDS, PRESET_RULES_LEAD_ID, sectionPromptId } from "../shared/prompts";
+import { secretMarkForms } from "../shared/secret-marks";
+import { ChatMetaQueue } from "./chat-meta-queue";
 import type { HostBookEntry, HostEntryPlacement, HostPort } from "./host";
 import { NARRATOR_OUTLET, outletOf } from "./preset-binding";
 import type { WorldStore } from "./worlds";
-
-/** Where the narrator rules come from, and how the engine's sections are marked in the prompt. */
-export const NARRATOR_SOURCE = "These rules come from LumiRPEngine, the engine that keeps this roleplay's world; its sections in this prompt each start with their name in square brackets.";
-
-/**
- * The order of authority (DESIGN D36, §6.8), the narrator's top rule: the player's own directives
- * come first, the dice they chose deciding uncertain attempts; then what the story has established;
- * then the sections, the world as it stands, which the player may direct away from. Everything after
- * it, the marked facts' guidance included, works under it. What the story brings in becomes part of
- * the world.
- */
-export const NARRATOR_AUTHORITY = [
-  "Order of authority, highest first; every rule after it works under it:",
-  "1. The player's own instructions: what they say out of character (OOC), and what they write their character does. An attempt the engine rolled for goes as the roll says: the player chose to play with dice.",
-  "2. What the story has already established.",
-  "3. The engine's sections: the world as it stands now, kept up with the story and with the player's own changes. Follow them unless the player directs otherwise.",
-  "People, places and things the story brings in become part of the world.",
-].join("\n");
-
-/** What leads the preset's own narrator rules (`RPEngine · narrator`): they are the player's. */
-export const PRESET_RULES_LEAD = "The player's own rules for the narrator, from their preset:";
+import { markWording, renderPrompt, resolvePrompt } from "./prompts";
 
 /**
  * The narrator rules' entry for a turn (DESIGN §6.8): where they come from, the order of authority,
- * since the player's directives come first, then what marked facts mean (`MARKED_FACTS_RULE`, which
- * keeps each character consistent with what they know) and what a secret's mark means in the user's
- * wording (`secretMarksRule`), then the preset's own rules, as the player's. Only the preset's rules
- * and the user's wording differ between turns, never by world, so the rules tell nothing of whether a
- * world keeps secrets.
+ * since the player's directives come first, then what marked facts mean (which keeps each character
+ * consistent with what they know) and what a secret's mark means (each form a mark takes in the
+ * turn's wording of it, `secretMarkForms`, and its word for everyone fill the sentence's
+ * placeholders), then the preset's own rules, as the player's. Each part is the turn's text for it
+ * (`texts`, DESIGN §6.12: the user's own or a Re-narrate's turn's, else the shipped one), the mark
+ * wording among them, so the rules explain the marks the turn's sections carry; each is neutralized
+ * as any text the engine puts into a prompt is, and a part the user left empty is left out. Only the
+ * preset's rules and the user's own texts differ between turns, never by world, so the rules tell
+ * nothing of whether a world keeps secrets.
  */
-export function narratorRules(preset: string | null, wording: SecretMarkWording = SECRET_MARK_WORDING): string {
-  return ["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_AUTHORITY, MARKED_FACTS_RULE, secretMarksRule(wording), ...(preset ? [PRESET_RULES_LEAD, preset] : [])].join("\n");
+export function narratorRules(preset: string | null, texts: PromptTexts): string {
+  // A text is filled from its own placeholders only, so every part may be given the marks'.
+  const wording = markWording(texts);
+  const vars = { forms: secretMarkForms(wording).join(" or "), everyone: neutralizeMacros(wording.everyone) };
+  const part = (id: string): string => neutralizeMacros(renderPrompt(id, texts, vars));
+  return ["[Narrator rules]", ...NARRATOR_RULE_IDS.map(part), ...(preset ? [part(PRESET_RULES_LEAD_ID), preset] : [])].filter((s) => s !== "").join("\n");
 }
 
 /**
  * A world's sections in rank order: its own, then the built-in ones it has without listing them
- * (`builtInSectionsOf`), each in the world's own wording when `sectionTemplates` gives one.
+ * (`builtInSectionsOf`). A built-in section reads in the world's own wording when `sectionTemplates`
+ * gives one, else the user's own text for it (`texts`, DESIGN §6.12), else the shipped template: the
+ * world's comes first, since it words the section for its own story.
  */
-export function sectionsOf(world: WorldDoc): SectionTemplate[] {
-  const wording = world.sectionTemplates ?? {};
+export function sectionsOf(world: WorldDoc, texts: PromptTexts = {}): SectionTemplate[] {
+  const wording = Object.fromEntries(Object.entries(world.sectionTemplates ?? {}).map(([slot, text]) => [sectionPromptId(slot), text]));
   const builtIn = builtInSectionsOf(world).map((s) => {
-    const text = hasOwn(wording, s.id) ? wording[s.id] : undefined;
-    return typeof text === "string" ? { ...s, template: text } : s;
+    const text = resolvePrompt(sectionPromptId(s.id), texts, wording).text;
+    return text === s.template ? s : { ...s, template: text };
   });
   return [...Object.values(world.sections), ...builtIn].sort((a, b) => a.rank - b.rank);
 }
@@ -134,6 +126,8 @@ export class EngineBook {
   constructor(
     private readonly host: HostPort,
     private readonly worlds: WorldStore,
+    /** The chat's turn among LRE's writes of its metadata: the host's merge writes the whole bag back, LRE's key with it. */
+    private readonly queue: ChatMetaQueue = new ChatMetaQueue(),
   ) {}
 
   /**
@@ -259,19 +253,23 @@ export class EngineBook {
     if (failed?.status === "rejected") throw failed.reason;
   }
 
-  /** Appends the book to the chat's `chat_world_book_ids` (read-merge-write). */
-  async attach(chatId: ChatId, bookId: string, userId: UserId): Promise<void> {
-    const meta = await this.host.chats.chatMetadata(chatId, userId);
-    const ids = Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids.filter((x): x is string => typeof x === "string") : [];
-    if (ids.includes(bookId)) return;
-    await this.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...ids, bookId] }, userId);
+  /** Appends the book to the chat's `chat_world_book_ids` (read-merge-write, in the chat's turn among LRE's writes of its metadata). */
+  attach(chatId: ChatId, bookId: string, userId: UserId): Promise<void> {
+    return this.queue.run(chatId, userId, async () => {
+      const meta = await this.host.chats.chatMetadata(chatId, userId);
+      const ids = Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids.filter((x): x is string => typeof x === "string") : [];
+      if (ids.includes(bookId)) return;
+      await this.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...ids, bookId] }, userId);
+    });
   }
 
-  async detach(chatId: ChatId, bookId: string, userId: UserId): Promise<void> {
-    const meta = await this.host.chats.chatMetadata(chatId, userId);
-    const ids = Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids.filter((x): x is string => typeof x === "string") : [];
-    if (!ids.includes(bookId)) return;
-    await this.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: ids.filter((id) => id !== bookId) }, userId);
+  detach(chatId: ChatId, bookId: string, userId: UserId): Promise<void> {
+    return this.queue.run(chatId, userId, async () => {
+      const meta = await this.host.chats.chatMetadata(chatId, userId);
+      const ids = Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids.filter((x): x is string => typeof x === "string") : [];
+      if (!ids.includes(bookId)) return;
+      await this.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: ids.filter((id) => id !== bookId) }, userId);
+    });
   }
 
   /** The book's entries (for import and linking). */

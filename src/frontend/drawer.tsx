@@ -23,6 +23,7 @@ import type { Rect } from "./layout";
 import { Play } from "./play/play";
 import { scrollParent } from "./scroll";
 import { Settings } from "./settings/settings";
+import { AcceptanceBanner } from "./settings/agents";
 import { useSelect } from "./store";
 
 const MODES: readonly { id: Mode; label: string; icon: IconName }[] = [
@@ -133,6 +134,7 @@ export function Drawer(props: { measure(el: Element): Rect }) {
       </div>
       <ActivityBanner />
       <UpdateNotice />
+      <AcceptanceBanner />
       <div class="lre-mode-body" id={bodyId} role="tabpanel" aria-labelledby={`${bodyId}-tab-${mode}`}>
         {mode === "play" ? (
           <Play />

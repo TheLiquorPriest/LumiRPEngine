@@ -21,7 +21,7 @@ import { factId, MINDS_EVENTS, type MindsRunView } from "../../src/shared/minds"
 import type { BackendToFrontend, LoreBookEntryView, LoreBookView, ResultBodies } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
 import { bookTextHash } from "../../src/shared/lore";
-import { publicText, secretMarkText } from "../../src/shared/secret-marks";
+import { publicText, SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import { blankWorld } from "../../src/engine/authoring";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -156,7 +156,7 @@ async function sectionTexts(rig: Rig, chatId: string): Promise<string[]> {
 /** An entry as the host gives the interceptor one. */
 const candidate = (id: string, bookId: string, disabled: boolean, extensions: JsonObject, content = `${SECRET}.`): WorldInfoCandidate => ({ id, bookId, disabled, extensions, comment: "", content });
 /** The interceptor's gate as the runtime's, the chat's world and state read by `head`. */
-const gateOn = (registry: Registry, head: WorldInfoGate["head"]): WorldInfoGate => ({ registry, playsWorld: () => true, head, settings: async () => defaultSettings(), log: () => undefined });
+const gateOn = (registry: Registry, head: WorldInfoGate["head"]): WorldInfoGate => ({ registry, playsWorld: () => true, head, settings: async () => defaultSettings(), wording: async () => SECRET_MARK_WORDING, log: () => undefined });
 
 /**
  * The texts a prompt gets of `entries` with `verdict` applied as the host applies it, before its own

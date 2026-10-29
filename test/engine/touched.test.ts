@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
+import { blobHash } from "../../src/shared/stores";
 import type { WorldDoc } from "../../src/shared/world";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { applyEvent, applyMarker, coreEventTypes, EXTERNAL_ACCOUNT_PREFIX, validateEvent } from "../../src/engine/events";
@@ -159,6 +160,10 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "engine.hint", data: { track: "heist", stage: "on" } },
   { type: "engine.pause", data: { scene: null } },
   { type: "engine.feed", data: { section: "people", to: { maxLines: 3 } } },
+  { type: "engine.ws.write", data: { path: "notes/dev.md", hash: blobHash("Dev keeps the bar.") } },
+  { type: "engine.ws.pin", data: { path: "notes/dev.md", pinned: true } },
+  { type: "engine.ws.readers", data: { path: "notes/dev.md", readers: "everyone" } },
+  { type: "engine.ws.delete", data: { path: "notes/dev.md" } },
   { type: "engine.check", data: { actor: "you", check: "initiative", outcome: "success" } },
   { type: "engine.entity", data: { entity: "dev", tier: "supporting", agent: false, levels: { money: 2 } } },
   { type: "engine.class", data: { entity: "dev", class: {}, tags: ["regular"], was: {} } },

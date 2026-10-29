@@ -1,7 +1,8 @@
 // The built-in `engine` pack: bookkeeping events the runtime records (rule firings, interrupt
 // signals, agent catch-up cursors, the clock set back by a ✎ fix and how far it had run, recorded
 // choices, puzzle attempts, reveals, the hints the player opened, the paused scene, checks rolled by the `check` effect), GM
-// edits of an entity's tier, agent flag and levels and of its classes and tags, life states
+// edits of an entity's tier, agent flag and levels and of its classes and tags, the chat's workspace
+// files and pins (`engine/workspace`: `engine.ws.write`, `engine.ws.delete`, `engine.ws.pin`), life states
 // (`engine/life`: the events, the `life` effect, the `life` channel and `life_of`), the engine's
 // narration channels (`knows`, `spawn`) and the taxonomy formulas (`kind_is`, `in_class`,
 // `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built with it first:
@@ -28,6 +29,7 @@ import type { EntityState, WorldState } from "./state";
 import { own } from "./pack-kit";
 import { minutesBetween } from "./world-state";
 import { feedEvent } from "./feed";
+import { wsDeleteEvent, wsPinEvent, wsReadersEvent, wsWriteEvent } from "./workspace";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 
@@ -526,6 +528,11 @@ export const enginePack: PackDef = {
     for (const def of events) r.event(def);
     // The GM's per-chat section settings (DESIGN §6.11).
     r.event(feedEvent);
+    // The chat's workspace files, by path, and the ones pinned (DESIGN §4.4).
+    r.event(wsWriteEvent);
+    r.event(wsDeleteEvent);
+    r.event(wsPinEvent);
+    r.event(wsReadersEvent);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);

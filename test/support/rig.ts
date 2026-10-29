@@ -71,6 +71,7 @@ export class Rig {
       await this.rt.meter.settle();
       await this.rt.diag.settle();
       await this.rt.agents.settle();
+      await this.rt.sweep.settle();
     };
     // The page asked to start a prepared reply claims it first, as the frontend does (DESIGN §5.1).
     this.host.claimRestart = async (restart) => {

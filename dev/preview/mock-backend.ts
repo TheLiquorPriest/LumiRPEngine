@@ -6,16 +6,19 @@ import { CLASS_TRAITS, type AccountView, type FinanceView, type JournalLine } fr
 import { CLAIM_PRESETS } from "../../src/shared/claims";
 import { readInferred } from "../../src/shared/inferred";
 import type { DiagCall, DiagRecord } from "../../src/shared/diagnostics";
+import { STEP_LABEL } from "../../src/shared/diagnostics";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
 import { applyPatch } from "../../src/shared/json-patch";
 import type { MindsRunView } from "../../src/shared/minds";
-import type { LoreBookEntryView, LorePinView } from "../../src/shared/protocol";
+import type { AssistantProposal, AssistantProposalOp, AssistantRun, AssistantView, LoreBookEntryView, LorePinView, TraceRow, WorkspaceFileView } from "../../src/shared/protocol";
 import { editedBookFields, OLD_SECRECY_FIELDS, withBookLoreFields, type BookLoreFields } from "../../src/shared/lore";
 import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../../src/shared/secret-marks";
 import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LoreDrift, PresetCard, ResultBodies } from "../../src/shared/protocol";
 import { AGENT_API } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
+import { agentSettingsOf, type AcceptanceState } from "../../src/shared/agent-settings";
+import { blobHash, isLearnedPath, isWorkspacePath } from "../../src/shared/stores";
 import type { GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
@@ -24,7 +27,7 @@ import { decodeMapView } from "../../src/packs/space/ui/view";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { MarkChangeError, markedContent } from "../../src/backend/book-lore";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
-import { extractionView, freshFixture, gmFixture, OVERDRAWN_PURCHASE, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
+import { assistantFileChanges, assistantFixture, extractionView, freshFixture, gmFixture, OVERDRAWN_PURCHASE, pausedFixture, portAlderMoney, previewOpKey, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, workspaceFixture, WORLDS, worldFixture, type PreviewFileChange, type PreviewWorkspace } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
 import { applyRoutineOp, chatRolesFixture, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
 import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
@@ -34,7 +37,7 @@ import { formulaFunctions } from "../../src/engine/scope";
 import { buildCharacter } from "../../src/engine/character";
 import { initialState } from "../../src/engine/world-state";
 import { buildSections } from "../../src/backend/sections-build";
-import { secretMarkWording } from "../../src/backend/chat-knowledge-prefs";
+import { markWording } from "../../src/backend/prompts";
 import { sectionsOf, sectionTokens } from "../../src/backend/book";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import { unrevealedSecrets } from "../../src/engine/visibility";
@@ -104,6 +107,31 @@ const LORE_PROPOSALS: JobProposal[] = [
   { id: "l3", collection: "lore", key: "founders_day", value: { id: "founders_day", title: "Founders' Day", content: "Every June the town closes Main Street for a parade and a pie contest.", keys: [], links: [], topics: ["Town history"], source: { kind: "book", bookId: "book-town", entryId: "e-founders", hash: "h-founders" } }, source: "e-founders", confidence: 0.55, pack: "lore", index: { terms: ["founders' day"], topics: [{ id: "town_history", label: "Town history" }] }, sourceNames: { "book-town/e-founders": "Founders Day" } },
 ];
 
+/** What a GM edit's Undo restores: the GM view, the routine changes and the workspace as they were before it. */
+interface EditSnapshot {
+  gm: GmView;
+  routines: PreviewRoutines;
+  workspace: PreviewWorkspace;
+}
+
+/** What the GM assistant's running row and the activity line show while it answers, as the backend's `RUN_LABEL`. */
+const ASSISTANT_LABEL = STEP_LABEL.assistant ?? "GM assistant";
+
+/** The reply the preview's GM edits land on (`m4`): the turn a GM → Workspace write is credited to. */
+const EDIT_TURN = 4;
+
+/**
+ * What an answer proposes for each kind of change you ask for, in Port Alder: the preview's stand-in
+ * for its edit tools' dry runs. The tool call its trace shows, the operation (whose hash is the
+ * change's key, as the writer's `opKey` makes it), and the change as the proposal shows it.
+ */
+const ASKED_CHANGES: { asks: RegExp; call: TraceRow; change: PreviewFileChange | { kind: "gm_edit"; op: Record<string, string | number> }; op: Omit<AssistantProposalOp, "key"> }[] = [
+  { asks: /\b(move|put)/i, call: { tool: "gm_move", summary: "danny_okafor → bluebird_coffee", ms: 38 }, change: { kind: "gm_edit", op: { op: "move", entity: "danny_okafor", to: "bluebird_coffee" } }, op: { changeType: "gm_edit", lines: ["Danny Okafor is at Bluebird Coffee"], mode: "auto" } },
+  { asks: /\bgive/i, call: { tool: "gm_adjust_money", summary: "marcus_delgado +4000", ms: 33 }, change: { kind: "gm_edit", op: { op: "adjust", account: "marcus_delgado_checking", cents: 4_000 } }, op: { changeType: "money_adjust", lines: ["Marcus Delgado: correction +40.00"], mode: "confirm" } },
+  { asks: /\b(set|change)/i, call: { tool: "gm_set_stage", summary: "p_township_truck → fixed", ms: 29 }, change: { kind: "gm_edit", op: { op: "stage", track: "p_township_truck", to: "fixed" } }, op: { changeType: "stage", lines: ["The truck that won't start: It fires"], mode: "auto" } },
+  { asks: /\bpin/i, call: { tool: "workspace_pin", summary: "lore-drafts/rusty-anchor.md", ms: 9 }, change: { kind: "ws_pin", path: "lore-drafts/rusty-anchor.md", pinned: true }, op: { changeType: "workspace", lines: ["workspace file lore-drafts/rusty-anchor.md pinned"], mode: "auto" } },
+];
+
 export class MockBackend {
   /** The chat's latest minds run (`lre.minds`): the preview runs it one mind at a time, and the third fails as a cut-off call does. */
   private mindsRun: MindsRunView | null = null;
@@ -117,6 +145,8 @@ export class MockBackend {
   private view: StateView | null = null;
   private rev = 0;
   private settings: UserSettings = settingsFixture();
+  /** Acceptance runs (`lre.acceptance`): the open one and the last closed. */
+  private acceptance: AcceptanceState = { run: null, last: null };
   private world: WorldDoc = worldFixture();
   private draft: WorldDoc = worldFixture();
   /** The draft's write count, as the backend keeps it: 0 while the draft is the world. */
@@ -130,8 +160,18 @@ export class MockBackend {
   private gm: GmView = gmFixture();
   /** This chat's routine changes (GM → Routines), as the castlife slice keeps them. */
   private routines: PreviewRoutines = previewRoutines();
-  /** The GM view and the routine changes as they were before each GM edit, by the edit's Undo chip. */
-  private readonly beforeEdit = new Map<string, { gm: GmView; routines: PreviewRoutines }>();
+  /** This chat's workspace (GM → Workspace, the agents' workspace tools). */
+  private workspace: PreviewWorkspace = workspaceFixture();
+  /** This chat's thread with the GM assistant (`lre.assistant`). */
+  private assistant: AssistantView = assistantFixture();
+  /** What each proposed workspace change writes when it is applied, by its key: the backend keeps the operation on the stored proposal, and the view leaves it out. */
+  private readonly proposedFiles = new Map<string, PreviewFileChange>(Object.entries(assistantFileChanges()));
+  /** The answer under way's timers: its pushes as its calls spend tokens, and its landing. */
+  private answering: ReturnType<typeof setTimeout>[] = [];
+  /** The last number the preview gave a new message or proposal of the thread. */
+  private assistantIds = 0;
+  /** The GM view, the routine changes and the workspace as they were before each GM edit, by the edit's Undo chip. */
+  private readonly beforeEdit = new Map<string, EditSnapshot>();
   /** Kept jobs (`lre.job list`): an import a restart cut off after its first chunk. */
   private kept: JobSummary[] = [{ jobId: "job-kept", kind: "import_lore", worldId: WORLDS[0]?.id ?? "", status: "interrupted", progress: 0.5, message: "Interrupted by a restart. The 2 proposal(s) it made before it stopped are below; run it again for the rest.", result: { proposals: PROPOSALS.slice(0, 2) }, input: { bookIds: ["book-1"] }, at: Date.now() - 600_000 }];
   /** The active preset as the backend reads it: one section outlet placed, one unknown, and guidance blocks in each state. */
@@ -345,6 +385,30 @@ export class MockBackend {
     return lines;
   }
 
+  /** The GM view, the routine changes and the workspace as they stand: what a GM edit's Undo restores. */
+  private editSnapshot(): EditSnapshot {
+    return structuredClone({ gm: this.gm, routines: this.routines, workspace: this.workspace });
+  }
+
+  /**
+   * Lands one GM edit as the backend records it, whatever made it (`lre.edit`, an applied proposal,
+   * a GM → Workspace change): first in the GM view's edits with its Undo chip, `before` kept for that
+   * Undo, and the chat's "GM edit" fix chip and Journal fix line pushed, with `also`'s change to the
+   * view. Answers the chip.
+   */
+  private landEdit(before: EditSnapshot, lines: string[], also?: (view: StateView) => void): string {
+    const seq = (before.gm.edits[0]?.seq ?? 0) + 1;
+    const chip = `fix:m4:0:${seq}`;
+    this.gm.edits.unshift({ messageId: "m4", seq, lines, undo: chip });
+    this.beforeEdit.set(chip, before);
+    this.mutate((view) => {
+      view.chips.push({ id: chip, kind: "fix", messageId: "m4", label: "GM edit", detail: lines.join(" · "), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+      also?.(view);
+      view.journal.push({ kind: "fix", messageId: "m4", ref: { in: "post", seq, index: 0 }, text: lines.join(" · ") });
+    }, 40);
+    return chip;
+  }
+
   receive(message: FrontendToBackend): void {
     this.log.push(message);
     const reqId = message.reqId;
@@ -387,6 +451,7 @@ export class MockBackend {
         if (undone) {
           this.gm = undone.gm;
           this.routines = undone.routines;
+          this.workspace = undone.workspace;
         }
         if (chip.id === "c-overdrawn" && message.choice === "other" && !this.payAnotherWay()) return this.error(reqId, "validation", "No other way to pay covers it.");
         this.result(reqId, "lre.chip", { applied: true, pending: false });
@@ -456,7 +521,7 @@ export class MockBackend {
         // The narrator's knowledge as This chat → Knowledge shows it: the chat's own, else the world's, else the user's.
         const knowledge = this.view?.controls?.knowledge.narrator;
         const narrator = { chat: knowledge?.chat ?? null, view: knowledge?.chat ?? knowledge?.world ?? knowledge?.user ?? settings.narrator };
-        const built = buildSections({ registry: REGISTRY, world, state, secrets: unrevealedSecrets(REGISTRY, world, state), narrator, wording: secretMarkWording(settings), budget: settings.modelUse.tokens.sections, mindsBudget: settings.minds.tokens, said: "", planned: { outcome: [], montage: [] }, outline: [], elapsed: null, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
+        const built = buildSections({ registry: REGISTRY, world, state, secrets: unrevealedSecrets(REGISTRY, world, state), narrator, wording: markWording(settings.prompts.texts), budget: settings.modelUse.tokens.sections, mindsBudget: settings.minds.tokens, texts: settings.prompts.texts, said: "", planned: { outcome: [], montage: [] }, outline: [], elapsed: null, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
         return this.result(reqId, "lre.sections", { sections: built.sections.map((s) => ({ slot: s.slot, label: s.label, status: s.status, scope: s.scope, content: s.content, tokens: s.tokens, cut: s.cut, marked: s.marked, hints: s.hints })), budget: { sections: settings.modelUse.tokens.sections, used: built.used, minds: settings.minds.tokens } });
       }
       case "lre.chat.knowledge": {
@@ -493,23 +558,17 @@ export class MockBackend {
         return built ? this.result(reqId, "lre.character", built) : this.error(reqId, "not_found", "no such character");
       }
       case "lre.edit": {
-        const before = { gm: structuredClone(this.gm), routines: structuredClone(this.routines) };
+        const before = this.editSnapshot();
         const lines = this.applyEdit(message.ops);
         if (typeof lines === "string") return this.error(reqId, "validation", lines);
-        const seq = (before.gm.edits[0]?.seq ?? 0) + 1;
-        const chip = `fix:m4:0:${seq}`;
-        this.gm.edits.unshift({ messageId: "m4", seq, lines, undo: chip });
-        this.beforeEdit.set(chip, before);
-        this.result(reqId, "lre.edit", { pending: false, undo: chip });
-        this.mutate((view) => {
-          view.chips.push({ id: chip, kind: "fix", messageId: "m4", label: "GM edit", detail: lines.join(" · "), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+        const chip = this.landEdit(before, lines, (view) => {
           // A section's settings for this chat show on its row and in the preview, as the backend's view has them.
           for (const op of message.ops) {
             const row = op.op === "feed" ? view.controls?.sections.find((r) => r.id === op.section) : undefined;
             if (row && op.op === "feed") row.chat = op.to;
           }
-          view.journal.push({ kind: "fix", messageId: "m4", ref: { in: "post", seq, index: 0 }, text: lines.join(" · ") });
-        }, 40);
+        });
+        this.result(reqId, "lre.edit", { pending: false, undo: chip });
         return;
       }
       case "lre.fix":
@@ -614,6 +673,8 @@ export class MockBackend {
         if (isRecord(message.patch.realism) && message.patch.realism.preset && preset !== "custom") next.realism.claims = { ...CLAIM_PRESETS[preset] };
         // A merge patch drops a policy's null skills list; the store reads it back as every skill.
         next.inferred = readInferred(next.inferred);
+        // The agents' settings as the store reads them back (`agentSettingsOf`): a part reset to its default (null) reads as the default, not a missing key.
+        next.agents = agentSettingsOf(next.agents);
         this.settings = next;
         this.result(reqId, "lre.settings.set", { settings: structuredClone(this.settings), extraction: extractionView(this.settings) });
         return;
@@ -873,7 +934,81 @@ export class MockBackend {
       }
       case "lre.diag":
         if (message.op === "dismiss") this.activity(null);
+        // An agent call's text, as the backend answers a hash the chat's records keep.
+        if (message.op === "text") return this.result(reqId, "lre.diag", { records: [], activity: null, text: message.hash === PREVIEW_AGENT_TEXT ? "system: You are the game master's assistant.\nuser: Who keeps the lighthouse?\nassistant: lore_search {\"query\": \"lighthouse keeper\"}\ntool: (2 entries)\nassistant: The keeper's log names Sam." : null });
         return this.result(reqId, "lre.diag", { records: message.op === "clear" ? [] : diagnosticsFixture(), activity: null });
+      case "lre.acceptance": {
+        // As the backend does: one run at a time, opened with a label and closed into the last run; the preview spends nothing.
+        const view = (label: string, openedAt: number, closedAt: number | null) => ({ label, openedAt, closedAt, connections: this.settings.agents.acceptance.connections.map((c) => ({ id: c.id, spent: { tokensIn: 0, cachedIn: 0, tokensOut: 0, calls: 0, refused: 0, estimated: false }, reserved: { tokensIn: 0, tokensOut: 0 }, ceiling: { only: c.only, tokensIn: c.tokensIn, tokensOut: c.tokensOut } })) });
+        if (message.op === "open") {
+          if (this.acceptance.run) return this.error(reqId, "bad_request", "an acceptance run is open already: close it first");
+          this.acceptance = { ...this.acceptance, run: view(message.label, Date.now(), null) };
+        } else if (message.op === "close" && this.acceptance.run) this.acceptance = { run: null, last: { ...this.acceptance.run, closedAt: Date.now() } };
+        this.emit({ lre: 1, type: "lre.acceptance.changed", state: structuredClone(this.acceptance) });
+        return this.result(reqId, "lre.acceptance", structuredClone(this.acceptance));
+      }
+      case "lre.assistant": {
+        // As the backend's `Assistant.request` does (R6a): every op answers the whole thread after it, and each but `get` pushes it to the chat's sessions too.
+        const chatId = message.chatId;
+        if (message.op === "get") return this.result(reqId, "lre.assistant", structuredClone(this.assistant));
+        if (message.op === "send") {
+          // One answer at a time: your message joins the thread and the answer starts, answered at once; its progress and its answer are pushed.
+          const text = message.text.trim();
+          if (text === "") return this.error(reqId, "bad_request", "Write a message for the assistant.");
+          if (this.assistant.running) return this.error(reqId, "conflict", "The assistant is still answering your last message: wait for its answer, or Cancel it.");
+          const startedAt = Date.now();
+          const run: AssistantRun = { agentId: `agent_preview_${this.assistantIds}`, label: ASSISTANT_LABEL, tokens: { in: 0, out: 0 }, startedAt };
+          this.assistant.thread.push({ id: this.nextAssistantId("am"), role: "user", text, at: startedAt });
+          this.assistant.running = run;
+          // The activity line shows its label and nothing else, as the backend's `agentWorking` does.
+          this.activity({ state: "running", label: run.label, since: startedAt });
+          // Its calls spend tokens: pushed as they are spent, then the answer lands.
+          this.answering = ([[500, 6_100, 90], [1_100, 12_400, 230], [1_700, 18_900, 410]] as const).map(([ms, tokensIn, tokensOut]) =>
+            setTimeout(() => {
+              run.tokens = { in: tokensIn, out: tokensOut };
+              this.pushAssistant(chatId);
+            }, ms),
+          );
+          this.answering.push(setTimeout(() => this.landAnswer(chatId, text), 2_300));
+        } else if (message.op === "cancel") {
+          // The answer ends as cancelled, with what its calls spent so far, and proposes nothing.
+          const run = this.assistant.running;
+          if (run) {
+            for (const timer of this.answering) clearTimeout(timer);
+            this.answering = [];
+            this.assistant.thread.push({ id: this.nextAssistantId("am"), role: "assistant", text: "", at: Date.now(), usage: { in: run.tokens.in, out: run.tokens.out, cached: 0 }, status: "cancelled" });
+            this.assistant.running = null;
+            this.activity(null);
+          }
+        } else if (message.op === "apply") {
+          const refused = this.applyProposal(message.proposalId, message.keys);
+          if (refused) return this.error(reqId, refused.code, refused.message);
+        } else if (message.op === "reject") {
+          const proposal = this.openProposal(message.proposalId);
+          if ("code" in proposal) return this.error(reqId, proposal.code, proposal.message);
+          proposal.status = "rejected";
+        } else {
+          // `clear` forgets the thread and its proposals, refused while an answer is under way.
+          if (this.assistant.running) return this.error(reqId, "conflict", "The assistant is still answering: wait for its answer, or Cancel it, before you clear the conversation.");
+          this.assistant = { thread: [], running: null, proposals: [] };
+          this.proposedFiles.clear();
+        }
+        this.result(reqId, "lre.assistant", structuredClone(this.assistant));
+        this.pushAssistant(chatId);
+        return;
+      }
+      case "lre.workspace": {
+        // As the backend's `workspaceRequest` does (R6a): the workspace at the chat's head, and your own change to it through the writer, as one GM edit with its Undo chip (never held: the preview runs no turn), or refused in plain words.
+        if (message.op === "list") return this.result(reqId, "lre.workspace", { files: structuredClone(this.workspace.files) });
+        if (message.op === "read") return this.result(reqId, "lre.workspace", { text: this.workspace.files.some((f) => f.path === message.path) ? (this.workspace.texts[message.path] ?? null) : null });
+        const change: PreviewFileChange = message.op === "write" ? { kind: "ws_write", path: message.path, text: message.text, ...(message.readers !== undefined ? { readers: message.readers } : {}) } : message.op === "delete" ? { kind: "ws_delete", path: message.path } : message.op === "move" ? { kind: "ws_move", from: message.from, to: message.to } : message.op === "readers" ? { kind: "ws_readers", path: message.path, readers: message.readers } : { kind: "ws_pin", path: message.path, pinned: message.pinned };
+        const before = this.editSnapshot();
+        // Your own write is the GM's, credited to the reply it lands on.
+        const lines = this.changeWorkspace(change, { role: "gm", key: previewOpKey(change) });
+        if (!Array.isArray(lines)) return this.error(reqId, "validation", lines.reason);
+        const undo = this.landEdit(before, lines);
+        return this.result(reqId, "lre.workspace", { files: structuredClone(this.workspace.files), pending: false, undo });
+      }
       case "lre.routine": {
         // Cast's usual day: someone's day as the POV may know it.
         if (message.op === "day" && message.view === "player") return this.result(reqId, "lre.routine", { player: routinePlayerFixture(message.entity) });
@@ -891,9 +1026,166 @@ export class MockBackend {
     const chatId = this.view?.chatId;
     if (chatId) this.emit({ lre: 1, type: "lre.activity", chatId, activity: activity ? { chatId, turn: "gen-preview", ...activity } : null });
   }
+
+  /** Pushes the chat's thread with the GM assistant (`lre.assistant.update`), as the backend's `push` does after each change. */
+  private pushAssistant(chatId: string): void {
+    this.emit({ lre: 1, type: "lre.assistant.update", chatId, view: structuredClone(this.assistant) });
+  }
+
+  /** The id the preview gives a new message (`am`) or proposal (`ap`) of the thread. */
+  private nextAssistantId(prefix: "am" | "ap"): string {
+    this.assistantIds += 1;
+    return `${prefix}-preview-${this.assistantIds}`;
+  }
+
+  /** The open proposal `id`, or why not, as the backend's `openProposal` says it. */
+  private openProposal(id: string): AssistantProposal | { code: string; message: string } {
+    const proposal = this.assistant.proposals.find((p) => p.id === id);
+    if (!proposal) return { code: "not_found", message: "There is no such proposal in this conversation." };
+    if (proposal.status !== "open") return { code: "bad_request", message: `That proposal was ${proposal.status} already.` };
+    return proposal;
+  }
+
+  /**
+   * The answer under way lands, as the backend's `answer` lands it: its message with its trace and
+   * usage, and, when you asked for a change, its proposal (`messageId` = the answer's), applied at
+   * once when Settings → Agents → Assistant says so and none of its changes asks first.
+   */
+  private landAnswer(chatId: string, asked: string): void {
+    const run = this.assistant.running;
+    if (!run) return;
+    this.answering = [];
+    this.activity(null);
+    const asks = ASKED_CHANGES.filter((c) => c.asks.test(asked));
+    const ops = asks.map((c): AssistantProposalOp => ({ key: previewOpKey(c.change), ...structuredClone(c.op) }));
+    // A workspace change keeps what it writes, for its Apply.
+    for (const c of asks) if (c.change.kind !== "gm_edit") this.proposedFiles.set(previewOpKey(c.change), c.change);
+    const id = this.nextAssistantId("am");
+    const text = ops.length > 0 ? "I checked what you asked against the world as it stands: the change is below for you to apply." : "Danny Okafor is at Alder Automotive until five, and Marcus Delgado is at The Rusty Anchor after six. Ask me to change something and I'll check it first.";
+    const trace: TraceRow[] = [{ tool: "people_find", summary: "“Danny”", ms: 44 }, { tool: "people_where", summary: "danny_okafor", ms: 36 }, ...asks.map((c) => ({ ...c.call }))];
+    this.assistant.thread.push({ id, role: "assistant", text, at: Date.now(), trace, usage: { in: run.tokens.in, out: run.tokens.out, cached: Math.round(run.tokens.in * 0.8) }, status: "answered" });
+    const proposal: AssistantProposal | null = ops.length > 0 ? { id: this.nextAssistantId("ap"), messageId: id, ops, status: "open" } : null;
+    if (proposal) this.assistant.proposals.push(proposal);
+    // One that asks first waits for Apply.
+    if (proposal && this.settings.agents.assistant.apply === "at_once" && ops.every((o) => o.mode !== "confirm")) this.applyProposal(proposal.id, undefined);
+    this.assistant.running = null;
+    this.pushAssistant(chatId);
+  }
+
+  /**
+   * Applies the open proposal `id`, all of it or the changes `keys` picks, as the backend's
+   * `applyProposal` does: what landed as one GM edit (the preview's GM view is another world's, so
+   * a change of Port Alder's is its lines alone; a workspace change changes the workspace), each op
+   * `applied` or `refused` with why, the proposal `applied` with the edit's chip; one none of whose
+   * changes landed stays open. Why not, as an error's code and words.
+   */
+  private applyProposal(id: string, keys: readonly string[] | undefined): { code: string; message: string } | null {
+    const proposal = this.openProposal(id);
+    if ("code" in proposal) return proposal;
+    if (keys !== undefined && keys.some((k) => !proposal.ops.some((o) => o.key === k))) return { code: "bad_request", message: "Pick changes the proposal holds." };
+    const picked = keys === undefined ? proposal.ops : proposal.ops.filter((o) => keys.includes(o.key));
+    if (picked.length === 0) return { code: "bad_request", message: "Pick at least one change to apply." };
+    const before = this.editSnapshot();
+    const lines: string[] = [];
+    const applied = new Set<string>();
+    const refused = new Map<string, { code: string; reason: string }>();
+    for (const o of picked) {
+      const change = this.proposedFiles.get(o.key);
+      const done = change ? this.changeWorkspace(change, { role: "assistant", key: o.key }) : o.lines;
+      if (!Array.isArray(done)) refused.set(o.key, done);
+      else {
+        applied.add(o.key);
+        lines.push(...o.lines);
+      }
+    }
+    // Each change as this Apply left it: what an Apply before it refused is said again, or no more.
+    proposal.ops = proposal.ops.map(({ applied: _before, refused: _was, ...o }): AssistantProposalOp => {
+      if (applied.has(o.key)) return { ...o, applied: true };
+      const no = refused.get(o.key);
+      return no ? { ...o, refused: no } : o;
+    });
+    if (applied.size > 0) {
+      proposal.status = "applied";
+      proposal.chipId = this.landEdit(before, lines);
+    }
+    return null;
+  }
+
+  /**
+   * A workspace change as the writer checks it and the engine makes it (`prepareFile`,
+   * `workspaceOp`): a path that isn't one, a file that isn't there, a move into or out of the
+   * learned area, or a change that changes nothing is refused, in plain words, and nothing changes;
+   * else the files and their bodies change (listed by path, as the backend lists them), a file
+   * written credited to `by` on the reply the preview's edits land on (a learned one, on none), read
+   * with the readers the GM chose, else as it was, a new one by the GM alone (the preview's agent
+   * writes are the assistant's, with everyone's knowledge). Answers the edit's lines.
+   */
+  private changeWorkspace(change: PreviewFileChange, by: { role: string; key: string }): string[] | { code: string; reason: string } {
+    const ws = this.workspace;
+    const notPath = (path: string) => (isWorkspacePath(path) ? null : { code: "bad_path", reason: `${path} isn't a workspace path: names of letters, digits, “.”, “_” and “-”, joined by /.` });
+    const noFile = (path: string) => ({ code: "no_file", reason: `No workspace file ${path} here.` });
+    const provenance = (path: string) => ({ role: by.role, ...(isLearnedPath(path) ? {} : { key: by.key }), turn: isLearnedPath(path) ? null : EDIT_TURN });
+    switch (change.kind) {
+      case "ws_write": {
+        const wrong = notPath(change.path);
+        if (wrong) return wrong;
+        const file = ws.files.find((f) => f.path === change.path);
+        const hash = blobHash(change.text);
+        const readers = by.role === "gm" ? (change.readers ?? file?.readers ?? "gm") : "everyone";
+        if (file?.hash === hash && file.readers === readers) return { code: "no_change", reason: "The file already holds that text." };
+        const written: WorkspaceFileView = { path: change.path, hash, size: change.text.length, pinned: file?.pinned ?? false, readers, learned: isLearnedPath(change.path), provenance: provenance(change.path) };
+        ws.files = [...ws.files.filter((f) => f !== file), written].sort((a, b) => (a.path < b.path ? -1 : 1));
+        ws.texts[change.path] = change.text;
+        return [`workspace file ${change.path} written`];
+      }
+      case "ws_delete": {
+        const wrong = notPath(change.path);
+        if (wrong) return wrong;
+        if (!ws.files.some((f) => f.path === change.path)) return noFile(change.path);
+        ws.files = ws.files.filter((f) => f.path !== change.path);
+        delete ws.texts[change.path];
+        return [`workspace file ${change.path} deleted`];
+      }
+      case "ws_move": {
+        const wrong = notPath(change.from) ?? notPath(change.to);
+        if (wrong) return wrong;
+        const file = ws.files.find((f) => f.path === change.from);
+        if (!file) return noFile(change.from);
+        if (isLearnedPath(change.from) !== isLearnedPath(change.to)) return { code: "learned_move", reason: `${change.from} can't move to ${change.to}: files under learned/ stay there, and the others stay out of it. Write the file at its new path, then delete the old one.` };
+        if (change.to === change.from) return { code: "no_change", reason: "The file is already there." };
+        if (ws.files.some((f) => f.path === change.to)) return { code: "file_exists", reason: `There is a workspace file ${change.to} already.` };
+        // Written at its new path, its pin and readers going with it, and removed from its old one.
+        ws.files = [...ws.files.filter((f) => f !== file), { ...file, path: change.to, provenance: provenance(change.to) }].sort((a, b) => (a.path < b.path ? -1 : 1));
+        ws.texts[change.to] = ws.texts[change.from] ?? "";
+        delete ws.texts[change.from];
+        return [`workspace file ${change.to} written`, `workspace file ${change.from} deleted`];
+      }
+      case "ws_pin": {
+        const wrong = notPath(change.path);
+        if (wrong) return wrong;
+        const file = ws.files.find((f) => f.path === change.path);
+        if (!file) return noFile(change.path);
+        if (file.pinned === change.pinned) return { code: "no_change", reason: change.pinned ? "The file is pinned already." : "The file isn't pinned." };
+        file.pinned = change.pinned;
+        return [`workspace file ${change.path} ${change.pinned ? "pinned" : "unpinned"}`];
+      }
+      case "ws_readers": {
+        const wrong = notPath(change.path);
+        if (wrong) return wrong;
+        const file = ws.files.find((f) => f.path === change.path);
+        if (!file) return noFile(change.path);
+        if (file.readers === change.readers) return { code: "no_change", reason: "The file is read with that knowledge already." };
+        file.readers = change.readers;
+        return [`workspace file ${change.path} read with ${change.readers === "pov" ? "the player character's" : change.readers === "everyone" ? "everyone's" : "the GM's"} knowledge`];
+      }
+    }
+  }
 }
 
-/** Two turns as the backend records them: the newer one's outline cut off at max tokens, the older one clean; and a slow view. */
+/** The blob hash the preview's first agent record keeps as its text's; the failed one keeps none. */
+const PREVIEW_AGENT_TEXT = "0123456789abcdef0123456789abcdef";
+
+/** Two turns as the backend records them: the newer one's outline cut off at max tokens, the older one clean; a slow view; and two agent calls outside a turn. */
 function diagnosticsFixture(): DiagRecord[] {
   const t = Date.now() - 120_000;
   const call = (purpose: string, tokensOut: number, finishReason: string, ms: number): DiagCall => ({ purpose, via: "helper", connection: "active", model: "deepseek-v4-flash", tokensIn: 6200, tokensOut, finishReason, maxTokens: 2000, ms, ok: true });
@@ -909,5 +1201,7 @@ function diagnosticsFixture(): DiagRecord[] {
     step(8, "gen-e5f6a7b8", "pre", "pre", 60_000, 2300, { calls: [call("interpret", 150, "stop", 2200)] }),
     step(9, "gen-e5f6a7b8", "plan", "plan", 62_300, 70),
     { seq: 10, kind: "turn", level: "info", turn: "gen-e5f6a7b8", phase: null, step: "turn", status: "ok", start: t + 60_000, end: t + 80_000, ms: 20_000 },
+    { seq: 11, kind: "agent", level: "info", turn: null, phase: null, step: "gm", status: "ok", start: t + 90_000, end: t + 96_400, ms: 6400, agent: { role: "gm", connection: "active", model: "deepseek-v4-flash", usage: { in: 14_200, cachedIn: 11_900, out: 640, reasoningOut: 210, estimated: ["reasoningOut"] }, ms: 6400, outcome: "ok", tools: ["lore_search", "lore_read"], text: PREVIEW_AGENT_TEXT } },
+    { seq: 12, kind: "agent", level: "warn", turn: null, phase: null, step: "gm", status: "failed", start: t + 100_000, end: t + 101_200, ms: 1200, reason: "429 rate limited", agent: { role: "gm", connection: "active", model: "deepseek-v4-flash", usage: null, ms: 1200, outcome: "failed", error: "429 rate limited" } },
   ];
 }

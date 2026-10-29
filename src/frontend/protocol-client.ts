@@ -20,8 +20,9 @@ import { formatMs, TIMEOUTS, timerMs } from "../shared/timeouts";
 import type { Activity } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, MindsRunUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
+import type { AssistantUpdate, AssistantView, DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, MindsRunUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
 import type { AgentsView } from "../shared/agents";
+import type { AcceptanceRunView, AcceptanceState } from "../shared/agent-settings";
 import type { StateView } from "../shared/state-view";
 import { applyDelta, DeltaError } from "./delta";
 import type { RequestBody, Send } from "./registry";
@@ -50,6 +51,16 @@ export type SyncStatus = "closed" | "syncing" | "live" | "resyncing";
 
 function isActivity(value: unknown): value is Activity {
   return isRecord(value) && typeof value.chatId === "string" && (value.state === "running" || value.state === "failed") && typeof value.label === "string" && typeof value.since === "number" && (value.turn === null || typeof value.turn === "string");
+}
+
+/** An acceptance run as pushed: a light check, as for the other pushes; the backend owns the rest of the shape. */
+function isAcceptanceRun(value: unknown): value is AcceptanceRunView {
+  return isRecord(value) && typeof value.label === "string" && typeof value.openedAt === "number" && (value.closedAt === null || typeof value.closedAt === "number") && Array.isArray(value.connections);
+}
+
+/** The GM assistant's thread as pushed: a light check, as for the other pushes; the backend owns the rest of the shape. */
+function isAssistantView(value: unknown): value is AssistantView {
+  return isRecord(value) && Array.isArray(value.thread) && Array.isArray(value.proposals) && (value.running === null || (isRecord(value.running) && typeof value.running.label === "string"));
 }
 
 export interface SyncState {
@@ -114,7 +125,10 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.routine": true,
   "lre.character": true,
   "lre.agents": true,
+  "lre.acceptance": true,
   "lre.cancel": true,
+  "lre.assistant": true,
+  "lre.workspace": true,
 };
 
 function isRequestType(value: unknown): value is keyof ResultBodies {
@@ -140,6 +154,8 @@ export class ProtocolClient {
   private readonly draftListeners = new Set<(push: DraftChanged) => void>();
   private readonly generateListeners = new Set<(push: GeneratePush) => void>();
   private readonly agentsListeners = new Set<(view: AgentsView) => void>();
+  private readonly acceptanceListeners = new Set<(state: AcceptanceState) => void>();
+  private readonly assistantListeners = new Set<(update: AssistantUpdate) => void>();
   private readonly unsubscribe: () => void;
   private requestMs: Limit;
   private readonly newReqId: () => string;
@@ -205,6 +221,18 @@ export class ProtocolClient {
   onAgents(listener: (view: AgentsView) => void): () => void {
     this.agentsListeners.add(listener);
     return () => this.agentsListeners.delete(listener);
+  }
+
+  /** An acceptance run opened, closed or spent (`lre.acceptance.changed`, AGENT-LOOP-PLAN §12): Settings → Agents and the drawer's counter follow it. */
+  onAcceptance(listener: (state: AcceptanceState) => void): () => void {
+    this.acceptanceListeners.add(listener);
+    return () => this.acceptanceListeners.delete(listener);
+  }
+
+  /** A chat's thread with the GM assistant changed (`lre.assistant.update`): GM data, which only GM → Assistant shows, behind the gate. */
+  onAssistant(listener: (update: AssistantUpdate) => void): () => void {
+    this.assistantListeners.add(listener);
+    return () => this.assistantListeners.delete(listener);
   }
 
   /** Whether this page's document is on screen (setup reads `document.visibilityState`); sent with each hello, resync and `page`. */
@@ -388,6 +416,18 @@ export class ProtocolClient {
         if (isRecord(payload.view) && typeof payload.view.build === "string" && Array.isArray(payload.view.clients)) {
           const view = payload.view as unknown as AgentsView;
           for (const listener of this.agentsListeners) listener(view);
+        }
+        return;
+      case "lre.acceptance.changed":
+        if (isRecord(payload.state) && (payload.state.run === null || isAcceptanceRun(payload.state.run)) && (payload.state.last === null || isAcceptanceRun(payload.state.last))) {
+          const state: AcceptanceState = { run: payload.state.run, last: payload.state.last };
+          for (const listener of this.acceptanceListeners) listener(state);
+        }
+        return;
+      case "lre.assistant.update":
+        if (typeof payload.chatId === "string" && isAssistantView(payload.view)) {
+          const update: AssistantUpdate = { lre: PROTOCOL_VERSION, type: "lre.assistant.update", chatId: payload.chatId, view: payload.view };
+          for (const listener of this.assistantListeners) listener(update);
         }
         return;
     }

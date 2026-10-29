@@ -122,7 +122,7 @@ const TAG_CATEGORIES: Readonly<Record<string, readonly string[]>> = {
 const OFFER_CAP = 24;
 
 /** What a place sells: its own `sells` list (categories or catalog ids), else the categories its tags sell, and its tags. */
-function placeTrade(ctx: ReadContext, place: string | null): { categories: string[]; sells: string[]; tags: string[] } {
+export function placeTrade(ctx: ReadContext, place: string | null): { categories: string[]; sells: string[]; tags: string[] } {
   const p = place ? own(ctx.world.places, place) : undefined;
   const sells = Array.isArray(p?.fields.sells) ? p.fields.sells.filter((x): x is string => typeof x === "string") : [];
   const tags = Array.isArray(p?.fields.tags) ? p.fields.tags.filter((x): x is string => typeof x === "string") : [];

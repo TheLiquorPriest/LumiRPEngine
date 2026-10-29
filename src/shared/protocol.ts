@@ -7,6 +7,7 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { AgentsView, HelloClient, KitReport } from "./agents";
+import type { AcceptanceState } from "./agent-settings";
 import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
 import type { BookFieldsEdit, BookLoreFields, LoreIndexAddition } from "./lore";
@@ -15,7 +16,7 @@ import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
 import type { CharacterResult } from "./character";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
-import type { ExtractionType, NarratorView, UserSettings } from "./settings";
+import type { ChangeType, NarratorView, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
@@ -785,9 +786,10 @@ export type PresetRequest = Request<"lre.preset"> & { op: "get" | "add" };
 
 /**
  * Diagnostics (DESIGN §6.9), GM-level like `lre.gm`: answered on request, never pushed. `get` reads
- * the chat's records, `clear` forgets them, `dismiss` clears a failure from the activity line.
+ * the chat's records, `clear` forgets them, `dismiss` clears a failure from the activity line, `text`
+ * reads an agent call's text by the hash one of the chat's records keeps (no other blob).
  */
-export type DiagRequest = Request<"lre.diag"> & { chatId: ChatId; op: "get" | "clear" | "dismiss" };
+export type DiagRequest = Request<"lre.diag"> & ({ chatId: ChatId; op: "get" | "clear" | "dismiss" } | { chatId: ChatId; op: "text"; hash: string });
 
 /** What the active preset says to LumiRPEngine: the section outlets its enabled blocks hold (with the section each places, null when none has that name) and each guidance block's state. */
 export interface PresetCard {
@@ -805,6 +807,142 @@ export interface PresetCard {
  * until the next update; `forget` drops a server.
  */
 export type AgentsRequest = Request<"lre.agents"> & ({ op: "get" | "kit" | "dismiss" } | { op: "update" | "reconnect" | "forget"; client: string });
+
+/**
+ * Acceptance runs (AGENT-LOOP-PLAN §12; Settings → Agents → Acceptance runs): `get` reads the open
+ * run and the last one closed; `open` starts a run under `label`, so the connections it guards may
+ * be called, each within its ceilings; `close` ends it and keeps its spend as the last run. Your
+ * action alone: an outside client is refused, so no agent of yours arms a guarded connection.
+ */
+export type AcceptanceRequest = Request<"lre.acceptance"> & ({ op: "get" | "close" } | { op: "open"; label: string });
+
+// ---------------------------------------------------------------- the GM assistant and the workspace (INC1-SPEC C8)
+
+/**
+ * GM → Assistant (DESIGN §4.5): the game master's chat with the GM agent about this chat's world:
+ * GM data, behind the GM gate as `lre.gm` is. `get` reads the thread; `send` adds your message and
+ * starts the agent on it, answering at once: its progress and its answer come as
+ * `lre.assistant.update`. `cancel` stops the answer under way; `apply` applies an open proposal,
+ * whole or the changes `keys` picks; `reject` turns one down; `clear` forgets the thread and its
+ * proposals (refused while an answer is under way).
+ */
+export type AssistantRequest = Request<"lre.assistant"> & { chatId: ChatId } & ({ op: "get" | "cancel" | "clear" } | { op: "send"; text: string } | { op: "apply"; proposalId: string; keys?: string[] } | { op: "reject"; proposalId: string });
+
+/** One tool call of an answer: the tool, its arguments in short, what it gave back when it failed, and how long it took. GM-only, as the whole thread is. */
+export interface TraceRow {
+  tool: string;
+  summary: string;
+  error?: string;
+  ms: number;
+}
+
+/** How an answer ended: it answered; a budget or the acceptance guard refused its next call; the loop detector stopped it; you cancelled it; or a call failed. */
+export type AssistantStatus = "answered" | "refused" | "stopped" | "cancelled" | "failed";
+
+/**
+ * One message of the thread, yours (`user`) or the assistant's. An assistant message has its tool
+ * calls (`trace`), what its calls spent (`usage`: tokens in, of which `cached` the provider read from
+ * its cache, and out) and how it ended (`status`), with why when it stopped short of an answer
+ * (`reason`).
+ */
+export interface AssistantMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  /** Epoch ms. */
+  at: number;
+  trace?: TraceRow[];
+  usage?: { in: number; out: number; cached: number };
+  status?: AssistantStatus;
+  reason?: string;
+}
+
+/**
+ * One change of a proposal as its dry run put it: its operation key, its change type, its mode and
+ * its lines; then, once it was applied, whether it landed (`applied`) or was refused, and why.
+ */
+export interface AssistantProposalOp {
+  key: string;
+  changeType: string;
+  /** The change in plain words, read with the assistant's knowledge. */
+  lines: string[];
+  /** `auto`, or `confirm`: its change type asks first (Settings → Changes from the reply), so it waits for Apply even where changes apply at once. */
+  mode: string;
+  applied?: true;
+  /** Why it didn't land: the writer's code and reason; `WRITE_REFUSED` (its write was refused for when it came), and an applied proposal's Apply may send it again. */
+  refused?: { code: string; reason: string };
+  /** Its proposal's Undo took it back. A change it made in the learned area is no Undo's to take back: it stays applied. */
+  undone?: true;
+}
+
+/**
+ * A change's refusal when its write was refused for when it came, not for what it is: a turn's close
+ * refused its held write, or a turn landed between its check and its write. An Apply may send it
+ * again, an applied proposal's too, while what landed beside it stands.
+ */
+export const WRITE_REFUSED = "write_refused";
+
+/**
+ * The changes one answer proposed: its edit tools' dry runs, each change once. `open` waits for
+ * Apply, a pick or No; `applied`: what was picked landed as one GM edit, whose chip (`chipId`, for
+ * `lre.chip`'s undo) takes it back; `pending`: applied while the engine ran a turn, so it lands when
+ * that turn ends, and its chip is named then (none when the turn had already made it so); `undone`:
+ * its chip's Undo took back what it wrote, wherever it was pressed (each change it took back says
+ * so); `rejected`: turned down.
+ */
+export interface AssistantProposal {
+  id: string;
+  /** The answer that proposed it. */
+  messageId: string;
+  ops: AssistantProposalOp[];
+  status: "open" | "applied" | "rejected";
+  chipId?: string;
+  pending?: true;
+  undone?: true;
+}
+
+/** The answer under way: its agent, its label (all the activity line shows of it), the tokens its calls have spent so far, and when it started (epoch ms). */
+export interface AssistantRun {
+  agentId: string;
+  label: string;
+  tokens: { in: number; out: number };
+  startedAt: number;
+}
+
+/** A chat's thread with the assistant, oldest first; the answer under way, if any; and every proposal, oldest first. */
+export interface AssistantView {
+  thread: AssistantMessage[];
+  running: AssistantRun | null;
+  proposals: AssistantProposal[];
+}
+
+/**
+ * GM → Workspace (DESIGN §4.4): the chat's workspace at its head, and its learned area. `list` and
+ * `read` read it; `write`, `delete`, `move`, `pin` and `readers` change one file through the writer
+ * the agents' tools use, as one GM edit with its Undo chip, held while the engine runs a turn
+ * (`HeldWrite.hold`); a file under `learned/` changes at once, in the chat's metadata, with no Undo
+ * chip. A write says whose knowledge may read the file (`readers`: the player character's,
+ * everyone's or the GM's); left out, a file keeps its readers, and a new one is the GM's alone;
+ * `readers` sets them by themselves. GM data, behind the gate as `lre.gm` is.
+ */
+export type WorkspaceRequest = Request<"lre.workspace"> & { chatId: ChatId } & ({ op: "list" } | { op: "read"; path: string } | { op: "write"; path: string; text: string; readers?: "pov" | "everyone" | "gm" } | { op: "delete"; path: string } | { op: "move"; from: string; to: string } | { op: "pin"; path: string; pinned: boolean } | { op: "readers"; path: string; readers: "pov" | "everyone" | "gm" });
+
+/**
+ * A workspace file as GM → Workspace lists it: its path, its body's hash and size, whether it is
+ * pinned, whose knowledge may read it (`readers`), whether it is the learned area's (kept outside the
+ * turns), and who wrote it: the agent's role (`gm` for your own) and its operation's key, and the
+ * turn, the number of the reply on the chain whose record holds the write (null before any reply,
+ * and for a learned file).
+ */
+export interface WorkspaceFileView {
+  path: string;
+  hash: string;
+  size: number;
+  pinned: boolean;
+  readers: "pov" | "everyone" | "gm";
+  learned: boolean;
+  provenance: { role?: string; key?: string; turn: number | null };
+}
 
 export type FrontendToBackend =
   | HelloRequest
@@ -837,8 +975,11 @@ export type FrontendToBackend =
   | RoutineRequest
   | CharacterRequest
   | AgentsRequest
+  | AcceptanceRequest
   | CancelTurnRequest
-  | ChatKnowledgeRequest;
+  | ChatKnowledgeRequest
+  | AssistantRequest
+  | WorkspaceRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -850,7 +991,7 @@ export interface LintIssue {
   message: string;
 }
 
-/** Each extraction type's effective mode and where it comes from (DESIGN §11, D4 learning). */
+/** Each extraction or agent change type's effective mode and where it comes from (DESIGN §11, D4 learning; AGENT-LOOP-PLAN §6). */
 export interface ExtractionModeView {
   mode: BoundMode;
   source: "pinned" | "learned" | "default" | "bound";
@@ -860,10 +1001,10 @@ export interface ExtractionModeView {
   rejected: number;
 }
 
-/** Settings plus a derived view: effective extraction modes. */
+/** Settings plus a derived view: effective modes, the reply's extraction types then the agents' change types. */
 export interface SettingsResult {
   settings: UserSettings;
-  extraction: Record<ExtractionType, ExtractionModeView>;
+  extraction: Record<ChangeType, ExtractionModeView>;
 }
 
 /** Results per request type. */
@@ -925,8 +1066,8 @@ export interface ResultBodies {
   /** `books` answers the user's books; every other op, the book as it stands now. */
   "lre.secrecy": { books?: SecrecyBookView[]; book?: SecrecyBookPlan };
   "lre.preset": { card: PresetCard };
-  /** `get`: the chat's records, oldest first, and its activity line now. */
-  "lre.diag": { records: DiagRecord[]; activity: Activity | null };
+  /** `get`: the chat's records, oldest first, and its activity line now; `text`: the agent call's text, null when it is gone. */
+  "lre.diag": { records: DiagRecord[]; activity: Activity | null; text?: string | null };
   /** The run started, cancelled or asked about; null when the chat has had none since the extension started. */
   "lre.minds": { run: MindsRunView | null };
   /** Whether a run or read was under way to stop. */
@@ -935,6 +1076,16 @@ export interface ResultBodies {
   "lre.character": CharacterResult;
   /** `kit`: this build, where its kit is, and whether the asking session checked in since the extension started; every other op answers the `view`. */
   "lre.agents": { view?: AgentsView; build?: string; kit?: KitReport | null; known?: boolean };
+  /** The open acceptance run and the last one closed, after the op. */
+  "lre.acceptance": AcceptanceState;
+  /** Every op: the chat's thread, the answer under way and the proposals, after the op. */
+  "lre.assistant": AssistantView;
+  /**
+   * `list` and each change: the files at the head after it (a held change isn't among them until it
+   * lands), and for a change whether it is held (`pending`) and the chip that undoes it (`undo`, null
+   * while it is held); `read`: the file's text, null when there is no such file.
+   */
+  "lre.workspace": { files?: WorkspaceFileView[]; text?: string | null; pending?: boolean; undo?: string | null };
 }
 
 export type ResultMessage = {
@@ -1014,6 +1165,21 @@ export interface AgentsChanged extends Envelope<"lre.agents.changed"> {
   view: AgentsView;
 }
 
+/** An acceptance run opened, closed or spent (`lre.acceptance`): sent to every session of the user, so its counter stays current. */
+export interface AcceptanceChanged extends Envelope<"lre.acceptance.changed"> {
+  state: AcceptanceState;
+}
+
+/**
+ * The GM assistant's thread in a chat changed (`lre.assistant`): a message, a proposal, or the answer
+ * under way. Sent to the sessions that asked about that chat's assistant: GM data, shown only behind
+ * the GM gate.
+ */
+export interface AssistantUpdate extends Envelope<"lre.assistant.update"> {
+  chatId: ChatId;
+  view: AssistantView;
+}
+
 /** Update now (DESIGN §23): asks the MCP servers that checked in as `client` to check the extension's kit now; sent to every session of the user, and the others ignore it. */
 export interface KitReload extends Envelope<"lre.kit.reload"> {
   client: string;
@@ -1028,4 +1194,4 @@ export interface KitReconnect extends Envelope<"lre.kit.reconnect"> {
   client: string;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | KitReload | KitReconnect;
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | AcceptanceChanged | AssistantUpdate | KitReload | KitReconnect;

@@ -4,14 +4,14 @@
 // under LRE's key (`lumi_rp_engine.prefs`, beside the chat's `ChatRun`), never in its ledger: it is
 // how the chat is played, not a fact of its story, so a swipe, a Re-run or an Undo never changes it,
 // recorded turns replay as they were, and a Lumiverse Branch, which copies the chat's metadata,
-// keeps it.
+// keeps it. A choice is written in the chat's turn among LRE's writes of its metadata (`ChatMetaQueue`).
 
 import type { ChatId, UserId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
-import { SECRET_MARK_WORDING, type SecretMarkWording } from "../shared/secret-marks";
 import { narratorViewOf, type NarratorView, type UserSettings } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
+import { ChatMetaQueue } from "./chat-meta-queue";
 import type { HostPort } from "./host";
 
 /** A chat's own choices; a part left out follows its world's default, else the user's Settings. */
@@ -58,16 +58,15 @@ export function knowledgeOn(chat: ChatKnowledgePrefs | null, world: Pick<WorldDo
   return chat?.knowledge ?? settings.minds.knowledge.enabled;
 }
 
-/** The wording of a secret's mark (Settings → Narrator): the user's own, part by part, else the shipped text. */
-export function secretMarkWording(settings: Pick<UserSettings, "narrator">): SecretMarkWording {
-  return { ...SECRET_MARK_WORDING, ...settings.narrator.marks };
-}
-
 /** Each chat's own choices, read once from its metadata and kept per (user, chat), so one user's read never answers another's. */
 export class ChatKnowledge {
   private readonly prefs = new Map<string, ChatKnowledgePrefs>();
 
-  constructor(private readonly host: Pick<HostPort, "chats">) {}
+  constructor(
+    private readonly host: Pick<HostPort, "chats">,
+    /** The chat's turn among LRE's writes of its metadata (one queue for every writer of it). */
+    private readonly queue: ChatMetaQueue = new ChatMetaQueue(),
+  ) {}
 
   private keep(chatId: ChatId, userId: UserId, prefs: ChatKnowledgePrefs): void {
     const key = `${userId}\u0000${chatId}`;
@@ -96,28 +95,31 @@ export class ChatKnowledge {
   }
 
   /**
-   * Sets the chat's own choices, read-merge-write into its metadata: every other key of LRE's (the
-   * chat's run) and of other writers stays as it is. Only a chat that plays a world has them.
+   * Sets the chat's own choices, read-merge-write into its metadata in the chat's turn: every other
+   * key of LRE's (the chat's run, its agents') and of other writers stays as it is. Only a chat that
+   * plays a world has them.
    */
-  async set(chatId: ChatId, userId: UserId, change: ChatKnowledgeChange): Promise<ChatKnowledgePrefs> {
-    const meta = await this.host.chats.chatMetadata(chatId, userId);
-    const own = meta[LEDGER_NAMESPACE];
-    if (!isRecord(own)) throw new Error("this chat plays no world");
-    const next: ChatKnowledgePrefs = { ...chatKnowledgePrefsOf(meta) };
-    if (change.knowledge === null) delete next.knowledge;
-    else if (change.knowledge !== undefined) next.knowledge = change.knowledge;
-    if (change.narrator === null) delete next.narrator;
-    else if (change.narrator !== undefined) next.narrator = { knowledge: change.narrator.knowledge, secrets: change.narrator.secrets };
-    const stored: JsonObject = { ...own };
-    delete stored[PREFS_KEY];
-    const prefs: JsonObject = {};
-    if (next.knowledge !== undefined) prefs.knowledge = next.knowledge;
-    if (next.narrator) prefs.narrator = { knowledge: next.narrator.knowledge, secrets: next.narrator.secrets };
-    // A chat that follows in both stores no `prefs` at all.
-    if (Object.keys(prefs).length > 0) stored[PREFS_KEY] = prefs;
-    await this.host.chats.mergeChatMetadata(chatId, { [LEDGER_NAMESPACE]: stored }, userId);
-    this.keep(chatId, userId, next);
-    return next;
+  set(chatId: ChatId, userId: UserId, change: ChatKnowledgeChange): Promise<ChatKnowledgePrefs> {
+    return this.queue.run(chatId, userId, async () => {
+      const meta = await this.host.chats.chatMetadata(chatId, userId);
+      const own = meta[LEDGER_NAMESPACE];
+      if (!isRecord(own)) throw new Error("this chat plays no world");
+      const next: ChatKnowledgePrefs = { ...chatKnowledgePrefsOf(meta) };
+      if (change.knowledge === null) delete next.knowledge;
+      else if (change.knowledge !== undefined) next.knowledge = change.knowledge;
+      if (change.narrator === null) delete next.narrator;
+      else if (change.narrator !== undefined) next.narrator = { knowledge: change.narrator.knowledge, secrets: change.narrator.secrets };
+      const stored: JsonObject = { ...own };
+      delete stored[PREFS_KEY];
+      const prefs: JsonObject = {};
+      if (next.knowledge !== undefined) prefs.knowledge = next.knowledge;
+      if (next.narrator) prefs.narrator = { knowledge: next.narrator.knowledge, secrets: next.narrator.secrets };
+      // A chat that follows in both stores no `prefs` at all.
+      if (Object.keys(prefs).length > 0) stored[PREFS_KEY] = prefs;
+      await this.host.chats.mergeChatMetadata(chatId, { [LEDGER_NAMESPACE]: stored }, userId);
+      this.keep(chatId, userId, next);
+      return next;
+    });
   }
 
   /** Forgets a chat's choices (after an attach), so they are read afresh. */

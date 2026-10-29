@@ -7,6 +7,7 @@ import { KNOWLEDGE_DEFAULTS, KNOWLEDGE_SLOT, MINDS_SLOT, type KnowledgeSettings 
 import { secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
 import type { NarratorView } from "../shared/settings";
 import type { ContextGeneration } from "../shared/state-view";
+import type { PromptTexts } from "../shared/prompts";
 import type { FeedScope, SectionFeed, SectionTemplate, WorldDoc } from "../shared/world";
 import { feedOf, linesOf, markedText, renderersOf, sectionScope, secretLineText, sourceOf } from "../engine/feed";
 import { optionalQuery } from "../engine/pack-kit";
@@ -28,11 +29,13 @@ export interface SectionsInput {
   secrets: readonly string[];
   /** The narrator's knowledge (`backend/chat-knowledge-prefs.ts`): this chat's own choice (null when it follows), and the knowledge in force. */
   narrator: { chat: NarratorView | null; view: NarratorView };
-  /** The wording of a secret's mark (Settings → Narrator). */
+  /** The wording of a secret's mark: the prompt registry's Secret marks texts, as the turn resolves them (`markWording`, `backend/prompts.ts`). */
   wording: SecretMarkWording;
   /** The shared section budget, and the Minds section's own (tokens). */
   budget: number;
   mindsBudget: number;
+  /** The texts the turn is sent (DESIGN §6.12): the user's own, or a Re-narrate's turn's; a built-in section's template comes from them under the world's own wording. */
+  texts: PromptTexts;
   /**
    * The user's knowledge settings (DESIGN §24.11): the Who knows what section's limits and wording
    * (`minds.knowing`), and its own token cap (`narratorTokens`); absent, the defaults.
@@ -137,6 +140,8 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
   const outcomes = new Map<SlotId, SectionOutcome>();
   const fills: { slot: SlotId; content: string }[] = [];
   const recorded: SlotId[] = [];
+  // The world's sections, each built-in one in its wording for this turn (`sectionsOf`).
+  const sections = sectionsOf(world, input.texts);
   // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2). A
   // later section over what is left is trimmed by whole lines from its end until it fits (a fact told
   // in several lines, `FeedLine.group`, by all of them at once), and left out whole only when not
@@ -166,7 +171,7 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
     // Only those it tells of are out of Stance, which tells of everyone else: so it is fitted as it
     // will go out, its switch and its caps for this chat included, and a Minds section switched off,
     // or with nowhere to go, tells of no one and leaves everyone to Stance.
-    const mindsSection = sectionsOf(world).find((s) => s.id === MINDS_SLOT);
+    const mindsSection = sections.find((s) => s.id === MINDS_SLOT);
     const mindsFeed = mindsSection ? feedOf(mindsSection, state) : null;
     const mindsOn = mindsSection !== undefined && mindsFeed?.enabled !== false && input.hasEntry(mindsSection);
     const read = registry.context(world, state);
@@ -180,7 +185,7 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
     const nameOf = (id: string): string => state.entities[id]?.name ?? world.entities[id]?.name ?? id;
     // The sections filled so far, in rank order: the Outline points only at those (DESIGN §9.5).
     const filled = new Set<string>();
-    for (const section of sectionsOf(world)) {
+    for (const section of sections) {
       // The world's settings for the section, the GM's in this chat over them (§6.11); its scope
       // follows the narrator's knowledge unless one of them sets its own.
       const feed = feedOf(section, state);
@@ -237,7 +242,7 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
           input.warn(`section ${section.id}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      if (section.id === "outline") lines.push(...withoutMissing(input.outline, missingSections(sectionsOf(world), section.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && input.hasEntry(mindsSection))).map((text) => ({ text })));
+      if (section.id === "outline") lines.push(...withoutMissing(input.outline, missingSections(sections, section.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && input.hasEntry(mindsSection))).map((text) => ({ text })));
       // DESIGN §9.2: every turn has an elapsed time, and the Scene slot states it.
       if (section.id === "scene" && input.elapsed !== null) lines.push({ text: input.elapsed > 0 ? `This turn took ${spanText(input.elapsed)}.` : "No time passes this turn." });
       // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.
@@ -343,5 +348,5 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
     const was = outcomes.get(h.slot);
     if (was) outcomes.set(h.slot, { ...was, status: "sent", content, tokens: input.cost(content), marked: facts, hints });
   }
-  return { sections: sectionsOf(world).flatMap((s) => outcomes.get(s.id) ?? []), record, fills, recorded, used };
+  return { sections: sections.flatMap((s) => outcomes.get(s.id) ?? []), record, fills, recorded, used };
 }

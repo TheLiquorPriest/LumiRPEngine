@@ -1,14 +1,16 @@
 // Diagnostics (DESIGN §6.9) on the frontend: the in-flight activity line the HUD, the status line and
 // the drawer show while the engine works (a step's label and the time it has taken, or a failure with
 // a way to Diagnostics), the drawer's error banner, and the Diagnostics page in Settings: each turn's
-// steps with their model calls, the failures with their reasons and fixes, filters, copy and download.
-// The page is GM-level (a reason may name what the player hasn't met): it asks for the records only
-// once the player opens its curtain, and never keeps them in pushed state.
+// steps with their model calls, agent calls with their text on request, the failures with their
+// reasons and fixes, filters, copy and download, and how many records a chat keeps. The records are
+// GM-level (a reason or an agent's text may name what the player hasn't met): the page asks for them
+// only once the player opens its curtain, and never keeps them in pushed state.
 
 import { useEffect, useState } from "preact/hooks";
-import { CANNOT_STOP, type Activity, type DiagRecord } from "../shared/diagnostics";
+import { CANNOT_STOP, DIAGNOSTICS_DEFAULTS, type Activity, type DiagAgentCall, type DiagnosticsSettings, type DiagRecord, type DiagUsageField } from "../shared/diagnostics";
+import type { JsonObject } from "../shared/json";
 import { useApp } from "./app";
-import { Badge, Banner, Button, Empty, List, ListRow, Section, Seg, useBusy } from "./components";
+import { Badge, Banner, Button, Empty, List, ListRow, NumberStepper, Section, Seg, useBusy } from "./components";
 import { Icon } from "./icons";
 import { useSelect } from "./store";
 
@@ -147,7 +149,7 @@ const FILTERS: readonly { value: DiagFilter; label: string }[] = [
 
 export function filterRecords(records: readonly DiagRecord[], filter: DiagFilter): DiagRecord[] {
   if (filter === "problems") return records.filter((r) => r.status === "failed" || r.level === "warn" || r.level === "error");
-  if (filter === "calls") return records.filter((r) => (r.calls?.length ?? 0) > 0);
+  if (filter === "calls") return records.filter((r) => (r.calls?.length ?? 0) > 0 || r.kind === "agent");
   if (filter === "slow") return records.filter((r) => r.kind === "slow");
   return [...records];
 }
@@ -176,6 +178,18 @@ function callText(r: DiagRecord): string[] {
   return (r.calls ?? []).map((c) => `    call ${c.purpose} via ${c.via} on ${c.connection} / ${c.model}: ${c.ok ? "ok" : "failed"}, ${c.tokensIn ?? "?"} in, ${c.tokensOut ?? "?"} out${c.maxTokens !== null ? ` of ${c.maxTokens}` : ""}, finish ${c.finishReason || "-"}, ${Math.round(c.ms)} ms${c.error ? `: ${c.error}` : ""}`);
 }
 
+/**
+ * An agent call as one line: on what; its tokens in, with the part read from the provider's cache,
+ * and out, with the part spent reasoning (a count the provider didn't report is the runtime's
+ * estimate, marked "~"); its time and how it ended; the tools it called; its error.
+ */
+function agentText(a: DiagAgentCall): string {
+  const u = a.usage;
+  const count = (field: DiagUsageField) => (u ? `${u.estimated?.includes(field) ? "~" : ""}${u[field]}` : "");
+  const usage = u ? `${count("in")} in (${count("cachedIn")} cached), ${count("out")} out (${count("reasoningOut")} reasoning)${u.estimated?.length ? ", ~ estimated" : ""}` : "no token counts";
+  return `${a.model} on ${a.connection} · ${usage} · ${msText(a.ms)} · ${a.outcome}${a.tools?.length ? ` · tools ${a.tools.join(", ")}` : ""}${a.error ? ` · ${a.error}` : ""}`;
+}
+
 /** The records as plain lines, oldest first, for the clipboard and a bug report. */
 export function diagText(records: readonly DiagRecord[]): string {
   return records
@@ -185,6 +199,7 @@ export function diagText(records: readonly DiagRecord[]): string {
       ...(r.path ? [`    path: ${r.path}`] : []),
       ...(r.sections ?? []).map((s) => `    section ${s.slot}${s.outlet ? ` → ${s.outlet}` : ""}: ${s.filled ? "filled" : "empty"}`),
       ...callText(r),
+      ...(r.agent ? [`    agent ${r.agent.role}: ${agentText(r.agent)}`] : []),
     ])
     .join("\n");
 }
@@ -195,13 +210,48 @@ function msText(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
 }
 
-/** A record's name in the timeline: the turn's summary, a phase's step, or what was asked. */
+/** A record's name in the timeline: the turn's summary, an agent's call, a phase's step, or what was asked. */
 function titleOf(r: DiagRecord): string {
   if (r.kind === "turn") return "The turn";
-  return r.phase && r.phase !== r.step && r.phase !== "request" ? `${r.phase} · ${r.step}` : r.step;
+  const step = r.kind === "agent" ? `${r.step} agent` : r.step;
+  return r.phase && r.phase !== r.step && r.phase !== "request" ? `${r.phase} · ${step}` : step;
 }
 
-function RecordRow(props: { record: DiagRecord }) {
+/**
+ * An agent call's text (its messages and answer), on request: read once through `lre.diag`'s `text`
+ * and shown in a scrolling block, or said to be gone once its retention has passed. It sits behind
+ * the page's curtain with the record that names it.
+ */
+function AgentText(props: { chatId: string; hash: string }) {
+  const app = useApp();
+  const [text, setText] = useState<string | null | undefined>(undefined);
+  const [open, setOpen] = useState(false);
+  const [busy, run] = useBusy();
+  const show = () =>
+    run(async () => {
+      if (text === undefined) {
+        const result = await app.request({ type: "lre.diag", chatId: props.chatId, op: "text", hash: props.hash });
+        setText(result?.text ?? null);
+      }
+      setOpen(true);
+    });
+  return (
+    <div class="lre-diag-agent-text">
+      <Button size="sm" variant="ghost" icon={open ? "eye-off" : "eye"} busy={busy} onClick={open ? () => setOpen(false) : show}>
+        {open ? "Hide text" : "Show text"}
+      </Button>
+      {!open ? null : text ? (
+        <pre class="lre-diag-text" tabIndex={0}>
+          {text}
+        </pre>
+      ) : (
+        <p class="lre-diag-fix">This text is gone: its retention in Settings → Agents → Retention has passed, or it couldn't be stored.</p>
+      )}
+    </div>
+  );
+}
+
+function RecordRow(props: { record: DiagRecord; chatId: string }) {
   const r = props.record;
   const calls = r.calls ?? [];
   const tokens = calls.reduce((n, c) => n + (c.tokensOut ?? 0), 0);
@@ -214,10 +264,10 @@ function RecordRow(props: { record: DiagRecord }) {
         subtitle={subtitle || undefined}
         value={msText(r.ms)}
         valueTone={r.status === "failed" ? "neg" : "muted"}
-        badge={r.kind === "slow" ? <Badge tone="warn">slow</Badge> : <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>}
+        badge={r.kind === "slow" ? <Badge tone="warn">slow</Badge> : <Badge tone={STATUS_TONE[r.status]}>{r.agent?.outcome ?? r.status}</Badge>}
       />
       {r.fix ? <p class="lre-diag-fix">Fix: {r.fix}</p> : null}
-      {calls.length > 0 || (r.sections?.length ?? 0) > 0 ? (
+      {calls.length > 0 || (r.sections?.length ?? 0) > 0 || r.agent ? (
         <ul class="lre-diag-calls">
           {calls.map((c, i) => (
             <li key={i} data-lre-diag-call={c.ok && c.finishReason !== "length" ? "ok" : "bad"}>
@@ -231,13 +281,39 @@ function RecordRow(props: { record: DiagRecord }) {
               {s.outlet ? ` → ${s.outlet}` : " (world placement)"}: {s.filled ? "filled" : "empty"}
             </li>
           ))}
+          {r.agent ? <li data-lre-diag-call={r.agent.outcome === "ok" || r.agent.outcome === "cancelled" ? "ok" : "bad"}>{agentText(r.agent)}</li> : null}
         </ul>
       ) : null}
+      {r.agent?.text ? <AgentText chatId={props.chatId} hash={r.agent.text} /> : null}
     </div>
   );
 }
 
-export function DiagnosticsPage() {
+/** How many records each chat keeps (Settings → Diagnostics): not GM-level, so outside the curtain. */
+function RecordsPerChat(props: { value: number; patch(patch: JsonObject): void; busy: boolean }) {
+  const fallback = DIAGNOSTICS_DEFAULTS.recordsPerChat;
+  return (
+    <Section title="Keep" flush>
+      <div class="lre-set-rows">
+        <div class="lre-set-ext" data-lre-diag-setting="recordsPerChat">
+          <div class="lre-set-ext-head">
+            <span class="lre-set-ext-title">Records per chat</span>
+            {props.value === fallback ? null : (
+              <Button size="sm" variant="ghost" icon="undo" label={`Reset Records per chat to its default, ${fallback}`} disabled={props.busy} onClick={() => props.patch({ diagnostics: { recordsPerChat: null } })}>
+                Default
+              </Button>
+            )}
+          </div>
+          <span class="lre-small lre-muted">Each chat keeps its newest records, the oldest going first. Agent calls fill them faster than the engine's steps.</span>
+          <NumberStepper label="Records per chat" value={props.value} min={1} step={50} integer disabled={props.busy} onChange={(recordsPerChat) => props.patch({ diagnostics: { recordsPerChat } })} />
+          <span class="lre-small lre-muted">Default {fallback}.</span>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+export function DiagnosticsPage(props: { diagnostics: DiagnosticsSettings; patch(patch: JsonObject): void; busy: boolean }) {
   const app = useApp();
   const chatId = useSelect(app.sync, (state) => state.chatId);
   const [revealed, setRevealed] = useState(false);
@@ -258,14 +334,22 @@ export function DiagnosticsPage() {
   useEffect(() => {
     if (revealed) load();
   }, [revealed]);
-  if (!chatId) return <Empty icon="list">Open a chat to see what the engine did in it.</Empty>;
+  const keep = <RecordsPerChat value={props.diagnostics.recordsPerChat} patch={props.patch} busy={props.busy} />;
+  if (!chatId)
+    return (
+      <div class="lre-stack" data-lre-settings-page="diagnostics">
+        {keep}
+        <Empty icon="list">Open a chat to see what the engine did in it.</Empty>
+      </div>
+    );
   if (!revealed)
     return (
       <div class="lre-stack" data-lre-settings-page="diagnostics">
         <CannotStopNotice />
         <Banner tone="gm" title="GM detail" actions={<Button icon="eye" onClick={() => setRevealed(true)}>Show diagnostics</Button>}>
-          Diagnostics show each step the engine ran for this chat, its model calls and why one failed. A reason can name someone or something your character hasn't met yet.
+          Diagnostics show each step the engine ran for this chat, its model calls, its agents' calls with their text, and why one failed. A reason or a text can name someone or something your character hasn't met yet.
         </Banner>
+        {keep}
       </div>
     );
   const shown = records ? filterRecords(records, filter) : [];
@@ -274,6 +358,7 @@ export function DiagnosticsPage() {
   return (
     <div class="lre-stack lre-diag" data-lre-settings-page="diagnostics">
       <CannotStopNotice />
+      {keep}
       <div class="lre-diag-tools">
         <Seg<DiagFilter> label="Show" value={filter} options={FILTERS} onChange={setFilter} />
         <div class="lre-diag-actions">
@@ -337,7 +422,7 @@ export function DiagnosticsPage() {
             <Section key={`${group.turn ?? "none"}-${group.start}`} title={group.turn ? `Turn ${group.turn.slice(0, 8)} · ${new Date(group.start).toLocaleTimeString()}` : `Outside a turn · ${new Date(group.start).toLocaleTimeString()}`} aside={<Badge tone={failed ? "neg" : slow ? "warn" : "pos"}>{failed ? "failed" : slow ? "slow" : "ok"}</Badge>} flush>
               <List>
                 {group.records.map((r) => (
-                  <RecordRow key={r.seq} record={r} />
+                  <RecordRow key={r.seq} record={r} chatId={chatId} />
                 ))}
               </List>
             </Section>

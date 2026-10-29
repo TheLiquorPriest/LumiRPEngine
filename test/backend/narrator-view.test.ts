@@ -7,15 +7,17 @@
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
-import { markedText, secretLineText, secretMarksRule } from "../../src/engine/feed";
+import { markedText, secretLineText } from "../../src/engine/feed";
 import type { SectionRenderer } from "../../src/engine/registry";
 import type { WorldState } from "../../src/engine/state";
 import { editRequest } from "../../src/frontend/requests";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { mindLines } from "../../src/packs/minds/core/section";
 import type { JsonObject } from "../../src/shared/json";
+import { neutralizeMacros } from "../../src/shared/macros";
+import { MARK_TEXT_IDS } from "../../src/shared/prompts";
 import type { EditOp, ResultBodies } from "../../src/shared/protocol";
-import { SECRET_MARK_WORDING, secretMarkText, type SecretMarkWording } from "../../src/shared/secret-marks";
+import { SECRET_MARK_WORDING, secretMarkForms, secretMarkText, type SecretMarkWording } from "../../src/shared/secret-marks";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import type { NarratorView } from "../../src/shared/settings";
 import type { FeedScope, SectionTemplate, WorldDoc } from "../../src/shared/world";
@@ -61,6 +63,16 @@ async function alder(rig: Rig, world: AlderWorld = {}): Promise<string> {
 
 async function settings(rig: Rig, patch: Record<string, unknown>): Promise<void> {
   rig.body(await rig.send({ type: "lre.settings.set", patch }));
+}
+
+/** Saves the user's own wording of a secret's mark, part by part, as Settings → Agents → Prompts does (null resets a part). */
+async function marks(rig: Rig, wording: Partial<Record<keyof SecretMarkWording, string | null>>): Promise<void> {
+  await settings(rig, { prompts: { texts: Object.fromEntries(Object.entries(wording).map(([part, text]) => [MARK_TEXT_IDS[part as keyof SecretMarkWording], text])) } });
+}
+
+/** The narrator rules' sentence on marks as a turn sends it: `wording`'s rule, with each form its marks take and its word for everyone. */
+function ruleOf(wording: SecretMarkWording): string {
+  return neutralizeMacros(wording.rule.replace("{{forms}}", secretMarkForms(wording).join(" or ")).replace("{{everyone}}", wording.everyone));
 }
 
 /** A section budget with room for every marked fact, so nothing a test looks for is left out for space. */
@@ -239,18 +251,18 @@ describe("a secret's words: marked for the narrator, or left out", () => {
     expect(await playerSurfaces(rig, chatId)).not.toContain(TRUTH);
   });
 
-  test("the wording of a secret's mark is the user's to rewrite, and its reset brings back the shipped one", async () => {
+  test("the wording of a secret's mark is the user's to rewrite as a text of the prompt registry, and its reset brings back the shipped one", async () => {
     const rig = new Rig({ shipped: true });
     await roomy(rig);
     const heard = `Overheard at the counter: ${TRUTH}`;
     (rig.rt.registry.renderers as SectionRenderer[]).push({ slot: "scene", source: "probe_heard", label: "What was overheard", render: () => [heard] });
     const chatId = await alder(rig);
     const kept = "{{text}} (hidden from {{kept}})";
-    await settings(rig, { narrator: { marks: { kept } } });
+    await marks(rig, { kept });
     await rig.turn(chatId, "I look around.", "Quiet.");
     expect(told(rig, "scene")).toContain(secretMarkText(heard, [], [POV_NAME], { ...SECRET_MARK_WORDING, kept }));
     expect(told(rig, "scene")).not.toContain(secretMarkText(heard, [], [POV_NAME], SECRET_MARK_WORDING));
-    await settings(rig, { narrator: { marks: { kept: null } } });
+    await marks(rig, { kept: null });
     await rig.turn(chatId, "I look around again.", "Still quiet.");
     expect(told(rig, "scene")).toContain(secretMarkText(heard, [], [POV_NAME], SECRET_MARK_WORDING));
   });
@@ -278,17 +290,17 @@ describe("a secret's words: marked for the narrator, or left out", () => {
       everyone: "all but them",
       rule: "Read a line written {{forms}} as a secret: {{everyone}} means all who don't know it, and no one it is hidden from knows it.",
     };
-    await settings(rig, { narrator: { marks: own } });
+    await marks(rig, own);
     await rig.turn(chatId, "I look around again.", "Still quiet.");
     for (const form of forms(own)) expect(rules()).toContain(form);
-    expect(rules()).toContain(secretMarksRule(own));
-    expect(rules()).not.toContain(secretMarksRule({ ...own, rule: SECRET_MARK_WORDING.rule }));
+    expect(rules()).toContain(ruleOf(own));
+    expect(rules()).not.toContain(ruleOf({ ...own, rule: SECRET_MARK_WORDING.rule }));
     expect(rules()).not.toContain("[secret; known to");
     // Reset brings back the shipped rule, still explaining the user's own forms.
-    await settings(rig, { narrator: { marks: { rule: null } } });
+    await marks(rig, { rule: null });
     await rig.turn(chatId, "And once more.", "Quiet again.");
-    expect(rules()).toContain(secretMarksRule({ ...own, rule: SECRET_MARK_WORDING.rule }));
-    expect(rules()).not.toContain(secretMarksRule(own));
+    expect(rules()).toContain(ruleOf({ ...own, rule: SECRET_MARK_WORDING.rule }));
+    expect(rules()).not.toContain(ruleOf(own));
   });
 
   test("a mind whose thoughts carry an unrevealed truth reaches the Minds section marked as a secret its holder keeps from the player character, or not at all, even where the world gives the narrator each mind whole", async () => {

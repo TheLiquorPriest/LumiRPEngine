@@ -3,7 +3,7 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import type { GenerationReasoningOverrideDTO, PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO, WorldInfoInterceptorCtxDTO } from "lumiverse-spindle-types";
+import type { GenerationReasoningOverrideDTO, LlmMessageDTO, LlmMessagePartDTO, PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO, WorldInfoInterceptorCtxDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import { MCP_PERMISSION } from "../shared/agents";
 import type { HostPresetBlockInput } from "./host";
@@ -19,6 +19,7 @@ import type {
   HostBookEntry,
   HostBookEntryInput,
   HostChat,
+  HostConnectionProfile,
   HostEventMap,
   HostEventName,
   HostGenerationType,
@@ -26,6 +27,8 @@ import type {
   HostPort,
   HostCapabilities,
   HostRegexScript,
+  QuietMessage,
+  QuietThinkingBlock,
   QuietToolCall,
   SwipeAction,
   WorldInfoCandidate,
@@ -278,6 +281,74 @@ export function reasoningOverride(effort: ReasoningChoice | undefined): Generati
   return effort === "off" ? { source: "off" } : { source: "custom", apiReasoning: true, effort };
 }
 
+/**
+ * A message as the host takes it (`LlmMessageDTO`): its text, or its parts with each breakpoint as
+ * an ephemeral `cache_control`, and an assistant turn's reasoning carriers, sent back as the model
+ * gave them. A message with no parts and no carriers goes as it always has, `{role, content}`.
+ */
+export function messageDTO(m: QuietMessage): LlmMessageDTO {
+  const cache = (on: true | undefined) => (on ? { cache_control: { type: "ephemeral" } } : {});
+  const content =
+    m.parts?.map((p): LlmMessagePartDTO => {
+      if (p.type === "text") return { type: "text", text: p.text, ...cache(p.cache) };
+      if (p.type === "tool_use") return { type: "tool_use", id: p.id, name: p.name, input: p.input, ...(p.thoughtSignature !== undefined ? { thought_signature: p.thoughtSignature } : {}), ...cache(p.cache) };
+      return { type: "tool_result", tool_use_id: p.toolUseId, content: p.content, ...(p.isError ? { is_error: true } : {}), ...cache(p.cache) };
+    }) ?? m.content;
+  return {
+    role: m.role,
+    content,
+    ...(m.reasoning !== undefined ? { reasoning_content: m.reasoning } : {}),
+    ...(m.thinkingBlocks ? { thinking_blocks: m.thinkingBlocks } : {}),
+    ...(m.reasoningDetails ? { reasoning_details: m.reasoningDetails } : {}),
+  };
+}
+
+/** A thinking block the host passed back, or null when it isn't one. */
+function thinkingBlock(raw: unknown): QuietThinkingBlock | null {
+  const type = str(raw, "type");
+  if (type !== "thinking" && type !== "redacted_thinking") return null;
+  const thinking = str(raw, "thinking");
+  const signature = str(raw, "signature");
+  const data = str(raw, "data");
+  return { type, ...(thinking !== undefined ? { thinking } : {}), ...(signature !== undefined ? { signature } : {}), ...(data !== undefined ? { data } : {}) };
+}
+
+/** Anthropic's most explicit cache breakpoints in one request, the connection's own included (AGENT-LOOP-PLAN §16.1): a fifth fails the request. */
+const ANTHROPIC_CACHE_BREAKPOINTS = 4;
+
+/**
+ * The explicit cache breakpoints a connection takes, as the host's own prompt caching reads its
+ * `prompt_caching` (Lumiverse `src/services/caching/anthropic.ts`, `resolveConfig`): only Anthropic
+ * reads `cache_control` on a part; when the connection caches, it marks the end of the leading
+ * system messages unless told not to, the last message and each tool only when told to, and its
+ * automatic mode is on unless switched off.
+ */
+export function cacheBreakpoints(provider: string, metadata: unknown): HostConnectionProfile["cache"] {
+  if (provider !== "anthropic") return null;
+  const caching = isRecord(metadata) ? metadata.prompt_caching : undefined;
+  const on = caching === true || isRecord(caching);
+  const own = isRecord(caching) ? caching : {};
+  const marks = isRecord(own.breakpoints) ? own.breakpoints : {};
+  return { limit: ANTHROPIC_CACHE_BREAKPOINTS, system: on && marks.system !== false, lastMessage: on && marks.messages === true, tools: on && marks.tools === true, automatic: on && own.automatic !== false };
+}
+
+/** The host's Model Roulette provider: a connection that sends each call on one of its connections, picked at random. */
+const MODEL_ROULETTE = "model_roulette";
+
+/**
+ * The connections a Model Roulette may send a call on, as the host picks among them (Lumiverse
+ * `src/services/connections.service.ts`, `resolveConnection`): its `connection_roulette` ids, trimmed
+ * and once each, less itself; none for any other connection. Each is kept whatever the host's list
+ * says of it (the list stops at 100 connections), so the guard is asked of every one it might pick.
+ */
+export function rouletteTargets(c: { id: string; provider: string; metadata?: unknown }): string[] {
+  if (c.provider !== MODEL_ROULETTE) return [];
+  const config = isRecord(c.metadata) ? c.metadata.connection_roulette : undefined;
+  const ids = isRecord(config) && Array.isArray(config.connection_ids) ? config.connection_ids : [];
+  const named = ids.flatMap((id) => (typeof id === "string" && id.trim() !== "" ? [id.trim()] : []));
+  return [...new Set(named)].filter((id) => id !== c.id);
+}
+
 /** Keeps the last log lines and writes them, debounced: system lines to extension storage, user lines to that user's storage. */
 class DiagnosticsLog {
   private readonly lines: string[] = [];
@@ -453,10 +524,12 @@ export function createSpindleHost(): HostPort {
         if (request.json && (await takesJsonMode(request.connectionId, userId))) parameters.response_format = { type: "json_object" };
         // The host reads `parameters.model` as a per-request model override.
         if (request.model) parameters.model = request.model;
+        // Only then does an OpenAI-compatible stream (every call with tools) report usage; every provider drops the key itself.
+        if (request.usage) parameters._include_usage = true;
         const reasoning = reasoningOverride(request.effort);
         const raw = await spindle.generate.quiet({
           type: "quiet",
-          messages: request.messages,
+          messages: request.messages.map(messageDTO),
           parameters,
           ...(request.connectionId ? { connection_id: request.connectionId } : {}),
           ...(request.tools && request.tools.length > 0 ? { tools: request.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) } : {}),
@@ -466,12 +539,32 @@ export function createSpindleHost(): HostPort {
         });
         // `tool_calls` (`ToolCallDTO[]`): a call without a name is dropped; arguments that aren't an object read as none.
         const calls = isRecord(raw) && Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
-        const toolCalls: QuietToolCall[] = calls.flatMap((c, i) => (isRecord(c) && typeof c.name === "string" ? [{ name: c.name, args: toJsonObject(c.args), callId: str(c, "call_id") ?? `call_${i}` }] : []));
+        const toolCalls: QuietToolCall[] = calls.flatMap((c, i) => {
+          if (!isRecord(c) || typeof c.name !== "string") return [];
+          const signature = str(c, "thought_signature");
+          return [{ name: c.name, args: toJsonObject(c.args), callId: str(c, "call_id") ?? `call_${i}`, ...(signature !== undefined ? { thoughtSignature: signature } : {}) }];
+        });
         const usage = isRecord(raw) && isRecord(raw.usage) ? raw.usage : null;
         const tokensIn = usage ? (num(usage, "input_tokens") ?? num(usage, "prompt_tokens")) : undefined;
         const tokensOut = usage ? (num(usage, "output_tokens") ?? num(usage, "completion_tokens")) : undefined;
         const model = str(raw, "model");
-        return { content: str(raw, "content") ?? "", finishReason: str(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...(tokensIn !== undefined ? { tokensIn } : {}), ...(tokensOut !== undefined ? { tokensOut } : {}), ...(model ? { model } : {}), ...(toolCalls.length > 0 ? { toolCalls } : {}) };
+        const thought = str(raw, "reasoning");
+        // Carriers a reasoning model needs back after a tool call, once the host passes them (the core PR, AGENT-LOOP-PLAN §2).
+        const blocks = isRecord(raw) && Array.isArray(raw.thinking_blocks) ? raw.thinking_blocks.flatMap((b) => thinkingBlock(b) ?? []) : [];
+        const details = isRecord(raw) && Array.isArray(raw.reasoning_details) ? raw.reasoning_details.filter(isRecord).map(toJsonObject) : [];
+        return {
+          content: str(raw, "content") ?? "",
+          finishReason: str(raw, "finish_reason") ?? "",
+          tokens: usageTokens(raw),
+          ...(tokensIn !== undefined ? { tokensIn } : {}),
+          ...(tokensOut !== undefined ? { tokensOut } : {}),
+          ...(model ? { model } : {}),
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+          ...(thought ? { reasoning: thought } : {}),
+          ...(blocks.length > 0 ? { thinkingBlocks: blocks } : {}),
+          ...(details.length > 0 ? { reasoningDetails: details } : {}),
+          ...(usage ? { usage: toJsonObject(usage) } : {}),
+        };
       },
       async decide(request, userId, signal) {
         // The Decision API takes text, a list or an object as state; scalars go as their text.
@@ -653,6 +746,11 @@ export function createSpindleHost(): HostPort {
       },
       async decisionList(userId) {
         return (await spindle.decisions.listConnections({ userId })).map((c) => ({ id: c.id, name: c.name }));
+      },
+      async profile(connectionId, userId) {
+        // A connection named by its id is read by it: the list stops at 100 connections.
+        const c = connectionId ? await spindle.connections.get(connectionId, userId) : (await spindle.connections.list(userId)).find((x) => x.is_default);
+        return c ? { id: c.id, name: c.name, provider: c.provider, model: c.model, cache: cacheBreakpoints(c.provider, c.metadata), targets: rouletteTargets(c) } : null;
       },
     },
     mcp: {

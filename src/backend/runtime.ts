@@ -7,7 +7,7 @@ import type { ActionId, ChatId, ChipId, EntityId, InterruptClass, MessageId, Rev
 import type { JsonObject, JsonValue } from "../shared/json";
 import { heldBy } from "../shared/finance";
 import { hasOwn, isRecord } from "../shared/json";
-import type { ChatRun, EventRef, GenerationKind, HeldWrite, LedgerEvent, PostEvent, Rec, TimelapseTarget } from "../shared/ledger";
+import type { ChatRun, EventRef, GenerationKind, HeldWrite, LedgerEvent, PendingTurn, PostEvent, Rec, RefusedWrite, TimelapseTarget } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, StepConfig, UserSettings } from "../shared/settings";
@@ -39,7 +39,7 @@ import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatTimeOf
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
-import { activeText, ownMessage } from "../engine/ledger/path";
+import { activeText, isTombstoned, ownMessage } from "../engine/ledger/path";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
@@ -65,10 +65,19 @@ import { dayPlan, type DayPlan } from "../packs/castlife/core/index";
 import { Working } from "../engine/working";
 import type { GenerateAs, PresetCard, ResultBodies, TemplateInfo } from "../shared/protocol";
 import { Agents, type BuildInfo, thisBuild } from "./agents";
+import { AgentAccounts } from "./agents/provider";
 import { EngineBook, narratorRules, sectionsOf, sectionTokens } from "./book";
 import { DEFAULT_SECTIONS } from "../shared/sections";
+import type { PromptTexts } from "../shared/prompts";
+import type { SecretMarkWording } from "../shared/secret-marks";
+import { markWording, PromptSets, sourceTexts, turnPromptSet } from "./prompts";
 import { ChatPrefs } from "./chat-prefs";
-import { ChatKnowledge, knowledgeOn, narratorView, secretMarkWording } from "./chat-knowledge-prefs";
+import { ChatAgentMeta } from "./chat-agent-meta";
+import { ChatMetaQueue } from "./chat-meta-queue";
+import { BlobStore } from "./agents/blobs";
+import { Sessions } from "./agents/sessions";
+import { Sweep } from "./agents/sweep";
+import { ChatKnowledge, knowledgeOn, narratorView } from "./chat-knowledge-prefs";
 import { ChipStore, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
 import { LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks, type TurnInputs } from "./ledger-io";
@@ -84,7 +93,7 @@ import { liveLore } from "./book-lore";
 import { worldInfoVerdict, type WorldInfoGate } from "./wi-interceptor";
 import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
 import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
-import { failureWords, unplayedWords } from "./requirement-words";
+import { playerReason, unplayedWords } from "./requirement-words";
 import { buildSections } from "./sections-build";
 import { routineAsks } from "./routine-ask";
 import { CallMeter, dedupeProposals, extract, interpret, NotNeeded, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ReadAction, type ThingSort } from "./steps";
@@ -100,7 +109,8 @@ import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFaile
 import { actionWords, compactSpan, editedText, spanText } from "../engine/action-words";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
-import { CANNOT_STOP, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
+import { CANNOT_STOP, DIAG_RING, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
+import { RETENTION_DEFAULTS } from "../shared/stores";
 // The steps by their Settings names, apart from the activity line's in-flight labels above.
 import { STEP_LABEL as STEP_NAME } from "../shared/steps";
 
@@ -382,6 +392,16 @@ export function movedAlong(p: JsonObject, pre: readonly LedgerEvent[], state: Re
     const reached = e.lines.reduce((sum, l) => sum + (l.amount > 0 && names(to, l.account) ? l.amount : 0), 0);
     return left > 0 && reached > 0 && (near(left) || near(reached));
   });
+}
+
+/** A batch of writes that landed (P2), and those held that were refused as their window closed, with why; with the chat's core and the messages the ledger operation that settled them read. */
+export interface LandedWrites {
+  chatId: ChatId;
+  userId: UserId;
+  core: LedgerCore;
+  observed: ChainMessage[];
+  writes: HeldWrite[];
+  refused: RefusedWrite[];
 }
 
 /** A narrated purchase measured against the turn's own Buy: told again (dropped), maybe told again (an "Also bought …?" chip), or not the Buy at all (null). */
@@ -684,6 +704,22 @@ function rekey<V>(map: Map<string, V>, from: string, to: string): void {
   map.set(to, value);
 }
 
+/**
+ * A Re-run's source (DESIGN §6.12): the swipe of its message it was made in place of, the nearest at
+ * or before its own holding a live record, as a Re-narrate's source is found; none for a turn that
+ * replaces no recorded one (a retried reply).
+ */
+function rerunSource(core: LedgerCore, observed: readonly ChainMessage[], plan: PendingTurn): { messageId: MessageId; swipeId: number } | undefined {
+  if (plan.messageId === null || plan.swipeId === null) return undefined;
+  const target = core.chain(observed).find((m) => m.id === plan.messageId);
+  if (!target) return undefined;
+  for (let s = plan.swipeId; s >= 0; s--) {
+    const rec = target.ledger?.swipes[String(s)];
+    if (rec && !isTombstoned(core.journal.tombstones, target.id, rec)) return { messageId: target.id, swipeId: s };
+  }
+  return undefined;
+}
+
 function signalWithin(signal: AbortSignal, ms: number): AbortSignal {
   return ms > 0 ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal;
 }
@@ -699,6 +735,8 @@ export class Runtime implements TurnHooks {
   /** Planned-turn lines by seed, for Re-narrate after a restart. */
   readonly planNotes: PlanNotes;
   readonly book: EngineBook;
+  /** The texts each turn's narrator prompt was made from, by hash (DESIGN §6.12): what a Re-narrate may be sent again. */
+  readonly promptSets: PromptSets;
   readonly meter: CallMeter;
   /** The action each chat has staged for the player's next message (DESIGN §11). */
   readonly staged: StagedActions;
@@ -708,6 +746,8 @@ export class Runtime implements TurnHooks {
   readonly inspector: InspectorLog;
   /** How the player chose to see each chat (the map's display mode): presentation, beside the chat. */
   readonly chatPrefs: ChatPrefs;
+  /** Each chat's turn among LRE's writes of its metadata, one queue for every writer of it (`chat-meta-queue.ts`). */
+  readonly chatMeta = new ChatMetaQueue();
   /** What each chat chose for knowledge tracking and the narrator's knowledge, from its metadata (`chat-knowledge-prefs.ts`). */
   readonly chatKnowledge: ChatKnowledge;
   readonly steps: Steps;
@@ -721,8 +761,18 @@ export class Runtime implements TurnHooks {
   readonly push: StatePush;
   /** Each chat's diagnostics ring and the in-flight activity line (DESIGN §6.9). */
   readonly diag: Diagnostics;
+  /** The agent stores' blobs (DESIGN §4.4): workspace files, session segments and summaries, agent call texts. */
+  readonly blobs: BlobStore;
+  /** The main agent's session, read along each chat's chain from the blobs its records name (DESIGN §4.4). */
+  readonly sessions: Sessions;
+  /** Each chat's agent metadata: the learned area's index and the GM assistant's thread (DESIGN §4.4). */
+  readonly chatAgents: ChatAgentMeta;
+  /** Removes the blobs nothing references once their retention has passed, never during a turn (DESIGN §4.4). */
+  readonly sweep: Sweep;
   /** The outside MCP servers' check-ins and the update notice (DESIGN §23). */
   readonly agents: Agents;
+  /** Each user's agent accounts with their connections: throttles, and the acceptance runs' guard and ceilings (AGENT-LOOP-PLAN §12). */
+  readonly agentAccounts: AgentAccounts;
   readonly templates: Record<string, (id: string, name: string) => WorldDoc>;
   readonly templateInfo: readonly TemplateInfo[];
   private readonly pipeline: EnginePipeline;
@@ -732,6 +782,12 @@ export class Runtime implements TurnHooks {
   private readonly settingsCache = new Map<UserId, UserSettings>();
   /** Each user's `turnSettingsKey`, kept against the settings revision it was made from. */
   private readonly turnSettings = new Map<UserId, { revision: number; key: string }>();
+  /**
+   * The mark wording of the turn each chat's book holds (DESIGN §6.12), from the guard's write
+   * (`fill`) until its prompt is assembled (`clear`): the World Info entries in that prompt are marked
+   * in it, as its sections and narrator rules are, a Re-narrate's own turn's wording included.
+   */
+  private readonly turnWording = new Map<ChatId, SecretMarkWording>();
   /**
    * Host tokenizer counts of rendered section texts, by user and text hash: the host counts with each
    * user's own main model, so one user's count never prices another's section. A section costs its
@@ -799,29 +855,45 @@ export class Runtime implements TurnHooks {
     this.templateInfo = options.templateInfo ?? [];
     this.worlds = new WorldStore(this.host, this.registry);
     // The guard asks Lumiverse to wait as long as the users' guard timeouts say; a settings change
-    // stales a turn the engine prepared (its sections were made with the old ones).
-    this.settings = new SettingsStore(this.host, (userId, settings) => {
-      this.ledger.guardBudget(userId, settings.timeouts.guardMs);
-      this.ledger.inputsChanged(userId);
-    });
+    // stales a turn the engine prepared (its sections were made with the old ones). Which writes a
+    // turn holds while the engine runs follows Settings → Writes (DESIGN §4.3 P2). The connections
+    // acceptance runs guard are kept beside the runs, where an earlier build's settings write can't
+    // drop them.
+    this.agentAccounts = new AgentAccounts(this.host);
+    this.settings = new SettingsStore(
+      this.host,
+      (userId, settings) => {
+        this.ledger.guardBudget(userId, settings.timeouts.guardMs);
+        this.ledger.holdWrites(userId, settings.holdWrites);
+        this.ledger.inputsChanged(userId);
+        this.sweep.nudge(userId);
+      },
+      { get: (userId) => this.agentAccounts.guard(userId), set: (userId, connections) => this.agentAccounts.keepGuard(userId, connections) },
+    );
     this.chips = new ChipStore(this.host);
     this.planNotes = new PlanNotes(this.host);
     this.staged = new StagedActions(this.host);
     this.inspector = new InspectorLog(this.host);
     this.chatPrefs = new ChatPrefs(this.host);
-    this.chatKnowledge = new ChatKnowledge(this.host);
-    this.book = new EngineBook(this.host, this.worlds);
+    this.chatKnowledge = new ChatKnowledge(this.host, this.chatMeta);
+    this.book = new EngineBook(this.host, this.worlds, this.chatMeta);
+    this.promptSets = new PromptSets(this.host);
     this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks, async (worldId, userId) => (await this.worlds.index(worldId, userId)) !== null);
     this.presets = new PresetBinding(this.host);
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter, async (userId) => (await this.settings.get(userId)).helper);
-    this.diag = new Diagnostics(this.host);
+    this.blobs = new BlobStore(this.host);
+    // Each user's Settings → Diagnostics and Agents → Retention, as known: a call recorded before they load keeps the defaults.
+    this.diag = new Diagnostics(this.host, { blobs: this.blobs, ring: (userId) => this.settings.known(userId)?.diagnostics.recordsPerChat ?? DIAG_RING, transcriptDays: (userId) => this.settings.known(userId)?.retention.transcriptDays ?? RETENTION_DEFAULTS.transcriptDays });
     this.steps.onCall = (userId, call) => this.diag.call(userId, call);
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }), (chatId) => this.messages.forget(chatId));
+    this.sessions = new Sessions(this.blobs, this.ledger);
+    this.chatAgents = new ChatAgentMeta(this.host, this.chatMeta);
+    this.sweep = new Sweep({ host: this.host, blobs: this.blobs, retention: async (userId) => (await this.settings.get(userId)).retention, turning: (userId) => this.ledger.turning(userId), journals: (userId) => this.ledger.journals(userId), transcripts: (chatId, userId) => this.diag.transcripts(chatId, userId) });
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     // A view slower than a second is kept in the chat's diagnostics (a slow tab says where it went).
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
@@ -2409,12 +2481,26 @@ export class Runtime implements TurnHooks {
     this.changed(input.chatId, input.userId);
   }
 
+  /** Hears the writes that land (`onWritesLanded`). */
+  private readonly landedListeners = new Set<(input: LandedWrites) => void>();
+
+  /**
+   * Hears every batch of writes that lands (P2), at once or behind a reply, inside the ledger
+   * operation that landed it: a listener reads what it needs there and leaves its own work for after.
+   * The GM assistant names a held proposal's Undo chip this way once its write lands.
+   */
+  onWritesLanded(listener: (input: LandedWrites) => void): () => void {
+    this.landedListeners.add(listener);
+    return () => this.landedListeners.delete(listener);
+  }
+
   /**
    * Writes that landed (P2): a Re-read or Retry read offers what its read found (`readLanded`),
    * whether it landed at once or behind a reply, however that reply's window closed. Of a swipe's
    * reads that landed together, the last is the one that stands.
    */
-  async writesLanded(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; writes: HeldWrite[] }): Promise<void> {
+  async writesLanded(input: LandedWrites): Promise<void> {
+    for (const listener of this.landedListeners) listener(input);
     const reads = new Map<string, { messageId: MessageId; swipeId: number }>();
     for (const w of input.writes) if (w.kind === "reread" || w.kind === "retry_read") reads.set(`${w.messageId}:${w.swipeId}`, { messageId: w.messageId, swipeId: w.swipeId });
     for (const r of reads.values()) await this.readLanded(input, r.messageId, r.swipeId);
@@ -2498,6 +2584,8 @@ export class Runtime implements TurnHooks {
 
   changed(chatId: ChatId, userId: UserId): void {
     this.push.changed(chatId, userId);
+    // A sweep that is due runs once nothing of the user's is in flight (DESIGN §4.4).
+    this.sweep.nudge(userId);
   }
 
   /** The next swipe's mode, chosen on the swipe-option chip; consumed by that swipe. */
@@ -2798,8 +2886,9 @@ export class Runtime implements TurnHooks {
    * keeps the turn: the helper model, which every step without a connection of its own runs on; Model
    * use (each step, the phase budgets, the section budget); the minds; whether JSON blocks are hidden
    * from what the steps read of the chat; the run's own clocks (the engine run, its lore window, the
-   * skip plan); and the narrator's knowledge with the wording of a secret's mark. They are known by
-   * the time a turn starts, since its core was read with them.
+   * skip plan); the narrator's knowledge; and the texts its narrator prompt is made from, the wording
+   * of a secret's mark among them, with which a Re-narrate is sent (§6.12). They are known by the time
+   * a turn starts, since its core was read with them.
    */
   private turnSettingsKey(userId: UserId): string {
     const settings = this.settings.known(userId);
@@ -2807,8 +2896,8 @@ export class Runtime implements TurnHooks {
     const revision = this.settings.revision(userId);
     const kept = this.turnSettings.get(userId);
     if (kept?.revision === revision) return kept.key;
-    const { helper, modelUse, minds, hideJsonBlocks, timeouts, narrator } = settings;
-    const key = hashParts("lre.turn-settings", JSON.stringify({ helper, modelUse, minds, hideJsonBlocks, timeouts: { engineRunMs: timeouts.engineRunMs, preLookupMs: timeouts.preLookupMs, skipPlanMs: timeouts.skipPlanMs }, narrator }));
+    const { helper, modelUse, minds, hideJsonBlocks, timeouts, narrator, prompts, swipeTexts } = settings;
+    const key = hashParts("lre.turn-settings", JSON.stringify({ helper, modelUse, minds, hideJsonBlocks, timeouts: { engineRunMs: timeouts.engineRunMs, preLookupMs: timeouts.preLookupMs, skipPlanMs: timeouts.skipPlanMs }, narrator, prompts: prompts.texts, swipeTexts }));
     lruSet(this.turnSettings, userId, { revision, key }, 256);
     return key;
   }
@@ -2841,7 +2930,9 @@ export class Runtime implements TurnHooks {
       budget: settings.modelUse.tokens.sections,
       mindsBudget: settings.minds.tokens,
       narrator: { chat: chat.narrator ?? null, view: narratorView(chat, world, settings) },
-      wording: secretMarkWording(settings),
+      wording: markWording(settings.prompts.texts),
+      // The next turn's texts: the user's own, as a turn that isn't a Re-narrate is sent.
+      texts: settings.prompts.texts,
       knowledge: settings.minds.knowledge,
       said: "",
       planned: { outcome: [], montage: [] },
@@ -2888,6 +2979,10 @@ export class Runtime implements TurnHooks {
     const secrets = unrevealedSecrets(this.registry, world, state);
     const pending = input.core.journal.pending[input.generationId];
     const plan = pending?.planned ? pending : undefined;
+    // The texts the narrator's prompt is made from (DESIGN §6.12).
+    const texts = await this.turnTexts(input, plan, settings);
+    // The wording a secret is marked in, the turn's own: its sections, its rules and the World Info in its prompt alike.
+    const wording = markWording(texts);
     // This run's own lines: the plan it made and the prose it wrote, never another run's of the same
     // seed. A Re-narrate (P3) tells its source's, kept when that turn's reply took it (`adopted`).
     const renarrated = plan?.kind === "renarrate";
@@ -2926,7 +3021,8 @@ export class Runtime implements TurnHooks {
       mindsBudget: settings.minds.tokens,
       // What the narrator knows in this chat (C3): its own choice, else its world's default, else the user's.
       narrator: { chat: chat.narrator ?? null, view: narratorView(chat, world, settings) },
-      wording: secretMarkWording(settings),
+      wording,
+      texts,
       knowledge: settings.minds.knowledge,
       said: this.prePhase.get(input.generationId)?.text ?? "",
       planned,
@@ -2957,11 +3053,11 @@ export class Runtime implements TurnHooks {
     }
     // The narrator rules, for world chats only: at the preset's `{{outlet::lre_narrator}}`, else
     // before the character, apart from the section budget. Every turn has them: the order of
-    // authority first (DESIGN D36), then what marked facts and secret marks mean, in the user's mark
+    // authority first (DESIGN D36), then what marked facts and secret marks mean, in the turn's mark
     // wording, one text in every world whether or not the turn carries marked facts (§6.8, §6.11),
     // then the preset's own rules, as the player's.
     const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
-    if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, secretMarkWording(settings)) });
+    if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, texts) });
     this.countLater(input.userId, uncounted);
     // Activation is confirmed from the entries the player's record shows (a section's row) and the
     // preset's own narrator rules: an entry filled only for marked facts, or rules filled only with the
@@ -2974,8 +3070,33 @@ export class Runtime implements TurnHooks {
     // Diagnostics: each section, the outlet the preset gives it, and whether it went out with text.
     const sent = new Set(record.sections.filter((s) => !s.clipped).map((s) => s.slot));
     this.diag.sections({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, `${pending?.kind ?? "continue"} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent.has(s.id) })), started);
+    // The prompt set the turn was made from goes onto its record at commit, outside every hash, so a
+    // later Re-narrate can be sent the same texts (DESIGN §6.12).
+    if (pending) pending.prompts = await this.promptSets.put(input.userId, turnPromptSet(texts));
     // Nothing goes into the book yet: the guard of the generation that takes the turn writes it (`fill`).
-    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}` };
+    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}`, wording };
+  }
+
+  /**
+   * The texts a turn's narrator prompt is made from (DESIGN §6.12): the user's own now, except for a
+   * Re-narrate or a Re-run while Settings → Swipes keeps the turn's own, which is sent the prompt set
+   * its source swipe's record names (a Re-narrate's `renarrateOf`; a Re-run's, the swipe of its
+   * message it was made in place of, found as a Re-narrate's is). A source made before records named
+   * one was made with the shipped texts; one whose set is gone from storage gets the current texts,
+   * and its diagnostics say so. Either way a secret mark's wording the set doesn't hold is the user's
+   * now (`sourceTexts`): it came from Settings until it was a registry text.
+   */
+  private async turnTexts(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string }, plan: PendingTurn | undefined, settings: UserSettings): Promise<PromptTexts> {
+    if (!plan || settings.swipeTexts !== "turn") return settings.prompts.texts;
+    const source = plan.kind === "renarrate" ? plan.renarrateOf : plan.kind === "swipe" || plan.kind === "regenerate" ? rerunSource(input.core, input.observed, plan) : undefined;
+    if (!source) return settings.prompts.texts;
+    const rec = input.core.chain(input.observed).find((m) => m.id === source.messageId)?.ledger?.swipes[String(source.swipeId)];
+    if (!rec) return settings.prompts.texts;
+    if (rec.prompts === undefined) return sourceTexts(null, settings.prompts.texts);
+    const set = await this.promptSets.get(input.userId, rec.prompts);
+    if (set) return sourceTexts(set, settings.prompts.texts);
+    this.diag.skipped({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, "sections", "prompts", "the texts the re-narrated turn was made with are gone from storage, so your current texts were sent");
+    return settings.prompts.texts;
   }
 
   /**
@@ -2988,11 +3109,13 @@ export class Runtime implements TurnHooks {
     const now = (await this.presets.current(chatId, userId)).placed;
     if (`${now}\u0000${this.book.placedAs(delivered.bookId)}` !== delivered.placed) return "moved";
     await this.book.write(delivered.bookId, delivered.fills, userId);
+    lruSet(this.turnWording, chatId, delivered.wording, 512);
     return "filled";
   }
 
   /** Once the prompt that took them is assembled (DESIGN §6.4): the turn's entries emptied and off, so no later prompt holds them. */
   async clear(chatId: ChatId, userId: UserId, delivered: Delivered): Promise<void> {
+    this.turnWording.delete(chatId);
     await this.book.clear(delivered.bookId, [...delivered.fills.keys()], userId);
   }
 
@@ -3001,6 +3124,7 @@ export class Runtime implements TurnHooks {
    * turn of its own (Impersonate, a dry run): what a restart or a refused clear left there goes.
    */
   async vacate(chatId: ChatId, userId: UserId): Promise<void> {
+    this.turnWording.delete(chatId);
     const run = await this.runOf(chatId, userId);
     const bookId = run ? (await this.worlds.index(run.worldId, userId))?.loreBookId : null;
     if (bookId) await this.book.vacate(bookId, userId);
@@ -3054,6 +3178,7 @@ export class Runtime implements TurnHooks {
       playsWorld: (meta) => readRun(meta) !== null,
       head: (chatId, userId) => this.ledger.narratorState(chatId, userId),
       settings: (userId) => this.settings.get(userId),
+      wording: async (chatId, userId) => this.turnWording.get(chatId) ?? markWording((await this.settings.get(userId)).prompts.texts),
       log: (message, userId) => this.host.log("warn", `[LumiRPEngine] ${message}`, userId),
     };
   }
@@ -3492,15 +3617,6 @@ function planAnchors(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
     // A night's sleep is two blocks across midnight: the morning is where the run of sleep ends.
     return blocks.find((b, i) => b.activity === "sleep" && b.end > state.clock && !(blocks[i + 1]?.activity === "sleep" && blocks[i + 1]?.start === b.end))?.end ?? null;
   };
-}
-
-/** Why an action couldn't run, for the player: a requirement isn't shown as its expression ("requires to != here"), only in the words its shape has (`failureWords`). */
-export function playerReason(failed: { code: string; reason: string; requirement?: string }): string {
-  if (failed.code !== "requirement") return failed.reason;
-  const req = failed.requirement ?? failed.reason.replace(/^requires\s+/, "");
-  if (/\bto\s*!=\s*here\b/.test(req)) return "You're already there.";
-  const why = failureWords(req);
-  return why ? `Not possible here and now: ${why}.` : "Not possible here and now.";
 }
 
 /** A swipe's receipt for the `index`th typed action dropped for naming nothing that fits. */

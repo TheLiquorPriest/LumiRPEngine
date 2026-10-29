@@ -245,6 +245,8 @@ export interface PostEntry {
   by?: { action: string; label: string };
   /** A `fix` the GM made (`lre.edit`, a GM's minds run), not a ✎ correction of the player's: its chip says it was a GM edit (DESIGN §7). */
   gm?: true;
+  /** An agent's write (AGENT-LOOP-PLAN §4): its role, its batch's key (of the operations it was asked for), the keys of those it applied, the label its writer gave it, and the knowledge it wrote under (absent: the GM's own); GM-level, never on a player surface. */
+  agent?: { role: string; key: string; applied?: string[]; label: string; knowledge?: "pov" | "everyone" | "gm" };
   /**
    * What a GM edit or ✎ fix asked for (DESIGN §7, §12): its operations, or the time it set the
    * clock to. Landing after a reply it was held through, or carried after a read (a Re-read, a Retry
@@ -254,8 +256,42 @@ export interface PostEntry {
   edit?: FixDirective;
 }
 
+/**
+ * A workspace change one GM edit carries (DESIGN §4.4): write a file (its body a blob the writer
+ * stored first) for the knowledge that may read it (`readers`: the writer's), remove it, move it
+ * (its pin and readers with it), pin or unpin it, or set whose knowledge may read it.
+ */
+export type WorkspaceOp =
+  | { op: "ws_write"; path: string; hash: string; readers: "pov" | "everyone" | "gm" }
+  | { op: "ws_delete"; path: string }
+  | { op: "ws_move"; from: string; to: string }
+  | { op: "ws_pin"; path: string; pinned: boolean }
+  | { op: "ws_readers"; path: string; readers: "pov" | "everyone" | "gm" };
+
+/** The clock set as its ✎ fix sets it (`clockFix`), inside a GM edit: "YYYY-MM-DD HH:MM" in the world's calendar at the POV's place. */
+export interface ClockOp {
+  op: "clock";
+  time: string;
+}
+
+/**
+ * A field set as the player's ✎ fix sets it (`lre.fix`), inside a GM edit: under the player's rules,
+ * whatever the edit around it may, so a locked field is refused and an activity set takes no old end.
+ * An agent's ✎ fix is written so (`backend/agents/tools/writer.ts`), and one held through a reply is
+ * worked out again under the rules it was checked with.
+ */
+export interface FixSetOp {
+  op: "fix_set";
+  entity: string;
+  field: string;
+  value: JsonValue;
+}
+
+/** What one `fix` entry asks for, in order: GM edits, plus an agent's workspace changes, clock sets and ✎ fixes. */
+export type FixOp = EditOp | WorkspaceOp | ClockOp | FixSetOp;
+
 /** A GM edit's or ✎ fix's request, kept on its `fix` entry (`PostEntry.edit`). */
-export type FixDirective = { ops: EditOp[] } | { clock: string };
+export type FixDirective = { ops: FixOp[] } | { clock: string };
 
 /** A level change for everyone, for one detail band (stored under `tier`, the key the band ids had as tiers) or for one entity. */
 export type ResolveScope = { all: true } | { tier: Band } | { entity: EntityId };
@@ -335,6 +371,20 @@ export interface CarryDrop {
   reason: string;
 }
 
+/**
+ * The agent session's blobs a turn made (DESIGN §4.4, sessions), by hash: its own segment of the
+ * main session, and a compaction's summary, or a span a rollback restored, with the span it
+ * replaced. No key holds a chat id or a path, so a swipe, a Re-run or a Branch needs no remapping.
+ */
+export interface RecSession {
+  /** What the turn added to the main session. */
+  segment?: string;
+  /** What the session reads from in place of everything on the chain before this record. */
+  summary?: string;
+  /** What `summary` replaced, archived, so a rollback can bring it back. */
+  archived?: string;
+}
+
 /** One swipe's turn record (DESIGN §4.3, `Rec`). */
 export interface Rec {
   v: 1;
@@ -366,6 +416,15 @@ export interface Rec {
   /** Content accepted without being read: an assistant edit or an unread Continue (DESIGN §4.3). Outside every hash. */
   accepted?: ContentId;
   diag?: string;
+  /** The hash of the prompt set the turn's narrator prompt was made from (DESIGN §6.12), which a Re-narrate may use again. Outside every hash. */
+  prompts?: string;
+  /**
+   * The turn's agent session blobs (DESIGN §4.4): outside every hash but the tombstone's, like
+   * `diag`, written at the turn's close and never once the next turn is planned
+   * (`LedgerCore.recordSession`). Only the agent stores read it, each checking it as they go, so a
+   * damaged one costs the session link, never the turn's world changes.
+   */
+  session?: RecSession;
 }
 
 /** `spindle_metadata.lumi_rp_engine` on an assistant message. Swipe keys are decimal indexes. */
@@ -413,8 +472,11 @@ export interface Tombstone {
   recHash: string;
 }
 
-/** A user write the journal holds while a window is open (P2). */
-export type HeldWrite =
+/**
+ * A user write the journal holds while a window is open (P2): a reply's, or an engine run's
+ * pre-reply window (`Journal.prereply`).
+ */
+export type HeldWrite = (
   | { kind: "post"; id: string; target: "head"; entry: Omit<PostEntry, "seq" | "at"> }
   | { kind: "marker"; id: string; target: "head"; body: MarkerBody }
   | { kind: "keep"; id: string; messageId: MessageId; parentPath: PathHash; convert: EventRef[] }
@@ -430,7 +492,16 @@ export type HeldWrite =
    * journaled between the tap and the undo (an earlier held Undo, a Re-read) that worked its request
    * out again can't leave the undo naming the wrong part.
    */
-  | { kind: "undo"; id: string; messageId: MessageId; swipeId: number; refs: EventRef[]; entry?: number };
+  | { kind: "undo"; id: string; messageId: MessageId; swipeId: number; refs: EventRef[]; entry?: number }
+) & {
+  /**
+   * Held through the engine run before the reply too, whatever "Hold writes during the engine run"
+   * says: a GM agent's write or a workspace save, which an agent may make at any time and which must
+   * never throw the turn away. Without it, the pre-reply window holds a write only while that setting
+   * is on; a reply's own window holds every write either way (P2).
+   */
+  hold?: true;
+};
 
 export interface HeldEntry {
   write: HeldWrite;
@@ -485,6 +556,8 @@ export interface PendingTurn {
   undone?: EventRef[];
   /** Re-narrate: copies a plan journaled before copies were carried at commit had already dropped (P3), still noted. */
   dropped?: CarryDrop[];
+  /** The prompt set the engine run made the turn's narrator prompt from (DESIGN §6.12), recorded on the turn's record at commit. */
+  prompts?: string;
 }
 
 /** Latest journal state of one message's ledger. */
@@ -506,6 +579,14 @@ export interface Journal {
   held: HeldEntry[];
   /** Open in-flight windows (P2). */
   windows: GenerationId[];
+  /**
+   * Open pre-reply windows (P2), by engine run id: a run's, from its start until the generation
+   * that takes its turn takes the window over, or the run ends without a reply. At most one is open.
+   * It holds only the writes made meanwhile that are held through the run (`HeldWrite.hold`, or all of
+   * them with "Hold writes during the engine run" on); every other write lands and makes the turn
+   * stale, as before. Apart from `windows`: a turn being planned is not in flight. Absent when none.
+   */
+  prereply?: GenerationId[];
   pending: Record<GenerationId, PendingTurn>;
   /** Whether the starting markers have been written for this chat (L20). */
   started: boolean;

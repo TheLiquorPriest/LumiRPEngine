@@ -22,7 +22,7 @@ import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
 import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, UpgradePreview, WorldChatInfo } from "../shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
-import { EXTRACTION_TYPES, helperCallOf, narratorViewOf } from "../shared/settings";
+import { EXTRACTION_TYPES, helperCallOf, narratorViewOf, type UserSettings } from "../shared/settings";
 import { formatMs, TimeoutFired, timerMs } from "../shared/timeouts";
 import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
@@ -51,7 +51,8 @@ import { pinBooks, pinEntries, pinViews } from "./lore-pins";
 import { markBookEntry, MarkChangeError, markChangeOf, writeBookFields } from "./book-lore";
 import { bookLoreFieldsOf, engineWroteEntry, OLD_SECRECY_FIELDS } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
-import { ACTIVE_CONNECTION, playerReason, readRun, Runtime, unpricedChip } from "./runtime";
+import { ACTIVE_CONNECTION, readRun, Runtime, unpricedChip } from "./runtime";
+import { playerReason } from "./requirement-words";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
@@ -61,6 +62,7 @@ import { buildCharacter } from "../engine/character";
 import type { CharacterResult } from "../shared/character";
 import { type DraftNotice, newChatRun, WorldError } from "./worlds";
 import { SecrecyError, SecrecyMoves } from "./secrecy-migration";
+import { Assistant, AssistantError, ASSISTANT_ROLE, workspaceRequest } from "./agents/assistant";
 
 export class RequestError extends Error {
   constructor(
@@ -82,6 +84,11 @@ function isRequest(raw: unknown): raw is FrontendToBackend {
   return isRecord(raw) && raw.lre === PROTOCOL_VERSION && typeof raw.type === "string" && typeof raw.reqId === "string";
 }
 
+/** Refuses a settings write that would change what acceptance runs guard (AGENT-LOOP-PLAN §12): an outside client's, however its patch says it. */
+function keepAcceptance(current: Readonly<UserSettings>, next: Readonly<UserSettings>): void {
+  if (JSON.stringify(current.agents.acceptance) !== JSON.stringify(next.agents.acceptance)) throw new RequestError("forbidden", "Acceptance runs are set in Settings → Agents, not by an outside client");
+}
+
 /** Notes that a request changed a world's working copy, to the state it has now. */
 type DraftNoted = DraftNotice;
 
@@ -98,6 +105,8 @@ export class Dispatcher {
   private readonly minds: MindsRuns;
   /** Build's moves of the user's World Info books to secret marks (DESIGN §4.2). */
   private readonly secrecy: SecrecyMoves;
+  /** GM → Assistant, the GM agent's chat about each chat's world (DESIGN §4.5): its answers run in the background. */
+  readonly assistant: Assistant;
 
   constructor(
     private readonly rt: Runtime,
@@ -105,12 +114,21 @@ export class Dispatcher {
   ) {
     this.minds = new MindsRuns(rt);
     this.secrecy = new SecrecyMoves(rt.host);
+    this.assistant = new Assistant(rt);
   }
 
   start(): void {
     this.rt.host.frontend.onMessage((message, userId, session) => {
       void this.handle(message, userId, session);
     });
+    // An acceptance run's counter follows every change to it, on every page of the user's (AGENT-LOOP-PLAN §12).
+    this.rt.agentAccounts.onChange((userId) => {
+      void this.rt.settings
+        .get(userId)
+        .then(async (settings) => this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.acceptance.changed", state: await this.rt.agentAccounts.state(userId, settings.agents) }, userId))
+        .catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] the acceptance run's counter wasn't sent (${error instanceof Error ? error.message : String(error)})`, userId));
+    });
+    this.assistant.start();
   }
 
   async handle(raw: unknown, userId: UserId, session?: string): Promise<void> {
@@ -527,6 +545,12 @@ export class Dispatcher {
         // GM-level, like `lre.gm`: read only when the Diagnostics page asks, never pushed.
         if (r.op === "clear") await this.rt.diag.clear(r.chatId, userId);
         if (r.op === "dismiss") this.rt.diag.dismiss(r.chatId, userId);
+        if (r.op === "text") {
+          // Only a text one of this chat's records keeps (within transcript retention), never any blob of the user's.
+          if (typeof r.hash !== "string" || !(await this.rt.diag.transcripts(r.chatId, userId)).includes(r.hash)) throw new RequestError("not_found", "no record of this chat keeps that text: it may have passed its retention");
+          reply("lre.diag", { records: [], activity: this.rt.diag.activityOf(r.chatId), text: await this.rt.blobs.get(userId, r.hash) });
+          return;
+        }
         reply("lre.diag", { records: r.op === "get" ? await this.rt.diag.records(r.chatId, userId) : [], activity: this.rt.diag.activityOf(r.chatId) });
         return;
       }
@@ -561,16 +585,24 @@ export class Dispatcher {
       case "lre.settings.get":
       case "lre.settings.set": {
         if (r.type === "lre.settings.set") {
+          // Acceptance runs guard a connection from agents (AGENT-LOOP-PLAN §12): an outside client, which may be one, can't change what they guard, whatever its patch's shape (a reset of the whole Agents page included).
+          const guard = this.outside(userId, session) ? keepAcceptance : undefined;
           const hid = (await this.rt.settings.get(userId)).hideJsonBlocks;
-          const hides = (await this.rt.settings.set(userId, r.patch)).hideJsonBlocks;
+          const hides = (await this.rt.settings.set(userId, r.patch, guard)).hideJsonBlocks;
           if (hides !== hid) await this.rt.hidingChanged(userId, hides);
         }
         const settings = await this.rt.settings.get(userId);
         const routed = helperCallOf(settings.modelUse.steps.extract, settings.helper).connectionId;
-        // The connection whose learning Settings shows: extraction's (its own, else the helper model's), else the user's default.
-        const active = routed ? null : await this.rt.host.connections.active(userId).catch(() => null);
-        const id = routed ?? active?.id ?? ACTIVE_CONNECTION;
-        reply(r.type, await this.rt.settings.result(userId, { id, name: active?.name ?? (id === ACTIVE_CONNECTION ? "Active connection" : id) }));
+        const own = settings.agents.assistant.connectionId;
+        // The connections whose learning Settings shows: a reply's types on extraction's (its own, else
+        // the helper model's), else the user's default; the GM assistant's change types as its role
+        // learns them, on its own connection, else the user's default, as it applies them.
+        const active = routed && own ? null : await this.rt.host.connections.active(userId).catch(() => null);
+        const connectionOf = (route: string | null | undefined): { id: string; name: string } => {
+          const id = route ?? active?.id ?? ACTIVE_CONNECTION;
+          return { id, name: !route && active ? active.name : id === ACTIVE_CONNECTION ? "Active connection" : id };
+        };
+        reply(r.type, await this.rt.settings.result(userId, connectionOf(routed), { role: ASSISTANT_ROLE, connection: connectionOf(own) }));
         return;
       }
       case "lre.settings.caveats": {
@@ -734,6 +766,33 @@ export class Dispatcher {
         reply("lre.agents", await this.rt.agents.request(r, userId, session));
         return;
       }
+      case "lre.acceptance": {
+        // Opened and closed by the user alone (AGENT-LOOP-PLAN §12): never an outside client, so no agent arms a connection the runs guard.
+        if (r.op !== "get" && this.outside(userId, session)) throw new RequestError("forbidden", "An acceptance run is opened and closed in Settings → Agents, not by an outside client");
+        const accounts = this.rt.agentAccounts;
+        if (r.op === "open") {
+          const label = typeof r.label === "string" ? r.label.trim() : "";
+          if (!safeKey(label)) throw new RequestError("bad_request", "give the run a label of 1 to 200 characters");
+          if (!(await accounts.open(userId, label))) throw new RequestError("bad_request", "an acceptance run is open already: close it first");
+        } else if (r.op === "close") await accounts.close(userId);
+        else if (r.op !== "get") throw new RequestError("bad_request", "op must be get, open or close");
+        reply("lre.acceptance", await accounts.state(userId, (await this.rt.settings.get(userId)).agents));
+        return;
+      }
+      case "lre.assistant":
+      case "lre.workspace": {
+        // GM → Assistant and GM → Workspace (DESIGN §4.5, §4.4): behind the GM gate, as `lre.gm` is.
+        // An answer goes on in the background, pushed to the sessions that asked about the chat's assistant.
+        await this.requireWorldChat(r.chatId, userId);
+        try {
+          if (r.type === "lre.assistant") reply("lre.assistant", await this.assistant.request(r, userId, session));
+          else reply("lre.workspace", await workspaceRequest(this.rt, r, userId));
+        } catch (error) {
+          if (error instanceof AssistantError) throw new RequestError(error.code, error.message);
+          throw error;
+        }
+        return;
+      }
     }
   }
 
@@ -782,7 +841,8 @@ export class Dispatcher {
         if (existing && existing.worldId !== r.worldId) throw new RequestError("conflict", "This chat already plays another world. Start a new chat for this one.");
         if (existing) await this.rt.book.attach(r.chatId, await this.rt.book.ensure(world, index, userId), userId);
         else {
-          await this.rt.host.chats.mergeChatMetadata(r.chatId, { [LEDGER_NAMESPACE]: JSON.parse(JSON.stringify(newChatRun(r.worldId, revision))) as JsonValue }, userId);
+          // The chat's run, in the chat's turn among LRE's writes of its metadata.
+          await this.rt.chatMeta.run(r.chatId, userId, () => this.rt.host.chats.mergeChatMetadata(r.chatId, { [LEDGER_NAMESPACE]: JSON.parse(JSON.stringify(newChatRun(r.worldId, revision))) as JsonValue }, userId));
           const bookId = await this.rt.book.ensure(world, index, userId);
           await this.rt.book.attach(r.chatId, bookId, userId);
           this.rt.forgetChat(r.chatId);
@@ -855,6 +915,11 @@ export class Dispatcher {
       }
     }
     this.rt.host.log("info", `[LumiRPEngine] outside client connected: ${named.name} ${named.version}`, userId);
+  }
+
+  /** Whether the session said hello as an outside client (DESIGN §23): an MCP server or the CLI, not one of the user's pages. */
+  private outside(userId: UserId, session: string | undefined): boolean {
+    return session !== undefined && this.clients.has(`${userId}\u0000${session}`);
   }
 
   /** The world's engine-managed book follows its head revision: a slot entry per section, and no leftover lore copies (DESIGN §4.2). */
@@ -986,6 +1051,8 @@ export class Dispatcher {
       if (!m || !rec || !entry || String(m.swipeId) !== swipe) throw new RequestError("not_found", "the correction is gone");
       if (entry.events.length > 0 && entry.events.every((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index))) return { applied: false, pending: false };
       const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: seq });
+      // A GM assistant proposal's Undo, wherever it was pressed: its card says so, and its changes count as undone toward what the assistant learns.
+      if (entry.agent?.role === ASSISTANT_ROLE && (result.applied || result.pending)) await this.assistant.undone(chatId, userId, id);
       return { applied: result.applied, pending: result.pending };
     }
     if (kind === "refused") {

@@ -124,7 +124,8 @@ export function mapSettingsOf(world: { readonly mapSettings?: unknown }): MapSet
 /** A vehicle trip's overheads when the world doesn't tune them; no speeds, so every route keeps its own minutes. */
 export const DEFAULT_TRAVEL: Readonly<TravelTuning> = Object.freeze({ speeds: {}, vehicleSpeeds: {}, startMinutes: 1, parkMinutes: 1, fetchMinutes: 30 });
 
-const TRAVEL_MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water"];
+/** Every way of travelling a route may offer. */
+export const TRAVEL_MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water"];
 
 /** A world's travel tuning (DESIGN §9.1), each part read for itself: one missing or malformed is the default; a speed is kept only when above 0. */
 export function travelTuningOf(world: { readonly mapSettings?: unknown }): TravelTuning {

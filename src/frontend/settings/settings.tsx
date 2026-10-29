@@ -1,8 +1,12 @@
 // Settings (DESIGN §12): a home list of pages in groups, each page under a header with
-// Back. Getting started: Helper model, Model use, Steps and connections, Minds, Narrator, Timeouts. Defaults
-// for new chats: Realism, Checks, Time. Replies: Changes from the reply, Swipes. Your preset.
-// Display: Show ids. About: Caveats, fetched on their own (a dry run of the chat) by home and the
-// Caveats page, and Diagnostics (each turn's steps, model calls and failures; behind its own curtain).
+// Back. Getting started: Helper model, Model use, Steps and connections, Minds, Narrator, Timeouts.
+// Agents: Agents (the agent runtime's budgets, throttles, caching and acceptance runs), Assistant
+// (the GM assistant's connection, knowledge, how its changes land, its history and budget), Prompts,
+// every text sent to a model (DESIGN §6.12), Writes (what waits while the engine runs) and Retention
+// (how long the agents' stored texts are kept). Defaults for new chats: Realism, Checks, Time.
+// Replies: Changes from the reply, Swipes. Your preset. Display: Show ids. About: Caveats, fetched on
+// their own (a dry run of the chat) by home and the Caveats page, and Diagnostics (each turn's steps,
+// model calls and failures; behind its own curtain).
 // The page is UI state (`ui.settings.page`), so it holds while the drawer switches modes. A running
 // chat's own rules (realism, checks, time, pins and Upgrade) live in GM → This chat.
 
@@ -11,7 +15,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { hasOwn, type JsonObject, type JsonValue } from "../../shared/json";
 import { mergeAdjusted, type MergeAdjustment } from "../../shared/json-patch";
 import type { SettingsResult } from "../../shared/protocol";
-import { EXTRACTION_TYPES, stepConfigOf } from "../../shared/settings";
+import { CHANGE_TYPES, stepConfigOf } from "../../shared/settings";
 import type { StepPurpose } from "../../shared/world";
 import { ADJUDICATION_PRESET_LABEL } from "../../shared/adjudication";
 import type { SettingsPage } from "../app";
@@ -27,9 +31,14 @@ import { PresetPage } from "./preset";
 import { ExtractionPage, SwipesPage } from "./replies";
 import { type Connection, HelperSection, helperSummary, ModelUseSection, StepsSection, useConnections } from "./steps";
 import { STEP_LABEL } from "../../shared/steps";
+import { AgentsSection, agentsSummary } from "./agents";
+import { AssistantPage, assistantSummary } from "./assistant";
 import { limitText, TimeoutsSection } from "./timeouts";
+import { WritesPage } from "./writes";
+import { RetentionPage, retentionSummary } from "./retention";
 import { DiagnosticsPage } from "../diagnostics";
 import { McpServerPage } from "../agents";
+import { ownTextCount, PromptsPage } from "./agent-prompts";
 
 type Page = Exclude<SettingsPage, "home">;
 type Caveat = { code: string; message: string };
@@ -45,8 +54,10 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   model: { title: "Model use", subtitle: "How much the engine asks a model", icon: "bolt" },
   steps: { title: "Steps and connections", subtitle: "Which model runs each step", icon: "branch" },
   minds: { title: "Minds", subtitle: "How characters think and remember", icon: "sparkle" },
-  narrator: { title: "Narrator", subtitle: "What the narrator knows, and how a secret is marked", icon: "eye" },
+  narrator: { title: "Narrator", subtitle: "What the narrator knows, and what of a secret", icon: "eye" },
   timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
+  agents: { title: "Agents", subtitle: "The agent runtime's budgets, caching and acceptance runs", icon: "function" },
+  assistant: { title: "Assistant", subtitle: "The GM assistant's model, knowledge and budget", icon: "message" },
   realism: { title: "Realism", subtitle: "For new chats", icon: "layers" },
   checks: { title: "Checks", subtitle: "For new chats", icon: "dice" },
   time: { title: "Time", subtitle: "For new chats", icon: "clock" },
@@ -54,14 +65,18 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   swipes: { title: "Swipes", subtitle: "What a swipe does", icon: "refresh" },
   preset: { title: "Preset", subtitle: "Your Lumiverse preset and LumiRPEngine", icon: "scroll" },
   display: { title: "Display", subtitle: "How LumiRPEngine looks on this device", icon: "eye" },
+  writes: { title: "Writes", subtitle: "What waits while the engine runs", icon: "pause" },
   caveats: { title: "Caveats", subtitle: "What to know", icon: "info" },
   diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" },
   mcp: { title: "MCP server", subtitle: "Your agent's lumirpengine, and how it follows updates", icon: "branch" },
+  prompts: { title: "Prompts", subtitle: "Every text sent to a model, yours to edit", icon: "edit" },
+  retention: { title: "Retention", subtitle: "How long the agents' stored texts are kept", icon: "box" },
 };
 
 /** The home list's groups, in order. */
 const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
+  { title: "Agents", pages: ["agents", "assistant", "prompts", "writes", "retention"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -91,6 +106,10 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: narratorViewSummary(settings.narrator) };
     case "timeouts":
       return { subtitle: `Engine run ${limitText(settings.timeouts.engineRunMs)} · reading the reply ${limitText(settings.timeouts.postReplyMs)}` };
+    case "agents":
+      return { subtitle: agentsSummary(settings.agents) };
+    case "assistant":
+      return { subtitle: assistantSummary(settings.agents.assistant, connections) };
     case "steps": {
       const purposes = Object.keys(STEP_LABEL) as StepPurpose[];
       const on = purposes.filter((purpose) => stepConfigOf(settings.modelUse.steps, purpose).enabled).length;
@@ -103,15 +122,17 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
     case "time":
       return { subtitle: `${settings.time.scale}× scale · montage by ${settings.time.montage === "key" ? "key moments" : settings.time.montage}` };
     case "extraction": {
-      const pinned = EXTRACTION_TYPES.filter((type) => data.extraction[type]?.source === "pinned").length;
+      const pinned = CHANGE_TYPES.filter((type) => data.extraction[type]?.source === "pinned").length;
       return { subtitle: pinned > 0 ? `${pinned} pinned, the rest learn` : "Every type learns from you" };
     }
     case "swipes":
-      return { subtitle: settings.swipeDefault === "rerun" ? "Re-run by default" : "Re-narrate by default" };
+      return { subtitle: `${settings.swipeDefault === "rerun" ? "Re-run by default" : "Re-narrate by default"} · Swipes send ${settings.swipeTexts === "turn" ? "the turn's texts" : "your current texts"}` };
     case "preset":
       return { subtitle: settings.hideJsonBlocks ? "JSON blocks hidden in world chats" : "JSON blocks shown" };
     case "display":
       return { subtitle: "Show ids", value: showIds ? "On" : "Off" };
+    case "writes":
+      return { subtitle: "Hold writes during the engine run", value: settings.holdWrites ? "On" : "Off" };
     case "caveats": {
       // A check still running isn't a warning: the row says it's checking until the dry run answers.
       const found = caveats?.filter((c) => !hasOwn(STILL_CHECKING, c.code)) ?? [];
@@ -122,6 +143,12 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: "Each turn's steps, model calls and errors" };
     case "mcp":
       return { subtitle: "The setup that follows LumiRPEngine, and each server's state" };
+    case "prompts": {
+      const own = ownTextCount(settings.prompts);
+      return { subtitle: own === 0 ? "Every text as shipped" : `${own} ${own === 1 ? "text" : "texts"} of your own` };
+    }
+    case "retention":
+      return { subtitle: retentionSummary(settings.retention) };
   }
 }
 
@@ -283,6 +310,10 @@ export function Settings() {
       <NarratorPage narrator={settings.narrator} patch={patch} busy={busy} />
     ) : page === "timeouts" ? (
       <TimeoutsSection timeouts={settings.timeouts} patch={patch} busy={busy} />
+    ) : page === "agents" ? (
+      <AgentsSection agents={settings.agents} patch={patch} busy={busy} />
+    ) : page === "assistant" ? (
+      <AssistantPage agents={settings.agents} patch={patch} busy={busy} />
     ) : page === "realism" ? (
       <RealismPage settings={settings} patch={patch} busy={busy} />
     ) : page === "checks" ? (
@@ -292,15 +323,21 @@ export function Settings() {
     ) : page === "extraction" ? (
       <ExtractionPage data={data} patch={patch} busy={busy} />
     ) : page === "swipes" ? (
-      <SwipesPage value={settings.swipeDefault} patch={patch} busy={busy} />
+      <SwipesPage value={settings.swipeDefault} texts={settings.swipeTexts} patch={patch} busy={busy} />
     ) : page === "preset" ? (
       <PresetPage hideJsonBlocks={settings.hideJsonBlocks} patch={patch} busy={busy} />
     ) : page === "display" ? (
       <DisplayPage />
+    ) : page === "writes" ? (
+      <WritesPage holdWrites={settings.holdWrites} patch={patch} busy={busy} />
     ) : page === "diagnostics" ? (
-      <DiagnosticsPage />
+      <DiagnosticsPage diagnostics={settings.diagnostics} patch={patch} busy={busy} />
     ) : page === "mcp" ? (
       <McpServerPage />
+    ) : page === "prompts" ? (
+      <PromptsPage prompts={settings.prompts} patch={patch} busy={busy} />
+    ) : page === "retention" ? (
+      <RetentionPage retention={settings.retention} patch={patch} busy={busy} />
     ) : (
       <CaveatsPage caveats={caveats} open={go} />
     );

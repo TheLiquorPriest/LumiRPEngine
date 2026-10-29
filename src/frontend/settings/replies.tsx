@@ -1,12 +1,14 @@
 // Settings → Replies: what the engine may change from a reply's text, per type
-// (Auto, Confirm or Never, with where the mode comes from and Unpin, D4 learning), and what a swipe
-// does by default.
+// (Auto, Confirm or Never, with where the mode comes from and Unpin, D4 learning), what the GM
+// assistant may change on its own, per type (AGENT-LOOP-PLAN §6), what a swipe does by default,
+// and which texts a Re-narrate is sent (DESIGN §6.12).
 
 import type { JsonObject } from "../../shared/json";
+import type { SwipeTexts } from "../../shared/prompts";
 import type { BoundMode } from "../../shared/ids";
 import type { ExtractionModeView, SettingsResult } from "../../shared/protocol";
-import { EXTRACTION_TYPES } from "../../shared/settings";
-import type { ExtractionType } from "../../shared/settings";
+import { AGENT_CHANGE_LABEL, AGENT_CHANGE_TYPES, EXTRACTION_TYPES } from "../../shared/settings";
+import type { ChangeType, ExtractionType } from "../../shared/settings";
 import { Button, Section, Seg } from "../components";
 
 const EXTRACTION_LABEL: Record<ExtractionType, string> = {
@@ -52,6 +54,25 @@ export function modeSource(view: ExtractionModeView): string {
   }
 }
 
+/** One type's row: its mode, Unpin when pinned, and where the mode comes from. `agent` marks an agent change type's. */
+function ModeRow(props: { type: ChangeType; label: string; view: ExtractionModeView; agent?: boolean; patch(patch: JsonObject): void; busy: boolean }) {
+  const { type, label, view } = props;
+  return (
+    <div class="lre-set-ext" data-lre-extraction={props.agent ? undefined : type} data-lre-agent-change={props.agent ? type : undefined}>
+      <div class="lre-set-ext-head">
+        <span class="lre-set-ext-title">{label}</span>
+        {view.source === "pinned" ? (
+          <Button size="sm" variant="ghost" icon="undo" label={`Unpin ${label} and let it learn`} disabled={props.busy} onClick={() => props.patch({ extraction: { [type]: null } })}>
+            Unpin
+          </Button>
+        ) : null}
+      </div>
+      <Seg<BoundMode> label={label} value={view.mode} options={MODE_OPTIONS} disabled={props.busy} onChange={(mode) => props.patch({ extraction: { [type]: { mode } } })} />
+      <span class={view.source === "learned" ? "lre-small lre-pos" : "lre-small lre-muted"}>{modeSource(view)}</span>
+    </div>
+  );
+}
+
 export function ExtractionPage(props: { data: SettingsResult; patch(patch: JsonObject): void; busy: boolean }) {
   return (
     <div class="lre-stack" data-lre-settings-page="extraction">
@@ -64,21 +85,22 @@ export function ExtractionPage(props: { data: SettingsResult; patch(patch: JsonO
           {EXTRACTION_TYPES.map((type) => {
             const view = props.data.extraction[type];
             if (!view) return null;
-            return (
-              <div key={type} class="lre-set-ext" data-lre-extraction={type}>
-                <div class="lre-set-ext-head">
-                  <span class="lre-set-ext-title">{EXTRACTION_LABEL[type]}</span>
-                  {view.source === "pinned" ? (
-                    <Button size="sm" variant="ghost" icon="undo" label={`Unpin ${EXTRACTION_LABEL[type]} and let it learn`} disabled={props.busy} onClick={() => props.patch({ extraction: { [type]: null } })}>
-                      Unpin
-                    </Button>
-                  ) : null}
-                </div>
-                <Seg<BoundMode> label={EXTRACTION_LABEL[type]} value={view.mode} options={MODE_OPTIONS} disabled={props.busy} onChange={(mode) => props.patch({ extraction: { [type]: { mode } } })} />
-                <span class={view.source === "learned" ? "lre-small lre-pos" : "lre-small lre-muted"}>{modeSource(view)}</span>
-              </div>
-            );
+            return <ModeRow key={type} type={type} label={EXTRACTION_LABEL[type]} view={view} patch={props.patch} busy={props.busy} />;
           })}
+        </div>
+      </Section>
+      <Section title="The GM assistant's changes">
+        <div class="lre-stack">
+          <p class="lre-small lre-muted" style={{ margin: 0 }}>
+            What an agent (the GM assistant) may change on its own. Auto applies it, with its Undo, when the assistant is set to apply at once; Confirm waits for your Apply; Never refuses it. Each kind learns from your Apply, No and Undo on the assistant's connection, as the reply's kinds learn from your confirms and undos, unless you pin it. Your own GM edits are never held back.
+          </p>
+          <div class="lre-set-rows">
+            {AGENT_CHANGE_TYPES.map((type) => {
+              const view = props.data.extraction[type];
+              if (!view) return null;
+              return <ModeRow key={type} type={type} label={AGENT_CHANGE_LABEL[type]} view={view} agent patch={props.patch} busy={props.busy} />;
+            })}
+          </div>
         </div>
       </Section>
     </div>
@@ -90,7 +112,12 @@ const SWIPE_HELP: Record<"rerun" | "renarrate", string> = {
   renarrate: "A plain swipe keeps everything the engine decided (the same dice, outcome and events) and only asks for new prose.",
 };
 
-export function SwipesPage(props: { value: "rerun" | "renarrate"; patch(patch: JsonObject): void; busy: boolean }) {
+const SWIPE_TEXTS_HELP: Record<SwipeTexts, string> = {
+  turn: "A Re-narrate or a Re-run is sent the texts its turn was made with (Settings → Agents → Prompts as they were then), so only the prose or the roll changes.",
+  current: "A Re-narrate or a Re-run is sent your texts as they are now, so an edit to the narrator rules or a section's guidance shows in the new prose.",
+};
+
+export function SwipesPage(props: { value: "rerun" | "renarrate"; texts: SwipeTexts; patch(patch: JsonObject): void; busy: boolean }) {
   return (
     <div class="lre-stack" data-lre-settings-page="swipes">
       <p class="lre-set-lead">What a plain swipe on a reply does. The Swipe as… chip under a reply still offers Re-run and Re-narrate for a single swipe.</p>
@@ -108,6 +135,23 @@ export function SwipesPage(props: { value: "rerun" | "renarrate"; patch(patch: J
           />
           <p class="lre-small lre-muted" style={{ margin: 0 }}>
             {SWIPE_HELP[props.value]}
+          </p>
+        </div>
+      </Section>
+      <Section title="Texts on Re-narrate and Re-run">
+        <div class="lre-stack">
+          <Seg<SwipeTexts>
+            label="Swipe with"
+            value={props.texts}
+            options={[
+              { value: "turn", label: "The texts the turn was made with" },
+              { value: "current", label: "My current texts" },
+            ]}
+            disabled={props.busy}
+            onChange={(swipeTexts) => props.patch({ swipeTexts })}
+          />
+          <p class="lre-small lre-muted" style={{ margin: 0 }}>
+            {SWIPE_TEXTS_HELP[props.texts]}
           </p>
         </div>
       </Section>

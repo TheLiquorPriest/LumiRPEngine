@@ -1,11 +1,13 @@
 // The GM view (`core.gm`, DESIGN §7): the truth for the GM section in view, secrets
 // and removed entities included, with the editor. GM mode renders it for World, Places and Story,
 // for each pack's tab (`UiRegistry.gm`: everyone's money is the economy pack's, the characters'
-// minds the minds pack's), and for This chat's Edits. Behind the gate in UI state
-// (`ui.gm.revealed`): its data is asked for (`lre.gm`) only while the gate is open and dropped when
-// it closes, so it never travels with the player's state and nothing of it is drawn behind the
-// gate. Every change is one `lre.edit`: checked against what it touches, all or none, one fix with
-// its own Undo chip. Once one applies, a notice over the tab bar says what it did, with that Undo.
+// minds the minds pack's, the GM assistant and the workspace the core pack's), and for This chat's
+// Edits. Behind the gate in UI state (`ui.gm.revealed`): its data is asked for (`lre.gm`) only while
+// the gate is open and dropped when it closes, so it never travels with the player's state and
+// nothing of it is drawn behind the gate. Every change is one `lre.edit`: checked against what it
+// touches, all or none, one fix with its own Undo chip. Once one applies, a notice over the tab bar
+// says what it did, with that Undo; a GM → Workspace write, one GM edit through its own request,
+// says it the same way (`changed`).
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { EditOp } from "../../shared/protocol";
@@ -95,6 +97,12 @@ export function GmPanel(props: PanelProps) {
       setNotice(null);
       await load();
     });
+  /** A change sent through a request of its own (GM → Workspace's writes): reloads, then says what it did with its Undo, as `commit` does for an edit. */
+  const changed = async (text: string, result: { pending?: boolean; undo?: string | null }): Promise<void> => {
+    if (result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+    const view = await load();
+    if (view && result.undo) setNotice(editNotice([result.undo], view.edits, text));
+  };
   const pack = app.catalog.gmSections.find((def) => def.id === section);
   const editor: BulkEditor | null = gm
     ? {
@@ -119,7 +127,7 @@ export function GmPanel(props: PanelProps) {
       ) : section === "chat" ? (
         <EditsLog gm={editor.gm} busy={busy} onUndo={(chip) => undo([chip])} />
       ) : pack ? (
-        <pack.component chatId={props.chatId} gm={editor.gm} currency={editor.currency} busy={editor.busy} edit={editor.edit} reload={async () => void (await load())} send={props.send} />
+        <pack.component chatId={props.chatId} gm={editor.gm} currency={editor.currency} busy={editor.busy} edit={editor.edit} reload={async () => void (await load())} changed={changed} send={props.send} />
       ) : (
         <WorldSection editor={editor} chatId={props.chatId} />
       )}

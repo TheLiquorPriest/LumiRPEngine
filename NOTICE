@@ -83,6 +83,18 @@ no license, so only its design was used, and each file below is new code in Lumi
     sessions, concurrent calls with per-world writes, protocol version negotiation, paging, search
     and diffs.
 
+Design taken from LumiAgent by AMousePad (https://github.com/AMousePad/LumiAgent, src/agent), as a
+design reference only, with no LumiAgent code retained (each file below is new code in LumiRPEngine):
+
+  - LumiAgent src/agent  ->  LumiRPEngine src/backend/agents/{runtime,provider,usage}.ts
+    The ideas of an agent loop over the host's generation call: tool calls run and their results
+    fed back until the model answers, tool calls a model writes as text recovered, large tool
+    results clipped with the rest readable from scratch, a detector for repeated identical calls,
+    and request and token throttles. Everything else is new: native tool turns over Lumiverse's
+    message parts, agent handles with revision caps, budgets per call, agent and turn, acceptance
+    runs with ceilings and reservations, cache breakpoints within the provider's limit, and usage
+    read per provider.
+
 Written for the adaptation (no Warp code):
 
   - src/engine/rng.ts is the seeded generator that replaces xmur3 + mulberry32 in Warp's

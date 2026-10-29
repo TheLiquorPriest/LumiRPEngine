@@ -153,6 +153,12 @@ export interface GmSectionProps {
   edit(ops: EditOp[]): Promise<boolean>;
   /** Asks for the GM view again (after a request other than an edit changed the chat). */
   reload(): Promise<void>;
+  /**
+   * After a change sent through a request of its own (GM → Workspace's writes, each one GM edit with
+   * its chip): the GM view loads again and its notice says `text` with that change's Undo (`undo`),
+   * as after an edit; one held while a reply is written (`pending`, no chip yet) is said in a toast.
+   */
+  changed(text: string, result: { pending?: boolean; undo?: string | null }): Promise<void>;
   send: Send;
 }
 

@@ -1,10 +1,10 @@
 // GM mode, inside the drawer's GM frame: a bottom bar in GM gold (World, Places,
-// Story, each pack's tab in its order, This chat) over the GM panels. The truth (World, Places,
-// Story, the packs' tabs, the Fight and the Edits log) is the `core.gm` panel, behind the gate in UI
-// state; This chat's rules and the Inspector (`core.context` and any other GM panel) aren't behind
-// it. Leaving GM mode, or moving to another chat, closes the gate again. The bar's height is
-// published (`--lre-gm-nav-h`) so what a list pins at the bottom (its selection bar, an edit's
-// notice) sits above the bar, never under it.
+// Story, each pack's tab in its order, the core pack's Assistant and Workspace last, This chat) over
+// the GM panels. The truth (World, Places, Story, the packs' tabs, the Fight and the Edits log) is
+// the `core.gm` panel, behind the gate in UI state; This chat's rules and the Inspector
+// (`core.context` and any other GM panel) aren't behind it. Leaving GM mode, or moving to another
+// chat, closes the gate again. The bar's height is published (`--lre-gm-nav-h`) so what a list pins
+// at the bottom (its selection bar, an edit's notice) sits above the bar, never under it.
 
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { GmSection } from "../app";

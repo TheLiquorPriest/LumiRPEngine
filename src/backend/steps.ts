@@ -193,6 +193,33 @@ export function transientFailure(error: unknown): boolean {
   return /\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|ESOCKETTIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|UND_ERR_[A-Z_]+)\b|socket hang up|socket connection was closed|connection (?:was )?(?:reset|closed)|fetch failed|network error|timed? ?out|too many requests|rate.?limit|\((?:5\d\d|429)\)|\b(?:status|HTTP)\s*:?\s*(?:5\d\d|429)\b/i.test(text);
 }
 
+/**
+ * How providers say a model or endpoint takes no tools: OpenAI-compatible servers ("does not support
+ * tools", "function calling is not supported", "tools unsupported", "Unsupported parameter: 'tools'",
+ * "Unrecognized request argument supplied: tools"), OpenRouter's routing ("No endpoints found that
+ * support tool use"), vLLM's (`"auto" tool choice requires --enable-auto-tool-choice`), llama.cpp's
+ * ("tools param requires --jinja flag") and Gemini's ("Function calling is not enabled"). Only an
+ * error that says so turns a connection's tools to text, an agent's or a step's lookup: any other
+ * failure is the call's own.
+ */
+const TOOL_REFUSALS: readonly RegExp[] = [
+  /\b(?:does|do)(?: not|n't) support (?:native )?(?:tools?|tool[ _-]?(?:use|calls?|calling)|function[ _-]?(?:calls?|calling)|functions)\b/i,
+  /\b(?:tools?|tool[ _-]?(?:use|calls?|calling)|function[ _-]?(?:calls?|calling))\b[^.\n]{0,40}\b(?:is|are) not (?:supported|enabled|available)\b/i,
+  /\b(?:tools?|tool[ _-]?(?:use|calls?|calling)|function[ _-]?(?:calls?|calling))(?: are| is)? unsupported\b/i,
+  /\bno endpoints found that support tool use\b/i,
+  /\bunsupported (?:parameter|argument|field)\b[^.\n]{0,8}\btools?\b/i,
+  /\bunrecognized request arguments? supplied\b[^.\n]{0,8}\btools?\b/i,
+  /--enable-auto-tool-choice\b/i,
+  /\btools? param(?:eter)? requires --jinja\b/i,
+  /\bfunction calling is not enabled\b/i,
+];
+
+/** Whether a failed call's error is its provider refusing native tools (`TOOL_REFUSALS`), in its message or its cause's. */
+export function isToolRefusal(error: unknown): boolean {
+  const texts = [error instanceof Error ? error.message : String(error), error instanceof Error && error.cause !== undefined ? (error.cause instanceof Error ? error.cause.message : String(error.cause)) : ""];
+  return texts.some((text) => TOOL_REFUSALS.some((pattern) => pattern.test(text)));
+}
+
 /** How many times a call that failed transiently is made again, the first after `RETRY_PAUSE_MS`, each later one after twice the wait before it. */
 export const TRANSIENT_RETRIES = 2;
 const RETRY_PAUSE_MS = 1000;
@@ -321,12 +348,14 @@ export class Steps {
     let messages = opening();
     let reply = await ask(messages, offer === "tools", { lookup: false });
     if (reply instanceof Error && offer === "tools" && lore && !signal.aborted && !transientFailure(reply)) {
-      // The connection refused the tools: the same question in the need form, on the round already held.
-      const refusal = reply.message;
-      offer = lore.refuseTools();
+      // The call with the tools failed for good: the same question in the need form, on the round
+      // already held. Only a provider saying it takes no tools turns the connection's lookups to the
+      // need form from then on, once that works.
+      const refusal = isToolRefusal(reply) ? reply.message : null;
+      offer = lore.refuseTools(refusal !== null);
       messages = opening();
       reply = await ask(messages, false, { lookup: false });
-      if (!(reply instanceof Error)) lore.keepRefusal(refusal);
+      if (!(reply instanceof Error) && refusal !== null) lore.keepRefusal(refusal);
     }
     while (lore && offer && !(reply instanceof Error)) {
       const asks = lore.asked(reply, offer);
@@ -393,10 +422,10 @@ export class Steps {
     };
     let reply = await ask(offer);
     if (reply instanceof Error && offer === "tools" && !signal.aborted && !transientFailure(reply)) {
-      const refusal = reply.message;
-      offer = lore.refuseTools();
+      const refusal = isToolRefusal(reply) ? reply.message : null;
+      offer = lore.refuseTools(refusal !== null);
       reply = await ask(offer);
-      if (!(reply instanceof Error)) lore.keepRefusal(refusal);
+      if (!(reply instanceof Error) && refusal !== null) lore.keepRefusal(refusal);
     }
     if (reply instanceof Error) return;
     const asks = lore.asked(reply, offer);

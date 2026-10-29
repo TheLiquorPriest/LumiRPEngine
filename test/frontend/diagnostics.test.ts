@@ -70,6 +70,14 @@ describe("Diagnostics page", () => {
     expect(text).toContain("call mind via helper on active / m: ok, 10 in, 2000 out of 2000, finish length");
   });
 
+  test("agent calls count as model calls, and the copied text has their role, model, tokens with the estimate marked, outcome and tools", () => {
+    const agent = rec({ seq: 5, turn: null, kind: "agent", phase: null, step: "gm", status: "failed", level: "warn", start: 6000, ms: 2500, agent: { role: "gm", connection: "c1", model: "deepseek-v4-flash", usage: { in: 1200, cachedIn: 800, out: 300, reasoningOut: 120, estimated: ["reasoningOut"] }, ms: 2500, outcome: "refused", tools: ["lore_search"] } });
+    expect(filterRecords([...records, agent], "calls").map((r) => r.seq)).toEqual([4, 5]);
+    const line = diagText([agent]).split("\n").find((l) => l.includes("deepseek-v4-flash")) ?? "";
+    for (const part of ["gm", "c1", "1200", "800", "300", "~120", "refused", "lore_search"]) expect(line).toContain(part);
+    expect(line).not.toContain("~1200");
+  });
+
   test("elapsed time reads in seconds, then minutes", () => {
     expect(elapsedText(8400)).toBe("8 s");
     expect(elapsedText(65_000)).toBe("1 m 05 s");

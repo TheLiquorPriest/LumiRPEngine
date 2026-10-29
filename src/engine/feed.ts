@@ -7,8 +7,7 @@
 import type { EntityId, SlotId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import type { PackEvent } from "../shared/ledger";
-import { neutralizeMacros } from "../shared/macros";
-import { SECRET_MARK_WORDING, secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
+import { secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
 import type { NarratorView } from "../shared/settings";
 import { readSectionFeed, SECTION_FEED_KEYS, type FeedScope, type SectionFeed, type SectionTemplate } from "../shared/world";
 import { feedSentence } from "../shared/words";
@@ -87,7 +86,7 @@ export function linesOf(r: SectionRenderer, ctx: ReadContext, scope: FeedScope):
   return r.render(ctx).map((text) => ({ text, known: "pov" }));
 }
 
-/** The note a fact beyond the player character's carries for the narrator (DESIGN §6.11). */
+/** The note a fact beyond the player character's carries for the narrator (DESIGN §6.11); the narrator rules' marked-facts text says what it means (`MARKED_FACTS_RULE`, `shared/prompts.ts`). */
 export function markedText(line: FeedLine): string {
   if (line.known === "pov") return line.text;
   return line.known === "scene" ? `${line.text} [unknown to you; known to ${line.who ?? "others here"}]` : `${line.text} [unknown to you; GM only]`;
@@ -96,50 +95,13 @@ export function markedText(line: FeedLine): string {
 /**
  * A secret line (`FeedLine.secret`, DESIGN §24.11) as the narrator's knowledge gives it: under
  * "marked", its text with whom it is known to and kept from, by name, in the secret mark's wording
- * (Settings → Narrator); under "omit", nothing. Null for a line that isn't a secret.
+ * (the prompt registry's Secret marks texts, as the turn resolves them); under "omit", nothing. Null
+ * for a line that isn't a secret.
  */
 export function secretLineText(line: FeedLine, secrets: "marked" | "omit", wording: SecretMarkWording, nameOf: (id: EntityId) => string): string | null {
   if (!line.secret || secrets === "omit") return null;
   const kept = line.secret.keptFrom;
   return secretMarkText(line.text, (line.secret.known ?? []).map(nameOf), kept === "everyone" ? "everyone" : kept.map(nameOf), wording);
-}
-
-/**
- * What the narrator is told of marked facts (DESIGN §6.8, §6.11), the one source of it: knowledge
- * guidance under the order of authority, since the player's own directives come first. The marks
- * `markedText` writes say who knows a fact, so every character stays consistent with what they know
- * until the story or the player makes it known; and since knowledge barriers matter for the reply the
- * player reads, a marked fact isn't told to them unless they direct it or the story brings it out.
- * The same text in every world and on every turn, marked facts or not, so the prompt tells nothing of
- * whether a world keeps secrets.
- */
-export const MARKED_FACTS_RULE =
-  "What each person knows, under that order: a fact marked [unknown to you; known to …] or [unknown to you; GM only] is one the player character doesn't know, and the mark says who does. Keep every character consistent with what they know: no one says, acts on or is narrated as knowing a fact they don't, until the story reveals it to them or the player's own instructions make it known. Unless the player's own instructions say otherwise, don't tell a marked fact in the narration or have the reply reveal it; it becomes known only through what the story has already established or what the player character does or finds. Marked facts are for steering the story and the people who do know them.";
-
-/**
- * Every form a secret's mark takes in a wording, "…" standing for its text and names: each case
- * `secretMarkText` writes for the sections and the interceptor (holders or none, kept from some or
- * from everyone), as a section shows it.
- */
-export function secretMarkForms(wording: SecretMarkWording = SECRET_MARK_WORDING): string[] {
-  const cases: [string[], string[] | "everyone"][] = [[["…"], "everyone"], [[], ["…"]], [[], "everyone"], [["…"], ["…"]]];
-  return [...new Set(cases.map(([known, kept]) => neutralizeMacros(secretMarkText("…", known, kept, wording))))];
-}
-
-/**
- * What the narrator is told of a secret's mark (C5, Settings → Narrator), beside `MARKED_FACTS_RULE`
- * and under the same order: the user's rule (`SecretMarkWording.rule`, the shipped one by default),
- * `{{forms}}` filled with each form their wording writes, so an edited wording is still explained, and
- * `{{everyone}}` with their word for everyone, in one pass. The rule's own text is neutralized as the
- * forms are (§6.3): a macro in it is told as written, never run. It depends only on that wording,
- * never on the world or the turn.
- */
-export function secretMarksRule(wording: SecretMarkWording = SECRET_MARK_WORDING): string {
-  const values: Readonly<Record<string, string>> = { forms: secretMarkForms(wording).join(" or "), everyone: neutralizeMacros(wording.everyone) };
-  return wording.rule
-    .split(/(\{\{(?:forms|everyone)\}\})/)
-    .map((part, i) => (i % 2 === 1 ? (values[part.slice(2, -2)] ?? "") : neutralizeMacros(part)))
-    .join("");
 }
 
 /** The `engine.feed` event: one section's override in this chat, replaced whole (`to: null` clears it). */

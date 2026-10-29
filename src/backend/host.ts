@@ -234,9 +234,38 @@ export interface HostCapabilities {
 
 // ---------------------------------------------------------------- model calls
 
+/**
+ * A part of a model message (the host's `LlmMessagePartDTO`): text, a tool call the model made, or
+ * a tool's result going back. `cache` marks a cache breakpoint after the part (the host's
+ * `cache_control`), which only a provider that takes explicit breakpoints reads.
+ */
+export type QuietPart =
+  | { type: "text"; text: string; cache?: true }
+  | { type: "tool_use"; id: string; name: string; input: JsonObject; thoughtSignature?: string; cache?: true }
+  | { type: "tool_result"; toolUseId: string; content: string; isError?: true; cache?: true };
+
+/** A provider's thinking block (Anthropic's signed `thinking`, or `redacted_thinking`), sent back verbatim after a tool call. */
+export interface QuietThinkingBlock {
+  type: "thinking" | "redacted_thinking";
+  thinking?: string;
+  signature?: string;
+  data?: string;
+}
+
+/**
+ * A message of a quiet call. `content` is its text; an agent's tool turns go as `parts` instead
+ * (AGENT-LOOP-PLAN §3.2), and then `content` only renders them as text, for logs and tests. An
+ * assistant turn carries what its model gave of its reasoning, sent back as given on the next
+ * call: the reasoning text (DeepSeek's `reasoning_content`, which a thinking model must be sent
+ * again after a tool call), Anthropic's thinking blocks and OpenRouter's `reasoning_details`.
+ */
 export interface QuietMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  parts?: QuietPart[];
+  reasoning?: string;
+  thinkingBlocks?: QuietThinkingBlock[];
+  reasoningDetails?: JsonObject[];
 }
 
 export interface QuietRequest {
@@ -252,6 +281,8 @@ export interface QuietRequest {
   effort?: ReasoningChoice;
   /** Sampling parameters by the host's names; each left out is the connection's own (its preset's). */
   params?: SamplingParams;
+  /** Asks the provider for its token usage (the host's `_include_usage`): only then does an OpenAI-compatible stream, which every call with tools is, report it. */
+  usage?: true;
 }
 
 /** A tool a quiet call offers (the host's `ToolSchemaDTO`): its parameters as a JSON Schema. */
@@ -261,11 +292,12 @@ export interface QuietTool {
   parameters: JsonObject;
 }
 
-/** A tool call the model made (the host's `ToolCallDTO`), its arguments parsed. */
+/** A tool call the model made (the host's `ToolCallDTO`), its arguments parsed; `thoughtSignature`, Google's, goes back with it. */
 export interface QuietToolCall {
   name: string;
   args: JsonObject;
   callId: string;
+  thoughtSignature?: string;
 }
 
 export interface QuietResult {
@@ -277,8 +309,32 @@ export interface QuietResult {
   tokensOut?: number;
   /** The model that answered, when the host says. */
   model?: string;
-  /** Present when the model called tools; the host has no tool-role messages, so results go back in a user message. */
+  /** Present when the model called tools natively. */
   toolCalls?: QuietToolCall[];
+  /** The model's reasoning text, when the provider gave it. */
+  reasoning?: string;
+  /** Reasoning carriers to send back on the next call after a tool call, when the host passes them. */
+  thinkingBlocks?: QuietThinkingBlock[];
+  reasoningDetails?: JsonObject[];
+  /** The provider's usage as the host passed it: its prompt and completion tokens and, in `provider_raw`, the provider's own fields. */
+  usage?: JsonObject;
+}
+
+/**
+ * A connection as the agent runtime needs it (`connections.profile`): its provider and model, its
+ * explicit cache breakpoints (null where the provider takes none; else the most a request may hold,
+ * the provider's own limit, and those the connection's own prompt caching adds to every request on
+ * it: one after the leading system messages, one on the last message, one on each tool, and one for
+ * its automatic mode), and, for a Model Roulette, the connections the host picks one of at random
+ * for each call (`targets`; none for any other connection).
+ */
+export interface HostConnectionProfile {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  cache: { limit: number; system: boolean; lastMessage: boolean; tools: boolean; automatic: boolean } | null;
+  targets: string[];
 }
 
 export interface DecideRequest {
@@ -528,6 +584,8 @@ export interface HostPort {
     models(connectionId: string, userId: UserId): Promise<string[] | null>;
     /** The user's Decisions API connection profiles, by id and name: what a Decision step's own connection must be one of. */
     decisionList(userId: UserId): Promise<{ id: string; name: string }[]>;
+    /** One connection (null: the user's default) as the agent runtime needs it; null when there's no such connection. */
+    profile(connectionId: string | null, userId: UserId): Promise<HostConnectionProfile | null>;
   };
   /**
    * Lumiverse's MCP server profiles (`spindle.mcp.servers`, the `mcp_servers` permission; DESIGN §23,

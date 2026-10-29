@@ -37,11 +37,17 @@ const SECTIONS: Readonly<Record<string, string>> = {
   adjudication: 'Checks for new chats (preset "narrative", "balanced", "crunchy" or "custom"; checks, riskyAt, trivialAt, impossibleAt, description, authority, closeBy, retry, retryAfter).',
   overrideWorldAdjudication: "Checks: new chats use these over a world's own adjudication.",
   time: `Time for new chats: sceneTicks, scale, interrupts, speedThrough, montage, unitCap; and, for every chat, askBeyondMinutes: how long a typed or narrated skip runs without asking (whole minutes, 0 to ${TIMELAPSE_REACH_MINUTES}; longer becomes a Timelapse chip).`,
-  extraction: 'Changes from the reply: a pinned mode per change type ("auto", "confirm", "never", maxDelta); null unpins one, so learning decides it again.',
+  extraction: 'Changes from the reply: a pinned mode per change type ("auto", "confirm", "never", maxDelta); null unpins one, so learning decides it again. The GM assistant\'s change types (gm_spawn, despawn, destroy, money_adjust, stage, gm_edit, workspace) take a pinned mode too (no maxDelta).',
   swipeDefault: 'Swipes: what a swipe does ("rerun" or "renarrate").',
+  swipeTexts: 'Swipes: which texts a Re-narrate is sent ("turn": those its turn was made with; "current": the ones set now).',
+  prompts: 'Agents → Prompts: texts, your own text for each editable text by its id (null brings back the shipped one; each must keep the placeholders its text requires and use no others), and maxChars, the longest a text of your own may be.',
   hideJsonBlocks: "Preset: hide each reply's <json> block in world chats.",
-  narrator: `Narrator: the narrator's knowledge in every chat that sets none and whose world sets none (knowledge "scene", everyone in the scene's with each fact beyond the player character's marked, or "pov", the player character's only; secrets "marked", fed marked as secrets, or "omit", left out), and marks: your own wording of a secret's mark (known, kept, both, everyone; a part left out, or null, is the shipped text). lre_chat_knowledge sets one chat's own.`,
+  narrator: `Narrator: the narrator's knowledge in every chat that sets none and whose world sets none (knowledge "scene", everyone in the scene's with each fact beyond the player character's marked, or "pov", the player character's only; secrets "marked", fed marked as secrets, or "omit", left out). lre_chat_knowledge sets one chat's own. How a secret is marked is in prompts: the texts narrator.mark.known, narrator.mark.kept, narrator.mark.both, narrator.mark.everyone and narrator.secret_marks.`,
   gates: "Steps and connections → Preview before playing: intent shows a typed message's read action before it plays, outline the turn's outline before the reply is written; each waits on Play, Edit or Cancel.",
+  agents: "Agents: the agent runtime's thinkingInToolLoops, budget (each agent: callTokensIn, callTokensOut, callMs, callTools, tokensIn, tokensOut, toolTurns, wallMs, revisions, concurrency), turn (every agent of a turn: tokensIn, tokensOut, toolTurns, wallMs), loopRepeats, clipChars, throttles (per connection id: requestsPerMinute, tokensPerMinute), caching (on, nonce, roles); assistant, the GM assistant (Agents → Assistant: connectionId and model, null for your default; effort; knowledge, whose knowledge its tools read with: \"pov\", \"everyone\" with secrets marked, or \"gm\"; apply, \"ask\" to have each proposal wait for Apply or \"at_once\" to apply it with an Undo chip; historyTokens, how much of its thread goes with each message; budget, its own limits over every agent's budget, null giving one back); acceptance (the connections acceptance runs guard and their ceilings, estimateFactor) is yours to set in Settings → Agents, not through this tool. Tokens and counts are whole numbers, times milliseconds, \"none\" for no limit.",
+  holdWrites: "Writes: true holds a chip, fix or any other change made while the engine works on a turn before its reply until that turn closes, landing over what it did; false (the default) lands it at once and the engine runs the turn again. A GM agent's writes and workspace saves are held either way.",
+  retention: 'Agents → Retention: transcriptDays (days Diagnostics keeps an agent call\'s text, or "none" while its record stays), unreferencedDays (days a stored blob nothing references is kept before a sweep removes it), sweepHours (hours between sweeps, or "none" for never).',
+  diagnostics: "Diagnostics: recordsPerChat, how many records each chat's diagnostics keep, the oldest going first.",
 };
 
 /** Each change type's effective mode, which Changes from the reply shows: derived, so read-only. */
@@ -147,7 +153,8 @@ function diagRecord(record: DiagRecord): JsonObject {
 async function diagRead(args: Args, ctx: ToolContext): Promise<ToolResult> {
   const chatId = neededText(args, "chatId", "the chat's id (lre_chats lists them)");
   const spoilers = boolArg(args, "spoilers");
-  const last = intArg(args, "last", 1, 400) ?? 30;
+  // The records a chat keeps are the user's setting (Settings → Diagnostics), so `last` has no ceiling of its own; the body's size bounds what is shown.
+  const last = intArg(args, "last", 1, Number.MAX_SAFE_INTEGER) ?? 30;
   const failures = boolArg(args, "failures");
   const body = await ctx.live().conn.request("lre.diag", { chatId, op: "get" });
   const records = failures ? body.records.filter((r) => r.status === "failed" || r.level === "error" || r.level === "warn") : body.records;
@@ -187,7 +194,7 @@ export const CONFIG_TOOLS: readonly ToolModule[] = [
     name: "lre_settings_set",
     description:
       'Change your LumiRPEngine settings with a JSON merge patch (RFC 7386) over them, as the Settings pages do: objects merge, a list or a value replaces, null deletes (unpin a change type with {"extraction": {"purchase": null}}). A named preset (realism.preset, modelUse.preset) expands into its levels and caps, or its steps, budgets and minds policy; a change to what a named preset sets makes it "custom", as Settings does. LumiRPEngine keeps every setting within what it takes: the answer lists the sections that changed with their values now, anything that came out other than sent (adjusted), and the caveats (Settings → Caveats) as they read now. Realism, checks and time seed new chats only.',
-    inputSchema: object({ patch: { type: "object", description: 'The merge patch: {"swipeDefault": "renarrate"}, {"modelUse": {"preset": "standard"}}, {"modelUse": {"steps": {"judge": {"enabled": true}}}}, {"timeouts": {"requestMs": 60000}}, {"narrator": {"knowledge": "pov"}}, {"narrator": {"marks": {"known": null}}} (back to the shipped wording).' } }, ["patch"]),
+    inputSchema: object({ patch: { type: "object", description: 'The merge patch: {"swipeDefault": "renarrate"}, {"modelUse": {"preset": "standard"}}, {"modelUse": {"steps": {"judge": {"enabled": true}}}}, {"timeouts": {"requestMs": 60000}}, {"narrator": {"knowledge": "pov"}}, {"prompts": {"texts": {"narrator.mark.known": null}}} (a secret\'s mark back to the shipped wording).' } }, ["patch"]),
     write: { destructive: true, idempotent: true },
     run: settingsSet,
     cli: { command: "settings-set", section: "Settings and presets", usage: "settings-set --patch <file|json>", summary: "Change settings with a JSON merge patch", options: { "--patch": { arg: "patch", as: "json" } } },
@@ -225,8 +232,8 @@ export const CONFIG_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_diag",
     description:
-      "A chat's diagnostics (Settings → Diagnostics): the activity line (what the engine is doing for it now, or the step that failed last; player-safe), and the records of each turn's steps, model calls (connection, model, tokens, finish reason, time), failures and why, the sections each engine run wrote, and slow requests. The records are GM-level, since a step's reason can name what the player hasn't found: without spoilers: true only their counts come back. last: the newest records to show (default 30); failures: only failed, warning and error records.",
-    inputSchema: object({ chatId: CHAT_ID, spoilers: { type: "boolean", description: "Show the records themselves." }, last: { type: "integer", minimum: 1, maximum: 400, description: "The newest records to show (default 30)." }, failures: { type: "boolean", description: "Only failed steps, warnings and errors." } }, ["chatId"]),
+      "A chat's diagnostics (Settings → Diagnostics): the activity line (what the engine is doing for it now, or the step that failed last; player-safe), and the records of each turn's steps, model calls (connection, model, tokens, finish reason, time), failures and why, the sections each engine run wrote, slow requests, and agents' calls (role, connection, model, tokens in and out with their cached and reasoning parts, an estimate marked as one, time, outcome, the tools called; a call's text only by its hash, read in Diagnostics behind its curtain). The records are GM-level, since a step's reason can name what the player hasn't found: without spoilers: true only their counts come back. last: the newest records to show (default 30); failures: only failed, warning and error records.",
+    inputSchema: object({ chatId: CHAT_ID, spoilers: { type: "boolean", description: "Show the records themselves." }, last: { type: "integer", minimum: 1, description: "The newest records to show (default 30)." }, failures: { type: "boolean", description: "Only failed steps, warnings and errors." } }, ["chatId"]),
     write: false,
     run: diagRead,
     cli: { command: "diag", section: "Diagnostics", usage: "diag <chatId> [--spoilers] [--last <n>] [--failures]", summary: "A chat's activity line and diagnostics", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" }, "--last": { arg: "last", as: "int" }, "--failures": { arg: "failures", as: "flag" } } },

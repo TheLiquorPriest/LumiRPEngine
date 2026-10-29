@@ -1,5 +1,6 @@
 // User settings (`userStorage/settings.json`), the two preset families (D25; DESIGN §5.3, §9.1) and
-// D4 per-connection extraction learning (`userStorage/extraction-learning.json`; DESIGN §11).
+// D4 per-connection extraction learning (`userStorage/extraction-learning.json`; DESIGN §11), with
+// agent changes' learning per role beside it (AGENT-LOOP-PLAN §6).
 
 import { defaultAdjudication, readAdjudication } from "../shared/adjudication";
 import { CLAIM_PRESETS, readClaims } from "../shared/claims";
@@ -9,8 +10,8 @@ import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
-import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, GateSettings, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { ASK_BEYOND_DEFAULT, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, NARRATOR_DEFAULTS, narratorSettingsOf, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES, UNREASONED_ROUTE, UNREASONED_STEPS } from "../shared/settings";
+import type { AgentChangeType, ChangeType, ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, GateSettings, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
+import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, ASK_BEYOND_DEFAULT, CHANGE_TYPES, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, NARRATOR_DEFAULTS, narratorSettingsOf, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES, UNREASONED_ROUTE, UNREASONED_STEPS } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
@@ -18,6 +19,10 @@ import type { Limit } from "../shared/minds";
 import { defaultMindsSettings, isMindPurpose, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, timeoutsOf } from "../shared/timeouts";
 import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, stepConfigOf } from "../shared/settings";
+import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from "../shared/agent-settings";
+import { MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, promptSettingsOf, promptsWritten, SWIPE_TEXTS } from "../shared/prompts";
+import { DIAGNOSTICS_DEFAULTS, diagnosticsSettingsOf } from "../shared/diagnostics";
+import { RETENTION_DEFAULTS, retentionOf } from "../shared/stores";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -231,14 +236,25 @@ export function defaultSettings(): UserSettings {
     inferred: null,
     extraction: {},
     swipeDefault: "rerun",
+    // A Re-narrate keeps the texts its turn was made with until the user picks their current ones.
+    swipeTexts: "turn",
     hideJsonBlocks: true,
     minds: defaultMindsSettings(),
     timeouts: defaultTimeouts(),
     jobs: { ...JOB_SETTINGS_DEFAULTS },
     // A turn plays as soon as it is read until the player asks to see it first.
     gates: { intent: false, outline: false },
+    // The agent runtime's own: no classic turn reads them (AGENT-LOOP-PLAN §15).
+    agents: defaultAgentSettings(),
+    // Every text is the shipped one until the user writes their own.
+    prompts: { texts: {}, maxChars: PROMPT_SETTINGS_DEFAULTS.maxChars },
+    // A write made while the engine runs lands at once and the turn's reply doesn't start, as it always has (DESIGN §4.3 P2).
+    holdWrites: false,
+    // The agent stores keep a call's text a month and a blob nothing references a week, swept daily.
+    retention: { ...RETENTION_DEFAULTS },
+    diagnostics: { ...DIAGNOSTICS_DEFAULTS },
     // The narrator knows what everyone in the scene knows, secrets marked, in every chat that sets nothing of its own.
-    narrator: { ...NARRATOR_DEFAULTS, marks: {} },
+    narrator: { ...NARRATOR_DEFAULTS },
   };
 }
 
@@ -253,6 +269,45 @@ export function mergePatch(target: JsonValue, patch: JsonValue): JsonValue {
     else out[k] = mergePatch(hasOwn(out, k) ? (out[k] ?? null) : null, v);
   }
   return out;
+}
+
+/**
+ * A settings file from before a secret's mark wording was a text of the prompt registry (DESIGN
+ * §6.12): each part of its `narrator.marks` becomes the user's own text of that part
+ * (`MARK_TEXT_IDS`; `marks.rule`, the narrator rules' sentence, is `narrator.secret_marks`), unless the
+ * file already holds a text there. The moved texts are then read as any of the user's own
+ * (`promptSettingsOf`), so the wording the user had stays theirs. Only a stored file is moved: a write
+ * that sends `narrator.marks` sends a key Settings no longer has. The file keeps the field, as each
+ * write makes it again (`storedForm`), for a build from before the move to read.
+ */
+function migrateMarkWording(raw: unknown): unknown {
+  if (!isRecord(raw) || !isRecord(raw.narrator) || !hasOwn(raw.narrator, "marks")) return raw;
+  const { marks, ...narrator } = raw.narrator;
+  const prompts = isRecord(raw.prompts) ? raw.prompts : {};
+  const texts: Record<string, unknown> = isRecord(prompts.texts) ? { ...prompts.texts } : {};
+  if (isRecord(marks)) {
+    for (const [part, id] of Object.entries(MARK_TEXT_IDS)) {
+      const text = marks[part];
+      if (typeof text === "string" && typeof texts[id] !== "string") texts[id] = text;
+    }
+  }
+  return { ...raw, narrator, prompts: { ...prompts, texts } };
+}
+
+/**
+ * The settings as their file stores them: with the user's own mark wording also under
+ * `narrator.marks`, where a build from before the wording was a registry text (Increment 0) reads
+ * it, so going back to one keeps the wording. It is made from the user's texts on each write, so a
+ * part set back to the shipped one is gone from it too, and this build reads it only for a part its
+ * texts don't hold (`migrateMarkWording`), which then never happens.
+ */
+function storedForm(settings: UserSettings): unknown {
+  const marks: Record<string, string> = {};
+  for (const [part, id] of Object.entries(MARK_TEXT_IDS)) {
+    const text = settings.prompts.texts[id];
+    if (text !== undefined) marks[part] = text;
+  }
+  return Object.keys(marks).length === 0 ? settings : { ...settings, narrator: { ...settings.narrator, marks } };
 }
 
 /**
@@ -476,10 +531,11 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   };
   const rawBounds = isRecord(v.extraction) ? v.extraction : {};
   const extraction: ExtractionBounds = {};
-  for (const type of EXTRACTION_TYPES) {
+  for (const type of CHANGE_TYPES) {
     const b = hasOwn(rawBounds, type) ? rawBounds[type] : undefined;
     const mode = isRecord(b) ? oneOf<BoundMode>(b.mode, ["auto", "confirm", "never"]) : undefined;
-    const maxDelta = isRecord(b) ? real(b.maxDelta, 0, 1e12) : undefined;
+    // An agent change type is a mode only: no field bound applies to it.
+    const maxDelta = isRecord(b) && !isAgentChangeType(type) ? real(b.maxDelta, 0, 1e12) : undefined;
     if (mode) extraction[type] = { mode, ...(maxDelta !== undefined ? { maxDelta } : {}) };
   }
   return {
@@ -497,11 +553,17 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     inferred: readInferred(v.inferred),
     extraction,
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,
+    swipeTexts: oneOf(v.swipeTexts, SWIPE_TEXTS) ?? d.swipeTexts,
     hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
     minds: mindsSettingsOf(v.minds, d.minds),
     timeouts: timeoutsOf(v.timeouts, d.timeouts),
     jobs: jobSettingsOf(v.jobs, d.jobs),
     gates: gatesOf(v.gates, d.gates),
+    agents: agentSettingsOf(v.agents, d.agents),
+    prompts: promptSettingsOf(v.prompts, d.prompts),
+    holdWrites: typeof v.holdWrites === "boolean" ? v.holdWrites : d.holdWrites,
+    retention: retentionOf(v.retention, d.retention),
+    diagnostics: diagnosticsSettingsOf(v.diagnostics, d.diagnostics),
     narrator: narratorSettingsOf(v.narrator, d.narrator),
   };
 }
@@ -541,62 +603,109 @@ function expandPresets(settings: UserSettings, patch: JsonObject): UserSettings 
 
 // ---------------------------------------------------------------- D4 learning
 
-export interface ModeChange {
+/**
+ * A flip D4 learning made, of the type it was counted for: a reply's type (`ExtractionType`) from the
+ * extract step's chips, whose mode-change chip the chat shows; an agent's type under its role, which
+ * no chip announces, since the chat is a player surface.
+ */
+export interface ModeChange<T extends ChangeType = ChangeType> {
   connectionId: string;
-  type: ExtractionType;
+  type: T;
   from: BoundMode;
   to: BoundMode;
+  /** The agent role whose learning flipped (AGENT-LOOP-PLAN §6); absent for the extract step's. */
+  role?: string;
+}
+
+/** Whether a change type is an agent's (AGENT-LOOP-PLAN §6) rather than a reply's. */
+function isAgentChangeType(type: ChangeType): type is AgentChangeType {
+  return AGENT_CHANGE_TYPES.some((t) => t === type);
 }
 
 function emptyStats(): ExtractionTypeStats {
   return { accepted: 0, rejected: 0, recent: "" };
 }
 
-/** A connection's stats for a type, own keys only (a connection id is outside data). */
-function statsOf(learning: ExtractionLearning, connectionId: string, type: ExtractionType): ExtractionTypeStats | undefined {
-  if (!hasOwn(learning.connections, connectionId)) return undefined;
-  const byType = learning.connections[connectionId];
+/**
+ * A type's stats on a connection, own keys only (role and connection ids are outside data): under
+ * `role` when one is given, else the extract step's per-connection learning.
+ */
+function statsFor(learning: ExtractionLearning, connectionId: string, type: ChangeType, role?: string): ExtractionTypeStats | undefined {
+  let byType: Partial<Record<ChangeType, ExtractionTypeStats>> | undefined;
+  if (role === undefined) {
+    if (!hasOwn(learning.connections, connectionId)) return undefined;
+    byType = learning.connections[connectionId];
+  } else {
+    const roles = learning.roles;
+    if (!roles || !hasOwn(roles, role)) return undefined;
+    const byConnection = roles[role];
+    if (!byConnection || !hasOwn(byConnection, connectionId)) return undefined;
+    byType = byConnection[connectionId];
+  }
   return byType && hasOwn(byType, type) ? byType[type] : undefined;
 }
 
 const MODES: readonly BoundMode[] = ["auto", "confirm", "never"];
 
 /**
- * The learning file's valid entries only, as fresh objects: a connection that isn't an object and a
- * type entry with a wrong-typed field are dropped, so counting never writes into a stored value.
+ * The learning file's valid entries only, as fresh objects: a role or connection that isn't an
+ * object or has an unsafe id, and a type entry with a wrong-typed field, are dropped, so counting
+ * never writes into a stored value. A file without `roles` reads back without it.
  */
 function learningFrom(raw: Readonly<Record<string, unknown>>): ExtractionLearning {
   const count = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+  const statsFrom = (s: unknown): ExtractionTypeStats | undefined => {
+    if (!isRecord(s) || !count(s.accepted) || !count(s.rejected) || typeof s.recent !== "string" || !/^[ar]*$/.test(s.recent)) return undefined;
+    const learned = MODES.find((m) => m === s.learned);
+    if ((s.learned !== undefined && !learned) || (s.changedAt !== undefined && typeof s.changedAt !== "number") || (s.holdUntil !== undefined && !count(s.holdUntil))) return undefined;
+    return {
+      accepted: s.accepted,
+      rejected: s.rejected,
+      recent: s.recent.slice(-EXTRACTION_LEARNING.window),
+      ...(learned ? { learned } : {}),
+      ...(typeof s.changedAt === "number" ? { changedAt: s.changedAt } : {}),
+      ...(count(s.holdUntil) ? { holdUntil: s.holdUntil } : {}),
+    };
+  };
   const connections: ExtractionLearning["connections"] = {};
   for (const [connectionId, byType] of Object.entries(isRecord(raw.connections) ? raw.connections : {})) {
     if (!safeKey(connectionId) || !isRecord(byType)) continue;
     const kept: Partial<Record<ExtractionType, ExtractionTypeStats>> = {};
     for (const type of EXTRACTION_TYPES) {
-      const s = hasOwn(byType, type) ? byType[type] : undefined;
-      if (!isRecord(s) || !count(s.accepted) || !count(s.rejected) || typeof s.recent !== "string" || !/^[ar]*$/.test(s.recent)) continue;
-      const learned = MODES.find((m) => m === s.learned);
-      if ((s.learned !== undefined && !learned) || (s.changedAt !== undefined && typeof s.changedAt !== "number") || (s.holdUntil !== undefined && !count(s.holdUntil))) continue;
-      kept[type] = {
-        accepted: s.accepted,
-        rejected: s.rejected,
-        recent: s.recent.slice(-EXTRACTION_LEARNING.window),
-        ...(learned ? { learned } : {}),
-        ...(typeof s.changedAt === "number" ? { changedAt: s.changedAt } : {}),
-        ...(count(s.holdUntil) ? { holdUntil: s.holdUntil } : {}),
-      };
+      const stats = statsFrom(hasOwn(byType, type) ? byType[type] : undefined);
+      if (stats) kept[type] = stats;
     }
     connections[connectionId] = kept;
   }
-  return { v: 1, connections };
+  if (!isRecord(raw.roles)) return { v: 1, connections };
+  const roles: NonNullable<ExtractionLearning["roles"]> = {};
+  for (const [role, byConnection] of Object.entries(raw.roles)) {
+    if (!safeKey(role) || !isRecord(byConnection)) continue;
+    const keptConnections: Record<string, Partial<Record<ChangeType, ExtractionTypeStats>>> = {};
+    for (const [connectionId, byType] of Object.entries(byConnection)) {
+      if (!safeKey(connectionId) || !isRecord(byType)) continue;
+      const kept: Partial<Record<ChangeType, ExtractionTypeStats>> = {};
+      for (const type of CHANGE_TYPES) {
+        const stats = statsFrom(hasOwn(byType, type) ? byType[type] : undefined);
+        if (stats) kept[type] = stats;
+      }
+      keptConnections[connectionId] = kept;
+    }
+    roles[role] = keptConnections;
+  }
+  return { v: 1, connections, roles };
 }
 
-/** The effective mode for a type on a connection, with its source (DESIGN §11 precedence). */
-export function effectiveMode(settings: UserSettings, learning: ExtractionLearning, connectionId: string | null, type: ExtractionType): { mode: BoundMode; source: ExtractionModeView["source"] } {
+/**
+ * The effective mode for a type on a connection, with its source (DESIGN §11 precedence): pinned,
+ * then learned (under `role` when an agent's change is asked about), then the type's default.
+ */
+export function effectiveMode(settings: UserSettings, learning: ExtractionLearning, connectionId: string | null, type: ChangeType, role?: string): { mode: BoundMode; source: ExtractionModeView["source"] } {
   const pinned = settings.extraction[type];
   if (pinned) return { mode: pinned.mode, source: "pinned" };
-  const learned = connectionId ? statsOf(learning, connectionId, type)?.learned : undefined;
+  const learned = connectionId ? statsFor(learning, connectionId, type, role)?.learned : undefined;
   if (learned) return { mode: learned, source: "learned" };
-  const cold = EXTRACTION_DEFAULTS[type];
+  const cold = isAgentChangeType(type) ? AGENT_CHANGE_DEFAULTS[type] : EXTRACTION_DEFAULTS[type];
   if (cold) return { mode: cold, source: "default" };
   return { mode: "confirm", source: "bound" };
 }
@@ -605,34 +714,58 @@ export function effectiveMode(settings: UserSettings, learning: ExtractionLearni
  * Records one chip outcome and applies the D4 rules: promotion at `promoteAt` acceptance over at
  * least `minProposals` outcomes (read from the rolling window), demotion past `demoteUndoRate`.
  * A pinned type is counted but never flips. Returns the flip, if any, for the mode-change chip.
+ * An agent's outcome counts under its `role` (AGENT-LOOP-PLAN §6); one with no role counts on the
+ * connection only for an extraction type, so an agent type with no role records nothing. `undone`
+ * takes back an outcome counted accepted (an agent's change applied, then undone): it counts as
+ * rejected instead, so a proposal still counts once.
  */
-export function recordOutcome(settings: UserSettings, learning: ExtractionLearning, connectionId: string, type: ExtractionType, outcome: "accepted" | "rejected", now: number): ModeChange | null {
+export function recordOutcome<T extends ChangeType>(settings: UserSettings, learning: ExtractionLearning, connectionId: string, type: T, outcome: "accepted" | "rejected" | "undone", now: number, role?: string): ModeChange<T> | null {
   if (!safeKey(connectionId)) return null;
-  const byType = hasOwn(learning.connections, connectionId) ? (learning.connections[connectionId] ?? {}) : {};
-  learning.connections[connectionId] = byType;
-  const stats = statsOf(learning, connectionId, type) ?? emptyStats();
+  let byType: Partial<Record<ChangeType, ExtractionTypeStats>>;
+  if (role === undefined) {
+    if (isAgentChangeType(type)) return null;
+    const kept = hasOwn(learning.connections, connectionId) ? (learning.connections[connectionId] ?? {}) : {};
+    learning.connections[connectionId] = kept;
+    byType = kept;
+  } else {
+    if (!safeKey(role)) return null;
+    const roles = learning.roles ?? {};
+    learning.roles = roles;
+    const byConnection = hasOwn(roles, role) ? (roles[role] ?? {}) : {};
+    roles[role] = byConnection;
+    byType = hasOwn(byConnection, connectionId) ? (byConnection[connectionId] ?? {}) : {};
+    byConnection[connectionId] = byType;
+  }
+  const stats = statsFor(learning, connectionId, type, role) ?? emptyStats();
   byType[type] = stats;
-  if (outcome === "accepted") stats.accepted++;
-  else stats.rejected++;
-  stats.recent = `${stats.recent}${outcome === "accepted" ? "a" : "r"}`.slice(-EXTRACTION_LEARNING.window);
+  if (outcome === "undone" && stats.accepted > 0) {
+    stats.accepted--;
+    stats.rejected++;
+    const at = stats.recent.lastIndexOf("a");
+    stats.recent = at >= 0 ? `${stats.recent.slice(0, at)}r${stats.recent.slice(at + 1)}` : `${stats.recent}r`.slice(-EXTRACTION_LEARNING.window);
+  } else {
+    if (outcome === "accepted") stats.accepted++;
+    else stats.rejected++;
+    stats.recent = `${stats.recent}${outcome === "accepted" ? "a" : "r"}`.slice(-EXTRACTION_LEARNING.window);
+  }
   if (settings.extraction[type]) return null;
   const total = stats.accepted + stats.rejected;
   if (stats.holdUntil !== undefined && total < stats.holdUntil) return null;
   const window = stats.recent.length;
   const accepted = [...stats.recent].filter((c) => c === "a").length;
-  const current = effectiveMode(settings, learning, connectionId, type).mode;
+  const current = effectiveMode(settings, learning, connectionId, type, role).mode;
   let to: BoundMode | null = null;
   if (current === "confirm" && total >= EXTRACTION_LEARNING.minProposals && window >= EXTRACTION_LEARNING.minProposals && accepted / window >= EXTRACTION_LEARNING.promoteAt) to = "auto";
   else if (current === "auto" && window >= EXTRACTION_LEARNING.minProposals && (window - accepted) / window > EXTRACTION_LEARNING.demoteUndoRate) to = "confirm";
   if (!to) return null;
   stats.learned = to;
   stats.changedAt = now;
-  return { connectionId, type, from: current, to };
+  return { connectionId, type, from: current, to, ...(role !== undefined ? { role } : {}) };
 }
 
 /** Undo on a mode-change chip: back to the previous mode, held for another `minProposals` outcomes. */
 export function undoModeChange(learning: ExtractionLearning, change: ModeChange): void {
-  const stats = statsOf(learning, change.connectionId, change.type);
+  const stats = statsFor(learning, change.connectionId, change.type, change.role);
   if (!stats) return;
   stats.learned = change.from;
   stats.holdUntil = stats.accepted + stats.rejected + EXTRACTION_LEARNING.minProposals;
@@ -640,32 +773,68 @@ export function undoModeChange(learning: ExtractionLearning, change: ModeChange)
 
 // ---------------------------------------------------------------- the store
 
+/**
+ * Where the connections acceptance runs guard are kept apart from the settings file (the runs'
+ * own, `AgentAccounts`): read over the file's own list, and kept there on each change.
+ */
+export interface AcceptanceGuardStore {
+  get(userId: UserId): Promise<readonly AcceptanceConnection[] | undefined>;
+  set(userId: UserId, connections: readonly AcceptanceConnection[]): Promise<void>;
+}
+
 export class SettingsStore {
   private readonly settings = new Map<UserId, UserSettings>();
   private readonly learning = new Map<UserId, ExtractionLearning>();
   private readonly revisions = new Map<UserId, number>();
 
-  /** `loaded` hears each user's settings as they are read or set (the context handler's timeout follows them). */
+  /** `loaded` hears each user's settings as they are read or set (the context handler's timeout follows them); `guards` keeps the acceptance runs' guard apart from the settings file. */
   constructor(
     private readonly host: HostPort,
     private readonly loaded: (userId: UserId, settings: UserSettings) => void = () => undefined,
+    private readonly guards: AcceptanceGuardStore | null = null,
   ) {}
 
   async get(userId: UserId): Promise<UserSettings> {
     const known = this.settings.get(userId);
     if (known) return known;
     const raw = await readStoredJson(this.host, SETTINGS_PATH, userId, "settings", (r) => isRecord(r) && r.v === 1);
-    const settings = normalize(raw ?? null);
+    const settings = normalize(migrateMarkWording(raw ?? null));
+    await this.withGuard(userId, settings);
     this.settings.set(userId, settings);
     this.loaded(userId, settings);
     return settings;
   }
 
-  async set(userId: UserId, patch: JsonObject): Promise<UserSettings> {
+  /**
+   * The connections acceptance runs guard, as `guards` keeps them, over the settings file's own
+   * list: a build from before the agents writes the settings without them, and the guard holds all
+   * the same. A list only the settings file holds (kept before the guard was kept apart) moves there;
+   * one that can't be moved yet is read from the settings file, and moved on a later start.
+   */
+  private async withGuard(userId: UserId, settings: UserSettings): Promise<void> {
+    if (!this.guards) return;
+    const kept = await this.guards.get(userId);
+    if (kept !== undefined) settings.agents.acceptance.connections = kept.map((c) => ({ ...c }));
+    else if (settings.agents.acceptance.connections.length > 0) {
+      await this.guards.set(userId, settings.agents.acceptance.connections).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] the connections acceptance runs guard weren't moved beside the runs (${error instanceof Error ? error.message : String(error)}); they are read from the settings until they are`, userId));
+    }
+  }
+
+  /**
+   * Sets the user's settings to what `patch` makes of them. `check` sees the settings before and
+   * after and may refuse the write by throwing (a guard on what a caller may change, however its
+   * patch says it). A change to the acceptance runs' guard is kept apart (`guards`) before the
+   * settings file is written.
+   */
+  async set(userId: UserId, patch: JsonObject, check?: (current: Readonly<UserSettings>, next: Readonly<UserSettings>) => void): Promise<UserSettings> {
     const current = await this.get(userId);
     const merged = normalize(mergePatch(JSON.parse(JSON.stringify(current)) as JsonValue, patch));
     const next = expandPresets(merged, patch);
-    await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(next), userId);
+    // A text of the user's own is stored only as it can be sent: one this write changed that can't be stays as it was.
+    next.prompts = promptsWritten(current.prompts, next.prompts);
+    check?.(current, next);
+    if (this.guards && JSON.stringify(next.agents.acceptance.connections) !== JSON.stringify(current.agents.acceptance.connections)) await this.guards.set(userId, next.agents.acceptance.connections);
+    await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(storedForm(next)), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
     this.settings.set(userId, next);
     this.revisions.set(userId, this.revision(userId) + 1);
@@ -698,15 +867,21 @@ export class SettingsStore {
     await this.host.storage.move(`${LEARNING_PATH}.tmp`, LEARNING_PATH, userId);
   }
 
-  /** Settings plus each type's effective mode for `connection`. */
-  async result(userId: UserId, connection: { id: string; name: string } | null): Promise<SettingsResult> {
+  /**
+   * Settings plus each type's effective mode: a reply's type as learned on `connection` (the extract
+   * step's), and an agent change type as learned for `agent.role` on the connection that role runs on.
+   */
+  async result(userId: UserId, connection: { id: string; name: string } | null, agent: { role: string; connection: { id: string; name: string } | null }): Promise<SettingsResult> {
     const settings = await this.get(userId);
     const learning = await this.learningOf(userId);
-    const extraction = {} as Record<ExtractionType, ExtractionModeView>;
-    for (const type of EXTRACTION_TYPES) {
-      const { mode, source } = effectiveMode(settings, learning, connection?.id ?? null, type);
-      const stats = connection ? statsOf(learning, connection.id, type) : undefined;
-      extraction[type] = { mode, source, connection, accepted: stats?.accepted ?? 0, rejected: stats?.rejected ?? 0 };
+    const extraction = {} as Record<ChangeType, ExtractionModeView>;
+    for (const type of CHANGE_TYPES) {
+      const agentType = isAgentChangeType(type);
+      const on = agentType ? agent.connection : connection;
+      const role = agentType ? agent.role : undefined;
+      const { mode, source } = effectiveMode(settings, learning, on?.id ?? null, type, role);
+      const stats = on ? statsFor(learning, on.id, type, role) : undefined;
+      extraction[type] = { mode, source, connection: on, accepted: stats?.accepted ?? 0, rejected: stats?.rejected ?? 0 };
     }
     return { settings, extraction };
   }

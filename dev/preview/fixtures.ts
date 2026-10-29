@@ -5,11 +5,15 @@ import { featureOn, FINANCE_FEATURES, payeeKey, type AccountView, type CardView,
 import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
-import type { ExtractionModeView, UpgradePreview } from "../../src/shared/protocol";
-import type { ExtractionType, UserSettings } from "../../src/shared/settings";
-import { NARRATOR_DEFAULTS, SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
+import type { AssistantProposalOp, AssistantView, ExtractionModeView, TraceRow, UpgradePreview, WorkspaceFileView } from "../../src/shared/protocol";
+import type { ChangeType, ExtractionType, UserSettings } from "../../src/shared/settings";
+import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, NARRATOR_DEFAULTS, SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
 import { claimFactId, defaultMindsSettings, KNOWLEDGE_DEFAULTS, witnessRef } from "../../src/shared/minds";
 import { defaultTimeouts } from "../../src/shared/timeouts";
+import { hashJson } from "../../src/shared/hash";
+import type { AgentKnowledge } from "../../src/shared/agent-tools";
+import { blobHash, isLearnedPath } from "../../src/shared/stores";
+import { defaultAgentSettings } from "../../src/shared/agent-settings";
 import type { Holding, KnowledgeFact, MindCommitment, MindNote, MindPlan, MindsGmCharacter, MindsGmEvidence, MindsGmHolding, MindsGmView, WitnessEntry } from "../../src/shared/minds";
 import { calendarOf, formatClock } from "../../src/engine/calendar";
 import { faded, salienceNow } from "../../src/packs/minds/core/state";
@@ -1364,20 +1368,26 @@ export function settingsFixture(): UserSettings {
     inferred: null,
     extraction: { regard: { mode: "never" } },
     swipeDefault: "rerun",
+    swipeTexts: "turn",
     hideJsonBlocks: true,
     minds: defaultMindsSettings(),
     timeouts: { ...defaultTimeouts(), requestMs: 600_000, laneHeartbeatMs: "none" },
     jobs: { routineLoreTokens: 8000 },
     gates: { intent: false, outline: false },
-    narrator: { ...NARRATOR_DEFAULTS, marks: {} },
+    agents: defaultAgentSettings(),
+    prompts: { texts: {}, maxChars: 20_000 },
+    holdWrites: false,
+    retention: { transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 },
+    diagnostics: { recordsPerChat: 400 },
+    narrator: { ...NARRATOR_DEFAULTS },
   };
 }
 
 const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", routine: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm", take: "confirm", drop: "confirm", use_up: "confirm", wear: "confirm", lose: "confirm", item_condition: "confirm", learn: "auto", reveal: "confirm" };
 
-/** What the backend would derive: pins first, then learning on the connection, then D4 defaults. */
-export function extractionView(settings: UserSettings): Record<ExtractionType, ExtractionModeView> {
-  const out = {} as Record<ExtractionType, ExtractionModeView>;
+/** What the backend would derive: pins first, then learning on the connection, then D4 defaults; the GM assistant's change types pinned or at their defaults. */
+export function extractionView(settings: UserSettings): Record<ChangeType, ExtractionModeView> {
+  const out = {} as Record<ChangeType, ExtractionModeView>;
   for (const type of Object.keys(DEFAULTS) as ExtractionType[]) {
     const pinned = settings.extraction[type];
     if (pinned) out[type] = { mode: pinned.mode, source: "pinned", connection: null, accepted: 4, rejected: 1 };
@@ -1385,5 +1395,147 @@ export function extractionView(settings: UserSettings): Record<ExtractionType, E
     else if (type === "quantity" || type === "spawn") out[type] = { mode: "confirm", source: "bound", connection: null, accepted: 0, rejected: 0 };
     else out[type] = { mode: DEFAULTS[type], source: "default", connection: { id: "conn-ds", name: "DeepSeek" }, accepted: type === "give" ? 11 : 0, rejected: type === "give" ? 2 : 0 };
   }
+  for (const type of AGENT_CHANGE_TYPES) {
+    const pinned = settings.extraction[type];
+    out[type] = pinned ? { mode: pinned.mode, source: "pinned", connection: null, accepted: 0, rejected: 0 } : { mode: AGENT_CHANGE_DEFAULTS[type], source: "default", connection: null, accepted: 0, rejected: 0 };
+  }
   return out;
+}
+
+// ---------------------------------------------------------------- GM → Assistant and GM → Workspace (INC1-SPEC C8)
+
+/** A workspace change as the agents' writer takes it (its `ws_*` operations): GM → Workspace's own, or what a proposal's workspace change makes when it is applied. */
+export type PreviewFileChange = { kind: "ws_write"; path: string; text: string; readers?: AgentKnowledge } | { kind: "ws_delete"; path: string } | { kind: "ws_move"; from: string; to: string } | { kind: "ws_pin"; path: string; pinned: boolean } | { kind: "ws_readers"; path: string; readers: AgentKnowledge };
+
+/** An operation's key as the writer's `opKey` makes it: the hash of the operation as given, so the same operation is the same key. */
+export function previewOpKey(op: PreviewFileChange | { kind: "gm_edit"; op: Record<string, string | number> }): string {
+  return hashJson(["lre.agent.op", op]);
+}
+
+/** Port Alder's workspace files: what the assistant noted on Marcus (pinned) and drafted for the Rusty Anchor, the GM's own plan for the fleet contract, and a learned note on how Jordan Ellis plays. */
+const MARCUS_NOTE = "# Marcus Delgado\n\n- Owns Alder Automotive; the township fleet contract would carry the shop through the winter.\n- Takes calls in the parking lot and won't say who from (What Marcus isn't saying).\n- Trusts Jordan with the truck that won't start; hasn't told Danny Okafor about the letter.\n";
+const RUSTY_ANCHOR_DRAFT = "# The Rusty Anchor\n\nThe bar at the end of Harbor Street where the marina crews drink once the boats are in. Dale Whitcomb keeps a stool by the window; Sam Reyes tends bar on weekends.\n";
+const FLEET_PLAN = "# The Fleet Contract\n\n1. Fix the township pickup (the truck that won't start).\n2. Pass Priya's inspection at Alder Township Hall.\n3. Service the township fleet: six trucks, two a week.\n";
+const DANNY_NOTE = "# Danny Okafor\n\n- At Bluebird Coffee this afternoon, not the shop.\n- Doesn't know what Marcus isn't saying; suspects something from the calls.\n";
+const PLAY_NOTE = "# How Jordan Ellis plays\n\n- Asks around before acting; likes to be told who knows what.\n- Keeps the shop's hours: mornings at the garage, evenings at Bluebird Coffee.\n";
+
+/** The changes the assistant's notes on Marcus were: written, then pinned. */
+const MARCUS_WRITE: PreviewFileChange = { kind: "ws_write", path: "notes/marcus.md", text: MARCUS_NOTE };
+const MARCUS_PIN: PreviewFileChange = { kind: "ws_pin", path: "notes/marcus.md", pinned: true };
+/** The open proposal's workspace change: the assistant's note on Danny. */
+const DANNY_WRITE: PreviewFileChange = { kind: "ws_write", path: "notes/danny.md", text: DANNY_NOTE };
+
+/** A workspace file as `listWorkspace` lists it: its body's hash and size in characters, whose knowledge may read it, whether it is a learned note, and who wrote it on which reply. */
+function workspaceFile(path: string, text: string, pinned: boolean, readers: AgentKnowledge, provenance: WorkspaceFileView["provenance"]): WorkspaceFileView {
+  return { path, hash: blobHash(text), size: text.length, pinned, readers, learned: isLearnedPath(path), provenance };
+}
+
+/** The chat's workspace as the preview keeps it: its files as GM → Workspace lists them, and their bodies, by path. */
+export interface PreviewWorkspace {
+  files: WorkspaceFileView[];
+  texts: Record<string, string>;
+}
+
+/**
+ * GM → Workspace's files and their bodies, by path, sorted as the backend lists them: the
+ * assistant's note on Marcus (written on reply 4 with everyone's knowledge, and pinned), its Rusty
+ * Anchor draft (reply 6), the GM's own fleet-contract plan, written before any reply and GM only,
+ * and the assistant's learned note on how Jordan Ellis plays, readable as Jordan knows the world.
+ */
+export function workspaceFixture(): PreviewWorkspace {
+  const texts: Record<string, string> = { "learned/how-jordan-plays.md": PLAY_NOTE, "lore-drafts/rusty-anchor.md": RUSTY_ANCHOR_DRAFT, "notes/marcus.md": MARCUS_NOTE, "plans/fleet-contract.md": FLEET_PLAN };
+  return {
+    files: [
+      workspaceFile("learned/how-jordan-plays.md", PLAY_NOTE, false, "pov", { role: "assistant", turn: null }),
+      workspaceFile("lore-drafts/rusty-anchor.md", RUSTY_ANCHOR_DRAFT, false, "everyone", { role: "assistant", key: previewOpKey({ kind: "ws_write", path: "lore-drafts/rusty-anchor.md", text: RUSTY_ANCHOR_DRAFT }), turn: 6 }),
+      workspaceFile("notes/marcus.md", MARCUS_NOTE, true, "everyone", { role: "assistant", key: previewOpKey(MARCUS_WRITE), turn: 4 }),
+      workspaceFile("plans/fleet-contract.md", FLEET_PLAN, false, "gm", { role: "gm", key: previewOpKey({ kind: "ws_write", path: "plans/fleet-contract.md", text: FLEET_PLAN }), turn: null }),
+    ],
+    texts,
+  };
+}
+
+/** What the fixture's open proposal's workspace change writes when it is applied, by its key: the backend keeps the operation on the stored proposal, and the view leaves it out. */
+export function assistantFileChanges(): Record<string, PreviewFileChange> {
+  return { [previewOpKey(DANNY_WRITE)]: DANNY_WRITE };
+}
+
+/**
+ * GM → Assistant's thread in Port Alder, oldest first, in every state the page draws: a question
+ * answered with its folded trace (one call failed) and usage; notes on Marcus proposed and applied
+ * (its chip long expired); a correction for Jess turned down; a move, a stage and a note still open,
+ * the stage asking first; and a day plan the loop detector stopped.
+ */
+export function assistantFixture(): AssistantView {
+  const start = Date.now() - 50 * 60_000;
+  const at = (minutes: number) => start + minutes * 60_000;
+  const row = (tool: string, summary: string, ms: number, error?: string): TraceRow => ({ tool, summary, ms, ...(error !== undefined ? { error } : {}) });
+  const fileOp = (change: PreviewFileChange, line: string, applied: boolean): AssistantProposalOp => ({ key: previewOpKey(change), changeType: "workspace", lines: [line], mode: "auto", ...(applied ? { applied: true as const } : {}) });
+  const editOp = (op: Record<string, string | number>, changeType: string, line: string, mode: "auto" | "confirm"): AssistantProposalOp => ({ key: previewOpKey({ kind: "gm_edit", op }), changeType, lines: [line], mode });
+  return {
+    thread: [
+      { id: "am1", role: "user", text: "Where is Danny Okafor this afternoon, and does he know what Marcus isn't saying?", at: at(0) },
+      {
+        id: "am2",
+        role: "assistant",
+        text: "Danny is at Alder Automotive until five, under the township pickup (the truck that won't start). He doesn't know: only Marcus and Priya Nair know what Marcus isn't saying. Danny has noticed the calls in the parking lot, though, and his mind has him wondering whether the shop is in trouble.",
+        at: at(1),
+        trace: [row("people_find", "“Danny”", 42), row("people_where", "danny_okafor", 35), row("knowledge_who_knows", "s_shop_truble", 18, "There's no track s_shop_truble."), row("knowledge_who_knows", "s_shop_trouble", 51), row("minds_read", "danny_okafor", 64)],
+        usage: { in: 18_400, out: 610, cached: 15_200 },
+        status: "answered",
+      },
+      { id: "am3", role: "user", text: "Put a note on Marcus in the workspace and pin it.", at: at(6) },
+      {
+        id: "am4",
+        role: "assistant",
+        text: "Here's a note on Marcus at notes/marcus.md, pinned. Apply it and it's in the workspace.",
+        at: at(7),
+        trace: [row("workspace_list", "", 12), row("people_sheet", "marcus_delgado", 58), row("workspace_write", "notes/marcus.md", 21), row("workspace_pin", "notes/marcus.md", 9)],
+        usage: { in: 12_900, out: 380, cached: 11_600 },
+        status: "answered",
+      },
+      { id: "am5", role: "user", text: "Give Jess Kowalczyk $200 for the babysitting.", at: at(15) },
+      {
+        id: "am6",
+        role: "assistant",
+        text: "Jess's checking takes it: $200 from Jordan, as a correction. Money changes ask first, so it waits for your Apply.",
+        at: at(16),
+        trace: [row("money_balances", "jess_kowalczyk", 47), row("gm_adjust_money", "jess_kowalczyk +20000", 33)],
+        usage: { in: 11_200, out: 240, cached: 10_100 },
+        status: "answered",
+      },
+      { id: "am7", role: "user", text: "Move Danny to Bluebird Coffee, move the fleet contract on to Priya's inspection, and note what you found on him.", at: at(30) },
+      {
+        id: "am8",
+        role: "assistant",
+        text: "Three changes, checked against the world as it stands: Danny to Bluebird Coffee, the Fleet Contract to Priya's inspection, and a note on him at notes/danny.md. The stage change asks first, so Apply when you're ready.",
+        at: at(31),
+        trace: [row("places_read", "bluebird_coffee", 29), row("gm_move", "danny_okafor → bluebird_coffee", 40), row("quests_stage", "q_fleet_contract", 26), row("gm_set_stage", "q_fleet_contract → inspection", 31), row("workspace_write", "notes/danny.md", 17)],
+        usage: { in: 21_700, out: 520, cached: 18_300 },
+        status: "answered",
+      },
+      { id: "am9", role: "user", text: "Walk me through everyone's day tomorrow, hour by hour.", at: at(44) },
+      {
+        id: "am10",
+        role: "assistant",
+        text: "Here's what I have so far: Jordan opens Alder Automotive at seven; Priya Nair is at Alder Township Hall from eight…",
+        at: at(46),
+        trace: [row("time_day", "tomorrow", 22), row("people_where", "priya_nair", 31), row("people_where", "priya_nair", 30), row("people_where", "priya_nair", 30)],
+        usage: { in: 26_300, out: 710, cached: 22_800 },
+        status: "stopped",
+        reason: "The loop detector stopped it: it called people_where with the same arguments 3 times in a row.",
+      },
+    ],
+    running: null,
+    proposals: [
+      { id: "ap1", messageId: "am4", ops: [fileOp(MARCUS_WRITE, "workspace file notes/marcus.md written", true), fileOp(MARCUS_PIN, "workspace file notes/marcus.md pinned", true)], status: "applied", chipId: "fix:m4:0:11" },
+      { id: "ap2", messageId: "am6", ops: [editOp({ op: "adjust", account: "jess_kowalczyk_checking", cents: 20_000 }, "money_adjust", "Jess Kowalczyk: correction +200.00", "confirm")], status: "rejected" },
+      {
+        id: "ap3",
+        messageId: "am8",
+        ops: [editOp({ op: "move", entity: "danny_okafor", to: "bluebird_coffee" }, "gm_edit", "Danny Okafor is at Bluebird Coffee", "auto"), editOp({ op: "stage", track: "q_fleet_contract", to: "inspection" }, "stage", "The Fleet Contract: Pass Priya's inspection", "confirm"), fileOp(DANNY_WRITE, "workspace file notes/danny.md written", false)],
+        status: "open",
+      },
+    ],
+  };
 }

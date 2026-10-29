@@ -221,8 +221,8 @@ export function useConnections(): Connection[] {
   return connections;
 }
 
-/** Where a helper call runs, in words: the connection's name (or Lumiverse's default), and the model when one is known. */
-function placeOf(call: { connectionId: string | null; model: string | null }, connections: readonly Connection[]): string {
+/** Where a call runs (a helper step's, the GM assistant's), in words: the connection's name (or Lumiverse's default), and the model when one is known. */
+export function placeOf(call: { connectionId: string | null; model: string | null }, connections: readonly Connection[]): string {
   if (!call.connectionId) return "Lumiverse's default connection";
   const c = connections.find((x) => x.id === call.connectionId);
   const model = call.model ?? c?.model ?? null;
@@ -266,7 +266,7 @@ function OptionalNumber(props: { label: string; otherLabel: string; value: numbe
   );
 }
 
-function ConnectionSelect(props: { value: string | null; connections: readonly Connection[]; firstLabel: string; help?: string; disabled: boolean; onChange(id: string | null): void }) {
+export function ConnectionSelect(props: { value: string | null; connections: readonly Connection[]; firstLabel: string; help?: string; disabled: boolean; onChange(id: string | null): void }) {
   return (
     <label class="lre-field">
       <span class="label">Connection</span>

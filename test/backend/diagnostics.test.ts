@@ -1,12 +1,16 @@
 // Diagnostics (DESIGN §6.9): each turn's steps with their model calls and outcomes, failures with
 // their reasons and fixes, the ring's bound and its storage, the log's levels and turn ids, the
-// activity line, and that none of it reaches a player surface uninvited.
+// activity line, that none of it reaches a player surface uninvited, and agent calls with their
+// texts as blobs (DESIGN §4.4), their retention and `lre.diag`'s `text`.
 
 import { describe, expect, test } from "bun:test";
+import { BlobStore } from "../../src/backend/agents/blobs";
 import { Diagnostics } from "../../src/backend/diagnostics";
-import type { DiagRecord } from "../../src/shared/diagnostics";
+import type { DiagAgentCall, DiagRecord } from "../../src/shared/diagnostics";
 import { isRecord } from "../../src/shared/json";
+import type { Limit } from "../../src/shared/minds";
 import type { ActivityPush } from "../../src/shared/protocol";
+import { blobHash, DAY_MS } from "../../src/shared/stores";
 import { FakeHost } from "../support/fake-host";
 import { alderChat, fakeModels } from "../support/mind-chat";
 import { Rig } from "../support/rig";
@@ -198,5 +202,100 @@ describe("the minds' memory beside the reply's read", () => {
     // The knowledge step's call answered after the memory's, and the memory's cut-off still fails the step.
     expect((minds?.calls ?? []).at(-1)).toMatchObject({ purpose: "knowledge", ok: true });
     expect(activities(rig.host).filter((m) => m.chatId === chatId).at(-1)?.activity).toMatchObject({ state: "failed", label: "Failed: Updating the characters' memories" });
+  });
+});
+
+const gmCall = (over: Partial<Omit<DiagAgentCall, "text">> = {}): Omit<DiagAgentCall, "text"> => ({ role: "gm", connection: "c1", model: "deepseek-v4-flash", usage: { in: 1200, cachedIn: 800, out: 300, reasoningOut: 120, estimated: ["reasoningOut"] }, ms: 2500, outcome: "ok", tools: ["lore_search"], ...over });
+
+describe("agent calls", () => {
+  test("a record keeps the call's role, model, usage and outcome, and its text as a stored blob", async () => {
+    const host = new FakeHost();
+    const blobs = new BlobStore(host);
+    const diag = new Diagnostics(host, { blobs });
+    await diag.agentCall(at(), null, gmCall(), "user: who keeps the lighthouse?");
+    const [record] = await diag.records("chat-1", "u1");
+    expect(record).toMatchObject({ kind: "agent", status: "ok", agent: { role: "gm", connection: "c1", model: "deepseek-v4-flash", usage: { in: 1200, cachedIn: 800, out: 300, reasoningOut: 120, estimated: ["reasoningOut"] }, ms: 2500, outcome: "ok", tools: ["lore_search"] } });
+    const hash = record?.agent?.text ?? "";
+    expect(await blobs.get("u1", hash)).toBe("user: who keeps the lighthouse?");
+    expect(await diag.transcripts("chat-1", "u1")).toEqual([hash]);
+  });
+
+  test("a failed agent call shows failed, but never fails a classic turn or its activity line", async () => {
+    const host = new FakeHost();
+    const diag = new Diagnostics(host);
+    diag.begin(at());
+    await diag.agentCall(at(), "pre", gmCall({ outcome: "failed", error: "401 unauthorized", usage: null }));
+    expect(diag.failure(at())).toBeNull();
+    diag.end(at());
+    const records = await diag.records("chat-1", "u1");
+    expect(records.find((r) => r.kind === "agent")).toMatchObject({ status: "failed", agent: { outcome: "failed", usage: null, error: "401 unauthorized" } });
+    expect(records.find((r) => r.kind === "turn")?.status).toBe("ok");
+    expect(activities(host).at(-1)?.activity).toBeNull();
+  });
+
+  test("past transcript retention a record keeps no text and transcripts() no longer lists it; none keeps it while the record stays; 0 stores none", async () => {
+    let now = 1_000_000;
+    const host = new FakeHost();
+    const blobs = new BlobStore(host);
+    const days = new Map<string, Limit>([["u1", 2], ["u2", "none"], ["u3", 0]]);
+    const options = { blobs, now: () => now, transcriptDays: (u: string) => days.get(u) ?? 2 };
+    const diag = new Diagnostics(host, options);
+    await diag.agentCall(at(), null, gmCall(), "text one");
+    await diag.agentCall({ chatId: "chat-2", userId: "u2", turn: null }, null, gmCall(), "text two");
+    await diag.agentCall({ chatId: "chat-3", userId: "u3", turn: null }, null, gmCall(), "text three");
+    now += DAY_MS;
+    expect(await diag.transcripts("chat-1", "u1")).toEqual([blobHash("text one")]);
+    now += 2 * DAY_MS;
+    expect(await diag.transcripts("chat-1", "u1")).toEqual([]);
+    const [kept] = await diag.records("chat-1", "u1");
+    expect(kept).toMatchObject({ kind: "agent", agent: { role: "gm", outcome: "ok" } });
+    expect(kept?.agent?.text).toBeUndefined();
+    expect(await diag.transcripts("chat-2", "u2")).toEqual([blobHash("text two")]);
+    expect((await diag.records("chat-3", "u3"))[0]?.agent?.text).toBeUndefined();
+    expect(await blobs.list("u3")).toEqual([]);
+    // The stored file lets go of the text too, and a chat read from its file alone answers the same.
+    await diag.settle();
+    expect(host.files.get("u1/runs/chat-1/diagnostics.json")).not.toContain(blobHash("text one"));
+    const again = new Diagnostics(host, options);
+    expect(await again.transcripts("chat-1", "u1")).toEqual([]);
+    expect(await again.transcripts("chat-2", "u2")).toEqual([blobHash("text two")]);
+  });
+
+  test("the ring follows each user's records per chat", async () => {
+    const ring = new Map([["u1", 2], ["u2", 4]]);
+    const diag = new Diagnostics(new FakeHost(), { ring: (u) => ring.get(u) ?? 400 });
+    for (let i = 0; i < 5; i++) {
+      diag.skipped(at(`gen-${i}`), "read", "read", `skip ${i}`);
+      diag.skipped({ chatId: "chat-2", userId: "u2", turn: `gen-${i}` }, "read", "read", `skip ${i}`);
+    }
+    expect((await diag.records("chat-1", "u1")).map((r) => r.reason)).toEqual(["skip 3", "skip 4"]);
+    expect(await diag.records("chat-2", "u2")).toHaveLength(4);
+    ring.set("u2", 1);
+    expect((await diag.records("chat-2", "u2")).map((r) => r.reason)).toEqual(["skip 4"]);
+  });
+
+  test("a file stored before agent calls reads as before, and a malformed agent call is dropped from its record only", async () => {
+    const host = new FakeHost();
+    const old = { seq: 1, kind: "step", level: "info", turn: "gen-1", phase: "pre", step: "pre", status: "ok", start: 1, end: 2, ms: 1, calls: [{ purpose: "interpret", via: "helper", connection: "active", model: "m", tokensIn: 9, tokensOut: 3, finishReason: "stop", maxTokens: 100, ms: 1, ok: true }] };
+    const bad = { seq: 2, kind: "agent", level: "info", turn: null, phase: null, step: "gm", status: "ok", start: 3, end: 4, ms: 1, agent: { role: "gm", usage: "lots" } };
+    host.files.set("u1/runs/chat-1/diagnostics.json", JSON.stringify({ v: 1, records: [old, bad] }));
+    const records = await new Diagnostics(host).records("chat-1", "u1");
+    expect(records[0]).toEqual(old as DiagRecord);
+    expect(records[1]).toMatchObject({ kind: "agent", step: "gm", status: "ok" });
+    expect(records[1]?.agent).toBeUndefined();
+  });
+});
+
+describe("an agent call's text through lre.diag", () => {
+  test("the text op answers a text one of the chat's records keeps, and refuses any other blob", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const userId = rig.host.userId;
+    await rig.rt.diag.agentCall({ chatId, userId, turn: null }, null, gmCall(), "assistant: the keeper's log names Sam.");
+    const records = (rig.body(await rig.send({ type: "lre.diag", chatId, op: "get" })).records ?? []) as DiagRecord[];
+    const hash = records.find((r) => r.kind === "agent")?.agent?.text ?? "";
+    expect(rig.body(await rig.send({ type: "lre.diag", chatId, op: "text", hash })).text).toBe("assistant: the keeper's log names Sam.");
+    const other = await rig.rt.blobs.put(userId, "a workspace file");
+    expect(await rig.send({ type: "lre.diag", chatId, op: "text", hash: other })).toMatchObject({ type: "lre.error", code: "not_found" });
   });
 });

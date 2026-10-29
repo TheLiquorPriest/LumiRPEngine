@@ -3,6 +3,7 @@
 // and base rules, the shared atoms, the drawer shell, then the areas, so an area's rule overrides an
 // atom's at equal specificity.
 
+import { ASSISTANT_CSS } from "./styles/assistant";
 import { BUILD_CSS } from "./styles/build";
 import { CHARACTER_CSS } from "./styles/character";
 import { CHAT_CSS } from "./styles/chat";
@@ -21,5 +22,6 @@ import { SETTINGS_CSS } from "./styles/settings";
 import { SHELL_CSS } from "./styles/shell";
 import { TOKENS_CSS } from "./styles/tokens";
 import { VISUAL_EDITORS_CSS } from "./styles/visual-editors";
+import { WORKSPACE_CSS } from "./styles/workspace";
 
-export const CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, CHARACTER_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join("\n");
+export const CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, ASSISTANT_CSS, WORKSPACE_CSS, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, CHARACTER_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join("\n");

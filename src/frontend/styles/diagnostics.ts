@@ -29,5 +29,8 @@ export const DIAGNOSTICS_CSS = `
 .lre-diag-row[data-lre-diag-status=failed] .lre-listrow-title{color:var(--lre-neg)}
 .lre-diag-calls{margin:0;padding:0 var(--lre-s3) var(--lre-s2) calc(var(--lre-s3) + 28px);list-style:none;display:flex;flex-direction:column;gap:2px;font-size:var(--lre-fs-xs);line-height:1.4;color:var(--lre-muted);overflow-wrap:anywhere}
 .lre-diag-calls>li[data-lre-diag-call=bad]{color:var(--lre-neg)}
+/* An agent call's Show text and its text, a scrolling block */
+.lre-diag-agent-text{display:flex;flex-direction:column;align-items:flex-start;gap:var(--lre-s2);padding:0 var(--lre-s3) var(--lre-s2) calc(var(--lre-s3) + 28px);min-width:0}
+.lre-diag-text{align-self:stretch;margin:0;max-height:min(50vh,360px);overflow:auto;overscroll-behavior:contain;padding:var(--lre-s2) var(--lre-s3);border-radius:var(--lre-r);background:var(--lre-well);color:var(--lre-fg);font:var(--lre-fs-sm)/1.45 var(--lre-mono);white-space:pre-wrap;overflow-wrap:anywhere}
 @container (min-width:640px){.lre-diag-tools{flex-direction:row;align-items:center;justify-content:space-between}}
 `;

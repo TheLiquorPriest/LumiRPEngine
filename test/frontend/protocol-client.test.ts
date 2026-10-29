@@ -265,6 +265,22 @@ describe("snapshot, delta and resync", () => {
     h.push({ lre: 1, type: "lre.job.update", jobId: "j1", kind: "playtest", status: "running", progress: 0.5 });
     expect(seen).toEqual(["j1:running:0.5"]);
   });
+
+  test("the GM assistant's updates reach assistant listeners whichever chat they name; a malformed one doesn't", () => {
+    const h = harness();
+    const seen: string[] = [];
+    const off = h.client.onAssistant((update) => seen.push(`${update.chatId}:${update.view.thread.length}:${update.view.running?.label ?? "idle"}`));
+    const view = { thread: [{ id: "m1", role: "user", text: "Where is Danny Okafor?", at: 1 }], running: { agentId: "a1", label: "Asking the GM assistant…", tokens: { in: 0, out: 0 }, startedAt: 1 }, proposals: [] };
+    h.push({ lre: 1, type: "lre.assistant.update", chatId: "c1", view });
+    h.push({ lre: 1, type: "lre.assistant.update", chatId: "c2", view: { ...view, running: null } });
+    h.push({ lre: 1, type: "lre.assistant.update", chatId: "c1", view: { thread: "nope", running: null, proposals: [] } });
+    h.push({ lre: 1, type: "lre.assistant.update", chatId: "c1", view: { thread: [], running: { label: 3 }, proposals: [] } });
+    h.push({ lre: 1, type: "lre.assistant.update", view });
+    expect(seen).toEqual(["c1:1:Asking the GM assistant…", "c2:1:idle"]);
+    off();
+    h.push({ lre: 1, type: "lre.assistant.update", chatId: "c1", view });
+    expect(seen).toHaveLength(2);
+  });
 });
 
 /** The backend's answer to a hello or resync, sent before it builds the view (dispatch.ts). */

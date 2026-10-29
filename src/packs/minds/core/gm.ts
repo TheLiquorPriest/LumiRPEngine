@@ -27,7 +27,7 @@ function outOfPlay(id: EntityId, why: string): FidelityScore {
  * `threshold`, and its evidence, each fact by its claim and each witness entry by its line in their
  * own log (`witness`), or as gone once the log no longer keeps it.
  */
-function holdingsView(ctx: ReadContext, who: EntityId, witness: readonly WitnessEntry[], threshold: number): MindsGmHolding[] {
+export function holdingsView(ctx: ReadContext, who: EntityId, witness: readonly WitnessEntry[], threshold: number): MindsGmHolding[] {
   const { world, state } = ctx;
   const cal = calendarOf(world);
   const name = (id: EntityId): string => own(state.entities, id)?.name ?? id;

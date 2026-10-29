@@ -45,7 +45,8 @@ export function currentStage(world: WorldDoc, state: Readonly<WorldState>, track
   return own(state.tracks, track)?.stage ?? def.start;
 }
 
-function trackEnv(reg: Registry, w: Working, track: TrackDef, trackId: TrackId): ExprEnv {
+/** What a track's predicates read (`next`, `fail`, a target's `gate`): its owner as `self` and `owner`, and `track.*` (its id, stage, minutes there, attempts and objectives met). */
+export function trackEnv(reg: Registry, w: Pick<Working, "state" | "ctx">, track: TrackDef, trackId: TrackId): ExprEnv {
   const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
   const def = own(track.stages, stage);
   const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: track.owner ? { self: track.owner, owner: track.owner } : {} });

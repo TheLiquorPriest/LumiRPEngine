@@ -1,9 +1,11 @@
 // Diagnostics (DESIGN §6.9): what the engine did each turn, step by step, with its model calls, its
-// failures and why, the sections each engine run wrote and slow requests; and the in-flight activity line. The
-// records are GM-level (a step's reason may name what the player hasn't met): they are read only on
-// request (`lre.diag`), never pushed. The activity line is player-safe: a step's label, no names.
+// failures and why, the sections each engine run wrote, slow requests and each agent's calls; and the
+// in-flight activity line. The records are GM-level (a step's reason may name what the player hasn't
+// met): they are read only on request (`lre.diag`), never pushed. The activity line is player-safe: a
+// step's label, no names.
 
 import type { ChatId } from "./ids";
+import { isRecord } from "./json";
 import { formatMs, HOST_LIMITS } from "./timeouts";
 
 export type DiagLevel = "debug" | "info" | "warn" | "error";
@@ -46,10 +48,54 @@ export interface DiagSection {
   filled: boolean;
 }
 
+/** A count of an agent call's usage, by name. */
+export type DiagUsageField = "in" | "cachedIn" | "out" | "reasoningOut";
+
+export const DIAG_USAGE_FIELDS: readonly DiagUsageField[] = ["in", "cachedIn", "out", "reasoningOut"];
+
+/**
+ * An agent call's tokens: `in` (of which `cachedIn` the provider read from its cache) and `out` (of
+ * which `reasoningOut` reasoning). `estimated` names the counts the provider didn't report, which
+ * hold the agent runtime's estimate; absent when every count is the provider's.
+ */
+export interface DiagUsage {
+  in: number;
+  cachedIn: number;
+  out: number;
+  reasoningOut: number;
+  estimated?: DiagUsageField[];
+}
+
+/** How an agent call ended: answered, failed, cancelled by the user, or refused by the provider. */
+export type DiagAgentOutcome = "ok" | "failed" | "cancelled" | "refused";
+
+export const DIAG_AGENT_OUTCOMES: readonly DiagAgentOutcome[] = ["ok", "failed", "cancelled", "refused"];
+
+/** One call an agent made (AGENT-LOOP-PLAN §3.5): who asked, on what, what it cost and how it ended. */
+export interface DiagAgentCall {
+  /** The agent's role ("gm", "director"). */
+  role: string;
+  /** The connection's id, or "active" for the user's active connection. */
+  connection: string;
+  model: string;
+  /** Null when the call ended before any count, the provider's or an estimate, came back. */
+  usage: DiagUsage | null;
+  ms: number;
+  outcome: DiagAgentOutcome;
+  error?: string;
+  /** The tools the answer called, by name, in order; their arguments and results are in the text. */
+  tools?: string[];
+  /**
+   * The blob hash (`shared/stores.ts`) of the call's text, its messages and its answer, read only
+   * through `lre.diag`'s `text`; gone once transcript retention (Settings → Agents → Retention) passes.
+   */
+  text?: string;
+}
+
 export interface DiagRecord {
   /** Increasing per chat. */
   seq: number;
-  kind: "step" | "error" | "sections" | "slow" | "turn";
+  kind: "step" | "error" | "sections" | "slow" | "turn" | "agent";
   level: DiagLevel;
   /** The generation the record belongs to; null outside a turn. */
   turn: string | null;
@@ -68,10 +114,26 @@ export interface DiagRecord {
   /** Section records: the generation path and each section with its outlet and whether it got text. */
   path?: string;
   sections?: DiagSection[];
+  /** Agent records: the call. */
+  agent?: DiagAgentCall;
 }
 
-/** Records kept per chat; the oldest go first. */
+/** Records kept per chat unless Settings → Diagnostics says otherwise; the oldest go first. */
 export const DIAG_RING = 400;
+
+/** Settings → Diagnostics (AGENT-LOOP-PLAN §15). */
+export interface DiagnosticsSettings {
+  /** Records kept per chat, the oldest going first: agent calls fill them faster than helper steps. */
+  recordsPerChat: number;
+}
+
+export const DIAGNOSTICS_DEFAULTS: Readonly<DiagnosticsSettings> = Object.freeze({ recordsPerChat: DIAG_RING });
+
+/** `UserSettings.diagnostics` as stored: a whole number of records from 1, with no ceiling, else `base`'s. */
+export function diagnosticsSettingsOf(raw: unknown, base: Readonly<DiagnosticsSettings> = DIAGNOSTICS_DEFAULTS): DiagnosticsSettings {
+  const n = isRecord(raw) ? raw.recordsPerChat : undefined;
+  return { recordsPerChat: typeof n === "number" && Number.isInteger(n) && n >= 1 ? n : base.recordsPerChat };
+}
 
 /** A request (a view or an edit) slower than this is recorded. */
 export const SLOW_MS = 1000;
@@ -123,6 +185,8 @@ export const STEP_LABEL: Record<string, string> = {
   consolidate: "Updating memory…",
   knowledge: "Working out who knows what…",
   minds: "Updating the characters' memories…",
+  /** The GM assistant answering in GM → Assistant, outside any turn: its label is all the line shows of it. */
+  assistant: "Asking the GM assistant…",
 };
 
 /** The line while `count` calls for `purpose` are under way: minds are counted ("Asking 3 minds…"). */

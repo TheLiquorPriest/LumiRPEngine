@@ -11,8 +11,10 @@ import type { Plays } from "./harness";
  * that keeps its request, a rebased view holding one, either of those with one already so where it
  * was made (no events of its own), a copy of an earlier build's chat whose starting markers it had
  * to restore, a turn checked on the chain it was planned on after a deletion moved a swipe it saw, a
- * fight's start, acts, turns and end, a turn's planned life changes and tellings, and queued turns
- * and each way one stops early (the suite asserts they happen).
+ * fight's start, acts, turns and end, a turn's planned life changes and tellings, queued turns and
+ * each way one stops early, and writes made while the engine ran a turn before its reply: held
+ * through a turn that then played, held through one that went stale, and a turn made stale (the
+ * suite asserts they happen).
  */
 export interface Coverage {
   fundsDrops: number;
@@ -32,11 +34,12 @@ export interface Coverage {
   lives: Record<"life" | "told", number>;
   minds: Record<"mind" | "memory" | "presence" | "fix", number>;
   queues: Plays;
+  prereply: Record<"held" | "ended" | "stale", number>;
 }
 
 /** A fresh count for a runner or a whole suite. */
 export function noCoverage(): Coverage {
-  return { fundsDrops: 0, groupDrops: 0, apartDrops: 0, apartConverts: 0, tiedDrops: 0, carried: 0, carryDrops: 0, stripped: 0, askedCarried: 0, askedViews: 0, askedEmpty: 0, earlierCopies: 0, shiftedPlans: 0, fights: { start: 0, act: 0, turn: 0, end: 0 }, lives: { life: 0, told: 0 }, minds: { mind: 0, memory: 0, presence: 0, fix: 0 }, queues: { queued: 0, check: 0, failure: 0, interruption: 0 } };
+  return { fundsDrops: 0, groupDrops: 0, apartDrops: 0, apartConverts: 0, tiedDrops: 0, carried: 0, carryDrops: 0, stripped: 0, askedCarried: 0, askedViews: 0, askedEmpty: 0, earlierCopies: 0, shiftedPlans: 0, fights: { start: 0, act: 0, turn: 0, end: 0 }, lives: { life: 0, told: 0 }, minds: { mind: 0, memory: 0, presence: 0, fix: 0 }, queues: { queued: 0, check: 0, failure: 0, interruption: 0 }, prereply: { held: 0, ended: 0, stale: 0 } };
 }
 
 /** Adds one run's counts to another's: a long run split into shards counts as the whole run. */
@@ -46,6 +49,7 @@ export function addCoverage(into: Coverage, from: Coverage): void {
   for (const k of ["life", "told"] as const) into.lives[k] += from.lives[k];
   for (const k of ["mind", "memory", "presence", "fix"] as const) into.minds[k] += from.minds[k];
   for (const k of ["queued", "check", "failure", "interruption"] as const) into.queues[k] += from.queues[k];
+  for (const k of ["held", "ended", "stale"] as const) into.prereply[k] += from.prereply[k];
 }
 
 /**
@@ -87,6 +91,10 @@ export function coverageGaps(coverage: Coverage, runs: number): string[] {
     // and queued turns play several actions and stop at a check, a failure and an interruption.
     for (const k of ["life", "told"] as const) need(`lives.${k}`, coverage.lives[k]);
     for (const k of ["queued", "check", "failure", "interruption"] as const) need(`queues.${k}`, coverage.queues[k]);
+    // L50: writes made while the engine runs before a reply are held through a turn that plays, and
+    // through one an edit makes stale, where they land as it goes; one the window doesn't hold, or an
+    // edit, makes the turn stale.
+    for (const k of ["held", "ended", "stale"] as const) need(`prereply.${k}`, coverage.prereply[k]);
   }
   // Minds' records fold on every view: Dev's minds before the plan, presence and memory after the reply, and GM minds controls.
   if (runs >= 40) for (const k of ["mind", "memory", "presence", "fix"] as const) need(`minds.${k}`, coverage.minds[k]);
