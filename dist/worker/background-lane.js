@@ -2236,6 +2236,7 @@ var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var TIMELAPSE_REACH_MINUTES = 366 * 1440;
+var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition", "learn", "reveal"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -2256,6 +2257,26 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   item_condition: "confirm",
   learn: "auto",
   reveal: "confirm"
+});
+var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace"];
+var CHANGE_TYPES = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
+var AGENT_CHANGE_DEFAULTS = Object.freeze({
+  gm_spawn: "confirm",
+  despawn: "confirm",
+  destroy: "confirm",
+  money_adjust: "confirm",
+  stage: "confirm",
+  gm_edit: "auto",
+  workspace: "auto"
+});
+var AGENT_CHANGE_LABEL = Object.freeze({
+  gm_spawn: "Adding people or things",
+  despawn: "Removing people",
+  destroy: "Destroying things",
+  money_adjust: "Money adjustments",
+  stage: "Quest and secret stages",
+  gm_edit: "Other GM edits (fields, tiers, minds, routines, sections, the clock)",
+  workspace: "Workspace notes"
 });
 var EXTRACTION_LEARNING = Object.freeze({
   promoteAt: 0.9,
@@ -6851,6 +6872,821 @@ var feedEvent = {
   }
 };
 
+// src/shared/agent-tools-read.ts
+var person = "The person: their id, or their name as the world has it.";
+var place = "The place: its id, or its name.";
+var thing = "The thing: its id, or its name.";
+var track = "The quest, secret, puzzle or agenda: its id, or its label.";
+var READ_TOOL_TEXTS = [
+  {
+    name: "people_find",
+    family: "people",
+    tier: "read",
+    note: "Finds people by name, kind or place.",
+    text: "Find people by part of their name, their kind or where they are. Gives each one's id, name, kind and place. With no arguments it lists everyone you can see. Use the ids it gives in later calls.",
+    args: [
+      { path: "name", text: "Part of a name, in any case; leave it out to match every name." },
+      { path: "kind", text: "Only people of this kind." },
+      { path: "place", text: "Only people at this place or somewhere inside it: its id or name." }
+    ]
+  },
+  {
+    name: "people_sheet",
+    family: "people",
+    tier: "read",
+    note: "Reads one person's sheet.",
+    text: "Read one person's sheet: their kind, tier and life state, their fields (who they are, their stats), what they are doing, their relations, and what the world's lore says about them.",
+    args: [{ path: "person", text: person }]
+  },
+  {
+    name: "people_where",
+    family: "people",
+    tier: "read",
+    note: "Says where someone is and what they are doing.",
+    text: "Where a person is now and what they are doing. Read with the player character's knowledge, someone away shows only where and when the player character last saw them.",
+    args: [{ path: "person", text: person }]
+  },
+  {
+    name: "people_regard",
+    family: "people",
+    tier: "read",
+    note: "Says how someone regards others.",
+    text: "How a person regards others: their warmth, trust and respect toward each, in the world's words. Give toward for one relationship, or leave it out for everyone they regard.",
+    args: [
+      { path: "person", text: "Whose regard: their id or name." },
+      { path: "toward", text: "Toward whom: their id or name; leave it out for everyone." }
+    ]
+  },
+  {
+    name: "places_read",
+    family: "places",
+    tier: "read",
+    note: "Reads a place: where it sits, what it is, the places inside it and its lore.",
+    text: "Read a place: its name, the places around it (outermost first), its description and fields, the places inside it, the ways out of it, and what the world's lore says about it.",
+    args: [{ path: "place", text: place }]
+  },
+  {
+    name: "places_contents",
+    family: "places",
+    tier: "read",
+    note: "Says who and what is at a place.",
+    text: "Who and what is at a place now: the people there with what they are doing, and the things lying there loose (not carried, and not in a container).",
+    args: [{ path: "place", text: place }]
+  },
+  {
+    name: "places_route",
+    family: "places",
+    tier: "read",
+    note: "Finds the way between two places and how long it takes.",
+    text: "The way from one place to another and how long it takes, for each way of travelling there is (or the one you name): the minutes, the distance and the places it passes.",
+    args: [
+      { path: "to", text: "Where to: a place's id or name." },
+      { path: "from", text: "Where from: a place's id or name; leave it out for where the player character is." },
+      { path: "mode", text: "Only this way of travelling; leave it out for each." }
+    ]
+  },
+  {
+    name: "items_inventory",
+    family: "items",
+    tier: "read",
+    note: "Lists what someone wears, carries and owns.",
+    text: "What a person wears, carries and owns: each thing with its id and name, what it is in, and its condition where the world keeps one.",
+    args: [{ path: "person", text: person }]
+  },
+  {
+    name: "items_holder",
+    family: "items",
+    tier: "read",
+    note: "Says where a thing is and who holds it.",
+    text: "Where a thing is and who holds it: the person or container it is in, the place, its owners with their shares, and who may use it.",
+    args: [{ path: "thing", text: thing }]
+  },
+  {
+    name: "items_condition",
+    family: "items",
+    tier: "read",
+    note: "Reads a thing's condition and state.",
+    text: "A thing's condition and state as the world keeps them: how worn it is, whether it works, and for a vehicle its fuel and mileage.",
+    args: [{ path: "thing", text: thing }]
+  },
+  {
+    name: "money_balances",
+    family: "money",
+    tier: "read",
+    note: "Reads someone's money: accounts, balances, debts and how well off they are.",
+    text: "Someone's money: their accounts with each balance (a negative balance is owed), their cash, and how well off they are. Works for a person or a business; leave person out for the player character.",
+    args: [{ path: "person", text: "Whose money: a person's or a business's id or name; leave it out for the player character's." }]
+  },
+  {
+    name: "money_prices",
+    family: "money",
+    tier: "read",
+    note: "Prices a thing, or lists what a place sells.",
+    text: "What things cost: the price of a thing from the world's catalog at a place, with its usual range; leave item out to list what the place sells.",
+    args: [
+      { path: "item", text: "What to price, in words, or its catalog id; leave it out to list what the place sells." },
+      { path: "place", text: "Where: a place's id or name; leave it out for where the player character is." }
+    ]
+  },
+  {
+    name: "quests_tracks",
+    family: "quests",
+    tier: "read",
+    note: "Lists the quests, secrets, puzzles and agendas.",
+    text: "List the quests, secrets, puzzles and agendas: each one's id, label, kind and the stage it is at.",
+    args: [{ path: "kind", text: "Only this kind: quest, secret, puzzle or agenda." }]
+  },
+  {
+    name: "quests_stage",
+    family: "quests",
+    tier: "read",
+    note: "Reads where a quest or secret stands.",
+    text: "Where one quest, secret, puzzle or agenda stands: its stage, since when, the objectives still to do, the hints earned and the truths revealed so far.",
+    args: [{ path: "track", text: track }]
+  },
+  {
+    name: "quests_moves",
+    family: "quests",
+    tier: "read",
+    note: "Says what moves a quest or secret on.",
+    text: "What moves a quest, secret, puzzle or agenda on from the stage it is at: the stages it can go to and what each needs, what fails it, and what gates it.",
+    args: [{ path: "track", text: track }]
+  },
+  {
+    name: "knowledge_who_knows",
+    family: "knowledge",
+    tier: "read",
+    note: "Says who knows a fact, and how.",
+    text: "Who knows a fact. Find facts by words of what they claim, by a fact's id, or by a person, place, thing or quest they are about. Gives each fact with everyone who holds it: how they came by it and from whom, since when, what they take it to be, how sure they are, and whom they keep it from.",
+    args: [{ path: "about", text: "Words of the fact's claim, a fact id, or the id or name of a person, place, thing or quest it is about." }]
+  },
+  {
+    name: "knowledge_what_knows",
+    family: "knowledge",
+    tier: "read",
+    note: "Says what someone knows.",
+    text: "What a person knows: each fact they hold, with how they came by it and from whom, since when, what they take it to be, how sure they are, and whom they keep it from.",
+    args: [
+      { path: "person", text: person },
+      { path: "about", text: "Only facts matching these words, or about this person, place, thing or quest; leave it out for all they know." }
+    ]
+  },
+  {
+    name: "time_clock",
+    family: "time",
+    tier: "read",
+    note: "Reads the date and time.",
+    text: "The time now: the date and time of day in the world's calendar, the part of the day, today's holidays, and whether the clock is paused.",
+    args: []
+  },
+  {
+    name: "time_day",
+    family: "time",
+    tier: "read",
+    note: "Reads someone's day.",
+    text: "A person's day: what they do when, and where, from their routine and their plans. Day 0 is today, 1 tomorrow, -1 yesterday.",
+    args: [
+      { path: "person", text: person },
+      { path: "day", text: "Which day, counted from today: 0 today, 1 tomorrow, -1 yesterday; leave it out for today." }
+    ]
+  },
+  {
+    name: "checks_odds",
+    family: "checks",
+    tier: "read",
+    note: "Gives an action's odds.",
+    text: "The odds of an action: whether it can be tried now and, if not, why; for one that rolls, the chance of each outcome, the dice and the difficulty. The actor is the player character unless you name another.",
+    args: [
+      { path: "action", text: "The action's id." },
+      { path: "actor", text: "Who tries it: a person's id or name; leave it out for the player character." },
+      { path: "params", text: `The action's arguments by name, such as its target or where to, written as a JSON object: {"target": "an id or a name"}.` }
+    ]
+  },
+  {
+    name: "minds_read",
+    family: "minds",
+    tier: "read",
+    note: "Reads a character's mind, memory and plans.",
+    text: "A character's mind: their latest thoughts (what they make of the moment, what they intend, how they come across, their mood), their memory notes, the commitments they made and the plans they keep.",
+    args: [{ path: "person", text: person }]
+  }
+];
+
+// src/shared/agent-tools-write.ts
+var entity = "The person or thing: their id, or their name as the world has it.";
+var person2 = "The person: their id, or their name as the world has it.";
+var field = "The field's id.";
+var relation = "The relation type's id: knows, owns, member_of, regard, in, or one of the world's own.";
+var path = "The workspace file's path: names joined by /, such as notes/marcus.md.";
+var under = "Only files under this folder, such as notes/; leave it out for every file.";
+var lore = "The lore entry's id, as lore_search or lore_grep gives it.";
+var proposes = "The answer is the change in plain words, its change type and its mode; nothing changes until the game master applies it.";
+var WRITE_TOOL_TEXTS = [
+  {
+    name: "gm_set_field",
+    family: "people",
+    tier: "gm",
+    note: "Proposes a field of a person or thing, as the GM's Edit sets it.",
+    text: `Propose setting one field of a person or thing, as the GM's Edit does, locked fields too. The engine checks the value against the field's type, values and bounds; money is in minor units (2500 is 25.00) and moves against a correction. ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "field", text: field },
+      { path: "value", text: `Its new value in the field's type, written as JSON: a number, true or false, "words" or an "id" in quotes, a list such as ["a", "b"], or null to clear a reference; plain words read as text.` }
+    ]
+  },
+  {
+    name: "gm_add_to_field",
+    family: "people",
+    tier: "gm",
+    note: "Proposes adding to a number field, within its bounds.",
+    text: `Propose adding to a number field of a person or thing, or taking from it with a negative amount; it stops at the field's bounds. Money is in minor units and moves against a correction. ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "field", text: field },
+      { path: "delta", text: "How much to add; a negative amount takes away." }
+    ]
+  },
+  {
+    name: "gm_set_entity",
+    family: "people",
+    tier: "gm",
+    note: "Proposes someone's tier, agent flag and levels.",
+    text: `Propose a person's or thing's tier, whether they live on their own as an agent between turns, and their level of detail in each domain. Give any of the three. ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "tier", text: "Their new tier." },
+      { path: "agent", text: "true: they live on their own between turns; false: only while the story is with them." },
+      { path: "levels", text: 'Per domain, a level from 0 to 4, or -1 to follow their tier: {"money": 2, "gear": -1}.' }
+    ]
+  },
+  {
+    name: "gm_classify",
+    family: "people",
+    tier: "gm",
+    note: "Proposes someone's classes and tags, whole.",
+    text: `Propose a person's or thing's classes and tags, whole: each of the world's facets with its values, and every tag. The chat keeps them from then on over the world's definition. ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "class", text: `Each facet's values, by the facet's id, written as a JSON object: {"role": ["ally"]}.` },
+      { path: "tags", text: "Their tags, all of them." }
+    ]
+  },
+  {
+    name: "gm_set_life",
+    family: "people",
+    tier: "gm",
+    note: "Proposes someone's life state, and who is told of it.",
+    text: `Propose a person's life state (alive, dying, dead, or one the world has), and whom it is told to besides those with them. Give either or both. ${proposes}`,
+    args: [
+      { path: "person", text: person2 },
+      { path: "state", text: "Their new life state." },
+      { path: "tell", text: "Who else learns of it: each person's id or name." }
+    ]
+  },
+  {
+    name: "gm_spawn",
+    family: "people",
+    tier: "gm",
+    note: "Proposes someone or something new in the chat.",
+    text: `Propose bringing someone or something new into the chat: its kind and name, and if you like its id, tier, place and whether it lives as an agent. A new person counts against the world's spawn cap, the people a chat may bring in (Build \u2192 World). ${proposes}`,
+    args: [
+      { path: "kind", text: "Its kind." },
+      { path: "name", text: "Its name." },
+      { path: "id", text: "An id of your own for it; leave it out for one the engine makes. Reading with the player character's knowledge, always leave it out: an id is refused." },
+      { path: "tier", text: "Its tier; leave it out for the world's spawn tier." },
+      { path: "place", text: "Where it starts: a place's id or name." },
+      { path: "agent", text: "true: it lives on its own between turns." }
+    ]
+  },
+  {
+    name: "gm_despawn",
+    family: "people",
+    tier: "gm",
+    note: "Proposes taking someone or something out of the world.",
+    text: `Propose taking a person or thing out of the world: it is kept, its relations end, and gm_restore brings it back. Removing a person and destroying a thing are change types of their own. ${proposes}`,
+    args: [{ path: "entity", text: entity }]
+  },
+  {
+    name: "gm_restore",
+    family: "people",
+    tier: "gm",
+    note: "Proposes bringing back someone or something taken out.",
+    text: `Propose bringing back a person or thing that was taken out of the world, where it was. ${proposes}`,
+    args: [{ path: "entity", text: entity }]
+  },
+  {
+    name: "gm_link",
+    family: "people",
+    tier: "gm",
+    note: "Proposes a relation, or new fields for one.",
+    text: `Propose a relation from one person or thing to another (or to a place), with its fields, or new fields for one already there. ${proposes}`,
+    args: [
+      { path: "relation", text: relation },
+      { path: "from", text: "From whom or what: an id or name." },
+      { path: "to", text: "To whom or what: an id or name, a place's for a relation to a place." },
+      { path: "fields", text: `The relation's fields, as the world defines them, written as a JSON object: {"heat": 3}.` },
+      { path: "until", text: "When it ends, in the world's minutes; leave it out for never." }
+    ]
+  },
+  {
+    name: "gm_unlink",
+    family: "people",
+    tier: "gm",
+    note: "Proposes ending a relation.",
+    text: `Propose ending a relation from one person or thing to another. ${proposes}`,
+    args: [
+      { path: "relation", text: relation },
+      { path: "from", text: "From whom or what: an id or name." },
+      { path: "to", text: "To whom or what: an id or name." }
+    ]
+  },
+  {
+    name: "gm_move",
+    family: "places",
+    tier: "gm",
+    note: "Proposes moving someone or something to a place.",
+    text: `Propose moving a person or thing to a place, out of any container, along the one path every move in the story takes (whoever is with them comes along). ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "to", text: "The place: its id or name." }
+    ]
+  },
+  {
+    name: "gm_put",
+    family: "items",
+    tier: "gm",
+    note: "Proposes putting a thing into another, or taking it out.",
+    text: `Propose putting a thing inside another (a bag, a car, or a person who then carries it), or, leaving into out, taking it out to where its container is. ${proposes}`,
+    args: [
+      { path: "entity", text: "The thing, or a person going into a vehicle: an id or name." },
+      { path: "into", text: "Into what: an id or name; leave it out to take it out." }
+    ]
+  },
+  {
+    name: "gm_adjust_money",
+    family: "money",
+    tier: "gm",
+    note: "Proposes money into or out of an account against a correction.",
+    text: `Propose moving money into an account, or out of it with a negative amount, against the outside correction account. ${proposes}`,
+    args: [
+      { path: "account", text: "The account: its id or name." },
+      { path: "cents", text: "How much, in minor units (2500 is 25.00); negative takes it out." }
+    ]
+  },
+  {
+    name: "gm_effect",
+    family: "money",
+    tier: "gm",
+    note: "Proposes running one of the world's GM effects.",
+    text: `Propose running one of the effects the world's packs let the GM run, with literal arguments: what no field holds, such as an asset's price. ${proposes}`,
+    args: [
+      { path: "effect", text: "The effect's id." },
+      { path: "args", text: `Its arguments, as literal values, written as a JSON object: {"account": "an account's id"}.` }
+    ]
+  },
+  {
+    name: "gm_set_stage",
+    family: "quests",
+    tier: "gm",
+    note: "Proposes moving a quest or secret to a stage.",
+    text: `Propose moving a quest, secret, puzzle or agenda to a stage: on to one that follows, as reaching it in the story would (its effects, rewards and reveal); back, only the stage. ${proposes}`,
+    args: [
+      { path: "track", text: "The quest, secret, puzzle or agenda: its id or label." },
+      { path: "stage", text: "The stage: its id or label." }
+    ]
+  },
+  {
+    name: "gm_feed",
+    family: "knowledge",
+    tier: "gm",
+    note: "Proposes a section's settings in this chat.",
+    text: `Propose a section's settings in this chat over the world's: whether the narrator gets it, its lines and tokens at most, the sources that fill it, and whose knowledge it reads. Leave settings out to return the section to the world's. ${proposes}`,
+    args: [
+      { path: "section", text: "The section's id." },
+      { path: "settings", text: 'Written as a JSON object: {"enabled": true or false, "maxLines": a count, "maxTokens": a count, "include": [its sources], "scope": "player", "scene" or "gm"}, any of them.' }
+    ]
+  },
+  {
+    name: "gm_mind_edit",
+    family: "minds",
+    tier: "gm",
+    note: "Proposes a change to a character's mind, as GM \u2192 Minds makes it.",
+    text: `Propose a change to a character's mind, as GM \u2192 Minds makes it. mind_pin pins their fidelity (level), or unpins it with level none; mind_refresh asks for a fresh mind next turn; mind_memory edits a note, commitment or plan (part, id and value: the fields to change), adds one (part and value, which needs its text, and a plan its what and when) or deletes one (part and id, no value); mind_intent sets what they mean to do now (text) and how they go about it (approach), either or both; mind_knowledge sets what one person holds of a fact the chat knows (fact and holding, whole), or takes it away (fact, no holding). Reading with the player character's knowledge, only the player character's own knowledge may be changed (mind_knowledge on them): a change to anyone else's mind is refused. ${proposes}`,
+    args: [
+      { path: "op", text: "Which change: mind_pin, mind_refresh, mind_memory, mind_intent or mind_knowledge." },
+      { path: "person", text: person2 },
+      { path: "level", text: "mind_pin: live, near, far or background; none unpins." },
+      { path: "part", text: "mind_memory: note, commitment or plan." },
+      { path: "id", text: "mind_memory: the note's, commitment's or plan's id; leave it out to add one." },
+      { path: "value", text: "mind_memory: its fields, or the ones to change, written as a JSON object; leave it out to delete it." },
+      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most 600 characters); an empty text clears it." },
+      { path: "approach", text: "mind_intent: reactive (they answer the scene), proactive (they pursue their own aims), or none (their mind decides)." },
+      { path: "fact", text: "mind_knowledge: the fact's id, as the knowledge tools give it." },
+      { path: "holding", text: 'mind_knowledge: the holding, whole, written as a JSON object: {"how": "authored", "witnessed", "told", "inferred" or "guessed", "by": who told them or null, "evidence": [fact ids], "since": {"msg", "at"}, "belief": "true", "false" or "uncertain", "confidence": 0 to 1, "keptFrom": [ids] or "everyone"}; leave it out to take it away.' }
+    ]
+  },
+  {
+    name: "gm_routine_edit",
+    family: "time",
+    tier: "gm",
+    note: "Proposes a change to a character's routine or schedules in this chat.",
+    text: `Propose a change to a character's routine or schedules in this chat, as GM \u2192 Routine makes it. routine_follow sets how they follow their routine (mode, awareness, role, skips; default returns one to the world's); routine_block sets one block of it (block, and value: the block, or {"id", "off": true}; leave value out to drop the chat's change); schedule_override changes one of their schedules (schedule, and value: {"off": true, "until": minutes or null} or {"slots": [...]}; leave value out to drop the chat's change). ${proposes}`,
+    args: [
+      { path: "op", text: "Which change: routine_follow, routine_block or schedule_override." },
+      { path: "person", text: person2 },
+      { path: "mode", text: "routine_follow: follows, no_invitations (no invitations from it) or off (no routine at all); default returns it to the world's." },
+      { path: "awareness", text: "routine_follow: story_first, balanced or routine_first; default returns it to the world's." },
+      { path: "role", text: "routine_follow: informative (context only), enforced (lived, the story first) or off (not even context); default returns it to their level's." },
+      { path: "skips", text: "routine_follow: how they live through a time skip; default returns it to their level's." },
+      { path: "block", text: "routine_block: the block's id." },
+      { path: "schedule", text: "schedule_override: the schedule's id." },
+      { path: "value", text: "routine_block or schedule_override: the new block or schedule change, written as a JSON object; leave it out to drop the chat's change." }
+    ]
+  },
+  {
+    name: "gm_fix",
+    family: "time",
+    tier: "gm",
+    note: "Proposes a \u270E fix: the clock, or a field as the player corrects it.",
+    text: `Propose a \u270E fix, as the player corrects the HUD: the clock set to a time (a later time runs the time between; an earlier one sets the clock back), or one field set as the player could set it (a locked field is refused, and a place must be one the player character can see). Give time alone, or entity, field and value. ${proposes}`,
+    args: [
+      { path: "time", text: `The clock: "YYYY-MM-DD HH:MM" in the world's calendar where the player character is.` },
+      { path: "entity", text: entity },
+      { path: "field", text: field },
+      { path: "value", text: `The field's new value in its type, written as JSON: a number, true or false, "words" or an "id" in quotes; plain words read as text.` }
+    ]
+  },
+  {
+    name: "workspace_list",
+    family: "workspace",
+    tier: "read",
+    note: "Lists the chat's workspace files.",
+    text: "List the chat's workspace files, the notes the agents and the game master keep for this chat: each one's path, its size in characters, whether it is pinned, the turn it was written on and who wrote it. The workspace follows the chat's turns, so a swipe from before a note has none of it.",
+    args: [{ path: "under", text: under }]
+  },
+  {
+    name: "workspace_read",
+    family: "workspace",
+    tier: "read",
+    note: "Reads a workspace file.",
+    text: "Read one workspace file whole.",
+    args: [{ path: "path", text: path }]
+  },
+  {
+    name: "workspace_grep",
+    family: "workspace",
+    tier: "read",
+    note: "Finds text in the workspace files.",
+    text: "Find the lines of the workspace files that hold some text, in any case: each file's path, and each line's number and text.",
+    args: [
+      { path: "text", text: "What to look for." },
+      { path: "under", text: under }
+    ]
+  },
+  {
+    name: "workspace_write",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes writing a workspace file whole.",
+    text: `Propose writing a workspace file whole: a new one, or a new text for one already there. ${proposes}`,
+    args: [
+      { path: "path", text: path },
+      { path: "text", text: "The file's whole text." }
+    ]
+  },
+  {
+    name: "workspace_edit",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes replacing text in a workspace file.",
+    text: `Propose an edit to a workspace file: its text find replaced with replace, where find is there exactly once, or everywhere it is with all. ${proposes}`,
+    args: [
+      { path: "path", text: path },
+      { path: "find", text: "The text to replace, as the file has it." },
+      { path: "replace", text: "What goes in its place; an empty text removes it." },
+      { path: "all", text: "true: replace it everywhere it is." }
+    ]
+  },
+  {
+    name: "workspace_move",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes moving or renaming a workspace file.",
+    text: `Propose moving or renaming a workspace file; its pin goes with it. ${proposes}`,
+    args: [
+      { path: "from", text: "The file's path now." },
+      { path: "to", text: "Its new path, where no file is yet." }
+    ]
+  },
+  {
+    name: "workspace_delete",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes deleting a workspace file.",
+    text: `Propose deleting a workspace file. ${proposes}`,
+    args: [{ path: "path", text: path }]
+  },
+  {
+    name: "workspace_pin",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes pinning a workspace file, or unpinning it.",
+    text: `Propose pinning a workspace file, which marks it as one to keep in view, or unpinning it. ${proposes}`,
+    args: [
+      { path: "path", text: path },
+      { path: "pinned", text: "true pins it; false unpins it." }
+    ]
+  },
+  {
+    name: "lore_search",
+    family: "lore",
+    tier: "read",
+    note: "Searches the world's lore and the chat's World Info books.",
+    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read.",
+    args: [{ path: "query", text: "Words or names to look for." }]
+  },
+  {
+    name: "lore_grep",
+    family: "lore",
+    tier: "read",
+    note: "Finds lore entries that hold some text.",
+    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it.",
+    args: [{ path: "text", text: "What to look for." }]
+  },
+  {
+    name: "lore_read",
+    family: "lore",
+    tier: "read",
+    note: "Reads one lore entry, by its id.",
+    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach.",
+    args: [{ path: "id", text: lore }]
+  },
+  {
+    name: "lore_save",
+    family: "lore",
+    tier: "gm",
+    note: "Proposes saving a lore entry to a workspace file.",
+    text: `Propose saving a lore entry's text, as you read it, to a workspace file. ${proposes}`,
+    args: [
+      { path: "id", text: lore },
+      { path: "path", text: "The workspace file; leave it out for one under lore/ named after the entry." }
+    ]
+  },
+  {
+    name: "lore_draft",
+    family: "lore",
+    tier: "gm",
+    note: "Proposes a draft edit of a lore entry, as a workspace file under lore-drafts/.",
+    text: `Propose a draft of an edit to a lore entry, as a workspace file under lore-drafts/ that names the entry and holds your text. Nothing writes a book or the world's lore from it: the game master applies it in Build, on their own press. ${proposes}`,
+    args: [
+      { path: "id", text: lore },
+      { path: "text", text: "The entry's text as you would have it." },
+      { path: "path", text: "The draft file, under lore-drafts/; leave it out for one named after the entry." }
+    ]
+  }
+];
+var WRITE_NOTE = {
+  noWriter: "tool.note.no_writer",
+  badOp: "tool.note.bad_op",
+  badPath: "tool.note.bad_path",
+  noFile: "tool.note.no_file",
+  pathTaken: "tool.note.path_taken",
+  never: "tool.note.never",
+  spawnCap: "tool.note.spawn_cap",
+  spawnId: "tool.note.spawn_id",
+  notYourMind: "tool.note.not_your_mind",
+  povEffect: "tool.note.pov_effect",
+  povRefused: "tool.note.pov_refused",
+  learnedMove: "tool.note.learned_move",
+  fileExists: "tool.note.file_exists",
+  tooMany: "tool.note.too_many",
+  editMissing: "tool.note.edit_missing",
+  editSeveral: "tool.note.edit_several",
+  noLore: "tool.note.no_lore",
+  draftPath: "tool.note.draft_path",
+  cancelled: "tool.note.cancelled",
+  paused: "tool.note.paused",
+  noWorld: "tool.note.no_world",
+  noChange: "tool.note.no_change",
+  stale: "tool.note.stale"
+};
+var filePath = { name: "path", text: "the workspace path the call gave" };
+var WRITE_TOOL_NOTES = [
+  { id: WRITE_NOTE.noWriter, label: "Nothing to write with", note: "A write tool's answer when the agent may only read.", text: "This agent can't change anything here: it only reads.", vars: [] },
+  { id: WRITE_NOTE.badOp, label: "A change it can't read", note: "A write's answer when the change it was given isn't one the engine can read.", text: "That change isn't one the engine can read: check it against the tool's description.", vars: [] },
+  { id: WRITE_NOTE.badPath, label: "Not a workspace path", note: "A workspace write's answer when the path isn't one a file may have.", text: "{{path}} isn't a workspace path: names of letters, digits, \u201C.\u201D, \u201C_\u201D and \u201C-\u201D, joined by /.", vars: [filePath] },
+  { id: WRITE_NOTE.noFile, label: "No such file", note: "A workspace tool's answer when no file is at the path, or none the agent's knowledge may read.", text: "No workspace file {{path}} here.", vars: [filePath] },
+  { id: WRITE_NOTE.pathTaken, label: "A path taken by a file it can't read", note: "A workspace write's answer when a file the agent's knowledge may not read (Who may read it, GM \u2192 Workspace) is at the path.", text: "A workspace file you can't read is already at {{path}}: pick another path.", vars: [filePath] },
+  { id: WRITE_NOTE.never, label: "A change type set to Never", note: "A write's answer when the user set its change type to Never in Settings \u2192 Changes from the reply.", text: "{{type}} is set to Never (Settings \u2192 Changes from the reply), so this change isn't made.", vars: [{ name: "type", text: "the change type, as Settings names it", required: true }] },
+  { id: WRITE_NOTE.spawnCap, label: "The spawn cap", note: "A GM spawn's answer when the chat has brought in as many people as its world allows.", text: "This chat has brought in {{count}} people, all its world allows (its spawn cap, Build \u2192 World), so no one new can join it.", vars: [{ name: "count", text: "the people the chat has brought in", required: true }] },
+  { id: WRITE_NOTE.spawnId, label: "An id a spawn can't take", note: "A GM spawn's answer, under the player character's knowledge, when the id it asks for is taken or isn't an id: one answer whoever holds it, so it never tells of someone the player character can't know.", text: "{{id}} can't be used for someone or something new: leave the id out, and one is made.", vars: [{ name: "id", text: "the id the spawn asked for" }] },
+  { id: WRITE_NOTE.notYourMind, label: "Another's mind", note: "A minds change's answer, under the player character's knowledge, for anyone but the player character: one answer whoever it is and whatever their mind holds, so it never tells what another knows or thinks.", text: "{{pov}} can't see into anyone else's mind, and you read the world as {{pov}} knows it: only what {{pov}} knows may be changed.", vars: [{ name: "pov", text: "the player character's name" }] },
+  { id: WRITE_NOTE.povEffect, label: "An effect under your character's knowledge", note: "gm_effect's answer under the player character's knowledge: one answer for every effect, whatever it would touch, since an effect works on what the player character may not know of.", text: "Effects aren't proposed with {{pov}}'s knowledge: their workings reach past what {{pov}} knows. Use the other tools, or ask the game master.", vars: [{ name: "pov", text: "the player character's name" }] },
+  { id: WRITE_NOTE.povRefused, label: "A refusal under your character's knowledge", note: "A write's answer, under the player character's knowledge, whenever the engine refuses the change: one answer whatever the engine's reason, so a refusal never tells what the player character can't know.", text: "That change can't be made as {{pov}} knows the world: check it against what you can read, or propose another.", vars: [{ name: "pov", text: "the player character's name" }] },
+  { id: WRITE_NOTE.tooMany, label: "Too many changes at once", note: "An apply's answer when one batch holds more changes than one GM edit may.", text: "One batch holds at most {{max}} changes, as one GM edit does.", vars: [{ name: "max", text: "the most one GM edit holds", required: true }] },
+  { id: WRITE_NOTE.editMissing, label: "Text not in the file", note: "workspace_edit's answer when the file doesn't hold the text to replace.", text: "{{path}} doesn't hold that text.", vars: [filePath] },
+  { id: WRITE_NOTE.learnedMove, label: "Into or out of learned/", note: "workspace_move's answer when it would take a file into or out of the learned area (learned/), which is kept apart from the turns.", text: "{{path}} can't move to {{to}}: files under learned/ stay there, and the others stay out of it. Write the file at its new path, then delete the old one.", vars: [filePath, { name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.fileExists, label: "A path taken in learned/", note: "workspace_move's answer, in the learned area, when a file is already at the path it was to move to.", text: "A workspace file is already at {{to}}: pick another path.", vars: [{ name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.editSeveral, label: "Text in the file more than once", note: "workspace_edit's answer when the text to replace is there more than once and all isn't set.", text: "{{path}} holds that text {{count}} times: give more of it to pick one, or set all to replace every one.", vars: [filePath, { name: "count", text: "how many times the file holds it", required: true }] },
+  { id: WRITE_NOTE.noLore, label: "No such lore entry", note: "A lore tool's answer when no entry has the id, or none the agent's knowledge may read.", text: "No lore entry {{id}} here.", vars: [{ name: "id", text: "the entry id the call gave" }] },
+  { id: WRITE_NOTE.draftPath, label: "A draft outside lore-drafts/", note: "lore_draft's answer when the path it was given isn't under lore-drafts/.", text: "A lore draft goes under lore-drafts/, and {{path}} isn't there.", vars: [filePath] },
+  { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
+  { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
+  { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },
+  { id: WRITE_NOTE.noChange, label: "A change that changes nothing", note: "A write's answer when the change would leave everything as it is, or, under the player character's knowledge, when it can't be made for a reason the player mustn't learn of.", text: "That changes nothing.", vars: [] },
+  { id: WRITE_NOTE.stale, label: "The chat changed meanwhile", note: "An apply's answer when the chat changed between the check and the write (a turn landed), so the engine no longer takes the change.", text: "The chat changed while this was being written, so it no longer applies: read it again and propose the change anew.", vars: [] }
+];
+
+// src/shared/agent-tools.ts
+var AGENT_KNOWLEDGE = ["pov", "everyone", "gm"];
+function isAgentKnowledge(v) {
+  return typeof v === "string" && AGENT_KNOWLEDGE.includes(v);
+}
+var TOOL_NOTE = {
+  noPerson: "tool.note.no_person",
+  noPlace: "tool.note.no_place",
+  noThing: "tool.note.no_thing",
+  noTrack: "tool.note.no_track",
+  noFact: "tool.note.no_fact",
+  noField: "tool.note.no_field",
+  ambiguous: "tool.note.ambiguous",
+  missing: "tool.note.missing",
+  badValue: "tool.note.bad_value",
+  badValueUnlisted: "tool.note.bad_value_unlisted",
+  hidden: "tool.note.hidden"
+};
+var asked = { name: "name", text: "the name or id the model asked for, as it wrote it" };
+var LAYER_NOTES = [
+  { id: TOOL_NOTE.noPerson, label: "No such person", note: "A tool's answer when a person's name or id names no one the agent's knowledge can see: a hidden person reads exactly as one who doesn't exist.", text: "No such person here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noPlace, label: "No such place", note: "A tool's answer when a place's name or id names no place the agent's knowledge can see.", text: "No such place here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noThing, label: "No such thing", note: "A tool's answer when a thing's name or id names nothing the agent's knowledge can see.", text: "No such thing here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noTrack, label: "No such quest or secret", note: "A tool's answer when a quest, secret, puzzle or agenda's id or label names none the agent's knowledge can see.", text: "No such quest, secret, puzzle or agenda here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the agent's knowledge can see: under the player character's knowledge, one it doesn't hold reads exactly as one the chat doesn't record.", text: "No such fact here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noField, label: "No such field", note: "A write's answer, under the player character's knowledge, when a field names none it may see of that person or thing: a hidden field reads exactly as one its kind doesn't have.", text: "No such field here: {{name}}.", vars: [asked] },
+  {
+    id: TOOL_NOTE.ambiguous,
+    label: "Several match",
+    note: "A tool's answer when a name fits more than one, listing only those the agent's knowledge can see.",
+    text: "{{name}} could be any of these; ask again with one of their ids: {{matches}}.",
+    vars: [asked, { name: "matches", text: "each match the agent may see, as its name and id", required: true }]
+  },
+  {
+    id: TOOL_NOTE.missing,
+    label: "A missing argument",
+    note: "A tool's answer when the call leaves out an argument the tool needs.",
+    text: "{{tool}} needs {{arg}}: {{text}}",
+    vars: [
+      { name: "tool", text: "the tool" },
+      { name: "arg", text: "the argument left out", required: true },
+      { name: "text", text: "that argument's description" }
+    ]
+  },
+  {
+    id: TOOL_NOTE.badValue,
+    label: "A value it doesn't take",
+    note: "A tool's answer when an argument holds a value the tool doesn't take.",
+    text: "{{tool}} doesn't take {{value}} as {{arg}}; it takes one of: {{values}}.",
+    vars: [
+      { name: "tool", text: "the tool" },
+      { name: "arg", text: "the argument" },
+      { name: "value", text: "the value given", required: true },
+      { name: "values", text: "the values it takes" }
+    ]
+  },
+  {
+    id: TOOL_NOTE.badValueUnlisted,
+    label: "A value it doesn't take, with none to list",
+    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list: under the player character's knowledge, a quest's stages it hasn't come to.",
+    text: "{{tool}} doesn't take {{value}} as {{arg}}.",
+    vars: [
+      { name: "tool", text: "the tool" },
+      { name: "arg", text: "the argument" },
+      { name: "value", text: "the value given", required: true }
+    ]
+  },
+  {
+    id: TOOL_NOTE.hidden,
+    label: "Beyond the player character's knowledge",
+    note: "A tool's answer, under the player character's knowledge, to what the player character can't know: another's mind or knowledge, or another's odds.",
+    text: "{{pov}} doesn't know that, and you read the world as {{pov}} knows it.",
+    vars: [{ name: "pov", text: "the player character's name" }]
+  }
+];
+var TOOL_NOTES = [...LAYER_NOTES, ...WRITE_TOOL_NOTES];
+var TOOL_TEXTS = [...READ_TOOL_TEXTS, ...WRITE_TOOL_TEXTS];
+var BY_NAME = new Map(TOOL_TEXTS.map((t) => [t.name, t]));
+
+// src/shared/stores.ts
+var BLOB_HASH = /^[0-9a-f]{32}$/;
+function isBlobHash(v) {
+  return typeof v === "string" && BLOB_HASH.test(v);
+}
+var PATH_SEGMENT = /^[\p{L}\p{N}._-]+(?: [\p{L}\p{N}._-]+)*$/u;
+function isWorkspacePath(v) {
+  if (!safeKey(v))
+    return false;
+  return v.split("/").every((name) => name !== "." && name !== ".." && PATH_SEGMENT.test(name));
+}
+var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 });
+var DAY_MS = 24 * 60 * 60 * 1000;
+var HOUR_MS = 60 * 60 * 1000;
+
+// src/engine/workspace.ts
+var WS_KEY = "ws";
+var PINS_KEY = "wsPins";
+var READERS_KEY = "wsReaders";
+var WS_WRITE = "engine.ws.write";
+var WS_DELETE = "engine.ws.delete";
+var WS_PIN = "engine.ws.pin";
+var WS_READERS = "engine.ws.readers";
+function workspaceOf(state) {
+  const raw = engineSlice(state)[WS_KEY];
+  const out = {};
+  if (!isRecord(raw))
+    return out;
+  for (const [path2, hash] of Object.entries(raw))
+    if (isWorkspacePath(path2) && isBlobHash(hash))
+      out[path2] = hash;
+  return out;
+}
+function writable2(state, key) {
+  const s = state.packs.engine ?? {};
+  state.packs.engine = s;
+  const current = isRecord(s[key]) ? { ...s[key] } : {};
+  s[key] = current;
+  return current;
+}
+var wsWriteEvent = {
+  type: WS_WRITE,
+  validate: (e) => {
+    if (!isWorkspacePath(e.data.path))
+      return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
+    return isBlobHash(e.data.hash) ? null : { code: "bad_event", reason: "a workspace file's body is a blob's hash" };
+  },
+  apply: (e, state) => {
+    if (isWorkspacePath(e.data.path) && isBlobHash(e.data.hash))
+      writable2(state, WS_KEY)[e.data.path] = e.data.hash;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `workspace file ${String(e.data.path)} written`
+};
+var wsDeleteEvent = {
+  type: WS_DELETE,
+  validate: (e, ctx) => {
+    if (!isWorkspacePath(e.data.path))
+      return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
+    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: `no workspace file ${e.data.path}` };
+  },
+  apply: (e, state) => {
+    if (!isWorkspacePath(e.data.path))
+      return;
+    delete writable2(state, WS_KEY)[e.data.path];
+    if (isRecord(state.packs.engine?.[PINS_KEY]))
+      delete writable2(state, PINS_KEY)[e.data.path];
+    if (isRecord(state.packs.engine?.[READERS_KEY]))
+      delete writable2(state, READERS_KEY)[e.data.path];
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `workspace file ${String(e.data.path)} deleted`
+};
+var wsPinEvent = {
+  type: WS_PIN,
+  validate: (e, ctx) => {
+    if (!isWorkspacePath(e.data.path))
+      return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
+    if (typeof e.data.pinned !== "boolean")
+      return { code: "bad_event", reason: "a pin is on or off" };
+    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: `no workspace file ${e.data.path}` };
+  },
+  apply: (e, state) => {
+    if (!isWorkspacePath(e.data.path) || typeof e.data.pinned !== "boolean")
+      return;
+    const pins = writable2(state, PINS_KEY);
+    if (e.data.pinned)
+      pins[e.data.path] = true;
+    else
+      delete pins[e.data.path];
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `workspace file ${String(e.data.path)} ${e.data.pinned === true ? "pinned" : "unpinned"}`
+};
+var wsReadersEvent = {
+  type: WS_READERS,
+  validate: (e, ctx) => {
+    if (!isWorkspacePath(e.data.path))
+      return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
+    if (!isAgentKnowledge(e.data.readers))
+      return { code: "bad_event", reason: "a file's readers are the player character's, everyone's or the GM's knowledge" };
+    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: `no workspace file ${e.data.path}` };
+  },
+  apply: (e, state) => {
+    if (!isWorkspacePath(e.data.path) || !isAgentKnowledge(e.data.readers))
+      return;
+    if (e.data.readers !== "gm")
+      writable2(state, READERS_KEY)[e.data.path] = e.data.readers;
+    else if (isRecord(state.packs.engine?.[READERS_KEY]))
+      delete writable2(state, READERS_KEY)[e.data.path];
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `workspace file ${String(e.data.path)} read with ${e.data.readers === "pov" ? "the player character's" : e.data.readers === "everyone" ? "everyone's" : "the GM's"} knowledge`
+};
+
 // src/engine/engine-pack.ts
 var LEVELS = [0, 1, 2, 3, 4];
 var ENGINE_PACK = "engine";
@@ -6896,12 +7732,12 @@ function readEngineSlice(state) {
       revealed[k] = v.filter((x) => typeof x === "string");
   const byStage = (v) => {
     const out = {};
-    for (const [track, row] of Object.entries(rec(v))) {
+    for (const [track2, row] of Object.entries(rec(v))) {
       const counts = {};
       for (const [stage, n] of Object.entries(rec(row)))
         if (typeof n === "number")
           counts[stage] = n;
-      out[track] = counts;
+      out[track2] = counts;
     }
     return out;
   };
@@ -6942,13 +7778,13 @@ function sub(state, key) {
   s[key] = fresh;
   return fresh;
 }
-function countStage(state, key, track, stage, next) {
-  if (!safeKey(track) || !safeKey(stage))
+function countStage(state, key, track2, stage, next) {
+  if (!safeKey(track2) || !safeKey(stage))
     return;
   const all = sub(state, key);
-  const row = isRecord(all[track]) ? all[track] : {};
+  const row = isRecord(all[track2]) ? all[track2] : {};
   const n = row[stage];
-  all[track] = { ...row, [stage]: next(typeof n === "number" ? n : 0) };
+  all[track2] = { ...row, [stage]: next(typeof n === "number" ? n : 0) };
 }
 function str2(e, key) {
   const v = e.data[key];
@@ -7033,14 +7869,14 @@ var events = [
     type: ENGINE_EVENTS.attempt,
     validate: (e, ctx) => own(ctx.world.tracks, str2(e, "track")) ? null : { code: "missing_track", reason: `no track ${str2(e, "track")}` },
     apply: (e, state) => {
-      const track = str2(e, "track");
+      const track2 = str2(e, "track");
       if (e.data.correct === true)
-        sub(state, "solved")[track] = str2(e, "stage");
+        sub(state, "solved")[track2] = str2(e, "stage");
       else {
         const attempts = sub(state, "attempts");
-        const n = own(attempts, track);
-        attempts[track] = (typeof n === "number" ? n : 0) + 1;
-        countStage(state, "missed", track, str2(e, "stage"), (count) => count + 1);
+        const n = own(attempts, track2);
+        attempts[track2] = (typeof n === "number" ? n : 0) + 1;
+        countStage(state, "missed", track2, str2(e, "stage"), (count) => count + 1);
       }
     },
     describe: (e) => `attempt on ${str2(e, "track")}`
@@ -7148,8 +7984,8 @@ var events = [
       }
     },
     touches: (e) => {
-      const entity = str2(e, "entity");
-      return ["tier", "agent", "levels"].filter((aspect) => e.data[aspect] !== undefined).map((aspect) => ({ entity, aspect }));
+      const entity2 = str2(e, "entity");
+      return ["tier", "agent", "levels"].filter((aspect) => e.data[aspect] !== undefined).map((aspect) => ({ entity: entity2, aspect }));
     },
     describe: (e, ctx) => {
       const clauses = [];
@@ -7228,8 +8064,8 @@ var events = [
       const key = e.data.key;
       if (typeof key !== "string" || !safeKey(key))
         return;
-      const { place, round } = e.data;
-      sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds"), ...typeof round === "string" ? { round } : {} };
+      const { place: place2, round } = e.data;
+      sub(state, "tries")[key] = { at: state.clock, place: typeof place2 === "string" ? place2 : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds"), ...typeof round === "string" ? { round } : {} };
     },
     describe: (e) => `${str2(e, "actor")}: ${str2(e, "action").replace(/_/g, " ")}, ${str2(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str2(e, "why")})`}`
   },
@@ -7298,6 +8134,10 @@ var enginePack = {
     for (const def of events)
       r.event(def);
     r.event(feedEvent);
+    r.event(wsWriteEvent);
+    r.event(wsDeleteEvent);
+    r.event(wsPinEvent);
+    r.event(wsReadersEvent);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);
@@ -7311,29 +8151,29 @@ var enginePack = {
         return wakes && Array.isArray(out) ? [...out, { type: ENGINE_EVENTS.caught, data: { agent: subject, slot: slotIndexAt(calendarOf(ctx.world), ctx.state.clock) } }] : out;
       }
     });
-    r.formula("life_of", (ctx, entity) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("life_of", (ctx, entity2) => {
+      const hit = entityArg(ctx, entity2);
       return hit ? lifeOf(ctx.state, hit[0]) : "";
     });
-    r.formula("kind_is", (ctx, entity, kind) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("kind_is", (ctx, entity2, kind) => {
+      const hit = entityArg(ctx, entity2);
       return hit !== null && kindIs(ctx.registry, ctx.world, hit[1].kind, String(kind ?? ""));
     });
-    r.formula("in_class", (ctx, entity, facet, value) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("in_class", (ctx, entity2, facet, value) => {
+      const hit = entityArg(ctx, entity2);
       return hit !== null && inClass(ctx.world, ctx.state, hit[0], String(facet ?? ""), [String(value ?? "")]);
     });
-    r.formula("has_tag", (ctx, entity, tag) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("has_tag", (ctx, entity2, tag) => {
+      const hit = entityArg(ctx, entity2);
       return hit !== null && tagsOf(ctx.world, ctx.state, hit[0]).includes(String(tag ?? ""));
     });
-    r.formula("member_of", (ctx, entity, group) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("member_of", (ctx, entity2, group) => {
+      const hit = entityArg(ctx, entity2);
       return hit !== null && isMemberOf(ctx.state, hit[0], String(group ?? ""));
     });
-    r.formula("tier_of", (ctx, entity) => entityArg(ctx, entity)?.[1].tier ?? "");
-    r.formula("band_of", (ctx, entity) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("tier_of", (ctx, entity2) => entityArg(ctx, entity2)?.[1].tier ?? "");
+    r.formula("band_of", (ctx, entity2) => {
+      const hit = entityArg(ctx, entity2);
       return hit ? tierBand(ctx.world, hit[1].tier) ?? "" : "";
     });
   }
@@ -7359,7 +8199,7 @@ function objectAt(parent, key) {
   parent[key] = fresh;
   return fresh;
 }
-function writable2(state, id) {
+function writable3(state, id) {
   const slice2 = state.packs[PACK3] ?? {};
   state.packs[PACK3] = slice2;
   return objectAt(objectAt(slice2, SLICE3), id);
@@ -7367,7 +8207,7 @@ function writable2(state, id) {
 function touch(state, t) {
   if (!own(state.entities, t.entity))
     return;
-  const e = writable2(state, t.entity);
+  const e = writable3(state, t.entity);
   if ("field" in t)
     objectAt(e, "fields")[t.field] = true;
   else if ("rel" in t)
@@ -7479,13 +8319,13 @@ var setDef = {
     return e.atMost && (typeof e.value !== "number" || !Number.isFinite(e.value)) ? reject3("bad_value", "a cap is a finite number") : null;
   },
   apply: (e, state) => {
-    const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
-    if (!entity || !safeKey(e.field))
+    const entity2 = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
+    if (!entity2 || !safeKey(e.field))
       return;
-    const current = entity.fields[e.field];
+    const current = entity2.fields[e.field];
     if (e.atMost && typeof current === "number" && typeof e.value === "number" && current <= e.value)
       return;
-    entity.fields[e.field] = e.value;
+    entity2.fields[e.field] = e.value;
   },
   touches: (e) => [{ entity: e.entity, field: e.field }],
   describe: (e, ctx) => `${nameOf2(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? `is ${e.atMost ? "at most" : "now"} ${String(e.value)}` : "changed"}`
@@ -7503,11 +8343,11 @@ var addDef = {
     return Number.isFinite(e.delta) ? null : reject3("bad_delta", "delta must be finite");
   },
   apply: (e, state) => {
-    const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
-    if (!entity || !safeKey(e.field))
+    const entity2 = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
+    if (!entity2 || !safeKey(e.field))
       return;
-    const current = entity.fields[e.field];
-    entity.fields[e.field] = (typeof current === "number" ? current : 0) + e.delta;
+    const current = entity2.fields[e.field];
+    entity2.fields[e.field] = (typeof current === "number" ? current : 0) + e.delta;
   },
   touches: (e) => [{ entity: e.entity, field: e.field }],
   describe: (e, ctx) => `${nameOf2(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${e.delta >= 0 ? "+" : ""}${e.delta}`
@@ -7542,11 +8382,11 @@ var linkDef = {
   type: "link",
   validate: (e, ctx) => hasEntity(ctx.state, e.from) && (hasEntity(ctx.state, e.to) || e.rel === "knows" && safeKey(e.to) && hasOwn(ctx.world.places, e.to)) ? null : reject3("missing_entity", `link ${e.from} \u2192 ${e.to}`),
   apply: (e, state) => {
-    const entity = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
-    if (!entity)
+    const entity2 = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
+    if (!entity2)
       return;
-    entity.relations = entity.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
-    entity.relations.push({ type: e.rel, to: e.to, ...e.fields ? { fields: e.fields } : {}, ...e.until !== undefined ? { until: e.until } : {} });
+    entity2.relations = entity2.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
+    entity2.relations.push({ type: e.rel, to: e.to, ...e.fields ? { fields: e.fields } : {}, ...e.until !== undefined ? { until: e.until } : {} });
   },
   touches: (e) => [{ entity: e.from, rel: e.rel, to: e.to }],
   describe: (e, ctx) => `${nameOf2(ctx, e.from)} ${e.rel.replace(/_/g, " ")} ${nameOf2(ctx, e.to)}`
@@ -7554,13 +8394,13 @@ var linkDef = {
 var unlinkDef = {
   type: "unlink",
   validate: (e, ctx) => {
-    const entity = hasEntity(ctx.state, e.from) ? ctx.state.entities[e.from] : undefined;
-    return entity && entity.relations.some((r) => r.type === e.rel && r.to === e.to) ? null : reject3("missing_relation", `no ${e.rel} from ${e.from} to ${e.to}`);
+    const entity2 = hasEntity(ctx.state, e.from) ? ctx.state.entities[e.from] : undefined;
+    return entity2 && entity2.relations.some((r) => r.type === e.rel && r.to === e.to) ? null : reject3("missing_relation", `no ${e.rel} from ${e.from} to ${e.to}`);
   },
   apply: (e, state) => {
-    const entity = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
-    if (entity)
-      entity.relations = entity.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
+    const entity2 = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
+    if (entity2)
+      entity2.relations = entity2.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
   },
   touches: (e) => [{ entity: e.from, rel: e.rel, to: e.to }],
   describe: (e, ctx) => `${nameOf2(ctx, e.from)} no longer ${e.rel.replace(/_/g, " ")} ${nameOf2(ctx, e.to)}`
@@ -7590,26 +8430,26 @@ var spawnDef = {
 var stageDef = {
   type: "stage",
   validate: (e, ctx) => {
-    const track = safeKey(e.track) && hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
-    if (!track)
+    const track2 = safeKey(e.track) && hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
+    if (!track2)
       return reject3("missing_track", `no track ${e.track}`);
-    if (!safeKey(e.to) || !hasOwn(track.stages, e.to))
+    if (!safeKey(e.to) || !hasOwn(track2.stages, e.to))
       return reject3("missing_stage", `no stage ${e.to} in ${e.track}`);
     if (e.from === undefined)
       return null;
-    const at = (hasOwn(ctx.state.tracks, e.track) ? ctx.state.tracks[e.track]?.stage : undefined) ?? track.start;
+    const at = (hasOwn(ctx.state.tracks, e.track) ? ctx.state.tracks[e.track]?.stage : undefined) ?? track2.start;
     if (at === e.from)
       return null;
-    const label = (stage) => (hasOwn(track.stages, stage) ? track.stages[stage]?.label : undefined) ?? stage;
-    return reject3("stage_moved", `${track.label} is at ${label(at)} now, no longer at ${label(e.from)}, where this move began`);
+    const label = (stage) => (hasOwn(track2.stages, stage) ? track2.stages[stage]?.label : undefined) ?? stage;
+    return reject3("stage_moved", `${track2.label} is at ${label(at)} now, no longer at ${label(e.from)}, where this move began`);
   },
   apply: (e, state) => {
     if (safeKey(e.track))
       state.tracks[e.track] = { stage: e.to, since: state.clock };
   },
   describe: (e, ctx) => {
-    const track = hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
-    return `${track?.label ?? "A thread"}: ${(track && hasOwn(track.stages, e.to) ? track.stages[e.to]?.label : undefined) ?? "moved on"}`;
+    const track2 = hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
+    return `${track2?.label ?? "A thread"}: ${(track2 && hasOwn(track2.stages, e.to) ? track2.stages[e.to]?.label : undefined) ?? "moved on"}`;
   }
 };
 var clockDef = {
@@ -7887,14 +8727,14 @@ function failOutcome(action, ready, counted, pass) {
 function markedFor(registry, world, state, action, actor) {
   if (action.adjudicate === true)
     return true;
-  let place = placeOfEntity(state, actor);
-  for (let depth = 0;place !== null && depth < PARENT_DEPTH2; depth++) {
-    const def = own(world.places, place);
+  let place2 = placeOfEntity(state, actor);
+  for (let depth = 0;place2 !== null && depth < PARENT_DEPTH2; depth++) {
+    const def = own(world.places, place2);
     if (!def)
       break;
     if (def.adjudicate === true)
       return true;
-    place = def.parent ?? null;
+    place2 = def.parent ?? null;
   }
   for (const [id, t] of Object.entries(world.tracks)) {
     if (t.adjudicate !== true)
@@ -7948,8 +8788,8 @@ function verdictOf(policy, input) {
     return unrolled("impossible", failOutcome(action, ready, counts, pass));
   if (named && policy.trivialAt !== null && againstLine(made, counts.outcomes, policy.trivialAt) >= 0)
     return unrolled("trivial", passOutcome(action, ready, counts, pass));
-  const asked = !named || policy.checks === "every" || policy.checks === "risky" && risky !== false || policy.checks === "marked" && markedFor(registry, world, state, action, actor);
-  if (!asked)
+  const asked2 = !named || policy.checks === "every" || policy.checks === "risky" && risky !== false || policy.checks === "marked" && markedFor(registry, world, state, action, actor);
+  if (!asked2)
     return unrolled(policy.checks === "never" ? "never" : policy.checks === "risky" ? "safe" : "unmarked", passOutcome(action, ready, counts, pass));
   if (policy.authority === "narrative")
     return unrolled("story", null);
@@ -8033,16 +8873,16 @@ function lintAdjudication(world) {
   const initiative = isRecord(combat) && typeof combat.initiative === "string" ? combat.initiative : null;
   const policyChecks = Object.entries(world.checks).filter(([id]) => id !== initiative || Object.values(world.actions).some((a) => a.check === id));
   const checks = [...policyChecks.map(([id, c]) => [`checks.${id}`, c]), ...Object.entries(world.actions).flatMap(([id, a]) => typeof a.check === "object" && a.check !== null ? [[`actions.${id}.check`, a.check]] : [])];
-  for (const [path, check] of checks) {
+  for (const [path2, check] of checks) {
     const bands = checkBands(check, check.dc !== undefined || check.vs !== undefined ? 0 : null);
     const known = new Set(bands.map((b) => b.outcome));
     for (const o of check.pass ?? [])
       if (!known.has(o))
-        issues.push({ severity: "warning", path: `${path}.pass`, code: "adjudication_outcome", message: `"${o}" counts as a success, but no band of this check reads it.` });
+        issues.push({ severity: "warning", path: `${path2}.pass`, code: "adjudication_outcome", message: `"${o}" counts as a success, but no band of this check reads it.` });
     if (typeof check.auto === "string" && check.auto !== "" && !known.has(check.auto))
-      issues.push({ severity: "warning", path: `${path}.auto`, code: "adjudication_outcome", message: `An unrolled check passes as "${check.auto}", which no band of this check reads.` });
+      issues.push({ severity: "warning", path: `${path2}.auto`, code: "adjudication_outcome", message: `An unrolled check passes as "${check.auto}", which no band of this check reads.` });
     if (readsChance && passOutcomes(check, bands).length === 0)
-      issues.push({ severity: "info", path, code: "adjudication_success", message: "This check names no success (no success band and no pass list), so the policy can't tell its chance or grant it without a roll: it rolls whenever its action runs (under narrative authority the story decides, and the dice when it can't), and a failed try isn't remembered." });
+      issues.push({ severity: "info", path: path2, code: "adjudication_success", message: "This check names no success (no success band and no pass list), so the policy can't tell its chance or grant it without a roll: it rolls whenever its action runs (under narrative authority the story decides, and the dice when it can't), and a failed try isn't remembered." });
   }
   return issues;
 }
@@ -8144,14 +8984,14 @@ function createRng(seed) {
 }
 
 // src/engine/materialize.ts
-function materializationSeed(runSeed, entity, domain) {
-  return hashParts(runSeed, entity, domain);
+function materializationSeed(runSeed, entity2, domain) {
+  return hashParts(runSeed, entity2, domain);
 }
 function tablesRevision(world) {
   return hashJson(world.pins.tables);
 }
-function isMaterialized(state, entity, domain) {
-  return Object.prototype.hasOwnProperty.call(state.materialized, `${entity}:${domain}`);
+function isMaterialized(state, entity2, domain) {
+  return Object.prototype.hasOwnProperty.call(state.materialized, `${entity2}:${domain}`);
 }
 function pinnedVersion(world, reg, domain) {
   const def = reg.materializers.get(domain);
@@ -8163,30 +9003,30 @@ function pinnedVersion(world, reg, domain) {
     return { code: "generator_pin", reason: `${domain} is pinned to generator v${pin}; this build has v${carried.join(", v")}` };
   return pin ?? def.version;
 }
-function sample(reg, ctx, entity, domain, runSeed) {
+function sample(reg, ctx, entity2, domain, runSeed) {
   const def = reg.materializers.get(domain);
-  if (!def || !own(ctx.state.entities, entity))
+  if (!def || !own(ctx.state.entities, entity2))
     return null;
   const version = pinnedVersion(ctx.world, reg, domain);
   if (typeof version !== "number")
     return null;
-  const events2 = def.materialize(entity, ctx, createRng(materializationSeed(runSeed, entity, domain)), version);
+  const events2 = def.materialize(entity2, ctx, createRng(materializationSeed(runSeed, entity2, domain)), version);
   if (events2.length === 0)
     return null;
-  return { type: "materialize", entity, domain, generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events: events2 };
+  return { type: "materialize", entity: entity2, domain, generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events: events2 };
 }
-function materializeIfNeeded(reg, w, entity, domain, runSeed) {
-  if (isMaterialized(w.state, entity, domain))
+function materializeIfNeeded(reg, w, entity2, domain, runSeed) {
+  if (isMaterialized(w.state, entity2, domain))
     return null;
-  const event = sample(reg, w.ctx, entity, domain, runSeed);
+  const event = sample(reg, w.ctx, entity2, domain, runSeed);
   if (!event)
     return null;
   return w.apply(event) ? null : event;
 }
-function materializeAll(reg, w, entity, runSeed) {
+function materializeAll(reg, w, entity2, runSeed) {
   const out = [];
   for (const domain of [...reg.materializers.keys()].sort()) {
-    const ev = materializeIfNeeded(reg, w, entity, domain, runSeed);
+    const ev = materializeIfNeeded(reg, w, entity2, domain, runSeed);
     if (ev)
       out.push(ev);
   }
@@ -8200,15 +9040,15 @@ class RegistryError extends Error {
     this.name = "RegistryError";
   }
 }
-function effectiveLevel(world, state, entity, domain) {
+function effectiveLevel(world, state, entity2, domain) {
   const domainLevel = state.realism.levels[domain];
-  const e = state.entities[entity];
+  const e = state.entities[entity2];
   if (!e)
     return domainLevel;
   const override = e.levels[domain];
   if (override !== undefined)
     return Math.min(override, domainLevel);
-  const band = entity === world.pov ? null : tierBand(world, e.tier);
+  const band = entity2 === world.pov ? null : tierBand(world, e.tier);
   const cap = band ? state.realism.tierCaps[band][domain] : undefined;
   return cap === undefined ? domainLevel : Math.min(cap, domainLevel);
 }
@@ -8265,7 +9105,7 @@ function createRegistry(packs) {
         world,
         state,
         tables: { get: (id) => world.tables[id] },
-        levelOf: (entity, domain) => rulesetFloor(world, domain, effectiveLevel(world, state, entity, domain)),
+        levelOf: (entity2, domain) => rulesetFloor(world, domain, effectiveLevel(world, state, entity2, domain)),
         service(name) {
           if (!services.has(String(name)))
             throw new RegistryError(`no service ${String(name)}`);
@@ -8441,9 +9281,9 @@ function progressionApplies(reg, world, prog, kind) {
     return kindIs(reg, world, kind, prog.kind);
   return fieldDef(reg, world, kind, prog.xpField) !== undefined && fieldDef(reg, world, kind, prog.levelField) !== undefined;
 }
-function levelProgression(reg, world, kind, field) {
+function levelProgression(reg, world, kind, field2) {
   for (const prog of Object.values(world.ruleset?.progression ?? {}))
-    if (prog.levelField === field && progressionApplies(reg, world, prog, kind))
+    if (prog.levelField === field2 && progressionApplies(reg, world, prog, kind))
       return prog;
   return null;
 }
@@ -8471,21 +9311,21 @@ function levelFor(thresholds, xp, maxLevel) {
   }
   return maxLevel !== undefined && Number.isFinite(maxLevel) ? Math.min(level, Math.max(0, Math.floor(maxLevel))) : level;
 }
-function storedNumber(reg, ctx, entity, field) {
-  const e = own(ctx.state.entities, entity);
-  const v = e ? own(e.fields, field) : undefined;
+function storedNumber(reg, ctx, entity2, field2) {
+  const e = own(ctx.state.entities, entity2);
+  const v = e ? own(e.fields, field2) : undefined;
   if (typeof v === "number")
     return v;
-  const d = e ? fieldDef(reg, ctx.world, e.kind, field)?.default : undefined;
+  const d = e ? fieldDef(reg, ctx.world, e.kind, field2)?.default : undefined;
   return typeof d === "number" ? d : null;
 }
-function progressOf(reg, ctx, entity, prog) {
-  const e = own(ctx.state.entities, entity);
+function progressOf(reg, ctx, entity2, prog) {
+  const e = own(ctx.state.entities, entity2);
   if (!e || !progressionApplies(reg, ctx.world, prog, e.kind))
     return null;
   const thresholds = thresholdsOf(ctx.world, prog);
-  const xp = storedNumber(reg, ctx, entity, prog.xpField) ?? 0;
-  const level = storedNumber(reg, ctx, entity, prog.levelField) ?? levelFor(thresholds, 0, prog.maxLevel);
+  const xp = storedNumber(reg, ctx, entity2, prog.xpField) ?? 0;
+  const level = storedNumber(reg, ctx, entity2, prog.levelField) ?? levelFor(thresholds, 0, prog.maxLevel);
   const top = prog.maxLevel !== undefined ? Math.min(thresholds.length, prog.maxLevel) : thresholds.length;
   return { level, xp, from: thresholds[level - 1] ?? 0, next: level < top ? thresholds[level] ?? null : null, reached: levelFor(thresholds, xp, prog.maxLevel) };
 }
@@ -8512,12 +9352,12 @@ function display(ctx, def, v) {
   return { value: Array.isArray(v) ? `${v.length} item${v.length === 1 ? "" : "s"}` : "\u2014" };
 }
 var FIXABLE = { number: true, text: true, bool: true, enum: true, money: true, duration: true };
-function fixOf(entity, field, def, value, bounds) {
+function fixOf(entity2, field2, def, value, bounds) {
   if (def.derived !== undefined || !own(FIXABLE, def.type))
     return;
   return {
-    entity,
-    field,
+    entity: entity2,
+    field: field2,
     type: def.type,
     value: value ?? null,
     ...def.type === "enum" && def.values ? { options: def.values.map((x) => ({ value: x, label: x })) } : {},
@@ -8525,11 +9365,11 @@ function fixOf(entity, field, def, value, bounds) {
     ...bounds.max !== undefined ? { max: bounds.max } : {}
   };
 }
-function rowOf2(reg, ctx, entity, row, fixes) {
-  const e = own(ctx.state.entities, entity);
+function rowOf2(reg, ctx, entity2, row, fixes) {
+  const e = own(ctx.state.entities, entity2);
   if (!e)
     return null;
-  const env = scopeEnv({ reg, ctx, bindings: { self: entity } });
+  const env = scopeEnv({ reg, ctx, bindings: { self: entity2 } });
   if ("formula" in row) {
     const v = evalExpr(row.formula, env, null);
     return { label: row.label, ...display(ctx, undefined, v) };
@@ -8540,19 +9380,19 @@ function rowOf2(reg, ctx, entity, row, fixes) {
       return null;
     const read = env.lookup(["self", row.pool]);
     const current = typeof read === "number" ? read : 0;
-    const max = poolMax(reg, ctx, entity, def2.pool);
+    const max = poolMax(reg, ctx, entity2, def2.pool);
     const min = def2.pool.min ?? 0;
-    const fix2 = fixes ? fixOf(entity, row.pool, def2, own(e.fields, row.pool) ?? current, { min, ...max !== null ? { max } : {} }) : undefined;
+    const fix2 = fixes ? fixOf(entity2, row.pool, def2, own(e.fields, row.pool) ?? current, { min, ...max !== null ? { max } : {} }) : undefined;
     return { label: row.label ?? def2.label ?? words2(row.pool), value: `${shown(current)} / ${max === null ? "\u2014" : shown(max)}`, pool: { current, min, max }, ...fix2 ? { fix: fix2 } : {} };
   }
   if ("progression" in row) {
     const prog = own(ctx.world.ruleset?.progression ?? {}, row.progression);
-    const p = prog ? progressOf(reg, ctx, entity, prog) : null;
+    const p = prog ? progressOf(reg, ctx, entity2, prog) : null;
     if (!prog || !p)
       return null;
     const def2 = fieldDef(reg, ctx.world, e.kind, prog.xpField);
     const xpLabel = def2?.label ?? "XP";
-    const fix2 = fixes && def2 ? fixOf(entity, prog.xpField, def2, own(e.fields, prog.xpField) ?? p.xp, { min: def2.min, max: def2.max }) : undefined;
+    const fix2 = fixes && def2 ? fixOf(entity2, prog.xpField, def2, own(e.fields, prog.xpField) ?? p.xp, { min: def2.min, max: def2.max }) : undefined;
     return {
       label: row.label ?? prog.label,
       value: shown(p.level),
@@ -8568,10 +9408,10 @@ function rowOf2(reg, ctx, entity, row, fixes) {
   if (!def && stored === undefined)
     return null;
   const value = def?.derived === undefined && stored !== undefined ? stored : env.lookup(["self", row.field]);
-  const fix = fixes && def && !levelProgression(reg, ctx.world, e.kind, row.field) ? fixOf(entity, row.field, def, stored, { min: def.min, max: def.max }) : undefined;
+  const fix = fixes && def && !levelProgression(reg, ctx.world, e.kind, row.field) ? fixOf(entity2, row.field, def, stored, { min: def.min, max: def.max }) : undefined;
   return { label: row.label ?? def?.label ?? words2(row.field), ...display(ctx, def, value), ...fix ? { fix } : {} };
 }
-function buildEntitySheet(ctx, entity, opts = {}) {
+function buildEntitySheet(ctx, entity2, opts = {}) {
   const layout = ctx.world.ruleset?.sheet;
   if (!layout || !Array.isArray(layout.sections) || layout.sections.length === 0)
     return null;
@@ -8579,7 +9419,7 @@ function buildEntitySheet(ctx, entity, opts = {}) {
   return layout.sections.map((section) => ({
     title: section.label,
     rows: (Array.isArray(section.rows) ? section.rows : []).flatMap((row) => {
-      const view = isRecord(row) ? rowOf2(reg, ctx, entity, row, opts.fixes === true) : null;
+      const view = isRecord(row) ? rowOf2(reg, ctx, entity2, row, opts.fixes === true) : null;
       return view ? [view] : [];
     })
   }));
@@ -8611,16 +9451,16 @@ function spreadPlaces(world) {
     const from = placeChain(world, r.from);
     const to = placeChain(world, r.to);
     for (let i = 1;i < from.length; i++) {
-      const place = from[i];
+      const place2 = from[i];
       const fromPart = from[i - 1];
-      const j = place === undefined ? -1 : to.indexOf(place);
+      const j = place2 === undefined ? -1 : to.indexOf(place2);
       const toPart = to[j - 1];
-      if (place === undefined || fromPart === undefined || j < 1 || toPart === undefined)
+      if (place2 === undefined || fromPart === undefined || j < 1 || toPart === undefined)
         continue;
-      const parts = joins.get(place) ?? new Map;
-      joins.set(place, parts);
+      const parts = joins.get(place2) ?? new Map;
+      joins.set(place2, parts);
       if (farRoute(r))
-        out.add(place);
+        out.add(place2);
       else
         parts.set(joined(parts, fromPart), joined(parts, toPart));
     }
@@ -8635,9 +9475,9 @@ function spreadPlaces(world) {
     else
       partsOf.set(p.parent, [p.id]);
   }
-  for (const [place, parts] of joins) {
-    if (new Set((partsOf.get(place) ?? []).map((part) => joined(parts, part))).size > 1)
-      out.add(place);
+  for (const [place2, parts] of joins) {
+    if (new Set((partsOf.get(place2) ?? []).map((part) => joined(parts, part))).size > 1)
+      out.add(place2);
   }
   spreadOf.set(world, out);
   return out;
@@ -8654,11 +9494,11 @@ function together(world, a, b) {
   };
   return within3(a, b) || within3(b, a);
 }
-function siteOf(world, place) {
-  if (place === null)
+function siteOf(world, place2) {
+  if (place2 === null)
     return null;
-  const chain = placeChain(world, place);
-  let site = place;
+  const chain = placeChain(world, place2);
+  let site = place2;
   for (const up of chain.slice(1)) {
     if (spreadPlaces(world).has(up))
       break;
@@ -8716,7 +9556,7 @@ function movedElsewhere(events2, here) {
   for (const ev of events2)
     if (ev.type === "set" && ev.field === "place")
       last.set(ev.entity, ev.value);
-  return new Set([...last].filter(([, place]) => place !== here).map(([id]) => id));
+  return new Set([...last].filter(([, place2]) => place2 !== here).map(([id]) => id));
 }
 
 // src/engine/effects.ts
@@ -8738,67 +9578,67 @@ function clampNumber(value, min, max) {
     v = max;
   return v;
 }
-function fieldBounds(reg, ctx, entity, def) {
+function fieldBounds(reg, ctx, entity2, def) {
   if (!def?.pool)
     return { ...def?.min !== undefined ? { min: def.min } : {}, ...def?.max !== undefined ? { max: def.max } : {} };
-  const top = poolMax(reg, ctx, entity, def.pool);
+  const top = poolMax(reg, ctx, entity2, def.pool);
   const min = Math.max(def.min ?? -Infinity, def.pool.min ?? 0);
   const max = Math.min(def.max ?? Infinity, top ?? Infinity);
   return { ...Number.isFinite(min) ? { min } : {}, ...Number.isFinite(max) ? { max } : {} };
 }
-function followsXp(reg, world, kind, field) {
-  const prog = levelProgression(reg, world, kind, field);
+function followsXp(reg, world, kind, field2) {
+  const prog = levelProgression(reg, world, kind, field2);
   if (!prog)
     return null;
   const label = (id) => fieldDef(reg, world, kind, id)?.label ?? id.replace(/_/g, " ");
   return reject4("follows_xp", `${label(prog.levelField)} follows ${label(prog.xpField)}: change ${label(prog.xpField)} instead`);
 }
-function change(reg, w, entity, field, delta) {
-  const e = own(w.state.entities, entity);
+function change(reg, w, entity2, field2, delta) {
+  const e = own(w.state.entities, entity2);
   if (!e)
-    return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
-  const def = fieldDef(reg, w.world, e.kind, field);
+    return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
+  const def = fieldDef(reg, w.world, e.kind, field2);
   if (def?.derived !== undefined)
-    return reject4("derived", `${field} is derived`);
-  const follows = followsXp(reg, w.world, e.kind, field);
+    return reject4("derived", `${field2} is derived`);
+  const follows = followsXp(reg, w.world, e.kind, field2);
   if (follows)
     return follows;
-  const stored = own(e.fields, field);
-  const cur = stored ?? def?.default ?? (def?.pool ? poolMax(reg, w.ctx, entity, def.pool) ?? 0 : 0);
+  const stored = own(e.fields, field2);
+  const cur = stored ?? def?.default ?? (def?.pool ? poolMax(reg, w.ctx, entity2, def.pool) ?? 0 : 0);
   if (typeof cur !== "number")
-    return reject4("not_numeric", `${e.name}'s ${field.replace(/_/g, " ")} is not a number`);
-  const b = fieldBounds(reg, w.ctx, entity, def);
+    return reject4("not_numeric", `${e.name}'s ${field2.replace(/_/g, " ")} is not a number`);
+  const b = fieldBounds(reg, w.ctx, entity2, def);
   const next = clampNumber(cur + delta, b.min, b.max);
   if (next === cur)
     return [];
-  return stored === undefined && cur !== 0 ? [{ type: "set", entity, field, value: next }] : [{ type: "add", entity, field, delta: next - cur }];
+  return stored === undefined && cur !== 0 ? [{ type: "set", entity: entity2, field: field2, value: next }] : [{ type: "add", entity: entity2, field: field2, delta: next - cur }];
 }
 function coreEffect(reg, w, type, args, rng) {
   const state = w.state;
   const world = w.world;
   switch (type) {
     case "set": {
-      const entity = text2(args.entity);
-      const field = text2(args.field);
-      const e = own(state.entities, entity);
+      const entity2 = text2(args.entity);
+      const field2 = text2(args.field);
+      const e = own(state.entities, entity2);
       if (!e)
-        return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
-      if (field === "")
+        return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
+      if (field2 === "")
         return reject4("bad_args", "set needs a field");
-      const def = fieldDef(reg, world, e.kind, field);
+      const def = fieldDef(reg, world, e.kind, field2);
       let value = args.value ?? null;
       if (def?.derived !== undefined)
-        return reject4("derived", `${field} is derived`);
-      const follows = followsXp(reg, world, e.kind, field);
+        return reject4("derived", `${field2} is derived`);
+      const follows = followsXp(reg, world, e.kind, field2);
       if (follows)
         return follows;
       if (def && (def.type === "number" || def.type === "money" || def.type === "duration") && typeof value === "number") {
-        const b = fieldBounds(reg, w.ctx, entity, def);
+        const b = fieldBounds(reg, w.ctx, entity2, def);
         value = clampNumber(value, b.min, b.max);
       }
       if (def?.type === "enum" && def.values && typeof value === "string" && !def.values.includes(value))
-        return reject4("bad_value", `${field} must be one of ${def.values.join(", ")}`);
-      return [{ type: "set", entity, field, value }];
+        return reject4("bad_value", `${field2} must be one of ${def.values.join(", ")}`);
+      return [{ type: "set", entity: entity2, field: field2, value }];
     }
     case "add": {
       if (typeof args.delta !== "number" || !Number.isFinite(args.delta))
@@ -8806,53 +9646,53 @@ function coreEffect(reg, w, type, args, rng) {
       return change(reg, w, text2(args.entity), text2(args.field), args.delta);
     }
     case "recover": {
-      const entity = text2(args.entity);
-      const field = text2(args.field);
-      const e = own(state.entities, entity);
+      const entity2 = text2(args.entity);
+      const field2 = text2(args.field);
+      const e = own(state.entities, entity2);
       if (!e)
-        return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
-      const pool = fieldDef(reg, world, e.kind, field)?.pool;
+        return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
+      const pool = fieldDef(reg, world, e.kind, field2)?.pool;
       if (!pool)
-        return reject4("not_pool", `${e.name}'s ${field.replace(/_/g, " ")} isn't a pool`);
+        return reject4("not_pool", `${e.name}'s ${field2.replace(/_/g, " ")} isn't a pool`);
       if (args.amount !== undefined && (typeof args.amount !== "number" || !Number.isFinite(args.amount)))
         return reject4("bad_args", "recover needs a numeric amount");
-      const top = poolMax(reg, w.ctx, entity, pool);
+      const top = poolMax(reg, w.ctx, entity2, pool);
       if (top === null)
-        return reject4("no_max", `${e.name}'s ${field.replace(/_/g, " ")} has no max to recover to`);
-      const read = scopeEnv({ reg, ctx: w.ctx, bindings: { self: entity } });
-      const now = Number(read.lookup(["self", field])) || 0;
+        return reject4("no_max", `${e.name}'s ${field2.replace(/_/g, " ")} has no max to recover to`);
+      const read = scopeEnv({ reg, ctx: w.ctx, bindings: { self: entity2 } });
+      const now = Number(read.lookup(["self", field2])) || 0;
       const amount = typeof args.amount === "number" ? args.amount : args.full !== true && pool.recover !== undefined ? Number(evalExpr(pool.recover, read, 0)) || 0 : top - now;
-      return change(reg, w, entity, field, Math.max(0, amount));
+      return change(reg, w, entity2, field2, Math.max(0, amount));
     }
     case "award": {
-      const entity = text2(args.entity);
+      const entity2 = text2(args.entity);
       const id = text2(args.progression);
       const prog = own(world.ruleset?.progression ?? {}, id);
       if (!prog)
         return reject4("unknown_progression", `no progression ${id}`);
-      const e = own(state.entities, entity);
+      const e = own(state.entities, entity2);
       if (!e)
-        return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
+        return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
       if (!progressionApplies(reg, world, prog, e.kind))
         return reject4("not_applicable", `${e.name} has no ${prog.label}`);
       if (typeof args.amount !== "number" || !Number.isFinite(args.amount))
         return reject4("bad_args", "award needs a numeric amount");
-      return change(reg, w, entity, prog.xpField, args.amount);
+      return change(reg, w, entity2, prog.xpField, args.amount);
     }
     case "move": {
-      const entity = text2(args.entity);
+      const entity2 = text2(args.entity);
       const to = text2(args.to);
-      const e = own(state.entities, entity);
+      const e = own(state.entities, entity2);
       if (!e)
-        return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
+        return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
       if (!own(world.places, to))
         return reject4("missing_place", `no place ${labelOf(w, to)}`);
-      const here = placeOfEntity(state, entity);
-      const stayed = entity === world.pov ? movedElsewhere(w.events, here) : undefined;
-      const moved = relocate(w.ctx, entity, to, { party: true, ...stayed ? { stayed } : {}, ...typeof args.activity === "string" ? { activity: args.activity } : {}, ...args.told === true ? { told: true } : {} });
+      const here = placeOfEntity(state, entity2);
+      const stayed = entity2 === world.pov ? movedElsewhere(w.events, here) : undefined;
+      const moved = relocate(w.ctx, entity2, to, { party: true, ...stayed ? { stayed } : {}, ...typeof args.activity === "string" ? { activity: args.activity } : {}, ...args.told === true ? { told: true } : {} });
       if (!Array.isArray(moved))
         return moved;
-      const along = text2(args.with).split(",").map((s) => s.trim()).filter((id) => id !== "" && id !== entity && own(state.entities, id) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)));
+      const along = text2(args.with).split(",").map((s) => s.trim()).filter((id) => id !== "" && id !== entity2 && own(state.entities, id) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)));
       const out = [...moved];
       for (const id of along) {
         if (out.some((ev) => ev.type === "set" && ev.entity === id && ev.field === "place"))
@@ -8878,35 +9718,35 @@ function coreEffect(reg, w, type, args, rng) {
       const id = text2(args.id) || `${kind}:${hashParts(rng.seed, "spawn", kind, text2(args.name)).slice(0, 10)}`;
       const tier = tierOf(world, text2(args.tier)) ? text2(args.tier) : spawnTierOf(world);
       const fields = isRecord(args.fields) ? { ...args.fields } : {};
-      for (const field of Object.keys(fields)) {
-        const follows = followsXp(reg, world, kind, field);
+      for (const field2 of Object.keys(fields)) {
+        const follows = followsXp(reg, world, kind, field2);
         if (follows)
           return follows;
       }
       if (typeof args.place === "string")
         fields.place = args.place;
       const relations = objects(args.relations).map((r) => ({ type: text2(r.type), to: text2(r.to) }));
-      const entity = { id, kind, name: text2(args.name) || id, tier, fields, relations };
+      const entity2 = { id, kind, name: text2(args.name) || id, tier, fields, relations };
       if (args.class !== undefined) {
         const classes = classOf(args.class);
-        const problem = classes ? classProblems(world, classes, entity.name)[0] : { code: "bad_args", message: "a spawn's class is facet \u2192 values" };
+        const problem = classes ? classProblems(world, classes, entity2.name)[0] : { code: "bad_args", message: "a spawn's class is facet \u2192 values" };
         if (problem)
           return reject4(problem.code, problem.message);
         if (classes && Object.keys(classes).length > 0)
-          entity.class = classes;
+          entity2.class = classes;
       }
       const tags = [...new Set((Array.isArray(args.tags) ? args.tags : []).filter((t) => typeof t === "string" && t.trim() !== "").map((t) => t.trim()))];
       if (tags.length > 0)
-        entity.tags = tags;
-      const links = spawnLinks(reg, world, state, entity);
+        entity2.tags = tags;
+      const links = spawnLinks(reg, world, state, entity2);
       if (isRejection(links))
         return links;
       const out = [];
       if (agentOf(world, { id, tier, agent: typeof args.agent === "boolean" ? args.agent : undefined })) {
-        entity.agent = true;
+        entity2.agent = true;
         out.push({ type: "engine.caught", data: { agent: id, slot: slotIndexAt(calendarOf(world), state.clock) } });
       }
-      return [{ type: "spawn", entity }, ...links, ...out];
+      return [{ type: "spawn", entity: entity2 }, ...links, ...out];
     }
     case "stage":
       return [{ type: "stage", track: text2(args.track), to: text2(args.to) }];
@@ -9000,13 +9840,13 @@ function applyCheck(reg, w, spec, scope) {
   out.rejected.push(...result.rejected);
   return out;
 }
-function followXp(reg, w, entity, id, prog, scope, spawned) {
+function followXp(reg, w, entity2, id, prog, scope, spawned) {
   const out = { applied: [], rejected: [] };
-  const e = own(w.state.entities, entity);
-  const p = e ? progressOf(reg, w.ctx, entity, prog) : null;
+  const e = own(w.state.entities, entity2);
+  const p = e ? progressOf(reg, w.ctx, entity2, prog) : null;
   if (!e || !p)
     return out;
-  const bounds = fieldBounds(reg, w.ctx, entity, fieldDef(reg, w.world, e.kind, prog.levelField));
+  const bounds = fieldBounds(reg, w.ctx, entity2, fieldDef(reg, w.world, e.kind, prog.levelField));
   const to = clampNumber(p.reached, bounds.min, bounds.max);
   const from = p.level;
   if (to === from)
@@ -9017,14 +9857,14 @@ function followXp(reg, w, entity, id, prog, scope, spawned) {
     out.applied.push(ev);
     return true;
   };
-  const who = entity === w.world.pov ? "You" : e.name;
-  const line2 = (text3) => ({ type: ENGINE_EVENTS.note, data: { text: text3, entity, ...entity === w.world.pov ? {} : { visibility: "secret" } } });
+  const who = entity2 === w.world.pov ? "You" : e.name;
+  const line2 = (text3) => ({ type: ENGINE_EVENTS.note, data: { text: text3, entity: entity2, ...entity2 === w.world.pov ? {} : { visibility: "secret" } } });
   if (spawned) {
-    applied({ type: "set", entity, field: prog.levelField, value: to });
+    applied({ type: "set", entity: entity2, field: prog.levelField, value: to });
     return out;
   }
   if (to < from) {
-    const group = `fx:${hashParts(scope.rng.seed, "level", id, entity).slice(0, 10)}`;
+    const group = `fx:${hashParts(scope.rng.seed, "level", id, entity2).slice(0, 10)}`;
     const mark = w.mark();
     const unit = [];
     const landed = (ev) => {
@@ -9034,16 +9874,16 @@ function followXp(reg, w, entity, id, prog, scope, spawned) {
       unit.push(member);
       return true;
     };
-    let whole4 = landed({ type: "set", entity, field: prog.levelField, value: to });
-    for (const [field, def] of Object.entries(kindFields(reg, w.world, e.kind))) {
+    let whole4 = landed({ type: "set", entity: entity2, field: prog.levelField, value: to });
+    for (const [field2, def] of Object.entries(kindFields(reg, w.world, e.kind))) {
       if (!whole4)
         break;
       if (!def.pool || def.derived !== undefined)
         continue;
-      const value = own(own(w.state.entities, entity)?.fields ?? {}, field) ?? def.default;
-      const max = fieldBounds(reg, w.ctx, entity, def).max;
+      const value = own(own(w.state.entities, entity2)?.fields ?? {}, field2) ?? def.default;
+      const max = fieldBounds(reg, w.ctx, entity2, def).max;
       if (typeof value === "number" && max !== undefined && value > max)
-        whole4 = landed({ type: "set", entity, field, value: max, atMost: true });
+        whole4 = landed({ type: "set", entity: entity2, field: field2, value: max, atMost: true });
     }
     if (whole4 && landed(line2(`${who} dropped to ${prog.label} ${to} (from ${from}).`)))
       out.applied.push(...unit);
@@ -9053,11 +9893,11 @@ function followXp(reg, w, entity, id, prog, scope, spawned) {
   }
   const depth = scope.depth ?? 0;
   for (let level = from + 1;level <= to; level++) {
-    if (!applied({ type: "set", entity, field: prog.levelField, value: level }))
+    if (!applied({ type: "set", entity: entity2, field: prog.levelField, value: level }))
       return out;
     if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP)
       continue;
-    const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 });
+    const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity2 }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity2}:${level}`), depth: depth + 1 });
     out.applied.push(...r.applied);
     out.rejected.push(...r.rejected);
   }
@@ -9369,7 +10209,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
     const policy = policyFor(w.world, w.state, p.action, p.actor);
     const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, counts });
     const judgement = opts.judgement ?? null;
-    const place = placeOfEntity(w.state, p.actor);
+    const place2 = placeOfEntity(w.state, p.actor);
     let close = null;
     const story = verdict.why === "story" ? judgedOutcome(judgement, outcomeChoices(p.action, Object.keys(odds)), rng.fork("judge")) : null;
     const rolls = verdict.roll || verdict.why === "story" && story === null;
@@ -9404,7 +10244,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
           ...why ? { why } : {},
           ...approach ? { rating: approach.rating, max: approach.max, reason: approach.reason.slice(0, 240) } : {},
           ...close ? { close: close.outcome } : {},
-          ...tracked ? { key: tryKey(p.actor, p.action.id, p.params), place, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready), ...round !== null ? { round } : {} } : {}
+          ...tracked ? { key: tryKey(p.actor, p.action.id, p.params), place: place2, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready), ...round !== null ? { round } : {} } : {}
         }
       });
     }
@@ -9555,7 +10395,7 @@ function lintInferred(world, reg) {
   if (!policy)
     return [{ severity: "error", path: `${at}.mode`, code: "inferred", message: `${raw.mode === undefined ? "It names no mode" : `"${String(raw.mode)}" isn't a mode`}: use off, suggest or auto. ${unset}` }];
   const issues = [];
-  const warn = (path, code, message) => void issues.push({ severity: "warning", path: `${at}${path}`, code, message });
+  const warn = (path2, code, message) => void issues.push({ severity: "warning", path: `${at}${path2}`, code, message });
   const plays = (key, given, value) => warn(`.${key}`, "inferred_value", `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(value)}.`);
   const choices = [["when", raw.when, INFER_WHENS, policy.when], ["who", raw.who, INFER_WHOS, policy.who], ["detail", raw.detail, INFER_DETAILS, policy.detail], ["others", raw.others, INFER_OTHERS, policy.others]];
   for (const [key, given, values, value] of choices)
@@ -9738,8 +10578,8 @@ function resolveTry(reg, w, params, rng, opts = {}) {
 // src/engine/lore-lint.ts
 function lintLore(world) {
   const issues = [];
-  const push = (severity, path, code, message) => {
-    issues.push({ severity, path, code, message });
+  const push = (severity, path2, code, message) => {
+    issues.push({ severity, path: path2, code, message });
   };
   const truths = [];
   for (const t of Object.values(world.tracks))
@@ -9794,29 +10634,29 @@ function lintLore(world) {
     }
   }
   for (const [term, raw] of Object.entries(world.loreIndex.terms)) {
-    const path = `loreIndex.terms.${term}`;
+    const path2 = `loreIndex.terms.${term}`;
     const entries2 = ids(raw);
     const matched = loreTerm(term);
     if (matched === "")
-      push("warning", path, "empty_term", "a blank term matches nothing");
+      push("warning", path2, "empty_term", "a blank term matches nothing");
     else if (matched !== term)
-      push("warning", path, "term_case", `lookups match this term as "${matched}"`);
+      push("warning", path2, "term_case", `lookups match this term as "${matched}"`);
     if (entries2.length === 0)
-      push("warning", path, "empty_term", `"${term}" leads to no entry`);
+      push("warning", path2, "empty_term", `"${term}" leads to no entry`);
     for (const id of entries2)
       if (!hasOwn(world.lore, id))
-        push("warning", path, "missing_ref", `"${id}" is not a lore entry`);
+        push("warning", path2, "missing_ref", `"${id}" is not a lore entry`);
     const elsewhere = [...new Set(aliases.get(matched) ?? [])].filter((id) => !entries2.includes(id));
     if (elsewhere.length > 0)
-      push("warning", path, "alias_elsewhere", `"${term}" is an alias of ${elsewhere.map((id) => `"${world.lore[id]?.title ?? id}"`).join(", ")}, but the term doesn't lead there`);
+      push("warning", path2, "alias_elsewhere", `"${term}" is an alias of ${elsewhere.map((id) => `"${world.lore[id]?.title ?? id}"`).join(", ")}, but the term doesn't lead there`);
   }
   for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
-    const path = `loreIndex.topics.${id}`;
+    const path2 = `loreIndex.topics.${id}`;
     if (typeof topic.label !== "string" || topic.label.trim() === "")
-      push("warning", path, "topic_label", "the topic needs a label");
+      push("warning", path2, "topic_label", "the topic needs a label");
     for (const entry of ids(topic.entries))
       if (!hasOwn(world.lore, entry))
-        push("warning", path, "missing_ref", `"${entry}" is not a lore entry`);
+        push("warning", path2, "missing_ref", `"${entry}" is not a lore entry`);
   }
   issues.push(...lintLorePins(world));
   issues.push(...lintLoreBooks(world));
@@ -9845,8 +10685,8 @@ function lintLorePins(world) {
   if (raw === undefined)
     return [];
   const issues = [];
-  const push = (severity, path, code, message) => {
-    issues.push({ severity, path, code, message });
+  const push = (severity, path2, code, message) => {
+    issues.push({ severity, path: path2, code, message });
   };
   if (!isRecord(raw))
     return [{ severity: "error", path: "lorePins", code: "pin_shape", message: "Lore pins are an object of characters, places and steps; none are read." }];
@@ -9862,36 +10702,36 @@ function lintLorePins(world) {
       continue;
     }
     for (const [id, list] of Object.entries(targets)) {
-      const path = `lorePins.${part}.${id}`;
+      const path2 = `lorePins.${part}.${id}`;
       const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : part === "places" ? hasOwn(world.places, id) ? world.places[id]?.name : undefined : hasOwn(STEP_OUTPUTS, id) ? id : undefined;
       if (name === undefined)
-        push("warning", path, "pin_target", part === "steps" ? `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
+        push("warning", path2, "pin_target", part === "steps" ? `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
       if (!Array.isArray(list)) {
-        push("error", path, "pin_shape", "The pins are a list; none are read.");
+        push("error", path2, "pin_shape", "The pins are a list; none are read.");
         continue;
       }
       const seen = new Set;
       for (const [i, pin] of list.entries()) {
         if (!isLorePin(pin)) {
-          push("error", path, "pin_shape", `Pin ${i + 1} is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}, so it is ignored.`);
+          push("error", path2, "pin_shape", `Pin ${i + 1} is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}, so it is ignored.`);
           continue;
         }
         const key = lorePinKey(pin);
         if (seen.has(key))
-          push("warning", path, "pin_duplicate", `${"lore" in pin ? `"${pin.lore}"` : ("entry" in pin) ? "A book entry" : "A book"} is pinned here twice; it is read once.`);
+          push("warning", path2, "pin_duplicate", `${"lore" in pin ? `"${pin.lore}"` : ("entry" in pin) ? "A book entry" : "A book"} is pinned here twice; it is read once.`);
         seen.add(key);
         if (!("lore" in pin))
           continue;
         const entry = hasOwn(world.lore, pin.lore) ? world.lore[pin.lore] : undefined;
         if (!entry) {
-          push("warning", path, "pin_missing", `"${pin.lore}" is not a lore entry, so nothing is pinned.`);
+          push("warning", path2, "pin_missing", `"${pin.lore}" is not a lore entry, so nothing is pinned.`);
           continue;
         }
         const source = loreSourceOf(entry.source);
         if (source.kind === "ai" && source.status === "pending")
-          push("warning", path, "pin_pending", `"${entry.title}" was written by an indexing job and isn't reviewed yet; no call reads it until it is.`);
+          push("warning", path2, "pin_pending", `"${entry.title}" was written by an indexing job and isn't reviewed yet; no call reads it until it is.`);
         if (part === "characters" && name !== undefined && loreIsSecret(entry) && !loreHeldBy(world, entry, id))
-          push("warning", path, "pin_unread", `"${entry.title}" is a secret that isn't ${name}'s own, so their mind never reads it; name them among its holders, or pin something else.`);
+          push("warning", path2, "pin_unread", `"${entry.title}" is a secret that isn't ${name}'s own, so their mind never reads it; name them among its holders, or pin something else.`);
       }
     }
   }
@@ -9904,15 +10744,15 @@ function specsOf(v) {
 }
 function effectLists(world) {
   const out = [];
-  const add = (path, effects) => {
+  const add = (path2, effects) => {
     if (!Array.isArray(effects))
       return;
-    out.push({ path, effects: [...effects] });
+    out.push({ path: path2, effects: [...effects] });
     effects.forEach((spec, i) => {
       if (spec.type !== "check" || !isRecord(spec.args?.outcomes))
         return;
       for (const [outcome, list] of Object.entries(spec.args.outcomes))
-        add(`${path}.${i}.args.outcomes.${outcome}`, specsOf(list));
+        add(`${path2}.${i}.args.outcomes.${outcome}`, specsOf(list));
     });
   };
   for (const [id, a] of Object.entries(world.actions))
@@ -9934,11 +10774,11 @@ function effectLists(world) {
   }
   return out;
 }
-function checkSites(path, check) {
+function checkSites(path2, check) {
   const out = [];
   const push = (key, expr) => {
     if (typeof expr === "string")
-      out.push({ path: `${path}.${key}`, expr, effectArg: false });
+      out.push({ path: `${path2}.${key}`, expr, effectArg: false });
   };
   push("modifier", check.modifier);
   push("advantage", check.advantage);
@@ -9950,7 +10790,7 @@ function checkSites(path, check) {
   }
   return out;
 }
-function argSites(path, spec) {
+function argSites(path2, spec) {
   const out = [];
   const visit2 = (at, v) => {
     if (typeof v === "string") {
@@ -9966,17 +10806,17 @@ function argSites(path, spec) {
     if (spec.type === "check" && key === "outcomes")
       continue;
     if (spec.type === "check" && key === "check" && isRecord(value))
-      out.push(...checkSites(`${path}.args.check`, value));
+      out.push(...checkSites(`${path2}.args.check`, value));
     else
-      visit2(`${path}.args.${key}`, value);
+      visit2(`${path2}.args.${key}`, value);
   }
   return out;
 }
 function exprSites(world) {
   const out = [];
-  const push = (path, expr) => {
+  const push = (path2, expr) => {
     if (typeof expr === "string")
-      out.push({ path, expr, effectArg: false });
+      out.push({ path: path2, expr, effectArg: false });
   };
   for (const [id, k] of Object.entries(world.kinds)) {
     for (const [name, f] of Object.entries(k.fields)) {
@@ -10033,8 +10873,8 @@ function exprSites(world) {
     if (isRecord(combat.initiative))
       out.push(...checkSites("ruleset.combat.initiative", combat.initiative));
   }
-  for (const { path, effects } of effectLists(world))
-    effects.forEach((spec, i) => out.push(...argSites(`${path}.${i}`, spec)));
+  for (const { path: path2, effects } of effectLists(world))
+    effects.forEach((spec, i) => out.push(...argSites(`${path2}.${i}`, spec)));
   return out;
 }
 function columnsOf(world, id) {
@@ -10052,9 +10892,9 @@ function columnsOf(world, id) {
 }
 function lintRuleset(world, reg) {
   const issues = [];
-  const err = (path, code, message) => void issues.push({ severity: "error", path, code, message });
-  const warn = (path, code, message) => void issues.push({ severity: "warning", path, code, message });
-  const info = (path, code, message) => void issues.push({ severity: "info", path, code, message });
+  const err = (path2, code, message) => void issues.push({ severity: "error", path: path2, code, message });
+  const warn = (path2, code, message) => void issues.push({ severity: "warning", path: path2, code, message });
+  const info = (path2, code, message) => void issues.push({ severity: "info", path: path2, code, message });
   for (const site of exprSites(world)) {
     let calls;
     try {
@@ -10083,16 +10923,16 @@ function lintRuleset(world, reg) {
         warn(site.path, "table_row", `The data table "${id}" has no row "${key}"; the read gives nothing.`);
     }
   }
-  const lintCheck = (path, check, opponents) => {
+  const lintCheck = (path2, check, opponents) => {
     let natural = false;
     try {
       natural = naturalDie(parseDice(check.dice)) !== null;
       diceDistribution(check.dice);
     } catch (e) {
-      err(`${path}.dice`, "dice", `"${String(check.dice)}" can't be rolled with exact odds: ${e instanceof Error ? e.message : String(e)}`);
+      err(`${path2}.dice`, "dice", `"${String(check.dice)}" can't be rolled with exact odds: ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
-    for (const site of checkSites(path, check)) {
+    for (const site of checkSites(path2, check)) {
       try {
         compile(site.expr);
       } catch (e) {
@@ -10101,26 +10941,26 @@ function lintRuleset(world, reg) {
     }
     const bands = Array.isArray(check.bands) ? check.bands : [];
     if (!natural && bands.some((b) => b.natural))
-      err(`${path}.bands`, "natural_band", `Natural bands read one kept die, but "${check.dice}" doesn't start with one (use d20, 2d20kh1 or 2d20kl1).`);
+      err(`${path2}.bands`, "natural_band", `Natural bands read one kept die, but "${check.dice}" doesn't start with one (use d20, 2d20kh1 or 2d20kl1).`);
     if (!natural && check.advantage !== undefined)
-      err(`${path}.advantage`, "advantage", `Advantage adds a natural die, but "${check.dice}" doesn't start with one (use d20, d100, 2d20kh1\u2026).`);
+      err(`${path2}.advantage`, "advantage", `Advantage adds a natural die, but "${check.dice}" doesn't start with one (use d20, d100, 2d20kh1\u2026).`);
     const hasDc = check.dc !== undefined || check.vs !== undefined;
     if (!hasDc && bands.some((b) => b.margin))
-      err(`${path}.bands`, "margin_band", "Margin bands measure from a DC, and this check has neither a dc nor an opponent.");
+      err(`${path2}.bands`, "margin_band", "Margin bands measure from a DC, and this check has neither a dc nor an opponent.");
     if (bands.length === 0 && !hasDc)
-      warn(`${path}.bands`, "no_bands", "With no bands and no DC every roll reads none.");
+      warn(`${path2}.bands`, "no_bands", "With no bands and no DC every roll reads none.");
     const vs = check.vs;
     if (!vs)
       return;
     if ([vs.check, vs.modifier, vs.passive].filter((x) => x !== undefined).length > 1)
-      err(`${path}.vs`, "vs", "An opponent rolls a check, rolls this check's dice with a modifier, or has a passive score: give one of check, modifier and passive.");
+      err(`${path2}.vs`, "vs", "An opponent rolls a check, rolls this check's dice with a modifier, or has a passive score: give one of check, modifier and passive.");
     if (vs.check !== undefined && !own(world.checks, vs.check))
-      err(`${path}.vs.check`, "refs", `The opponent's check "${vs.check}" doesn't exist.`);
+      err(`${path2}.vs.check`, "refs", `The opponent's check "${vs.check}" doesn't exist.`);
     if (vs.passive !== undefined && check.dc !== undefined)
-      warn(`${path}.dc`, "dc_passive", "The opponent's passive score is the DC, so dc is never read.");
+      warn(`${path2}.dc`, "dc_passive", "The opponent's passive score is the DC, so dc is never read.");
     const who = vs.who ?? "target";
     if (opponents && !opponents.includes(who))
-      err(`${path}.vs.who`, "vs_who", `The opponent is "${who}", which isn't one of this action's people (${opponents.length > 0 ? opponents.join(", ") : "it names none"}).`);
+      err(`${path2}.vs.who`, "vs_who", `The opponent is "${who}", which isn't one of this action's people (${opponents.length > 0 ? opponents.join(", ") : "it names none"}).`);
   };
   for (const [id, c] of Object.entries(world.checks))
     lintCheck(`checks.${id}`, c, null);
@@ -10136,9 +10976,9 @@ function lintRuleset(world, reg) {
         err(`actions.${id}.check`, "vs_who", `"${a.label}" rolls an opposed check against "${named.vs.who ?? "target"}", which isn't one of its people.`);
     }
   }
-  for (const { path, effects } of effectLists(world)) {
+  for (const { path: path2, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
-      const at = `${path}.${i}.args`;
+      const at = `${path2}.${i}.args`;
       if (spec.type === "check") {
         const c = spec.args?.check;
         if (typeof c === "string" && !c.startsWith("=") && !own(world.checks, c))
@@ -10317,14 +11157,14 @@ function lintRuleset(world, reg) {
       if (p.kind === undefined && kinds.length === 0)
         warn(at, "progression", `No kind has both ${p.xpField} and ${p.levelField}, so this progression applies to no one.`);
       for (const k of p.kind !== undefined && (own(world.kinds, p.kind) || reg.kinds.has(p.kind)) ? kinds : []) {
-        for (const [key, field] of [["xpField", p.xpField], ["levelField", p.levelField]]) {
-          const def = fieldDef(reg, world, k, field);
+        for (const [key, field2] of [["xpField", p.xpField], ["levelField", p.levelField]]) {
+          const def = fieldDef(reg, world, k, field2);
           if (!def)
-            err(`${at}.${key}`, "progression", `The kind ${k} has no field ${field}.`);
+            err(`${at}.${key}`, "progression", `The kind ${k} has no field ${field2}.`);
           else if (def.type !== "number")
-            err(`${at}.${key}`, "progression", `${field} must be a number field.`);
+            err(`${at}.${key}`, "progression", `${field2} must be a number field.`);
           else if (def.derived !== undefined)
-            err(`${at}.${key}`, "progression", `${field} is derived, so the engine can't set it.`);
+            err(`${at}.${key}`, "progression", `${field2} is derived, so the engine can't set it.`);
         }
       }
       const t = p.thresholds;
@@ -10350,8 +11190,8 @@ function lintRuleset(world, reg) {
       for (const [eid, e] of Object.entries(world.entities)) {
         if (!progressionApplies(reg, world, p, e.kind))
           continue;
-        const numberOf = (field) => {
-          const v = own(e.fields, field) ?? fieldDef(reg, world, e.kind, field)?.default;
+        const numberOf = (field2) => {
+          const v = own(e.fields, field2) ?? fieldDef(reg, world, e.kind, field2)?.default;
           return typeof v === "number" ? v : null;
         };
         const levelDef = fieldDef(reg, world, e.kind, p.levelField);
@@ -10522,23 +11362,23 @@ function sampleSlot(slot, previous, rng) {
   }
   return slot.value;
 }
-function scheduleSeed(runSeed, schedule, entity, occurrence) {
-  return hashParts(runSeed, `schedule:${schedule}`, entity, occurrence);
+function scheduleSeed(runSeed, schedule, entity2, occurrence) {
+  return hashParts(runSeed, `schedule:${schedule}`, entity2, occurrence);
 }
 function scheduleDomain(reg, schedule) {
   if (!schedule.pack)
     return null;
   return reg.packs.find((p) => p.id === schedule.pack)?.domain ?? null;
 }
-function held(state, entity, target, at) {
-  const holds = own(state.entities, entity)?.fields.holds;
+function held(state, entity2, target, at) {
+  const holds = own(state.entities, entity2)?.fields.holds;
   if (!isRecord(holds))
     return false;
   const until = own(holds, target);
   return typeof until === "number" && until > at;
 }
-function restValue(reg, world, state, entity, target) {
-  const e = own(state.entities, entity);
+function restValue(reg, world, state, entity2, target) {
+  const e = own(state.entities, entity2);
   if (!e)
     return;
   if (target === "place") {
@@ -10561,16 +11401,16 @@ function runningRivals(reg, ctx, schedule, rank, at) {
   }
   return out;
 }
-function runsFor(ctx, rival, entity) {
-  return rival.owners.has(entity) && (!rival.domain || ctx.levelOf(entity, rival.domain) >= 1);
+function runsFor(ctx, rival, entity2) {
+  return rival.owners.has(entity2) && (!rival.domain || ctx.levelOf(entity2, rival.domain) >= 1);
 }
-function overriddenAt(reg, ctx, schedule, entity, at) {
+function overriddenAt(reg, ctx, schedule, entity2, at) {
   const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
   if (rank === null || rank === 0)
     return false;
-  return runningRivals(reg, ctx, schedule, rank, at).some((r) => r.rank < rank && runsFor(ctx, r, entity));
+  return runningRivals(reg, ctx, schedule, rank, at).some((r) => r.rank < rank && runsFor(ctx, r, entity2));
 }
-function valueBefore(reg, ctx, instant, entity) {
+function valueBefore(reg, ctx, instant, entity2) {
   const cal = calendarOf(ctx.world);
   const s = instant.schedule;
   for (const [i, slot] of s.slots.entries()) {
@@ -10581,7 +11421,7 @@ function valueBefore(reg, ctx, instant, entity) {
       if (recursOn(cal, s.recurrence, d) && clockAt(cal, d, span.start) + span.length === instant.at)
         return slot.value === undefined ? null : slot.value;
   }
-  return restValue(reg, ctx.world, ctx.state, entity, s.target) ?? null;
+  return restValue(reg, ctx.world, ctx.state, entity2, s.target) ?? null;
 }
 function firstOfDay(instant) {
   if (instant.edge !== "start")
@@ -10602,48 +11442,48 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
   const yields = optionalQuery(ctx, "castlife.yields");
   const off = optionalQuery(ctx, "castlife.schedule_off");
   const routine = schedule.target === "place" || schedule.target === "activity";
-  for (const entity of scheduleOwners(reg, ctx.world, ctx.state, schedule)) {
-    if (domain && ctx.levelOf(entity, domain) < 1)
+  for (const entity2 of scheduleOwners(reg, ctx.world, ctx.state, schedule)) {
+    if (domain && ctx.levelOf(entity2, domain) < 1)
       continue;
-    if (held(ctx.state, entity, schedule.target, instant.at))
+    if (held(ctx.state, entity2, schedule.target, instant.at))
       continue;
-    if (opts.povRoutine === false && entity === ctx.world.pov && routine)
+    if (opts.povRoutine === false && entity2 === ctx.world.pov && routine)
       continue;
-    if (off?.(ctx, entity, schedule.id, instant.at) === true)
+    if (off?.(ctx, entity2, schedule.id, instant.at) === true)
       continue;
-    if (routine && optionalQuery(ctx, "combat.engaged")?.(ctx, entity) === true)
+    if (routine && optionalQuery(ctx, "combat.engaged")?.(ctx, entity2) === true)
       continue;
-    const mine = rivals.filter((r) => runsFor(ctx, r, entity));
+    const mine = rivals.filter((r) => runsFor(ctx, r, entity2));
     if (rank !== null && mine.some((r) => r.rank < rank))
       continue;
-    const current = own(own(ctx.state.entities, entity)?.fields ?? {}, schedule.target);
+    const current = own(own(ctx.state.entities, entity2)?.fields ?? {}, schedule.target);
     let value;
     if (instant.edge === "start")
-      value = sampleSlot(slot, current, createRng(scheduleSeed(runSeed, schedule.id, entity, instant.occurrence)));
+      value = sampleSlot(slot, current, createRng(scheduleSeed(runSeed, schedule.id, entity2, instant.occurrence)));
     else {
       if (startsHere)
         continue;
-      const under = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
-      value = under ? sampleSlot(under.slot, current, createRng(scheduleSeed(runSeed, under.schedule.id, entity, under.occurrence))) : restValue(reg, ctx.world, ctx.state, entity, schedule.target);
+      const under2 = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
+      value = under2 ? sampleSlot(under2.slot, current, createRng(scheduleSeed(runSeed, under2.schedule.id, entity2, under2.occurrence))) : restValue(reg, ctx.world, ctx.state, entity2, schedule.target);
     }
     if (value === undefined || keyOf(value) === keyOf(current))
       continue;
     if (schedule.target === "place" && typeof value === "string" && !own(ctx.world.places, value))
       continue;
-    if (routine && routineStays(ctx, entity, schedule.target === "place" ? value : null))
+    if (routine && routineStays(ctx, entity2, schedule.target === "place" ? value : null))
       continue;
     if (routine && yields) {
       const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
-      const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity);
-      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
+      const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity2);
+      if (yields(ctx, entity2, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
         continue;
     }
     if (schedule.target === "place" && typeof value === "string") {
-      const moved = relocate(ctx, entity, value, { party: true });
+      const moved = relocate(ctx, entity2, value, { party: true });
       if (!("code" in moved))
         out.push(...moved);
     } else
-      out.push({ type: "set", entity, field: schedule.target, value });
+      out.push({ type: "set", entity: entity2, field: schedule.target, value });
   }
   return out;
 }
@@ -10674,10 +11514,10 @@ function activeSlot(world, schedule, clock) {
   }
   return null;
 }
-function nextStartFor(reg, ctx, schedule, entity, clock, horizonDays = 14) {
+function nextStartFor(reg, ctx, schedule, entity2, clock, horizonDays = 14) {
   for (const i of scheduleInstants(ctx.world, [schedule], clock, clock + horizonDays * MINUTES_PER_DAY)) {
     const slot = schedule.slots[i.slot];
-    if (i.edge === "start" && slot && !overriddenAt(reg, ctx, schedule, entity, i.at))
+    if (i.edge === "start" && slot && !overriddenAt(reg, ctx, schedule, entity2, i.at))
       return { at: i.at, slot };
   }
   return null;
@@ -10827,8 +11667,8 @@ function overlayOf(reg, world, kind) {
 }
 function lintStructure(world, reg) {
   const issues = [];
-  const err = (path, code, message) => void issues.push({ severity: "error", path, code, message });
-  const warn = (path, code, message) => void issues.push({ severity: "warning", path, code, message });
+  const err = (path2, code, message) => void issues.push({ severity: "error", path: path2, code, message });
+  const warn = (path2, code, message) => void issues.push({ severity: "warning", path: path2, code, message });
   const known = (id) => !!own(world.entities, id) || !!own(world.places, id);
   const typed = new Map;
   for (const [id, e] of Object.entries(world.entities)) {
@@ -10883,10 +11723,10 @@ function lintStructure(world, reg) {
           err(at, "refs", `${a.label}'s ${p.label ?? name} names rows of the data table "${p.table}", which this world doesn't have.`);
       }
       if (p.claim !== undefined) {
-        const place = p.claim;
+        const place2 = p.claim;
         const at = `actions.${id}.params.${name}.claim`;
-        if (place !== "held" && place !== "here")
-          err(at, "claims", `${a.label}'s ${p.label ?? name} says a claimed thing appears "${String(place)}"; it should be "held" (in the actor's hands) or "here" (where the actor is).`);
+        if (place2 !== "held" && place2 !== "here")
+          err(at, "claims", `${a.label}'s ${p.label ?? name} says a claimed thing appears "${String(place2)}"; it should be "held" (in the actor's hands) or "here" (where the actor is).`);
         else if (p.type !== "ref")
           warn(at, "claims", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so no claimed thing ever fills it.`);
       }
@@ -10908,12 +11748,12 @@ function lintStructure(world, reg) {
       continue;
     const packFields = new Map;
     for (let cur = pack, guard = 0;cur && guard < 32; cur = cur.extends ? reg.kinds.get(cur.extends) : undefined, guard++) {
-      for (const [field, def] of Object.entries(cur.fields))
-        if (!packFields.has(field))
-          packFields.set(field, def);
+      for (const [field2, def] of Object.entries(cur.fields))
+        if (!packFields.has(field2))
+          packFields.set(field2, def);
     }
     const kept2 = kindFields(reg, world, id);
-    const lost = [...packFields].filter(([field]) => !hasOwn(kept2, field)).map(([field, def]) => def.label ?? field);
+    const lost = [...packFields].filter(([field2]) => !hasOwn(kept2, field2)).map(([field2, def]) => def.label ?? field2);
     if (lost.length > 0)
       warn(`kinds.${id}`, "kind_shadow", `Kind ${k.label} (${id}) lies over the ${pack.pack ?? "engine"} pack's ${pack.label} but builds on ${k.extends || "nothing"} instead of ${pack.extends ?? "nothing"}, so it and every kind built on it lose ${lost.length} of that kind's fields (${lost.slice(0, 6).join(", ")}${lost.length > 6 ? ", \u2026" : ""}): forms show those values as untyped text and the levels that gate them no longer apply. ${pack.extends ? `Set its Extends back to ${pack.extends}` : "Clear its Extends"}, or give the kind its own id.`);
   }
@@ -10922,17 +11762,17 @@ function lintStructure(world, reg) {
       err(`classifications.${id}.id`, "id_mismatch", "the id must match its key");
     const values = isRecord(f.values) ? f.values : {};
     for (const [vid, v] of Object.entries(values)) {
-      const path = `classifications.${id}.values.${vid}.parent`;
+      const path2 = `classifications.${id}.values.${vid}.parent`;
       if (v.parent === undefined)
         continue;
       if (!hasOwn(values, v.parent)) {
-        err(path, "refs", `${f.label}: "${v.label}" nests under "${v.parent}", which isn't one of its values.`);
+        err(path2, "refs", `${f.label}: "${v.label}" nests under "${v.parent}", which isn't one of its values.`);
         continue;
       }
       let cur = v.parent;
       for (let guard = 0;cur !== undefined && guard < 64; guard++) {
         if (cur === vid) {
-          err(path, "cycles", `${f.label}: "${v.label}" nests under itself.`);
+          err(path2, "cycles", `${f.label}: "${v.label}" nests under itself.`);
           break;
         }
         cur = own(values, cur)?.parent;
@@ -10987,21 +11827,21 @@ function lintStructure(world, reg) {
       if (key !== "knowledge" && key !== "secrets")
         warn(`narrator.${key}`, "narrator_key", `The narrator's knowledge has no part "${key}", only knowledge and secrets; it is ignored.`);
   }
-  for (const { path, effects } of effectLists(world)) {
+  for (const { path: path2, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       if (spec.type !== "spawn")
         return;
       const tier = spec.args.tier;
       if (typeof tier === "string" && !tierOf(world, tier))
-        warn(`${path}.${i}`, "unknown_tier", `A spawn in ${path} names tier "${tier}", which isn't one of the world's tiers; it gets the spawn tier instead.`);
+        warn(`${path2}.${i}`, "unknown_tier", `A spawn in ${path2} names tier "${tier}", which isn't one of the world's tiers; it gets the spawn tier instead.`);
       const raw = spec.args.class;
       if (raw === undefined || isRecord(raw) && Object.values(raw).some((v) => typeof v === "string" && v.startsWith("=")))
         return;
       const classes = classOf(raw);
-      const who = `A spawn in ${path}`;
+      const who = `A spawn in ${path2}`;
       const problems = classes ? classProblems(world, classes, who) : [{ code: "unknown_facet", message: `${who} gives a class that isn't a facet \u2192 values map.` }];
       for (const p of problems)
-        warn(`${path}.${i}`, p.code, `${p.message} The spawn is refused.`);
+        warn(`${path2}.${i}`, p.code, `${p.message} The spawn is refused.`);
     });
   }
   for (const [id, def] of Object.entries(isRecord(world.lifeStates) ? world.lifeStates : {})) {
@@ -11025,11 +11865,11 @@ function lintStructure(world, reg) {
   const downLife = world.ruleset?.combat?.down?.life;
   if (downLife !== undefined && (typeof downLife !== "string" || !isLifeState(world, downLife)))
     err("ruleset.combat.down.life", "unknown_life", `Combat's down rule names life state "${String(downLife)}", which isn't one of the world's.`);
-  for (const { path, effects } of effectLists(world)) {
+  for (const { path: path2, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       const to = spec.args.to;
       if (spec.type === "life" && typeof to === "string" && !to.startsWith("=") && !isLifeState(world, to))
-        warn(`${path}.${i}`, "unknown_life", `A life change in ${path} names life state "${to}", which isn't one of the world's; it is refused.`);
+        warn(`${path2}.${i}`, "unknown_life", `A life change in ${path2} names life state "${to}", which isn't one of the world's; it is refused.`);
     });
   }
   for (const [id, t] of Object.entries(world.tracks)) {
@@ -11104,7 +11944,7 @@ function lintStructure(world, reg) {
       if (!own(world.entities, id))
         err(`${s.path}.knownBy`, "refs", `${s.what}'s Known by names "${id}", which isn't in the world.`);
   }
-  for (const { path, effects } of effectLists(world)) {
+  for (const { path: path2, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       if (spec.type !== "post" || !Array.isArray(spec.args.lines))
         return;
@@ -11113,7 +11953,7 @@ function lintStructure(world, reg) {
         return;
       const sum = amounts.reduce((a, b) => a + (b ?? 0), 0);
       if (sum !== 0)
-        err(`${path}.${i}`, "unbalanced_posting", `A posting in ${path} doesn't balance (it sums to ${sum}).`);
+        err(`${path2}.${i}`, "unbalanced_posting", `A posting in ${path2} doesn't balance (it sums to ${sum}).`);
     });
   }
   for (const domain of DOMAINS) {
@@ -11294,23 +12134,23 @@ function runRulesOnTick(reg, w, tick, opts) {
 
 // src/engine/tracks.ts
 var TRANSITION_CAP = 8;
-function currentStage(world, state, track) {
-  const def = own(world.tracks, track);
+function currentStage(world, state, track2) {
+  const def = own(world.tracks, track2);
   if (!def)
     return null;
-  return own(state.tracks, track)?.stage ?? def.start;
+  return own(state.tracks, track2)?.stage ?? def.start;
 }
-function trackEnv(reg, w, track, trackId) {
-  const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
-  const def = own(track.stages, stage);
-  const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: track.owner ? { self: track.owner, owner: track.owner } : {} });
+function trackEnv(reg, w, track2, trackId) {
+  const stage = own(w.state.tracks, trackId)?.stage ?? track2.start;
+  const def = own(track2.stages, stage);
+  const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: track2.owner ? { self: track2.owner, owner: track2.owner } : {} });
   const objectives = def?.objectives ?? [];
   const done = objectives.filter((o) => truthy2(evalExpr(objectiveWhen(o), env0, false))).length;
   const slice2 = readEngineSlice(w.state);
   return scopeEnv({
     reg,
     ctx: w.ctx,
-    bindings: track.owner ? { self: track.owner, owner: track.owner } : {},
+    bindings: track2.owner ? { self: track2.owner, owner: track2.owner } : {},
     vars: {
       track: {
         id: trackId,
@@ -11324,62 +12164,62 @@ function trackEnv(reg, w, track, trackId) {
     }
   });
 }
-function enter(reg, w, trackId, track, from, to, via, seed) {
+function enter(reg, w, trackId, track2, from, to, via, seed) {
   const start = w.events.length;
-  const leaving = own(track.stages, from);
+  const leaving = own(track2.stages, from);
   const key = hashParts(seed, "track", trackId, from, to, w.state.clock);
   const rng = createRng(key);
-  const bindings = track.owner ? { self: track.owner, owner: track.owner } : {};
+  const bindings = track2.owner ? { self: track2.owner, owner: track2.owner } : {};
   if (via !== "fail" && leaving?.rewards && leaving.rewards.length > 0)
     applyEffects(reg, w, leaving.rewards, { bindings, rng: rng.fork("rewards") });
   if (w.apply({ type: "stage", track: trackId, to, from }))
     return null;
-  const entering = own(track.stages, to);
+  const entering = own(track2.stages, to);
   if (entering?.effects && entering.effects.length > 0)
     applyEffects(reg, w, entering.effects, { bindings, rng: rng.fork("effects") });
-  if (entering?.rewards && entering.rewards.length > 0 && isTerminal(track, to))
+  if (entering?.rewards && entering.rewards.length > 0 && isTerminal(track2, to))
     applyEffects(reg, w, entering.rewards, { bindings, rng: rng.fork("end rewards") });
   if (entering?.truth)
     w.apply({ type: ENGINE_EVENTS.revealed, data: { track: trackId, stage: to } });
-  if (track.kind === "quest") {
+  if (track2.kind === "quest") {
     const cue = entering?.cue && !ownersCue(reg, w.world, w.state, w.world.pov, trackId) ? entering.cue : null;
-    const text3 = cue ?? `${track.label}: ${entering?.label ?? to}`;
-    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text: text3, visibility: track.visibility } });
+    const text3 = cue ?? `${track2.label}: ${entering?.label ?? to}`;
+    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text: text3, visibility: track2.visibility } });
   }
   w.unite(start, `stage:${key.slice(0, 10)}`);
   return { track: trackId, from, to, via, events: w.events.slice(start) };
 }
-function gateOpen(reg, w, track, trackId, to) {
-  const gate = own(track.stages, to)?.gate;
+function gateOpen(reg, w, track2, trackId, to) {
+  const gate = own(track2.stages, to)?.gate;
   if (gate === undefined)
     return true;
-  return truthy2(evalExpr(gate, trackEnv(reg, w, track, trackId), false));
+  return truthy2(evalExpr(gate, trackEnv(reg, w, track2, trackId), false));
 }
 function stepTracks(reg, w, seed) {
   const changes = [];
   for (const trackId of Object.keys(w.world.tracks).sort()) {
-    const track = own(w.world.tracks, trackId);
-    if (!track)
+    const track2 = own(w.world.tracks, trackId);
+    if (!track2)
       continue;
     for (let i = 0;i < TRANSITION_CAP; i++) {
-      const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
-      const def = own(track.stages, stage);
+      const stage = own(w.state.tracks, trackId)?.stage ?? track2.start;
+      const def = own(track2.stages, stage);
       if (!def)
         break;
-      const env = trackEnv(reg, w, track, trackId);
+      const env = trackEnv(reg, w, track2, trackId);
       let change2 = null;
-      const solvedHere = track.kind === "puzzle" && def.answer !== undefined && own(readEngineSlice(w.state).solved, trackId) === stage;
+      const solvedHere = track2.kind === "puzzle" && def.answer !== undefined && own(readEngineSlice(w.state).solved, trackId) === stage;
       if (def.fail && truthy2(evalExpr(def.fail.when, env, false)))
-        change2 = enter(reg, w, trackId, track, stage, def.fail.to, "fail", seed);
-      else if (solvedHere && def.next[0] && gateOpen(reg, w, track, trackId, def.next[0].to))
-        change2 = enter(reg, w, trackId, track, stage, def.next[0].to, "answer", seed);
+        change2 = enter(reg, w, trackId, track2, stage, def.fail.to, "fail", seed);
+      else if (solvedHere && def.next[0] && gateOpen(reg, w, track2, trackId, def.next[0].to))
+        change2 = enter(reg, w, trackId, track2, stage, def.next[0].to, "answer", seed);
       else {
         for (const n of def.next) {
           if (!truthy2(evalExpr(n.when, env, false)))
             continue;
-          if (!gateOpen(reg, w, track, trackId, n.to))
+          if (!gateOpen(reg, w, track2, trackId, n.to))
             continue;
-          change2 = enter(reg, w, trackId, track, stage, n.to, "next", seed);
+          change2 = enter(reg, w, trackId, track2, stage, n.to, "next", seed);
           break;
         }
       }
@@ -11395,11 +12235,11 @@ function normalizeAnswer(text3) {
 }
 function checkAnswer(world, state, trackId, answer, decision) {
   const none = { correct: false, via: null, needsDecision: false, event: null };
-  const track = own(world.tracks, trackId);
-  if (!track || track.kind !== "puzzle")
+  const track2 = own(world.tracks, trackId);
+  if (!track2 || track2.kind !== "puzzle")
     return none;
-  const stage = own(state.tracks, trackId)?.stage ?? track.start;
-  const def = own(track.stages, stage);
+  const stage = own(state.tracks, trackId)?.stage ?? track2.start;
+  const def = own(track2.stages, stage);
   if (!def?.answer)
     return none;
   let via = null;
@@ -11427,14 +12267,14 @@ function agendaFor(world, state, agent) {
   }
   return out.sort((a, b) => b.priority - a.priority || a.track.localeCompare(b.track));
 }
-function isTerminal(track, stage) {
-  const def = own(track.stages, stage);
+function isTerminal(track2, stage) {
+  const def = own(track2.stages, stage);
   return !def || def.next.length === 0 && !def.fail;
 }
 
 // src/engine/simulate.ts
-function processSeed(runSeed, process, entity, slotIndex) {
-  return hashParts(runSeed, process, entity, slotIndex);
+function processSeed(runSeed, process, entity2, slotIndex) {
+  return hashParts(runSeed, process, entity2, slotIndex);
 }
 function lod1Agents(world, state) {
   return Object.keys(state.entities).filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id) && acts(world, state, id)).sort();
@@ -11461,7 +12301,7 @@ function interruptPolicy(state, overrides = {}) {
 }
 var ALL_NOTE = Object.fromEntries(INTERRUPT_CLASSES.map((c) => [c, "note"]));
 function rngFactory(runSeed, process, slot) {
-  return (entity) => createRng(processSeed(runSeed, process, entity, slot));
+  return (entity2) => createRng(processSeed(runSeed, process, entity2, slot));
 }
 function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse, run) {
   const applied = [];
@@ -11923,12 +12763,12 @@ function sceneType(world, state) {
   return placeSceneType(world, state);
 }
 function placeSceneType(world, state) {
-  let place = placeOfEntity(state, world.pov) ?? undefined;
-  for (let guard = 0;place && guard < 32; guard++) {
-    const def = own(world.places, place);
+  let place2 = placeOfEntity(state, world.pov) ?? undefined;
+  for (let guard = 0;place2 && guard < 32; guard++) {
+    const def = own(world.places, place2);
     if (def?.sceneType)
       return def.sceneType;
-    place = def?.parent;
+    place2 = def?.parent;
   }
   return DEFAULT_SCENE_TYPE;
 }
@@ -11985,9 +12825,9 @@ function parseTarget(v) {
       return at !== null ? { type: "at", at } : null;
     }
     case "stage": {
-      const track = str3("track");
+      const track2 = str3("track");
       const stage = str3("stage");
-      return track && stage ? { type: "stage", track, stage } : null;
+      return track2 && stage ? { type: "stage", track: track2, stage } : null;
     }
     case "shift":
     case "commitment":
@@ -12393,17 +13233,17 @@ function buildMontage(reg, world, before, after, events2, granularity) {
     const prev = own(before.entities, id);
     if (!prev)
       continue;
-    for (const [field, v] of Object.entries(e.fields)) {
+    for (const [field2, v] of Object.entries(e.fields)) {
       if (typeof v !== "number")
         continue;
-      const def = fieldDef(reg, world, e.kind, field);
-      if (!def?.bands || !canSeeField(reg, world, after, pov, id, field) || !playerKnows(reg, world, after, pov, id))
+      const def = fieldDef(reg, world, e.kind, field2);
+      if (!def?.bands || !canSeeField(reg, world, after, pov, id, field2) || !playerKnows(reg, world, after, pov, id))
         continue;
-      const old = own(prev.fields, field);
+      const old = own(prev.fields, field2);
       const from = bandOf(def.bands, typeof old === "number" ? old : 0)?.label ?? "";
       const to = bandOf(def.bands, v)?.label ?? "";
       if (from !== to)
-        bands.push({ entity: id, field, label: `${possessive(e.name)} ${fieldNoun(def.label, field).noun}`, from, to });
+        bands.push({ entity: id, field: field2, label: `${possessive(e.name)} ${fieldNoun(def.label, field2).noun}`, from, to });
     }
   }
   return {
@@ -12698,8 +13538,8 @@ function softLocks(id, action) {
 }
 function lintWorld(world, registry) {
   const issues = [];
-  const err = (path, code, message) => {
-    issues.push({ severity: "error", path, code, message });
+  const err = (path2, code, message) => {
+    issues.push({ severity: "error", path: path2, code, message });
   };
   if (world.format !== WORLD_FORMAT)
     err("format", "format", `format must be ${WORLD_FORMAT}`);
@@ -12728,8 +13568,8 @@ function lintWorld(world, registry) {
     if (!world.places[r.to])
       err(`routes.${id}.to`, "missing_place", `unknown place "${r.to}"`);
   }
-  const warn = (path, code, message) => {
-    issues.push({ severity: "warning", path, code, message });
+  const warn = (path2, code, message) => {
+    issues.push({ severity: "warning", path: path2, code, message });
   };
   for (const [id, a] of Object.entries(world.actions)) {
     if (!a.check && Object.keys(a.outcomes).some((o) => o !== "default"))
@@ -12743,19 +13583,19 @@ function lintWorld(world, registry) {
   }
   const builtIn = new Set(builtInSectionsOf(world).map((s) => s.id));
   for (const [id, text3] of Object.entries(world.sectionTemplates ?? {})) {
-    const path = `sectionTemplates.${id}`;
+    const path2 = `sectionTemplates.${id}`;
     const label = DEFAULT_SECTIONS[id]?.label ?? id;
     if (typeof text3 !== "string") {
-      err(path, "section_template", `the wording of "${label}" must be text`);
+      err(path2, "section_template", `the wording of "${label}" must be text`);
       continue;
     }
     const problem = hasOwn(DEFAULT_SECTIONS, id) ? sectionTemplateProblem(text3) : `there is no built-in section "${id}"`;
     if (problem !== null)
-      err(path, "section_template", `"${label}": ${problem}`);
+      err(path2, "section_template", `"${label}": ${problem}`);
     if (macroHazards(text3, ["{{lines}}"]).length > 0)
-      err(path, "section_macro", `"${label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
+      err(path2, "section_macro", `"${label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
     if (hasOwn(DEFAULT_SECTIONS, id) && !builtIn.has(id))
-      warn(path, "section_template_unused", `"${label}" is the world's own section, so its own template is used and this wording isn't`);
+      warn(path2, "section_template_unused", `"${label}" is the world's own section, so its own template is used and this wording isn't`);
   }
   const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
   for (const [id, s] of Object.entries(world.sections)) {
@@ -12891,12 +13731,12 @@ function pickReader(registry, world, state, typed, heard) {
   const nameOf3 = (value) => {
     if (typeof value !== "string" || value === "")
       return null;
-    const entity = own(state.entities, value);
-    if (entity)
-      return povMayKnow(registry, world, state, value) ? entity.name : null;
-    const place = own(world.places, value);
-    if (place)
-      return canSeePlace(registry, world, state, world.pov, value) ? place.name : null;
+    const entity2 = own(state.entities, value);
+    if (entity2)
+      return povMayKnow(registry, world, state, value) ? entity2.name : null;
+    const place2 = own(world.places, value);
+    if (place2)
+      return canSeePlace(registry, world, state, world.pov, value) ? place2.name : null;
     return null;
   };
   const asTyped = (value) => {
@@ -12932,9 +13772,9 @@ function pickReader(registry, world, state, typed, heard) {
       return screened(words4);
     if (typeof value !== "string" || value === "")
       return null;
-    const entity = own(state.entities, value);
-    if (entity)
-      return canSeeEntity(registry, world, state, world.pov, value) ? entity.name : null;
+    const entity2 = own(state.entities, value);
+    if (entity2)
+      return canSeeEntity(registry, world, state, world.pov, value) ? entity2.name : null;
     if (value !== outsideOf(def))
       return nameOf3(value) ?? asTyped(value);
     const key = value.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? value.slice(EXTERNAL_ACCOUNT_PREFIX.length).replace(/[_:]+/g, " ").trim() : "";
@@ -13003,7 +13843,7 @@ function toldAction(registry, world, state, res, before) {
   for (const e of res.events)
     if (e.type === "set" && e.entity === res.actor)
       last.set(e.field, e.value);
-  const unchanged = new Set([...last].filter(([field, value]) => JSON.stringify(value) === JSON.stringify(before.fields[field] ?? null)).map(([field]) => field));
+  const unchanged = new Set([...last].filter(([field2, value]) => JSON.stringify(value) === JSON.stringify(before.fields[field2] ?? null)).map(([field2]) => field2));
   const events2 = res.events.filter((e) => !(e.type === "set" && e.entity === res.actor && unchanged.has(e.field)));
   return { what: parts.length > 0 ? `${label} (${parts.join(", ")})` : label, changes: playerLines(registry, world, state, world.pov, events2, TOLD_CHANGES), minutes: res.duration };
 }
@@ -13752,8 +14592,8 @@ var calendarPack = {
         if (level === 0)
           return [];
         const cal = calendarOf(ctx.world);
-        const place = placeOfEntity(ctx.state, ctx.world.pov);
-        const offset = level >= 3 ? placeOffset(ctx.world, ctx.state.clock, place) : 0;
+        const place2 = placeOfEntity(ctx.state, ctx.world.pov);
+        const offset = level >= 3 ? placeOffset(ctx.world, ctx.state.clock, place2) : 0;
         const part = dayPartAt(cal, ctx.state.clock + offset).label;
         const lines = [level === 1 ? `Time: ${part}.` : `Time: ${formatClock(cal, ctx.state.clock, offset)} (${part.toLowerCase()}).`];
         if (level >= 4) {
@@ -13841,26 +14681,26 @@ function placeChildren(world) {
   }
   return out;
 }
-function placePath(world, place) {
+function placePath(world, place2) {
   const out = [];
-  for (let cur = place ?? undefined, guard = 0;cur && own(world.places, cur) && guard < 64 && !out.includes(cur); guard++) {
+  for (let cur = place2 ?? undefined, guard = 0;cur && own(world.places, cur) && guard < 64 && !out.includes(cur); guard++) {
     out.unshift(cur);
     cur = own(world.places, cur)?.parent;
   }
   return out;
 }
-function hasGrid(world, place) {
-  const grid = own(world.places, place)?.grid;
+function hasGrid(world, place2) {
+  const grid = own(world.places, place2)?.grid;
   return grid !== undefined && own(world.grids, grid) !== undefined;
 }
-function nodeMapOf(world, place) {
-  return Object.values(isRecord(world.maps) ? world.maps : {}).find((m) => isRecord(m) && m.scope === place && m.layout === undefined);
+function nodeMapOf(world, place2) {
+  return Object.values(isRecord(world.maps) ? world.maps : {}).find((m) => isRecord(m) && m.scope === place2 && m.layout === undefined);
 }
 function defaultScope(world, here, children, filter) {
-  const path = placePath(world, here);
-  const inner = path.at(-1);
-  for (let i = path.length - 1;i >= 0; i--) {
-    const id = path[i];
+  const path2 = placePath(world, here);
+  const inner = path2.at(-1);
+  for (let i = path2.length - 1;i >= 0; i--) {
+    const id = path2[i];
     if (id === undefined)
       continue;
     if (id === inner && !(children.get(id) ?? []).some(filter.drawn))
@@ -13868,14 +14708,14 @@ function defaultScope(world, here, children, filter) {
     if (hasGrid(world, id) || nodeMapOf(world, id))
       return id;
   }
-  return path.length >= 2 ? path[path.length - 2] ?? null : null;
+  return path2.length >= 2 ? path2[path2.length - 2] ?? null : null;
 }
-function childOf(world, scope, place) {
-  const path = placePath(world, place);
+function childOf(world, scope, place2) {
+  const path2 = placePath(world, place2);
   if (scope === null)
-    return path[0] ?? null;
-  const at = path.indexOf(scope);
-  return at >= 0 ? path[at + 1] ?? null : null;
+    return path2[0] ?? null;
+  const at = path2.indexOf(scope);
+  return at >= 0 ? path2[at + 1] ?? null : null;
 }
 function ring(ids, frame) {
   const step = Math.min(frame.width, frame.height) / 100;
@@ -13985,15 +14825,15 @@ var HOLD_DEPTH2 = 32;
 function spotData(v) {
   return isRecord(v) && typeof v.scope === "string" && Number.isInteger(v.x) && Number.isInteger(v.y) ? { scope: v.scope, x: Number(v.x), y: Number(v.y) } : null;
 }
-function spotOf(world, state, entity) {
-  let id = entity;
+function spotOf(world, state, entity2) {
+  let id = entity2;
   for (let depth = 0;depth < HOLD_DEPTH2; depth++) {
     const e = own(state.entities, id);
     if (!e)
       return null;
-    const place = e.fields.place;
-    if (typeof place === "string" && place !== "") {
-      const stand = standingGrid(world, place);
+    const place2 = e.fields.place;
+    if (typeof place2 === "string" && place2 !== "") {
+      const stand = standingGrid(world, place2);
       const { x, y } = e.fields;
       return stand && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null ? { scope: stand.scope, x, y } : null;
     }
@@ -14004,12 +14844,12 @@ function spotOf(world, state, entity) {
   }
   return null;
 }
-function posEvent(entity, at, from) {
-  const data = { entity, at: at ? { ...at } : null, from: from ? { ...from } : null };
+function posEvent(entity2, at, from) {
+  const data = { entity: entity2, at: at ? { ...at } : null, from: from ? { ...from } : null };
   return { type: POS_EVENT, data };
 }
-function setCell(entity, fields, cell) {
-  return [...fields.x !== cell.x ? [{ type: "set", entity, field: "x", value: cell.x }] : [], ...fields.y !== cell.y ? [{ type: "set", entity, field: "y", value: cell.y }] : []];
+function setCell(entity2, fields, cell) {
+  return [...fields.x !== cell.x ? [{ type: "set", entity: entity2, field: "x", value: cell.x }] : [], ...fields.y !== cell.y ? [{ type: "set", entity: entity2, field: "y", value: cell.y }] : []];
 }
 function hiddenCells(ctx, grid) {
   const { world, state } = ctx;
@@ -14026,64 +14866,64 @@ function hiddenCells(ctx, grid) {
 function povGround(ctx, grid, hidden = hiddenCells(ctx, grid)) {
   return hidden.size > 0 ? { ...grid, blocked: [...grid.blocked, ...hidden] } : grid;
 }
-function arrivalEvents(ctx, entity, to) {
-  const e = own(ctx.state.entities, entity);
-  if (!e || entity !== ctx.world.pov || ctx.levelOf(entity, "space") < 3)
+function arrivalEvents(ctx, entity2, to) {
+  const e = own(ctx.state.entities, entity2);
+  if (!e || entity2 !== ctx.world.pov || ctx.levelOf(entity2, "space") < 3)
     return [];
   if (!mapSettingsOf(ctx.world).grid.movement) {
     const cell = own(ctx.world.places, to)?.cell;
-    return cell ? setCell(entity, e.fields, cell) : [];
+    return cell ? setCell(entity2, e.fields, cell) : [];
   }
-  const from = spotOf(ctx.world, ctx.state, entity);
+  const from = spotOf(ctx.world, ctx.state, entity2);
   const at = arrivalCell(ctx.world, to);
   if (at)
-    return [posEvent(entity, { scope: at.scope, x: at.cell.x, y: at.cell.y }, from)];
-  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(entity, null, from)] : [];
+    return [posEvent(entity2, { scope: at.scope, x: at.cell.x, y: at.cell.y }, from)];
+  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(entity2, null, from)] : [];
 }
-function stepEvents(ctx, entity, to) {
-  const e = own(ctx.state.entities, entity);
+function stepEvents(ctx, entity2, to) {
+  const e = own(ctx.state.entities, entity2);
   if (!e)
-    return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
-  if (isGone(ctx.state, entity))
-    return { code: "gone", reason: `${labelOf(ctx, entity)} has been removed` };
-  const here = placeOfEntity(ctx.state, entity);
+    return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity2)}` };
+  if (isGone(ctx.state, entity2))
+    return { code: "gone", reason: `${labelOf(ctx, entity2)} has been removed` };
+  const here = placeOfEntity(ctx.state, entity2);
   const stand = standingGrid(ctx.world, here);
   const index = stand ? cellIndex(stand.grid, to) : null;
   if (!stand || here === null)
-    return { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't on a map's grid here` };
+    return { code: "off_grid", reason: `${labelOf(ctx, entity2)} isn't on a map's grid here` };
   if (index === null)
     return { code: "off_grid", reason: "That spot isn't on this map." };
-  const hidden = entity === ctx.world.pov ? hiddenCells(ctx, stand.grid) : new Set;
+  const hidden = entity2 === ctx.world.pov ? hiddenCells(ctx, stand.grid) : new Set;
   if (hidden.has(index))
     return { code: "no_way", reason: "There's no way there from here." };
   if (!mapSettingsOf(ctx.world).grid.movement)
-    return setCell(entity, e.fields, to);
-  const from = spotOf(ctx.world, ctx.state, entity);
+    return setCell(entity2, e.fields, to);
+  const from = spotOf(ctx.world, ctx.state, entity2);
   if (!from || from.scope !== stand.scope)
-    return { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't standing on this map` };
+    return { code: "off_grid", reason: `${labelOf(ctx, entity2)} isn't standing on this map` };
   if (!findPath(povGround(ctx, stand.grid, hidden), from, to))
     return { code: "no_way", reason: "There's no way there from here." };
   const room = areaPlaceAt(ctx.world, stand.scope, stand.grid, index) ?? stand.scope;
   if (room === here)
-    return [posEvent(entity, { scope: stand.scope, x: to.x, y: to.y }, from)];
-  const out = e.relations.filter((r) => r.type === "in").map((r) => ({ type: "unlink", rel: "in", from: entity, to: r.to }));
-  out.push({ type: "set", entity, field: "place", value: room });
+    return [posEvent(entity2, { scope: stand.scope, x: to.x, y: to.y }, from)];
+  const out = e.relations.filter((r) => r.type === "in").map((r) => ({ type: "unlink", rel: "in", from: entity2, to: r.to }));
+  out.push({ type: "set", entity: entity2, field: "place", value: room });
   const inner = room !== stand.scope ? gridOf(ctx.world, room) : undefined;
   const entry = inner ? entranceCell(inner) : null;
   if (inner)
-    out.push(posEvent(entity, entry ? { scope: room, ...entry } : null, from));
+    out.push(posEvent(entity2, entry ? { scope: room, ...entry } : null, from));
   else
-    out.push(posEvent(entity, { scope: stand.scope, x: to.x, y: to.y }, from));
+    out.push(posEvent(entity2, { scope: stand.scope, x: to.x, y: to.y }, from));
   return out;
 }
-function layEvents(ctx, thing, place, by) {
-  const e = own(ctx.state.entities, thing);
+function layEvents(ctx, thing2, place2, by) {
+  const e = own(ctx.state.entities, thing2);
   if (!e)
     return [];
-  const spot = by !== null && place !== null && mapSettingsOf(ctx.world).grid.movement ? spotOf(ctx.world, ctx.state, by) : null;
-  if (spot && place !== null && standingGrid(ctx.world, place)?.scope === spot.scope)
-    return [posEvent(thing, spot, null)];
-  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(thing, null, null)] : [];
+  const spot = by !== null && place2 !== null && mapSettingsOf(ctx.world).grid.movement ? spotOf(ctx.world, ctx.state, by) : null;
+  if (spot && place2 !== null && standingGrid(ctx.world, place2)?.scope === spot.scope)
+    return [posEvent(thing2, spot, null)];
+  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(thing2, null, null)] : [];
 }
 function reach(ctx, a, b) {
   const { world, state } = ctx;
@@ -14110,11 +14950,11 @@ function entered(ctx, on, e) {
   if (e.type !== POS_EVENT || !("data" in e))
     return false;
   const at = spotData(e.data.at);
-  const entity = strOf(e.data.entity);
-  if (!at || on.in !== undefined && on.in !== at.scope || isGone(ctx.state, entity))
+  const entity2 = strOf(e.data.entity);
+  if (!at || on.in !== undefined && on.in !== at.scope || isGone(ctx.state, entity2))
     return false;
   const who = on.who === undefined ? null : knownBySelector(on.who);
-  if (on.who === undefined ? entity !== ctx.world.pov : who === null || !selectorMatches(ctx.registry, ctx.world, ctx.state, who, entity))
+  if (on.who === undefined ? entity2 !== ctx.world.pov : who === null || !selectorMatches(ctx.registry, ctx.world, ctx.state, who, entity2))
     return false;
   const grid = gridOf(ctx.world, at.scope);
   if (!grid)
@@ -14180,9 +15020,9 @@ function buildEdges(world, mode, closed) {
     }
   }
   const connector = mode === "walk" ? { minutes: SIBLING_WALK_MINUTES, distanceKm: 0.3 } : { minutes: 1, distanceKm: 0 };
-  const ancestors = (place) => {
+  const ancestors = (place2) => {
     const out2 = new Set;
-    let cur = own(world.places, place)?.parent;
+    let cur = own(world.places, place2)?.parent;
     for (let guard = 0;cur && guard < 64; guard++) {
       out2.add(cur);
       cur = own(world.places, cur)?.parent;
@@ -14300,9 +15140,9 @@ class Frontier {
   static before(a, b) {
     return a.minutes < b.minutes || a.minutes === b.minutes && a.place < b.place;
   }
-  push(minutes, place) {
+  push(minutes, place2) {
     const heap = this.heap;
-    heap.push({ minutes, place });
+    heap.push({ minutes, place: place2 });
     for (let i = heap.length - 1;i > 0; ) {
       const up = i - 1 >> 1;
       if (!this.swapIfBefore(i, up))
@@ -14397,9 +15237,9 @@ function reverseEdges(world, closed) {
     return out;
   });
 }
-function aroundOf(world, place) {
+function aroundOf(world, place2) {
   const out = [];
-  let cur = own(world.places, place)?.parent;
+  let cur = own(world.places, place2)?.parent;
   for (let guard = 0;cur && guard < 64; guard++) {
     out.push(cur);
     cur = own(world.places, cur)?.parent;
@@ -14490,8 +15330,8 @@ function itemsOn(ctx, scope, grid, cells, sight, here) {
   const out = [];
   for (const id of Object.keys(state.entities).sort()) {
     const e = own(state.entities, id);
-    const place = e?.fields.place;
-    if (!e || id === world.pov || typeof place !== "string" || standingGrid(world, place)?.scope !== scope)
+    const place2 = e?.fields.place;
+    if (!e || id === world.pov || typeof place2 !== "string" || standingGrid(world, place2)?.scope !== scope)
       continue;
     const { x, y } = e.fields;
     if (typeof x !== "number" || typeof y !== "number")
@@ -14499,7 +15339,7 @@ function itemsOn(ctx, scope, grid, cells, sight, here) {
     const index = cellIndex(grid, { x, y });
     if (index === null || cells.blank.has(index) || cells.void.has(index) || kindIs(ctx.registry, world, e.kind, "person") || isGone(state, id) || !canSeeEntity(ctx.registry, world, state, world.pov, id))
       continue;
-    if (sight !== null ? !sight.has(index) : place !== here)
+    if (sight !== null ? !sight.has(index) : place2 !== here)
       continue;
     out.push({ id, name: e.name, x, y });
   }
@@ -14544,11 +15384,11 @@ function buildMapView(ctx, chosen = null) {
   const settings = mapSettingsOf(world);
   const display2 = chosen ?? settings.display;
   const here = placeOfEntity(state, world.pov);
-  const path = placePath(world, here);
-  const inside = new Set(path);
+  const path2 = placePath(world, here);
+  const inside = new Set(path2);
   const known = (id) => canSeePlace(ctx.registry, world, state, world.pov, id);
   const standIns = new Map;
-  for (const id of path)
+  for (const id of path2)
     if (!known(id))
       standIns.set(id, standIn(world, standIns.size + 1));
   const closed = closedRoutes(ctx);
@@ -14607,7 +15447,7 @@ function buildMapView(ctx, chosen = null) {
           travel.push(o);
     }
   }
-  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes, travel };
+  return { level, here: here === null ? null : filter.shown(here), path: path2.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes, travel };
 }
 
 // src/engine/access.ts
@@ -14651,9 +15491,9 @@ function fieldsInOrder(ctx, kind) {
     const pack = ctx.registry.kinds.get(id);
     if (!mine && !pack)
       break;
-    for (const [field, def] of [...Object.entries(mine?.fields ?? {}), ...Object.entries(pack?.fields ?? {})])
-      if (!out.has(field))
-        out.set(field, def);
+    for (const [field2, def] of [...Object.entries(mine?.fields ?? {}), ...Object.entries(pack?.fields ?? {})])
+      if (!out.has(field2))
+        out.set(field2, def);
     id = kindParent(ctx.registry, ctx.world, id);
   }
   return [...out];
@@ -14680,9 +15520,9 @@ function valueWords(ctx, def, unit, v) {
     if (text3 === "")
       return null;
     if (def.type === "ref") {
-      const place = own(ctx.world.places, text3);
-      if (place)
-        return canSeePlace(ctx.registry, ctx.world, ctx.state, pov, text3) ? place.name : null;
+      const place2 = own(ctx.world.places, text3);
+      if (place2)
+        return canSeePlace(ctx.registry, ctx.world, ctx.state, pov, text3) ? place2.name : null;
       const e = own(ctx.state.entities, text3);
       return e && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, text3) ? e.name : null;
     }
@@ -14706,15 +15546,15 @@ function thingDetails(ctx, id, omit = () => false) {
   if (!e)
     return [];
   const out = [];
-  for (const [field, def] of fieldsInOrder(ctx, e.kind)) {
-    if (UNTOLD[field] || def.derived !== undefined || omit(field, def))
+  for (const [field2, def] of fieldsInOrder(ctx, e.kind)) {
+    if (UNTOLD[field2] || def.derived !== undefined || omit(field2, def))
       continue;
     if (def.domain && ctx.levelOf(pov, def.domain) < (def.level ?? 1))
       continue;
-    if (!canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field))
+    if (!canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field2))
       continue;
-    const { noun, unit } = fieldNoun(def.label, field);
-    const words4 = valueWords(ctx, def, unit, own(e.fields, field));
+    const { noun, unit } = fieldNoun(def.label, field2);
+    const words4 = valueWords(ctx, def, unit, own(e.fields, field2));
     if (words4 !== null)
       out.push(words4 === "" ? noun : `${noun} ${words4}`);
   }
@@ -14777,14 +15617,14 @@ function sceneLines(ctx, scope) {
   if (level === 0)
     return [];
   const here = placeOfEntity(ctx.state, pov);
-  const place = here ? own(ctx.world.places, here) : undefined;
-  if (!here || !place)
+  const place2 = here ? own(ctx.world.places, here) : undefined;
+  if (!here || !place2)
     return [];
   const sees = (who, id) => canSeePlace(ctx.registry, ctx.world, ctx.state, who, id);
-  const parent = place.parent && sees(pov, place.parent) ? placeName(ctx, place.parent) : undefined;
+  const parent = place2.parent && sees(pov, place2.parent) ? placeName(ctx, place2.parent) : undefined;
   const lines = [{ text: `Place: ${povPlace(ctx.registry, ctx.world, ctx.state)?.name ?? HIDDEN_PLACE_NAME}${parent ? ` (in ${parent})` : ""}.`, known: "pov" }];
-  if (place.parent && !parent) {
-    const outer = place.parent;
+  if (place2.parent && !parent) {
+    const outer = place2.parent;
     const line2 = beyond(ctx, scope, `This place is in ${placeName(ctx, outer)}.`, (who) => sees(who, outer));
     if (line2)
       lines.push(line2);
@@ -14829,19 +15669,19 @@ function placeLines(ctx, scope) {
   if (ctx.levelOf(pov, "space") === 0)
     return [];
   const here = placeOfEntity(ctx.state, pov);
-  const place = here ? own(ctx.world.places, here) : undefined;
-  if (!here || !place)
+  const place2 = here ? own(ctx.world.places, here) : undefined;
+  if (!here || !place2)
     return [];
   const seeThing = (who, id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
   const seePlace = (who, id) => canSeePlace(ctx.registry, ctx.world, ctx.state, who, id);
   const lines = [];
-  const description = place.fields.description;
+  const description = place2.fields.description;
   if (typeof description === "string" && description.trim() !== "") {
     const shown2 = povPlace(ctx.registry, ctx.world, ctx.state);
     if (shown2?.id)
       lines.push({ text: `${shown2.name}: ${description.trim()}`, known: "pov" });
     else if (scope === "gm")
-      lines.push({ text: `${place.name}: ${description.trim()}`, known: "gm" });
+      lines.push({ text: `${place2.name}: ${description.trim()}`, known: "gm" });
   }
   const inside = Object.values(ctx.world.places).filter((p) => p.parent === here).map((p) => p.id).sort();
   const insideSeen = inside.filter((id) => seePlace(pov, id));
@@ -14903,7 +15743,7 @@ function placeLoreLines(ctx, scope) {
   const found = [];
   for (const entry of Object.values(world.lore)) {
     const links = Array.isArray(entry.links) ? entry.links : [];
-    const at = chain.findIndex((place) => links.includes(place));
+    const at = chain.findIndex((place2) => links.includes(place2));
     if (at < 0 || typeof entry.content !== "string" || entry.content.trim() === "")
       continue;
     const read = canSeePlace(registry, world, state, world.pov, chain[at] ?? here) && loreReadable(registry, world, state, entry, NARRATOR_READS, false, open);
@@ -14931,17 +15771,17 @@ function reachable(ctx, from, to) {
     return true;
   return MODES.some((m) => routeAt(ctx, from, to, m) !== null);
 }
-function gridWalk(ctx, place, x, y) {
-  const stand = standingGrid(ctx.world, place);
+function gridWalk(ctx, place2, x, y) {
+  const stand = standingGrid(ctx.world, place2);
   const fields = own(ctx.state.entities, ctx.world.pov)?.fields;
   if (!stand || typeof fields?.x !== "number" || typeof fields.y !== "number")
     return null;
-  const path = findPath(povGround(ctx, stand.grid), { x: fields.x, y: fields.y }, { x, y });
-  return path ? { grid: stand.grid, path } : null;
+  const path2 = findPath(povGround(ctx, stand.grid), { x: fields.x, y: fields.y }, { x, y });
+  return path2 ? { grid: stand.grid, path: path2 } : null;
 }
 function gridLint(world) {
   const issues = [];
-  const err = (path, message) => void issues.push({ severity: "error", path, code: "space.grid", message });
+  const err = (path2, message) => void issues.push({ severity: "error", path: path2, code: "space.grid", message });
   const raw = world.mapSettings;
   const grid = isRecord(raw) ? raw.grid : undefined;
   if (raw !== undefined && !isRecord(raw))
@@ -14962,9 +15802,9 @@ function gridLint(world) {
     if (travel !== undefined && !isRecord(travel))
       err("mapSettings.travel", "Travel times are an object: speeds, vehicleSpeeds, startMinutes, parkMinutes and fetchMinutes.");
     else if (isRecord(travel)) {
-      const speed = (path, v) => {
+      const speed = (path2, v) => {
         if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0))
-          err(path, "A speed is km/h, above 0.");
+          err(path2, "A speed is km/h, above 0.");
       };
       for (const [key, v] of Object.entries(isRecord(travel.speeds) ? travel.speeds : {})) {
         if (!MODES.includes(key))
@@ -14992,26 +15832,26 @@ function gridLint(world) {
     const on = rule.on;
     if (!isRecord(on) || !(("zone" in on) || ("cell" in on)))
       continue;
-    const path = `rules.${id}.on`;
+    const path2 = `rules.${id}.on`;
     const scope = on.in;
     const onGrid = typeof scope === "string" ? gridOf(world, scope) : undefined;
     if (scope !== undefined && !onGrid)
-      err(path, `"${String(scope)}" isn't a place with a grid.`);
+      err(path2, `"${String(scope)}" isn't a place with a grid.`);
     if ("cell" in on) {
       const cell = on.cell;
       if (scope === undefined)
-        err(path, "A cell trigger names the place whose grid the cell is on, as `in`.");
+        err(path2, "A cell trigger names the place whose grid the cell is on, as `in`.");
       if (!Array.isArray(cell) || cell.length !== 2 || !cell.every((n) => Number.isInteger(n)))
-        err(path, "A cell is [x, y], two whole numbers.");
+        err(path2, "A cell is [x, y], two whole numbers.");
       else if (onGrid && cellIndex(onGrid, { x: Number(cell[0]), y: Number(cell[1]) }) === null)
-        err(path, `[${cell.join(", ")}] isn't on ${String(scope)}'s grid.`);
+        err(path2, `[${cell.join(", ")}] isn't on ${String(scope)}'s grid.`);
     } else if (typeof on.zone !== "string" || !(onGrid ? [onGrid] : Object.values(world.grids)).some((g) => hasOwn(g.zones, String(on.zone)))) {
-      err(path, `No grid${onGrid ? ` of ${String(scope)}` : ""} has a zone "${String(on.zone)}".`);
+      err(path2, `No grid${onGrid ? ` of ${String(scope)}` : ""} has a zone "${String(on.zone)}".`);
     }
     if (on.who !== undefined && knownBySelector(on.who) === null)
-      err(`${path}.who`, "`who` is a selector the engine can read whole, with at least one constraint (kind, tier, class, memberOf, tag or ids).");
+      err(`${path2}.who`, "`who` is a selector the engine can read whole, with at least one constraint (kind, tier, class, memberOf, tag or ids).");
     if (!movement)
-      issues.push({ severity: "warning", path, code: "space.grid", message: "With the grid system off nobody steps across a grid, so this rule never fires." });
+      issues.push({ severity: "warning", path: path2, code: "space.grid", message: "With the grid system off nobody steps across a grid, so this rule never fires." });
   }
   return issues;
 }
@@ -15060,21 +15900,21 @@ var PERSON = {
 function asMode(v) {
   return typeof v === "string" && MODES.includes(v) ? v : "walk";
 }
-var travel = (ctx, entity, to, mode) => {
-  const e = own(ctx.state.entities, entity);
+var travel = (ctx, entity2, to, mode) => {
+  const e = own(ctx.state.entities, entity2);
   if (!e)
-    return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
+    return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity2)}` };
   if (!own(ctx.world.places, to))
     return { code: "missing_place", reason: `no place ${labelOf(ctx, to)}` };
-  const from = placeOfEntity(ctx.state, entity);
+  const from = placeOfEntity(ctx.state, entity2);
   const plan2 = from ? routeAt(ctx, from, to, mode) : nominalRoute(ctx, to, to, mode);
   if (!plan2)
     return { code: "no_route", reason: `no ${mode} route to ${labelOf(ctx, to)}` };
   const events2 = [];
   for (const r of e.relations)
     if (r.type === "in")
-      events2.push({ type: "unlink", rel: "in", from: entity, to: r.to });
-  events2.push({ type: "set", entity, field: "place", value: to });
+      events2.push({ type: "unlink", rel: "in", from: entity2, to: r.to });
+  events2.push({ type: "set", entity: entity2, field: "place", value: to });
   return { plan: plan2, events: events2 };
 };
 var spacePack = {
@@ -15098,28 +15938,28 @@ var spacePack = {
     r.event({
       type: POS_EVENT,
       validate: (e, ctx) => {
-        const entity = strOf(e.data.entity);
-        if (!own(ctx.state.entities, entity))
-          return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
+        const entity2 = strOf(e.data.entity);
+        if (!own(ctx.state.entities, entity2))
+          return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity2)}` };
         if (e.data.at === null)
           return null;
         const at = spotData(e.data.at);
-        const stand = standingGrid(ctx.world, placeOfEntity(ctx.state, entity));
-        return at && stand && stand.scope === at.scope && cellIndex(stand.grid, at) !== null ? null : { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't on that map` };
+        const stand = standingGrid(ctx.world, placeOfEntity(ctx.state, entity2));
+        return at && stand && stand.scope === at.scope && cellIndex(stand.grid, at) !== null ? null : { code: "off_grid", reason: `${labelOf(ctx, entity2)} isn't on that map` };
       },
       apply: (e, state, ctx) => {
-        const entity = strOf(e.data.entity);
-        const thing = own(state.entities, entity);
-        if (!thing)
+        const entity2 = strOf(e.data.entity);
+        const thing2 = own(state.entities, entity2);
+        if (!thing2)
           return;
         const at = spotData(e.data.at);
         if (at)
-          Object.assign(thing.fields, { x: at.x, y: at.y });
+          Object.assign(thing2.fields, { x: at.x, y: at.y });
         else {
-          delete thing.fields.x;
-          delete thing.fields.y;
+          delete thing2.fields.x;
+          delete thing2.fields.y;
         }
-        if (entity === ctx.world.pov)
+        if (entity2 === ctx.world.pov)
           observeCells(state, ctx.world);
       },
       touches: (e) => [{ entity: strOf(e.data.entity), field: "x" }, { entity: strOf(e.data.entity), field: "y" }],
@@ -15154,16 +15994,16 @@ var spacePack = {
     r.formula("route_exists", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode)) !== null);
     r.formula("go_minutes", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) ?? 0);
     r.formula("can_go", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) !== null);
-    r.formula("within", (ctx, place, ancestor) => placeWithin(ctx.world, String(place ?? ""), String(ancestor ?? "")));
-    r.formula("grid_minutes", (ctx, place, x, y) => {
-      const path = gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0));
-      return path ? gridMinutes(path.grid, path.path) : 0;
+    r.formula("within", (ctx, place2, ancestor) => placeWithin(ctx.world, String(place2 ?? ""), String(ancestor ?? "")));
+    r.formula("grid_minutes", (ctx, place2, x, y) => {
+      const path2 = gridWalk(ctx, String(place2 ?? ""), Number(x ?? 0), Number(y ?? 0));
+      return path2 ? gridMinutes(path2.grid, path2.path) : 0;
     });
-    r.formula("grid_reachable", (ctx, place, x, y) => gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0)) !== null);
+    r.formula("grid_reachable", (ctx, place2, x, y) => gridWalk(ctx, String(place2 ?? ""), Number(x ?? 0), Number(y ?? 0)) !== null);
     r.formula("reach", (ctx, a, b) => reach(ctx, String(a ?? ""), String(b ?? "")));
-    r.formula("on_grid", (ctx, thing) => {
-      const e = own(ctx.state.entities, String(thing ?? ""));
-      return mapSettingsOf(ctx.world).grid.movement && typeof e?.fields.place === "string" && spotOf(ctx.world, ctx.state, String(thing ?? "")) !== null;
+    r.formula("on_grid", (ctx, thing2) => {
+      const e = own(ctx.state.entities, String(thing2 ?? ""));
+      return mapSettingsOf(ctx.world).grid.movement && typeof e?.fields.place === "string" && spotOf(ctx.world, ctx.state, String(thing2 ?? "")) !== null;
     });
     r.action({
       id: "go",
@@ -15202,20 +16042,20 @@ var spacePack = {
       type: "location",
       boundField: "ref",
       validate(p, ctx) {
-        const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
-        const place = placeOf2(p, ctx);
-        if (!own(ctx.state.entities, entity))
-          return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
-        if (!own(ctx.world.places, place))
-          return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
-        const route = relocate(ctx, entity, place, { told: true });
+        const entity2 = typeof p.entity === "string" ? p.entity : ctx.world.pov;
+        const place2 = placeOf2(p, ctx);
+        if (!own(ctx.state.entities, entity2))
+          return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity2)}` };
+        if (!own(ctx.world.places, place2))
+          return { code: "missing_place", reason: `no place ${labelOf(ctx, place2)}` };
+        const route = relocate(ctx, entity2, place2, { told: true });
         return "code" in route ? route : null;
       },
       toEffects: (p, ctx) => {
-        const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
+        const entity2 = typeof p.entity === "string" ? p.entity : ctx.world.pov;
         const to = placeOf2(p, ctx);
         const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : null;
-        return [{ type: "move", args: { entity, to, told: true, ...activity !== null ? { activity } : {} } }];
+        return [{ type: "move", args: { entity: entity2, to, told: true, ...activity !== null ? { activity } : {} } }];
       }
     });
     r.lint({
@@ -15565,12 +16405,12 @@ function impliedYield(bond, price, at, frequency) {
 }
 function priceOf(ctx, a, at = ctx.state.clock) {
   if (a.option) {
-    const under = assetOf(ctx, a.option.underlying);
-    if (!under || under.option)
+    const under2 = assetOf(ctx, a.option.underlying);
+    if (!under2 || under2.option)
       return 0;
-    const spot = priceOf(ctx, under, at);
+    const spot = priceOf(ctx, under2, at);
     const years = (a.option.expiry - at) / YEAR_MINUTES;
-    const perUnit = years <= 0 ? intrinsic(a.option.right, spot, a.option.strike) : blackScholes({ right: a.option.right, spot, strike: a.option.strike, years, ratePct: riskFreePct(ctx), volPct: under.vol, yieldPct: under.yieldPct });
+    const perUnit = years <= 0 ? intrinsic(a.option.right, spot, a.option.strike) : blackScholes({ right: a.option.right, spot, strike: a.option.strike, years, ratePct: riskFreePct(ctx), volPct: under2.vol, yieldPct: under2.yieldPct });
     return mark(perUnit * a.option.multiplier);
   }
   if (a.bond) {
@@ -15656,12 +16496,12 @@ function optionId(underlying, right, strike, expiry) {
   return `opt:${underlying}:${right}:${Math.round(strike)}:${expiry}`;
 }
 function optionDef(ctx, underlying, right, strike, expiry) {
-  const under = assetOf(ctx, underlying);
+  const under2 = assetOf(ctx, underlying);
   const at = closeOf(ctx.world, expiry);
-  if (!under || under.option || under.class === "property" || under.class === "business_stake" || !(strike > 0) || at === null || at <= ctx.state.clock)
+  if (!under2 || under2.option || under2.class === "property" || under2.class === "business_stake" || !(strike > 0) || at === null || at <= ctx.state.clock)
     return null;
   const money = formatMoney(Math.round(strike), ctx.world.currency);
-  return { label: `${under.symbol ?? under.label} ${expiry} ${money} ${right}`, class: "option", underlying, strike: Math.round(strike), expiry, right, multiplier: 100, settlement: "physical" };
+  return { label: `${under2.symbol ?? under2.label} ${expiry} ${money} ${right}`, class: "option", underlying, strike: Math.round(strike), expiry, right, multiplier: 100, settlement: "physical" };
 }
 function str3(e, k) {
   return typeof e.data[k] === "string" ? e.data[k] : "";
@@ -15760,28 +16600,28 @@ function registerMarkets(r) {
       const issues = [];
       const books = { world, state: { clock: 0, entities: {}, packs: {} }, tables: { get: (id) => own(world.tables, id) } };
       for (const [id, raw] of Object.entries(configAssets(world))) {
-        const path = `packs.economy.config.assets.${id}`;
+        const path2 = `packs.economy.config.assets.${id}`;
         const def = readAssetDef(raw);
         if (!def) {
-          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${id} needs a class (${ASSET_CLASSES.join(", ")}).`, path });
+          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${id} needs a class (${ASSET_CLASSES.join(", ")}).`, path: path2 });
           continue;
         }
         if (def.class === "option") {
           if (!def.underlying || !own(configAssets(world), def.underlying))
-            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} names no underlying asset the world lists.`, path: `${path}.underlying` });
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} names no underlying asset the world lists.`, path: `${path2}.underlying` });
           if (!(typeof def.strike === "number" && def.strike > 0))
-            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs a strike above zero.`, path: `${path}.strike` });
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs a strike above zero.`, path: `${path2}.strike` });
           if (clockOfDate(world, def.expiry) === null)
-            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs an expiry date (YYYY-MM-DD).`, path: `${path}.expiry` });
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs an expiry date (YYYY-MM-DD).`, path: `${path2}.expiry` });
           if (def.right !== "call" && def.right !== "put")
-            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} is a call or a put.`, path: `${path}.right` });
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} is a call or a put.`, path: `${path2}.right` });
         }
         if (def.class === "bond" && def.face !== undefined && clockOfDate(world, def.maturity) === null)
-          issues.push({ severity: "error", code: "economy.assets", message: `Bond ${def.label || id} has a face value but no maturity date (YYYY-MM-DD).`, path: `${path}.maturity` });
+          issues.push({ severity: "error", code: "economy.assets", message: `Bond ${def.label || id} has a face value but no maturity date (YYYY-MM-DD).`, path: `${path2}.maturity` });
         if (def.model !== undefined && !isRecord(own(investingRows(books), def.model)))
-          issues.push({ severity: "warning", code: "economy.assets", message: `Asset ${def.label || id} follows ${def.model}, which the finance table doesn't list; it takes its class's model.`, path: `${path}.model` });
+          issues.push({ severity: "warning", code: "economy.assets", message: `Asset ${def.label || id} follows ${def.model}, which the finance table doesn't list; it takes its class's model.`, path: `${path2}.model` });
         if (def.price !== undefined && !(def.price > 0))
-          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${def.label || id} needs a price above zero.`, path: `${path}.price` });
+          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${def.label || id} needs a price above zero.`, path: `${path2}.price` });
       }
       return issues;
     }
@@ -15843,42 +16683,42 @@ function incomeIn(state, party, year) {
   const y = objOf(own(objOf(own(objOf(holdingsSlice(state).income), party)), String(year)));
   return { dividend: numOf(y.dividend), interest: numOf(y.interest), profit: numOf(y.profit) };
 }
-function basisRecord(state, entity, party) {
-  const r = own(objOf(own(objOf(holdingsSlice(state).basis), entity)), party);
+function basisRecord(state, entity2, party) {
+  const r = own(objOf(own(objOf(holdingsSlice(state).basis), entity2)), party);
   if (r === undefined)
     return null;
   const o = objOf(r);
   return { basis: numOf(o.basis), since: typeof o.since === "number" ? o.since : null };
 }
-function setBasisRecord(state, entity, party, value) {
-  if (!safeKey(entity) || !safeKey(party))
+function setBasisRecord(state, entity2, party, value) {
+  if (!safeKey(entity2) || !safeKey(party))
     return;
   const all2 = holdingsRecord(state, "basis");
-  const mine = objOf(own(all2, entity));
+  const mine = objOf(own(all2, entity2));
   if (value === null)
     delete mine[party];
   else
     mine[party] = { basis: value.basis, ...value.since !== null ? { since: value.since } : {} };
-  all2[entity] = mine;
+  all2[entity2] = mine;
 }
 
 // src/packs/economy/core/gains.ts
 var TAX_PROVIDER = "investment_tax";
-function basisOf(api, ctx, entity, party) {
-  const recorded = basisRecord(ctx.state, entity, party);
+function basisOf(api, ctx, entity2, party) {
+  const recorded = basisRecord(ctx.state, entity2, party);
   if (recorded)
     return recorded;
-  const e = own(ctx.state.entities, entity);
+  const e = own(ctx.state.entities, entity2);
   if (e?.kind !== "property")
     return { basis: 0, since: null };
-  const authored = own(ctx.world.entities, entity)?.fields.value;
+  const authored = own(ctx.world.entities, entity2)?.fields.value;
   const whole4 = numOf(e.fields.purchase_price, typeof authored === "number" ? authored : numOf(e.fields.value));
-  return { basis: Math.round(whole4 * api.shareOf(ctx.state, entity, party) / 100), since: clockOfDate(ctx.world, e.fields.purchased) };
+  return { basis: Math.round(whole4 * api.shareOf(ctx.state, entity2, party) / 100), since: clockOfDate(ctx.world, e.fields.purchased) };
 }
 function isHome(state, property, party) {
   const home = own(state.entities, party)?.fields.home;
-  const place = own(state.entities, property)?.fields.place;
-  return typeof home === "string" && home !== "" && (home === property || home === place);
+  const place2 = own(state.entities, property)?.fields.place;
+  return typeof home === "string" && home !== "" && (home === property || home === place2);
 }
 function str4(e, k) {
   return typeof e.data[k] === "string" ? e.data[k] : "";
@@ -15896,16 +16736,16 @@ function disposeEvent(api) {
       return typeof proceeds === "number" && Number.isSafeInteger(proceeds) && proceeds >= 0 ? null : reject5("bad_event", "a disposal's proceeds are a whole amount");
     },
     apply: (e, state, ctx) => {
-      const entity = str4(e, "entity");
+      const entity2 = str4(e, "entity");
       const party = str4(e, "party");
       const pct = numOf(e.data.pct);
       const proceeds = numOf(e.data.proceeds);
-      const b = basisOf(api, { world: ctx.world, state }, entity, party);
+      const b = basisOf(api, { world: ctx.world, state }, entity2, party);
       const part = Math.round(b.basis * pct / 100);
       const held2 = b.since === null ? Infinity : state.clock - b.since;
-      const home = own(state.entities, entity)?.kind === "property" && isHome(state, entity, party) && held2 >= 2 * YEAR_MINUTES;
-      recordGain(state, ctx.world, party, { term: held2 >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, `Sold ${labelOf(ctx, entity)}`), qty: pct / 100, ...home ? { home: true } : {} });
-      setBasisRecord(state, entity, party, pct >= 100 ? null : { basis: b.basis - part, since: b.since });
+      const home = own(state.entities, entity2)?.kind === "property" && isHome(state, entity2, party) && held2 >= 2 * YEAR_MINUTES;
+      recordGain(state, ctx.world, party, { term: held2 >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, `Sold ${labelOf(ctx, entity2)}`), qty: pct / 100, ...home ? { home: true } : {} });
+      setBasisRecord(state, entity2, party, pct >= 100 ? null : { basis: b.basis - part, since: b.since });
     },
     describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str4(e, "party"))} sold ${numOf(e.data.pct)}% of their share of ${labelOf(ctx, str4(e, "entity"))}`
   };
@@ -16083,11 +16923,11 @@ function registerGains(r) {
   };
   r.amount(TAX_PROVIDER, provider);
 }
-function disposal(entity, party, pct, proceeds, label) {
-  return { type: "economy.dispose", data: { entity, party, pct: Math.min(100, Math.max(0, pct)), proceeds: Math.max(0, Math.round(proceeds)), label } };
+function disposal(entity2, party, pct, proceeds, label) {
+  return { type: "economy.dispose", data: { entity: entity2, party, pct: Math.min(100, Math.max(0, pct)), proceeds: Math.max(0, Math.round(proceeds)), label } };
 }
-function acquisition(entity, party, cents) {
-  return { type: "economy.acquire", data: { entity, party, cents: Math.max(0, Math.round(cents)) } };
+function acquisition(entity2, party, cents) {
+  return { type: "economy.acquire", data: { entity: entity2, party, cents: Math.max(0, Math.round(cents)) } };
 }
 
 // src/packs/economy/core/holdings.ts
@@ -16432,7 +17272,7 @@ function holdingView(api, ctx, holding, detail, viewer) {
   const price = priceOf(ctx, a);
   const value = Math.round(qty * price);
   const cost = lots.reduce((s, l) => s + l.cost, 0);
-  const under = a.option ? assetOf(ctx, a.option.underlying) : null;
+  const under2 = a.option ? assetOf(ctx, a.option.underlying) : null;
   const route = routeOf(ctx.state, holding);
   return {
     id: holding,
@@ -16444,7 +17284,7 @@ function holdingView(api, ctx, holding, detail, viewer) {
     cost: detail ? cost : 0,
     gain: detail ? value - cost : 0,
     lots: detail ? lots.map((l) => ({ qty: l.qty, cost: l.cost, at: dateText(ctx.world, l.at), gain: Math.round(l.qty * price) - l.cost, term: ctx.state.clock - l.at >= YEAR_MINUTES ? "long" : "short" })) : [],
-    option: a.option && under ? { right: a.option.right, underlying: under.label, strike: a.option.strike, expiry: dateText(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf(ctx, under), a.option.strike) > 0 } : null,
+    option: a.option && under2 ? { right: a.option.right, underlying: under2.label, strike: a.option.strike, expiry: dateText(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf(ctx, under2), a.option.strike) > 0 } : null,
     route: a.pays > 0 || a.bond ? shownRoute(api, ctx, viewer, route.to, route.reinvest) : null
   };
 }
@@ -16748,10 +17588,10 @@ function wordsFor2(books, viewer, words4, unseen) {
   const seen = seenIn(books, viewer, id);
   if (seen === undefined)
     return words4.replace(/_/g, " ").trim();
-  const entity = own(books.state.entities, id);
+  const entity2 = own(books.state.entities, id);
   if (!seen)
-    return entity ? "someone" : unseen;
-  return entity?.name ?? own(books.world.places, id)?.name ?? unseen;
+    return entity2 ? "someone" : unseen;
+  return entity2?.name ?? own(books.world.places, id)?.name ?? unseen;
 }
 function outsideName(books, raw, viewer) {
   const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
@@ -16940,7 +17780,7 @@ function productOf(books, id) {
   const def = own(worldProducts(books.world), productId) ?? {};
   const base = classDefaults(books, cls);
   const f = e.fields;
-  const num5 = (field, fallback) => numOf(f[field], fallback);
+  const num5 = (field2, fallback) => numOf(f[field2], fallback);
   const fees = { ...base.fees, ...objOf(def.fees) };
   const minimum = { ...base.minimum, ...def.minimum ?? {} };
   if (typeof f.min_pct === "number")
@@ -17056,8 +17896,8 @@ function balance(state, account) {
 }
 function statusOf(state, account) {
   const set = strOf(own(objOf(sliceOf(state, "economy").status), account));
-  const field = strOf(own(state.entities, account)?.fields.status);
-  const v = set || field;
+  const field2 = strOf(own(state.entities, account)?.fields.status);
+  const v = set || field2;
   return v === "frozen" || v === "collections" || v === "charged_off" || v === "closed" || v === "paid_off" || v === "matured" ? v : "open";
 }
 function holdsOn(state, account) {
@@ -17109,16 +17949,16 @@ function accountsWorth(books, party, shown2) {
     total += (shown2 ? shown2(id) : balance(books.state, id)) * shareOf(books.state, id, party) / 100;
   return Math.round(total);
 }
-function anchorOf(state, entity) {
-  const band = strOf(own(state.entities, entity)?.fields.wealth, "modest");
-  const a = objOf(own(objOf(sliceOf(state, "economy").anchors), entity));
+function anchorOf(state, entity2) {
+  const band = strOf(own(state.entities, entity2)?.fields.wealth, "modest");
+  const a = objOf(own(objOf(sliceOf(state, "economy").anchors), entity2));
   if (a.band === band && typeof a.typical === "number" && typeof a.base === "number")
     return { band, typical: a.typical, base: a.base };
-  return { band, typical: bandByLabel(band).typical, base: balance(state, external(entity)) };
+  return { band, typical: bandByLabel(band).typical, base: balance(state, external(entity2)) };
 }
-function notional(state, entity) {
-  const a = anchorOf(state, entity);
-  return a.typical + (balance(state, external(entity)) - a.base);
+function notional(state, entity2) {
+  const a = anchorOf(state, entity2);
+  return a.typical + (balance(state, external(entity2)) - a.base);
 }
 function regionRow(ctx, who = ctx.world.pov) {
   const configured = ctx.world.packs.economy?.config.region;
@@ -17128,7 +17968,7 @@ function regionRow(ctx, who = ctx.world.pov) {
 function costOfLiving(ctx, who) {
   return numOf(regionRow(ctx, who).cost_of_living_multiplier, 1);
 }
-function priceModifier(ctx, category, place) {
+function priceModifier(ctx, category, place2) {
   let mult = 1;
   for (const raw of Object.values(objOf(sliceOf(ctx.state, "economy").modifiers))) {
     const m = objOf(raw);
@@ -17139,7 +17979,7 @@ function priceModifier(ctx, category, place) {
       continue;
     const at = strOf(m.place);
     if (at !== "") {
-      let cur = place ?? undefined;
+      let cur = place2 ?? undefined;
       let inside = false;
       for (let guard = 0;cur && guard < 32 && !inside; guard++) {
         inside = cur === at;
@@ -17161,8 +18001,8 @@ function priceOf2(ctx, ref, rng) {
   const raw = bandOfJson(item ? item.price_cents : cat?.price_cents);
   if (!raw)
     return null;
-  const place = ref.place !== undefined ? ref.place : placeOfEntity(ctx.state, ctx.world.pov);
-  const mult = regional * priceModifier(ctx, categoryId, place);
+  const place2 = ref.place !== undefined ? ref.place : placeOfEntity(ctx.state, ctx.world.pov);
+  const mult = regional * priceModifier(ctx, categoryId, place2);
   const band = { min: Math.round(raw.min * mult), typical: Math.round(raw.typical * mult), max: Math.round(raw.max * mult) };
   let unit2 = band.typical;
   if (rng) {
@@ -17336,8 +18176,8 @@ function isCreditAccount(ctx, account) {
 var STAGE_WORDS = { current: "up to date", late: "late", "30": "30 days past due", "60": "60 days past due", "90": "90 days past due", "120": "120 days past due", collections: "in collections", charged_off: "charged off" };
 var STATUS_WORDS = { open: "open", frozen: "frozen", collections: "in collections", charged_off: "charged off", closed: "closed", paid_off: "paid off", matured: "matured" };
 var CREDIT_WORDS = { inquiry: "a credit inquiry", opened: "a new account", on_time: "a payment on time", late: "a late payment", collections: "an account in collections", charged_off: "an account charged off", closed: "a closed account", paid_off: "an account paid off", declined: "a declined application" };
-function whoseFor(ctx, viewer, person) {
-  return viewer === person ? "Your" : `${own(ctx.state.entities, person)?.name ?? person}'s`;
+function whoseFor(ctx, viewer, person3) {
+  return viewer === person3 ? "Your" : `${own(ctx.state.entities, person3)?.name ?? person3}'s`;
 }
 function wordsOf2(words4, id) {
   return own(words4, id) ?? id.replace(/_/g, " ");
@@ -17527,10 +18367,10 @@ var EVENTS2 = [
     validate: (e, ctx) => own(ctx.state.entities, str7(e, "person")) && str7(e, "kind") !== "" ? null : reject6("bad_event", "a credit entry needs a person and a kind"),
     apply: (e, state) => {
       const credit = sliceRecord(state, "economy", "credit");
-      const person = str7(e, "person");
-      const cur = objOf(credit[person]);
+      const person3 = str7(e, "person");
+      const cur = objOf(credit[person3]);
       const { person: _person, ...entry } = e.data;
-      credit[person] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
+      credit[person3] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
     },
     describe: (e, ctx, viewer) => viewer !== undefined && viewer !== str7(e, "person") ? "" : `${whoseFor(ctx, viewer, str7(e, "person"))} credit report now shows ${wordsOf2(CREDIT_WORDS, str7(e, "kind"))}`
   },
@@ -17539,10 +18379,10 @@ var EVENTS2 = [
     validate: (e, ctx) => own(ctx.state.entities, str7(e, "person")) && typeof e.data.score === "number" ? null : reject6("bad_event", "a score needs a person and a number"),
     apply: (e, state) => {
       const credit = sliceRecord(state, "economy", "credit");
-      const person = str7(e, "person");
-      const cur = objOf(credit[person]);
+      const person3 = str7(e, "person");
+      const cur = objOf(credit[person3]);
       const at = typeof e.data.at === "number" ? e.data.at : state.clock;
-      credit[person] = { ...cur, score: numOf(e.data.score), factors: objOf(e.data.factors), at, history: pushCapped(cur.history, { at, score: numOf(e.data.score) }, SCORES_KEPT) };
+      credit[person3] = { ...cur, score: numOf(e.data.score), factors: objOf(e.data.factors), at, history: pushCapped(cur.history, { at, score: numOf(e.data.score) }, SCORES_KEPT) };
     },
     describe: (e, ctx, viewer) => viewer !== undefined && viewer !== str7(e, "person") ? "" : `${whoseFor(ctx, viewer, str7(e, "person"))} credit score is now ${numOf(e.data.score)}`
   },
@@ -18156,9 +18996,9 @@ function ownerLines(api, ctx, id, viewer) {
 function propertyView(api, ctx, id, party, flows) {
   const e = own(ctx.state.entities, id);
   const value = propertyValue(ctx.state, id);
-  const place = strOf(e?.fields.place);
+  const place2 = strOf(e?.fields.place);
   const asking = num5(e?.fields.asking_price);
-  const shownPlace = place === "" || party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place) ? null : own(ctx.world.places, place)?.name ?? labelOf(ctx, place);
+  const shownPlace = place2 === "" || party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place2) ? null : own(ctx.world.places, place2)?.name ?? labelOf(ctx, place2);
   if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) {
     const mayBuy = api.feature(ctx, party, "property") && (asking !== undefined || payers(api, ctx.state, id).owners.length === 0);
     return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null, ...mayBuy ? { mortgageTerms: offeredTerms(ctx) } : {} };
@@ -18327,28 +19167,28 @@ function registerProperty(r) {
       for (const e of Object.values(world.entities)) {
         if (e.kind !== "property")
           continue;
-        const path = `entities.${e.id}.fields`;
-        const place = strOf(e.fields.place);
-        if (place !== "" && !own(world.places, place))
-          issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} is at "${place}", which isn't a place.`, path: `${path}.place` });
+        const path2 = `entities.${e.id}.fields`;
+        const place2 = strOf(e.fields.place);
+        if (place2 !== "" && !own(world.places, place2))
+          issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} is at "${place2}", which isn't a place.`, path: `${path2}.place` });
         if (!(numOf(e.fields.value) > 0))
-          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} has no value, so it adds nothing to anyone's worth and costs nothing to keep.`, path: `${path}.value` });
+          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} has no value, so it adds nothing to anyone's worth and costs nothing to keep.`, path: `${path2}.value` });
         for (const o of ownersIn(e.fields))
           if (!own(world.entities, o.party))
-            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} names owner "${o.party}", who isn't in the world.`, path: `${path}.owners` });
+            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} names owner "${o.party}", who isn't in the world.`, path: `${path2}.owners` });
         const mortgage = strOf(e.fields.mortgage);
         if (mortgage !== "") {
           const loan = own(world.entities, mortgage);
           if (loan?.kind !== "account")
-            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name}'s mortgage "${mortgage}" isn't an account.`, path: `${path}.mortgage` });
+            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name}'s mortgage "${mortgage}" isn't an account.`, path: `${path2}.mortgage` });
           else if (strOf(loan.fields.secured_by) !== e.id)
             issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name}'s mortgage ${loan.name} isn't secured by it (its secured_by names ${strOf(loan.fields.secured_by) || "nothing"}).`, path: `entities.${mortgage}.fields.secured_by` });
         }
         if (e.fields.managed === true && !(numOf(e.fields.market_rent) > 0))
-          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} is let to outside tenants but has no market rent, so it lets nothing.`, path: `${path}.market_rent` });
+          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} is let to outside tenants but has no market rent, so it lets nothing.`, path: `${path2}.market_rent` });
         const rentTo = strOf(e.fields.rent_to);
         if (rentTo !== "" && own(world.entities, rentTo)?.kind !== "account")
-          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name}'s rent goes to "${rentTo}", which isn't an account; it goes to the owners' accounts instead.`, path: `${path}.rent_to` });
+          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name}'s rent goes to "${rentTo}", which isn't an account; it goes to the owners' accounts instead.`, path: `${path2}.rent_to` });
       }
       for (const e of Object.values(world.entities)) {
         if (e.kind !== "flow" || e.fields.flow_kind !== "rent" || typeof e.fields.link !== "string" || e.fields.link === "")
@@ -18375,12 +19215,12 @@ function propertyLines(ctx, scope) {
   const see = (who, id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
   const name = (id) => own(ctx.state.entities, id)?.name ?? id;
   const where = (id, viewer) => {
-    const place = placeOfEntity(ctx.state, id);
-    if (!place)
+    const place2 = placeOfEntity(ctx.state, id);
+    if (!place2)
       return "";
-    if (viewer !== null && !canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place))
+    if (viewer !== null && !canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place2))
       return " somewhere";
-    const at = own(ctx.world.places, place)?.name ?? place;
+    const at = own(ctx.world.places, place2)?.name ?? place2;
     return at === name(id) ? "" : ` at ${at}`;
   };
   const roleOf = (o) => `${ROLE_LABEL[o.role]}${o.worth > 0 ? `, ${Math.round(o.worth)}%` : ""}`;
@@ -18610,43 +19450,43 @@ function bracketTax(brackets, taxable) {
   }
   return Math.round(tax);
 }
-function filingStatusOf(ctx, person) {
-  const raw = strOf(own(ctx.state.entities, person)?.fields.filing_status);
+function filingStatusOf(ctx, person3) {
+  const raw = strOf(own(ctx.state.entities, person3)?.fields.filing_status);
   return FILING_STATUSES.includes(raw) ? raw : "single";
 }
-function stateTaxPct(ctx, person) {
-  const region = regionRow(ctx, person);
-  return { state: numOf(region.state_income_tax_effective_pct), local: own(ctx.state.entities, person)?.fields.local_tax === true ? numOf(region.local_income_tax_pct_typical) : 0 };
+function stateTaxPct(ctx, person3) {
+  const region = regionRow(ctx, person3);
+  return { state: numOf(region.state_income_tax_effective_pct), local: own(ctx.state.entities, person3)?.fields.local_tax === true ? numOf(region.local_income_tax_pct_typical) : 0 };
 }
 var YEARS_KEPT = 2;
-function yearPay(state, person, year) {
-  const y = objOf(own(objOf(own(objOf(sliceOf(state, "economy").ytd), person)), String(year)));
+function yearPay(state, person3, year) {
+  const y = objOf(own(objOf(own(objOf(sliceOf(state, "economy").ytd), person3)), String(year)));
   const contract = {};
   for (const [m, c] of Object.entries(objOf(y.contract)))
     if (typeof c === "number")
       contract[m] = c;
   return { gross: numOf(y.gross), fica: numOf(y.fica), withheld: numOf(y.withheld), pretax: numOf(y.pretax), contract };
 }
-function addPay(state, person, year, month, pay) {
+function addPay(state, person3, year, month, pay) {
   const ytd = sliceRecord(state, "economy", "ytd");
-  const mine = { ...objOf(own(ytd, person)) };
-  const cur = yearPay(state, person, year);
+  const mine = { ...objOf(own(ytd, person3)) };
+  const cur = yearPay(state, person3, year);
   const contract = { ...cur.contract };
   if (pay.contract)
     contract[String(month)] = numOf(contract[String(month)]) + pay.gross;
   mine[String(year)] = { gross: cur.gross + pay.gross, fica: cur.fica + pay.fica, withheld: cur.withheld + pay.withheld, pretax: cur.pretax + pay.pretax, contract };
   for (const old of Object.keys(mine).sort().slice(0, Math.max(0, Object.keys(mine).length - YEARS_KEPT)))
     delete mine[old];
-  ytd[person] = mine;
+  ytd[person3] = mine;
 }
 function taxTotal(t) {
   return t.federal + t.socialSecurity + t.medicare + t.state + t.local;
 }
-function payTaxes(ctx, person, input) {
+function payTaxes(ctx, person3, input) {
   if (input.selfEmployed || input.gross <= 0)
     return { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
   const taxable = Math.max(0, input.gross - input.pretax.income);
-  const { state, local } = stateTaxPct(ctx, person);
+  const { state, local } = stateTaxPct(ctx, person3);
   const stateTax = Math.round(taxable * state / 100);
   const localTax = Math.round(taxable * local / 100);
   if (!input.brackets) {
@@ -18654,7 +19494,7 @@ function payTaxes(ctx, person, input) {
     return { federal: Math.round(taxable * numOf(occ?.withholding_rate_pct) / 100), socialSecurity: 0, medicare: 0, state: stateTax, local: localTax };
   }
   const t = federalTables(ctx);
-  const filing = filingStatusOf(ctx, person);
+  const filing = filingStatusOf(ctx, person3);
   const periods = Math.max(1, input.periods);
   const federal2 = Math.round(bracketTax(t.brackets[filing], Math.max(0, taxable * periods - t.standardDeduction[filing])) / periods);
   if (input.ficaExempt)
@@ -18722,40 +19562,40 @@ function passThroughOwners(ctx, api) {
       const structure = structureOf(ctx.state, id);
       if (structure === "c_corp")
         continue;
-      for (const person of holdersOf(ctx.state, id)) {
-        const share2 = api.shareOf(ctx.state, id, person);
+      for (const person3 of holdersOf(ctx.state, id)) {
+        const share2 = api.shareOf(ctx.state, id, person3);
         if (share2 <= 0)
           continue;
-        const held2 = out.get(person);
+        const held2 = out.get(person3);
         const one = { business: id, share: share2, selfEmployed: selfEmployedProfit(structure) };
         if (held2)
           held2.push(one);
         else
-          out.set(person, [one]);
+          out.set(person3, [one]);
       }
     }
     return out;
   });
 }
-function passThroughShares(ctx, api, person) {
-  return [...passThroughOwners(ctx, api).get(person) ?? []];
+function passThroughShares(ctx, api, person3) {
+  return [...passThroughOwners(ctx, api).get(person3) ?? []];
 }
-function ordinaryIncome(api, ctx, person, year) {
-  const pay = yearPay(ctx.state, person, year);
+function ordinaryIncome(api, ctx, person3, year) {
+  const pay = yearPay(ctx.state, person3, year);
   const span = monthsSpan(ctx, year, [1, 12]);
   let gross = pay.gross;
-  for (const s of passThroughShares(ctx, api, person))
+  for (const s of passThroughShares(ctx, api, person3))
     gross += Math.round(Math.max(0, businessBooks(api, ctx, s.business, span.from, span.to).profit) * s.share / 100);
-  const filing = filingStatusOf(ctx, person);
+  const filing = filingStatusOf(ctx, person3);
   return { gross, taxable: Math.max(0, gross - pay.pretax - federalTables(ctx).standardDeduction[filing]), filing };
 }
-function estimatedTax(api, ctx, person, p) {
-  const pay = yearPay(ctx.state, person, p.year);
-  const contract = api.feature(ctx, person, "withholding") ? p.months.reduce((a, m) => a + numOf(own(pay.contract, String(m))), 0) : 0;
+function estimatedTax(api, ctx, person3, p) {
+  const pay = yearPay(ctx.state, person3, p.year);
+  const contract = api.feature(ctx, person3, "withholding") ? p.months.reduce((a, m) => a + numOf(own(pay.contract, String(m))), 0) : 0;
   const span = monthsSpan(ctx, p.year, p.months);
   let seIncome = contract;
   let other = 0;
-  for (const s of passThroughShares(ctx, api, person)) {
+  for (const s of passThroughShares(ctx, api, person3)) {
     if (!api.feature(ctx, s.business, "business_tax"))
       continue;
     const part = Math.round(Math.max(0, businessBooks(api, ctx, s.business, span.from, span.to).profit) * s.share / 100);
@@ -18767,13 +19607,13 @@ function estimatedTax(api, ctx, person, p) {
   const income = seIncome + other;
   if (income <= 0)
     return { cents: 0, income: 0 };
-  const state = income * stateTaxPct(ctx, person).state / 100;
-  if (!api.feature(ctx, person, "tax_brackets")) {
-    const occ = rowOf(ctx, "economy.occupations", setAsideOccupation(ctx, person));
+  const state = income * stateTaxPct(ctx, person3).state / 100;
+  if (!api.feature(ctx, person3, "tax_brackets")) {
+    const occ = rowOf(ctx, "economy.occupations", setAsideOccupation(ctx, person3));
     return { cents: Math.round(income * numOf(occ?.estimated_tax_set_aside_pct, 15) / 100 + state), income };
   }
   const t = federalTables(ctx);
-  const filing = filingStatusOf(ctx, person);
+  const filing = filingStatusOf(ctx, person3);
   const scale = 12 / p.months.length;
   const se = seIncome * SE_EARNINGS_SHARE * t.selfEmploymentPct / 100;
   const contractYear = Object.values(pay.contract).reduce((a, c) => a + c, 0);
@@ -18783,8 +19623,8 @@ function estimatedTax(api, ctx, person, p) {
   const federal2 = (bracketTax(t.brackets[filing], stacked) - bracketTax(t.brackets[filing], base)) / scale;
   return { cents: Math.round(federal2 + se + state), income };
 }
-function taxRegionOf(ctx, place) {
-  for (let id = place ?? undefined, guard = 0;id && guard < 32; guard++) {
+function taxRegionOf(ctx, place2) {
+  for (let id = place2 ?? undefined, guard = 0;id && guard < 32; guard++) {
     const p = own(ctx.world.places, id);
     if (!p)
       break;
@@ -18796,8 +19636,8 @@ function taxRegionOf(ctx, place) {
   const configured = objOf(ctx.world.packs.economy?.config).region;
   return typeof configured === "string" && configured !== "" ? configured : "us";
 }
-function salesTaxPct(ctx, place) {
-  for (let id = place ?? undefined, guard = 0;id && guard < 32; guard++) {
+function salesTaxPct(ctx, place2) {
+  for (let id = place2 ?? undefined, guard = 0;id && guard < 32; guard++) {
     const p = own(ctx.world.places, id);
     if (!p)
       break;
@@ -18806,13 +19646,13 @@ function salesTaxPct(ctx, place) {
       return pct;
     id = p.parent;
   }
-  return numOf(rowOf(ctx, "economy.regions", taxRegionOf(ctx, place))?.sales_tax_combined_avg_pct);
+  return numOf(rowOf(ctx, "economy.regions", taxRegionOf(ctx, place2))?.sales_tax_combined_avg_pct);
 }
-function taxExempt(ctx, place, category) {
+function taxExempt(ctx, place2, category) {
   const named = (v) => Array.isArray(v) && v.includes(category);
   if (named(objOf(objOf(ctx.world.packs.economy?.config).taxes).exempt))
     return true;
-  for (let id = place ?? undefined, guard = 0;id && guard < 32; guard++) {
+  for (let id = place2 ?? undefined, guard = 0;id && guard < 32; guard++) {
     const p = own(ctx.world.places, id);
     if (!p)
       break;
@@ -18877,14 +19717,14 @@ function contractWork(ctx) {
     return out;
   });
 }
-function contractOccupations(ctx, person) {
-  return [...contractWork(ctx).get(person) ?? []];
+function contractOccupations(ctx, person3) {
+  return [...contractWork(ctx).get(person3) ?? []];
 }
-function setAsideOccupation(ctx, person) {
-  return contractOccupations(ctx, person)[0] ?? strOf(own(ctx.state.entities, person)?.fields.occupation);
+function setAsideOccupation(ctx, person3) {
+  return contractOccupations(ctx, person3)[0] ?? strOf(own(ctx.state.entities, person3)?.fields.occupation);
 }
-function owesEstimates(person, shares, work) {
-  return (shares.get(person)?.length ?? 0) > 0 || (work.get(person)?.length ?? 0) > 0;
+function owesEstimates(person3, shares, work) {
+  return (shares.get(person3)?.length ?? 0) > 0 || (work.get(person3)?.length ?? 0) > 0;
 }
 function registerTaxes(r) {
   const { api, core } = r;
@@ -18932,7 +19772,7 @@ function registerTaxes(r) {
     const lines = payer ? [{ account: payer, amount: -cents }, { account: api.outside("tax:federal"), amount: cents }] : undefined;
     return { cents, ...lines ? { lines } : {}, memo: business ? "Corporate income tax" : "Estimated tax", kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods, ...business ? { business: true } : {} } }] };
   });
-  core.query("economy.ordinary_income", (ctx, person, year) => ordinaryIncome(api, ctx, person, year));
+  core.query("economy.ordinary_income", (ctx, person3, year) => ordinaryIncome(api, ctx, person3, year));
   core.query("economy.income_tax", (ctx, filing, taxable) => bracketTax(federalTables(ctx).brackets[filing], taxable));
 }
 
@@ -18999,13 +19839,13 @@ function placesOf(ctx, business) {
 function businessIds(ctx) {
   return Object.keys(ctx.state.entities).filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "business") && !isGone(ctx.state, id)).sort();
 }
-function businessAt(ctx, place) {
-  if (!place)
+function businessAt(ctx, place2) {
+  if (!place2)
     return null;
   let best = null;
   for (const id of businessIds(ctx)) {
     for (const p of placesOf(ctx, id)) {
-      if (!placeWithin(ctx.world, place, p))
+      if (!placeWithin(ctx.world, place2, p))
         continue;
       let depth = 0;
       for (let cur = own(ctx.world.places, p)?.parent;cur && depth < 32; cur = own(ctx.world.places, cur)?.parent)
@@ -19225,8 +20065,8 @@ function jobBlocks(ctx, job, from, to) {
   for (const b of commitments(ctx, job.worker, from, to)) {
     if (b.kind !== "work" && b.kind !== "other")
       continue;
-    const place = b.place;
-    if (!place || !job.workplaces.some((w) => placeWithin(ctx.world, place, w)))
+    const place2 = b.place;
+    if (!place2 || !job.workplaces.some((w) => placeWithin(ctx.world, place2, w)))
       continue;
     const start = Math.max(b.start, from);
     const end = Math.min(b.end, to);
@@ -19579,8 +20419,8 @@ function hire(api, args, ctx) {
       fields.pay_days = peer.custom.days;
   }
   const id = `job:${hashParts(ctx.rng.seed, "hire", business, worker, String(ctx.state.clock)).slice(0, 10)}`;
-  const entity = { id, kind: JOB_KIND, name: `${labelOf(ctx, worker)} at ${labelOf(ctx, business)}`, tier: "background", fields, relations: [] };
-  return [{ type: "spawn", entity }];
+  const entity2 = { id, kind: JOB_KIND, name: `${labelOf(ctx, worker)} at ${labelOf(ctx, business)}`, tier: "background", fields, relations: [] };
+  return [{ type: "spawn", entity: entity2 }];
 }
 function endJob(api, args, ctx) {
   const job = readJob(ctx, strOf(args.job));
@@ -19624,8 +20464,8 @@ function jobView(ctx, api, job, viewer) {
   const since = typeof record2.through === "number" ? record2.through : now - 7 * MINUTES_PER_DAY;
   const scheduled = hoursSource(ctx, job, now) === "contract" ? null : jobBlocks(ctx, job, since, now).reduce((a, b) => a + (b.end - b.start), 0);
   const money = (c) => api.money(ctx, c);
-  const entity = own(ctx.state.entities, job.id);
-  const fields = entity?.fields ?? {};
+  const entity2 = own(ctx.state.entities, job.id);
+  const fields = entity2?.fields ?? {};
   const unseen = Object.fromEntries(["employer", "workplace"].filter((k) => outsideHidden(ctx, strOf(fields[k]), viewer)).map((k) => [k, ""]));
   return {
     id: job.id,
@@ -19788,9 +20628,9 @@ function walkInPosting(ctx, api, business, at, rng) {
   const cents = Math.max(0, Math.round(daily * (1 + spread * (rng.next() + rng.next() - 1))));
   if (cents === 0)
     return null;
-  const place = placesOf(ctx, business)[0] ?? null;
+  const place2 = placesOf(ctx, business)[0] ?? null;
   const collects = e.fields.collects_sales_tax !== false;
-  const tax = collects && api.feature(ctx, business, "sales_tax") ? salesTaxOn(cents, salesTaxPct(ctx, place)) : 0;
+  const tax = collects && api.feature(ctx, business, "sales_tax") ? salesTaxOn(cents, salesTaxPct(ctx, place2)) : 0;
   const cal = calendarOf(ctx.world);
   const day = dateAt(cal, at).dayIndex;
   const worked = (j) => jobBlocks(ctx, j, clockAt(cal, day, 0), clockAt(cal, day + 1, 0)).length > 0;
@@ -19958,8 +20798,8 @@ function issueInvoice(ctx, api, args) {
   const due = dateText3(ctx, dateAt(cal, ctx.state.clock).dayIndex + days);
   const memo = strOf(args.memo).trim() || `${labelOf(ctx, business)} invoice`;
   const id = `invoice:${hashParts(ctx.rng.seed, "invoice", business, customer, String(ctx.state.clock), String(cents)).slice(0, 10)}`;
-  const entity = { id, kind: INVOICE_KIND, name: memo, tier: "background", fields: { business, customer, cents, memo, issued: ctx.state.clock, due, state: "open", paid: 0, late_fee: 0, fees: 0 }, relations: [] };
-  return [{ type: "spawn", entity }];
+  const entity2 = { id, kind: INVOICE_KIND, name: memo, tier: "background", fields: { business, customer, cents, memo, issued: ctx.state.clock, due, state: "open", paid: 0, late_fee: 0, fees: 0 }, relations: [] };
+  return [{ type: "spawn", entity: entity2 }];
 }
 function payInvoice(ctx, api, args) {
   const inv = readInvoice(ctx, strOf(args.invoice));
@@ -20415,8 +21255,8 @@ function exercise(api, ctx, x) {
     return reject5("nothing_held", `${labelOf(ctx, x.party)} holds no whole contract of ${a.label}`);
   if (qty > held2 + QTY_EPSILON)
     return reject5("declined", `${h.name} holds ${unitsText(held2)} contracts, not ${qty}`);
-  const under = assetOf(ctx, a.option.underlying);
-  if (!under)
+  const under2 = assetOf(ctx, a.option.underlying);
+  if (!under2)
     return reject5("missing_asset", `no asset ${a.option.underlying}`);
   const units = qty * a.option.multiplier;
   const strike = Math.round(units * a.option.strike);
@@ -20424,7 +21264,7 @@ function exercise(api, ctx, x) {
   const money = (c) => formatMoney(c, ctx.world.currency);
   const label = `Exercised ${qty} ${a.label}`;
   if (a.option.settlement === "cash") {
-    const cash = Math.round(units * intrinsic(a.option.right, priceOf(ctx, under), a.option.strike));
+    const cash = Math.round(units * intrinsic(a.option.right, priceOf(ctx, under2), a.option.strike));
     if (cash <= 0)
       return reject5("out_of_money", `${a.label} is worth nothing to exercise`);
     const to = x.to !== undefined ? proceedsAccount(api, ctx, x.party, x.holding, x.to) : undefined;
@@ -20433,9 +21273,9 @@ function exercise(api, ctx, x) {
     const posted2 = settle(api, ctx, x.holding, a, qty, cash, label, to);
     return isRejection4(posted2) ? posted2 : unit(posted2);
   }
-  const into = findHolding(ctx.state, under.id, account, x.party);
+  const into = findHolding(ctx.state, under2.id, account, x.party);
   const events2 = [];
-  const market = marketOf(api, under.id);
+  const market = marketOf(api, under2.id);
   let lines;
   let target = into;
   if (a.option.right === "call") {
@@ -20446,10 +21286,10 @@ function exercise(api, ctx, x) {
     if (unusable)
       return unusable;
     if (!target) {
-      target = `${account ?? x.party}:${under.id}`;
+      target = `${account ?? x.party}:${under2.id}`;
       for (let i = 2;own(ctx.state.entities, target); i++)
-        target = `${account ?? x.party}:${under.id}:${i}`;
-      events2.push({ type: "spawn", entity: { id: target, kind: "holding", name: under.symbol ?? under.label, tier: "background", fields: { asset: under.id, lots: [], ...account ? { account } : { owners: [{ party: x.party, role: "owner" }] } }, relations: [] } });
+        target = `${account ?? x.party}:${under2.id}:${i}`;
+      events2.push({ type: "spawn", entity: { id: target, kind: "holding", name: under2.symbol ?? under2.label, tier: "background", fields: { asset: under2.id, lots: [], ...account ? { account } : { owners: [{ party: x.party, role: "owner" }] } }, relations: [] } });
     }
     lines = [
       { account: from, amount: -strike },
@@ -20457,7 +21297,7 @@ function exercise(api, ctx, x) {
     ];
   } else {
     if (!target || qtyOf(lotsOf(ctx, target)) + QTY_EPSILON < units)
-      return reject5("nothing_to_deliver", `exercising ${qty} ${a.label} delivers ${unitsText(units)} ${under.symbol ?? under.label}, which ${labelOf(ctx, x.party)} doesn't hold${account ? ` in ${labelOf(ctx, account)}` : ""}`);
+      return reject5("nothing_to_deliver", `exercising ${qty} ${a.label} delivers ${unitsText(units)} ${under2.symbol ?? under2.label}, which ${labelOf(ctx, x.party)} doesn't hold${account ? ` in ${labelOf(ctx, account)}` : ""}`);
     const to = proceedsAccount(api, ctx, x.party, x.holding, x.to);
     if (typeof to !== "string")
       return to;
@@ -20466,7 +21306,7 @@ function exercise(api, ctx, x) {
       { account: to, amount: strike }
     ];
   }
-  const posted = api.post(ctx, lines, { memo: `${label}: ${money(strike)} for ${unitsText(units)} ${under.symbol ?? under.label}`, kind: a.option.right === "call" ? "purchase" : "sale", category: "investment" });
+  const posted = api.post(ctx, lines, { memo: `${label}: ${money(strike)} for ${unitsText(units)} ${under2.symbol ?? under2.label}`, kind: a.option.right === "call" ? "purchase" : "sale", category: "investment" });
   if (isRejection4(posted))
     return posted;
   return unit([...events2, ...posted, { type: "economy.exercise", data: { option: x.holding, into: target, qty, units, cash: strike, right: a.option.right, label } }]);
@@ -20511,8 +21351,8 @@ function settlements(api, ctx, slot) {
     }
     if (!a.option)
       continue;
-    const under = assetOf(ctx, a.option.underlying);
-    const value = under ? Math.round(roundQty(qty) * a.option.multiplier * intrinsic(a.option.right, priceOf(ctx, under, at.at), a.option.strike)) : 0;
+    const under2 = assetOf(ctx, a.option.underlying);
+    const value = under2 ? Math.round(roundQty(qty) * a.option.multiplier * intrinsic(a.option.right, priceOf(ctx, under2, at.at), a.option.strike)) : 0;
     if (value > 0) {
       const label = `${a.label} exercised at expiry`;
       const settled = settle(api, ctx, holding, a, qty, value, label);
@@ -20875,12 +21715,12 @@ var FINANCE_MODULES = [
 
 // src/packs/economy/core/credit.ts
 var MONTH = 1440 * 30.4;
-function creditEntriesOf(ctx, person) {
-  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person));
+function creditEntriesOf(ctx, person3) {
+  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person3));
   return (Array.isArray(raw.entries) ? raw.entries : []).map((x) => objOf(x));
 }
-function creditAccounts(ctx, person) {
-  return accountsOf(ctx, person, "worth").filter((id) => {
+function creditAccounts(ctx, person3) {
+  return accountsOf(ctx, person3, "worth").filter((id) => {
     const c = classOf2(ctx, id);
     return c !== null && isCredit(c);
   });
@@ -20897,9 +21737,9 @@ function ageMonths(ctx, account) {
   }
   return Math.max(0, (ctx.state.clock - at) / MONTH);
 }
-function scoreFactors(ctx, person) {
-  const accounts = creditAccounts(ctx, person);
-  const entries2 = creditEntriesOf(ctx, person);
+function scoreFactors(ctx, person3) {
+  const accounts = creditAccounts(ctx, person3);
+  const entries2 = creditEntriesOf(ctx, person3);
   if (accounts.length === 0 && entries2.length === 0)
     return null;
   const now = ctx.state.clock;
@@ -20942,16 +21782,16 @@ function scoreOf(f) {
   const weighted = 0.35 * f.payment + 0.3 * f.utilisation + 0.15 * f.age + 0.1 * f.mix + 0.1 * f.recent;
   return Math.max(SCORE_MIN, Math.min(SCORE_MAX, Math.round(SCORE_MIN + (SCORE_MAX - SCORE_MIN) * weighted)));
 }
-function currentScore(ctx, person) {
-  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person));
+function currentScore(ctx, person3) {
+  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person3));
   if (typeof raw.score === "number")
     return raw.score;
-  const f = scoreFactors(ctx, person);
+  const f = scoreFactors(ctx, person3);
   return f ? scoreOf(f) : null;
 }
-function monthlyScore(ctx, person, at) {
-  const f = scoreFactors(ctx, person);
-  return f ? [{ type: FINANCE_EVENTS.score, data: { person, score: scoreOf(f), factors: { ...f }, at } }] : [];
+function monthlyScore(ctx, person3, at) {
+  const f = scoreFactors(ctx, person3);
+  return f ? [{ type: FINANCE_EVENTS.score, data: { person: person3, score: scoreOf(f), factors: { ...f }, at } }] : [];
 }
 var TIER_KEYS = { super_prime: "super_prime_781_850", prime: "prime_661_780", nonprime: "nonprime_601_660", subprime: "subprime_501_600", deep_subprime: "deep_subprime_300_500" };
 function aprFor(ctx, cls, score) {
@@ -20982,14 +21822,14 @@ function loanCeiling(ctx, score, securedBy) {
   const tier = creditTierOf(score ?? 700);
   return tier === "super_prime" || tier === "prime" ? numOf(amounts.max, 5000000) : tier === "deep_subprime" ? numOf(amounts.min, 1e5) : numOf(amounts.typical, 800000);
 }
-function decide(ctx, person, app, reports) {
+function decide(ctx, person3, app, reports) {
   const products = worldProducts(ctx.world);
   const def = own(products, app.product);
   const cls = def?.class ?? (isAccountClass(app.product) ? app.product : null);
   if (!cls || !isCredit(cls))
     return reject6("not_credit", `${app.product.replace(/_/g, " ")} isn't a kind of credit`);
-  const score = reports ? currentScore(ctx, person) : null;
-  const entries2 = reports ? creditEntriesOf(ctx, person) : [];
+  const score = reports ? currentScore(ctx, person3) : null;
+  const entries2 = reports ? creditEntriesOf(ctx, person3) : [];
   const chargedOff = entries2.some((e) => e.kind === "charged_off" && ctx.state.clock - numOf(e.at) <= 24 * MONTH);
   const secured = app.secured_by !== undefined && own(ctx.state.entities, app.secured_by) !== undefined;
   const label = def?.label ?? CLASS_TRAITS[cls].label;
@@ -21008,13 +21848,13 @@ function decide(ctx, person, app, reports) {
     return declined(`it's more than a lender would lend them (up to ${formatMoney(most, ctx.world.currency)})`);
   return { approved: true, reason: "", apr, limit: null, cls, label };
 }
-function creditReport(ctx, person) {
+function creditReport(ctx, person3) {
   const cal = calendarOf(ctx.world);
-  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person));
-  const factors = scoreFactors(ctx, person);
+  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person3));
+  const factors = scoreFactors(ctx, person3);
   const score = typeof raw.score === "number" ? raw.score : factors ? scoreOf(factors) : null;
-  const accounts = creditAccounts(ctx, person);
-  const entries2 = creditEntriesOf(ctx, person);
+  const accounts = creditAccounts(ctx, person3);
+  const entries2 = creditEntriesOf(ctx, person3);
   let limit = 0;
   let owed = 0;
   let ontime = 0;
@@ -21038,7 +21878,7 @@ function creditReport(ctx, person) {
   const products = { ...Object.fromEntries(["credit_card", "line_of_credit", "loan"].map((c) => [c, { label: CLASS_TRAITS[c].label, class: c }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id, p]) => [id, { label: p.label, class: p.class }])) };
   const offers = Object.entries(products).filter(([, p]) => isCredit(p.class) && p.class !== "mortgage").map(([product, p]) => ({ product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score) }));
   return {
-    person,
+    person: person3,
     score,
     band: score === null ? null : scoreBand(score),
     tier: score === null ? null : creditTierOf(score),
@@ -21054,8 +21894,8 @@ function creditReport(ctx, person) {
     offers
   };
 }
-function hasCreditFile(ctx, person) {
-  return creditAccounts(ctx, person).length > 0 || creditEntriesOf(ctx, person).length > 0;
+function hasCreditFile(ctx, person3) {
+  return creditAccounts(ctx, person3).length > 0 || creditEntriesOf(ctx, person3).length > 0;
 }
 function scoreInstants(ctx, from, to) {
   const cal = calendarOf(ctx.world);
@@ -21211,8 +22051,8 @@ function cardRoom(ctx, card, what) {
   if (!accountFeature(ctx, account, "daily_limits"))
     return Infinity;
   const p = productOf(ctx, account);
-  const field = what === "purchase" ? "daily_purchase_limit" : "daily_atm_limit";
-  const limit = typeof e.fields[field] === "number" ? e.fields[field] : p?.[field] ?? null;
+  const field2 = what === "purchase" ? "daily_purchase_limit" : "daily_atm_limit";
+  const limit = typeof e.fields[field2] === "number" ? e.fields[field2] : p?.[field2] ?? null;
   if (limit === null)
     return Infinity;
   const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
@@ -21901,12 +22741,12 @@ class Run {
     this.ctx = base.registry.context(base.world, this.state);
   }
   touch(e) {
-    const entity = e.type === "set" || e.type === "add" ? e.entity : e.type === "link" || e.type === "unlink" ? e.from : null;
-    if (entity !== null && !this.ownEntities.has(entity)) {
-      const cur = own(this.state.entities, entity);
+    const entity2 = e.type === "set" || e.type === "add" ? e.entity : e.type === "link" || e.type === "unlink" ? e.from : null;
+    if (entity2 !== null && !this.ownEntities.has(entity2)) {
+      const cur = own(this.state.entities, entity2);
       if (cur)
-        this.state.entities[entity] = { ...cur, fields: { ...cur.fields }, relations: [...cur.relations] };
-      this.ownEntities.add(entity);
+        this.state.entities[entity2] = { ...cur, fields: { ...cur.fields }, relations: [...cur.relations] };
+      this.ownEntities.add(entity2);
     }
     const dot = e.type.indexOf(".");
     const pack = dot > 0 ? e.type.slice(0, dot) : null;
@@ -22614,11 +23454,11 @@ function sharedAttempt(hooks, ctx, flow, cents, at, overdraft) {
 function money(ctx, cents) {
   return formatMoney(cents, ctx.world.currency);
 }
-function featureAt(ctx, who, field) {
+function featureAt(ctx, who, field2) {
   let cur = placeOfEntity(ctx.state, who) ?? undefined;
   for (let guard = 0;cur && guard < 32; guard++) {
     const p = own(ctx.world.places, cur);
-    const f = objOf(p?.fields[field]);
+    const f = objOf(p?.fields[field2]);
     if (typeof f.bank === "string" && f.bank !== "")
       return { place: cur, feature: f };
     cur = p?.parent;
@@ -22780,8 +23620,8 @@ function replaceCard(ctx, who, card) {
   const spawn = optionalService(ctx, "gear.spawn");
   const oldItem = strOf(e.fields.item);
   if (spawn && ctx.levelOf(holder, "gear") >= 1) {
-    const place = oldItem !== "" ? own(ctx.state.entities, oldItem)?.relations.find((r) => r.type === "in")?.to : undefined;
-    const made = spawn(ctx, { name: own(ctx.state.entities, oldItem)?.name ?? e.name, owner: holder, holder: place && own(ctx.state.entities, place) && !own(ctx.state.entities, oldItem)?.fields.lost ? place : holder, salt: `card:${id}` });
+    const place2 = oldItem !== "" ? own(ctx.state.entities, oldItem)?.relations.find((r) => r.type === "in")?.to : undefined;
+    const made = spawn(ctx, { name: own(ctx.state.entities, oldItem)?.name ?? e.name, owner: holder, holder: place2 && own(ctx.state.entities, place2) && !own(ctx.state.entities, oldItem)?.fields.lost ? place2 : holder, salt: `card:${id}` });
     if (Array.isArray(made)) {
       out.push(...made);
       const item = made.find((x) => x.type === "spawn");
@@ -22831,14 +23671,14 @@ var FLOW_PARAM_FIELDS = { label: "", kind: "flow_kind", from: "from", to: "to", 
 function flowFields(args) {
   const fields = {};
   let label;
-  for (const [param, field] of Object.entries(FLOW_PARAM_FIELDS)) {
+  for (const [param, field2] of Object.entries(FLOW_PARAM_FIELDS)) {
     const v = args[param];
     if (v === undefined || v === null || v === "")
       continue;
     if (param === "label")
       label = String(v).slice(0, 80);
     else
-      fields[field] = v;
+      fields[field2] = v;
   }
   if (typeof fields.flow_kind === "string" && !FLOW_KINDS.includes(fields.flow_kind))
     return reject6("bad_flow", `a flow can't be a ${fields.flow_kind}`);
@@ -22989,8 +23829,8 @@ function createFlow(ctx, who, args) {
   const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
   const fields = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
   const id = `flow_${who}_${hashParts(who, label, ctx.state.clock).slice(0, 8)}`;
-  const entity = { id, kind: "flow", name: label, tier: "background", fields, relations: [] };
-  return [{ type: "spawn", entity }];
+  const entity2 = { id, kind: "flow", name: label, tier: "background", fields, relations: [] };
+  return [{ type: "spawn", entity: entity2 }];
 }
 var CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
 function renameAndClear(current, id, name, clear) {
@@ -23020,11 +23860,11 @@ function updateFlow(ctx, who, flow, args) {
   if (both && both.type === "set")
     return reject6("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
   const cleared = new Set(more.flatMap((x) => x.type === "set" ? [x.field] : []));
-  const after = (field) => cleared.has(field) ? "" : strOf(made.fields[field] ?? e.fields[field]);
+  const after = (field2) => cleared.has(field2) ? "" : strOf(made.fields[field2] ?? e.fields[field2]);
   const problem = flowProblem(ctx, who, after("from"), after("to"), after("fallback"));
   if (problem)
     return problem;
-  return [...Object.entries(made.fields).map(([field, value]) => ({ type: "set", entity: flow, field, value })), ...more];
+  return [...Object.entries(made.fields).map(([field2, value]) => ({ type: "set", entity: flow, field: field2, value })), ...more];
 }
 function editFlow(ctx, flow, name, clear) {
   const e = own(ctx.state.entities, flow);
@@ -23673,7 +24513,7 @@ function remind(run, account) {
     tell(run, account, "bill", `${labelOf(ctx, account)} payment of ${money2(ctx, left)} is due today.`, cycle.due - (DUE_MINUTE - (9 * 60 + 30)));
 }
 function creditEntries(ctx, account, kind, at, days) {
-  return creditHolders(ctx, account).map((person) => ({ type: FINANCE_EVENTS.credit, data: { person, kind, account, at, ...days !== undefined ? { days } : {} } }));
+  return creditHolders(ctx, account).map((person3) => ({ type: FINANCE_EVENTS.credit, data: { person: person3, kind, account, at, ...days !== undefined ? { days } : {} } }));
 }
 function dueCheck(run, account, at) {
   const ctx = run.ctx;
@@ -23748,16 +24588,16 @@ function statementState(cycle, now) {
 function parties(ctx) {
   return Object.keys(ctx.state.entities).sort().filter((id) => isParty(ctx, id) && !isGone(ctx.state, id));
 }
-function openingBalances(entity, ctx, claimed) {
+function openingBalances(entity2, ctx, claimed) {
   const s = ctx.state;
-  const closed = accountsOf(ctx, entity).filter((id) => !claimed?.has(id) && !isOpened(s, id, openerOf(s, id) === entity ? null : openerOf(s, id)));
+  const closed = accountsOf(ctx, entity2).filter((id) => !claimed?.has(id) && !isOpened(s, id, openerOf(s, id) === entity2 ? null : openerOf(s, id)));
   for (const id of closed)
     claimed?.add(id);
   const lines = closed.filter((id) => typeof own(s.entities, id)?.fields.opening === "number" && numOf(own(s.entities, id)?.fields.opening) !== 0).map((id) => ({ account: id, amount: Math.round(numOf(own(s.entities, id)?.fields.opening)) }));
   const out = [];
   if (lines.length > 0) {
     const total = lines.reduce((a, l) => a + l.amount, 0);
-    const all2 = total === 0 ? lines : [...lines, { account: external(entity), amount: -total }];
+    const all2 = total === 0 ? lines : [...lines, { account: external(entity2), amount: -total }];
     if (all2.length >= 2)
       out.push({ type: "post", lines: all2, memo: "Opening balances" }, { type: FINANCE_EVENTS.txn, data: { memo: "Opening balance", kind: "opening", category: "opening", lines: lines.map((l) => ({ account: l.account, amount: l.amount })) } });
   }
@@ -23804,11 +24644,11 @@ function moneyStep(hooks, slot, ctx, rng) {
   }
   const scores = scoreInstants(ctx, slot.start, slot.end);
   if (scores.length > 0) {
-    for (const person of parties(ctx)) {
-      if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, person)?.kind ?? "", "person") || !featureFor(ctx, person, "credit"))
+    for (const person3 of parties(ctx)) {
+      if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, person3)?.kind ?? "", "person") || !featureFor(ctx, person3, "credit"))
         continue;
       for (const at of scores)
-        tasks.push({ at, rank: 6, key: `score:${person}`, run: (r) => hasCreditFile(r.ctx, person) ? void r.emit(monthlyScore(r.ctx, person, at)) : undefined });
+        tasks.push({ at, rank: 6, key: `score:${person3}`, run: (r) => hasCreditFile(r.ctx, person3) ? void r.emit(monthlyScore(r.ctx, person3, at)) : undefined });
     }
   }
   return runTasks(ctx, tasks);
@@ -23823,7 +24663,7 @@ function runTasks(ctx, tasks) {
   return run.out;
 }
 function planTasks(hooks, slot, ctx, rng) {
-  return planPayments(ctx).flatMap(({ entity, plan: plan2, flow, at: due }) => {
+  return planPayments(ctx).flatMap(({ entity: entity2, plan: plan2, flow, at: due }) => {
     if (due > slot.end)
       return [];
     const at = Math.max(due, slot.start + 1);
@@ -23835,7 +24675,7 @@ function planTasks(hooks, slot, ctx, rng) {
         run: (r) => {
           const ran = runOccurrence(hooks, r, flow, at, rng(`flow:${flow.id}:${at}`), false);
           const paid = ran?.outcome === "paid";
-          r.emit([{ type: MINDS_EVENTS.plan, data: { entity, plan: plan2.id, status: paid ? "done" : "dropped", at, reason: paid ? null : ran?.reason ?? "the payment didn't go through" } }]);
+          r.emit([{ type: MINDS_EVENTS.plan, data: { entity: entity2, plan: plan2.id, status: paid ? "done" : "dropped", at, reason: paid ? null : ran?.reason ?? "the payment didn't go through" } }]);
         }
       }
     ];
@@ -23852,17 +24692,17 @@ function logUniform(rng, lo, hi) {
   const b = Math.log(Math.max(2, hi));
   return Math.exp(a + (b - a) * rng.next());
 }
-function materializeMoney(entity, ctx, rng, version) {
+function materializeMoney(entity2, ctx, rng, version) {
   const s = ctx.state;
-  const e = own(s.entities, entity);
-  const level = e ? ctx.levelOf(entity, "money") : 0;
+  const e = own(s.entities, entity2);
+  const level = e ? ctx.levelOf(entity2, "money") : 0;
   if (!e || level < 1)
     return [];
-  if (accountsOf(ctx, entity).length > 0)
-    return openingBalances(entity, ctx);
+  if (accountsOf(ctx, entity2).length > 0)
+    return openingBalances(entity2, ctx);
   if (level < 2 || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
     return [];
-  const ext = external(entity);
+  const ext = external(entity2);
   const band = bandByLabel(strOf(e.fields.wealth, "modest"));
   const lo = Number.isFinite(band.min) ? Math.max(band.min, 0) : 0;
   const hi = Number.isFinite(band.max) ? band.max - 1 : band.typical * 4;
@@ -23875,17 +24715,17 @@ function materializeMoney(entity, ctx, rng, version) {
   const limit = Math.round(Math.min(2500000, Math.max(50000, band.typical * 0.3)) / 1e4) * 1e4;
   const owed = Math.round(limit * rng.next() * 0.25);
   const statementDay = 1 + rng.int(0, 27);
-  const wallet = Object.keys(s.entities).sort().find((id2) => own(s.entities, id2)?.fields.owner === entity && (own(s.entities, id2)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(s.entities, id2)?.name ?? "")));
-  const id = (suffix) => `${entity}:${suffix}`;
+  const wallet = Object.keys(s.entities).sort().find((id2) => own(s.entities, id2)?.fields.owner === entity2 && (own(s.entities, id2)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(s.entities, id2)?.name ?? "")));
+  const id = (suffix) => `${entity2}:${suffix}`;
   const out = [];
   if (version === 1) {
-    const mk = (suffix, name, fields, inWallet = false) => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owner: entity, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
+    const mk = (suffix, name, fields, inWallet = false) => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owner: entity2, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
     for (const def of [mk("cash", "Cash", { type: "cash" }, true), mk("checking", "Checking", { type: "checking", institution: "Local bank" }), mk("savings", "Savings", { type: "savings", institution: "Local bank", apy_pct: 0.4 }), mk("card", "Credit card", { type: "card", limit, apr_pct: 22, statement_day: statementDay, due_days: 25, autopay: "minimum" })])
       out.push({ type: "spawn", entity: def });
   } else {
-    const owners = [{ party: entity, role: "owner" }];
+    const owners = [{ party: entity2, role: "owner" }];
     const mk = (suffix, name, fields, inWallet = false) => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owners, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
-    const card = (suffix, name, account, network) => ({ id: id(suffix), kind: "card", name, tier: "background", fields: { account, holder: entity, network, state: "active" }, relations: [] });
+    const card = (suffix, name, account, network) => ({ id: id(suffix), kind: "card", name, tier: "background", fields: { account, holder: entity2, network, state: "active" }, relations: [] });
     for (const def of [
       mk("cash", "Cash", { product: "cash" }, true),
       mk("checking", "Checking", { product: "checking", institution: "Local bank" }),
@@ -24175,7 +25015,7 @@ function cardView(ctx, viewer, card) {
   const purchase = cardRoom(ctx, card, "purchase");
   const atm = cardRoom(ctx, card, "atm");
   const p = productOf(ctx, strOf(f.account));
-  const limitOf = (field) => typeof f[field] === "number" ? f[field] : p?.[field] ?? null;
+  const limitOf = (field2) => typeof f[field2] === "number" ? f[field2] : p?.[field2] ?? null;
   const purchaseLimit = limitOf("daily_purchase_limit");
   return {
     id: card,
@@ -25236,16 +26076,16 @@ var TAG_CATEGORIES = {
   workplace: ["vehicle_services", "tools_hardware"]
 };
 var OFFER_CAP = 24;
-function placeTrade(ctx, place) {
-  const p = place ? own(ctx.world.places, place) : undefined;
+function placeTrade(ctx, place2) {
+  const p = place2 ? own(ctx.world.places, place2) : undefined;
   const sells = Array.isArray(p?.fields.sells) ? p.fields.sells.filter((x) => typeof x === "string") : [];
   const tags = Array.isArray(p?.fields.tags) ? p.fields.tags.filter((x) => typeof x === "string") : [];
   return { categories: [...new Set(sells.length > 0 ? sells : tags.flatMap((t) => own(TAG_CATEGORIES, t) ?? []))], sells, tags };
 }
-function offersAtPlace(ctx, place) {
-  if (!place || !own(ctx.world.places, place))
+function offersAtPlace(ctx, place2) {
+  if (!place2 || !own(ctx.world.places, place2))
     return [];
-  const { categories, sells } = placeTrade(ctx, place);
+  const { categories, sells } = placeTrade(ctx, place2);
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
   const out = [];
   for (const category of categories) {
@@ -25255,20 +26095,20 @@ function offersAtPlace(ctx, place) {
       const row = rows[id];
       if (!row || strOf(row.category) !== category && !sells.includes(id))
         continue;
-      const price = priceOf2(ctx, { catalog: id, place });
+      const price = priceOf2(ctx, { catalog: id, place: place2 });
       if (price)
         out.push({ item: id, name: price.name, cents: price.unitCents, category });
     }
   }
   return out;
 }
-function matchCatalog(ctx, text3, place, category = "") {
+function matchCatalog(ctx, text3, place2, category = "") {
   const item = itemName(text3);
   if (!item)
     return null;
   const said2 = new Set([...item.words, ...item.trailing?.words ?? []]);
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
-  const trade2 = placeTrade(ctx, place);
+  const trade2 = placeTrade(ctx, place2);
   const tags = trade2.tags.map((t) => stem(t.toLowerCase()));
   const nouns = Object.keys(rows).sort().map((id) => ({ id, name: catalogName(id, strOf(rows[id]?.name, id)) })).filter((r) => r.name.heads.has(item.head));
   const unnamed = (name) => [...item.words].filter((w) => w !== item.head && !name.words.has(w));
@@ -25302,10 +26142,10 @@ function amountOf(v) {
 }
 var PHYSICAL = new Set(["groceries_staples", "clothing", "electronics", "tools_hardware", "household_goods", "personal_care", "gifts", "alcohol", "medical"]);
 function quote(ctx, args, payer, qty) {
-  const place = placeOfEntity(ctx.state, payer);
+  const place2 = placeOfEntity(ctx.state, payer);
   const named = strOf(args.item);
   const given = strOf(args.category);
-  const row = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place, given);
+  const row = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place2, given);
   const category = given !== "" ? given : !row && rowOf(ctx, "economy.categories", named) ? named : "";
   const said2 = typeof args.price === "number" && args.price > 0 ? Math.round(args.price) : undefined;
   const rowDef = row ? rowOf(ctx, "economy.catalog", row) : undefined;
@@ -25313,7 +26153,7 @@ function quote(ctx, args, payer, qty) {
   if (said2 !== undefined && args.exact === true)
     return { price: asIs(said2), row };
   if (row) {
-    const price = priceOf2(ctx, { catalog: row, qty, place, ...said2 !== undefined ? { narrated: said2 } : {} }, ctx.rng);
+    const price = priceOf2(ctx, { catalog: row, qty, place: place2, ...said2 !== undefined ? { narrated: said2 } : {} }, ctx.rng);
     if (price)
       return { price, row, ...price.clamped && said2 !== undefined ? { narrated: { cents: said2, limited: "band" } } : {} };
   }
@@ -25321,7 +26161,7 @@ function quote(ctx, args, payer, qty) {
     const cents = Math.min(said2, args.stated === true ? Infinity : unpricedCap(ctx.world));
     return { price: { ...asIs(cents), clamped: cents !== said2 }, row: null, ...cents !== said2 ? { narrated: { cents: said2, limited: "cap" } } : {} };
   }
-  const banded = category !== "" ? priceOf2(ctx, { category, qty, place }, ctx.rng) : null;
+  const banded = category !== "" ? priceOf2(ctx, { category, qty, place: place2 }, ctx.rng) : null;
   return banded ? { price: banded, row: null } : null;
 }
 function emptyHooks() {
@@ -25340,8 +26180,8 @@ function makeApi(hooks) {
   return {
     classOf: (books, account) => classOf2(books, account),
     traitsOf: (books, account) => traitsOf(books, account),
-    ownersOf: (state, entity) => ownersOf(state, entity),
-    shareOf: (state, entity, party) => shareOf(state, entity, party),
+    ownersOf: (state, entity2) => ownersOf(state, entity2),
+    shareOf: (state, entity2, party) => shareOf(state, entity2, party),
     interestsOf: (ctx, who) => interestsOf(ctx, who),
     paysFor: (ctx, who, to, from, deposit2) => paysFor(ctx, who, to, from, { deposit: deposit2 }),
     landsInReach: (ctx, who, account, from) => landsInReach(ctx, who, account, from),
@@ -25483,18 +26323,18 @@ function registerRest(r, hooks) {
   });
   r.query("economy.offers", (ctx, who) => offersAtPlace(ctx, placeOfEntity(ctx.state, who)));
   r.query("economy.item_choices", (ctx, text3, who) => {
-    const place = placeOfEntity(ctx.state, who);
+    const place2 = placeOfEntity(ctx.state, who);
     const item = itemName(text3);
     const said2 = new Set(item ? [...item.words, ...item.trailing?.words ?? []] : []);
     const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
     const near = Object.keys(rows).sort().map((id) => ({ id, shared: [...catalogName(id, strOf(rows[id]?.name, id)).words].filter((w) => said2.has(w)).length })).filter((x) => x.shared > 0).sort((a, b) => b.shared - a.shared).slice(0, 6);
     const out = [];
     for (const { id } of near) {
-      const price = priceOf2(ctx, { catalog: id, place });
+      const price = priceOf2(ctx, { catalog: id, place: place2 });
       if (price)
         out.push({ item: id, name: price.name, cents: price.unitCents, category: price.category });
     }
-    for (const offer of offersAtPlace(ctx, place))
+    for (const offer of offersAtPlace(ctx, place2))
       if (!out.some((o) => o.item === offer.item))
         out.push(offer);
     return out.slice(0, 12);
@@ -25502,7 +26342,7 @@ function registerRest(r, hooks) {
   r.query("economy.people_money", (ctx) => buildPeopleMoney(hooks, ctx));
   r.query("economy.finance", (ctx, party, player) => buildFinanceView(hooks, ctx, party, player));
   r.query("economy.summary", (ctx, who) => moneySummary(hooks, ctx, who));
-  r.query("economy.holders", (ctx, entity) => holdersOf(ctx.state, entity));
+  r.query("economy.holders", (ctx, entity2) => holdersOf(ctx.state, entity2));
   r.query("economy.paid_from", paidFrom);
   r.query("economy.carried_cash", carriedCash);
   r.query("economy.unpriced", (ctx, p) => {
@@ -25514,9 +26354,9 @@ function registerRest(r, hooks) {
   });
   r.query("economy.purchaser", (ctx, p) => purchaser(p, ctx).payer);
   r.query("economy.payee_of", (ctx, id) => {
-    const thing = own(ctx.state.entities, id);
-    if (thing)
-      return strOf(thing.fields.owner) || (ownersIn(thing.fields)[0]?.party ?? null);
+    const thing2 = own(ctx.state.entities, id);
+    if (thing2)
+      return strOf(thing2.fields.owner) || (ownersIn(thing2.fields)[0]?.party ?? null);
     return own(ctx.world.places, id) ? businessAt(ctx, id) : null;
   });
   r.guard({ type: "post", validate: (e, ctx) => e.type === "post" ? postGuard(ctx, e.lines, e.overdraw === true) : null });
@@ -25525,10 +26365,10 @@ function registerRest(r, hooks) {
   r.formula("net_worth", (ctx, who) => netWorth(hooks, ctx, String(who ?? ctx.world.pov)));
   r.formula("balance", (ctx, account) => balance(ctx.state, String(account ?? "")));
   r.formula("price", (ctx, item) => priceOf2(ctx, { catalog: String(item ?? "") })?.cents ?? priceOf2(ctx, { category: String(item ?? "") })?.cents ?? 0);
-  r.formula("holds", (ctx, who, thing) => heldBy(ctx.state.entities, String(thing ?? ""), String(who ?? ctx.world.pov)));
+  r.formula("holds", (ctx, who, thing2) => heldBy(ctx.state.entities, String(thing2 ?? ""), String(who ?? ctx.world.pov)));
   r.formula("spends", (ctx, who, account) => canSpend(ctx.state, String(account ?? ""), String(who ?? ctx.world.pov)));
-  r.formula("manages", (ctx, who, thing) => {
-    const id = String(thing ?? "");
+  r.formula("manages", (ctx, who, thing2) => {
+    const id = String(thing2 ?? "");
     const by = String(who ?? ctx.world.pov);
     return own(ctx.state.entities, id)?.kind === "account" ? managesAccount(ctx, id, by) : managesParty(ctx.state, id, by);
   });
@@ -25540,7 +26380,7 @@ function registerRest(r, hooks) {
   r.process({ id: "economy.accounts", domain: "money", minLevel: 3, step: (_slot, ctx) => openAccounts(ctx) });
   r.process({ id: "economy.money", domain: "money", minLevel: MONEY_STEP_LEVEL, step: (slot, ctx, rng) => moneyStep(hooks, slot, ctx, rng) });
   r.process({ id: "economy.plans", domain: "money", minLevel: 0, step: (slot, ctx, rng) => planStep(hooks, slot, ctx, rng) });
-  r.materializer({ domain: "money", version: 2, versions: [1, 2], materialize: (entity, ctx, rng, version) => materializeMoney(entity, ctx, rng, version) });
+  r.materializer({ domain: "money", version: 2, versions: [1, 2], materialize: (entity2, ctx, rng, version) => materializeMoney(entity2, ctx, rng, version) });
   const moneyLines = (ctx, scope) => {
     const pov = ctx.world.pov;
     const level = ctx.levelOf(pov, "money");
@@ -25642,10 +26482,10 @@ function registerRest(r, hooks) {
           issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name} names a product "${product}" that's neither the world's nor a class.`, path: `entities.${e.id}.fields.product` });
         if (product === "" && strOf(e.fields.type) === "")
           issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name} has no product.`, path: `entities.${e.id}.fields.product` });
-        for (const field of ["autopay_from", "overdraft_link", "secured_by"]) {
-          const v = strOf(e.fields[field]);
+        for (const field2 of ["autopay_from", "overdraft_link", "secured_by"]) {
+          const v = strOf(e.fields[field2]);
           if (v !== "" && !own(world.entities, v))
-            issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name}'s ${field.replace(/_/g, " ")} names "${v}", which isn't in the world.`, path: `entities.${e.id}.fields.${field}` });
+            issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name}'s ${field2.replace(/_/g, " ")} names "${v}", which isn't in the world.`, path: `entities.${e.id}.fields.${field2}` });
         }
       }
       for (const [id, p] of Object.entries(products))
@@ -25740,8 +26580,8 @@ function registerEffects(r, hooks) {
           return paid;
         out.push(...paid);
       }
-      const thing = priced ? PHYSICAL.has(priced.price.category) || story && priced.price.category === "misc" : story;
-      const spawn = args.keep !== false && thing ? optionalService(ctx, "gear.spawn") : null;
+      const thing2 = priced ? PHYSICAL.has(priced.price.category) || story && priced.price.category === "misc" : story;
+      const spawn = args.keep !== false && thing2 ? optionalService(ctx, "gear.spawn") : null;
       if (spawn && ctx.levelOf(payer, "gear") >= 1) {
         const made = spawn(ctx, { name, owner: payer, holder: payer, ...priced?.row ? { catalog: priced.row } : {}, ...priced ? { category: priced.price.category } : {}, qty, salt: `buy:${ctx.rng.seed}`, stack: true });
         if (Array.isArray(made))
@@ -25757,17 +26597,17 @@ function registerEffects(r, hooks) {
     args: ["percent", "scope?", "place?", "minutes?", "id?", "clear?"],
     resolve(a, ctx) {
       const scope = strOf(a.scope, "all");
-      const place = strOf(a.place);
-      if (place !== "" && !own(ctx.world.places, place))
-        return reject6("missing_place", `no place ${labelOf(ctx, place)}`);
-      const id = strOf(a.id) || `${place || "*"}:${scope}`;
+      const place2 = strOf(a.place);
+      if (place2 !== "" && !own(ctx.world.places, place2))
+        return reject6("missing_place", `no place ${labelOf(ctx, place2)}`);
+      const id = strOf(a.id) || `${place2 || "*"}:${scope}`;
       const percent = numOf(a.percent);
       if (a.clear === true || percent === 0)
         return [{ type: "economy.modifier", data: { id } }];
       if (percent <= -100)
         return reject6("bad_amount", "a price modifier can't make things free");
       const minutes = numOf(a.minutes);
-      return [{ type: "economy.modifier", data: { id, scope, place, mult: Math.round((1 + percent / 100) * 1e4) / 1e4, ...minutes > 0 ? { until: ctx.state.clock + Math.round(minutes) } : {} } }];
+      return [{ type: "economy.modifier", data: { id, scope, place: place2, mult: Math.round((1 + percent / 100) * 1e4) / 1e4, ...minutes > 0 ? { until: ctx.state.clock + Math.round(minutes) } : {} } }];
     }
   });
   r.effect({ type: "economy.lose", args: ["item", "thief?"], resolve: (a, ctx) => loseWith(ctx, strOf(a.item), strOf(a.thief) || undefined) });
@@ -25999,16 +26839,16 @@ function goesIn(ctx, id) {
   const goes = kindGoesIn(ctx.registry, ctx.world, e.kind);
   return goes === "any" && fixedOf(ctx, id) !== null ? "nowhere" : goes;
 }
-function holdProblem(ctx, thing, holder) {
-  const e = own(ctx.state.entities, thing);
+function holdProblem(ctx, thing2, holder) {
+  const e = own(ctx.state.entities, thing2);
   const h = own(ctx.state.entities, holder);
   if (!e || !h)
     return null;
   const as = holdsAs(ctx, holder);
   if (as === null)
     return `${h.name} can't hold anything`;
-  const goes = goesIn(ctx, thing);
-  const fixed = fixedOf(ctx, thing);
+  const goes = goesIn(ctx, thing2);
+  const fixed = fixedOf(ctx, thing2);
   if (goes === "nowhere")
     return fixed === "part" ? `${e.name} is built into what holds it` : fixed === "fixed" ? `${e.name} is fixed in place` : `${e.name} isn't a thing that goes inside anything`;
   if (goes === "vehicle" && as !== "vehicle")
@@ -26090,10 +26930,10 @@ function grants(state) {
     for (const r of own(state.entities, borrower)?.relations ?? []) {
       if (r.type !== "uses")
         continue;
-      const thing = own(state.entities, r.to);
-      if (!thing)
+      const thing2 = own(state.entities, r.to);
+      if (!thing2)
         continue;
-      const owner = typeof thing.fields.owner === "string" ? thing.fields.owner : null;
+      const owner = typeof thing2.fields.owner === "string" ? thing2.fields.owner : null;
       out.push({ thing: r.to, borrower, owner, until: r.until ?? null, overdue: r.until !== undefined && r.until <= state.clock });
     }
   }
@@ -26485,8 +27325,8 @@ function authoredMoves(world) {
       note(things, e.kind, `${holder.name} holds ${e.name}`);
     }
   }
-  for (const { path, effects } of effectLists(world)) {
-    const action = path.startsWith("actions.") ? own(world.actions, path.split(".")[1] ?? "") : undefined;
+  for (const { path: path2, effects } of effectLists(world)) {
+    const action = path2.startsWith("actions.") ? own(world.actions, path2.split(".")[1] ?? "") : undefined;
     const named = (arg) => {
       const at = argName(arg);
       if (!at)
@@ -26508,13 +27348,13 @@ function authoredMoves(world) {
         if (!action || !carried || !requiresCarried(action, carried.name))
           continue;
       }
-      const by = action?.label ?? path;
+      const by = action?.label ?? path2;
       const into = named(spec.args?.[move2.into]);
       if (into)
         note(holders, into.kind, `${by} gives things to ${into.words}`);
-      const thing = move2.thing === undefined ? null : named(spec.args?.[move2.thing]);
-      if (thing)
-        note(things, thing.kind, `${by} moves ${thing.words}`);
+      const thing2 = move2.thing === undefined ? null : named(spec.args?.[move2.thing]);
+      if (thing2)
+        note(things, thing2.kind, `${by} moves ${thing2.words}`);
     }
   }
   return { things, holders };
@@ -26527,8 +27367,8 @@ function presentGearLines(ctx, scope) {
   const here = placeOfEntity(ctx.state, pov);
   const lines = [];
   for (const who of Object.keys(ctx.state.entities).sort()) {
-    const person = own(ctx.state.entities, who);
-    if (!person || who === pov || !kindIs(ctx.registry, ctx.world, person.kind, "person") || isGone(ctx.state, who) || !see(pov, who) || !together(ctx.world, here, placeOfEntity(ctx.state, who)))
+    const person3 = own(ctx.state.entities, who);
+    if (!person3 || who === pov || !kindIs(ctx.registry, ctx.world, person3.kind, "person") || isGone(ctx.state, who) || !see(pov, who) || !together(ctx.world, here, placeOfEntity(ctx.state, who)))
       continue;
     const level = Math.max(1, ctx.levelOf(who, "gear"));
     const worn = wornBy(ctx, who);
@@ -26541,16 +27381,16 @@ function presentGearLines(ctx, scope) {
     const heldSeen = held2.filter((id) => see(pov, id));
     const parts = [...wornSeen.length > 0 ? [`wears ${say(wornSeen)}`] : [], ...heldSeen.length > 0 ? [`carries ${say(heldSeen)}`] : []];
     if (parts.length > 0)
-      lines.push({ text: `${person.name} ${parts.join("; ")}.`, known: "pov" });
+      lines.push({ text: `${person3.name} ${parts.join("; ")}.`, known: "pov" });
     if (scope === "player")
       continue;
     const hidden = [...worn, ...held2].filter((id) => !see(pov, id));
     const theirs = hidden.filter((id) => see(who, id));
     const gms = hidden.filter((id) => !see(who, id));
     if (theirs.length > 0)
-      lines.push({ text: `${person.name} has ${say(theirs)}.`, known: "scene", who: person.name });
+      lines.push({ text: `${person3.name} has ${say(theirs)}.`, known: "scene", who: person3.name });
     if (scope === "gm" && gms.length > 0)
-      lines.push({ text: `${person.name} has ${say(gms)}.`, known: "gm" });
+      lines.push({ text: `${person3.name} has ${say(gms)}.`, known: "gm" });
   }
   return lines;
 }
@@ -26623,21 +27463,21 @@ function cashGift(text3, currency) {
   const word = new RegExp(`^${article}([a-z]+)(?:[ -]${unit3})?${tail}$`).exec(t)?.[1];
   return word !== undefined && hasOwn(CASH_WORDS, word) ? { amount: CASH_WORDS[word] ?? null } : null;
 }
-function gearLevel(ctx, thing, to) {
+function gearLevel(ctx, thing2, to) {
   const toEntity = to ? own(ctx.state.entities, to) : undefined;
   if (to && toEntity && kindIs(ctx.registry, ctx.world, toEntity.kind, "person"))
     return ctx.levelOf(to, "gear");
-  const owner = own(ctx.state.entities, thing)?.fields.owner;
+  const owner = own(ctx.state.entities, thing2)?.fields.owner;
   return ctx.levelOf(typeof owner === "string" && own(ctx.state.entities, owner) ? owner : ctx.world.pov, "gear");
 }
-function detach(ctx, thing) {
-  const e = own(ctx.state.entities, thing);
+function detach(ctx, thing2) {
+  const e = own(ctx.state.entities, thing2);
   const out = [];
   if (!e)
     return out;
   for (const r of e.relations)
     if (r.type === "in" || r.type === "worn_by" || r.type === "equipped")
-      out.push({ type: "unlink", rel: r.type, from: thing, to: r.to });
+      out.push({ type: "unlink", rel: r.type, from: thing2, to: r.to });
   return out;
 }
 var transfer2 = (ctx, item, to, told = false) => {
@@ -26668,19 +27508,19 @@ var transfer2 = (ctx, item, to, told = false) => {
   out.push(...optionalService(ctx, "space.lay")?.(ctx, item, null, null) ?? []);
   return out;
 };
-var drop = (ctx, item, place) => {
+var drop = (ctx, item, place2) => {
   if (!own(ctx.state.entities, item))
     return reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
-  if (!own(ctx.world.places, place))
-    return reject9("missing_place", `no place ${labelOf(ctx, place)}`);
+  if (!own(ctx.world.places, place2))
+    return reject9("missing_place", `no place ${labelOf(ctx, place2)}`);
   if (gearLevel(ctx, item) === 0)
     return [];
-  return [...detach(ctx, item), { type: "set", entity: item, field: "place", value: place }, ...optionalService(ctx, "space.lay")?.(ctx, item, place, holderOf(ctx.state, item)) ?? []];
+  return [...detach(ctx, item), { type: "set", entity: item, field: "place", value: place2 }, ...optionalService(ctx, "space.lay")?.(ctx, item, place2, holderOf(ctx.state, item)) ?? []];
 };
-function endLoans(ctx, thing) {
-  const out = grants(ctx.state).filter((g) => g.thing === thing).map((g) => ({ type: "unlink", rel: "uses", from: g.borrower, to: thing }));
-  if (own(ctx.state.entities, thing)?.fields.overdue === true)
-    out.push({ type: "set", entity: thing, field: "overdue", value: false });
+function endLoans(ctx, thing2) {
+  const out = grants(ctx.state).filter((g) => g.thing === thing2).map((g) => ({ type: "unlink", rel: "uses", from: g.borrower, to: thing2 }));
+  if (own(ctx.state.entities, thing2)?.fields.overdue === true)
+    out.push({ type: "set", entity: thing2, field: "overdue", value: false });
   return out;
 }
 var give = (ctx, item, from, to, told = false) => {
@@ -26751,8 +27591,8 @@ var spawn = (ctx, spec) => {
   if (relations.length === 0 && spec.place)
     fields.place = spec.place;
   const kind = spec.kind ?? (row && typeof row.capacity_l === "number" ? "container" : "item");
-  const entity = { id, kind, name: spec.name, tier: "background", fields, relations };
-  return [{ type: "spawn", entity }];
+  const entity2 = { id, kind, name: spec.name, tier: "background", fields, relations };
+  return [{ type: "spawn", entity: entity2 }];
 };
 function usedUp(ctx, item, done) {
   const e = own(ctx.state.entities, item);
@@ -26761,15 +27601,15 @@ function usedUp(ctx, item, done) {
 function search(ctx, who, target) {
   if (!own(ctx.state.entities, who))
     return reject9("missing_entity", `no searcher ${labelOf(ctx, who)}`);
-  const place = placeOfEntity(ctx.state, who);
+  const place2 = placeOfEntity(ctx.state, who);
   if (target !== null) {
     if (!own(ctx.state.entities, target))
       return reject9("missing_entity", `no ${labelOf(ctx, target)} to search`);
-    if (placeOfEntity(ctx.state, target) !== place)
+    if (placeOfEntity(ctx.state, target) !== place2)
       return reject9("not_here", `${labelOf(ctx, target)} isn't here`);
-  } else if (!place)
+  } else if (!place2)
     return reject9("no_place", `${labelOf(ctx, who)} is nowhere`);
-  const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place).sort();
+  const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place2).sort();
   return found.filter((id) => id !== who && !isGone(ctx.state, id) && isDiscoverable(ctx.world, ctx.state, id) && !knows(ctx.state, who, id)).map((id) => ({ type: "link", rel: "knows", from: who, to: id }));
 }
 function heldItem(ctx, item, from) {
@@ -26780,9 +27620,9 @@ function heldItem(ctx, item, from) {
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
 }
 function lyingNamed(ctx, item, who) {
-  const place = placeOfEntity(ctx.state, who);
+  const place2 = placeOfEntity(ctx.state, who);
   const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
-  const fits = Object.keys(ctx.state.entities).filter((id) => !isGone(ctx.state, id) && !heldByPerson(ctx, id) && placeOfEntity(ctx.state, id) === place && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
+  const fits = Object.keys(ctx.state.entities).filter((id) => !isGone(ctx.state, id) && !heldByPerson(ctx, id) && placeOfEntity(ctx.state, id) === place2 && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
 }
 function heldByPerson(ctx, id) {
@@ -26807,8 +27647,8 @@ var claim = (ctx, c) => {
     return reject9("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
   const name = c.name.trim();
   if (c.existing && own(ctx.state.entities, c.existing)) {
-    const place2 = placeOfEntity(ctx.state, c.by);
-    const moved = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place2 ? drop(ctx, c.existing, place2) : reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    const place3 = placeOfEntity(ctx.state, c.by);
+    const moved = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place3 ? drop(ctx, c.existing, place3) : reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
     return Array.isArray(moved) ? { entity: c.existing, events: moved } : moved;
   }
   if (c.at === "held") {
@@ -26819,15 +27659,15 @@ var claim = (ctx, c) => {
     if (held2)
       return { entity: held2, events: [] };
   }
-  const place = placeOfEntity(ctx.state, c.by);
-  if (c.at === "here" && !place)
+  const place2 = placeOfEntity(ctx.state, c.by);
+  if (c.at === "here" && !place2)
     return reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
   const row = c.like ? rowOf(ctx, "gear.items", c.like) ?? rowOf(ctx, "gear.containers", c.like) : undefined;
   const fields = { claimed: true, notable: true };
   if (c.at === "held")
     fields.owner = c.by;
-  else if (place)
-    fields.place = place;
+  else if (place2)
+    fields.place = place2;
   if (c.catalog)
     fields.catalog = c.catalog;
   if (c.category)
@@ -26873,44 +27713,44 @@ var takePiece = (ctx, kit, piece, to) => {
   }
   return [...spawned, { type: "set", entity: kit, field: "taken", value: { ...taken, [p.name]: (own(taken, p.name) ?? 0) + 1 } }];
 };
-var lend = (ctx, thing, to, until) => {
-  const e = own(ctx.state.entities, thing);
+var lend = (ctx, thing2, to, until) => {
+  const e = own(ctx.state.entities, thing2);
   if (!e)
-    return reject9("missing_entity", `no ${labelOf(ctx, thing)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, thing2)}`);
   if (!own(ctx.state.entities, to))
     return reject9("missing_entity", `no ${labelOf(ctx, to)}`);
   if (!Number.isFinite(until) || until <= ctx.state.clock)
     return reject9("bad_until", "a loan needs a future end");
   const out = [];
-  if (typeof e.fields.place !== "string" || holderOf(ctx.state, thing)) {
-    const moved = transfer2(ctx, thing, to);
+  if (typeof e.fields.place !== "string" || holderOf(ctx.state, thing2)) {
+    const moved = transfer2(ctx, thing2, to);
     if (!Array.isArray(moved))
       return moved;
     out.push(...moved);
   }
   if (e.fields.overdue === true)
-    out.push({ type: "set", entity: thing, field: "overdue", value: false });
-  out.push({ type: "link", rel: "uses", from: to, to: thing, until: Math.round(until) });
+    out.push({ type: "set", entity: thing2, field: "overdue", value: false });
+  out.push({ type: "link", rel: "uses", from: to, to: thing2, until: Math.round(until) });
   return out;
 };
-var retrieve = (ctx, thing) => {
-  const e = own(ctx.state.entities, thing);
+var retrieve = (ctx, thing2) => {
+  const e = own(ctx.state.entities, thing2);
   if (!e)
-    return reject9("missing_entity", `no ${labelOf(ctx, thing)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, thing2)}`);
   const out = [];
   for (const g of grants(ctx.state))
-    if (g.thing === thing)
-      out.push({ type: "unlink", rel: "uses", from: g.borrower, to: thing });
+    if (g.thing === thing2)
+      out.push({ type: "unlink", rel: "uses", from: g.borrower, to: thing2 });
   const owner = typeof e.fields.owner === "string" ? e.fields.owner : null;
   if (typeof e.fields.home === "string" && own(ctx.world.places, e.fields.home))
-    out.push(...detach(ctx, thing), { type: "set", entity: thing, field: "place", value: e.fields.home });
+    out.push(...detach(ctx, thing2), { type: "set", entity: thing2, field: "place", value: e.fields.home });
   else if (owner && own(ctx.state.entities, owner)) {
-    const moved = transfer2(ctx, thing, owner);
+    const moved = transfer2(ctx, thing2, owner);
     if (Array.isArray(moved))
       out.push(...moved);
   }
   if (e.fields.overdue === true || out.some((x) => x.type === "unlink"))
-    out.push({ type: "set", entity: thing, field: "overdue", value: false });
+    out.push({ type: "set", entity: thing2, field: "overdue", value: false });
   return out;
 };
 var wear = (ctx, item, wearer, slot) => {
@@ -26966,11 +27806,11 @@ var gearPack = {
     r.query("gear.containment", (ctx, id) => ({ holds: holdsAs(ctx, id), goes: goesIn(ctx, id) }));
     r.formula("has_item", (ctx, holder, what) => hasItem(ctx, String(holder ?? ""), String(what ?? "")));
     r.formula("carries", (ctx, holder, item) => isInside(ctx.state, String(item ?? ""), String(holder ?? "")));
-    r.formula("movable", (ctx, thing) => fixedOf(ctx, String(thing ?? "")) === null);
+    r.formula("movable", (ctx, thing2) => fixedOf(ctx, String(thing2 ?? "")) === null);
     r.formula("carried_kg", (ctx, holder) => carriedBy(ctx.state, String(holder ?? "")).filter((id) => holderOf(ctx.state, id) === holder).reduce((a, id) => a + weightOf(ctx.state, id), 0) / 1000);
     r.formula("kit_present", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.present ?? 0);
     r.formula("kit_complete", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.complete ?? false);
-    r.formula("lent_out", (ctx, thing) => grants(ctx.state).some((g) => g.thing === thing));
+    r.formula("lent_out", (ctx, thing2) => grants(ctx.state).some((g) => g.thing === thing2));
     const wrap = (type, args, f) => r.effect({ type, args, resolve: (a, ctx) => f(a, ctx) });
     wrap("gear.transfer", ["item", "to"], (a, ctx) => {
       const item = strOf(a.item);
@@ -27072,12 +27912,12 @@ var gearPack = {
       step(slot, ctx) {
         const out = [];
         for (const g of grants(ctx.state)) {
-          const thing = own(ctx.state.entities, g.thing);
-          if (!thing || g.until === null || g.until > slot.end || thing.fields.overdue === true)
+          const thing2 = own(ctx.state.entities, g.thing);
+          if (!thing2 || g.until === null || g.until > slot.end || thing2.fields.overdue === true)
             continue;
           out.push({ type: "set", entity: g.thing, field: "overdue", value: true });
           const borrower = own(ctx.state.entities, g.borrower)?.name ?? g.borrower;
-          out.push({ type: ENGINE_EVENTS.signal, data: { class: "overdue", text: `${thing.name} is overdue from ${borrower}.`, ...g.owner ? { entity: g.owner } : {} } });
+          out.push({ type: ENGINE_EVENTS.signal, data: { class: "overdue", text: `${thing2.name} is overdue from ${borrower}.`, ...g.owner ? { entity: g.owner } : {} } });
         }
         return out;
       }
@@ -27085,15 +27925,15 @@ var gearPack = {
     r.materializer({
       domain: "gear",
       version: 1,
-      materialize(entity, ctx, rng) {
-        const e = own(ctx.state.entities, entity);
-        if (!e || ctx.levelOf(entity, "gear") < 2)
+      materialize(entity2, ctx, rng) {
+        const e = own(ctx.state.entities, entity2);
+        if (!e || ctx.levelOf(entity2, "gear") < 2)
           return [];
         const out = [];
         if (kindIs(ctx.registry, ctx.world, e.kind, "person")) {
-          const hasWallet = carriedBy(ctx.state, entity).some((id) => own(ctx.state.entities, id)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(ctx.state.entities, id)?.name ?? ""));
+          const hasWallet = carriedBy(ctx.state, entity2).some((id) => own(ctx.state.entities, id)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(ctx.state.entities, id)?.name ?? ""));
           if (!hasWallet) {
-            const w = spawn(ctx, { name: "Wallet", owner: entity, holder: entity, catalog: "wallet", kind: "container", salt: "materialize" });
+            const w = spawn(ctx, { name: "Wallet", owner: entity2, holder: entity2, catalog: "wallet", kind: "container", salt: "materialize" });
             if (Array.isArray(w))
               out.push(...w);
           }
@@ -27106,11 +27946,11 @@ var gearPack = {
           for (let i = 0;i < n; i++) {
             const id = rng.pick(rows);
             const row = rowOf(ctx, "gear.items", id);
-            const made = spawn(ctx, { name: strOf(row?.name, id), owner: typeof e.fields.owner === "string" ? e.fields.owner : null, holder: entity, catalog: id, salt: `stock:${i}` });
+            const made = spawn(ctx, { name: strOf(row?.name, id), owner: typeof e.fields.owner === "string" ? e.fields.owner : null, holder: entity2, catalog: id, salt: `stock:${i}` });
             if (Array.isArray(made))
               out.push(...made);
           }
-          out.push({ type: "set", entity, field: "sampled", value: true });
+          out.push({ type: "set", entity: entity2, field: "sampled", value: true });
         }
         return out;
       }
@@ -27362,14 +28202,14 @@ function buildGarageView(ctx) {
     const grant = Object.keys(ctx.state.entities).sort().map((b) => ({ b, r: own(ctx.state.entities, b)?.relations.find((x) => x.type === "uses" && x.to === id) })).find((x) => x.r);
     if (e.fields.owner !== pov && grant?.b !== pov)
       continue;
-    const place = placeOfEntity(ctx.state, id);
+    const place2 = placeOfEntity(ctx.state, id);
     const cls = rowOf(ctx, "vehicles.classes", strOf(e.fields.class));
     const v = {
       id,
       name: e.name,
       kind: strOf(cls?.domain, "road"),
       status: level <= 1 ? e.fields.status === "broken" ? "broken" : "runs fine" : strOf(e.fields.status, "ok").replace(/_/g, " "),
-      place: place ? canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? own(ctx.world.places, place)?.name ?? place : HIDDEN_PLACE_NAME : null
+      place: place2 ? canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? own(ctx.world.places, place2)?.name ?? place2 : HIDDEN_PLACE_NAME : null
     };
     if (level >= 2) {
       v.fuelPct = Math.round(numOf(e.fields.fuel_pct, 100));
@@ -27524,7 +28364,7 @@ function vehicleLines(ctx, scope) {
   const here = placeOfEntity(ctx.state, pov);
   const site = siteOf(ctx.world, here);
   const ownerName = (owner) => see(pov, owner) ? own(ctx.state.entities, owner)?.name ?? "someone" : "someone";
-  const placeText = (place) => !place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere";
+  const placeText = (place2) => !place2 ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? `at ${own(ctx.world.places, place2)?.name ?? place2}` : "somewhere";
   const classText = (v, kind) => {
     const name = classRow(ctx, v)?.name;
     if (typeof name !== "string" || name.trim() === "" || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "class"))
@@ -27546,17 +28386,17 @@ function vehicleLines(ctx, scope) {
       continue;
     const owner = accessOf(ctx.state, v).owners[0]?.party ?? null;
     const grant = grants2.get(v);
-    const place = placeOfEntity(ctx.state, v);
+    const place2 = placeOfEntity(ctx.state, v);
     const whose = owner === pov ? "yours" : level >= 2 && owner !== null && isMemberOf(ctx.state, pov, owner) ? `${ownerName(owner)}'s` : level >= 3 && grant ? `${owner ? `${ownerName(owner)}'s, ` : ""}${grant.until !== undefined ? `lent to you until ${formatClock(cal, grant.until)}` : "assigned to you"}` : null;
     if (whose === null) {
-      if (site !== null && siteOf(ctx.world, place) === site)
-        others.push({ v, owner, place });
+      if (site !== null && siteOf(ctx.world, place2) === site)
+        others.push({ v, owner, place: place2 });
       continue;
     }
     if (owner !== pov && !see(pov, v))
       continue;
-    const elsewhere = site !== null && siteOf(ctx.world, place) !== site;
-    const head = [placeText(place), ...level === 1 ? [] : [whose], ...elsewhere ? ["away from here"] : []];
+    const elsewhere = site !== null && siteOf(ctx.world, place2) !== site;
+    const head = [placeText(place2), ...level === 1 ? [] : [whose], ...elsewhere ? ["away from here"] : []];
     const parts = classText(v, e.kind);
     if (level === 1)
       parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
@@ -27568,7 +28408,7 @@ function vehicleLines(ctx, scope) {
       if (e.fields.status !== "ok" && e.fields.status !== undefined)
         parts.push(String(e.fields.status).replace(/_/g, " "));
     }
-    parts.push(...thingDetails(ctx, v, (field) => TOLD_APART[field] === true || field === "condition" && level < 3));
+    parts.push(...thingDetails(ctx, v, (field2) => TOLD_APART[field2] === true || field2 === "condition" && level < 3));
     const interval = level >= 4 ? serviceInterval(ctx, v) : null;
     if (interval !== null && canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "last_service")) {
       const unit3 = domainOf(ctx, v) === "road" ? "mi" : "h";
@@ -27589,7 +28429,7 @@ function vehicleLines(ctx, scope) {
   }
   const seen = others.filter((o) => see(pov, o.v)).map((o) => {
     const e = own(ctx.state.entities, o.v);
-    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field, def) => TOLD_APART[field] === true || def.domain !== undefined)] : [];
+    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field2, def) => TOLD_APART[field2] === true || def.domain !== undefined)] : [];
     const description = thingDescription(ctx, o.v);
     return { text: `${e?.name ?? o.v}: ${[`${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}`, ...looks].join("; ")}.${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
   });
@@ -27976,20 +28816,20 @@ var vehiclesPack = {
     r.materializer({
       domain: "vehicles",
       version: 1,
-      materialize(entity, ctx, rng) {
-        const e = own(ctx.state.entities, entity);
-        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, entity) < 2)
+      materialize(entity2, ctx, rng) {
+        const e = own(ctx.state.entities, entity2);
+        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, entity2) < 2)
           return [];
         const out = [];
-        if (typeof e.fields.fuel_pct !== "number" && burnsFuel(ctx, entity))
-          out.push({ type: "set", entity, field: "fuel_pct", value: rng.int(40, 90) });
-        if (ownerLevel(ctx, entity) >= 3) {
-          if (domainOf(ctx, entity) === "road" && typeof e.fields.odometer_mi !== "number")
-            out.push({ type: "set", entity, field: "odometer_mi", value: rng.int(15000, 120000) });
-          if (domainOf(ctx, entity) !== "road" && typeof e.fields.engine_hours !== "number")
-            out.push({ type: "set", entity, field: "engine_hours", value: rng.int(50, 900) });
+        if (typeof e.fields.fuel_pct !== "number" && burnsFuel(ctx, entity2))
+          out.push({ type: "set", entity: entity2, field: "fuel_pct", value: rng.int(40, 90) });
+        if (ownerLevel(ctx, entity2) >= 3) {
+          if (domainOf(ctx, entity2) === "road" && typeof e.fields.odometer_mi !== "number")
+            out.push({ type: "set", entity: entity2, field: "odometer_mi", value: rng.int(15000, 120000) });
+          if (domainOf(ctx, entity2) !== "road" && typeof e.fields.engine_hours !== "number")
+            out.push({ type: "set", entity: entity2, field: "engine_hours", value: rng.int(50, 900) });
           if (typeof e.fields.condition !== "number")
-            out.push({ type: "set", entity, field: "condition", value: rng.int(60, 95) });
+            out.push({ type: "set", entity: entity2, field: "condition", value: rng.int(60, 95) });
         }
         return out;
       }
@@ -28103,8 +28943,8 @@ function climateOf(ctx, region) {
 function climateSeason(climate, month) {
   return climate.seasons.find((s) => s.months.includes(month)) ?? climate.seasons[0] ?? null;
 }
-function regionOf2(ctx, place) {
-  let cur = place ?? undefined;
+function regionOf2(ctx, place2) {
+  let cur = place2 ?? undefined;
   for (let guard = 0;cur && guard < 32; guard++) {
     const r = own(ctx.world.places, cur)?.fields.region;
     if (typeof r === "string" && own(ctx.state.entities, r))
@@ -28113,8 +28953,8 @@ function regionOf2(ctx, place) {
   }
   return Object.keys(ctx.state.entities).sort().find((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "region")) ?? null;
 }
-function stateAt(ctx, place) {
-  const region = regionOf2(ctx, place);
+function stateAt(ctx, place2) {
+  const region = regionOf2(ctx, place2);
   if (!region)
     return null;
   const id = strOf(own(ctx.state.entities, region)?.fields.weather);
@@ -28190,19 +29030,19 @@ var weatherPack = {
   requires: ["space"],
   register(r) {
     r.kind(REGION);
-    r.query("weather.sky", (ctx, place) => {
+    r.query("weather.sky", (ctx, place2) => {
       if (ctx.levelOf(ctx.world.pov, "weather") < 2)
         return null;
-      const region = regionOf2(ctx, place);
+      const region = regionOf2(ctx, place2);
       return region ? strOf(own(ctx.state.entities, region)?.fields.weather) || null : null;
     });
-    r.query("weather.travel_factor", (ctx, place, mode) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? 1 : own(stateAt(ctx, place)?.travel ?? {}, mode) ?? 1);
-    r.query("weather.closed_modes", (ctx, place) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? [] : stateAt(ctx, place)?.closes ?? []);
+    r.query("weather.travel_factor", (ctx, place2, mode) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? 1 : own(stateAt(ctx, place2)?.travel ?? {}, mode) ?? 1);
+    r.query("weather.closed_modes", (ctx, place2) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? [] : stateAt(ctx, place2)?.closes ?? []);
     r.query("weather.season", (ctx, at) => ctx.levelOf(ctx.world.pov, "weather") < 1 ? null : seasonAt(ctx, at));
-    r.query("weather.foul", (ctx, place) => {
+    r.query("weather.foul", (ctx, place2) => {
       if (ctx.levelOf(ctx.world.pov, "weather") < 2)
         return null;
-      const st = stateAt(ctx, place);
+      const st = stateAt(ctx, place2);
       return st ? st.closes.length > 0 || Object.keys(st.travel).length > 0 : null;
     });
     r.query("weather.fix", (ctx) => {
@@ -28213,8 +29053,8 @@ var weatherPack = {
         return null;
       return { entity: region, field: "weather", type: "text", value: strOf(own(ctx.state.entities, region)?.fields.weather, "clear"), options: climateOf(ctx, region).states.map((s) => ({ value: s.id, label: s.label })) };
     });
-    r.formula("weather", (ctx, place) => {
-      const region = regionOf2(ctx, typeof place === "string" && place !== "" ? place : placeOfEntity(ctx.state, ctx.world.pov));
+    r.formula("weather", (ctx, place2) => {
+      const region = regionOf2(ctx, typeof place2 === "string" && place2 !== "" ? place2 : placeOfEntity(ctx.state, ctx.world.pov));
       return region ? strOf(own(ctx.state.entities, region)?.fields.weather, "clear") : "";
     });
     r.formula("season", (ctx) => seasonAt(ctx));
@@ -28475,15 +29315,15 @@ function anchorAfter(ctx, from, to, deltas, at) {
   return out;
 }
 function writeRegard(state2, from, to, anchor, entry) {
-  const entity = own(state2.entities, from);
-  if (!entity)
+  const entity2 = own(state2.entities, from);
+  if (!entity2)
     return;
   const prev = relationOf(state2, from, to) ?? {};
   const fields = { ...prev, ...anchor };
   if (entry)
     fields.history = [...Array.isArray(prev.history) ? prev.history.slice(-(HISTORY - 1)) : [], entry];
-  entity.relations = entity.relations.filter((r) => !(r.type === "regard" && r.to === to));
-  entity.relations.push({ type: "regard", to, fields });
+  entity2.relations = entity2.relations.filter((r) => !(r.type === "regard" && r.to === to));
+  entity2.relations.push({ type: "regard", to, fields });
 }
 var regardEvent = {
   type: "relationships.regard",
@@ -28920,7 +29760,7 @@ function occasionOf(ctx, who, day2) {
     return other !== who && !!e && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other) && birthdayOn(cal, e.fields.birthday, date) && regard(ctx, who, other) >= FOND;
   }) : [];
   const home = own(ctx.state.entities, who)?.fields.home;
-  const place = typeof home === "string" && own(ctx.world.places, home) ? home : null;
+  const place2 = typeof home === "string" && own(ctx.world.places, home) ? home : null;
   return {
     weekend,
     dayOff: weekend || holidays.some((h) => h.dayOff),
@@ -28928,7 +29768,7 @@ function occasionOf(ctx, who, day2) {
     birthday: birthdayOn(cal, own(ctx.state.entities, who)?.fields.birthday, date),
     friends,
     season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day2, 12 * 60)) ?? null,
-    foul: place ? optionalQuery(ctx, "weather.foul")?.(ctx, place) ?? null : null
+    foul: place2 ? optionalQuery(ctx, "weather.foul")?.(ctx, place2) ?? null : null
   };
 }
 
@@ -28953,9 +29793,9 @@ function chatFollow(state2, who) {
   return mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips };
 }
 function chatRoles(state2) {
-  return Object.keys(objOf(sliceOf(state2, "castlife").follow)).sort().flatMap((entity) => {
-    const role = chatFollow(state2, entity)?.role ?? null;
-    return role === null ? [] : [{ entity, role }];
+  return Object.keys(objOf(sliceOf(state2, "castlife").follow)).sort().flatMap((entity2) => {
+    const role = chatFollow(state2, entity2)?.role ?? null;
+    return role === null ? [] : [{ entity: entity2, role }];
   });
 }
 function chatBlocks(state2, who) {
@@ -29212,7 +30052,7 @@ function withPov(ctx, who) {
 function routineLived(ctx, who, skip) {
   return routineRole(ctx, who) === "enforced" || skip && skipLifeOf(ctx, who) === "routine";
 }
-function routineYields(ctx, who, field, expected, opts) {
+function routineYields(ctx, who, field2, expected, opts) {
   const pov = who === ctx.world.pov;
   const enforced = routineRole(ctx, who) === "enforced";
   if ((pov || enforced || opts.skip !== true) && opts.scene !== false && withPov(ctx, who))
@@ -29225,7 +30065,7 @@ function routineYields(ctx, who, field, expected, opts) {
     if ((!enforced || tier !== "background" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true)
       return true;
   }
-  const current = own(ctx.state.entities, who)?.fields[field];
+  const current = own(ctx.state.entities, who)?.fields[field2];
   const diverged = expected === null || expected === undefined ? !opts.edge : current !== undefined && current !== expected;
   if (!opts.edge)
     return diverged;
@@ -29249,8 +30089,8 @@ function routineIssues(world, reg, id, value, state2) {
   }
   const def = value;
   const issues = [];
-  const warn = (code, path, message) => {
-    issues.push({ severity: "warning", code, path, message });
+  const warn = (code, path2, message) => {
+    issues.push({ severity: "warning", code, path: path2, message });
   };
   if (def.id !== id)
     warn(ROUTINE_LINT.shape, `${at}.id`, `Routine ${id} is saved under another id (${def.id}).`);
@@ -29264,45 +30104,45 @@ function routineIssues(world, reg, id, value, state2) {
   const holidays = new Set(world.calendar.holidays.map((h) => h.id));
   const scenes = new Set(Object.values(world.places).flatMap((p) => p.sceneType ? [p.sceneType] : []));
   def.blocks.forEach((entry, i) => {
-    const path = `${at}.blocks.${i}`;
+    const path2 = `${at}.blocks.${i}`;
     const source = entry.source ?? def.source;
     if (source?.type === "lore" && !own(world.lore, source.entry))
-      warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on lore entry ${source.entry}, which the world doesn't have.`);
+      warn(ROUTINE_LINT.source, `${path2}.source`, `Routine ${id}, block ${entry.id}: rests on lore entry ${source.entry}, which the world doesn't have.`);
     if (source?.type === "sheet" && !own(world.entities, source.entity))
-      warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on ${source.entity}'s sheet, who isn't in the world.`);
+      warn(ROUTINE_LINT.source, `${path2}.source`, `Routine ${id}, block ${entry.id}: rests on ${source.entity}'s sheet, who isn't in the world.`);
     if (isOff(entry))
       return;
     const b = entry;
     const name = `Routine ${id}, block ${b.id}`;
     if (b.place !== undefined && typeof b.place === "object" && "place" in b.place && !own(world.places, b.place.place))
-      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: there's no place ${b.place.place}; it happens at home.`);
+      warn(ROUTINE_LINT.place, `${path2}.place`, `${name}: there's no place ${b.place.place}; it happens at home.`);
     if (b.place !== undefined && typeof b.place === "object" && "nearest" in b.place && !scenes.has(b.place.nearest))
-      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: no place has the scene type ${b.place.nearest}; it happens at home.`);
+      warn(ROUTINE_LINT.place, `${path2}.place`, `${name}: no place has the scene type ${b.place.nearest}; it happens at home.`);
     if (b.place === "with" && !b.company && b.days?.birthday !== "friend")
-      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: happens with its company, but names none; it happens at home.`);
+      warn(ROUTINE_LINT.place, `${path2}.place`, `${name}: happens with its company, but names none; it happens at home.`);
     if (b.company && isRecord(b.company.who)) {
       for (const p of selectorProblems(reg, world, b.company.who))
-        warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company ${p}.`);
+        warn(ROUTINE_LINT.company, `${path2}.company`, `${name}: its company ${p}.`);
       if (selectEntities(reg, world, state2, b.company.who).length === 0)
-        warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company matches nobody as a chat starts.`);
+        warn(ROUTINE_LINT.company, `${path2}.company`, `${name}: its company matches nobody as a chat starts.`);
     }
     for (const n of b.needs ?? [])
       if (!["hunger", "fatigue", "social", "fun"].includes(n))
-        warn(ROUTINE_LINT.need, `${path}.needs`, `${name}: there's no need ${n} (hunger, fatigue, social, fun).`);
+        warn(ROUTINE_LINT.need, `${path2}.needs`, `${name}: there's no need ${n} (hunger, fatigue, social, fun).`);
     for (const h of [...b.days?.holidays ?? [], ...b.days?.except ?? []])
       if (!holidays.has(h))
-        warn(ROUTINE_LINT.days, `${path}.days`, `${name}: the calendar has no holiday ${h}.`);
+        warn(ROUTINE_LINT.days, `${path2}.days`, `${name}: the calendar has no holiday ${h}.`);
     if (b.days?.weekdays?.length === 0)
-      warn(ROUTINE_LINT.days, `${path}.days`, `${name}: lists no weekdays, so it's never on.`);
+      warn(ROUTINE_LINT.days, `${path2}.days`, `${name}: lists no weekdays, so it's never on.`);
     if (b.window) {
       const span = windowSpan(b.window);
       if (span.to - span.from + b.minutes > MINUTES_PER_DAY * 2)
-        warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window and length run past the next day.`);
+        warn(ROUTINE_LINT.window, `${path2}.window`, `${name}: its window and length run past the next day.`);
       if (b.window.from === b.window.to)
-        warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window opens and closes at ${b.window.from}, which reads as a whole day; give it a span.`);
+        warn(ROUTINE_LINT.window, `${path2}.window`, `${name}: its window opens and closes at ${b.window.from}, which reads as a whole day; give it a span.`);
     }
     if (b.perWeek !== undefined && b.days?.weekdays && b.perWeek > b.days.weekdays.length)
-      warn(ROUTINE_LINT.days, `${path}.perWeek`, `${name}: ${b.perWeek} times a week, but it's on only ${b.days.weekdays.length} weekdays.`);
+      warn(ROUTINE_LINT.days, `${path2}.perWeek`, `${name}: ${b.perWeek} times a week, but it's on only ${b.days.weekdays.length} weekdays.`);
   });
   return issues;
 }
@@ -29313,7 +30153,7 @@ function routinesLint(world, reg, state2) {
     issues.push(...routineIssues(world, reg, id, own(raw, id), state2));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
   const known = ROUTINE_SETTING_VALUES;
-  const warn = (path, message) => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
+  const warn = (path2, message) => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path2}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);
     if (!allowed)
@@ -29362,11 +30202,11 @@ function routinesLint(world, reg, state2) {
 function schedulesLint(world, reg, state2) {
   const issues = [];
   const time = /^([01]\d|2[0-4]):[0-5]\d$/;
-  const sourceIssue = (source, path, name) => {
+  const sourceIssue = (source, path2, name) => {
     if (source?.type === "lore" && !own(world.lore, source.entry))
-      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on lore entry ${source.entry}, which the world doesn't have.` });
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path: path2, message: `${name} rests on lore entry ${source.entry}, which the world doesn't have.` });
     if (source?.type === "sheet" && !own(world.entities, source.entity))
-      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on ${source.entity}'s sheet, who isn't in the world.` });
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path: path2, message: `${name} rests on ${source.entity}'s sheet, who isn't in the world.` });
   };
   for (const s of allSchedules(reg, world)) {
     if (!own(world.schedules, s.id))
@@ -29456,8 +30296,8 @@ function authored(ctx, who, start, end) {
       if (!close || typeof value !== "string" || close.at <= start || e.at >= end)
         continue;
       const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
-      const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
-      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind, option: `schedule:${s.id}` }, rank });
+      const place2 = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
+      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place: place2, reason: kind === "other" ? "commitment" : kind, kind, option: `schedule:${s.id}` }, rank });
     }
   }
   const routine = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
@@ -29523,8 +30363,8 @@ function precedence(a, b) {
   return b.priority - a.priority || a.made - b.made || a.id.localeCompare(b.id);
 }
 function planBlock(ctx, who, { p, played }, start, end) {
-  const place = p.where !== null && own(ctx.world.places, p.where) ? p.where : p.kind === "rest" ? homeOf(ctx, who) : null;
-  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place, reason: "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
+  const place2 = p.where !== null && own(ctx.world.places, p.where) ? p.where : p.kind === "rest" ? homeOf(ctx, who) : null;
+  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place: place2, reason: "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
 }
 function placed(ctx, who, l, tier, a, stronger) {
   if (tight(l))
@@ -29658,7 +30498,7 @@ function personKind(world, kind) {
 }
 function hiddenNames3(world) {
   const out = [];
-  const label = (name, secret, entity) => void out.push({ name, secret, ...entity !== undefined ? { entity } : {}, said: (text3) => namesAny(text3, [], [name]) });
+  const label = (name, secret, entity2) => void out.push({ name, secret, ...entity2 !== undefined ? { entity: entity2 } : {}, said: (text3) => namesAny(text3, [], [name]) });
   for (const e of Object.values(world.entities)) {
     const v = visibilityOf(e.visibility);
     if (v === "public")
@@ -29686,7 +30526,7 @@ function hiddenNames3(world) {
 }
 function cueIssues(world) {
   const issues = [];
-  const issue = (severity, path, message) => void issues.push({ severity, path, code: "castlife.cues", message });
+  const issue = (severity, path2, message) => void issues.push({ severity, path: path2, code: "castlife.cues", message });
   const secrets = [...Object.values(world.tracks).flatMap((t) => Object.values(t.stages).flatMap((s) => s.truth ? [s.truth] : [])), ...Object.values(world.lore).flatMap((l) => loreIsSecret(l) && typeof l.content === "string" ? lorePhrases(l.content) : [])];
   const hidden = hiddenNames3(world);
   for (const e of Object.values(world.entities)) {
@@ -29700,34 +30540,34 @@ function cueIssues(world) {
     if (e.cues.length > 0 && !personKind(world, e.kind))
       issue("warning", at, `${e.name} isn't a person, so its cues never show: the Stance section tells people.`);
     e.cues.forEach((raw, i) => {
-      const path = `${at}.${i}`;
+      const path2 = `${at}.${i}`;
       const text3 = isRecord(raw) && typeof raw.text === "string" ? raw.text.trim() : "";
       if (text3 === "")
-        return issue("error", `${path}.text`, `A cue of ${e.name}'s has no text: say what the narrator sees them do.`);
+        return issue("error", `${path2}.text`, `A cue of ${e.name}'s has no text: say what the narrator sees them do.`);
       const cue = readCue(raw);
       if (!cue)
-        return issue("error", path, `${e.name}'s cue "${text3}" needs exactly one secret it stands for: a lore entry, a track or a story flag.`);
+        return issue("error", path2, `${e.name}'s cue "${text3}" needs exactly one secret it stands for: a lore entry, a track or a story flag.`);
       const { kind, id } = cue.secret;
       if (kind === "lore") {
         const entry = own(world.lore, id);
         if (!entry)
-          issue("error", `${path}.lore`, `${e.name}'s cue "${text3}" is for lore "${id}", which this world doesn't have.`);
+          issue("error", `${path2}.lore`, `${e.name}'s cue "${text3}" is for lore "${id}", which this world doesn't have.`);
         else if (!loreIsSecret(entry))
-          issue("warning", `${path}.lore`, `${e.name}'s cue "${text3}" is for "${entry.title}", which isn't secret lore, so it never shows.`);
+          issue("warning", `${path2}.lore`, `${e.name}'s cue "${text3}" is for "${entry.title}", which isn't secret lore, so it never shows.`);
       } else if (kind === "track") {
-        const track = own(world.tracks, id);
-        if (!track)
-          issue("error", `${path}.track`, `${e.name}'s cue "${text3}" is for track "${id}", which this world doesn't have.`);
-        else if (visibilityOf(track.visibility) === "public" && !Object.values(track.stages).some((s) => s.truth))
-          issue("warning", `${path}.track`, `${e.name}'s cue "${text3}" is for "${track.label}", a public track with no truth to reveal, so it never shows.`);
+        const track2 = own(world.tracks, id);
+        if (!track2)
+          issue("error", `${path2}.track`, `${e.name}'s cue "${text3}" is for track "${id}", which this world doesn't have.`);
+        else if (visibilityOf(track2.visibility) === "public" && !Object.values(track2.stages).some((s) => s.truth))
+          issue("warning", `${path2}.track`, `${e.name}'s cue "${text3}" is for "${track2.label}", a public track with no truth to reveal, so it never shows.`);
       }
       const lower = text3.toLowerCase();
       const secret = secrets.find((s) => s.trim() !== "" && lower.includes(s.toLowerCase()));
       const named = secret === undefined ? hidden.find((h) => h.entity !== e.id && h.said(text3)) : undefined;
       if (secret !== undefined)
-        issue("error", `${path}.text`, `${e.name}'s cue "${text3}" gives away a secret ("${secret}"): a cue says how they act, never what they hide.`);
+        issue("error", `${path2}.text`, `${e.name}'s cue "${text3}" gives away a secret ("${secret}"): a cue says how they act, never what they hide.`);
       else if (named)
-        issue("warning", `${path}.text`, `${e.name}'s cue "${text3}" names "${named.name}", which the player may not know; it is left out while they don't.`);
+        issue("warning", `${path2}.text`, `${e.name}'s cue "${text3}" names "${named.name}", which the player may not know; it is left out while they don't.`);
     });
   }
   for (const t of Object.values(world.tracks)) {
@@ -29742,11 +30582,11 @@ function cueIssues(world) {
       const named = hidden.find((h) => h.entity !== owner.id && h.said(cue) && !(h.secret && h.name.length > 3 && lower.includes(h.name.toLowerCase()) && lower !== h.name.toLowerCase()));
       if (!named)
         continue;
-      const path = `tracks.${t.id}.stages.${stage}.cue`;
+      const path2 = `tracks.${t.id}.stages.${stage}.cue`;
       if (named.secret)
-        issue("error", path, `The cue of "${t.label}" at "${s.label}" gives away a secret ("${named.name}"): a cue says how someone acts, never who or what is hidden.`);
+        issue("error", path2, `The cue of "${t.label}" at "${s.label}" gives away a secret ("${named.name}"): a cue says how someone acts, never who or what is hidden.`);
       else
-        issue("warning", path, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
+        issue("warning", path2, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
     }
   }
   return issues;
@@ -29923,7 +30763,7 @@ function startBlock(ctx, who, p) {
   const named = keyword === "home" || keyword === "work" ? null : placeOf2(ctx, p.place);
   if (named === null && keyword !== "" && keyword !== "home" && keyword !== "work")
     return refuse("there's no such place");
-  const place = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : activity === "work" ? "work" : basic ? basic.place ?? "home" : "here";
+  const place2 = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : activity === "work" ? "work" : basic ? basic.place ?? "home" : "here";
   const company2 = [];
   for (const raw of Array.isArray(p.with) ? p.with : []) {
     const id2 = text3(raw);
@@ -29942,7 +30782,7 @@ function startBlock(ctx, who, p) {
     minutes,
     priority: STORY_PRIORITY,
     ...Object.keys(days).length > 0 ? { days } : {},
-    place,
+    place: place2,
     ...company2.length > 0 ? { company: { who: { ids: company2 } } } : {}
   };
 }
@@ -30154,12 +30994,12 @@ function usualRoutine(ctx, who, read) {
       continue;
     const { text: text4, start } = blockClause(cal, day2, block);
     let today2 = false;
-    let place = null;
+    let place2 = null;
     try {
       today2 = blockOnDay(ctx, who, block, day2);
-      place = blockPlace(ctx, who, block);
+      place2 = blockPlace(ctx, who, block);
     } catch {}
-    out.push({ text: text4, place, start, minutes: block.minutes, today: today2, private: block.private === true, own: from.level === "own" || from.level === "chat" });
+    out.push({ text: text4, place: place2, start, minutes: block.minutes, today: today2, private: block.private === true, own: from.level === "own" || from.level === "chat" });
   }
   const spans = new Map;
   for (const s of chatSchedulesIn(ctx)) {
@@ -30202,7 +31042,7 @@ function usualRoutine(ctx, who, read) {
   const rank = (c) => c.today && c.start + c.minutes > minute ? 0 : 1;
   return out.sort((a, b) => rank(a) - rank(b) || a.start - b.start || a.text.localeCompare(b.text));
 }
-function presentUsual(ctx, place) {
+function presentUsual(ctx, place2) {
   const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state2, pov);
@@ -30216,7 +31056,7 @@ function presentUsual(ctx, place) {
       continue;
     if (routineRole(ctx, id) === "off")
       continue;
-    const told = knownUsual(ctx, id, place, (t) => (safe ??= povSafe(ctx))(t)).slice(0, 3);
+    const told = knownUsual(ctx, id, place2, (t) => (safe ??= povSafe(ctx))(t)).slice(0, 3);
     if (told.length > 0)
       out.push({ id, name: e.name, told });
   }
@@ -30228,12 +31068,12 @@ function povSafe(ctx) {
   const namesHidden2 = hiddenNameCheck(reg, world, state2, world.pov);
   return (t) => findLeaks(t, secrets).length === 0 && !namesHidden2(t);
 }
-function knownUsual(ctx, who, place, safe) {
+function knownUsual(ctx, who, place2, safe) {
   const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
   const named = (p) => {
     const def = own(world.places, p);
-    return def && canSeePlace(reg, world, state2, pov, p) ? place(p, def.name) : null;
+    return def && canSeePlace(reg, world, state2, pov, p) ? place2(p, def.name) : null;
   };
   const clauses = usualRoutine(ctx, who, { place: named, activity: canSeeField(reg, world, state2, pov, who, "activity") }).filter((c) => !c.private && c.text !== "");
   if (clauses.length === 0)
@@ -30357,8 +31197,8 @@ function within3(dayStart, fromH, toH) {
 var AGENDA_OPTION = "agenda:";
 var AGENDA_ACTIVITY = "agenda";
 var INVITED_OPTION = "invited:";
-function publicTrack(world, track) {
-  return visibilityOf(own(world.tracks, track)?.visibility) === "public";
+function publicTrack(world, track2) {
+  return visibilityOf(own(world.tracks, track2)?.visibility) === "public";
 }
 function shownActivity(ctx, who, activity) {
   if (activity !== AGENDA_ACTIVITY)
@@ -30468,10 +31308,10 @@ function planFor(ctx, who, day2, rng, legacy = false) {
   const start = clockAt(cal, day2, 0);
   const end = start + MINUTES_PER_DAY;
   const fixed = commitments(ctx, who, start, end);
-  const person = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
+  const person3 = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
   const level = ctx.levelOf(who, "castlife");
-  const routine = !legacy && person ? routineDay(ctx, who, day2, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => needsMetBy(ctx, activity) }) : { fixed: [], options: [] };
-  const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day2, [...fixed, ...routine.fixed]);
+  const routine = !legacy && person3 ? routineDay(ctx, who, day2, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => needsMetBy(ctx, activity) }) : { fixed: [], options: [] };
+  const invited = legacy || !person3 ? [] : invitedBlocks(ctx, who, day2, [...fixed, ...routine.fixed]);
   const options = legacy ? legacyDayOptions(ctx, who, start) : [...routine.options, ...groundedOptions(ctx, who, start)];
   const plan2 = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
   return {
@@ -30500,16 +31340,16 @@ var ACQUAINT_CHANCE = 0.15;
 function acquainted(state2, a, b) {
   return !!own(state2.entities, a)?.relations.some((r) => r.type === "regard" && r.to === b) || !!own(state2.entities, b)?.relations.some((r) => r.type === "regard" && r.to === a);
 }
-function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = false) {
+function takeUp(ctx, who, place2, activity, at, holdUntil, quiet = false, seen = false) {
   const out = [];
   const e = own(ctx.state.entities, who);
-  if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true)
+  if (!e || routineStays(ctx, who, place2) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true)
     return out;
-  if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
+  if (!held2(ctx.state, who, "place", at) && place2 && own(ctx.world.places, place2) && placeOfEntity(ctx.state, who) !== place2) {
     if (seen && withPov(ctx, who))
       out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
-    out.push(...movesOf(relocate(ctx, who, place, { party: true })));
-    if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
+    out.push(...movesOf(relocate(ctx, who, place2, { party: true })));
+    if (who !== ctx.world.pov && place2 === placeOfEntity(ctx.state, ctx.world.pov))
       out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
   }
   if (activity !== null && !held2(ctx.state, who, "activity", at) && e.fields.activity !== activity)
@@ -30548,11 +31388,11 @@ function liveBlock(ctx, who, plan2, block, from, at, scene, skip) {
   const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
   const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
   const opts = { edge, release: block.activity === "sleep", scene, skip };
-  const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
+  const place2 = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
   const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
   const skipLife = skip && who !== ctx.world.pov && routineRole(ctx, who) !== "enforced";
-  const tier = skip && place !== null ? optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background" : "background";
-  return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near" || skipLife, skipLife);
+  const tier = skip && place2 !== null ? optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background" : "background";
+  return takeUp(ctx, who, place2, doing, at, undefined, tier === "live" || tier === "near" || skipLife, skipLife);
 }
 function planOutcomes(ctx, who, slot) {
   if (who === ctx.world.pov)
@@ -30575,14 +31415,14 @@ function planOutcomes(ctx, who, slot) {
   return out;
 }
 var INVITE_LEAD = 6 * 60;
-function mayInvite(ctx, host, place) {
+function mayInvite(ctx, host, place2) {
   const pov = ctx.world.pov;
   if (followOf(ctx, host).mode !== "follows" || withPov(ctx, host) || !acts2(ctx, pov))
     return false;
   const tier = optionalQuery(ctx, "minds.tier")?.(ctx, host) ?? "background";
   if (tier === "live" || tier === "near")
     return false;
-  if (held2(ctx.state, pov, "place", ctx.state.clock) || place !== null && placeOfEntity(ctx.state, pov) === place)
+  if (held2(ctx.state, pov, "place", ctx.state.clock) || place2 !== null && placeOfEntity(ctx.state, pov) === place2)
     return false;
   if (!acquainted(ctx.state, host, pov) && !knows(ctx.state, host, pov))
     return false;
@@ -30653,9 +31493,9 @@ function bookInvitation(ctx, host) {
   const cal = calendarOf(ctx.world);
   const blocks = plan2 ? laidPlans(ctx, host, [plan2]).get(plan2.id) ?? [] : dayPlan(ctx, host, dateAt(cal, at).dayIndex).blocks;
   const end = blocks.find((b) => b.start === at)?.end;
-  const place = typeof inv.place === "string" && own(ctx.world.places, inv.place) && canSeePlace(ctx.registry, ctx.world, ctx.state, pov, inv.place) ? inv.place : null;
+  const place2 = typeof inv.place === "string" && own(ctx.world.places, inv.place) && canSeePlace(ctx.registry, ctx.world, ctx.state, pov, inv.place) ? inv.place : null;
   const people = [...new Set([host, ...plan2?.with ?? []])].filter((id) => id !== pov);
-  const appointment = { at, minutes: end !== undefined && end > at ? end - at : 60, ...place ? { place } : {}, label: `With ${own(ctx.state.entities, host)?.name ?? host}`, with: people, invitation: key };
+  const appointment = { at, minutes: end !== undefined && end > at ? end - at : 60, ...place2 ? { place: place2 } : {}, label: `With ${own(ctx.state.entities, host)?.name ?? host}`, with: people, invitation: key };
   return [{ type: "set", entity: pov, field: "appointments", value: [...booked, appointment] }];
 }
 function planMoments(ctx, who, slot) {
@@ -30734,9 +31574,9 @@ function livedAtMinute(ctx, who, slot) {
       blocks.forEach((b, i) => {
         if (b.end <= from || b.start >= to)
           return;
-        const place = b.place ?? (blocks.slice(0, i).some((x) => x.place !== null) ? home : here);
-        if (place !== null)
-          out.add(place);
+        const place2 = b.place ?? (blocks.slice(0, i).some((x) => x.place !== null) ? home : here);
+        if (place2 !== null)
+          out.add(place2);
       });
     }
     return out;
@@ -30908,13 +31748,13 @@ function stepAgent2(slot, ctx, rngFor, who) {
     return out;
   const pov = ctx.world.pov;
   if (block.activity.startsWith("retrieve:")) {
-    const thing = block.activity.slice("retrieve:".length);
-    const lent = own(ctx.state.entities, thing)?.fields.owner === who && Object.values(ctx.state.entities).some((x) => x.relations.some((r) => r.type === "uses" && r.to === thing));
+    const thing2 = block.activity.slice("retrieve:".length);
+    const lent = own(ctx.state.entities, thing2)?.fields.owner === who && Object.values(ctx.state.entities).some((x) => x.relations.some((r) => r.type === "uses" && r.to === thing2));
     const retrieve2 = lent ? optionalService(ctx, "gear.retrieve") : null;
     if (retrieve2) {
-      const got = retrieve2(ctx, thing);
+      const got = retrieve2(ctx, thing2);
       if (Array.isArray(got))
-        out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
+        out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing2)?.name ?? thing2} back.`, entity: who, visibility: "known_by" } });
     }
   }
   if (who !== pov || slot.povRoutine !== false)
@@ -30954,8 +31794,8 @@ function stepAgent2(slot, ctx, rngFor, who) {
       out.push(...invitation(ctx, who, a));
   return out;
 }
-function invitationText(ctx, agent, place, at, viewer) {
-  const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? own(ctx.world.places, place)?.name ?? place : null;
+function invitationText(ctx, agent, place2, at, viewer) {
+  const named = place2 !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place2)) ? own(ctx.world.places, place2)?.name ?? place2 : null;
   return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
 function dropUnlived(slot, ctx) {
@@ -30985,12 +31825,12 @@ function stepTrips(slot, ctx) {
       const t = objOf(raw);
       const from = numOf(t.from, NaN);
       const until = numOf(t.until, NaN);
-      const place = strOf(t.place);
+      const place2 = strOf(t.place);
       const holding = objOf(e.fields.holds).place === until;
-      const away = holding && e.fields.place === place;
-      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place) && !(slot.povRoutine === false && withPov(ctx, who))) {
+      const away = holding && e.fields.place === place2;
+      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place2) && !(slot.povRoutine === false && withPov(ctx, who))) {
         holds = { ...holds, place: until, activity: until };
-        out.push({ type: "set", entity: who, field: "holds", value: holds }, ...movesOf(relocate(ctx, who, place, { party: true })), { type: "set", entity: who, field: "activity", value: "trip" });
+        out.push({ type: "set", entity: who, field: "holds", value: holds }, ...movesOf(relocate(ctx, who, place2, { party: true })), { type: "set", entity: who, field: "activity", value: "trip" });
       }
       if (!(until <= slot.end && (until > slot.start || holding)))
         continue;
@@ -31286,8 +32126,8 @@ function buildCastView(ctx) {
     const e = own(ctx.state.entities, id);
     if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id))
       continue;
-    const place = placeOfEntity(ctx.state, id);
-    const present2 = place !== null && place === here;
+    const place2 = placeOfEntity(ctx.state, id);
+    const present2 = place2 !== null && place2 === here;
     if (!(present2 ? shown3(id) : playerKnows(ctx.registry, ctx.world, ctx.state, pov, id)))
       continue;
     const classes = {};
@@ -31296,7 +32136,7 @@ function buildCastView(ctx) {
       if (values.length > 0)
         classes[facet] = [...values];
     }
-    const sees = (field) => canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field);
+    const sees = (field2) => canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field2);
     const role = sees("role") ? strOf(e.fields.role) : "";
     const p = {
       id,
@@ -31315,7 +32155,7 @@ function buildCastView(ctx) {
       if (typeof e.fields.activity === "string" && sees("activity") && !still)
         p.activity = shownActivity(ctx, id, e.fields.activity).replace(/_/g, " ");
       if (sees("place"))
-        p.place = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? own(ctx.world.places, place)?.name ?? place : HIDDEN_PLACE_NAME;
+        p.place = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? own(ctx.world.places, place2)?.name ?? place2 : HIDDEN_PLACE_NAME;
     } else if (level >= 2) {
       const last = lastSighting(ctx.state, id);
       if (last)
@@ -31405,8 +32245,8 @@ function stanceLines(ctx) {
     if (doing !== null && safe(doing))
       parts.push(`Right now they are ${doing}.`);
     const agenda = agendaFor(world, state2, id).filter((a) => publicTrack(world, a.track)).map((a) => {
-      const track = own(world.tracks, a.track);
-      const cue = track ? own(track.stages, a.stage)?.cue?.trim() : undefined;
+      const track2 = own(world.tracks, a.track);
+      const cue = track2 ? own(track2.stages, a.stage)?.cue?.trim() : undefined;
       return cue ? cue : a.stageLabel;
     }).filter(safe);
     if (agenda.length > 0)
@@ -31425,9 +32265,9 @@ function stanceFeed(ctx, scope) {
   for (const id of stanceCast(ctx).people) {
     const name = own(ctx.state.entities, id)?.name ?? id;
     for (const a of agendaFor(ctx.world, ctx.state, id).filter((x) => !publicTrack(ctx.world, x.track))) {
-      const track = own(ctx.world.tracks, a.track);
-      const secret = visibilityOf(track?.visibility) === "secret";
-      const text4 = `${name}'s private agenda, ${track?.label ?? a.track}: ${a.stageLabel}.`;
+      const track2 = own(ctx.world.tracks, a.track);
+      const secret = visibilityOf(track2?.visibility) === "secret";
+      const text4 = `${name}'s private agenda, ${track2?.label ?? a.track}: ${a.stageLabel}.`;
       if (!secret)
         lines.push({ text: text4, known: "scene", who: name });
       else if (scope === "gm")
@@ -31492,7 +32332,7 @@ var castlifePack = {
     for (const def of EVENTS3)
       r.event(def);
     r.service("castlife.edit", routineEdit);
-    r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
+    r.query("castlife.yields", (ctx, who, field2, expected, release, scene, skip) => routineYields(ctx, who, field2, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
     r.query("castlife.chat_roles", (ctx) => chatRoles(ctx.state));
@@ -31774,13 +32614,13 @@ function buildSheetView(ctx) {
     return { label: s.label, value: level >= 3 ? `${v} (${mod2 >= 0 ? "+" : ""}${mod2})` : String(v), detail: word, fix: { entity: pov, field: s.id, type: "number", value: v, min: s.min, max: s.max } };
   });
   const derived = level >= 3 && !designed ? Object.entries(derivedOf(ctx)).map(([id, d]) => ({ label: d.label, value: String(derivedValue(ctx, pov, id)) })) : [];
-  const place = povPlace(ctx.registry, ctx.world, ctx.state);
+  const place2 = povPlace(ctx.registry, ctx.world, ctx.state);
   const activity = strOf(e?.fields.activity);
   return {
     level,
     name: e?.name ?? pov,
     tier: e ? tierLabel(ctx.world, e.tier) : "",
-    ...place ? { place: place.name } : {},
+    ...place2 ? { place: place2.name } : {},
     ...activity !== "" ? { activity } : {},
     conditions: activeConditions(ctx, pov).map((c) => c.label),
     sections: designed ?? [...stats.length > 0 ? [{ title: "Stats", rows: stats }] : [], ...derived.length > 0 ? [{ title: "Derived", rows: derived }] : []]
@@ -31946,13 +32786,13 @@ function leakyLabels(world) {
     if (p.visibility === "secret" && p.name.length > 3)
       secrets.push(p.name);
   const out = [];
-  const check = (path, text4) => {
+  const check = (path2, text4) => {
     if (!text4)
       return;
     const l = text4.toLowerCase();
     for (const s of secrets)
       if (l.includes(s.toLowerCase()) && l !== s.toLowerCase())
-        out.push({ path, text: text4, secret: s });
+        out.push({ path: path2, text: text4, secret: s });
   };
   for (const t of Object.values(world.tracks)) {
     check(`tracks.${t.id}.label`, t.label);
@@ -31977,7 +32817,7 @@ function nameWords(name) {
   return name.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 4);
 }
 function leakyIds(world, registry) {
-  const person = (kind) => {
+  const person3 = (kind) => {
     if (registry)
       return kindIs(registry, world, kind, "person");
     let k = kind;
@@ -31994,7 +32834,7 @@ function leakyIds(world, registry) {
       for (const w of nameWords(p.name))
         known.add(w);
   for (const e of Object.values(world.entities))
-    if (e.visibility !== "secret" && person(e.kind))
+    if (e.visibility !== "secret" && person3(e.kind))
       for (const w of nameWords(e.name))
         known.add(w);
   const secrets = [...Object.values(world.entities).filter((e) => e.visibility === "secret"), ...Object.values(world.places).filter((p) => p.visibility === "secret")].map((s) => ({
@@ -32128,10 +32968,10 @@ function askedForGm(ctx, ref) {
   const t = own(ctx.world.tracks, ref);
   return t ? `"${ref}" (${t.label})` : `"${ref}"`;
 }
-function answerTo(ctx, track, a) {
+function answerTo(ctx, track2, a) {
   const decision = typeof a.decision === "number" ? a.decision : undefined;
   const answer = typeof a.answer === "number" && Number.isFinite(a.answer) ? String(a.answer) : strOf(a.answer);
-  const check = checkAnswer(ctx.world, ctx.state, track, answer, decision);
+  const check = checkAnswer(ctx.world, ctx.state, track2, answer, decision);
   if (check.needsDecision)
     return reject14("needs_decision", "this answer needs a judgement");
   return check.event ? [check.event] : reject14("no_answer", "there is nothing to answer here");
@@ -32169,19 +33009,19 @@ var storyPack = {
           return answerTo(ctx, id, a);
         }
         const ref = strOf(a.puzzle);
-        const asked = ref.trim() === "" ? "" : askedFor(ctx, ref);
+        const asked2 = ref.trim() === "" ? "" : askedFor(ctx, ref);
         const fits = puzzlesFor(ctx, ref);
         if (fits.length > 1) {
           return {
             code: "ambiguous_puzzle",
-            reason: asked === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${asked ?? "that name"}`,
+            reason: asked2 === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${asked2 ?? "that name"}`,
             gm: `${fits.length} open puzzles fit ${askedForGm(ctx, ref)}: ${fits.map((id) => labelOf(ctx, id)).join(", ")}`
           };
         }
-        const track = fits[0];
-        if (track === undefined)
-          return { code: "not_a_puzzle", reason: asked === "" ? "there is no open puzzle to answer" : `no open puzzle ${asked ?? "by that name"}`, gm: `no open puzzle in the quest log fits ${askedForGm(ctx, ref)}` };
-        return answerTo(ctx, track, a);
+        const track2 = fits[0];
+        if (track2 === undefined)
+          return { code: "not_a_puzzle", reason: asked2 === "" ? "there is no open puzzle to answer" : `no open puzzle ${asked2 ?? "by that name"}`, gm: `no open puzzle in the quest log fits ${askedForGm(ctx, ref)}` };
+        return answerTo(ctx, track2, a);
       }
     });
     r.action({
@@ -32213,11 +33053,11 @@ var storyPack = {
     });
     r.lint({
       code: "story.answer_track",
-      check: (world) => effectLists(world).flatMap(({ path, effects }) => effects.flatMap((spec, i) => {
-        const track = spec.type === "story.answer" ? spec.args.track : undefined;
-        if (typeof track !== "string" || !track.startsWith("="))
+      check: (world) => effectLists(world).flatMap(({ path: path2, effects }) => effects.flatMap((spec, i) => {
+        const track2 = spec.type === "story.answer" ? spec.args.track : undefined;
+        if (typeof track2 !== "string" || !track2.startsWith("="))
           return [];
-        return [{ severity: "warning", code: "story.answer_track", message: `This answer's track is a formula (${track}), but track takes a puzzle's own id as written, such as "p_safe": the puzzle the formula gives is answered even when the player can't see it. To let the player say which puzzle, pass their words as puzzle instead.`, path: `${path}.${i}.args.track` }];
+        return [{ severity: "warning", code: "story.answer_track", message: `This answer's track is a formula (${track2}), but track takes a puzzle's own id as written, such as "p_safe": the puzzle the formula gives is answered even when the player can't see it. To let the player say which puzzle, pass their words as puzzle instead.`, path: `${path2}.${i}.args.track` }];
       }))
     });
     r.lint({
@@ -33014,12 +33854,12 @@ function startFight(a, ctx) {
   if (encounterOf(ctx.state))
     return reject15("in_fight", "a fight is already under way");
   const pov = ctx.world.pov;
-  const place = placeOfEntity(ctx.state, pov);
-  if (place === null)
+  const place2 = placeOfEntity(ctx.state, pov);
+  if (place2 === null)
     return reject15("nowhere", "there's nowhere to fight");
   if (!canFight(ctx, rules, pov))
     return reject15("cannot_fight", "you can't fight here");
-  const here = Object.keys(ctx.state.entities).sort().filter((id) => id !== pov && placeOfEntity(ctx.state, id) === place && canFight(ctx, rules, id));
+  const here = Object.keys(ctx.state.entities).sort().filter((id) => id !== pov && placeOfEntity(ctx.state, id) === place2 && canFight(ctx, rules, id));
   const named = namedFoes(ctx, a.foes, here);
   if (named !== null && !Array.isArray(named))
     return named;
@@ -33048,7 +33888,7 @@ function startFight(a, ctx) {
   }
   rolled.sort((x, y) => y.init - x.init || y.tie - x.tie || Number(y.id === pov) - Number(x.id === pov) || Number(y.side === "party") - Number(x.side === "party") || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
   const order = rolled.map((r) => ({ id: r.id, side: r.side, init: r.init, left: fullEconomy(ctx, rules, r.id) }));
-  return [{ type: "combat.start", data: { encounter: hashParts(ctx.rng.seed, "encounter").slice(0, 12), place, order } }];
+  return [{ type: "combat.start", data: { encounter: hashParts(ctx.rng.seed, "encounter").slice(0, 12), place: place2, order } }];
 }
 function describeSide(e, side) {
   const order = Array.isArray(e.data.order) ? e.data.order : [];
@@ -33490,7 +34330,7 @@ function noteOf(v) {
 function commitmentOf(v) {
   return { id: v.id, kind: v.kind, with: [...v.with], text: v.text, due: v.due, status: v.status, made: v.made, closed: v.closed };
 }
-function person(ctx, data) {
+function person3(ctx, data) {
   return str13(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: "a minds event names someone who isn't in the world" };
 }
 function fidelityWords(level) {
@@ -33521,8 +34361,8 @@ var round = {
   describe: (e, _ctx, viewer) => viewer !== undefined ? "" : e.data.on === true ? "A round of character minds ran" : "Character minds are switched off"
 };
 function validMind(data) {
-  const { at, place, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
-  if (!finite2(at) || !(place === null || str13(place)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str13(reason))
+  const { at, place: place2, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
+  if (!finite2(at) || !(place2 === null || str13(place2)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str13(reason))
     return bad("a mind needs its clock, place, level, moment and reason");
   if (!str13(monologue) || !str13(depiction) || !str13(intent) || !texts(reactions) || plans !== undefined && (!Array.isArray(plans) || !plans.every((p) => isPlan(p))))
     return bad("a mind needs its monologue, depiction, intent and reactions, and any plans it carries well formed");
@@ -33532,7 +34372,7 @@ function validMind(data) {
 }
 var mind = {
   type: MINDS_EVENTS.mind,
-  validate: (e, ctx) => person(ctx, e.data) ?? validMind(e.data),
+  validate: (e, ctx) => person3(ctx, e.data) ?? validMind(e.data),
   apply: (e, state2) => {
     const d = e.data;
     if (!str13(d.entity))
@@ -33575,7 +34415,7 @@ function validMemory(data) {
 }
 var memory = {
   type: MINDS_EVENTS.memory,
-  validate: (e, ctx) => person(ctx, e.data) ?? validMemory(e.data),
+  validate: (e, ctx) => person3(ctx, e.data) ?? validMemory(e.data),
   apply: (e, state2, ctx) => {
     const d = e.data;
     if (!str13(d.entity))
@@ -33623,10 +34463,10 @@ var presence = {
   apply: (e, state2) => {
     const d = e.data;
     const at = finite2(d.at) ? d.at : state2.clock;
-    const place = str13(d.place) ? d.place : null;
+    const place2 = str13(d.place) ? d.place : null;
     const who = ids(d.who) ? d.who.filter((id) => own(state2.entities, id)) : [];
     const s = writeSlice(state2);
-    s.presence.push({ msg: str13(d.msg) ? d.msg : null, at, place, who: [...who] });
+    s.presence.push({ msg: str13(d.msg) ? d.msg : null, at, place: place2, who: [...who] });
     if (s.presence.length > MINDS_KEEP.presence)
       s.presence.splice(0, s.presence.length - MINDS_KEEP.presence);
     const saw = texts(d.saw) ? d.saw : [];
@@ -33634,7 +34474,7 @@ var presence = {
       const c = writeCharacter(state2, id);
       c.lastPresent = at;
       for (const what of saw)
-        addWitness(c, { at, what, how: "saw", by: null, place });
+        addWitness(c, { at, what, how: "saw", by: null, place: place2 });
     }
   },
   describe: (e, ctx, viewer) => {
@@ -33650,7 +34490,7 @@ var planStatus = {
     const d = e.data;
     if (!str13(d.plan) || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str13(d.reason)))
       return bad("a plan's status needs the plan, a status, its clock and a reason or null");
-    const missing = person(ctx, d);
+    const missing = person3(ctx, d);
     if (missing)
       return missing;
     return readCharacter(ctx.state, String(d.entity)).plans.some((p) => p.id === d.plan) ? null : { code: "missing_plan", reason: "that plan isn't theirs any more" };
@@ -33676,7 +34516,7 @@ function editDef(type, key, valid, list, put, remove) {
     type,
     validate: (e, ctx) => {
       const d = e.data;
-      const missing = person(ctx, d);
+      const missing = person3(ctx, d);
       if (missing)
         return missing;
       const id = d[key];
@@ -33721,7 +34561,7 @@ var commitmentStatus = {
     const d = e.data;
     if (!str13(d.commitment) || typeof d.status !== "string" || !COMMITMENT_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str13(d.reason)))
       return bad("a commitment's status needs the commitment, a status, its clock and a reason or null");
-    const missing = person(ctx, d);
+    const missing = person3(ctx, d);
     if (missing)
       return missing;
     return readCharacter(ctx.state, String(d.entity)).commitments.some((x) => x.id === d.commitment) ? null : { code: "missing_commitment", reason: "that commitment isn't theirs any more" };
@@ -33739,7 +34579,7 @@ var commitmentStatus = {
 };
 var consolidated = {
   type: MINDS_EVENTS.consolidated,
-  validate: (e, ctx) => person(ctx, e.data) ?? (finite2(e.data.at) && ids(e.data.notes) && str13(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
+  validate: (e, ctx) => person3(ctx, e.data) ?? (finite2(e.data.at) && ids(e.data.notes) && str13(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
   apply: (e, state2) => {
     const d = e.data;
     const c = writeCharacter(state2, String(d.entity));
@@ -33753,7 +34593,7 @@ var consolidated = {
 };
 var pin = {
   type: MINDS_EVENTS.pin,
-  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.level === null || isFidelity(e.data.level) ? null : bad("a pin is a fidelity level or null")),
+  validate: (e, ctx) => person3(ctx, e.data) ?? (e.data.level === null || isFidelity(e.data.level) ? null : bad("a pin is a fidelity level or null")),
   apply: (e, state2) => {
     writeCharacter(state2, String(e.data.entity)).pin = isFidelity(e.data.level) ? e.data.level : null;
   },
@@ -33761,7 +34601,7 @@ var pin = {
 };
 var refresh = {
   type: MINDS_EVENTS.refresh,
-  validate: (e, ctx) => person(ctx, e.data),
+  validate: (e, ctx) => person3(ctx, e.data),
   apply: (e, state2) => {
     writeCharacter(state2, String(e.data.entity)).refresh = true;
   },
@@ -33775,7 +34615,7 @@ function isIntent(v) {
 }
 var intent = {
   type: MINDS_EVENTS.intent,
-  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.intent === null || isIntent(e.data.intent) ? null : bad("an intent is its text, its approach or both, or null to clear it")),
+  validate: (e, ctx) => person3(ctx, e.data) ?? (e.data.intent === null || isIntent(e.data.intent) ? null : bad("an intent is its text, its approach or both, or null to clear it")),
   apply: (e, state2) => {
     const c = writeCharacter(state2, String(e.data.entity));
     const v = e.data.intent;
@@ -34312,10 +35152,10 @@ ${texts2.reply}`);
       continue;
     const reasons = [];
     let score = 0;
-    const place = placeOfEntity(state2, id);
-    if (here !== null && place === here)
+    const place2 = placeOfEntity(state2, id);
+    if (here !== null && place2 === here)
       score += reason(reasons, "In the scene", w.here);
-    else if (closeBy(world, place, here))
+    else if (closeBy(world, place2, here))
       score += reason(reasons, "Close by", w.nearby);
     if (namedIn(e.name, said2))
       score += reason(reasons, "Named this turn", w.mentioned);
@@ -34354,7 +35194,7 @@ ${texts2.reply}`);
     const always = config3.always !== null && selectorMatches(reg, world, state2, config3.always, id);
     const author = never ? "background" : always ? "live" : null;
     const t = config3.thresholds;
-    const atHand = here !== null && place === here || namedIn(e.name, said2);
+    const atHand = here !== null && place2 === here || namedIn(e.name, said2);
     const scored = score >= t.live ? atHand ? "live" : "near" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
     if (score >= t.live && !atHand)
       reasons.push({ label: "Not at hand, so Near at most", points: 0 });
@@ -34475,8 +35315,8 @@ function worldSecrets(ctx) {
     if (ref?.kind === "wi")
       return true;
     if (ref?.kind === "lore") {
-      const lore = own(ctx.world.lore, ref.lore);
-      return lore !== undefined && loreIsSecret(lore) && !open(lore);
+      const lore2 = own(ctx.world.lore, ref.lore);
+      return lore2 !== undefined && loreIsSecret(lore2) && !open(lore2);
     }
     if (ref?.kind === "track")
       return !!own(ctx.world.tracks, ref.track)?.stages[ref.stage]?.truth && !(own(revealed, ref.track) ?? []).includes(ref.stage);
@@ -34494,9 +35334,9 @@ function knowledgeLines(ctx, scope) {
   const threshold2 = knowledgeThreshold(slice2);
   const words5 = { texts: settings, threshold: threshold2, nameOf: name };
   const people = presentPeople(ctx);
-  const place = placeOfEntity(state2, pov);
+  const place2 = placeOfEntity(state2, pov);
   const secret = worldSecrets(ctx);
-  const play = { here: [pov, ...people, ...place ? [place] : []], recent: latestTurns(slice2, settings.inPlayTurns), secret };
+  const play = { here: [pov, ...people, ...place2 ? [place2] : []], recent: latestTurns(slice2, settings.inPlayTurns), secret };
   const claim2 = (fact, id) => applyMarks(fact?.claim ?? id, { world, state: state2 }, "omit");
   const others = scope === "player" ? [] : people;
   const listed2 = [pov, ...others].flatMap((who) => rankedHoldings(slice2, who, play).slice(0, settings.perPerson).map((h) => ({ who, h })));
@@ -34577,8 +35417,8 @@ function configIssues(world, registry) {
   if (raw === undefined)
     return [];
   const out = [];
-  const err = (path, message) => void out.push({ severity: "error", path, code: "minds.config", message });
-  const warn = (path, message) => void out.push({ severity: "warning", path, code: "minds.config", message });
+  const err = (path2, message) => void out.push({ severity: "error", path: path2, code: "minds.config", message });
+  const warn = (path2, message) => void out.push({ severity: "warning", path: path2, code: "minds.config", message });
   if (!isRecord(raw)) {
     err("minds", "The minds config is an object (secrecy, weights, thresholds, always, never, memory, holdings); the defaults play instead.");
     return out;
@@ -34588,11 +35428,11 @@ function configIssues(world, registry) {
       warn(`minds.${key}`, `"${key}" isn't part of the minds config; nothing reads it.`);
   if (raw.secrecy !== undefined && raw.secrecy !== "full" && raw.secrecy !== "brief")
     err("minds.secrecy", 'Secrecy is "full" (the narrator gets each mind to depict) or "brief" (a leak-checked depiction only); "full", the default, plays instead.');
-  const number = (path, v, [lo, hi], whole4) => {
+  const number = (path2, v, [lo, hi], whole4) => {
     if (v === undefined)
       return;
     if (typeof v !== "number" || !Number.isFinite(v) || v < lo || v > hi || whole4 && !Number.isInteger(v))
-      err(path, `${whole4 ? "A whole number" : "A number"} from ${lo} to ${hi}; the default plays instead.`);
+      err(path2, `${whole4 ? "A whole number" : "A number"} from ${lo} to ${hi}; the default plays instead.`);
   };
   const weights = raw.weights;
   if (weights !== undefined && !isRecord(weights))
@@ -34662,14 +35502,14 @@ function configIssues(world, registry) {
         continue;
       }
       for (const [key, v] of Object.entries(fields)) {
-        const field = hasOwn(spec, key) ? spec[key] : undefined;
-        if (!field)
+        const field2 = hasOwn(spec, key) ? spec[key] : undefined;
+        if (!field2)
           warn(`minds.memory.${part}.${key}`, `"${key}" isn't a ${part} setting; nothing reads it.`);
-        else if (field === "bool") {
+        else if (field2 === "bool") {
           if (typeof v !== "boolean")
             err(`minds.memory.${part}.${key}`, "On (true) or off (false); the default plays instead.");
-        } else if (!(field.none && v === "none"))
-          number(`minds.memory.${part}.${key}`, v, field.range, field.whole);
+        } else if (!(field2.none && v === "none"))
+          number(`minds.memory.${part}.${key}`, v, field2.range, field2.whole);
       }
     }
   }
@@ -34679,10 +35519,10 @@ function missingRef(world, registry, ref) {
   if (ref.kind === "lore")
     return hasOwn(world.lore, ref.lore) ? null : `The world has no lore entry "${ref.lore}".`;
   if (ref.kind === "track") {
-    const track = hasOwn(world.tracks, ref.track) ? world.tracks[ref.track] : undefined;
-    if (!track)
+    const track2 = hasOwn(world.tracks, ref.track) ? world.tracks[ref.track] : undefined;
+    if (!track2)
       return `The world has no track "${ref.track}".`;
-    return hasOwn(track.stages, ref.stage) ? null : `The track "${track.label}" has no stage "${ref.stage}".`;
+    return hasOwn(track2.stages, ref.stage) ? null : `The track "${track2.label}" has no stage "${ref.stage}".`;
   }
   if (ref.kind === "field") {
     const e = hasOwn(world.entities, ref.entity) ? world.entities[ref.entity] : undefined;
@@ -34697,13 +35537,13 @@ function holdingIssues(world, raw, registry) {
   if (raw === undefined)
     return [];
   const out = [];
-  const err = (path, message) => void out.push({ severity: "error", path, code: "minds.holdings", message });
-  const warn = (path, message) => void out.push({ severity: "warning", path, code: "minds.holdings", message });
+  const err = (path2, message) => void out.push({ severity: "error", path: path2, code: "minds.holdings", message });
+  const warn = (path2, message) => void out.push({ severity: "warning", path: path2, code: "minds.holdings", message });
   if (!isRecord(raw)) {
     err("minds.holdings", "What people hold from the start is an object of facts by person; no one holds anything from the start instead.");
     return out;
   }
-  const person2 = (id) => {
+  const person4 = (id) => {
     const e = hasOwn(world.entities, id) ? world.entities[id] : undefined;
     return e !== undefined && (registry === undefined || kindIs(registry, world, e.kind, "person"));
   };
@@ -34711,45 +35551,45 @@ function holdingIssues(world, raw, registry) {
     const at = `minds.holdings.${who}`;
     if (!hasOwn(world.entities, who))
       err(at, `The world has no one "${who}", so these holdings are never read.`);
-    else if (!person2(who))
+    else if (!person4(who))
       err(at, `${world.entities[who]?.name ?? who} isn't a person, so these holdings are never read.`);
     if (!isRecord(facts)) {
       err(at, "Each person's holdings are an object of facts by id; they hold nothing from the start instead.");
       continue;
     }
     for (const [fact, v] of Object.entries(facts)) {
-      const path = `${at}.${fact}`;
+      const path2 = `${at}.${fact}`;
       const ref = parseFactId(fact);
       if (!ref || !AUTHORED_FACT_KINDS.includes(ref.kind)) {
-        err(path, "A fact held from the start is lore:<entry>, track:<track>:<stage> or field:<entity>:<field>; this one is left out.");
+        err(path2, "A fact held from the start is lore:<entry>, track:<track>:<stage> or field:<entity>:<field>; this one is left out.");
         continue;
       }
       const missing = missingRef(world, registry, ref);
       if (missing)
-        warn(path, `${missing} The holding seeds a fact nothing refers to.`);
+        warn(path2, `${missing} The holding seeds a fact nothing refers to.`);
       if (!isRecord(v)) {
-        err(path, "A holding is an object (belief, confidence, keptFrom); this one is left out.");
+        err(path2, "A holding is an object (belief, confidence, keptFrom); this one is left out.");
         continue;
       }
       for (const key of Object.keys(v))
         if (key !== "belief" && key !== "confidence" && key !== "keptFrom")
-          warn(`${path}.${key}`, `"${key}" isn't part of a holding; nothing reads it.`);
+          warn(`${path2}.${key}`, `"${key}" isn't part of a holding; nothing reads it.`);
       if (v.belief !== undefined && !HOLDING_BELIEFS.includes(v.belief))
-        err(`${path}.belief`, 'A belief is "true", "false" or "uncertain"; "true" plays instead.');
+        err(`${path2}.belief`, 'A belief is "true", "false" or "uncertain"; "true" plays instead.');
       if (v.confidence !== undefined && !isConfidence(v.confidence))
-        err(`${path}.confidence`, "A confidence is a number from 0 to 1; 1 plays instead.");
+        err(`${path2}.confidence`, "A confidence is a number from 0 to 1; 1 plays instead.");
       const kept2 = v.keptFrom;
       if (kept2 === undefined || kept2 === "everyone")
         continue;
       if (!Array.isArray(kept2) || !kept2.every((id) => typeof id === "string")) {
-        err(`${path}.keptFrom`, 'Whom it is kept from is "everyone" or a list of people; it is kept from no one instead.');
+        err(`${path2}.keptFrom`, 'Whom it is kept from is "everyone" or a list of people; it is kept from no one instead.');
         continue;
       }
       for (const id of kept2) {
         if (id === who)
-          warn(`${path}.keptFrom`, "No one keeps a fact from themselves; that name is passed over.");
-        else if (!person2(id))
-          err(`${path}.keptFrom`, `"${id}" isn't a person in the world; that name is passed over.`);
+          warn(`${path2}.keptFrom`, "No one keeps a fact from themselves; that name is passed over.");
+        else if (!person4(id))
+          err(`${path2}.keptFrom`, `"${id}" isn't a person in the world; that name is passed over.`);
       }
     }
   }

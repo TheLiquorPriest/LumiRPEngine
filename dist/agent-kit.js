@@ -2841,6 +2841,7 @@ var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var TIMELAPSE_REACH_MINUTES = 366 * 1440;
+var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition", "learn", "reveal"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -2861,6 +2862,26 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   item_condition: "confirm",
   learn: "auto",
   reveal: "confirm"
+});
+var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace"];
+var CHANGE_TYPES = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
+var AGENT_CHANGE_DEFAULTS = Object.freeze({
+  gm_spawn: "confirm",
+  despawn: "confirm",
+  destroy: "confirm",
+  money_adjust: "confirm",
+  stage: "confirm",
+  gm_edit: "auto",
+  workspace: "auto"
+});
+var AGENT_CHANGE_LABEL = Object.freeze({
+  gm_spawn: "Adding people or things",
+  despawn: "Removing people",
+  destroy: "Destroying things",
+  money_adjust: "Money adjustments",
+  stage: "Quest and secret stages",
+  gm_edit: "Other GM edits (fields, tiers, minds, routines, sections, the clock)",
+  workspace: "Workspace notes"
 });
 var EXTRACTION_LEARNING = Object.freeze({
   promoteAt: 0.9,
@@ -7742,6 +7763,22 @@ function wordedLines(reg, world, state, pov, events, max, player, you = "You") {
   return kept2.map((l) => l.text);
 }
 
+// src/shared/macros.ts
+var CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+var SHORTHAND = /<(user|char|bot)>/gi;
+var MACRO = /\{\{[\s\S]*?\}\}/g;
+function macroHazards(text, allowed = []) {
+  const out = [];
+  for (const m of text.matchAll(MACRO))
+    if (!allowed.includes(m[0]))
+      out.push(m[0].slice(0, 80));
+  for (const m of text.matchAll(CONTROL))
+    out.push(`control character U+${(m[0].codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`);
+  for (const m of text.matchAll(SHORTHAND))
+    out.push(m[0]);
+  return out;
+}
+
 // src/shared/secret-marks.ts
 var SECRET_MARK_WORDING = {
   known: "{{text}} [secret; known to {{known}}]",
@@ -8660,22 +8697,6 @@ function initialState(world, revision, types) {
   return state;
 }
 
-// src/shared/macros.ts
-var CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
-var SHORTHAND = /<(user|char|bot)>/gi;
-var MACRO = /\{\{[\s\S]*?\}\}/g;
-function macroHazards(text2, allowed = []) {
-  const out = [];
-  for (const m of text2.matchAll(MACRO))
-    if (!allowed.includes(m[0]))
-      out.push(m[0].slice(0, 80));
-  for (const m of text2.matchAll(CONTROL))
-    out.push(`control character U+${(m[0].codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`);
-  for (const m of text2.matchAll(SHORTHAND))
-    out.push(m[0]);
-  return out;
-}
-
 // src/engine/feed.ts
 var FEED_KEY = "feed";
 var FEED_EVENT = "engine.feed";
@@ -8708,6 +8729,821 @@ var feedEvent = {
     const label = own(ctx.world.sections, section)?.label ?? `${section.charAt(0).toUpperCase()}${section.slice(1).replace(/_/g, " ")}`;
     return feedSentence(label, e.data.to === null ? null : readSectionFeed(e.data.to));
   }
+};
+
+// src/shared/agent-tools-read.ts
+var person = "The person: their id, or their name as the world has it.";
+var place = "The place: its id, or its name.";
+var thing = "The thing: its id, or its name.";
+var track = "The quest, secret, puzzle or agenda: its id, or its label.";
+var READ_TOOL_TEXTS = [
+  {
+    name: "people_find",
+    family: "people",
+    tier: "read",
+    note: "Finds people by name, kind or place.",
+    text: "Find people by part of their name, their kind or where they are. Gives each one's id, name, kind and place. With no arguments it lists everyone you can see. Use the ids it gives in later calls.",
+    args: [
+      { path: "name", text: "Part of a name, in any case; leave it out to match every name." },
+      { path: "kind", text: "Only people of this kind." },
+      { path: "place", text: "Only people at this place or somewhere inside it: its id or name." }
+    ]
+  },
+  {
+    name: "people_sheet",
+    family: "people",
+    tier: "read",
+    note: "Reads one person's sheet.",
+    text: "Read one person's sheet: their kind, tier and life state, their fields (who they are, their stats), what they are doing, their relations, and what the world's lore says about them.",
+    args: [{ path: "person", text: person }]
+  },
+  {
+    name: "people_where",
+    family: "people",
+    tier: "read",
+    note: "Says where someone is and what they are doing.",
+    text: "Where a person is now and what they are doing. Read with the player character's knowledge, someone away shows only where and when the player character last saw them.",
+    args: [{ path: "person", text: person }]
+  },
+  {
+    name: "people_regard",
+    family: "people",
+    tier: "read",
+    note: "Says how someone regards others.",
+    text: "How a person regards others: their warmth, trust and respect toward each, in the world's words. Give toward for one relationship, or leave it out for everyone they regard.",
+    args: [
+      { path: "person", text: "Whose regard: their id or name." },
+      { path: "toward", text: "Toward whom: their id or name; leave it out for everyone." }
+    ]
+  },
+  {
+    name: "places_read",
+    family: "places",
+    tier: "read",
+    note: "Reads a place: where it sits, what it is, the places inside it and its lore.",
+    text: "Read a place: its name, the places around it (outermost first), its description and fields, the places inside it, the ways out of it, and what the world's lore says about it.",
+    args: [{ path: "place", text: place }]
+  },
+  {
+    name: "places_contents",
+    family: "places",
+    tier: "read",
+    note: "Says who and what is at a place.",
+    text: "Who and what is at a place now: the people there with what they are doing, and the things lying there loose (not carried, and not in a container).",
+    args: [{ path: "place", text: place }]
+  },
+  {
+    name: "places_route",
+    family: "places",
+    tier: "read",
+    note: "Finds the way between two places and how long it takes.",
+    text: "The way from one place to another and how long it takes, for each way of travelling there is (or the one you name): the minutes, the distance and the places it passes.",
+    args: [
+      { path: "to", text: "Where to: a place's id or name." },
+      { path: "from", text: "Where from: a place's id or name; leave it out for where the player character is." },
+      { path: "mode", text: "Only this way of travelling; leave it out for each." }
+    ]
+  },
+  {
+    name: "items_inventory",
+    family: "items",
+    tier: "read",
+    note: "Lists what someone wears, carries and owns.",
+    text: "What a person wears, carries and owns: each thing with its id and name, what it is in, and its condition where the world keeps one.",
+    args: [{ path: "person", text: person }]
+  },
+  {
+    name: "items_holder",
+    family: "items",
+    tier: "read",
+    note: "Says where a thing is and who holds it.",
+    text: "Where a thing is and who holds it: the person or container it is in, the place, its owners with their shares, and who may use it.",
+    args: [{ path: "thing", text: thing }]
+  },
+  {
+    name: "items_condition",
+    family: "items",
+    tier: "read",
+    note: "Reads a thing's condition and state.",
+    text: "A thing's condition and state as the world keeps them: how worn it is, whether it works, and for a vehicle its fuel and mileage.",
+    args: [{ path: "thing", text: thing }]
+  },
+  {
+    name: "money_balances",
+    family: "money",
+    tier: "read",
+    note: "Reads someone's money: accounts, balances, debts and how well off they are.",
+    text: "Someone's money: their accounts with each balance (a negative balance is owed), their cash, and how well off they are. Works for a person or a business; leave person out for the player character.",
+    args: [{ path: "person", text: "Whose money: a person's or a business's id or name; leave it out for the player character's." }]
+  },
+  {
+    name: "money_prices",
+    family: "money",
+    tier: "read",
+    note: "Prices a thing, or lists what a place sells.",
+    text: "What things cost: the price of a thing from the world's catalog at a place, with its usual range; leave item out to list what the place sells.",
+    args: [
+      { path: "item", text: "What to price, in words, or its catalog id; leave it out to list what the place sells." },
+      { path: "place", text: "Where: a place's id or name; leave it out for where the player character is." }
+    ]
+  },
+  {
+    name: "quests_tracks",
+    family: "quests",
+    tier: "read",
+    note: "Lists the quests, secrets, puzzles and agendas.",
+    text: "List the quests, secrets, puzzles and agendas: each one's id, label, kind and the stage it is at.",
+    args: [{ path: "kind", text: "Only this kind: quest, secret, puzzle or agenda." }]
+  },
+  {
+    name: "quests_stage",
+    family: "quests",
+    tier: "read",
+    note: "Reads where a quest or secret stands.",
+    text: "Where one quest, secret, puzzle or agenda stands: its stage, since when, the objectives still to do, the hints earned and the truths revealed so far.",
+    args: [{ path: "track", text: track }]
+  },
+  {
+    name: "quests_moves",
+    family: "quests",
+    tier: "read",
+    note: "Says what moves a quest or secret on.",
+    text: "What moves a quest, secret, puzzle or agenda on from the stage it is at: the stages it can go to and what each needs, what fails it, and what gates it.",
+    args: [{ path: "track", text: track }]
+  },
+  {
+    name: "knowledge_who_knows",
+    family: "knowledge",
+    tier: "read",
+    note: "Says who knows a fact, and how.",
+    text: "Who knows a fact. Find facts by words of what they claim, by a fact's id, or by a person, place, thing or quest they are about. Gives each fact with everyone who holds it: how they came by it and from whom, since when, what they take it to be, how sure they are, and whom they keep it from.",
+    args: [{ path: "about", text: "Words of the fact's claim, a fact id, or the id or name of a person, place, thing or quest it is about." }]
+  },
+  {
+    name: "knowledge_what_knows",
+    family: "knowledge",
+    tier: "read",
+    note: "Says what someone knows.",
+    text: "What a person knows: each fact they hold, with how they came by it and from whom, since when, what they take it to be, how sure they are, and whom they keep it from.",
+    args: [
+      { path: "person", text: person },
+      { path: "about", text: "Only facts matching these words, or about this person, place, thing or quest; leave it out for all they know." }
+    ]
+  },
+  {
+    name: "time_clock",
+    family: "time",
+    tier: "read",
+    note: "Reads the date and time.",
+    text: "The time now: the date and time of day in the world's calendar, the part of the day, today's holidays, and whether the clock is paused.",
+    args: []
+  },
+  {
+    name: "time_day",
+    family: "time",
+    tier: "read",
+    note: "Reads someone's day.",
+    text: "A person's day: what they do when, and where, from their routine and their plans. Day 0 is today, 1 tomorrow, -1 yesterday.",
+    args: [
+      { path: "person", text: person },
+      { path: "day", text: "Which day, counted from today: 0 today, 1 tomorrow, -1 yesterday; leave it out for today." }
+    ]
+  },
+  {
+    name: "checks_odds",
+    family: "checks",
+    tier: "read",
+    note: "Gives an action's odds.",
+    text: "The odds of an action: whether it can be tried now and, if not, why; for one that rolls, the chance of each outcome, the dice and the difficulty. The actor is the player character unless you name another.",
+    args: [
+      { path: "action", text: "The action's id." },
+      { path: "actor", text: "Who tries it: a person's id or name; leave it out for the player character." },
+      { path: "params", text: `The action's arguments by name, such as its target or where to, written as a JSON object: {"target": "an id or a name"}.` }
+    ]
+  },
+  {
+    name: "minds_read",
+    family: "minds",
+    tier: "read",
+    note: "Reads a character's mind, memory and plans.",
+    text: "A character's mind: their latest thoughts (what they make of the moment, what they intend, how they come across, their mood), their memory notes, the commitments they made and the plans they keep.",
+    args: [{ path: "person", text: person }]
+  }
+];
+
+// src/shared/agent-tools-write.ts
+var entity = "The person or thing: their id, or their name as the world has it.";
+var person2 = "The person: their id, or their name as the world has it.";
+var field = "The field's id.";
+var relation = "The relation type's id: knows, owns, member_of, regard, in, or one of the world's own.";
+var path = "The workspace file's path: names joined by /, such as notes/marcus.md.";
+var under = "Only files under this folder, such as notes/; leave it out for every file.";
+var lore = "The lore entry's id, as lore_search or lore_grep gives it.";
+var proposes = "The answer is the change in plain words, its change type and its mode; nothing changes until the game master applies it.";
+var WRITE_TOOL_TEXTS = [
+  {
+    name: "gm_set_field",
+    family: "people",
+    tier: "gm",
+    note: "Proposes a field of a person or thing, as the GM's Edit sets it.",
+    text: `Propose setting one field of a person or thing, as the GM's Edit does, locked fields too. The engine checks the value against the field's type, values and bounds; money is in minor units (2500 is 25.00) and moves against a correction. ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "field", text: field },
+      { path: "value", text: `Its new value in the field's type, written as JSON: a number, true or false, "words" or an "id" in quotes, a list such as ["a", "b"], or null to clear a reference; plain words read as text.` }
+    ]
+  },
+  {
+    name: "gm_add_to_field",
+    family: "people",
+    tier: "gm",
+    note: "Proposes adding to a number field, within its bounds.",
+    text: `Propose adding to a number field of a person or thing, or taking from it with a negative amount; it stops at the field's bounds. Money is in minor units and moves against a correction. ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "field", text: field },
+      { path: "delta", text: "How much to add; a negative amount takes away." }
+    ]
+  },
+  {
+    name: "gm_set_entity",
+    family: "people",
+    tier: "gm",
+    note: "Proposes someone's tier, agent flag and levels.",
+    text: `Propose a person's or thing's tier, whether they live on their own as an agent between turns, and their level of detail in each domain. Give any of the three. ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "tier", text: "Their new tier." },
+      { path: "agent", text: "true: they live on their own between turns; false: only while the story is with them." },
+      { path: "levels", text: 'Per domain, a level from 0 to 4, or -1 to follow their tier: {"money": 2, "gear": -1}.' }
+    ]
+  },
+  {
+    name: "gm_classify",
+    family: "people",
+    tier: "gm",
+    note: "Proposes someone's classes and tags, whole.",
+    text: `Propose a person's or thing's classes and tags, whole: each of the world's facets with its values, and every tag. The chat keeps them from then on over the world's definition. ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "class", text: `Each facet's values, by the facet's id, written as a JSON object: {"role": ["ally"]}.` },
+      { path: "tags", text: "Their tags, all of them." }
+    ]
+  },
+  {
+    name: "gm_set_life",
+    family: "people",
+    tier: "gm",
+    note: "Proposes someone's life state, and who is told of it.",
+    text: `Propose a person's life state (alive, dying, dead, or one the world has), and whom it is told to besides those with them. Give either or both. ${proposes}`,
+    args: [
+      { path: "person", text: person2 },
+      { path: "state", text: "Their new life state." },
+      { path: "tell", text: "Who else learns of it: each person's id or name." }
+    ]
+  },
+  {
+    name: "gm_spawn",
+    family: "people",
+    tier: "gm",
+    note: "Proposes someone or something new in the chat.",
+    text: `Propose bringing someone or something new into the chat: its kind and name, and if you like its id, tier, place and whether it lives as an agent. A new person counts against the world's spawn cap, the people a chat may bring in (Build → World). ${proposes}`,
+    args: [
+      { path: "kind", text: "Its kind." },
+      { path: "name", text: "Its name." },
+      { path: "id", text: "An id of your own for it; leave it out for one the engine makes. Reading with the player character's knowledge, always leave it out: an id is refused." },
+      { path: "tier", text: "Its tier; leave it out for the world's spawn tier." },
+      { path: "place", text: "Where it starts: a place's id or name." },
+      { path: "agent", text: "true: it lives on its own between turns." }
+    ]
+  },
+  {
+    name: "gm_despawn",
+    family: "people",
+    tier: "gm",
+    note: "Proposes taking someone or something out of the world.",
+    text: `Propose taking a person or thing out of the world: it is kept, its relations end, and gm_restore brings it back. Removing a person and destroying a thing are change types of their own. ${proposes}`,
+    args: [{ path: "entity", text: entity }]
+  },
+  {
+    name: "gm_restore",
+    family: "people",
+    tier: "gm",
+    note: "Proposes bringing back someone or something taken out.",
+    text: `Propose bringing back a person or thing that was taken out of the world, where it was. ${proposes}`,
+    args: [{ path: "entity", text: entity }]
+  },
+  {
+    name: "gm_link",
+    family: "people",
+    tier: "gm",
+    note: "Proposes a relation, or new fields for one.",
+    text: `Propose a relation from one person or thing to another (or to a place), with its fields, or new fields for one already there. ${proposes}`,
+    args: [
+      { path: "relation", text: relation },
+      { path: "from", text: "From whom or what: an id or name." },
+      { path: "to", text: "To whom or what: an id or name, a place's for a relation to a place." },
+      { path: "fields", text: `The relation's fields, as the world defines them, written as a JSON object: {"heat": 3}.` },
+      { path: "until", text: "When it ends, in the world's minutes; leave it out for never." }
+    ]
+  },
+  {
+    name: "gm_unlink",
+    family: "people",
+    tier: "gm",
+    note: "Proposes ending a relation.",
+    text: `Propose ending a relation from one person or thing to another. ${proposes}`,
+    args: [
+      { path: "relation", text: relation },
+      { path: "from", text: "From whom or what: an id or name." },
+      { path: "to", text: "To whom or what: an id or name." }
+    ]
+  },
+  {
+    name: "gm_move",
+    family: "places",
+    tier: "gm",
+    note: "Proposes moving someone or something to a place.",
+    text: `Propose moving a person or thing to a place, out of any container, along the one path every move in the story takes (whoever is with them comes along). ${proposes}`,
+    args: [
+      { path: "entity", text: entity },
+      { path: "to", text: "The place: its id or name." }
+    ]
+  },
+  {
+    name: "gm_put",
+    family: "items",
+    tier: "gm",
+    note: "Proposes putting a thing into another, or taking it out.",
+    text: `Propose putting a thing inside another (a bag, a car, or a person who then carries it), or, leaving into out, taking it out to where its container is. ${proposes}`,
+    args: [
+      { path: "entity", text: "The thing, or a person going into a vehicle: an id or name." },
+      { path: "into", text: "Into what: an id or name; leave it out to take it out." }
+    ]
+  },
+  {
+    name: "gm_adjust_money",
+    family: "money",
+    tier: "gm",
+    note: "Proposes money into or out of an account against a correction.",
+    text: `Propose moving money into an account, or out of it with a negative amount, against the outside correction account. ${proposes}`,
+    args: [
+      { path: "account", text: "The account: its id or name." },
+      { path: "cents", text: "How much, in minor units (2500 is 25.00); negative takes it out." }
+    ]
+  },
+  {
+    name: "gm_effect",
+    family: "money",
+    tier: "gm",
+    note: "Proposes running one of the world's GM effects.",
+    text: `Propose running one of the effects the world's packs let the GM run, with literal arguments: what no field holds, such as an asset's price. ${proposes}`,
+    args: [
+      { path: "effect", text: "The effect's id." },
+      { path: "args", text: `Its arguments, as literal values, written as a JSON object: {"account": "an account's id"}.` }
+    ]
+  },
+  {
+    name: "gm_set_stage",
+    family: "quests",
+    tier: "gm",
+    note: "Proposes moving a quest or secret to a stage.",
+    text: `Propose moving a quest, secret, puzzle or agenda to a stage: on to one that follows, as reaching it in the story would (its effects, rewards and reveal); back, only the stage. ${proposes}`,
+    args: [
+      { path: "track", text: "The quest, secret, puzzle or agenda: its id or label." },
+      { path: "stage", text: "The stage: its id or label." }
+    ]
+  },
+  {
+    name: "gm_feed",
+    family: "knowledge",
+    tier: "gm",
+    note: "Proposes a section's settings in this chat.",
+    text: `Propose a section's settings in this chat over the world's: whether the narrator gets it, its lines and tokens at most, the sources that fill it, and whose knowledge it reads. Leave settings out to return the section to the world's. ${proposes}`,
+    args: [
+      { path: "section", text: "The section's id." },
+      { path: "settings", text: 'Written as a JSON object: {"enabled": true or false, "maxLines": a count, "maxTokens": a count, "include": [its sources], "scope": "player", "scene" or "gm"}, any of them.' }
+    ]
+  },
+  {
+    name: "gm_mind_edit",
+    family: "minds",
+    tier: "gm",
+    note: "Proposes a change to a character's mind, as GM → Minds makes it.",
+    text: `Propose a change to a character's mind, as GM → Minds makes it. mind_pin pins their fidelity (level), or unpins it with level none; mind_refresh asks for a fresh mind next turn; mind_memory edits a note, commitment or plan (part, id and value: the fields to change), adds one (part and value, which needs its text, and a plan its what and when) or deletes one (part and id, no value); mind_intent sets what they mean to do now (text) and how they go about it (approach), either or both; mind_knowledge sets what one person holds of a fact the chat knows (fact and holding, whole), or takes it away (fact, no holding). Reading with the player character's knowledge, only the player character's own knowledge may be changed (mind_knowledge on them): a change to anyone else's mind is refused. ${proposes}`,
+    args: [
+      { path: "op", text: "Which change: mind_pin, mind_refresh, mind_memory, mind_intent or mind_knowledge." },
+      { path: "person", text: person2 },
+      { path: "level", text: "mind_pin: live, near, far or background; none unpins." },
+      { path: "part", text: "mind_memory: note, commitment or plan." },
+      { path: "id", text: "mind_memory: the note's, commitment's or plan's id; leave it out to add one." },
+      { path: "value", text: "mind_memory: its fields, or the ones to change, written as a JSON object; leave it out to delete it." },
+      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most 600 characters); an empty text clears it." },
+      { path: "approach", text: "mind_intent: reactive (they answer the scene), proactive (they pursue their own aims), or none (their mind decides)." },
+      { path: "fact", text: "mind_knowledge: the fact's id, as the knowledge tools give it." },
+      { path: "holding", text: 'mind_knowledge: the holding, whole, written as a JSON object: {"how": "authored", "witnessed", "told", "inferred" or "guessed", "by": who told them or null, "evidence": [fact ids], "since": {"msg", "at"}, "belief": "true", "false" or "uncertain", "confidence": 0 to 1, "keptFrom": [ids] or "everyone"}; leave it out to take it away.' }
+    ]
+  },
+  {
+    name: "gm_routine_edit",
+    family: "time",
+    tier: "gm",
+    note: "Proposes a change to a character's routine or schedules in this chat.",
+    text: `Propose a change to a character's routine or schedules in this chat, as GM → Routine makes it. routine_follow sets how they follow their routine (mode, awareness, role, skips; default returns one to the world's); routine_block sets one block of it (block, and value: the block, or {"id", "off": true}; leave value out to drop the chat's change); schedule_override changes one of their schedules (schedule, and value: {"off": true, "until": minutes or null} or {"slots": [...]}; leave value out to drop the chat's change). ${proposes}`,
+    args: [
+      { path: "op", text: "Which change: routine_follow, routine_block or schedule_override." },
+      { path: "person", text: person2 },
+      { path: "mode", text: "routine_follow: follows, no_invitations (no invitations from it) or off (no routine at all); default returns it to the world's." },
+      { path: "awareness", text: "routine_follow: story_first, balanced or routine_first; default returns it to the world's." },
+      { path: "role", text: "routine_follow: informative (context only), enforced (lived, the story first) or off (not even context); default returns it to their level's." },
+      { path: "skips", text: "routine_follow: how they live through a time skip; default returns it to their level's." },
+      { path: "block", text: "routine_block: the block's id." },
+      { path: "schedule", text: "schedule_override: the schedule's id." },
+      { path: "value", text: "routine_block or schedule_override: the new block or schedule change, written as a JSON object; leave it out to drop the chat's change." }
+    ]
+  },
+  {
+    name: "gm_fix",
+    family: "time",
+    tier: "gm",
+    note: "Proposes a ✎ fix: the clock, or a field as the player corrects it.",
+    text: `Propose a ✎ fix, as the player corrects the HUD: the clock set to a time (a later time runs the time between; an earlier one sets the clock back), or one field set as the player could set it (a locked field is refused, and a place must be one the player character can see). Give time alone, or entity, field and value. ${proposes}`,
+    args: [
+      { path: "time", text: `The clock: "YYYY-MM-DD HH:MM" in the world's calendar where the player character is.` },
+      { path: "entity", text: entity },
+      { path: "field", text: field },
+      { path: "value", text: `The field's new value in its type, written as JSON: a number, true or false, "words" or an "id" in quotes; plain words read as text.` }
+    ]
+  },
+  {
+    name: "workspace_list",
+    family: "workspace",
+    tier: "read",
+    note: "Lists the chat's workspace files.",
+    text: "List the chat's workspace files, the notes the agents and the game master keep for this chat: each one's path, its size in characters, whether it is pinned, the turn it was written on and who wrote it. The workspace follows the chat's turns, so a swipe from before a note has none of it.",
+    args: [{ path: "under", text: under }]
+  },
+  {
+    name: "workspace_read",
+    family: "workspace",
+    tier: "read",
+    note: "Reads a workspace file.",
+    text: "Read one workspace file whole.",
+    args: [{ path: "path", text: path }]
+  },
+  {
+    name: "workspace_grep",
+    family: "workspace",
+    tier: "read",
+    note: "Finds text in the workspace files.",
+    text: "Find the lines of the workspace files that hold some text, in any case: each file's path, and each line's number and text.",
+    args: [
+      { path: "text", text: "What to look for." },
+      { path: "under", text: under }
+    ]
+  },
+  {
+    name: "workspace_write",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes writing a workspace file whole.",
+    text: `Propose writing a workspace file whole: a new one, or a new text for one already there. ${proposes}`,
+    args: [
+      { path: "path", text: path },
+      { path: "text", text: "The file's whole text." }
+    ]
+  },
+  {
+    name: "workspace_edit",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes replacing text in a workspace file.",
+    text: `Propose an edit to a workspace file: its text find replaced with replace, where find is there exactly once, or everywhere it is with all. ${proposes}`,
+    args: [
+      { path: "path", text: path },
+      { path: "find", text: "The text to replace, as the file has it." },
+      { path: "replace", text: "What goes in its place; an empty text removes it." },
+      { path: "all", text: "true: replace it everywhere it is." }
+    ]
+  },
+  {
+    name: "workspace_move",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes moving or renaming a workspace file.",
+    text: `Propose moving or renaming a workspace file; its pin goes with it. ${proposes}`,
+    args: [
+      { path: "from", text: "The file's path now." },
+      { path: "to", text: "Its new path, where no file is yet." }
+    ]
+  },
+  {
+    name: "workspace_delete",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes deleting a workspace file.",
+    text: `Propose deleting a workspace file. ${proposes}`,
+    args: [{ path: "path", text: path }]
+  },
+  {
+    name: "workspace_pin",
+    family: "workspace",
+    tier: "gm",
+    note: "Proposes pinning a workspace file, or unpinning it.",
+    text: `Propose pinning a workspace file, which marks it as one to keep in view, or unpinning it. ${proposes}`,
+    args: [
+      { path: "path", text: path },
+      { path: "pinned", text: "true pins it; false unpins it." }
+    ]
+  },
+  {
+    name: "lore_search",
+    family: "lore",
+    tier: "read",
+    note: "Searches the world's lore and the chat's World Info books.",
+    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read.",
+    args: [{ path: "query", text: "Words or names to look for." }]
+  },
+  {
+    name: "lore_grep",
+    family: "lore",
+    tier: "read",
+    note: "Finds lore entries that hold some text.",
+    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it.",
+    args: [{ path: "text", text: "What to look for." }]
+  },
+  {
+    name: "lore_read",
+    family: "lore",
+    tier: "read",
+    note: "Reads one lore entry, by its id.",
+    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach.",
+    args: [{ path: "id", text: lore }]
+  },
+  {
+    name: "lore_save",
+    family: "lore",
+    tier: "gm",
+    note: "Proposes saving a lore entry to a workspace file.",
+    text: `Propose saving a lore entry's text, as you read it, to a workspace file. ${proposes}`,
+    args: [
+      { path: "id", text: lore },
+      { path: "path", text: "The workspace file; leave it out for one under lore/ named after the entry." }
+    ]
+  },
+  {
+    name: "lore_draft",
+    family: "lore",
+    tier: "gm",
+    note: "Proposes a draft edit of a lore entry, as a workspace file under lore-drafts/.",
+    text: `Propose a draft of an edit to a lore entry, as a workspace file under lore-drafts/ that names the entry and holds your text. Nothing writes a book or the world's lore from it: the game master applies it in Build, on their own press. ${proposes}`,
+    args: [
+      { path: "id", text: lore },
+      { path: "text", text: "The entry's text as you would have it." },
+      { path: "path", text: "The draft file, under lore-drafts/; leave it out for one named after the entry." }
+    ]
+  }
+];
+var WRITE_NOTE = {
+  noWriter: "tool.note.no_writer",
+  badOp: "tool.note.bad_op",
+  badPath: "tool.note.bad_path",
+  noFile: "tool.note.no_file",
+  pathTaken: "tool.note.path_taken",
+  never: "tool.note.never",
+  spawnCap: "tool.note.spawn_cap",
+  spawnId: "tool.note.spawn_id",
+  notYourMind: "tool.note.not_your_mind",
+  povEffect: "tool.note.pov_effect",
+  povRefused: "tool.note.pov_refused",
+  learnedMove: "tool.note.learned_move",
+  fileExists: "tool.note.file_exists",
+  tooMany: "tool.note.too_many",
+  editMissing: "tool.note.edit_missing",
+  editSeveral: "tool.note.edit_several",
+  noLore: "tool.note.no_lore",
+  draftPath: "tool.note.draft_path",
+  cancelled: "tool.note.cancelled",
+  paused: "tool.note.paused",
+  noWorld: "tool.note.no_world",
+  noChange: "tool.note.no_change",
+  stale: "tool.note.stale"
+};
+var filePath = { name: "path", text: "the workspace path the call gave" };
+var WRITE_TOOL_NOTES = [
+  { id: WRITE_NOTE.noWriter, label: "Nothing to write with", note: "A write tool's answer when the agent may only read.", text: "This agent can't change anything here: it only reads.", vars: [] },
+  { id: WRITE_NOTE.badOp, label: "A change it can't read", note: "A write's answer when the change it was given isn't one the engine can read.", text: "That change isn't one the engine can read: check it against the tool's description.", vars: [] },
+  { id: WRITE_NOTE.badPath, label: "Not a workspace path", note: "A workspace write's answer when the path isn't one a file may have.", text: "{{path}} isn't a workspace path: names of letters, digits, “.”, “_” and “-”, joined by /.", vars: [filePath] },
+  { id: WRITE_NOTE.noFile, label: "No such file", note: "A workspace tool's answer when no file is at the path, or none the agent's knowledge may read.", text: "No workspace file {{path}} here.", vars: [filePath] },
+  { id: WRITE_NOTE.pathTaken, label: "A path taken by a file it can't read", note: "A workspace write's answer when a file the agent's knowledge may not read (Who may read it, GM → Workspace) is at the path.", text: "A workspace file you can't read is already at {{path}}: pick another path.", vars: [filePath] },
+  { id: WRITE_NOTE.never, label: "A change type set to Never", note: "A write's answer when the user set its change type to Never in Settings → Changes from the reply.", text: "{{type}} is set to Never (Settings → Changes from the reply), so this change isn't made.", vars: [{ name: "type", text: "the change type, as Settings names it", required: true }] },
+  { id: WRITE_NOTE.spawnCap, label: "The spawn cap", note: "A GM spawn's answer when the chat has brought in as many people as its world allows.", text: "This chat has brought in {{count}} people, all its world allows (its spawn cap, Build → World), so no one new can join it.", vars: [{ name: "count", text: "the people the chat has brought in", required: true }] },
+  { id: WRITE_NOTE.spawnId, label: "An id a spawn can't take", note: "A GM spawn's answer, under the player character's knowledge, when the id it asks for is taken or isn't an id: one answer whoever holds it, so it never tells of someone the player character can't know.", text: "{{id}} can't be used for someone or something new: leave the id out, and one is made.", vars: [{ name: "id", text: "the id the spawn asked for" }] },
+  { id: WRITE_NOTE.notYourMind, label: "Another's mind", note: "A minds change's answer, under the player character's knowledge, for anyone but the player character: one answer whoever it is and whatever their mind holds, so it never tells what another knows or thinks.", text: "{{pov}} can't see into anyone else's mind, and you read the world as {{pov}} knows it: only what {{pov}} knows may be changed.", vars: [{ name: "pov", text: "the player character's name" }] },
+  { id: WRITE_NOTE.povEffect, label: "An effect under your character's knowledge", note: "gm_effect's answer under the player character's knowledge: one answer for every effect, whatever it would touch, since an effect works on what the player character may not know of.", text: "Effects aren't proposed with {{pov}}'s knowledge: their workings reach past what {{pov}} knows. Use the other tools, or ask the game master.", vars: [{ name: "pov", text: "the player character's name" }] },
+  { id: WRITE_NOTE.povRefused, label: "A refusal under your character's knowledge", note: "A write's answer, under the player character's knowledge, whenever the engine refuses the change: one answer whatever the engine's reason, so a refusal never tells what the player character can't know.", text: "That change can't be made as {{pov}} knows the world: check it against what you can read, or propose another.", vars: [{ name: "pov", text: "the player character's name" }] },
+  { id: WRITE_NOTE.tooMany, label: "Too many changes at once", note: "An apply's answer when one batch holds more changes than one GM edit may.", text: "One batch holds at most {{max}} changes, as one GM edit does.", vars: [{ name: "max", text: "the most one GM edit holds", required: true }] },
+  { id: WRITE_NOTE.editMissing, label: "Text not in the file", note: "workspace_edit's answer when the file doesn't hold the text to replace.", text: "{{path}} doesn't hold that text.", vars: [filePath] },
+  { id: WRITE_NOTE.learnedMove, label: "Into or out of learned/", note: "workspace_move's answer when it would take a file into or out of the learned area (learned/), which is kept apart from the turns.", text: "{{path}} can't move to {{to}}: files under learned/ stay there, and the others stay out of it. Write the file at its new path, then delete the old one.", vars: [filePath, { name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.fileExists, label: "A path taken in learned/", note: "workspace_move's answer, in the learned area, when a file is already at the path it was to move to.", text: "A workspace file is already at {{to}}: pick another path.", vars: [{ name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.editSeveral, label: "Text in the file more than once", note: "workspace_edit's answer when the text to replace is there more than once and all isn't set.", text: "{{path}} holds that text {{count}} times: give more of it to pick one, or set all to replace every one.", vars: [filePath, { name: "count", text: "how many times the file holds it", required: true }] },
+  { id: WRITE_NOTE.noLore, label: "No such lore entry", note: "A lore tool's answer when no entry has the id, or none the agent's knowledge may read.", text: "No lore entry {{id}} here.", vars: [{ name: "id", text: "the entry id the call gave" }] },
+  { id: WRITE_NOTE.draftPath, label: "A draft outside lore-drafts/", note: "lore_draft's answer when the path it was given isn't under lore-drafts/.", text: "A lore draft goes under lore-drafts/, and {{path}} isn't there.", vars: [filePath] },
+  { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
+  { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
+  { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },
+  { id: WRITE_NOTE.noChange, label: "A change that changes nothing", note: "A write's answer when the change would leave everything as it is, or, under the player character's knowledge, when it can't be made for a reason the player mustn't learn of.", text: "That changes nothing.", vars: [] },
+  { id: WRITE_NOTE.stale, label: "The chat changed meanwhile", note: "An apply's answer when the chat changed between the check and the write (a turn landed), so the engine no longer takes the change.", text: "The chat changed while this was being written, so it no longer applies: read it again and propose the change anew.", vars: [] }
+];
+
+// src/shared/agent-tools.ts
+var AGENT_KNOWLEDGE = ["pov", "everyone", "gm"];
+function isAgentKnowledge(v) {
+  return typeof v === "string" && AGENT_KNOWLEDGE.includes(v);
+}
+var TOOL_NOTE = {
+  noPerson: "tool.note.no_person",
+  noPlace: "tool.note.no_place",
+  noThing: "tool.note.no_thing",
+  noTrack: "tool.note.no_track",
+  noFact: "tool.note.no_fact",
+  noField: "tool.note.no_field",
+  ambiguous: "tool.note.ambiguous",
+  missing: "tool.note.missing",
+  badValue: "tool.note.bad_value",
+  badValueUnlisted: "tool.note.bad_value_unlisted",
+  hidden: "tool.note.hidden"
+};
+var asked = { name: "name", text: "the name or id the model asked for, as it wrote it" };
+var LAYER_NOTES = [
+  { id: TOOL_NOTE.noPerson, label: "No such person", note: "A tool's answer when a person's name or id names no one the agent's knowledge can see: a hidden person reads exactly as one who doesn't exist.", text: "No such person here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noPlace, label: "No such place", note: "A tool's answer when a place's name or id names no place the agent's knowledge can see.", text: "No such place here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noThing, label: "No such thing", note: "A tool's answer when a thing's name or id names nothing the agent's knowledge can see.", text: "No such thing here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noTrack, label: "No such quest or secret", note: "A tool's answer when a quest, secret, puzzle or agenda's id or label names none the agent's knowledge can see.", text: "No such quest, secret, puzzle or agenda here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the agent's knowledge can see: under the player character's knowledge, one it doesn't hold reads exactly as one the chat doesn't record.", text: "No such fact here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noField, label: "No such field", note: "A write's answer, under the player character's knowledge, when a field names none it may see of that person or thing: a hidden field reads exactly as one its kind doesn't have.", text: "No such field here: {{name}}.", vars: [asked] },
+  {
+    id: TOOL_NOTE.ambiguous,
+    label: "Several match",
+    note: "A tool's answer when a name fits more than one, listing only those the agent's knowledge can see.",
+    text: "{{name}} could be any of these; ask again with one of their ids: {{matches}}.",
+    vars: [asked, { name: "matches", text: "each match the agent may see, as its name and id", required: true }]
+  },
+  {
+    id: TOOL_NOTE.missing,
+    label: "A missing argument",
+    note: "A tool's answer when the call leaves out an argument the tool needs.",
+    text: "{{tool}} needs {{arg}}: {{text}}",
+    vars: [
+      { name: "tool", text: "the tool" },
+      { name: "arg", text: "the argument left out", required: true },
+      { name: "text", text: "that argument's description" }
+    ]
+  },
+  {
+    id: TOOL_NOTE.badValue,
+    label: "A value it doesn't take",
+    note: "A tool's answer when an argument holds a value the tool doesn't take.",
+    text: "{{tool}} doesn't take {{value}} as {{arg}}; it takes one of: {{values}}.",
+    vars: [
+      { name: "tool", text: "the tool" },
+      { name: "arg", text: "the argument" },
+      { name: "value", text: "the value given", required: true },
+      { name: "values", text: "the values it takes" }
+    ]
+  },
+  {
+    id: TOOL_NOTE.badValueUnlisted,
+    label: "A value it doesn't take, with none to list",
+    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list: under the player character's knowledge, a quest's stages it hasn't come to.",
+    text: "{{tool}} doesn't take {{value}} as {{arg}}.",
+    vars: [
+      { name: "tool", text: "the tool" },
+      { name: "arg", text: "the argument" },
+      { name: "value", text: "the value given", required: true }
+    ]
+  },
+  {
+    id: TOOL_NOTE.hidden,
+    label: "Beyond the player character's knowledge",
+    note: "A tool's answer, under the player character's knowledge, to what the player character can't know: another's mind or knowledge, or another's odds.",
+    text: "{{pov}} doesn't know that, and you read the world as {{pov}} knows it.",
+    vars: [{ name: "pov", text: "the player character's name" }]
+  }
+];
+var TOOL_NOTES = [...LAYER_NOTES, ...WRITE_TOOL_NOTES];
+var TOOL_TEXTS = [...READ_TOOL_TEXTS, ...WRITE_TOOL_TEXTS];
+var BY_NAME = new Map(TOOL_TEXTS.map((t) => [t.name, t]));
+
+// src/shared/stores.ts
+var BLOB_HASH = /^[0-9a-f]{32}$/;
+function isBlobHash(v) {
+  return typeof v === "string" && BLOB_HASH.test(v);
+}
+var PATH_SEGMENT = /^[\p{L}\p{N}._-]+(?: [\p{L}\p{N}._-]+)*$/u;
+function isWorkspacePath(v) {
+  if (!safeKey(v))
+    return false;
+  return v.split("/").every((name) => name !== "." && name !== ".." && PATH_SEGMENT.test(name));
+}
+var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 });
+var DAY_MS = 24 * 60 * 60 * 1000;
+var HOUR_MS = 60 * 60 * 1000;
+
+// src/engine/workspace.ts
+var WS_KEY = "ws";
+var PINS_KEY = "wsPins";
+var READERS_KEY = "wsReaders";
+var WS_WRITE = "engine.ws.write";
+var WS_DELETE = "engine.ws.delete";
+var WS_PIN = "engine.ws.pin";
+var WS_READERS = "engine.ws.readers";
+function workspaceOf(state) {
+  const raw = engineSlice(state)[WS_KEY];
+  const out = {};
+  if (!isRecord(raw))
+    return out;
+  for (const [path2, hash] of Object.entries(raw))
+    if (isWorkspacePath(path2) && isBlobHash(hash))
+      out[path2] = hash;
+  return out;
+}
+function writable2(state, key) {
+  const s = state.packs.engine ?? {};
+  state.packs.engine = s;
+  const current = isRecord(s[key]) ? { ...s[key] } : {};
+  s[key] = current;
+  return current;
+}
+var wsWriteEvent = {
+  type: WS_WRITE,
+  validate: (e) => {
+    if (!isWorkspacePath(e.data.path))
+      return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
+    return isBlobHash(e.data.hash) ? null : { code: "bad_event", reason: "a workspace file's body is a blob's hash" };
+  },
+  apply: (e, state) => {
+    if (isWorkspacePath(e.data.path) && isBlobHash(e.data.hash))
+      writable2(state, WS_KEY)[e.data.path] = e.data.hash;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `workspace file ${String(e.data.path)} written`
+};
+var wsDeleteEvent = {
+  type: WS_DELETE,
+  validate: (e, ctx) => {
+    if (!isWorkspacePath(e.data.path))
+      return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
+    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: `no workspace file ${e.data.path}` };
+  },
+  apply: (e, state) => {
+    if (!isWorkspacePath(e.data.path))
+      return;
+    delete writable2(state, WS_KEY)[e.data.path];
+    if (isRecord(state.packs.engine?.[PINS_KEY]))
+      delete writable2(state, PINS_KEY)[e.data.path];
+    if (isRecord(state.packs.engine?.[READERS_KEY]))
+      delete writable2(state, READERS_KEY)[e.data.path];
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `workspace file ${String(e.data.path)} deleted`
+};
+var wsPinEvent = {
+  type: WS_PIN,
+  validate: (e, ctx) => {
+    if (!isWorkspacePath(e.data.path))
+      return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
+    if (typeof e.data.pinned !== "boolean")
+      return { code: "bad_event", reason: "a pin is on or off" };
+    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: `no workspace file ${e.data.path}` };
+  },
+  apply: (e, state) => {
+    if (!isWorkspacePath(e.data.path) || typeof e.data.pinned !== "boolean")
+      return;
+    const pins = writable2(state, PINS_KEY);
+    if (e.data.pinned)
+      pins[e.data.path] = true;
+    else
+      delete pins[e.data.path];
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `workspace file ${String(e.data.path)} ${e.data.pinned === true ? "pinned" : "unpinned"}`
+};
+var wsReadersEvent = {
+  type: WS_READERS,
+  validate: (e, ctx) => {
+    if (!isWorkspacePath(e.data.path))
+      return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
+    if (!isAgentKnowledge(e.data.readers))
+      return { code: "bad_event", reason: "a file's readers are the player character's, everyone's or the GM's knowledge" };
+    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: `no workspace file ${e.data.path}` };
+  },
+  apply: (e, state) => {
+    if (!isWorkspacePath(e.data.path) || !isAgentKnowledge(e.data.readers))
+      return;
+    if (e.data.readers !== "gm")
+      writable2(state, READERS_KEY)[e.data.path] = e.data.readers;
+    else if (isRecord(state.packs.engine?.[READERS_KEY]))
+      delete writable2(state, READERS_KEY)[e.data.path];
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `workspace file ${String(e.data.path)} read with ${e.data.readers === "pov" ? "the player character's" : e.data.readers === "everyone" ? "everyone's" : "the GM's"} knowledge`
 };
 
 // src/engine/engine-pack.ts
@@ -8755,12 +9591,12 @@ function readEngineSlice(state) {
       revealed[k] = v.filter((x) => typeof x === "string");
   const byStage = (v) => {
     const out = {};
-    for (const [track, row] of Object.entries(rec(v))) {
+    for (const [track2, row] of Object.entries(rec(v))) {
       const counts = {};
       for (const [stage, n] of Object.entries(rec(row)))
         if (typeof n === "number")
           counts[stage] = n;
-      out[track] = counts;
+      out[track2] = counts;
     }
     return out;
   };
@@ -8801,13 +9637,13 @@ function sub(state, key) {
   s[key] = fresh;
   return fresh;
 }
-function countStage(state, key, track, stage, next) {
-  if (!safeKey(track) || !safeKey(stage))
+function countStage(state, key, track2, stage, next) {
+  if (!safeKey(track2) || !safeKey(stage))
     return;
   const all = sub(state, key);
-  const row = isRecord(all[track]) ? all[track] : {};
+  const row = isRecord(all[track2]) ? all[track2] : {};
   const n = row[stage];
-  all[track] = { ...row, [stage]: next(typeof n === "number" ? n : 0) };
+  all[track2] = { ...row, [stage]: next(typeof n === "number" ? n : 0) };
 }
 function str2(e, key) {
   const v = e.data[key];
@@ -8892,14 +9728,14 @@ var events = [
     type: ENGINE_EVENTS.attempt,
     validate: (e, ctx) => own(ctx.world.tracks, str2(e, "track")) ? null : { code: "missing_track", reason: `no track ${str2(e, "track")}` },
     apply: (e, state) => {
-      const track = str2(e, "track");
+      const track2 = str2(e, "track");
       if (e.data.correct === true)
-        sub(state, "solved")[track] = str2(e, "stage");
+        sub(state, "solved")[track2] = str2(e, "stage");
       else {
         const attempts = sub(state, "attempts");
-        const n = own(attempts, track);
-        attempts[track] = (typeof n === "number" ? n : 0) + 1;
-        countStage(state, "missed", track, str2(e, "stage"), (count) => count + 1);
+        const n = own(attempts, track2);
+        attempts[track2] = (typeof n === "number" ? n : 0) + 1;
+        countStage(state, "missed", track2, str2(e, "stage"), (count) => count + 1);
       }
     },
     describe: (e) => `attempt on ${str2(e, "track")}`
@@ -9007,8 +9843,8 @@ var events = [
       }
     },
     touches: (e) => {
-      const entity = str2(e, "entity");
-      return ["tier", "agent", "levels"].filter((aspect) => e.data[aspect] !== undefined).map((aspect) => ({ entity, aspect }));
+      const entity2 = str2(e, "entity");
+      return ["tier", "agent", "levels"].filter((aspect) => e.data[aspect] !== undefined).map((aspect) => ({ entity: entity2, aspect }));
     },
     describe: (e, ctx) => {
       const clauses = [];
@@ -9087,8 +9923,8 @@ var events = [
       const key = e.data.key;
       if (typeof key !== "string" || !safeKey(key))
         return;
-      const { place, round } = e.data;
-      sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds"), ...typeof round === "string" ? { round } : {} };
+      const { place: place2, round } = e.data;
+      sub(state, "tries")[key] = { at: state.clock, place: typeof place2 === "string" ? place2 : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds"), ...typeof round === "string" ? { round } : {} };
     },
     describe: (e) => `${str2(e, "actor")}: ${str2(e, "action").replace(/_/g, " ")}, ${str2(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str2(e, "why")})`}`
   },
@@ -9157,6 +9993,10 @@ var enginePack = {
     for (const def of events)
       r.event(def);
     r.event(feedEvent);
+    r.event(wsWriteEvent);
+    r.event(wsDeleteEvent);
+    r.event(wsPinEvent);
+    r.event(wsReadersEvent);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);
@@ -9170,29 +10010,29 @@ var enginePack = {
         return wakes && Array.isArray(out) ? [...out, { type: ENGINE_EVENTS.caught, data: { agent: subject, slot: slotIndexAt(calendarOf(ctx.world), ctx.state.clock) } }] : out;
       }
     });
-    r.formula("life_of", (ctx, entity) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("life_of", (ctx, entity2) => {
+      const hit = entityArg(ctx, entity2);
       return hit ? lifeOf(ctx.state, hit[0]) : "";
     });
-    r.formula("kind_is", (ctx, entity, kind) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("kind_is", (ctx, entity2, kind) => {
+      const hit = entityArg(ctx, entity2);
       return hit !== null && kindIs(ctx.registry, ctx.world, hit[1].kind, String(kind ?? ""));
     });
-    r.formula("in_class", (ctx, entity, facet, value) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("in_class", (ctx, entity2, facet, value) => {
+      const hit = entityArg(ctx, entity2);
       return hit !== null && inClass(ctx.world, ctx.state, hit[0], String(facet ?? ""), [String(value ?? "")]);
     });
-    r.formula("has_tag", (ctx, entity, tag) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("has_tag", (ctx, entity2, tag) => {
+      const hit = entityArg(ctx, entity2);
       return hit !== null && tagsOf(ctx.world, ctx.state, hit[0]).includes(String(tag ?? ""));
     });
-    r.formula("member_of", (ctx, entity, group) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("member_of", (ctx, entity2, group) => {
+      const hit = entityArg(ctx, entity2);
       return hit !== null && isMemberOf(ctx.state, hit[0], String(group ?? ""));
     });
-    r.formula("tier_of", (ctx, entity) => entityArg(ctx, entity)?.[1].tier ?? "");
-    r.formula("band_of", (ctx, entity) => {
-      const hit = entityArg(ctx, entity);
+    r.formula("tier_of", (ctx, entity2) => entityArg(ctx, entity2)?.[1].tier ?? "");
+    r.formula("band_of", (ctx, entity2) => {
+      const hit = entityArg(ctx, entity2);
       return hit ? tierBand(ctx.world, hit[1].tier) ?? "" : "";
     });
   }
@@ -9218,7 +10058,7 @@ function objectAt(parent, key) {
   parent[key] = fresh;
   return fresh;
 }
-function writable2(state, id) {
+function writable3(state, id) {
   const slice2 = state.packs[PACK3] ?? {};
   state.packs[PACK3] = slice2;
   return objectAt(objectAt(slice2, SLICE3), id);
@@ -9226,7 +10066,7 @@ function writable2(state, id) {
 function touch(state, t) {
   if (!own(state.entities, t.entity))
     return;
-  const e = writable2(state, t.entity);
+  const e = writable3(state, t.entity);
   if ("field" in t)
     objectAt(e, "fields")[t.field] = true;
   else if ("rel" in t)
@@ -9338,13 +10178,13 @@ var setDef = {
     return e.atMost && (typeof e.value !== "number" || !Number.isFinite(e.value)) ? reject3("bad_value", "a cap is a finite number") : null;
   },
   apply: (e, state) => {
-    const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
-    if (!entity || !safeKey(e.field))
+    const entity2 = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
+    if (!entity2 || !safeKey(e.field))
       return;
-    const current = entity.fields[e.field];
+    const current = entity2.fields[e.field];
     if (e.atMost && typeof current === "number" && typeof e.value === "number" && current <= e.value)
       return;
-    entity.fields[e.field] = e.value;
+    entity2.fields[e.field] = e.value;
   },
   touches: (e) => [{ entity: e.entity, field: e.field }],
   describe: (e, ctx) => `${nameOf2(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? `is ${e.atMost ? "at most" : "now"} ${String(e.value)}` : "changed"}`
@@ -9362,11 +10202,11 @@ var addDef = {
     return Number.isFinite(e.delta) ? null : reject3("bad_delta", "delta must be finite");
   },
   apply: (e, state) => {
-    const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
-    if (!entity || !safeKey(e.field))
+    const entity2 = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
+    if (!entity2 || !safeKey(e.field))
       return;
-    const current = entity.fields[e.field];
-    entity.fields[e.field] = (typeof current === "number" ? current : 0) + e.delta;
+    const current = entity2.fields[e.field];
+    entity2.fields[e.field] = (typeof current === "number" ? current : 0) + e.delta;
   },
   touches: (e) => [{ entity: e.entity, field: e.field }],
   describe: (e, ctx) => `${nameOf2(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${e.delta >= 0 ? "+" : ""}${e.delta}`
@@ -9401,11 +10241,11 @@ var linkDef = {
   type: "link",
   validate: (e, ctx) => hasEntity(ctx.state, e.from) && (hasEntity(ctx.state, e.to) || e.rel === "knows" && safeKey(e.to) && hasOwn(ctx.world.places, e.to)) ? null : reject3("missing_entity", `link ${e.from} → ${e.to}`),
   apply: (e, state) => {
-    const entity = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
-    if (!entity)
+    const entity2 = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
+    if (!entity2)
       return;
-    entity.relations = entity.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
-    entity.relations.push({ type: e.rel, to: e.to, ...e.fields ? { fields: e.fields } : {}, ...e.until !== undefined ? { until: e.until } : {} });
+    entity2.relations = entity2.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
+    entity2.relations.push({ type: e.rel, to: e.to, ...e.fields ? { fields: e.fields } : {}, ...e.until !== undefined ? { until: e.until } : {} });
   },
   touches: (e) => [{ entity: e.from, rel: e.rel, to: e.to }],
   describe: (e, ctx) => `${nameOf2(ctx, e.from)} ${e.rel.replace(/_/g, " ")} ${nameOf2(ctx, e.to)}`
@@ -9413,13 +10253,13 @@ var linkDef = {
 var unlinkDef = {
   type: "unlink",
   validate: (e, ctx) => {
-    const entity = hasEntity(ctx.state, e.from) ? ctx.state.entities[e.from] : undefined;
-    return entity && entity.relations.some((r) => r.type === e.rel && r.to === e.to) ? null : reject3("missing_relation", `no ${e.rel} from ${e.from} to ${e.to}`);
+    const entity2 = hasEntity(ctx.state, e.from) ? ctx.state.entities[e.from] : undefined;
+    return entity2 && entity2.relations.some((r) => r.type === e.rel && r.to === e.to) ? null : reject3("missing_relation", `no ${e.rel} from ${e.from} to ${e.to}`);
   },
   apply: (e, state) => {
-    const entity = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
-    if (entity)
-      entity.relations = entity.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
+    const entity2 = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
+    if (entity2)
+      entity2.relations = entity2.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
   },
   touches: (e) => [{ entity: e.from, rel: e.rel, to: e.to }],
   describe: (e, ctx) => `${nameOf2(ctx, e.from)} no longer ${e.rel.replace(/_/g, " ")} ${nameOf2(ctx, e.to)}`
@@ -9449,26 +10289,26 @@ var spawnDef = {
 var stageDef = {
   type: "stage",
   validate: (e, ctx) => {
-    const track = safeKey(e.track) && hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
-    if (!track)
+    const track2 = safeKey(e.track) && hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
+    if (!track2)
       return reject3("missing_track", `no track ${e.track}`);
-    if (!safeKey(e.to) || !hasOwn(track.stages, e.to))
+    if (!safeKey(e.to) || !hasOwn(track2.stages, e.to))
       return reject3("missing_stage", `no stage ${e.to} in ${e.track}`);
     if (e.from === undefined)
       return null;
-    const at = (hasOwn(ctx.state.tracks, e.track) ? ctx.state.tracks[e.track]?.stage : undefined) ?? track.start;
+    const at = (hasOwn(ctx.state.tracks, e.track) ? ctx.state.tracks[e.track]?.stage : undefined) ?? track2.start;
     if (at === e.from)
       return null;
-    const label = (stage) => (hasOwn(track.stages, stage) ? track.stages[stage]?.label : undefined) ?? stage;
-    return reject3("stage_moved", `${track.label} is at ${label(at)} now, no longer at ${label(e.from)}, where this move began`);
+    const label = (stage) => (hasOwn(track2.stages, stage) ? track2.stages[stage]?.label : undefined) ?? stage;
+    return reject3("stage_moved", `${track2.label} is at ${label(at)} now, no longer at ${label(e.from)}, where this move began`);
   },
   apply: (e, state) => {
     if (safeKey(e.track))
       state.tracks[e.track] = { stage: e.to, since: state.clock };
   },
   describe: (e, ctx) => {
-    const track = hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
-    return `${track?.label ?? "A thread"}: ${(track && hasOwn(track.stages, e.to) ? track.stages[e.to]?.label : undefined) ?? "moved on"}`;
+    const track2 = hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
+    return `${track2?.label ?? "A thread"}: ${(track2 && hasOwn(track2.stages, e.to) ? track2.stages[e.to]?.label : undefined) ?? "moved on"}`;
   }
 };
 var clockDef = {
@@ -9550,15 +10390,15 @@ class RegistryError extends Error {
     this.name = "RegistryError";
   }
 }
-function effectiveLevel(world, state, entity, domain) {
+function effectiveLevel(world, state, entity2, domain) {
   const domainLevel = state.realism.levels[domain];
-  const e = state.entities[entity];
+  const e = state.entities[entity2];
   if (!e)
     return domainLevel;
   const override = e.levels[domain];
   if (override !== undefined)
     return Math.min(override, domainLevel);
-  const band = entity === world.pov ? null : tierBand(world, e.tier);
+  const band = entity2 === world.pov ? null : tierBand(world, e.tier);
   const cap = band ? state.realism.tierCaps[band][domain] : undefined;
   return cap === undefined ? domainLevel : Math.min(cap, domainLevel);
 }
@@ -9615,7 +10455,7 @@ function createRegistry(packs) {
         world,
         state,
         tables: { get: (id) => world.tables[id] },
-        levelOf: (entity, domain) => rulesetFloor(world, domain, effectiveLevel(world, state, entity, domain)),
+        levelOf: (entity2, domain) => rulesetFloor(world, domain, effectiveLevel(world, state, entity2, domain)),
         service(name) {
           if (!services.has(String(name)))
             throw new RegistryError(`no service ${String(name)}`);
@@ -9816,16 +10656,16 @@ function spreadPlaces(world) {
     const from = placeChain(world, r.from);
     const to = placeChain(world, r.to);
     for (let i = 1;i < from.length; i++) {
-      const place = from[i];
+      const place2 = from[i];
       const fromPart = from[i - 1];
-      const j = place === undefined ? -1 : to.indexOf(place);
+      const j = place2 === undefined ? -1 : to.indexOf(place2);
       const toPart = to[j - 1];
-      if (place === undefined || fromPart === undefined || j < 1 || toPart === undefined)
+      if (place2 === undefined || fromPart === undefined || j < 1 || toPart === undefined)
         continue;
-      const parts = joins.get(place) ?? new Map;
-      joins.set(place, parts);
+      const parts = joins.get(place2) ?? new Map;
+      joins.set(place2, parts);
       if (farRoute(r))
-        out.add(place);
+        out.add(place2);
       else
         parts.set(joined(parts, fromPart), joined(parts, toPart));
     }
@@ -9840,9 +10680,9 @@ function spreadPlaces(world) {
     else
       partsOf.set(p.parent, [p.id]);
   }
-  for (const [place, parts] of joins) {
-    if (new Set((partsOf.get(place) ?? []).map((part) => joined(parts, part))).size > 1)
-      out.add(place);
+  for (const [place2, parts] of joins) {
+    if (new Set((partsOf.get(place2) ?? []).map((part) => joined(parts, part))).size > 1)
+      out.add(place2);
   }
   spreadOf.set(world, out);
   return out;
@@ -9859,11 +10699,11 @@ function together(world, a, b) {
   };
   return within2(a, b) || within2(b, a);
 }
-function siteOf(world, place) {
-  if (place === null)
+function siteOf(world, place2) {
+  if (place2 === null)
     return null;
-  const chain = placeChain(world, place);
-  let site = place;
+  const chain = placeChain(world, place2);
+  let site = place2;
   for (const up of chain.slice(1)) {
     if (spreadPlaces(world).has(up))
       break;
@@ -9918,7 +10758,7 @@ function movedElsewhere(events2, here) {
   for (const ev of events2)
     if (ev.type === "set" && ev.field === "place")
       last.set(ev.entity, ev.value);
-  return new Set([...last].filter(([, place]) => place !== here).map(([id]) => id));
+  return new Set([...last].filter(([, place2]) => place2 !== here).map(([id]) => id));
 }
 
 // src/engine/schedules.ts
@@ -10029,23 +10869,23 @@ function sampleSlot(slot, previous, rng) {
   }
   return slot.value;
 }
-function scheduleSeed(runSeed, schedule, entity, occurrence) {
-  return hashParts(runSeed, `schedule:${schedule}`, entity, occurrence);
+function scheduleSeed(runSeed, schedule, entity2, occurrence) {
+  return hashParts(runSeed, `schedule:${schedule}`, entity2, occurrence);
 }
 function scheduleDomain(reg, schedule) {
   if (!schedule.pack)
     return null;
   return reg.packs.find((p) => p.id === schedule.pack)?.domain ?? null;
 }
-function held(state, entity, target, at) {
-  const holds = own(state.entities, entity)?.fields.holds;
+function held(state, entity2, target, at) {
+  const holds = own(state.entities, entity2)?.fields.holds;
   if (!isRecord(holds))
     return false;
   const until = own(holds, target);
   return typeof until === "number" && until > at;
 }
-function restValue(reg, world, state, entity, target) {
-  const e = own(state.entities, entity);
+function restValue(reg, world, state, entity2, target) {
+  const e = own(state.entities, entity2);
   if (!e)
     return;
   if (target === "place") {
@@ -10068,16 +10908,16 @@ function runningRivals(reg, ctx, schedule, rank, at) {
   }
   return out;
 }
-function runsFor(ctx, rival, entity) {
-  return rival.owners.has(entity) && (!rival.domain || ctx.levelOf(entity, rival.domain) >= 1);
+function runsFor(ctx, rival, entity2) {
+  return rival.owners.has(entity2) && (!rival.domain || ctx.levelOf(entity2, rival.domain) >= 1);
 }
-function overriddenAt(reg, ctx, schedule, entity, at) {
+function overriddenAt(reg, ctx, schedule, entity2, at) {
   const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
   if (rank === null || rank === 0)
     return false;
-  return runningRivals(reg, ctx, schedule, rank, at).some((r) => r.rank < rank && runsFor(ctx, r, entity));
+  return runningRivals(reg, ctx, schedule, rank, at).some((r) => r.rank < rank && runsFor(ctx, r, entity2));
 }
-function valueBefore(reg, ctx, instant, entity) {
+function valueBefore(reg, ctx, instant, entity2) {
   const cal = calendarOf(ctx.world);
   const s = instant.schedule;
   for (const [i, slot] of s.slots.entries()) {
@@ -10088,7 +10928,7 @@ function valueBefore(reg, ctx, instant, entity) {
       if (recursOn(cal, s.recurrence, d) && clockAt(cal, d, span.start) + span.length === instant.at)
         return slot.value === undefined ? null : slot.value;
   }
-  return restValue(reg, ctx.world, ctx.state, entity, s.target) ?? null;
+  return restValue(reg, ctx.world, ctx.state, entity2, s.target) ?? null;
 }
 function firstOfDay(instant) {
   if (instant.edge !== "start")
@@ -10109,48 +10949,48 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
   const yields = optionalQuery(ctx, "castlife.yields");
   const off = optionalQuery(ctx, "castlife.schedule_off");
   const routine = schedule.target === "place" || schedule.target === "activity";
-  for (const entity of scheduleOwners(reg, ctx.world, ctx.state, schedule)) {
-    if (domain && ctx.levelOf(entity, domain) < 1)
+  for (const entity2 of scheduleOwners(reg, ctx.world, ctx.state, schedule)) {
+    if (domain && ctx.levelOf(entity2, domain) < 1)
       continue;
-    if (held(ctx.state, entity, schedule.target, instant.at))
+    if (held(ctx.state, entity2, schedule.target, instant.at))
       continue;
-    if (opts.povRoutine === false && entity === ctx.world.pov && routine)
+    if (opts.povRoutine === false && entity2 === ctx.world.pov && routine)
       continue;
-    if (off?.(ctx, entity, schedule.id, instant.at) === true)
+    if (off?.(ctx, entity2, schedule.id, instant.at) === true)
       continue;
-    if (routine && optionalQuery(ctx, "combat.engaged")?.(ctx, entity) === true)
+    if (routine && optionalQuery(ctx, "combat.engaged")?.(ctx, entity2) === true)
       continue;
-    const mine = rivals.filter((r) => runsFor(ctx, r, entity));
+    const mine = rivals.filter((r) => runsFor(ctx, r, entity2));
     if (rank !== null && mine.some((r) => r.rank < rank))
       continue;
-    const current = own(own(ctx.state.entities, entity)?.fields ?? {}, schedule.target);
+    const current = own(own(ctx.state.entities, entity2)?.fields ?? {}, schedule.target);
     let value;
     if (instant.edge === "start")
-      value = sampleSlot(slot, current, createRng(scheduleSeed(runSeed, schedule.id, entity, instant.occurrence)));
+      value = sampleSlot(slot, current, createRng(scheduleSeed(runSeed, schedule.id, entity2, instant.occurrence)));
     else {
       if (startsHere)
         continue;
-      const under = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
-      value = under ? sampleSlot(under.slot, current, createRng(scheduleSeed(runSeed, under.schedule.id, entity, under.occurrence))) : restValue(reg, ctx.world, ctx.state, entity, schedule.target);
+      const under2 = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
+      value = under2 ? sampleSlot(under2.slot, current, createRng(scheduleSeed(runSeed, under2.schedule.id, entity2, under2.occurrence))) : restValue(reg, ctx.world, ctx.state, entity2, schedule.target);
     }
     if (value === undefined || keyOf(value) === keyOf(current))
       continue;
     if (schedule.target === "place" && typeof value === "string" && !own(ctx.world.places, value))
       continue;
-    if (routine && routineStays(ctx, entity, schedule.target === "place" ? value : null))
+    if (routine && routineStays(ctx, entity2, schedule.target === "place" ? value : null))
       continue;
     if (routine && yields) {
       const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
-      const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity);
-      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
+      const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity2);
+      if (yields(ctx, entity2, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
         continue;
     }
     if (schedule.target === "place" && typeof value === "string") {
-      const moved = relocate(ctx, entity, value, { party: true });
+      const moved = relocate(ctx, entity2, value, { party: true });
       if (!("code" in moved))
         out.push(...moved);
     } else
-      out.push({ type: "set", entity, field: schedule.target, value });
+      out.push({ type: "set", entity: entity2, field: schedule.target, value });
   }
   return out;
 }
@@ -10181,10 +11021,10 @@ function activeSlot(world, schedule, clock) {
   }
   return null;
 }
-function nextStartFor(reg, ctx, schedule, entity, clock, horizonDays = 14) {
+function nextStartFor(reg, ctx, schedule, entity2, clock, horizonDays = 14) {
   for (const i of scheduleInstants(ctx.world, [schedule], clock, clock + horizonDays * MINUTES_PER_DAY)) {
     const slot = schedule.slots[i.slot];
-    if (i.edge === "start" && slot && !overriddenAt(reg, ctx, schedule, entity, i.at))
+    if (i.edge === "start" && slot && !overriddenAt(reg, ctx, schedule, entity2, i.at))
       return { at: i.at, slot };
   }
   return null;
@@ -10431,9 +11271,9 @@ function progressionApplies(reg, world, prog, kind) {
     return kindIs(reg, world, kind, prog.kind);
   return fieldDef(reg, world, kind, prog.xpField) !== undefined && fieldDef(reg, world, kind, prog.levelField) !== undefined;
 }
-function levelProgression(reg, world, kind, field) {
+function levelProgression(reg, world, kind, field2) {
   for (const prog of Object.values(world.ruleset?.progression ?? {}))
-    if (prog.levelField === field && progressionApplies(reg, world, prog, kind))
+    if (prog.levelField === field2 && progressionApplies(reg, world, prog, kind))
       return prog;
   return null;
 }
@@ -10461,21 +11301,21 @@ function levelFor(thresholds, xp, maxLevel) {
   }
   return maxLevel !== undefined && Number.isFinite(maxLevel) ? Math.min(level, Math.max(0, Math.floor(maxLevel))) : level;
 }
-function storedNumber(reg, ctx, entity, field) {
-  const e = own(ctx.state.entities, entity);
-  const v = e ? own(e.fields, field) : undefined;
+function storedNumber(reg, ctx, entity2, field2) {
+  const e = own(ctx.state.entities, entity2);
+  const v = e ? own(e.fields, field2) : undefined;
   if (typeof v === "number")
     return v;
-  const d = e ? fieldDef(reg, ctx.world, e.kind, field)?.default : undefined;
+  const d = e ? fieldDef(reg, ctx.world, e.kind, field2)?.default : undefined;
   return typeof d === "number" ? d : null;
 }
-function progressOf(reg, ctx, entity, prog) {
-  const e = own(ctx.state.entities, entity);
+function progressOf(reg, ctx, entity2, prog) {
+  const e = own(ctx.state.entities, entity2);
   if (!e || !progressionApplies(reg, ctx.world, prog, e.kind))
     return null;
   const thresholds = thresholdsOf(ctx.world, prog);
-  const xp = storedNumber(reg, ctx, entity, prog.xpField) ?? 0;
-  const level = storedNumber(reg, ctx, entity, prog.levelField) ?? levelFor(thresholds, 0, prog.maxLevel);
+  const xp = storedNumber(reg, ctx, entity2, prog.xpField) ?? 0;
+  const level = storedNumber(reg, ctx, entity2, prog.levelField) ?? levelFor(thresholds, 0, prog.maxLevel);
   const top = prog.maxLevel !== undefined ? Math.min(thresholds.length, prog.maxLevel) : thresholds.length;
   return { level, xp, from: thresholds[level - 1] ?? 0, next: level < top ? thresholds[level] ?? null : null, reached: levelFor(thresholds, xp, prog.maxLevel) };
 }
@@ -10502,12 +11342,12 @@ function display(ctx, def, v) {
   return { value: Array.isArray(v) ? `${v.length} item${v.length === 1 ? "" : "s"}` : "—" };
 }
 var FIXABLE = { number: true, text: true, bool: true, enum: true, money: true, duration: true };
-function fixOf(entity, field, def, value, bounds) {
+function fixOf(entity2, field2, def, value, bounds) {
   if (def.derived !== undefined || !own(FIXABLE, def.type))
     return;
   return {
-    entity,
-    field,
+    entity: entity2,
+    field: field2,
     type: def.type,
     value: value ?? null,
     ...def.type === "enum" && def.values ? { options: def.values.map((x) => ({ value: x, label: x })) } : {},
@@ -10515,11 +11355,11 @@ function fixOf(entity, field, def, value, bounds) {
     ...bounds.max !== undefined ? { max: bounds.max } : {}
   };
 }
-function rowOf2(reg, ctx, entity, row, fixes) {
-  const e = own(ctx.state.entities, entity);
+function rowOf2(reg, ctx, entity2, row, fixes) {
+  const e = own(ctx.state.entities, entity2);
   if (!e)
     return null;
-  const env = scopeEnv({ reg, ctx, bindings: { self: entity } });
+  const env = scopeEnv({ reg, ctx, bindings: { self: entity2 } });
   if ("formula" in row) {
     const v = evalExpr(row.formula, env, null);
     return { label: row.label, ...display(ctx, undefined, v) };
@@ -10530,19 +11370,19 @@ function rowOf2(reg, ctx, entity, row, fixes) {
       return null;
     const read = env.lookup(["self", row.pool]);
     const current = typeof read === "number" ? read : 0;
-    const max = poolMax(reg, ctx, entity, def2.pool);
+    const max = poolMax(reg, ctx, entity2, def2.pool);
     const min = def2.pool.min ?? 0;
-    const fix2 = fixes ? fixOf(entity, row.pool, def2, own(e.fields, row.pool) ?? current, { min, ...max !== null ? { max } : {} }) : undefined;
+    const fix2 = fixes ? fixOf(entity2, row.pool, def2, own(e.fields, row.pool) ?? current, { min, ...max !== null ? { max } : {} }) : undefined;
     return { label: row.label ?? def2.label ?? words2(row.pool), value: `${shown(current)} / ${max === null ? "—" : shown(max)}`, pool: { current, min, max }, ...fix2 ? { fix: fix2 } : {} };
   }
   if ("progression" in row) {
     const prog = own(ctx.world.ruleset?.progression ?? {}, row.progression);
-    const p = prog ? progressOf(reg, ctx, entity, prog) : null;
+    const p = prog ? progressOf(reg, ctx, entity2, prog) : null;
     if (!prog || !p)
       return null;
     const def2 = fieldDef(reg, ctx.world, e.kind, prog.xpField);
     const xpLabel = def2?.label ?? "XP";
-    const fix2 = fixes && def2 ? fixOf(entity, prog.xpField, def2, own(e.fields, prog.xpField) ?? p.xp, { min: def2.min, max: def2.max }) : undefined;
+    const fix2 = fixes && def2 ? fixOf(entity2, prog.xpField, def2, own(e.fields, prog.xpField) ?? p.xp, { min: def2.min, max: def2.max }) : undefined;
     return {
       label: row.label ?? prog.label,
       value: shown(p.level),
@@ -10558,10 +11398,10 @@ function rowOf2(reg, ctx, entity, row, fixes) {
   if (!def && stored === undefined)
     return null;
   const value = def?.derived === undefined && stored !== undefined ? stored : env.lookup(["self", row.field]);
-  const fix = fixes && def && !levelProgression(reg, ctx.world, e.kind, row.field) ? fixOf(entity, row.field, def, stored, { min: def.min, max: def.max }) : undefined;
+  const fix = fixes && def && !levelProgression(reg, ctx.world, e.kind, row.field) ? fixOf(entity2, row.field, def, stored, { min: def.min, max: def.max }) : undefined;
   return { label: row.label ?? def?.label ?? words2(row.field), ...display(ctx, def, value), ...fix ? { fix } : {} };
 }
-function buildEntitySheet(ctx, entity, opts = {}) {
+function buildEntitySheet(ctx, entity2, opts = {}) {
   const layout = ctx.world.ruleset?.sheet;
   if (!layout || !Array.isArray(layout.sections) || layout.sections.length === 0)
     return null;
@@ -10569,7 +11409,7 @@ function buildEntitySheet(ctx, entity, opts = {}) {
   return layout.sections.map((section) => ({
     title: section.label,
     rows: (Array.isArray(section.rows) ? section.rows : []).flatMap((row) => {
-      const view = isRecord(row) ? rowOf2(reg, ctx, entity, row, opts.fixes === true) : null;
+      const view = isRecord(row) ? rowOf2(reg, ctx, entity2, row, opts.fixes === true) : null;
       return view ? [view] : [];
     })
   }));
@@ -10595,67 +11435,67 @@ function clampNumber(value, min, max) {
     v = max;
   return v;
 }
-function fieldBounds(reg, ctx, entity, def) {
+function fieldBounds(reg, ctx, entity2, def) {
   if (!def?.pool)
     return { ...def?.min !== undefined ? { min: def.min } : {}, ...def?.max !== undefined ? { max: def.max } : {} };
-  const top = poolMax(reg, ctx, entity, def.pool);
+  const top = poolMax(reg, ctx, entity2, def.pool);
   const min = Math.max(def.min ?? -Infinity, def.pool.min ?? 0);
   const max = Math.min(def.max ?? Infinity, top ?? Infinity);
   return { ...Number.isFinite(min) ? { min } : {}, ...Number.isFinite(max) ? { max } : {} };
 }
-function followsXp(reg, world, kind, field) {
-  const prog = levelProgression(reg, world, kind, field);
+function followsXp(reg, world, kind, field2) {
+  const prog = levelProgression(reg, world, kind, field2);
   if (!prog)
     return null;
   const label = (id) => fieldDef(reg, world, kind, id)?.label ?? id.replace(/_/g, " ");
   return reject4("follows_xp", `${label(prog.levelField)} follows ${label(prog.xpField)}: change ${label(prog.xpField)} instead`);
 }
-function change(reg, w, entity, field, delta) {
-  const e = own(w.state.entities, entity);
+function change(reg, w, entity2, field2, delta) {
+  const e = own(w.state.entities, entity2);
   if (!e)
-    return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
-  const def = fieldDef(reg, w.world, e.kind, field);
+    return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
+  const def = fieldDef(reg, w.world, e.kind, field2);
   if (def?.derived !== undefined)
-    return reject4("derived", `${field} is derived`);
-  const follows = followsXp(reg, w.world, e.kind, field);
+    return reject4("derived", `${field2} is derived`);
+  const follows = followsXp(reg, w.world, e.kind, field2);
   if (follows)
     return follows;
-  const stored = own(e.fields, field);
-  const cur = stored ?? def?.default ?? (def?.pool ? poolMax(reg, w.ctx, entity, def.pool) ?? 0 : 0);
+  const stored = own(e.fields, field2);
+  const cur = stored ?? def?.default ?? (def?.pool ? poolMax(reg, w.ctx, entity2, def.pool) ?? 0 : 0);
   if (typeof cur !== "number")
-    return reject4("not_numeric", `${e.name}'s ${field.replace(/_/g, " ")} is not a number`);
-  const b = fieldBounds(reg, w.ctx, entity, def);
+    return reject4("not_numeric", `${e.name}'s ${field2.replace(/_/g, " ")} is not a number`);
+  const b = fieldBounds(reg, w.ctx, entity2, def);
   const next = clampNumber(cur + delta, b.min, b.max);
   if (next === cur)
     return [];
-  return stored === undefined && cur !== 0 ? [{ type: "set", entity, field, value: next }] : [{ type: "add", entity, field, delta: next - cur }];
+  return stored === undefined && cur !== 0 ? [{ type: "set", entity: entity2, field: field2, value: next }] : [{ type: "add", entity: entity2, field: field2, delta: next - cur }];
 }
 function coreEffect(reg, w, type, args, rng) {
   const state = w.state;
   const world = w.world;
   switch (type) {
     case "set": {
-      const entity = text2(args.entity);
-      const field = text2(args.field);
-      const e = own(state.entities, entity);
+      const entity2 = text2(args.entity);
+      const field2 = text2(args.field);
+      const e = own(state.entities, entity2);
       if (!e)
-        return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
-      if (field === "")
+        return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
+      if (field2 === "")
         return reject4("bad_args", "set needs a field");
-      const def = fieldDef(reg, world, e.kind, field);
+      const def = fieldDef(reg, world, e.kind, field2);
       let value = args.value ?? null;
       if (def?.derived !== undefined)
-        return reject4("derived", `${field} is derived`);
-      const follows = followsXp(reg, world, e.kind, field);
+        return reject4("derived", `${field2} is derived`);
+      const follows = followsXp(reg, world, e.kind, field2);
       if (follows)
         return follows;
       if (def && (def.type === "number" || def.type === "money" || def.type === "duration") && typeof value === "number") {
-        const b = fieldBounds(reg, w.ctx, entity, def);
+        const b = fieldBounds(reg, w.ctx, entity2, def);
         value = clampNumber(value, b.min, b.max);
       }
       if (def?.type === "enum" && def.values && typeof value === "string" && !def.values.includes(value))
-        return reject4("bad_value", `${field} must be one of ${def.values.join(", ")}`);
-      return [{ type: "set", entity, field, value }];
+        return reject4("bad_value", `${field2} must be one of ${def.values.join(", ")}`);
+      return [{ type: "set", entity: entity2, field: field2, value }];
     }
     case "add": {
       if (typeof args.delta !== "number" || !Number.isFinite(args.delta))
@@ -10663,53 +11503,53 @@ function coreEffect(reg, w, type, args, rng) {
       return change(reg, w, text2(args.entity), text2(args.field), args.delta);
     }
     case "recover": {
-      const entity = text2(args.entity);
-      const field = text2(args.field);
-      const e = own(state.entities, entity);
+      const entity2 = text2(args.entity);
+      const field2 = text2(args.field);
+      const e = own(state.entities, entity2);
       if (!e)
-        return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
-      const pool = fieldDef(reg, world, e.kind, field)?.pool;
+        return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
+      const pool = fieldDef(reg, world, e.kind, field2)?.pool;
       if (!pool)
-        return reject4("not_pool", `${e.name}'s ${field.replace(/_/g, " ")} isn't a pool`);
+        return reject4("not_pool", `${e.name}'s ${field2.replace(/_/g, " ")} isn't a pool`);
       if (args.amount !== undefined && (typeof args.amount !== "number" || !Number.isFinite(args.amount)))
         return reject4("bad_args", "recover needs a numeric amount");
-      const top = poolMax(reg, w.ctx, entity, pool);
+      const top = poolMax(reg, w.ctx, entity2, pool);
       if (top === null)
-        return reject4("no_max", `${e.name}'s ${field.replace(/_/g, " ")} has no max to recover to`);
-      const read = scopeEnv({ reg, ctx: w.ctx, bindings: { self: entity } });
-      const now = Number(read.lookup(["self", field])) || 0;
+        return reject4("no_max", `${e.name}'s ${field2.replace(/_/g, " ")} has no max to recover to`);
+      const read = scopeEnv({ reg, ctx: w.ctx, bindings: { self: entity2 } });
+      const now = Number(read.lookup(["self", field2])) || 0;
       const amount = typeof args.amount === "number" ? args.amount : args.full !== true && pool.recover !== undefined ? Number(evalExpr(pool.recover, read, 0)) || 0 : top - now;
-      return change(reg, w, entity, field, Math.max(0, amount));
+      return change(reg, w, entity2, field2, Math.max(0, amount));
     }
     case "award": {
-      const entity = text2(args.entity);
+      const entity2 = text2(args.entity);
       const id = text2(args.progression);
       const prog = own(world.ruleset?.progression ?? {}, id);
       if (!prog)
         return reject4("unknown_progression", `no progression ${id}`);
-      const e = own(state.entities, entity);
+      const e = own(state.entities, entity2);
       if (!e)
-        return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
+        return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
       if (!progressionApplies(reg, world, prog, e.kind))
         return reject4("not_applicable", `${e.name} has no ${prog.label}`);
       if (typeof args.amount !== "number" || !Number.isFinite(args.amount))
         return reject4("bad_args", "award needs a numeric amount");
-      return change(reg, w, entity, prog.xpField, args.amount);
+      return change(reg, w, entity2, prog.xpField, args.amount);
     }
     case "move": {
-      const entity = text2(args.entity);
+      const entity2 = text2(args.entity);
       const to = text2(args.to);
-      const e = own(state.entities, entity);
+      const e = own(state.entities, entity2);
       if (!e)
-        return reject4("missing_entity", `no entity ${labelOf(w, entity)}`);
+        return reject4("missing_entity", `no entity ${labelOf(w, entity2)}`);
       if (!own(world.places, to))
         return reject4("missing_place", `no place ${labelOf(w, to)}`);
-      const here = placeOfEntity(state, entity);
-      const stayed = entity === world.pov ? movedElsewhere(w.events, here) : undefined;
-      const moved = relocate(w.ctx, entity, to, { party: true, ...stayed ? { stayed } : {}, ...typeof args.activity === "string" ? { activity: args.activity } : {}, ...args.told === true ? { told: true } : {} });
+      const here = placeOfEntity(state, entity2);
+      const stayed = entity2 === world.pov ? movedElsewhere(w.events, here) : undefined;
+      const moved = relocate(w.ctx, entity2, to, { party: true, ...stayed ? { stayed } : {}, ...typeof args.activity === "string" ? { activity: args.activity } : {}, ...args.told === true ? { told: true } : {} });
       if (!Array.isArray(moved))
         return moved;
-      const along = text2(args.with).split(",").map((s) => s.trim()).filter((id) => id !== "" && id !== entity && own(state.entities, id) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)));
+      const along = text2(args.with).split(",").map((s) => s.trim()).filter((id) => id !== "" && id !== entity2 && own(state.entities, id) && !isGone(state, id) && acts(world, state, id) && together(world, here, placeOfEntity(state, id)));
       const out = [...moved];
       for (const id of along) {
         if (out.some((ev) => ev.type === "set" && ev.entity === id && ev.field === "place"))
@@ -10735,35 +11575,35 @@ function coreEffect(reg, w, type, args, rng) {
       const id = text2(args.id) || `${kind}:${hashParts(rng.seed, "spawn", kind, text2(args.name)).slice(0, 10)}`;
       const tier = tierOf(world, text2(args.tier)) ? text2(args.tier) : spawnTierOf(world);
       const fields = isRecord(args.fields) ? { ...args.fields } : {};
-      for (const field of Object.keys(fields)) {
-        const follows = followsXp(reg, world, kind, field);
+      for (const field2 of Object.keys(fields)) {
+        const follows = followsXp(reg, world, kind, field2);
         if (follows)
           return follows;
       }
       if (typeof args.place === "string")
         fields.place = args.place;
       const relations = objects(args.relations).map((r) => ({ type: text2(r.type), to: text2(r.to) }));
-      const entity = { id, kind, name: text2(args.name) || id, tier, fields, relations };
+      const entity2 = { id, kind, name: text2(args.name) || id, tier, fields, relations };
       if (args.class !== undefined) {
         const classes = classOf(args.class);
-        const problem = classes ? classProblems(world, classes, entity.name)[0] : { code: "bad_args", message: "a spawn's class is facet → values" };
+        const problem = classes ? classProblems(world, classes, entity2.name)[0] : { code: "bad_args", message: "a spawn's class is facet → values" };
         if (problem)
           return reject4(problem.code, problem.message);
         if (classes && Object.keys(classes).length > 0)
-          entity.class = classes;
+          entity2.class = classes;
       }
       const tags = [...new Set((Array.isArray(args.tags) ? args.tags : []).filter((t) => typeof t === "string" && t.trim() !== "").map((t) => t.trim()))];
       if (tags.length > 0)
-        entity.tags = tags;
-      const links = spawnLinks(reg, world, state, entity);
+        entity2.tags = tags;
+      const links = spawnLinks(reg, world, state, entity2);
       if (isRejection(links))
         return links;
       const out = [];
       if (agentOf(world, { id, tier, agent: typeof args.agent === "boolean" ? args.agent : undefined })) {
-        entity.agent = true;
+        entity2.agent = true;
         out.push({ type: "engine.caught", data: { agent: id, slot: slotIndexAt(calendarOf(world), state.clock) } });
       }
-      return [{ type: "spawn", entity }, ...links, ...out];
+      return [{ type: "spawn", entity: entity2 }, ...links, ...out];
     }
     case "stage":
       return [{ type: "stage", track: text2(args.track), to: text2(args.to) }];
@@ -10857,13 +11697,13 @@ function applyCheck(reg, w, spec, scope) {
   out.rejected.push(...result.rejected);
   return out;
 }
-function followXp(reg, w, entity, id, prog, scope, spawned) {
+function followXp(reg, w, entity2, id, prog, scope, spawned) {
   const out = { applied: [], rejected: [] };
-  const e = own(w.state.entities, entity);
-  const p = e ? progressOf(reg, w.ctx, entity, prog) : null;
+  const e = own(w.state.entities, entity2);
+  const p = e ? progressOf(reg, w.ctx, entity2, prog) : null;
   if (!e || !p)
     return out;
-  const bounds = fieldBounds(reg, w.ctx, entity, fieldDef(reg, w.world, e.kind, prog.levelField));
+  const bounds = fieldBounds(reg, w.ctx, entity2, fieldDef(reg, w.world, e.kind, prog.levelField));
   const to = clampNumber(p.reached, bounds.min, bounds.max);
   const from = p.level;
   if (to === from)
@@ -10874,14 +11714,14 @@ function followXp(reg, w, entity, id, prog, scope, spawned) {
     out.applied.push(ev);
     return true;
   };
-  const who = entity === w.world.pov ? "You" : e.name;
-  const line2 = (text3) => ({ type: ENGINE_EVENTS.note, data: { text: text3, entity, ...entity === w.world.pov ? {} : { visibility: "secret" } } });
+  const who = entity2 === w.world.pov ? "You" : e.name;
+  const line2 = (text3) => ({ type: ENGINE_EVENTS.note, data: { text: text3, entity: entity2, ...entity2 === w.world.pov ? {} : { visibility: "secret" } } });
   if (spawned) {
-    applied({ type: "set", entity, field: prog.levelField, value: to });
+    applied({ type: "set", entity: entity2, field: prog.levelField, value: to });
     return out;
   }
   if (to < from) {
-    const group = `fx:${hashParts(scope.rng.seed, "level", id, entity).slice(0, 10)}`;
+    const group = `fx:${hashParts(scope.rng.seed, "level", id, entity2).slice(0, 10)}`;
     const mark = w.mark();
     const unit = [];
     const landed = (ev) => {
@@ -10891,16 +11731,16 @@ function followXp(reg, w, entity, id, prog, scope, spawned) {
       unit.push(member);
       return true;
     };
-    let whole4 = landed({ type: "set", entity, field: prog.levelField, value: to });
-    for (const [field, def] of Object.entries(kindFields(reg, w.world, e.kind))) {
+    let whole4 = landed({ type: "set", entity: entity2, field: prog.levelField, value: to });
+    for (const [field2, def] of Object.entries(kindFields(reg, w.world, e.kind))) {
       if (!whole4)
         break;
       if (!def.pool || def.derived !== undefined)
         continue;
-      const value = own(own(w.state.entities, entity)?.fields ?? {}, field) ?? def.default;
-      const max = fieldBounds(reg, w.ctx, entity, def).max;
+      const value = own(own(w.state.entities, entity2)?.fields ?? {}, field2) ?? def.default;
+      const max = fieldBounds(reg, w.ctx, entity2, def).max;
       if (typeof value === "number" && max !== undefined && value > max)
-        whole4 = landed({ type: "set", entity, field, value: max, atMost: true });
+        whole4 = landed({ type: "set", entity: entity2, field: field2, value: max, atMost: true });
     }
     if (whole4 && landed(line2(`${who} dropped to ${prog.label} ${to} (from ${from}).`)))
       out.applied.push(...unit);
@@ -10910,11 +11750,11 @@ function followXp(reg, w, entity, id, prog, scope, spawned) {
   }
   const depth = scope.depth ?? 0;
   for (let level = from + 1;level <= to; level++) {
-    if (!applied({ type: "set", entity, field: prog.levelField, value: level }))
+    if (!applied({ type: "set", entity: entity2, field: prog.levelField, value: level }))
       return out;
     if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP)
       continue;
-    const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 });
+    const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity2 }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity2}:${level}`), depth: depth + 1 });
     out.applied.push(...r.applied);
     out.rejected.push(...r.rejected);
   }
@@ -11143,23 +11983,23 @@ function runRulesOnTick(reg, w, tick, opts) {
 
 // src/engine/tracks.ts
 var TRANSITION_CAP = 8;
-function currentStage(world, state, track) {
-  const def = own(world.tracks, track);
+function currentStage(world, state, track2) {
+  const def = own(world.tracks, track2);
   if (!def)
     return null;
-  return own(state.tracks, track)?.stage ?? def.start;
+  return own(state.tracks, track2)?.stage ?? def.start;
 }
-function trackEnv(reg, w, track, trackId) {
-  const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
-  const def = own(track.stages, stage);
-  const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: track.owner ? { self: track.owner, owner: track.owner } : {} });
+function trackEnv(reg, w, track2, trackId) {
+  const stage = own(w.state.tracks, trackId)?.stage ?? track2.start;
+  const def = own(track2.stages, stage);
+  const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: track2.owner ? { self: track2.owner, owner: track2.owner } : {} });
   const objectives = def?.objectives ?? [];
   const done = objectives.filter((o) => truthy2(evalExpr(objectiveWhen(o), env0, false))).length;
   const slice2 = readEngineSlice(w.state);
   return scopeEnv({
     reg,
     ctx: w.ctx,
-    bindings: track.owner ? { self: track.owner, owner: track.owner } : {},
+    bindings: track2.owner ? { self: track2.owner, owner: track2.owner } : {},
     vars: {
       track: {
         id: trackId,
@@ -11173,62 +12013,62 @@ function trackEnv(reg, w, track, trackId) {
     }
   });
 }
-function enter(reg, w, trackId, track, from, to, via, seed) {
+function enter(reg, w, trackId, track2, from, to, via, seed) {
   const start = w.events.length;
-  const leaving = own(track.stages, from);
+  const leaving = own(track2.stages, from);
   const key = hashParts(seed, "track", trackId, from, to, w.state.clock);
   const rng = createRng(key);
-  const bindings = track.owner ? { self: track.owner, owner: track.owner } : {};
+  const bindings = track2.owner ? { self: track2.owner, owner: track2.owner } : {};
   if (via !== "fail" && leaving?.rewards && leaving.rewards.length > 0)
     applyEffects(reg, w, leaving.rewards, { bindings, rng: rng.fork("rewards") });
   if (w.apply({ type: "stage", track: trackId, to, from }))
     return null;
-  const entering = own(track.stages, to);
+  const entering = own(track2.stages, to);
   if (entering?.effects && entering.effects.length > 0)
     applyEffects(reg, w, entering.effects, { bindings, rng: rng.fork("effects") });
-  if (entering?.rewards && entering.rewards.length > 0 && isTerminal(track, to))
+  if (entering?.rewards && entering.rewards.length > 0 && isTerminal(track2, to))
     applyEffects(reg, w, entering.rewards, { bindings, rng: rng.fork("end rewards") });
   if (entering?.truth)
     w.apply({ type: ENGINE_EVENTS.revealed, data: { track: trackId, stage: to } });
-  if (track.kind === "quest") {
+  if (track2.kind === "quest") {
     const cue = entering?.cue && !ownersCue(reg, w.world, w.state, w.world.pov, trackId) ? entering.cue : null;
-    const text3 = cue ?? `${track.label}: ${entering?.label ?? to}`;
-    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text: text3, visibility: track.visibility } });
+    const text3 = cue ?? `${track2.label}: ${entering?.label ?? to}`;
+    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text: text3, visibility: track2.visibility } });
   }
   w.unite(start, `stage:${key.slice(0, 10)}`);
   return { track: trackId, from, to, via, events: w.events.slice(start) };
 }
-function gateOpen(reg, w, track, trackId, to) {
-  const gate = own(track.stages, to)?.gate;
+function gateOpen(reg, w, track2, trackId, to) {
+  const gate = own(track2.stages, to)?.gate;
   if (gate === undefined)
     return true;
-  return truthy2(evalExpr(gate, trackEnv(reg, w, track, trackId), false));
+  return truthy2(evalExpr(gate, trackEnv(reg, w, track2, trackId), false));
 }
 function stepTracks(reg, w, seed) {
   const changes = [];
   for (const trackId of Object.keys(w.world.tracks).sort()) {
-    const track = own(w.world.tracks, trackId);
-    if (!track)
+    const track2 = own(w.world.tracks, trackId);
+    if (!track2)
       continue;
     for (let i = 0;i < TRANSITION_CAP; i++) {
-      const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
-      const def = own(track.stages, stage);
+      const stage = own(w.state.tracks, trackId)?.stage ?? track2.start;
+      const def = own(track2.stages, stage);
       if (!def)
         break;
-      const env = trackEnv(reg, w, track, trackId);
+      const env = trackEnv(reg, w, track2, trackId);
       let change2 = null;
-      const solvedHere = track.kind === "puzzle" && def.answer !== undefined && own(readEngineSlice(w.state).solved, trackId) === stage;
+      const solvedHere = track2.kind === "puzzle" && def.answer !== undefined && own(readEngineSlice(w.state).solved, trackId) === stage;
       if (def.fail && truthy2(evalExpr(def.fail.when, env, false)))
-        change2 = enter(reg, w, trackId, track, stage, def.fail.to, "fail", seed);
-      else if (solvedHere && def.next[0] && gateOpen(reg, w, track, trackId, def.next[0].to))
-        change2 = enter(reg, w, trackId, track, stage, def.next[0].to, "answer", seed);
+        change2 = enter(reg, w, trackId, track2, stage, def.fail.to, "fail", seed);
+      else if (solvedHere && def.next[0] && gateOpen(reg, w, track2, trackId, def.next[0].to))
+        change2 = enter(reg, w, trackId, track2, stage, def.next[0].to, "answer", seed);
       else {
         for (const n of def.next) {
           if (!truthy2(evalExpr(n.when, env, false)))
             continue;
-          if (!gateOpen(reg, w, track, trackId, n.to))
+          if (!gateOpen(reg, w, track2, trackId, n.to))
             continue;
-          change2 = enter(reg, w, trackId, track, stage, n.to, "next", seed);
+          change2 = enter(reg, w, trackId, track2, stage, n.to, "next", seed);
           break;
         }
       }
@@ -11244,11 +12084,11 @@ function normalizeAnswer(text3) {
 }
 function checkAnswer(world, state, trackId, answer, decision) {
   const none = { correct: false, via: null, needsDecision: false, event: null };
-  const track = own(world.tracks, trackId);
-  if (!track || track.kind !== "puzzle")
+  const track2 = own(world.tracks, trackId);
+  if (!track2 || track2.kind !== "puzzle")
     return none;
-  const stage = own(state.tracks, trackId)?.stage ?? track.start;
-  const def = own(track.stages, stage);
+  const stage = own(state.tracks, trackId)?.stage ?? track2.start;
+  const def = own(track2.stages, stage);
   if (!def?.answer)
     return none;
   let via = null;
@@ -11276,8 +12116,8 @@ function agendaFor(world, state, agent) {
   }
   return out.sort((a, b) => b.priority - a.priority || a.track.localeCompare(b.track));
 }
-function isTerminal(track, stage) {
-  const def = own(track.stages, stage);
+function isTerminal(track2, stage) {
+  const def = own(track2.stages, stage);
   return !def || def.next.length === 0 && !def.fail;
 }
 
@@ -11332,8 +12172,8 @@ class Working {
 }
 
 // src/engine/simulate.ts
-function processSeed(runSeed, process2, entity, slotIndex) {
-  return hashParts(runSeed, process2, entity, slotIndex);
+function processSeed(runSeed, process2, entity2, slotIndex) {
+  return hashParts(runSeed, process2, entity2, slotIndex);
 }
 function lod1Agents(world, state) {
   return Object.keys(state.entities).filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id) && acts(world, state, id)).sort();
@@ -11360,7 +12200,7 @@ function interruptPolicy(state, overrides = {}) {
 }
 var ALL_NOTE = Object.fromEntries(INTERRUPT_CLASSES.map((c) => [c, "note"]));
 function rngFactory(runSeed, process2, slot) {
-  return (entity) => createRng(processSeed(runSeed, process2, entity, slot));
+  return (entity2) => createRng(processSeed(runSeed, process2, entity2, slot));
 }
 function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse, run) {
   const applied = [];
@@ -11822,12 +12662,12 @@ function sceneType(world, state) {
   return placeSceneType(world, state);
 }
 function placeSceneType(world, state) {
-  let place = placeOfEntity(state, world.pov) ?? undefined;
-  for (let guard = 0;place && guard < 32; guard++) {
-    const def = own(world.places, place);
+  let place2 = placeOfEntity(state, world.pov) ?? undefined;
+  for (let guard = 0;place2 && guard < 32; guard++) {
+    const def = own(world.places, place2);
     if (def?.sceneType)
       return def.sceneType;
-    place = def?.parent;
+    place2 = def?.parent;
   }
   return DEFAULT_SCENE_TYPE;
 }
@@ -11884,9 +12724,9 @@ function parseTarget(v) {
       return at !== null ? { type: "at", at } : null;
     }
     case "stage": {
-      const track = str3("track");
+      const track2 = str3("track");
       const stage = str3("stage");
-      return track && stage ? { type: "stage", track, stage } : null;
+      return track2 && stage ? { type: "stage", track: track2, stage } : null;
     }
     case "shift":
     case "commitment":
@@ -12292,17 +13132,17 @@ function buildMontage(reg, world, before, after, events2, granularity) {
     const prev = own(before.entities, id);
     if (!prev)
       continue;
-    for (const [field, v] of Object.entries(e.fields)) {
+    for (const [field2, v] of Object.entries(e.fields)) {
       if (typeof v !== "number")
         continue;
-      const def = fieldDef(reg, world, e.kind, field);
-      if (!def?.bands || !canSeeField(reg, world, after, pov, id, field) || !playerKnows(reg, world, after, pov, id))
+      const def = fieldDef(reg, world, e.kind, field2);
+      if (!def?.bands || !canSeeField(reg, world, after, pov, id, field2) || !playerKnows(reg, world, after, pov, id))
         continue;
-      const old = own(prev.fields, field);
+      const old = own(prev.fields, field2);
       const from = bandOf(def.bands, typeof old === "number" ? old : 0)?.label ?? "";
       const to = bandOf(def.bands, v)?.label ?? "";
       if (from !== to)
-        bands.push({ entity: id, field, label: `${possessive(e.name)} ${fieldNoun(def.label, field).noun}`, from, to });
+        bands.push({ entity: id, field: field2, label: `${possessive(e.name)} ${fieldNoun(def.label, field2).noun}`, from, to });
     }
   }
   return {
@@ -12603,8 +13443,8 @@ var calendarPack = {
         if (level === 0)
           return [];
         const cal = calendarOf(ctx.world);
-        const place = placeOfEntity(ctx.state, ctx.world.pov);
-        const offset = level >= 3 ? placeOffset(ctx.world, ctx.state.clock, place) : 0;
+        const place2 = placeOfEntity(ctx.state, ctx.world.pov);
+        const offset = level >= 3 ? placeOffset(ctx.world, ctx.state.clock, place2) : 0;
         const part = dayPartAt(cal, ctx.state.clock + offset).label;
         const lines = [level === 1 ? `Time: ${part}.` : `Time: ${formatClock(cal, ctx.state.clock, offset)} (${part.toLowerCase()}).`];
         if (level >= 4) {
@@ -12692,26 +13532,26 @@ function placeChildren(world) {
   }
   return out;
 }
-function placePath(world, place) {
+function placePath(world, place2) {
   const out = [];
-  for (let cur = place ?? undefined, guard = 0;cur && own(world.places, cur) && guard < 64 && !out.includes(cur); guard++) {
+  for (let cur = place2 ?? undefined, guard = 0;cur && own(world.places, cur) && guard < 64 && !out.includes(cur); guard++) {
     out.unshift(cur);
     cur = own(world.places, cur)?.parent;
   }
   return out;
 }
-function hasGrid(world, place) {
-  const grid = own(world.places, place)?.grid;
+function hasGrid(world, place2) {
+  const grid = own(world.places, place2)?.grid;
   return grid !== undefined && own(world.grids, grid) !== undefined;
 }
-function nodeMapOf(world, place) {
-  return Object.values(isRecord(world.maps) ? world.maps : {}).find((m) => isRecord(m) && m.scope === place && m.layout === undefined);
+function nodeMapOf(world, place2) {
+  return Object.values(isRecord(world.maps) ? world.maps : {}).find((m) => isRecord(m) && m.scope === place2 && m.layout === undefined);
 }
 function defaultScope(world, here, children, filter) {
-  const path = placePath(world, here);
-  const inner = path.at(-1);
-  for (let i = path.length - 1;i >= 0; i--) {
-    const id = path[i];
+  const path2 = placePath(world, here);
+  const inner = path2.at(-1);
+  for (let i = path2.length - 1;i >= 0; i--) {
+    const id = path2[i];
     if (id === undefined)
       continue;
     if (id === inner && !(children.get(id) ?? []).some(filter.drawn))
@@ -12719,14 +13559,14 @@ function defaultScope(world, here, children, filter) {
     if (hasGrid(world, id) || nodeMapOf(world, id))
       return id;
   }
-  return path.length >= 2 ? path[path.length - 2] ?? null : null;
+  return path2.length >= 2 ? path2[path2.length - 2] ?? null : null;
 }
-function childOf(world, scope, place) {
-  const path = placePath(world, place);
+function childOf(world, scope, place2) {
+  const path2 = placePath(world, place2);
   if (scope === null)
-    return path[0] ?? null;
-  const at = path.indexOf(scope);
-  return at >= 0 ? path[at + 1] ?? null : null;
+    return path2[0] ?? null;
+  const at = path2.indexOf(scope);
+  return at >= 0 ? path2[at + 1] ?? null : null;
 }
 function ring(ids, frame) {
   const step = Math.min(frame.width, frame.height) / 100;
@@ -12836,15 +13676,15 @@ var HOLD_DEPTH2 = 32;
 function spotData(v) {
   return isRecord(v) && typeof v.scope === "string" && Number.isInteger(v.x) && Number.isInteger(v.y) ? { scope: v.scope, x: Number(v.x), y: Number(v.y) } : null;
 }
-function spotOf(world, state, entity) {
-  let id = entity;
+function spotOf(world, state, entity2) {
+  let id = entity2;
   for (let depth = 0;depth < HOLD_DEPTH2; depth++) {
     const e = own(state.entities, id);
     if (!e)
       return null;
-    const place = e.fields.place;
-    if (typeof place === "string" && place !== "") {
-      const stand = standingGrid(world, place);
+    const place2 = e.fields.place;
+    if (typeof place2 === "string" && place2 !== "") {
+      const stand = standingGrid(world, place2);
       const { x, y } = e.fields;
       return stand && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null ? { scope: stand.scope, x, y } : null;
     }
@@ -12855,12 +13695,12 @@ function spotOf(world, state, entity) {
   }
   return null;
 }
-function posEvent(entity, at, from) {
-  const data = { entity, at: at ? { ...at } : null, from: from ? { ...from } : null };
+function posEvent(entity2, at, from) {
+  const data = { entity: entity2, at: at ? { ...at } : null, from: from ? { ...from } : null };
   return { type: POS_EVENT, data };
 }
-function setCell(entity, fields, cell) {
-  return [...fields.x !== cell.x ? [{ type: "set", entity, field: "x", value: cell.x }] : [], ...fields.y !== cell.y ? [{ type: "set", entity, field: "y", value: cell.y }] : []];
+function setCell(entity2, fields, cell) {
+  return [...fields.x !== cell.x ? [{ type: "set", entity: entity2, field: "x", value: cell.x }] : [], ...fields.y !== cell.y ? [{ type: "set", entity: entity2, field: "y", value: cell.y }] : []];
 }
 function hiddenCells(ctx, grid) {
   const { world, state } = ctx;
@@ -12877,64 +13717,64 @@ function hiddenCells(ctx, grid) {
 function povGround(ctx, grid, hidden = hiddenCells(ctx, grid)) {
   return hidden.size > 0 ? { ...grid, blocked: [...grid.blocked, ...hidden] } : grid;
 }
-function arrivalEvents(ctx, entity, to) {
-  const e = own(ctx.state.entities, entity);
-  if (!e || entity !== ctx.world.pov || ctx.levelOf(entity, "space") < 3)
+function arrivalEvents(ctx, entity2, to) {
+  const e = own(ctx.state.entities, entity2);
+  if (!e || entity2 !== ctx.world.pov || ctx.levelOf(entity2, "space") < 3)
     return [];
   if (!mapSettingsOf(ctx.world).grid.movement) {
     const cell = own(ctx.world.places, to)?.cell;
-    return cell ? setCell(entity, e.fields, cell) : [];
+    return cell ? setCell(entity2, e.fields, cell) : [];
   }
-  const from = spotOf(ctx.world, ctx.state, entity);
+  const from = spotOf(ctx.world, ctx.state, entity2);
   const at = arrivalCell(ctx.world, to);
   if (at)
-    return [posEvent(entity, { scope: at.scope, x: at.cell.x, y: at.cell.y }, from)];
-  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(entity, null, from)] : [];
+    return [posEvent(entity2, { scope: at.scope, x: at.cell.x, y: at.cell.y }, from)];
+  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(entity2, null, from)] : [];
 }
-function stepEvents(ctx, entity, to) {
-  const e = own(ctx.state.entities, entity);
+function stepEvents(ctx, entity2, to) {
+  const e = own(ctx.state.entities, entity2);
   if (!e)
-    return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
-  if (isGone(ctx.state, entity))
-    return { code: "gone", reason: `${labelOf(ctx, entity)} has been removed` };
-  const here = placeOfEntity(ctx.state, entity);
+    return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity2)}` };
+  if (isGone(ctx.state, entity2))
+    return { code: "gone", reason: `${labelOf(ctx, entity2)} has been removed` };
+  const here = placeOfEntity(ctx.state, entity2);
   const stand = standingGrid(ctx.world, here);
   const index = stand ? cellIndex(stand.grid, to) : null;
   if (!stand || here === null)
-    return { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't on a map's grid here` };
+    return { code: "off_grid", reason: `${labelOf(ctx, entity2)} isn't on a map's grid here` };
   if (index === null)
     return { code: "off_grid", reason: "That spot isn't on this map." };
-  const hidden = entity === ctx.world.pov ? hiddenCells(ctx, stand.grid) : new Set;
+  const hidden = entity2 === ctx.world.pov ? hiddenCells(ctx, stand.grid) : new Set;
   if (hidden.has(index))
     return { code: "no_way", reason: "There's no way there from here." };
   if (!mapSettingsOf(ctx.world).grid.movement)
-    return setCell(entity, e.fields, to);
-  const from = spotOf(ctx.world, ctx.state, entity);
+    return setCell(entity2, e.fields, to);
+  const from = spotOf(ctx.world, ctx.state, entity2);
   if (!from || from.scope !== stand.scope)
-    return { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't standing on this map` };
+    return { code: "off_grid", reason: `${labelOf(ctx, entity2)} isn't standing on this map` };
   if (!findPath(povGround(ctx, stand.grid, hidden), from, to))
     return { code: "no_way", reason: "There's no way there from here." };
   const room = areaPlaceAt(ctx.world, stand.scope, stand.grid, index) ?? stand.scope;
   if (room === here)
-    return [posEvent(entity, { scope: stand.scope, x: to.x, y: to.y }, from)];
-  const out = e.relations.filter((r) => r.type === "in").map((r) => ({ type: "unlink", rel: "in", from: entity, to: r.to }));
-  out.push({ type: "set", entity, field: "place", value: room });
+    return [posEvent(entity2, { scope: stand.scope, x: to.x, y: to.y }, from)];
+  const out = e.relations.filter((r) => r.type === "in").map((r) => ({ type: "unlink", rel: "in", from: entity2, to: r.to }));
+  out.push({ type: "set", entity: entity2, field: "place", value: room });
   const inner = room !== stand.scope ? gridOf(ctx.world, room) : undefined;
   const entry = inner ? entranceCell(inner) : null;
   if (inner)
-    out.push(posEvent(entity, entry ? { scope: room, ...entry } : null, from));
+    out.push(posEvent(entity2, entry ? { scope: room, ...entry } : null, from));
   else
-    out.push(posEvent(entity, { scope: stand.scope, x: to.x, y: to.y }, from));
+    out.push(posEvent(entity2, { scope: stand.scope, x: to.x, y: to.y }, from));
   return out;
 }
-function layEvents(ctx, thing, place, by) {
-  const e = own(ctx.state.entities, thing);
+function layEvents(ctx, thing2, place2, by) {
+  const e = own(ctx.state.entities, thing2);
   if (!e)
     return [];
-  const spot = by !== null && place !== null && mapSettingsOf(ctx.world).grid.movement ? spotOf(ctx.world, ctx.state, by) : null;
-  if (spot && place !== null && standingGrid(ctx.world, place)?.scope === spot.scope)
-    return [posEvent(thing, spot, null)];
-  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(thing, null, null)] : [];
+  const spot = by !== null && place2 !== null && mapSettingsOf(ctx.world).grid.movement ? spotOf(ctx.world, ctx.state, by) : null;
+  if (spot && place2 !== null && standingGrid(ctx.world, place2)?.scope === spot.scope)
+    return [posEvent(thing2, spot, null)];
+  return typeof e.fields.x === "number" || typeof e.fields.y === "number" ? [posEvent(thing2, null, null)] : [];
 }
 function reach(ctx, a, b) {
   const { world, state } = ctx;
@@ -12961,11 +13801,11 @@ function entered(ctx, on, e) {
   if (e.type !== POS_EVENT || !("data" in e))
     return false;
   const at = spotData(e.data.at);
-  const entity = strOf(e.data.entity);
-  if (!at || on.in !== undefined && on.in !== at.scope || isGone(ctx.state, entity))
+  const entity2 = strOf(e.data.entity);
+  if (!at || on.in !== undefined && on.in !== at.scope || isGone(ctx.state, entity2))
     return false;
   const who = on.who === undefined ? null : knownBySelector(on.who);
-  if (on.who === undefined ? entity !== ctx.world.pov : who === null || !selectorMatches(ctx.registry, ctx.world, ctx.state, who, entity))
+  if (on.who === undefined ? entity2 !== ctx.world.pov : who === null || !selectorMatches(ctx.registry, ctx.world, ctx.state, who, entity2))
     return false;
   const grid = gridOf(ctx.world, at.scope);
   if (!grid)
@@ -13031,9 +13871,9 @@ function buildEdges(world, mode, closed) {
     }
   }
   const connector = mode === "walk" ? { minutes: SIBLING_WALK_MINUTES, distanceKm: 0.3 } : { minutes: 1, distanceKm: 0 };
-  const ancestors = (place) => {
+  const ancestors = (place2) => {
     const out2 = new Set;
-    let cur = own(world.places, place)?.parent;
+    let cur = own(world.places, place2)?.parent;
     for (let guard = 0;cur && guard < 64; guard++) {
       out2.add(cur);
       cur = own(world.places, cur)?.parent;
@@ -13151,9 +13991,9 @@ class Frontier {
   static before(a, b) {
     return a.minutes < b.minutes || a.minutes === b.minutes && a.place < b.place;
   }
-  push(minutes, place) {
+  push(minutes, place2) {
     const heap = this.heap;
-    heap.push({ minutes, place });
+    heap.push({ minutes, place: place2 });
     for (let i = heap.length - 1;i > 0; ) {
       const up = i - 1 >> 1;
       if (!this.swapIfBefore(i, up))
@@ -13248,9 +14088,9 @@ function reverseEdges(world, closed) {
     return out;
   });
 }
-function aroundOf(world, place) {
+function aroundOf(world, place2) {
   const out = [];
-  let cur = own(world.places, place)?.parent;
+  let cur = own(world.places, place2)?.parent;
   for (let guard = 0;cur && guard < 64; guard++) {
     out.push(cur);
     cur = own(world.places, cur)?.parent;
@@ -13341,8 +14181,8 @@ function itemsOn(ctx, scope, grid, cells, sight, here) {
   const out = [];
   for (const id of Object.keys(state.entities).sort()) {
     const e = own(state.entities, id);
-    const place = e?.fields.place;
-    if (!e || id === world.pov || typeof place !== "string" || standingGrid(world, place)?.scope !== scope)
+    const place2 = e?.fields.place;
+    if (!e || id === world.pov || typeof place2 !== "string" || standingGrid(world, place2)?.scope !== scope)
       continue;
     const { x, y } = e.fields;
     if (typeof x !== "number" || typeof y !== "number")
@@ -13350,7 +14190,7 @@ function itemsOn(ctx, scope, grid, cells, sight, here) {
     const index = cellIndex(grid, { x, y });
     if (index === null || cells.blank.has(index) || cells.void.has(index) || kindIs(ctx.registry, world, e.kind, "person") || isGone(state, id) || !canSeeEntity(ctx.registry, world, state, world.pov, id))
       continue;
-    if (sight !== null ? !sight.has(index) : place !== here)
+    if (sight !== null ? !sight.has(index) : place2 !== here)
       continue;
     out.push({ id, name: e.name, x, y });
   }
@@ -13395,11 +14235,11 @@ function buildMapView(ctx, chosen = null) {
   const settings = mapSettingsOf(world);
   const display2 = chosen ?? settings.display;
   const here = placeOfEntity(state, world.pov);
-  const path = placePath(world, here);
-  const inside = new Set(path);
+  const path2 = placePath(world, here);
+  const inside = new Set(path2);
   const known = (id) => canSeePlace(ctx.registry, world, state, world.pov, id);
   const standIns = new Map;
-  for (const id of path)
+  for (const id of path2)
     if (!known(id))
       standIns.set(id, standIn(world, standIns.size + 1));
   const closed = closedRoutes(ctx);
@@ -13458,7 +14298,7 @@ function buildMapView(ctx, chosen = null) {
           travel.push(o);
     }
   }
-  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes, travel };
+  return { level, here: here === null ? null : filter.shown(here), path: path2.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes, travel };
 }
 
 // src/engine/access.ts
@@ -13502,9 +14342,9 @@ function fieldsInOrder(ctx, kind) {
     const pack = ctx.registry.kinds.get(id);
     if (!mine && !pack)
       break;
-    for (const [field, def] of [...Object.entries(mine?.fields ?? {}), ...Object.entries(pack?.fields ?? {})])
-      if (!out.has(field))
-        out.set(field, def);
+    for (const [field2, def] of [...Object.entries(mine?.fields ?? {}), ...Object.entries(pack?.fields ?? {})])
+      if (!out.has(field2))
+        out.set(field2, def);
     id = kindParent(ctx.registry, ctx.world, id);
   }
   return [...out];
@@ -13531,9 +14371,9 @@ function valueWords(ctx, def, unit, v) {
     if (text3 === "")
       return null;
     if (def.type === "ref") {
-      const place = own(ctx.world.places, text3);
-      if (place)
-        return canSeePlace(ctx.registry, ctx.world, ctx.state, pov, text3) ? place.name : null;
+      const place2 = own(ctx.world.places, text3);
+      if (place2)
+        return canSeePlace(ctx.registry, ctx.world, ctx.state, pov, text3) ? place2.name : null;
       const e = own(ctx.state.entities, text3);
       return e && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, text3) ? e.name : null;
     }
@@ -13557,15 +14397,15 @@ function thingDetails(ctx, id, omit = () => false) {
   if (!e)
     return [];
   const out = [];
-  for (const [field, def] of fieldsInOrder(ctx, e.kind)) {
-    if (UNTOLD[field] || def.derived !== undefined || omit(field, def))
+  for (const [field2, def] of fieldsInOrder(ctx, e.kind)) {
+    if (UNTOLD[field2] || def.derived !== undefined || omit(field2, def))
       continue;
     if (def.domain && ctx.levelOf(pov, def.domain) < (def.level ?? 1))
       continue;
-    if (!canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field))
+    if (!canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field2))
       continue;
-    const { noun, unit } = fieldNoun(def.label, field);
-    const words3 = valueWords(ctx, def, unit, own(e.fields, field));
+    const { noun, unit } = fieldNoun(def.label, field2);
+    const words3 = valueWords(ctx, def, unit, own(e.fields, field2));
     if (words3 !== null)
       out.push(words3 === "" ? noun : `${noun} ${words3}`);
   }
@@ -13628,14 +14468,14 @@ function sceneLines(ctx, scope) {
   if (level === 0)
     return [];
   const here = placeOfEntity(ctx.state, pov);
-  const place = here ? own(ctx.world.places, here) : undefined;
-  if (!here || !place)
+  const place2 = here ? own(ctx.world.places, here) : undefined;
+  if (!here || !place2)
     return [];
   const sees = (who, id) => canSeePlace(ctx.registry, ctx.world, ctx.state, who, id);
-  const parent = place.parent && sees(pov, place.parent) ? placeName(ctx, place.parent) : undefined;
+  const parent = place2.parent && sees(pov, place2.parent) ? placeName(ctx, place2.parent) : undefined;
   const lines = [{ text: `Place: ${povPlace(ctx.registry, ctx.world, ctx.state)?.name ?? HIDDEN_PLACE_NAME}${parent ? ` (in ${parent})` : ""}.`, known: "pov" }];
-  if (place.parent && !parent) {
-    const outer = place.parent;
+  if (place2.parent && !parent) {
+    const outer = place2.parent;
     const line2 = beyond(ctx, scope, `This place is in ${placeName(ctx, outer)}.`, (who) => sees(who, outer));
     if (line2)
       lines.push(line2);
@@ -13680,19 +14520,19 @@ function placeLines(ctx, scope) {
   if (ctx.levelOf(pov, "space") === 0)
     return [];
   const here = placeOfEntity(ctx.state, pov);
-  const place = here ? own(ctx.world.places, here) : undefined;
-  if (!here || !place)
+  const place2 = here ? own(ctx.world.places, here) : undefined;
+  if (!here || !place2)
     return [];
   const seeThing = (who, id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
   const seePlace = (who, id) => canSeePlace(ctx.registry, ctx.world, ctx.state, who, id);
   const lines = [];
-  const description = place.fields.description;
+  const description = place2.fields.description;
   if (typeof description === "string" && description.trim() !== "") {
     const shown2 = povPlace(ctx.registry, ctx.world, ctx.state);
     if (shown2?.id)
       lines.push({ text: `${shown2.name}: ${description.trim()}`, known: "pov" });
     else if (scope === "gm")
-      lines.push({ text: `${place.name}: ${description.trim()}`, known: "gm" });
+      lines.push({ text: `${place2.name}: ${description.trim()}`, known: "gm" });
   }
   const inside = Object.values(ctx.world.places).filter((p) => p.parent === here).map((p) => p.id).sort();
   const insideSeen = inside.filter((id) => seePlace(pov, id));
@@ -13754,7 +14594,7 @@ function placeLoreLines(ctx, scope) {
   const found = [];
   for (const entry of Object.values(world.lore)) {
     const links = Array.isArray(entry.links) ? entry.links : [];
-    const at = chain.findIndex((place) => links.includes(place));
+    const at = chain.findIndex((place2) => links.includes(place2));
     if (at < 0 || typeof entry.content !== "string" || entry.content.trim() === "")
       continue;
     const read = canSeePlace(registry, world, state, world.pov, chain[at] ?? here) && loreReadable(registry, world, state, entry, NARRATOR_READS, false, open);
@@ -13782,17 +14622,17 @@ function reachable(ctx, from, to) {
     return true;
   return MODES.some((m) => routeAt(ctx, from, to, m) !== null);
 }
-function gridWalk(ctx, place, x, y) {
-  const stand = standingGrid(ctx.world, place);
+function gridWalk(ctx, place2, x, y) {
+  const stand = standingGrid(ctx.world, place2);
   const fields = own(ctx.state.entities, ctx.world.pov)?.fields;
   if (!stand || typeof fields?.x !== "number" || typeof fields.y !== "number")
     return null;
-  const path = findPath(povGround(ctx, stand.grid), { x: fields.x, y: fields.y }, { x, y });
-  return path ? { grid: stand.grid, path } : null;
+  const path2 = findPath(povGround(ctx, stand.grid), { x: fields.x, y: fields.y }, { x, y });
+  return path2 ? { grid: stand.grid, path: path2 } : null;
 }
 function gridLint(world) {
   const issues = [];
-  const err = (path, message) => void issues.push({ severity: "error", path, code: "space.grid", message });
+  const err = (path2, message) => void issues.push({ severity: "error", path: path2, code: "space.grid", message });
   const raw = world.mapSettings;
   const grid = isRecord(raw) ? raw.grid : undefined;
   if (raw !== undefined && !isRecord(raw))
@@ -13813,9 +14653,9 @@ function gridLint(world) {
     if (travel !== undefined && !isRecord(travel))
       err("mapSettings.travel", "Travel times are an object: speeds, vehicleSpeeds, startMinutes, parkMinutes and fetchMinutes.");
     else if (isRecord(travel)) {
-      const speed = (path, v) => {
+      const speed = (path2, v) => {
         if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0))
-          err(path, "A speed is km/h, above 0.");
+          err(path2, "A speed is km/h, above 0.");
       };
       for (const [key, v] of Object.entries(isRecord(travel.speeds) ? travel.speeds : {})) {
         if (!MODES.includes(key))
@@ -13843,26 +14683,26 @@ function gridLint(world) {
     const on = rule.on;
     if (!isRecord(on) || !(("zone" in on) || ("cell" in on)))
       continue;
-    const path = `rules.${id}.on`;
+    const path2 = `rules.${id}.on`;
     const scope = on.in;
     const onGrid = typeof scope === "string" ? gridOf(world, scope) : undefined;
     if (scope !== undefined && !onGrid)
-      err(path, `"${String(scope)}" isn't a place with a grid.`);
+      err(path2, `"${String(scope)}" isn't a place with a grid.`);
     if ("cell" in on) {
       const cell = on.cell;
       if (scope === undefined)
-        err(path, "A cell trigger names the place whose grid the cell is on, as `in`.");
+        err(path2, "A cell trigger names the place whose grid the cell is on, as `in`.");
       if (!Array.isArray(cell) || cell.length !== 2 || !cell.every((n) => Number.isInteger(n)))
-        err(path, "A cell is [x, y], two whole numbers.");
+        err(path2, "A cell is [x, y], two whole numbers.");
       else if (onGrid && cellIndex(onGrid, { x: Number(cell[0]), y: Number(cell[1]) }) === null)
-        err(path, `[${cell.join(", ")}] isn't on ${String(scope)}'s grid.`);
+        err(path2, `[${cell.join(", ")}] isn't on ${String(scope)}'s grid.`);
     } else if (typeof on.zone !== "string" || !(onGrid ? [onGrid] : Object.values(world.grids)).some((g) => hasOwn(g.zones, String(on.zone)))) {
-      err(path, `No grid${onGrid ? ` of ${String(scope)}` : ""} has a zone "${String(on.zone)}".`);
+      err(path2, `No grid${onGrid ? ` of ${String(scope)}` : ""} has a zone "${String(on.zone)}".`);
     }
     if (on.who !== undefined && knownBySelector(on.who) === null)
-      err(`${path}.who`, "`who` is a selector the engine can read whole, with at least one constraint (kind, tier, class, memberOf, tag or ids).");
+      err(`${path2}.who`, "`who` is a selector the engine can read whole, with at least one constraint (kind, tier, class, memberOf, tag or ids).");
     if (!movement)
-      issues.push({ severity: "warning", path, code: "space.grid", message: "With the grid system off nobody steps across a grid, so this rule never fires." });
+      issues.push({ severity: "warning", path: path2, code: "space.grid", message: "With the grid system off nobody steps across a grid, so this rule never fires." });
   }
   return issues;
 }
@@ -13911,21 +14751,21 @@ var PERSON = {
 function asMode(v) {
   return typeof v === "string" && MODES.includes(v) ? v : "walk";
 }
-var travel = (ctx, entity, to, mode) => {
-  const e = own(ctx.state.entities, entity);
+var travel = (ctx, entity2, to, mode) => {
+  const e = own(ctx.state.entities, entity2);
   if (!e)
-    return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
+    return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity2)}` };
   if (!own(ctx.world.places, to))
     return { code: "missing_place", reason: `no place ${labelOf(ctx, to)}` };
-  const from = placeOfEntity(ctx.state, entity);
+  const from = placeOfEntity(ctx.state, entity2);
   const plan2 = from ? routeAt(ctx, from, to, mode) : nominalRoute(ctx, to, to, mode);
   if (!plan2)
     return { code: "no_route", reason: `no ${mode} route to ${labelOf(ctx, to)}` };
   const events2 = [];
   for (const r of e.relations)
     if (r.type === "in")
-      events2.push({ type: "unlink", rel: "in", from: entity, to: r.to });
-  events2.push({ type: "set", entity, field: "place", value: to });
+      events2.push({ type: "unlink", rel: "in", from: entity2, to: r.to });
+  events2.push({ type: "set", entity: entity2, field: "place", value: to });
   return { plan: plan2, events: events2 };
 };
 var spacePack = {
@@ -13949,28 +14789,28 @@ var spacePack = {
     r.event({
       type: POS_EVENT,
       validate: (e, ctx) => {
-        const entity = strOf(e.data.entity);
-        if (!own(ctx.state.entities, entity))
-          return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
+        const entity2 = strOf(e.data.entity);
+        if (!own(ctx.state.entities, entity2))
+          return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity2)}` };
         if (e.data.at === null)
           return null;
         const at = spotData(e.data.at);
-        const stand = standingGrid(ctx.world, placeOfEntity(ctx.state, entity));
-        return at && stand && stand.scope === at.scope && cellIndex(stand.grid, at) !== null ? null : { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't on that map` };
+        const stand = standingGrid(ctx.world, placeOfEntity(ctx.state, entity2));
+        return at && stand && stand.scope === at.scope && cellIndex(stand.grid, at) !== null ? null : { code: "off_grid", reason: `${labelOf(ctx, entity2)} isn't on that map` };
       },
       apply: (e, state, ctx) => {
-        const entity = strOf(e.data.entity);
-        const thing = own(state.entities, entity);
-        if (!thing)
+        const entity2 = strOf(e.data.entity);
+        const thing2 = own(state.entities, entity2);
+        if (!thing2)
           return;
         const at = spotData(e.data.at);
         if (at)
-          Object.assign(thing.fields, { x: at.x, y: at.y });
+          Object.assign(thing2.fields, { x: at.x, y: at.y });
         else {
-          delete thing.fields.x;
-          delete thing.fields.y;
+          delete thing2.fields.x;
+          delete thing2.fields.y;
         }
-        if (entity === ctx.world.pov)
+        if (entity2 === ctx.world.pov)
           observeCells(state, ctx.world);
       },
       touches: (e) => [{ entity: strOf(e.data.entity), field: "x" }, { entity: strOf(e.data.entity), field: "y" }],
@@ -14005,16 +14845,16 @@ var spacePack = {
     r.formula("route_exists", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode)) !== null);
     r.formula("go_minutes", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) ?? 0);
     r.formula("can_go", (ctx, from, to) => goMinutes(ctx, String(from ?? ""), String(to ?? "")) !== null);
-    r.formula("within", (ctx, place, ancestor) => placeWithin(ctx.world, String(place ?? ""), String(ancestor ?? "")));
-    r.formula("grid_minutes", (ctx, place, x, y) => {
-      const path = gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0));
-      return path ? gridMinutes(path.grid, path.path) : 0;
+    r.formula("within", (ctx, place2, ancestor) => placeWithin(ctx.world, String(place2 ?? ""), String(ancestor ?? "")));
+    r.formula("grid_minutes", (ctx, place2, x, y) => {
+      const path2 = gridWalk(ctx, String(place2 ?? ""), Number(x ?? 0), Number(y ?? 0));
+      return path2 ? gridMinutes(path2.grid, path2.path) : 0;
     });
-    r.formula("grid_reachable", (ctx, place, x, y) => gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0)) !== null);
+    r.formula("grid_reachable", (ctx, place2, x, y) => gridWalk(ctx, String(place2 ?? ""), Number(x ?? 0), Number(y ?? 0)) !== null);
     r.formula("reach", (ctx, a, b) => reach(ctx, String(a ?? ""), String(b ?? "")));
-    r.formula("on_grid", (ctx, thing) => {
-      const e = own(ctx.state.entities, String(thing ?? ""));
-      return mapSettingsOf(ctx.world).grid.movement && typeof e?.fields.place === "string" && spotOf(ctx.world, ctx.state, String(thing ?? "")) !== null;
+    r.formula("on_grid", (ctx, thing2) => {
+      const e = own(ctx.state.entities, String(thing2 ?? ""));
+      return mapSettingsOf(ctx.world).grid.movement && typeof e?.fields.place === "string" && spotOf(ctx.world, ctx.state, String(thing2 ?? "")) !== null;
     });
     r.action({
       id: "go",
@@ -14053,20 +14893,20 @@ var spacePack = {
       type: "location",
       boundField: "ref",
       validate(p, ctx) {
-        const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
-        const place = placeOf2(p, ctx);
-        if (!own(ctx.state.entities, entity))
-          return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
-        if (!own(ctx.world.places, place))
-          return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
-        const route = relocate(ctx, entity, place, { told: true });
+        const entity2 = typeof p.entity === "string" ? p.entity : ctx.world.pov;
+        const place2 = placeOf2(p, ctx);
+        if (!own(ctx.state.entities, entity2))
+          return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity2)}` };
+        if (!own(ctx.world.places, place2))
+          return { code: "missing_place", reason: `no place ${labelOf(ctx, place2)}` };
+        const route = relocate(ctx, entity2, place2, { told: true });
         return "code" in route ? route : null;
       },
       toEffects: (p, ctx) => {
-        const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
+        const entity2 = typeof p.entity === "string" ? p.entity : ctx.world.pov;
         const to = placeOf2(p, ctx);
         const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : null;
-        return [{ type: "move", args: { entity, to, told: true, ...activity !== null ? { activity } : {} } }];
+        return [{ type: "move", args: { entity: entity2, to, told: true, ...activity !== null ? { activity } : {} } }];
       }
     });
     r.lint({
@@ -14120,14 +14960,14 @@ function minorUnitPlural(currency) {
 }
 
 // src/engine/materialize.ts
-function materializationSeed(runSeed, entity, domain) {
-  return hashParts(runSeed, entity, domain);
+function materializationSeed(runSeed, entity2, domain) {
+  return hashParts(runSeed, entity2, domain);
 }
 function tablesRevision(world) {
   return hashJson(world.pins.tables);
 }
-function isMaterialized(state, entity, domain) {
-  return Object.prototype.hasOwnProperty.call(state.materialized, `${entity}:${domain}`);
+function isMaterialized(state, entity2, domain) {
+  return Object.prototype.hasOwnProperty.call(state.materialized, `${entity2}:${domain}`);
 }
 function pinnedVersion(world, reg, domain) {
   const def = reg.materializers.get(domain);
@@ -14139,30 +14979,30 @@ function pinnedVersion(world, reg, domain) {
     return { code: "generator_pin", reason: `${domain} is pinned to generator v${pin}; this build has v${carried.join(", v")}` };
   return pin ?? def.version;
 }
-function sample(reg, ctx, entity, domain, runSeed) {
+function sample(reg, ctx, entity2, domain, runSeed) {
   const def = reg.materializers.get(domain);
-  if (!def || !own(ctx.state.entities, entity))
+  if (!def || !own(ctx.state.entities, entity2))
     return null;
   const version = pinnedVersion(ctx.world, reg, domain);
   if (typeof version !== "number")
     return null;
-  const events2 = def.materialize(entity, ctx, createRng(materializationSeed(runSeed, entity, domain)), version);
+  const events2 = def.materialize(entity2, ctx, createRng(materializationSeed(runSeed, entity2, domain)), version);
   if (events2.length === 0)
     return null;
-  return { type: "materialize", entity, domain, generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events: events2 };
+  return { type: "materialize", entity: entity2, domain, generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events: events2 };
 }
-function materializeIfNeeded(reg, w, entity, domain, runSeed) {
-  if (isMaterialized(w.state, entity, domain))
+function materializeIfNeeded(reg, w, entity2, domain, runSeed) {
+  if (isMaterialized(w.state, entity2, domain))
     return null;
-  const event = sample(reg, w.ctx, entity, domain, runSeed);
+  const event = sample(reg, w.ctx, entity2, domain, runSeed);
   if (!event)
     return null;
   return w.apply(event) ? null : event;
 }
-function materializeAll(reg, w, entity, runSeed) {
+function materializeAll(reg, w, entity2, runSeed) {
   const out = [];
   for (const domain of [...reg.materializers.keys()].sort()) {
-    const ev = materializeIfNeeded(reg, w, entity, domain, runSeed);
+    const ev = materializeIfNeeded(reg, w, entity2, domain, runSeed);
     if (ev)
       out.push(ev);
   }
@@ -14466,12 +15306,12 @@ function impliedYield(bond, price, at, frequency) {
 }
 function priceOf(ctx, a, at = ctx.state.clock) {
   if (a.option) {
-    const under = assetOf(ctx, a.option.underlying);
-    if (!under || under.option)
+    const under2 = assetOf(ctx, a.option.underlying);
+    if (!under2 || under2.option)
       return 0;
-    const spot = priceOf(ctx, under, at);
+    const spot = priceOf(ctx, under2, at);
     const years = (a.option.expiry - at) / YEAR_MINUTES;
-    const perUnit = years <= 0 ? intrinsic(a.option.right, spot, a.option.strike) : blackScholes({ right: a.option.right, spot, strike: a.option.strike, years, ratePct: riskFreePct(ctx), volPct: under.vol, yieldPct: under.yieldPct });
+    const perUnit = years <= 0 ? intrinsic(a.option.right, spot, a.option.strike) : blackScholes({ right: a.option.right, spot, strike: a.option.strike, years, ratePct: riskFreePct(ctx), volPct: under2.vol, yieldPct: under2.yieldPct });
     return mark(perUnit * a.option.multiplier);
   }
   if (a.bond) {
@@ -14557,12 +15397,12 @@ function optionId(underlying, right, strike, expiry) {
   return `opt:${underlying}:${right}:${Math.round(strike)}:${expiry}`;
 }
 function optionDef(ctx, underlying, right, strike, expiry) {
-  const under = assetOf(ctx, underlying);
+  const under2 = assetOf(ctx, underlying);
   const at = closeOf(ctx.world, expiry);
-  if (!under || under.option || under.class === "property" || under.class === "business_stake" || !(strike > 0) || at === null || at <= ctx.state.clock)
+  if (!under2 || under2.option || under2.class === "property" || under2.class === "business_stake" || !(strike > 0) || at === null || at <= ctx.state.clock)
     return null;
   const money = formatMoney(Math.round(strike), ctx.world.currency);
-  return { label: `${under.symbol ?? under.label} ${expiry} ${money} ${right}`, class: "option", underlying, strike: Math.round(strike), expiry, right, multiplier: 100, settlement: "physical" };
+  return { label: `${under2.symbol ?? under2.label} ${expiry} ${money} ${right}`, class: "option", underlying, strike: Math.round(strike), expiry, right, multiplier: 100, settlement: "physical" };
 }
 function str3(e, k) {
   return typeof e.data[k] === "string" ? e.data[k] : "";
@@ -14661,28 +15501,28 @@ function registerMarkets(r) {
       const issues = [];
       const books = { world, state: { clock: 0, entities: {}, packs: {} }, tables: { get: (id) => own(world.tables, id) } };
       for (const [id, raw] of Object.entries(configAssets(world))) {
-        const path = `packs.economy.config.assets.${id}`;
+        const path2 = `packs.economy.config.assets.${id}`;
         const def = readAssetDef(raw);
         if (!def) {
-          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${id} needs a class (${ASSET_CLASSES.join(", ")}).`, path });
+          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${id} needs a class (${ASSET_CLASSES.join(", ")}).`, path: path2 });
           continue;
         }
         if (def.class === "option") {
           if (!def.underlying || !own(configAssets(world), def.underlying))
-            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} names no underlying asset the world lists.`, path: `${path}.underlying` });
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} names no underlying asset the world lists.`, path: `${path2}.underlying` });
           if (!(typeof def.strike === "number" && def.strike > 0))
-            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs a strike above zero.`, path: `${path}.strike` });
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs a strike above zero.`, path: `${path2}.strike` });
           if (clockOfDate(world, def.expiry) === null)
-            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs an expiry date (YYYY-MM-DD).`, path: `${path}.expiry` });
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs an expiry date (YYYY-MM-DD).`, path: `${path2}.expiry` });
           if (def.right !== "call" && def.right !== "put")
-            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} is a call or a put.`, path: `${path}.right` });
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} is a call or a put.`, path: `${path2}.right` });
         }
         if (def.class === "bond" && def.face !== undefined && clockOfDate(world, def.maturity) === null)
-          issues.push({ severity: "error", code: "economy.assets", message: `Bond ${def.label || id} has a face value but no maturity date (YYYY-MM-DD).`, path: `${path}.maturity` });
+          issues.push({ severity: "error", code: "economy.assets", message: `Bond ${def.label || id} has a face value but no maturity date (YYYY-MM-DD).`, path: `${path2}.maturity` });
         if (def.model !== undefined && !isRecord(own(investingRows(books), def.model)))
-          issues.push({ severity: "warning", code: "economy.assets", message: `Asset ${def.label || id} follows ${def.model}, which the finance table doesn't list; it takes its class's model.`, path: `${path}.model` });
+          issues.push({ severity: "warning", code: "economy.assets", message: `Asset ${def.label || id} follows ${def.model}, which the finance table doesn't list; it takes its class's model.`, path: `${path2}.model` });
         if (def.price !== undefined && !(def.price > 0))
-          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${def.label || id} needs a price above zero.`, path: `${path}.price` });
+          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${def.label || id} needs a price above zero.`, path: `${path2}.price` });
       }
       return issues;
     }
@@ -14744,42 +15584,42 @@ function incomeIn(state, party, year) {
   const y = objOf(own(objOf(own(objOf(holdingsSlice(state).income), party)), String(year)));
   return { dividend: numOf(y.dividend), interest: numOf(y.interest), profit: numOf(y.profit) };
 }
-function basisRecord(state, entity, party) {
-  const r = own(objOf(own(objOf(holdingsSlice(state).basis), entity)), party);
+function basisRecord(state, entity2, party) {
+  const r = own(objOf(own(objOf(holdingsSlice(state).basis), entity2)), party);
   if (r === undefined)
     return null;
   const o = objOf(r);
   return { basis: numOf(o.basis), since: typeof o.since === "number" ? o.since : null };
 }
-function setBasisRecord(state, entity, party, value) {
-  if (!safeKey(entity) || !safeKey(party))
+function setBasisRecord(state, entity2, party, value) {
+  if (!safeKey(entity2) || !safeKey(party))
     return;
   const all = holdingsRecord(state, "basis");
-  const mine = objOf(own(all, entity));
+  const mine = objOf(own(all, entity2));
   if (value === null)
     delete mine[party];
   else
     mine[party] = { basis: value.basis, ...value.since !== null ? { since: value.since } : {} };
-  all[entity] = mine;
+  all[entity2] = mine;
 }
 
 // src/packs/economy/core/gains.ts
 var TAX_PROVIDER = "investment_tax";
-function basisOf(api, ctx, entity, party) {
-  const recorded = basisRecord(ctx.state, entity, party);
+function basisOf(api, ctx, entity2, party) {
+  const recorded = basisRecord(ctx.state, entity2, party);
   if (recorded)
     return recorded;
-  const e = own(ctx.state.entities, entity);
+  const e = own(ctx.state.entities, entity2);
   if (e?.kind !== "property")
     return { basis: 0, since: null };
-  const authored = own(ctx.world.entities, entity)?.fields.value;
+  const authored = own(ctx.world.entities, entity2)?.fields.value;
   const whole4 = numOf(e.fields.purchase_price, typeof authored === "number" ? authored : numOf(e.fields.value));
-  return { basis: Math.round(whole4 * api.shareOf(ctx.state, entity, party) / 100), since: clockOfDate(ctx.world, e.fields.purchased) };
+  return { basis: Math.round(whole4 * api.shareOf(ctx.state, entity2, party) / 100), since: clockOfDate(ctx.world, e.fields.purchased) };
 }
 function isHome(state, property, party) {
   const home = own(state.entities, party)?.fields.home;
-  const place = own(state.entities, property)?.fields.place;
-  return typeof home === "string" && home !== "" && (home === property || home === place);
+  const place2 = own(state.entities, property)?.fields.place;
+  return typeof home === "string" && home !== "" && (home === property || home === place2);
 }
 function str4(e, k) {
   return typeof e.data[k] === "string" ? e.data[k] : "";
@@ -14797,16 +15637,16 @@ function disposeEvent(api) {
       return typeof proceeds === "number" && Number.isSafeInteger(proceeds) && proceeds >= 0 ? null : reject5("bad_event", "a disposal's proceeds are a whole amount");
     },
     apply: (e, state, ctx) => {
-      const entity = str4(e, "entity");
+      const entity2 = str4(e, "entity");
       const party = str4(e, "party");
       const pct = numOf(e.data.pct);
       const proceeds = numOf(e.data.proceeds);
-      const b = basisOf(api, { world: ctx.world, state }, entity, party);
+      const b = basisOf(api, { world: ctx.world, state }, entity2, party);
       const part = Math.round(b.basis * pct / 100);
       const held2 = b.since === null ? Infinity : state.clock - b.since;
-      const home = own(state.entities, entity)?.kind === "property" && isHome(state, entity, party) && held2 >= 2 * YEAR_MINUTES;
-      recordGain(state, ctx.world, party, { term: held2 >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, `Sold ${labelOf(ctx, entity)}`), qty: pct / 100, ...home ? { home: true } : {} });
-      setBasisRecord(state, entity, party, pct >= 100 ? null : { basis: b.basis - part, since: b.since });
+      const home = own(state.entities, entity2)?.kind === "property" && isHome(state, entity2, party) && held2 >= 2 * YEAR_MINUTES;
+      recordGain(state, ctx.world, party, { term: held2 >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, `Sold ${labelOf(ctx, entity2)}`), qty: pct / 100, ...home ? { home: true } : {} });
+      setBasisRecord(state, entity2, party, pct >= 100 ? null : { basis: b.basis - part, since: b.since });
     },
     describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str4(e, "party"))} sold ${numOf(e.data.pct)}% of their share of ${labelOf(ctx, str4(e, "entity"))}`
   };
@@ -14984,11 +15824,11 @@ function registerGains(r) {
   };
   r.amount(TAX_PROVIDER, provider);
 }
-function disposal(entity, party, pct, proceeds, label) {
-  return { type: "economy.dispose", data: { entity, party, pct: Math.min(100, Math.max(0, pct)), proceeds: Math.max(0, Math.round(proceeds)), label } };
+function disposal(entity2, party, pct, proceeds, label) {
+  return { type: "economy.dispose", data: { entity: entity2, party, pct: Math.min(100, Math.max(0, pct)), proceeds: Math.max(0, Math.round(proceeds)), label } };
 }
-function acquisition(entity, party, cents) {
-  return { type: "economy.acquire", data: { entity, party, cents: Math.max(0, Math.round(cents)) } };
+function acquisition(entity2, party, cents) {
+  return { type: "economy.acquire", data: { entity: entity2, party, cents: Math.max(0, Math.round(cents)) } };
 }
 
 // src/packs/economy/core/holdings.ts
@@ -15333,7 +16173,7 @@ function holdingView(api, ctx, holding, detail, viewer) {
   const price = priceOf(ctx, a);
   const value = Math.round(qty * price);
   const cost = lots.reduce((s, l) => s + l.cost, 0);
-  const under = a.option ? assetOf(ctx, a.option.underlying) : null;
+  const under2 = a.option ? assetOf(ctx, a.option.underlying) : null;
   const route = routeOf(ctx.state, holding);
   return {
     id: holding,
@@ -15345,7 +16185,7 @@ function holdingView(api, ctx, holding, detail, viewer) {
     cost: detail ? cost : 0,
     gain: detail ? value - cost : 0,
     lots: detail ? lots.map((l) => ({ qty: l.qty, cost: l.cost, at: dateText(ctx.world, l.at), gain: Math.round(l.qty * price) - l.cost, term: ctx.state.clock - l.at >= YEAR_MINUTES ? "long" : "short" })) : [],
-    option: a.option && under ? { right: a.option.right, underlying: under.label, strike: a.option.strike, expiry: dateText(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf(ctx, under), a.option.strike) > 0 } : null,
+    option: a.option && under2 ? { right: a.option.right, underlying: under2.label, strike: a.option.strike, expiry: dateText(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf(ctx, under2), a.option.strike) > 0 } : null,
     route: a.pays > 0 || a.bond ? shownRoute(api, ctx, viewer, route.to, route.reinvest) : null
   };
 }
@@ -15649,10 +16489,10 @@ function wordsFor2(books, viewer, words3, unseen) {
   const seen = seenIn(books, viewer, id);
   if (seen === undefined)
     return words3.replace(/_/g, " ").trim();
-  const entity = own(books.state.entities, id);
+  const entity2 = own(books.state.entities, id);
   if (!seen)
-    return entity ? "someone" : unseen;
-  return entity?.name ?? own(books.world.places, id)?.name ?? unseen;
+    return entity2 ? "someone" : unseen;
+  return entity2?.name ?? own(books.world.places, id)?.name ?? unseen;
 }
 function outsideName(books, raw, viewer) {
   const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
@@ -15841,7 +16681,7 @@ function productOf(books, id) {
   const def = own(worldProducts(books.world), productId) ?? {};
   const base = classDefaults(books, cls);
   const f = e.fields;
-  const num5 = (field, fallback) => numOf(f[field], fallback);
+  const num5 = (field2, fallback) => numOf(f[field2], fallback);
   const fees = { ...base.fees, ...objOf(def.fees) };
   const minimum = { ...base.minimum, ...def.minimum ?? {} };
   if (typeof f.min_pct === "number")
@@ -15957,8 +16797,8 @@ function balance(state, account) {
 }
 function statusOf(state, account) {
   const set = strOf(own(objOf(sliceOf(state, "economy").status), account));
-  const field = strOf(own(state.entities, account)?.fields.status);
-  const v = set || field;
+  const field2 = strOf(own(state.entities, account)?.fields.status);
+  const v = set || field2;
   return v === "frozen" || v === "collections" || v === "charged_off" || v === "closed" || v === "paid_off" || v === "matured" ? v : "open";
 }
 function holdsOn(state, account) {
@@ -16010,16 +16850,16 @@ function accountsWorth(books, party, shown2) {
     total += (shown2 ? shown2(id) : balance(books.state, id)) * shareOf(books.state, id, party) / 100;
   return Math.round(total);
 }
-function anchorOf(state, entity) {
-  const band = strOf(own(state.entities, entity)?.fields.wealth, "modest");
-  const a = objOf(own(objOf(sliceOf(state, "economy").anchors), entity));
+function anchorOf(state, entity2) {
+  const band = strOf(own(state.entities, entity2)?.fields.wealth, "modest");
+  const a = objOf(own(objOf(sliceOf(state, "economy").anchors), entity2));
   if (a.band === band && typeof a.typical === "number" && typeof a.base === "number")
     return { band, typical: a.typical, base: a.base };
-  return { band, typical: bandByLabel(band).typical, base: balance(state, external(entity)) };
+  return { band, typical: bandByLabel(band).typical, base: balance(state, external(entity2)) };
 }
-function notional(state, entity) {
-  const a = anchorOf(state, entity);
-  return a.typical + (balance(state, external(entity)) - a.base);
+function notional(state, entity2) {
+  const a = anchorOf(state, entity2);
+  return a.typical + (balance(state, external(entity2)) - a.base);
 }
 function regionRow(ctx, who = ctx.world.pov) {
   const configured = ctx.world.packs.economy?.config.region;
@@ -16029,7 +16869,7 @@ function regionRow(ctx, who = ctx.world.pov) {
 function costOfLiving(ctx, who) {
   return numOf(regionRow(ctx, who).cost_of_living_multiplier, 1);
 }
-function priceModifier(ctx, category, place) {
+function priceModifier(ctx, category, place2) {
   let mult = 1;
   for (const raw of Object.values(objOf(sliceOf(ctx.state, "economy").modifiers))) {
     const m = objOf(raw);
@@ -16040,7 +16880,7 @@ function priceModifier(ctx, category, place) {
       continue;
     const at = strOf(m.place);
     if (at !== "") {
-      let cur = place ?? undefined;
+      let cur = place2 ?? undefined;
       let inside = false;
       for (let guard = 0;cur && guard < 32 && !inside; guard++) {
         inside = cur === at;
@@ -16062,8 +16902,8 @@ function priceOf2(ctx, ref, rng) {
   const raw = bandOfJson(item ? item.price_cents : cat?.price_cents);
   if (!raw)
     return null;
-  const place = ref.place !== undefined ? ref.place : placeOfEntity(ctx.state, ctx.world.pov);
-  const mult = regional * priceModifier(ctx, categoryId, place);
+  const place2 = ref.place !== undefined ? ref.place : placeOfEntity(ctx.state, ctx.world.pov);
+  const mult = regional * priceModifier(ctx, categoryId, place2);
   const band = { min: Math.round(raw.min * mult), typical: Math.round(raw.typical * mult), max: Math.round(raw.max * mult) };
   let unit2 = band.typical;
   if (rng) {
@@ -16237,8 +17077,8 @@ function isCreditAccount(ctx, account) {
 var STAGE_WORDS = { current: "up to date", late: "late", "30": "30 days past due", "60": "60 days past due", "90": "90 days past due", "120": "120 days past due", collections: "in collections", charged_off: "charged off" };
 var STATUS_WORDS = { open: "open", frozen: "frozen", collections: "in collections", charged_off: "charged off", closed: "closed", paid_off: "paid off", matured: "matured" };
 var CREDIT_WORDS = { inquiry: "a credit inquiry", opened: "a new account", on_time: "a payment on time", late: "a late payment", collections: "an account in collections", charged_off: "an account charged off", closed: "a closed account", paid_off: "an account paid off", declined: "a declined application" };
-function whoseFor(ctx, viewer, person) {
-  return viewer === person ? "Your" : `${own(ctx.state.entities, person)?.name ?? person}'s`;
+function whoseFor(ctx, viewer, person3) {
+  return viewer === person3 ? "Your" : `${own(ctx.state.entities, person3)?.name ?? person3}'s`;
 }
 function wordsOf2(words3, id) {
   return own(words3, id) ?? id.replace(/_/g, " ");
@@ -16428,10 +17268,10 @@ var EVENTS2 = [
     validate: (e, ctx) => own(ctx.state.entities, str7(e, "person")) && str7(e, "kind") !== "" ? null : reject6("bad_event", "a credit entry needs a person and a kind"),
     apply: (e, state) => {
       const credit = sliceRecord(state, "economy", "credit");
-      const person = str7(e, "person");
-      const cur = objOf(credit[person]);
+      const person3 = str7(e, "person");
+      const cur = objOf(credit[person3]);
       const { person: _person, ...entry } = e.data;
-      credit[person] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
+      credit[person3] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
     },
     describe: (e, ctx, viewer) => viewer !== undefined && viewer !== str7(e, "person") ? "" : `${whoseFor(ctx, viewer, str7(e, "person"))} credit report now shows ${wordsOf2(CREDIT_WORDS, str7(e, "kind"))}`
   },
@@ -16440,10 +17280,10 @@ var EVENTS2 = [
     validate: (e, ctx) => own(ctx.state.entities, str7(e, "person")) && typeof e.data.score === "number" ? null : reject6("bad_event", "a score needs a person and a number"),
     apply: (e, state) => {
       const credit = sliceRecord(state, "economy", "credit");
-      const person = str7(e, "person");
-      const cur = objOf(credit[person]);
+      const person3 = str7(e, "person");
+      const cur = objOf(credit[person3]);
       const at = typeof e.data.at === "number" ? e.data.at : state.clock;
-      credit[person] = { ...cur, score: numOf(e.data.score), factors: objOf(e.data.factors), at, history: pushCapped(cur.history, { at, score: numOf(e.data.score) }, SCORES_KEPT) };
+      credit[person3] = { ...cur, score: numOf(e.data.score), factors: objOf(e.data.factors), at, history: pushCapped(cur.history, { at, score: numOf(e.data.score) }, SCORES_KEPT) };
     },
     describe: (e, ctx, viewer) => viewer !== undefined && viewer !== str7(e, "person") ? "" : `${whoseFor(ctx, viewer, str7(e, "person"))} credit score is now ${numOf(e.data.score)}`
   },
@@ -17057,9 +17897,9 @@ function ownerLines(api, ctx, id, viewer) {
 function propertyView(api, ctx, id, party, flows) {
   const e = own(ctx.state.entities, id);
   const value = propertyValue(ctx.state, id);
-  const place = strOf(e?.fields.place);
+  const place2 = strOf(e?.fields.place);
   const asking = num5(e?.fields.asking_price);
-  const shownPlace = place === "" || party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place) ? null : own(ctx.world.places, place)?.name ?? labelOf(ctx, place);
+  const shownPlace = place2 === "" || party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place2) ? null : own(ctx.world.places, place2)?.name ?? labelOf(ctx, place2);
   if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) {
     const mayBuy = api.feature(ctx, party, "property") && (asking !== undefined || payers(api, ctx.state, id).owners.length === 0);
     return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null, ...mayBuy ? { mortgageTerms: offeredTerms(ctx) } : {} };
@@ -17228,28 +18068,28 @@ function registerProperty(r) {
       for (const e of Object.values(world.entities)) {
         if (e.kind !== "property")
           continue;
-        const path = `entities.${e.id}.fields`;
-        const place = strOf(e.fields.place);
-        if (place !== "" && !own(world.places, place))
-          issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} is at "${place}", which isn't a place.`, path: `${path}.place` });
+        const path2 = `entities.${e.id}.fields`;
+        const place2 = strOf(e.fields.place);
+        if (place2 !== "" && !own(world.places, place2))
+          issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} is at "${place2}", which isn't a place.`, path: `${path2}.place` });
         if (!(numOf(e.fields.value) > 0))
-          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} has no value, so it adds nothing to anyone's worth and costs nothing to keep.`, path: `${path}.value` });
+          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} has no value, so it adds nothing to anyone's worth and costs nothing to keep.`, path: `${path2}.value` });
         for (const o of ownersIn(e.fields))
           if (!own(world.entities, o.party))
-            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} names owner "${o.party}", who isn't in the world.`, path: `${path}.owners` });
+            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} names owner "${o.party}", who isn't in the world.`, path: `${path2}.owners` });
         const mortgage = strOf(e.fields.mortgage);
         if (mortgage !== "") {
           const loan = own(world.entities, mortgage);
           if (loan?.kind !== "account")
-            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name}'s mortgage "${mortgage}" isn't an account.`, path: `${path}.mortgage` });
+            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name}'s mortgage "${mortgage}" isn't an account.`, path: `${path2}.mortgage` });
           else if (strOf(loan.fields.secured_by) !== e.id)
             issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name}'s mortgage ${loan.name} isn't secured by it (its secured_by names ${strOf(loan.fields.secured_by) || "nothing"}).`, path: `entities.${mortgage}.fields.secured_by` });
         }
         if (e.fields.managed === true && !(numOf(e.fields.market_rent) > 0))
-          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} is let to outside tenants but has no market rent, so it lets nothing.`, path: `${path}.market_rent` });
+          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} is let to outside tenants but has no market rent, so it lets nothing.`, path: `${path2}.market_rent` });
         const rentTo = strOf(e.fields.rent_to);
         if (rentTo !== "" && own(world.entities, rentTo)?.kind !== "account")
-          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name}'s rent goes to "${rentTo}", which isn't an account; it goes to the owners' accounts instead.`, path: `${path}.rent_to` });
+          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name}'s rent goes to "${rentTo}", which isn't an account; it goes to the owners' accounts instead.`, path: `${path2}.rent_to` });
       }
       for (const e of Object.values(world.entities)) {
         if (e.kind !== "flow" || e.fields.flow_kind !== "rent" || typeof e.fields.link !== "string" || e.fields.link === "")
@@ -17276,12 +18116,12 @@ function propertyLines(ctx, scope) {
   const see = (who, id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
   const name = (id) => own(ctx.state.entities, id)?.name ?? id;
   const where = (id, viewer) => {
-    const place = placeOfEntity(ctx.state, id);
-    if (!place)
+    const place2 = placeOfEntity(ctx.state, id);
+    if (!place2)
       return "";
-    if (viewer !== null && !canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place))
+    if (viewer !== null && !canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place2))
       return " somewhere";
-    const at = own(ctx.world.places, place)?.name ?? place;
+    const at = own(ctx.world.places, place2)?.name ?? place2;
     return at === name(id) ? "" : ` at ${at}`;
   };
   const roleOf = (o) => `${ROLE_LABEL[o.role]}${o.worth > 0 ? `, ${Math.round(o.worth)}%` : ""}`;
@@ -17511,43 +18351,43 @@ function bracketTax(brackets, taxable) {
   }
   return Math.round(tax);
 }
-function filingStatusOf(ctx, person) {
-  const raw = strOf(own(ctx.state.entities, person)?.fields.filing_status);
+function filingStatusOf(ctx, person3) {
+  const raw = strOf(own(ctx.state.entities, person3)?.fields.filing_status);
   return FILING_STATUSES.includes(raw) ? raw : "single";
 }
-function stateTaxPct(ctx, person) {
-  const region = regionRow(ctx, person);
-  return { state: numOf(region.state_income_tax_effective_pct), local: own(ctx.state.entities, person)?.fields.local_tax === true ? numOf(region.local_income_tax_pct_typical) : 0 };
+function stateTaxPct(ctx, person3) {
+  const region = regionRow(ctx, person3);
+  return { state: numOf(region.state_income_tax_effective_pct), local: own(ctx.state.entities, person3)?.fields.local_tax === true ? numOf(region.local_income_tax_pct_typical) : 0 };
 }
 var YEARS_KEPT = 2;
-function yearPay(state, person, year) {
-  const y = objOf(own(objOf(own(objOf(sliceOf(state, "economy").ytd), person)), String(year)));
+function yearPay(state, person3, year) {
+  const y = objOf(own(objOf(own(objOf(sliceOf(state, "economy").ytd), person3)), String(year)));
   const contract = {};
   for (const [m, c] of Object.entries(objOf(y.contract)))
     if (typeof c === "number")
       contract[m] = c;
   return { gross: numOf(y.gross), fica: numOf(y.fica), withheld: numOf(y.withheld), pretax: numOf(y.pretax), contract };
 }
-function addPay(state, person, year, month, pay) {
+function addPay(state, person3, year, month, pay) {
   const ytd = sliceRecord(state, "economy", "ytd");
-  const mine = { ...objOf(own(ytd, person)) };
-  const cur = yearPay(state, person, year);
+  const mine = { ...objOf(own(ytd, person3)) };
+  const cur = yearPay(state, person3, year);
   const contract = { ...cur.contract };
   if (pay.contract)
     contract[String(month)] = numOf(contract[String(month)]) + pay.gross;
   mine[String(year)] = { gross: cur.gross + pay.gross, fica: cur.fica + pay.fica, withheld: cur.withheld + pay.withheld, pretax: cur.pretax + pay.pretax, contract };
   for (const old of Object.keys(mine).sort().slice(0, Math.max(0, Object.keys(mine).length - YEARS_KEPT)))
     delete mine[old];
-  ytd[person] = mine;
+  ytd[person3] = mine;
 }
 function taxTotal(t) {
   return t.federal + t.socialSecurity + t.medicare + t.state + t.local;
 }
-function payTaxes(ctx, person, input) {
+function payTaxes(ctx, person3, input) {
   if (input.selfEmployed || input.gross <= 0)
     return { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
   const taxable = Math.max(0, input.gross - input.pretax.income);
-  const { state, local } = stateTaxPct(ctx, person);
+  const { state, local } = stateTaxPct(ctx, person3);
   const stateTax = Math.round(taxable * state / 100);
   const localTax = Math.round(taxable * local / 100);
   if (!input.brackets) {
@@ -17555,7 +18395,7 @@ function payTaxes(ctx, person, input) {
     return { federal: Math.round(taxable * numOf(occ?.withholding_rate_pct) / 100), socialSecurity: 0, medicare: 0, state: stateTax, local: localTax };
   }
   const t = federalTables(ctx);
-  const filing = filingStatusOf(ctx, person);
+  const filing = filingStatusOf(ctx, person3);
   const periods = Math.max(1, input.periods);
   const federal2 = Math.round(bracketTax(t.brackets[filing], Math.max(0, taxable * periods - t.standardDeduction[filing])) / periods);
   if (input.ficaExempt)
@@ -17623,40 +18463,40 @@ function passThroughOwners(ctx, api) {
       const structure = structureOf(ctx.state, id);
       if (structure === "c_corp")
         continue;
-      for (const person of holdersOf(ctx.state, id)) {
-        const share2 = api.shareOf(ctx.state, id, person);
+      for (const person3 of holdersOf(ctx.state, id)) {
+        const share2 = api.shareOf(ctx.state, id, person3);
         if (share2 <= 0)
           continue;
-        const held2 = out.get(person);
+        const held2 = out.get(person3);
         const one = { business: id, share: share2, selfEmployed: selfEmployedProfit(structure) };
         if (held2)
           held2.push(one);
         else
-          out.set(person, [one]);
+          out.set(person3, [one]);
       }
     }
     return out;
   });
 }
-function passThroughShares(ctx, api, person) {
-  return [...passThroughOwners(ctx, api).get(person) ?? []];
+function passThroughShares(ctx, api, person3) {
+  return [...passThroughOwners(ctx, api).get(person3) ?? []];
 }
-function ordinaryIncome(api, ctx, person, year) {
-  const pay = yearPay(ctx.state, person, year);
+function ordinaryIncome(api, ctx, person3, year) {
+  const pay = yearPay(ctx.state, person3, year);
   const span = monthsSpan(ctx, year, [1, 12]);
   let gross = pay.gross;
-  for (const s of passThroughShares(ctx, api, person))
+  for (const s of passThroughShares(ctx, api, person3))
     gross += Math.round(Math.max(0, businessBooks(api, ctx, s.business, span.from, span.to).profit) * s.share / 100);
-  const filing = filingStatusOf(ctx, person);
+  const filing = filingStatusOf(ctx, person3);
   return { gross, taxable: Math.max(0, gross - pay.pretax - federalTables(ctx).standardDeduction[filing]), filing };
 }
-function estimatedTax(api, ctx, person, p) {
-  const pay = yearPay(ctx.state, person, p.year);
-  const contract = api.feature(ctx, person, "withholding") ? p.months.reduce((a, m) => a + numOf(own(pay.contract, String(m))), 0) : 0;
+function estimatedTax(api, ctx, person3, p) {
+  const pay = yearPay(ctx.state, person3, p.year);
+  const contract = api.feature(ctx, person3, "withholding") ? p.months.reduce((a, m) => a + numOf(own(pay.contract, String(m))), 0) : 0;
   const span = monthsSpan(ctx, p.year, p.months);
   let seIncome = contract;
   let other = 0;
-  for (const s of passThroughShares(ctx, api, person)) {
+  for (const s of passThroughShares(ctx, api, person3)) {
     if (!api.feature(ctx, s.business, "business_tax"))
       continue;
     const part = Math.round(Math.max(0, businessBooks(api, ctx, s.business, span.from, span.to).profit) * s.share / 100);
@@ -17668,13 +18508,13 @@ function estimatedTax(api, ctx, person, p) {
   const income = seIncome + other;
   if (income <= 0)
     return { cents: 0, income: 0 };
-  const state = income * stateTaxPct(ctx, person).state / 100;
-  if (!api.feature(ctx, person, "tax_brackets")) {
-    const occ = rowOf(ctx, "economy.occupations", setAsideOccupation(ctx, person));
+  const state = income * stateTaxPct(ctx, person3).state / 100;
+  if (!api.feature(ctx, person3, "tax_brackets")) {
+    const occ = rowOf(ctx, "economy.occupations", setAsideOccupation(ctx, person3));
     return { cents: Math.round(income * numOf(occ?.estimated_tax_set_aside_pct, 15) / 100 + state), income };
   }
   const t = federalTables(ctx);
-  const filing = filingStatusOf(ctx, person);
+  const filing = filingStatusOf(ctx, person3);
   const scale = 12 / p.months.length;
   const se = seIncome * SE_EARNINGS_SHARE * t.selfEmploymentPct / 100;
   const contractYear = Object.values(pay.contract).reduce((a, c) => a + c, 0);
@@ -17684,8 +18524,8 @@ function estimatedTax(api, ctx, person, p) {
   const federal2 = (bracketTax(t.brackets[filing], stacked) - bracketTax(t.brackets[filing], base)) / scale;
   return { cents: Math.round(federal2 + se + state), income };
 }
-function taxRegionOf(ctx, place) {
-  for (let id = place ?? undefined, guard = 0;id && guard < 32; guard++) {
+function taxRegionOf(ctx, place2) {
+  for (let id = place2 ?? undefined, guard = 0;id && guard < 32; guard++) {
     const p = own(ctx.world.places, id);
     if (!p)
       break;
@@ -17697,8 +18537,8 @@ function taxRegionOf(ctx, place) {
   const configured = objOf(ctx.world.packs.economy?.config).region;
   return typeof configured === "string" && configured !== "" ? configured : "us";
 }
-function salesTaxPct(ctx, place) {
-  for (let id = place ?? undefined, guard = 0;id && guard < 32; guard++) {
+function salesTaxPct(ctx, place2) {
+  for (let id = place2 ?? undefined, guard = 0;id && guard < 32; guard++) {
     const p = own(ctx.world.places, id);
     if (!p)
       break;
@@ -17707,13 +18547,13 @@ function salesTaxPct(ctx, place) {
       return pct;
     id = p.parent;
   }
-  return numOf(rowOf(ctx, "economy.regions", taxRegionOf(ctx, place))?.sales_tax_combined_avg_pct);
+  return numOf(rowOf(ctx, "economy.regions", taxRegionOf(ctx, place2))?.sales_tax_combined_avg_pct);
 }
-function taxExempt(ctx, place, category) {
+function taxExempt(ctx, place2, category) {
   const named = (v) => Array.isArray(v) && v.includes(category);
   if (named(objOf(objOf(ctx.world.packs.economy?.config).taxes).exempt))
     return true;
-  for (let id = place ?? undefined, guard = 0;id && guard < 32; guard++) {
+  for (let id = place2 ?? undefined, guard = 0;id && guard < 32; guard++) {
     const p = own(ctx.world.places, id);
     if (!p)
       break;
@@ -17778,14 +18618,14 @@ function contractWork(ctx) {
     return out;
   });
 }
-function contractOccupations(ctx, person) {
-  return [...contractWork(ctx).get(person) ?? []];
+function contractOccupations(ctx, person3) {
+  return [...contractWork(ctx).get(person3) ?? []];
 }
-function setAsideOccupation(ctx, person) {
-  return contractOccupations(ctx, person)[0] ?? strOf(own(ctx.state.entities, person)?.fields.occupation);
+function setAsideOccupation(ctx, person3) {
+  return contractOccupations(ctx, person3)[0] ?? strOf(own(ctx.state.entities, person3)?.fields.occupation);
 }
-function owesEstimates(person, shares, work) {
-  return (shares.get(person)?.length ?? 0) > 0 || (work.get(person)?.length ?? 0) > 0;
+function owesEstimates(person3, shares, work) {
+  return (shares.get(person3)?.length ?? 0) > 0 || (work.get(person3)?.length ?? 0) > 0;
 }
 function registerTaxes(r) {
   const { api, core } = r;
@@ -17833,7 +18673,7 @@ function registerTaxes(r) {
     const lines = payer ? [{ account: payer, amount: -cents }, { account: api.outside("tax:federal"), amount: cents }] : undefined;
     return { cents, ...lines ? { lines } : {}, memo: business ? "Corporate income tax" : "Estimated tax", kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods, ...business ? { business: true } : {} } }] };
   });
-  core.query("economy.ordinary_income", (ctx, person, year) => ordinaryIncome(api, ctx, person, year));
+  core.query("economy.ordinary_income", (ctx, person3, year) => ordinaryIncome(api, ctx, person3, year));
   core.query("economy.income_tax", (ctx, filing, taxable) => bracketTax(federalTables(ctx).brackets[filing], taxable));
 }
 
@@ -17900,13 +18740,13 @@ function placesOf(ctx, business) {
 function businessIds(ctx) {
   return Object.keys(ctx.state.entities).filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "business") && !isGone(ctx.state, id)).sort();
 }
-function businessAt(ctx, place) {
-  if (!place)
+function businessAt(ctx, place2) {
+  if (!place2)
     return null;
   let best = null;
   for (const id of businessIds(ctx)) {
     for (const p of placesOf(ctx, id)) {
-      if (!placeWithin(ctx.world, place, p))
+      if (!placeWithin(ctx.world, place2, p))
         continue;
       let depth = 0;
       for (let cur = own(ctx.world.places, p)?.parent;cur && depth < 32; cur = own(ctx.world.places, cur)?.parent)
@@ -18126,8 +18966,8 @@ function jobBlocks(ctx, job, from, to) {
   for (const b of commitments(ctx, job.worker, from, to)) {
     if (b.kind !== "work" && b.kind !== "other")
       continue;
-    const place = b.place;
-    if (!place || !job.workplaces.some((w) => placeWithin(ctx.world, place, w)))
+    const place2 = b.place;
+    if (!place2 || !job.workplaces.some((w) => placeWithin(ctx.world, place2, w)))
       continue;
     const start = Math.max(b.start, from);
     const end = Math.min(b.end, to);
@@ -18480,8 +19320,8 @@ function hire(api, args, ctx) {
       fields.pay_days = peer.custom.days;
   }
   const id = `job:${hashParts(ctx.rng.seed, "hire", business, worker, String(ctx.state.clock)).slice(0, 10)}`;
-  const entity = { id, kind: JOB_KIND, name: `${labelOf(ctx, worker)} at ${labelOf(ctx, business)}`, tier: "background", fields, relations: [] };
-  return [{ type: "spawn", entity }];
+  const entity2 = { id, kind: JOB_KIND, name: `${labelOf(ctx, worker)} at ${labelOf(ctx, business)}`, tier: "background", fields, relations: [] };
+  return [{ type: "spawn", entity: entity2 }];
 }
 function endJob(api, args, ctx) {
   const job = readJob(ctx, strOf(args.job));
@@ -18525,8 +19365,8 @@ function jobView(ctx, api, job, viewer) {
   const since = typeof record2.through === "number" ? record2.through : now - 7 * MINUTES_PER_DAY;
   const scheduled = hoursSource(ctx, job, now) === "contract" ? null : jobBlocks(ctx, job, since, now).reduce((a, b) => a + (b.end - b.start), 0);
   const money = (c) => api.money(ctx, c);
-  const entity = own(ctx.state.entities, job.id);
-  const fields = entity?.fields ?? {};
+  const entity2 = own(ctx.state.entities, job.id);
+  const fields = entity2?.fields ?? {};
   const unseen = Object.fromEntries(["employer", "workplace"].filter((k) => outsideHidden(ctx, strOf(fields[k]), viewer)).map((k) => [k, ""]));
   return {
     id: job.id,
@@ -18689,9 +19529,9 @@ function walkInPosting(ctx, api, business, at, rng) {
   const cents = Math.max(0, Math.round(daily * (1 + spread * (rng.next() + rng.next() - 1))));
   if (cents === 0)
     return null;
-  const place = placesOf(ctx, business)[0] ?? null;
+  const place2 = placesOf(ctx, business)[0] ?? null;
   const collects = e.fields.collects_sales_tax !== false;
-  const tax = collects && api.feature(ctx, business, "sales_tax") ? salesTaxOn(cents, salesTaxPct(ctx, place)) : 0;
+  const tax = collects && api.feature(ctx, business, "sales_tax") ? salesTaxOn(cents, salesTaxPct(ctx, place2)) : 0;
   const cal = calendarOf(ctx.world);
   const day = dateAt(cal, at).dayIndex;
   const worked = (j) => jobBlocks(ctx, j, clockAt(cal, day, 0), clockAt(cal, day + 1, 0)).length > 0;
@@ -18859,8 +19699,8 @@ function issueInvoice(ctx, api, args) {
   const due = dateText3(ctx, dateAt(cal, ctx.state.clock).dayIndex + days);
   const memo = strOf(args.memo).trim() || `${labelOf(ctx, business)} invoice`;
   const id = `invoice:${hashParts(ctx.rng.seed, "invoice", business, customer, String(ctx.state.clock), String(cents)).slice(0, 10)}`;
-  const entity = { id, kind: INVOICE_KIND, name: memo, tier: "background", fields: { business, customer, cents, memo, issued: ctx.state.clock, due, state: "open", paid: 0, late_fee: 0, fees: 0 }, relations: [] };
-  return [{ type: "spawn", entity }];
+  const entity2 = { id, kind: INVOICE_KIND, name: memo, tier: "background", fields: { business, customer, cents, memo, issued: ctx.state.clock, due, state: "open", paid: 0, late_fee: 0, fees: 0 }, relations: [] };
+  return [{ type: "spawn", entity: entity2 }];
 }
 function payInvoice(ctx, api, args) {
   const inv = readInvoice(ctx, strOf(args.invoice));
@@ -19316,8 +20156,8 @@ function exercise(api, ctx, x) {
     return reject5("nothing_held", `${labelOf(ctx, x.party)} holds no whole contract of ${a.label}`);
   if (qty > held2 + QTY_EPSILON)
     return reject5("declined", `${h.name} holds ${unitsText(held2)} contracts, not ${qty}`);
-  const under = assetOf(ctx, a.option.underlying);
-  if (!under)
+  const under2 = assetOf(ctx, a.option.underlying);
+  if (!under2)
     return reject5("missing_asset", `no asset ${a.option.underlying}`);
   const units = qty * a.option.multiplier;
   const strike = Math.round(units * a.option.strike);
@@ -19325,7 +20165,7 @@ function exercise(api, ctx, x) {
   const money = (c) => formatMoney(c, ctx.world.currency);
   const label = `Exercised ${qty} ${a.label}`;
   if (a.option.settlement === "cash") {
-    const cash = Math.round(units * intrinsic(a.option.right, priceOf(ctx, under), a.option.strike));
+    const cash = Math.round(units * intrinsic(a.option.right, priceOf(ctx, under2), a.option.strike));
     if (cash <= 0)
       return reject5("out_of_money", `${a.label} is worth nothing to exercise`);
     const to = x.to !== undefined ? proceedsAccount(api, ctx, x.party, x.holding, x.to) : undefined;
@@ -19334,9 +20174,9 @@ function exercise(api, ctx, x) {
     const posted2 = settle(api, ctx, x.holding, a, qty, cash, label, to);
     return isRejection4(posted2) ? posted2 : unit(posted2);
   }
-  const into = findHolding(ctx.state, under.id, account, x.party);
+  const into = findHolding(ctx.state, under2.id, account, x.party);
   const events2 = [];
-  const market = marketOf(api, under.id);
+  const market = marketOf(api, under2.id);
   let lines;
   let target = into;
   if (a.option.right === "call") {
@@ -19347,10 +20187,10 @@ function exercise(api, ctx, x) {
     if (unusable)
       return unusable;
     if (!target) {
-      target = `${account ?? x.party}:${under.id}`;
+      target = `${account ?? x.party}:${under2.id}`;
       for (let i = 2;own(ctx.state.entities, target); i++)
-        target = `${account ?? x.party}:${under.id}:${i}`;
-      events2.push({ type: "spawn", entity: { id: target, kind: "holding", name: under.symbol ?? under.label, tier: "background", fields: { asset: under.id, lots: [], ...account ? { account } : { owners: [{ party: x.party, role: "owner" }] } }, relations: [] } });
+        target = `${account ?? x.party}:${under2.id}:${i}`;
+      events2.push({ type: "spawn", entity: { id: target, kind: "holding", name: under2.symbol ?? under2.label, tier: "background", fields: { asset: under2.id, lots: [], ...account ? { account } : { owners: [{ party: x.party, role: "owner" }] } }, relations: [] } });
     }
     lines = [
       { account: from, amount: -strike },
@@ -19358,7 +20198,7 @@ function exercise(api, ctx, x) {
     ];
   } else {
     if (!target || qtyOf(lotsOf(ctx, target)) + QTY_EPSILON < units)
-      return reject5("nothing_to_deliver", `exercising ${qty} ${a.label} delivers ${unitsText(units)} ${under.symbol ?? under.label}, which ${labelOf(ctx, x.party)} doesn't hold${account ? ` in ${labelOf(ctx, account)}` : ""}`);
+      return reject5("nothing_to_deliver", `exercising ${qty} ${a.label} delivers ${unitsText(units)} ${under2.symbol ?? under2.label}, which ${labelOf(ctx, x.party)} doesn't hold${account ? ` in ${labelOf(ctx, account)}` : ""}`);
     const to = proceedsAccount(api, ctx, x.party, x.holding, x.to);
     if (typeof to !== "string")
       return to;
@@ -19367,7 +20207,7 @@ function exercise(api, ctx, x) {
       { account: to, amount: strike }
     ];
   }
-  const posted = api.post(ctx, lines, { memo: `${label}: ${money(strike)} for ${unitsText(units)} ${under.symbol ?? under.label}`, kind: a.option.right === "call" ? "purchase" : "sale", category: "investment" });
+  const posted = api.post(ctx, lines, { memo: `${label}: ${money(strike)} for ${unitsText(units)} ${under2.symbol ?? under2.label}`, kind: a.option.right === "call" ? "purchase" : "sale", category: "investment" });
   if (isRejection4(posted))
     return posted;
   return unit([...events2, ...posted, { type: "economy.exercise", data: { option: x.holding, into: target, qty, units, cash: strike, right: a.option.right, label } }]);
@@ -19412,8 +20252,8 @@ function settlements(api, ctx, slot) {
     }
     if (!a.option)
       continue;
-    const under = assetOf(ctx, a.option.underlying);
-    const value = under ? Math.round(roundQty(qty) * a.option.multiplier * intrinsic(a.option.right, priceOf(ctx, under, at.at), a.option.strike)) : 0;
+    const under2 = assetOf(ctx, a.option.underlying);
+    const value = under2 ? Math.round(roundQty(qty) * a.option.multiplier * intrinsic(a.option.right, priceOf(ctx, under2, at.at), a.option.strike)) : 0;
     if (value > 0) {
       const label = `${a.label} exercised at expiry`;
       const settled = settle(api, ctx, holding, a, qty, value, label);
@@ -19776,12 +20616,12 @@ var FINANCE_MODULES = [
 
 // src/packs/economy/core/credit.ts
 var MONTH = 1440 * 30.4;
-function creditEntriesOf(ctx, person) {
-  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person));
+function creditEntriesOf(ctx, person3) {
+  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person3));
   return (Array.isArray(raw.entries) ? raw.entries : []).map((x) => objOf(x));
 }
-function creditAccounts(ctx, person) {
-  return accountsOf(ctx, person, "worth").filter((id) => {
+function creditAccounts(ctx, person3) {
+  return accountsOf(ctx, person3, "worth").filter((id) => {
     const c = classOf2(ctx, id);
     return c !== null && isCredit(c);
   });
@@ -19798,9 +20638,9 @@ function ageMonths(ctx, account) {
   }
   return Math.max(0, (ctx.state.clock - at) / MONTH);
 }
-function scoreFactors(ctx, person) {
-  const accounts = creditAccounts(ctx, person);
-  const entries2 = creditEntriesOf(ctx, person);
+function scoreFactors(ctx, person3) {
+  const accounts = creditAccounts(ctx, person3);
+  const entries2 = creditEntriesOf(ctx, person3);
   if (accounts.length === 0 && entries2.length === 0)
     return null;
   const now = ctx.state.clock;
@@ -19843,16 +20683,16 @@ function scoreOf(f) {
   const weighted = 0.35 * f.payment + 0.3 * f.utilisation + 0.15 * f.age + 0.1 * f.mix + 0.1 * f.recent;
   return Math.max(SCORE_MIN, Math.min(SCORE_MAX, Math.round(SCORE_MIN + (SCORE_MAX - SCORE_MIN) * weighted)));
 }
-function currentScore(ctx, person) {
-  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person));
+function currentScore(ctx, person3) {
+  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person3));
   if (typeof raw.score === "number")
     return raw.score;
-  const f = scoreFactors(ctx, person);
+  const f = scoreFactors(ctx, person3);
   return f ? scoreOf(f) : null;
 }
-function monthlyScore(ctx, person, at) {
-  const f = scoreFactors(ctx, person);
-  return f ? [{ type: FINANCE_EVENTS.score, data: { person, score: scoreOf(f), factors: { ...f }, at } }] : [];
+function monthlyScore(ctx, person3, at) {
+  const f = scoreFactors(ctx, person3);
+  return f ? [{ type: FINANCE_EVENTS.score, data: { person: person3, score: scoreOf(f), factors: { ...f }, at } }] : [];
 }
 var TIER_KEYS = { super_prime: "super_prime_781_850", prime: "prime_661_780", nonprime: "nonprime_601_660", subprime: "subprime_501_600", deep_subprime: "deep_subprime_300_500" };
 function aprFor(ctx, cls, score) {
@@ -19883,14 +20723,14 @@ function loanCeiling(ctx, score, securedBy) {
   const tier = creditTierOf(score ?? 700);
   return tier === "super_prime" || tier === "prime" ? numOf(amounts.max, 5000000) : tier === "deep_subprime" ? numOf(amounts.min, 1e5) : numOf(amounts.typical, 800000);
 }
-function decide(ctx, person, app, reports) {
+function decide(ctx, person3, app, reports) {
   const products = worldProducts(ctx.world);
   const def = own(products, app.product);
   const cls = def?.class ?? (isAccountClass(app.product) ? app.product : null);
   if (!cls || !isCredit(cls))
     return reject6("not_credit", `${app.product.replace(/_/g, " ")} isn't a kind of credit`);
-  const score = reports ? currentScore(ctx, person) : null;
-  const entries2 = reports ? creditEntriesOf(ctx, person) : [];
+  const score = reports ? currentScore(ctx, person3) : null;
+  const entries2 = reports ? creditEntriesOf(ctx, person3) : [];
   const chargedOff = entries2.some((e) => e.kind === "charged_off" && ctx.state.clock - numOf(e.at) <= 24 * MONTH);
   const secured = app.secured_by !== undefined && own(ctx.state.entities, app.secured_by) !== undefined;
   const label = def?.label ?? CLASS_TRAITS[cls].label;
@@ -19909,13 +20749,13 @@ function decide(ctx, person, app, reports) {
     return declined(`it's more than a lender would lend them (up to ${formatMoney(most, ctx.world.currency)})`);
   return { approved: true, reason: "", apr, limit: null, cls, label };
 }
-function creditReport(ctx, person) {
+function creditReport(ctx, person3) {
   const cal = calendarOf(ctx.world);
-  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person));
-  const factors = scoreFactors(ctx, person);
+  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person3));
+  const factors = scoreFactors(ctx, person3);
   const score = typeof raw.score === "number" ? raw.score : factors ? scoreOf(factors) : null;
-  const accounts = creditAccounts(ctx, person);
-  const entries2 = creditEntriesOf(ctx, person);
+  const accounts = creditAccounts(ctx, person3);
+  const entries2 = creditEntriesOf(ctx, person3);
   let limit = 0;
   let owed = 0;
   let ontime = 0;
@@ -19939,7 +20779,7 @@ function creditReport(ctx, person) {
   const products = { ...Object.fromEntries(["credit_card", "line_of_credit", "loan"].map((c) => [c, { label: CLASS_TRAITS[c].label, class: c }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id, p]) => [id, { label: p.label, class: p.class }])) };
   const offers = Object.entries(products).filter(([, p]) => isCredit(p.class) && p.class !== "mortgage").map(([product, p]) => ({ product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score) }));
   return {
-    person,
+    person: person3,
     score,
     band: score === null ? null : scoreBand(score),
     tier: score === null ? null : creditTierOf(score),
@@ -19955,8 +20795,8 @@ function creditReport(ctx, person) {
     offers
   };
 }
-function hasCreditFile(ctx, person) {
-  return creditAccounts(ctx, person).length > 0 || creditEntriesOf(ctx, person).length > 0;
+function hasCreditFile(ctx, person3) {
+  return creditAccounts(ctx, person3).length > 0 || creditEntriesOf(ctx, person3).length > 0;
 }
 function scoreInstants(ctx, from, to) {
   const cal = calendarOf(ctx.world);
@@ -20112,8 +20952,8 @@ function cardRoom(ctx, card, what) {
   if (!accountFeature(ctx, account, "daily_limits"))
     return Infinity;
   const p = productOf(ctx, account);
-  const field = what === "purchase" ? "daily_purchase_limit" : "daily_atm_limit";
-  const limit = typeof e.fields[field] === "number" ? e.fields[field] : p?.[field] ?? null;
+  const field2 = what === "purchase" ? "daily_purchase_limit" : "daily_atm_limit";
+  const limit = typeof e.fields[field2] === "number" ? e.fields[field2] : p?.[field2] ?? null;
   if (limit === null)
     return Infinity;
   const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
@@ -20802,12 +21642,12 @@ class Run {
     this.ctx = base.registry.context(base.world, this.state);
   }
   touch(e) {
-    const entity = e.type === "set" || e.type === "add" ? e.entity : e.type === "link" || e.type === "unlink" ? e.from : null;
-    if (entity !== null && !this.ownEntities.has(entity)) {
-      const cur = own(this.state.entities, entity);
+    const entity2 = e.type === "set" || e.type === "add" ? e.entity : e.type === "link" || e.type === "unlink" ? e.from : null;
+    if (entity2 !== null && !this.ownEntities.has(entity2)) {
+      const cur = own(this.state.entities, entity2);
       if (cur)
-        this.state.entities[entity] = { ...cur, fields: { ...cur.fields }, relations: [...cur.relations] };
-      this.ownEntities.add(entity);
+        this.state.entities[entity2] = { ...cur, fields: { ...cur.fields }, relations: [...cur.relations] };
+      this.ownEntities.add(entity2);
     }
     const dot = e.type.indexOf(".");
     const pack = dot > 0 ? e.type.slice(0, dot) : null;
@@ -21515,11 +22355,11 @@ function sharedAttempt(hooks, ctx, flow, cents, at, overdraft) {
 function money(ctx, cents) {
   return formatMoney(cents, ctx.world.currency);
 }
-function featureAt(ctx, who, field) {
+function featureAt(ctx, who, field2) {
   let cur = placeOfEntity(ctx.state, who) ?? undefined;
   for (let guard = 0;cur && guard < 32; guard++) {
     const p = own(ctx.world.places, cur);
-    const f = objOf(p?.fields[field]);
+    const f = objOf(p?.fields[field2]);
     if (typeof f.bank === "string" && f.bank !== "")
       return { place: cur, feature: f };
     cur = p?.parent;
@@ -21681,8 +22521,8 @@ function replaceCard(ctx, who, card) {
   const spawn = optionalService(ctx, "gear.spawn");
   const oldItem = strOf(e.fields.item);
   if (spawn && ctx.levelOf(holder, "gear") >= 1) {
-    const place = oldItem !== "" ? own(ctx.state.entities, oldItem)?.relations.find((r) => r.type === "in")?.to : undefined;
-    const made = spawn(ctx, { name: own(ctx.state.entities, oldItem)?.name ?? e.name, owner: holder, holder: place && own(ctx.state.entities, place) && !own(ctx.state.entities, oldItem)?.fields.lost ? place : holder, salt: `card:${id}` });
+    const place2 = oldItem !== "" ? own(ctx.state.entities, oldItem)?.relations.find((r) => r.type === "in")?.to : undefined;
+    const made = spawn(ctx, { name: own(ctx.state.entities, oldItem)?.name ?? e.name, owner: holder, holder: place2 && own(ctx.state.entities, place2) && !own(ctx.state.entities, oldItem)?.fields.lost ? place2 : holder, salt: `card:${id}` });
     if (Array.isArray(made)) {
       out.push(...made);
       const item = made.find((x) => x.type === "spawn");
@@ -21732,14 +22572,14 @@ var FLOW_PARAM_FIELDS = { label: "", kind: "flow_kind", from: "from", to: "to", 
 function flowFields(args) {
   const fields = {};
   let label;
-  for (const [param, field] of Object.entries(FLOW_PARAM_FIELDS)) {
+  for (const [param, field2] of Object.entries(FLOW_PARAM_FIELDS)) {
     const v = args[param];
     if (v === undefined || v === null || v === "")
       continue;
     if (param === "label")
       label = String(v).slice(0, 80);
     else
-      fields[field] = v;
+      fields[field2] = v;
   }
   if (typeof fields.flow_kind === "string" && !FLOW_KINDS.includes(fields.flow_kind))
     return reject6("bad_flow", `a flow can't be a ${fields.flow_kind}`);
@@ -21890,8 +22730,8 @@ function createFlow(ctx, who, args) {
   const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
   const fields = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
   const id = `flow_${who}_${hashParts(who, label, ctx.state.clock).slice(0, 8)}`;
-  const entity = { id, kind: "flow", name: label, tier: "background", fields, relations: [] };
-  return [{ type: "spawn", entity }];
+  const entity2 = { id, kind: "flow", name: label, tier: "background", fields, relations: [] };
+  return [{ type: "spawn", entity: entity2 }];
 }
 var CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
 function renameAndClear(current, id, name, clear) {
@@ -21921,11 +22761,11 @@ function updateFlow(ctx, who, flow, args) {
   if (both && both.type === "set")
     return reject6("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
   const cleared = new Set(more.flatMap((x) => x.type === "set" ? [x.field] : []));
-  const after = (field) => cleared.has(field) ? "" : strOf(made.fields[field] ?? e.fields[field]);
+  const after = (field2) => cleared.has(field2) ? "" : strOf(made.fields[field2] ?? e.fields[field2]);
   const problem = flowProblem(ctx, who, after("from"), after("to"), after("fallback"));
   if (problem)
     return problem;
-  return [...Object.entries(made.fields).map(([field, value]) => ({ type: "set", entity: flow, field, value })), ...more];
+  return [...Object.entries(made.fields).map(([field2, value]) => ({ type: "set", entity: flow, field: field2, value })), ...more];
 }
 function editFlow(ctx, flow, name, clear) {
   const e = own(ctx.state.entities, flow);
@@ -22574,7 +23414,7 @@ function remind(run, account) {
     tell(run, account, "bill", `${labelOf(ctx, account)} payment of ${money2(ctx, left)} is due today.`, cycle.due - (DUE_MINUTE - (9 * 60 + 30)));
 }
 function creditEntries(ctx, account, kind, at, days) {
-  return creditHolders(ctx, account).map((person) => ({ type: FINANCE_EVENTS.credit, data: { person, kind, account, at, ...days !== undefined ? { days } : {} } }));
+  return creditHolders(ctx, account).map((person3) => ({ type: FINANCE_EVENTS.credit, data: { person: person3, kind, account, at, ...days !== undefined ? { days } : {} } }));
 }
 function dueCheck(run, account, at) {
   const ctx = run.ctx;
@@ -22649,16 +23489,16 @@ function statementState(cycle, now) {
 function parties(ctx) {
   return Object.keys(ctx.state.entities).sort().filter((id) => isParty(ctx, id) && !isGone(ctx.state, id));
 }
-function openingBalances(entity, ctx, claimed) {
+function openingBalances(entity2, ctx, claimed) {
   const s = ctx.state;
-  const closed = accountsOf(ctx, entity).filter((id) => !claimed?.has(id) && !isOpened(s, id, openerOf(s, id) === entity ? null : openerOf(s, id)));
+  const closed = accountsOf(ctx, entity2).filter((id) => !claimed?.has(id) && !isOpened(s, id, openerOf(s, id) === entity2 ? null : openerOf(s, id)));
   for (const id of closed)
     claimed?.add(id);
   const lines = closed.filter((id) => typeof own(s.entities, id)?.fields.opening === "number" && numOf(own(s.entities, id)?.fields.opening) !== 0).map((id) => ({ account: id, amount: Math.round(numOf(own(s.entities, id)?.fields.opening)) }));
   const out = [];
   if (lines.length > 0) {
     const total = lines.reduce((a, l) => a + l.amount, 0);
-    const all = total === 0 ? lines : [...lines, { account: external(entity), amount: -total }];
+    const all = total === 0 ? lines : [...lines, { account: external(entity2), amount: -total }];
     if (all.length >= 2)
       out.push({ type: "post", lines: all, memo: "Opening balances" }, { type: FINANCE_EVENTS.txn, data: { memo: "Opening balance", kind: "opening", category: "opening", lines: lines.map((l) => ({ account: l.account, amount: l.amount })) } });
   }
@@ -22705,11 +23545,11 @@ function moneyStep(hooks, slot, ctx, rng) {
   }
   const scores = scoreInstants(ctx, slot.start, slot.end);
   if (scores.length > 0) {
-    for (const person of parties(ctx)) {
-      if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, person)?.kind ?? "", "person") || !featureFor(ctx, person, "credit"))
+    for (const person3 of parties(ctx)) {
+      if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, person3)?.kind ?? "", "person") || !featureFor(ctx, person3, "credit"))
         continue;
       for (const at of scores)
-        tasks.push({ at, rank: 6, key: `score:${person}`, run: (r) => hasCreditFile(r.ctx, person) ? void r.emit(monthlyScore(r.ctx, person, at)) : undefined });
+        tasks.push({ at, rank: 6, key: `score:${person3}`, run: (r) => hasCreditFile(r.ctx, person3) ? void r.emit(monthlyScore(r.ctx, person3, at)) : undefined });
     }
   }
   return runTasks(ctx, tasks);
@@ -22724,7 +23564,7 @@ function runTasks(ctx, tasks) {
   return run.out;
 }
 function planTasks(hooks, slot, ctx, rng) {
-  return planPayments(ctx).flatMap(({ entity, plan: plan2, flow, at: due }) => {
+  return planPayments(ctx).flatMap(({ entity: entity2, plan: plan2, flow, at: due }) => {
     if (due > slot.end)
       return [];
     const at = Math.max(due, slot.start + 1);
@@ -22736,7 +23576,7 @@ function planTasks(hooks, slot, ctx, rng) {
         run: (r) => {
           const ran = runOccurrence(hooks, r, flow, at, rng(`flow:${flow.id}:${at}`), false);
           const paid = ran?.outcome === "paid";
-          r.emit([{ type: MINDS_EVENTS.plan, data: { entity, plan: plan2.id, status: paid ? "done" : "dropped", at, reason: paid ? null : ran?.reason ?? "the payment didn't go through" } }]);
+          r.emit([{ type: MINDS_EVENTS.plan, data: { entity: entity2, plan: plan2.id, status: paid ? "done" : "dropped", at, reason: paid ? null : ran?.reason ?? "the payment didn't go through" } }]);
         }
       }
     ];
@@ -22753,17 +23593,17 @@ function logUniform(rng, lo, hi) {
   const b = Math.log(Math.max(2, hi));
   return Math.exp(a + (b - a) * rng.next());
 }
-function materializeMoney(entity, ctx, rng, version) {
+function materializeMoney(entity2, ctx, rng, version) {
   const s = ctx.state;
-  const e = own(s.entities, entity);
-  const level = e ? ctx.levelOf(entity, "money") : 0;
+  const e = own(s.entities, entity2);
+  const level = e ? ctx.levelOf(entity2, "money") : 0;
   if (!e || level < 1)
     return [];
-  if (accountsOf(ctx, entity).length > 0)
-    return openingBalances(entity, ctx);
+  if (accountsOf(ctx, entity2).length > 0)
+    return openingBalances(entity2, ctx);
   if (level < 2 || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
     return [];
-  const ext = external(entity);
+  const ext = external(entity2);
   const band = bandByLabel(strOf(e.fields.wealth, "modest"));
   const lo = Number.isFinite(band.min) ? Math.max(band.min, 0) : 0;
   const hi = Number.isFinite(band.max) ? band.max - 1 : band.typical * 4;
@@ -22776,17 +23616,17 @@ function materializeMoney(entity, ctx, rng, version) {
   const limit = Math.round(Math.min(2500000, Math.max(50000, band.typical * 0.3)) / 1e4) * 1e4;
   const owed = Math.round(limit * rng.next() * 0.25);
   const statementDay = 1 + rng.int(0, 27);
-  const wallet = Object.keys(s.entities).sort().find((id2) => own(s.entities, id2)?.fields.owner === entity && (own(s.entities, id2)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(s.entities, id2)?.name ?? "")));
-  const id = (suffix) => `${entity}:${suffix}`;
+  const wallet = Object.keys(s.entities).sort().find((id2) => own(s.entities, id2)?.fields.owner === entity2 && (own(s.entities, id2)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(s.entities, id2)?.name ?? "")));
+  const id = (suffix) => `${entity2}:${suffix}`;
   const out = [];
   if (version === 1) {
-    const mk = (suffix, name, fields, inWallet = false) => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owner: entity, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
+    const mk = (suffix, name, fields, inWallet = false) => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owner: entity2, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
     for (const def of [mk("cash", "Cash", { type: "cash" }, true), mk("checking", "Checking", { type: "checking", institution: "Local bank" }), mk("savings", "Savings", { type: "savings", institution: "Local bank", apy_pct: 0.4 }), mk("card", "Credit card", { type: "card", limit, apr_pct: 22, statement_day: statementDay, due_days: 25, autopay: "minimum" })])
       out.push({ type: "spawn", entity: def });
   } else {
-    const owners = [{ party: entity, role: "owner" }];
+    const owners = [{ party: entity2, role: "owner" }];
     const mk = (suffix, name, fields, inWallet = false) => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owners, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
-    const card = (suffix, name, account, network) => ({ id: id(suffix), kind: "card", name, tier: "background", fields: { account, holder: entity, network, state: "active" }, relations: [] });
+    const card = (suffix, name, account, network) => ({ id: id(suffix), kind: "card", name, tier: "background", fields: { account, holder: entity2, network, state: "active" }, relations: [] });
     for (const def of [
       mk("cash", "Cash", { product: "cash" }, true),
       mk("checking", "Checking", { product: "checking", institution: "Local bank" }),
@@ -23076,7 +23916,7 @@ function cardView(ctx, viewer, card) {
   const purchase = cardRoom(ctx, card, "purchase");
   const atm = cardRoom(ctx, card, "atm");
   const p = productOf(ctx, strOf(f.account));
-  const limitOf2 = (field) => typeof f[field] === "number" ? f[field] : p?.[field] ?? null;
+  const limitOf2 = (field2) => typeof f[field2] === "number" ? f[field2] : p?.[field2] ?? null;
   const purchaseLimit = limitOf2("daily_purchase_limit");
   return {
     id: card,
@@ -24137,16 +24977,16 @@ var TAG_CATEGORIES = {
   workplace: ["vehicle_services", "tools_hardware"]
 };
 var OFFER_CAP = 24;
-function placeTrade(ctx, place) {
-  const p = place ? own(ctx.world.places, place) : undefined;
+function placeTrade(ctx, place2) {
+  const p = place2 ? own(ctx.world.places, place2) : undefined;
   const sells = Array.isArray(p?.fields.sells) ? p.fields.sells.filter((x) => typeof x === "string") : [];
   const tags = Array.isArray(p?.fields.tags) ? p.fields.tags.filter((x) => typeof x === "string") : [];
   return { categories: [...new Set(sells.length > 0 ? sells : tags.flatMap((t) => own(TAG_CATEGORIES, t) ?? []))], sells, tags };
 }
-function offersAtPlace(ctx, place) {
-  if (!place || !own(ctx.world.places, place))
+function offersAtPlace(ctx, place2) {
+  if (!place2 || !own(ctx.world.places, place2))
     return [];
-  const { categories, sells } = placeTrade(ctx, place);
+  const { categories, sells } = placeTrade(ctx, place2);
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
   const out = [];
   for (const category of categories) {
@@ -24156,20 +24996,20 @@ function offersAtPlace(ctx, place) {
       const row = rows[id];
       if (!row || strOf(row.category) !== category && !sells.includes(id))
         continue;
-      const price = priceOf2(ctx, { catalog: id, place });
+      const price = priceOf2(ctx, { catalog: id, place: place2 });
       if (price)
         out.push({ item: id, name: price.name, cents: price.unitCents, category });
     }
   }
   return out;
 }
-function matchCatalog(ctx, text3, place, category = "") {
+function matchCatalog(ctx, text3, place2, category = "") {
   const item = itemName(text3);
   if (!item)
     return null;
   const said3 = new Set([...item.words, ...item.trailing?.words ?? []]);
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
-  const trade2 = placeTrade(ctx, place);
+  const trade2 = placeTrade(ctx, place2);
   const tags = trade2.tags.map((t) => stem(t.toLowerCase()));
   const nouns = Object.keys(rows).sort().map((id) => ({ id, name: catalogName(id, strOf(rows[id]?.name, id)) })).filter((r) => r.name.heads.has(item.head));
   const unnamed = (name) => [...item.words].filter((w) => w !== item.head && !name.words.has(w));
@@ -24203,10 +25043,10 @@ function amountOf(v) {
 }
 var PHYSICAL = new Set(["groceries_staples", "clothing", "electronics", "tools_hardware", "household_goods", "personal_care", "gifts", "alcohol", "medical"]);
 function quote(ctx, args, payer, qty) {
-  const place = placeOfEntity(ctx.state, payer);
+  const place2 = placeOfEntity(ctx.state, payer);
   const named = strOf(args.item);
   const given = strOf(args.category);
-  const row = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place, given);
+  const row = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place2, given);
   const category = given !== "" ? given : !row && rowOf(ctx, "economy.categories", named) ? named : "";
   const said3 = typeof args.price === "number" && args.price > 0 ? Math.round(args.price) : undefined;
   const rowDef = row ? rowOf(ctx, "economy.catalog", row) : undefined;
@@ -24214,7 +25054,7 @@ function quote(ctx, args, payer, qty) {
   if (said3 !== undefined && args.exact === true)
     return { price: asIs(said3), row };
   if (row) {
-    const price = priceOf2(ctx, { catalog: row, qty, place, ...said3 !== undefined ? { narrated: said3 } : {} }, ctx.rng);
+    const price = priceOf2(ctx, { catalog: row, qty, place: place2, ...said3 !== undefined ? { narrated: said3 } : {} }, ctx.rng);
     if (price)
       return { price, row, ...price.clamped && said3 !== undefined ? { narrated: { cents: said3, limited: "band" } } : {} };
   }
@@ -24222,7 +25062,7 @@ function quote(ctx, args, payer, qty) {
     const cents = Math.min(said3, args.stated === true ? Infinity : unpricedCap(ctx.world));
     return { price: { ...asIs(cents), clamped: cents !== said3 }, row: null, ...cents !== said3 ? { narrated: { cents: said3, limited: "cap" } } : {} };
   }
-  const banded = category !== "" ? priceOf2(ctx, { category, qty, place }, ctx.rng) : null;
+  const banded = category !== "" ? priceOf2(ctx, { category, qty, place: place2 }, ctx.rng) : null;
   return banded ? { price: banded, row: null } : null;
 }
 function emptyHooks() {
@@ -24241,8 +25081,8 @@ function makeApi(hooks) {
   return {
     classOf: (books, account) => classOf2(books, account),
     traitsOf: (books, account) => traitsOf(books, account),
-    ownersOf: (state, entity) => ownersOf(state, entity),
-    shareOf: (state, entity, party) => shareOf(state, entity, party),
+    ownersOf: (state, entity2) => ownersOf(state, entity2),
+    shareOf: (state, entity2, party) => shareOf(state, entity2, party),
     interestsOf: (ctx, who) => interestsOf(ctx, who),
     paysFor: (ctx, who, to, from, deposit2) => paysFor(ctx, who, to, from, { deposit: deposit2 }),
     landsInReach: (ctx, who, account, from) => landsInReach(ctx, who, account, from),
@@ -24384,18 +25224,18 @@ function registerRest(r, hooks) {
   });
   r.query("economy.offers", (ctx, who) => offersAtPlace(ctx, placeOfEntity(ctx.state, who)));
   r.query("economy.item_choices", (ctx, text3, who) => {
-    const place = placeOfEntity(ctx.state, who);
+    const place2 = placeOfEntity(ctx.state, who);
     const item = itemName(text3);
     const said3 = new Set(item ? [...item.words, ...item.trailing?.words ?? []] : []);
     const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
     const near = Object.keys(rows).sort().map((id) => ({ id, shared: [...catalogName(id, strOf(rows[id]?.name, id)).words].filter((w) => said3.has(w)).length })).filter((x) => x.shared > 0).sort((a, b) => b.shared - a.shared).slice(0, 6);
     const out = [];
     for (const { id } of near) {
-      const price = priceOf2(ctx, { catalog: id, place });
+      const price = priceOf2(ctx, { catalog: id, place: place2 });
       if (price)
         out.push({ item: id, name: price.name, cents: price.unitCents, category: price.category });
     }
-    for (const offer of offersAtPlace(ctx, place))
+    for (const offer of offersAtPlace(ctx, place2))
       if (!out.some((o) => o.item === offer.item))
         out.push(offer);
     return out.slice(0, 12);
@@ -24403,7 +25243,7 @@ function registerRest(r, hooks) {
   r.query("economy.people_money", (ctx) => buildPeopleMoney(hooks, ctx));
   r.query("economy.finance", (ctx, party, player) => buildFinanceView(hooks, ctx, party, player));
   r.query("economy.summary", (ctx, who) => moneySummary(hooks, ctx, who));
-  r.query("economy.holders", (ctx, entity) => holdersOf(ctx.state, entity));
+  r.query("economy.holders", (ctx, entity2) => holdersOf(ctx.state, entity2));
   r.query("economy.paid_from", paidFrom);
   r.query("economy.carried_cash", carriedCash);
   r.query("economy.unpriced", (ctx, p) => {
@@ -24415,9 +25255,9 @@ function registerRest(r, hooks) {
   });
   r.query("economy.purchaser", (ctx, p) => purchaser(p, ctx).payer);
   r.query("economy.payee_of", (ctx, id) => {
-    const thing = own(ctx.state.entities, id);
-    if (thing)
-      return strOf(thing.fields.owner) || (ownersIn(thing.fields)[0]?.party ?? null);
+    const thing2 = own(ctx.state.entities, id);
+    if (thing2)
+      return strOf(thing2.fields.owner) || (ownersIn(thing2.fields)[0]?.party ?? null);
     return own(ctx.world.places, id) ? businessAt(ctx, id) : null;
   });
   r.guard({ type: "post", validate: (e, ctx) => e.type === "post" ? postGuard(ctx, e.lines, e.overdraw === true) : null });
@@ -24426,10 +25266,10 @@ function registerRest(r, hooks) {
   r.formula("net_worth", (ctx, who) => netWorth(hooks, ctx, String(who ?? ctx.world.pov)));
   r.formula("balance", (ctx, account) => balance(ctx.state, String(account ?? "")));
   r.formula("price", (ctx, item) => priceOf2(ctx, { catalog: String(item ?? "") })?.cents ?? priceOf2(ctx, { category: String(item ?? "") })?.cents ?? 0);
-  r.formula("holds", (ctx, who, thing) => heldBy(ctx.state.entities, String(thing ?? ""), String(who ?? ctx.world.pov)));
+  r.formula("holds", (ctx, who, thing2) => heldBy(ctx.state.entities, String(thing2 ?? ""), String(who ?? ctx.world.pov)));
   r.formula("spends", (ctx, who, account) => canSpend(ctx.state, String(account ?? ""), String(who ?? ctx.world.pov)));
-  r.formula("manages", (ctx, who, thing) => {
-    const id = String(thing ?? "");
+  r.formula("manages", (ctx, who, thing2) => {
+    const id = String(thing2 ?? "");
     const by = String(who ?? ctx.world.pov);
     return own(ctx.state.entities, id)?.kind === "account" ? managesAccount(ctx, id, by) : managesParty(ctx.state, id, by);
   });
@@ -24441,7 +25281,7 @@ function registerRest(r, hooks) {
   r.process({ id: "economy.accounts", domain: "money", minLevel: 3, step: (_slot, ctx) => openAccounts(ctx) });
   r.process({ id: "economy.money", domain: "money", minLevel: MONEY_STEP_LEVEL, step: (slot, ctx, rng) => moneyStep(hooks, slot, ctx, rng) });
   r.process({ id: "economy.plans", domain: "money", minLevel: 0, step: (slot, ctx, rng) => planStep(hooks, slot, ctx, rng) });
-  r.materializer({ domain: "money", version: 2, versions: [1, 2], materialize: (entity, ctx, rng, version) => materializeMoney(entity, ctx, rng, version) });
+  r.materializer({ domain: "money", version: 2, versions: [1, 2], materialize: (entity2, ctx, rng, version) => materializeMoney(entity2, ctx, rng, version) });
   const moneyLines = (ctx, scope) => {
     const pov = ctx.world.pov;
     const level = ctx.levelOf(pov, "money");
@@ -24543,10 +25383,10 @@ function registerRest(r, hooks) {
           issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name} names a product "${product}" that's neither the world's nor a class.`, path: `entities.${e.id}.fields.product` });
         if (product === "" && strOf(e.fields.type) === "")
           issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name} has no product.`, path: `entities.${e.id}.fields.product` });
-        for (const field of ["autopay_from", "overdraft_link", "secured_by"]) {
-          const v = strOf(e.fields[field]);
+        for (const field2 of ["autopay_from", "overdraft_link", "secured_by"]) {
+          const v = strOf(e.fields[field2]);
           if (v !== "" && !own(world.entities, v))
-            issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name}'s ${field.replace(/_/g, " ")} names "${v}", which isn't in the world.`, path: `entities.${e.id}.fields.${field}` });
+            issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name}'s ${field2.replace(/_/g, " ")} names "${v}", which isn't in the world.`, path: `entities.${e.id}.fields.${field2}` });
         }
       }
       for (const [id, p] of Object.entries(products))
@@ -24641,8 +25481,8 @@ function registerEffects(r, hooks) {
           return paid;
         out.push(...paid);
       }
-      const thing = priced ? PHYSICAL.has(priced.price.category) || story && priced.price.category === "misc" : story;
-      const spawn = args.keep !== false && thing ? optionalService(ctx, "gear.spawn") : null;
+      const thing2 = priced ? PHYSICAL.has(priced.price.category) || story && priced.price.category === "misc" : story;
+      const spawn = args.keep !== false && thing2 ? optionalService(ctx, "gear.spawn") : null;
       if (spawn && ctx.levelOf(payer, "gear") >= 1) {
         const made = spawn(ctx, { name, owner: payer, holder: payer, ...priced?.row ? { catalog: priced.row } : {}, ...priced ? { category: priced.price.category } : {}, qty, salt: `buy:${ctx.rng.seed}`, stack: true });
         if (Array.isArray(made))
@@ -24658,17 +25498,17 @@ function registerEffects(r, hooks) {
     args: ["percent", "scope?", "place?", "minutes?", "id?", "clear?"],
     resolve(a, ctx) {
       const scope = strOf(a.scope, "all");
-      const place = strOf(a.place);
-      if (place !== "" && !own(ctx.world.places, place))
-        return reject6("missing_place", `no place ${labelOf(ctx, place)}`);
-      const id = strOf(a.id) || `${place || "*"}:${scope}`;
+      const place2 = strOf(a.place);
+      if (place2 !== "" && !own(ctx.world.places, place2))
+        return reject6("missing_place", `no place ${labelOf(ctx, place2)}`);
+      const id = strOf(a.id) || `${place2 || "*"}:${scope}`;
       const percent = numOf(a.percent);
       if (a.clear === true || percent === 0)
         return [{ type: "economy.modifier", data: { id } }];
       if (percent <= -100)
         return reject6("bad_amount", "a price modifier can't make things free");
       const minutes = numOf(a.minutes);
-      return [{ type: "economy.modifier", data: { id, scope, place, mult: Math.round((1 + percent / 100) * 1e4) / 1e4, ...minutes > 0 ? { until: ctx.state.clock + Math.round(minutes) } : {} } }];
+      return [{ type: "economy.modifier", data: { id, scope, place: place2, mult: Math.round((1 + percent / 100) * 1e4) / 1e4, ...minutes > 0 ? { until: ctx.state.clock + Math.round(minutes) } : {} } }];
     }
   });
   r.effect({ type: "economy.lose", args: ["item", "thief?"], resolve: (a, ctx) => loseWith(ctx, strOf(a.item), strOf(a.thief) || undefined) });
@@ -24846,14 +25686,14 @@ function failOutcome(action, ready, counted, pass) {
 function markedFor(registry, world, state, action, actor2) {
   if (action.adjudicate === true)
     return true;
-  let place = placeOfEntity(state, actor2);
-  for (let depth = 0;place !== null && depth < PARENT_DEPTH2; depth++) {
-    const def = own(world.places, place);
+  let place2 = placeOfEntity(state, actor2);
+  for (let depth = 0;place2 !== null && depth < PARENT_DEPTH2; depth++) {
+    const def = own(world.places, place2);
     if (!def)
       break;
     if (def.adjudicate === true)
       return true;
-    place = def.parent ?? null;
+    place2 = def.parent ?? null;
   }
   for (const [id, t] of Object.entries(world.tracks)) {
     if (t.adjudicate !== true)
@@ -24907,8 +25747,8 @@ function verdictOf(policy, input) {
     return unrolled("impossible", failOutcome(action, ready, counts, pass));
   if (named && policy.trivialAt !== null && againstLine(made, counts.outcomes, policy.trivialAt) >= 0)
     return unrolled("trivial", passOutcome(action, ready, counts, pass));
-  const asked = !named || policy.checks === "every" || policy.checks === "risky" && risky !== false || policy.checks === "marked" && markedFor(registry, world, state, action, actor2);
-  if (!asked)
+  const asked2 = !named || policy.checks === "every" || policy.checks === "risky" && risky !== false || policy.checks === "marked" && markedFor(registry, world, state, action, actor2);
+  if (!asked2)
     return unrolled(policy.checks === "never" ? "never" : policy.checks === "risky" ? "safe" : "unmarked", passOutcome(action, ready, counts, pass));
   if (policy.authority === "narrative")
     return unrolled("story", null);
@@ -24992,16 +25832,16 @@ function lintAdjudication(world) {
   const initiative = isRecord(combat) && typeof combat.initiative === "string" ? combat.initiative : null;
   const policyChecks = Object.entries(world.checks).filter(([id]) => id !== initiative || Object.values(world.actions).some((a) => a.check === id));
   const checks = [...policyChecks.map(([id, c]) => [`checks.${id}`, c]), ...Object.entries(world.actions).flatMap(([id, a]) => typeof a.check === "object" && a.check !== null ? [[`actions.${id}.check`, a.check]] : [])];
-  for (const [path, check] of checks) {
+  for (const [path2, check] of checks) {
     const bands = checkBands(check, check.dc !== undefined || check.vs !== undefined ? 0 : null);
     const known = new Set(bands.map((b) => b.outcome));
     for (const o of check.pass ?? [])
       if (!known.has(o))
-        issues.push({ severity: "warning", path: `${path}.pass`, code: "adjudication_outcome", message: `"${o}" counts as a success, but no band of this check reads it.` });
+        issues.push({ severity: "warning", path: `${path2}.pass`, code: "adjudication_outcome", message: `"${o}" counts as a success, but no band of this check reads it.` });
     if (typeof check.auto === "string" && check.auto !== "" && !known.has(check.auto))
-      issues.push({ severity: "warning", path: `${path}.auto`, code: "adjudication_outcome", message: `An unrolled check passes as "${check.auto}", which no band of this check reads.` });
+      issues.push({ severity: "warning", path: `${path2}.auto`, code: "adjudication_outcome", message: `An unrolled check passes as "${check.auto}", which no band of this check reads.` });
     if (readsChance && passOutcomes(check, bands).length === 0)
-      issues.push({ severity: "info", path, code: "adjudication_success", message: "This check names no success (no success band and no pass list), so the policy can't tell its chance or grant it without a roll: it rolls whenever its action runs (under narrative authority the story decides, and the dice when it can't), and a failed try isn't remembered." });
+      issues.push({ severity: "info", path: path2, code: "adjudication_success", message: "This check names no success (no success band and no pass list), so the policy can't tell its chance or grant it without a roll: it rolls whenever its action runs (under narrative authority the story decides, and the dice when it can't), and a failed try isn't remembered." });
   }
   return issues;
 }
@@ -25308,7 +26148,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
     const policy = policyFor(w.world, w.state, p.action, p.actor);
     const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, counts });
     const judgement = opts.judgement ?? null;
-    const place = placeOfEntity(w.state, p.actor);
+    const place2 = placeOfEntity(w.state, p.actor);
     let close = null;
     const story = verdict.why === "story" ? judgedOutcome(judgement, outcomeChoices(p.action, Object.keys(odds)), rng.fork("judge")) : null;
     const rolls = verdict.roll || verdict.why === "story" && story === null;
@@ -25343,7 +26183,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
           ...why ? { why } : {},
           ...approach ? { rating: approach.rating, max: approach.max, reason: approach.reason.slice(0, 240) } : {},
           ...close ? { close: close.outcome } : {},
-          ...tracked ? { key: tryKey(p.actor, p.action.id, p.params), place, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready), ...round !== null ? { round } : {} } : {}
+          ...tracked ? { key: tryKey(p.actor, p.action.id, p.params), place: place2, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready), ...round !== null ? { round } : {} } : {}
         }
       });
     }
@@ -25494,7 +26334,7 @@ function lintInferred(world, reg) {
   if (!policy)
     return [{ severity: "error", path: `${at}.mode`, code: "inferred", message: `${raw.mode === undefined ? "It names no mode" : `"${String(raw.mode)}" isn't a mode`}: use off, suggest or auto. ${unset}` }];
   const issues = [];
-  const warn = (path, code, message) => void issues.push({ severity: "warning", path: `${at}${path}`, code, message });
+  const warn = (path2, code, message) => void issues.push({ severity: "warning", path: `${at}${path2}`, code, message });
   const plays = (key, given, value) => warn(`.${key}`, "inferred_value", `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(value)}.`);
   const choices = [["when", raw.when, INFER_WHENS, policy.when], ["who", raw.who, INFER_WHOS, policy.who], ["detail", raw.detail, INFER_DETAILS, policy.detail], ["others", raw.others, INFER_OTHERS, policy.others]];
   for (const [key, given, values, value] of choices)
@@ -25680,15 +26520,15 @@ function specsOf(v) {
 }
 function effectLists(world) {
   const out = [];
-  const add = (path, effects) => {
+  const add = (path2, effects) => {
     if (!Array.isArray(effects))
       return;
-    out.push({ path, effects: [...effects] });
+    out.push({ path: path2, effects: [...effects] });
     effects.forEach((spec, i) => {
       if (spec.type !== "check" || !isRecord(spec.args?.outcomes))
         return;
       for (const [outcome, list] of Object.entries(spec.args.outcomes))
-        add(`${path}.${i}.args.outcomes.${outcome}`, specsOf(list));
+        add(`${path2}.${i}.args.outcomes.${outcome}`, specsOf(list));
     });
   };
   for (const [id, a] of Object.entries(world.actions))
@@ -25710,11 +26550,11 @@ function effectLists(world) {
   }
   return out;
 }
-function checkSites(path, check) {
+function checkSites(path2, check) {
   const out = [];
   const push = (key, expr) => {
     if (typeof expr === "string")
-      out.push({ path: `${path}.${key}`, expr, effectArg: false });
+      out.push({ path: `${path2}.${key}`, expr, effectArg: false });
   };
   push("modifier", check.modifier);
   push("advantage", check.advantage);
@@ -25726,7 +26566,7 @@ function checkSites(path, check) {
   }
   return out;
 }
-function argSites(path, spec) {
+function argSites(path2, spec) {
   const out = [];
   const visit2 = (at, v) => {
     if (typeof v === "string") {
@@ -25742,17 +26582,17 @@ function argSites(path, spec) {
     if (spec.type === "check" && key === "outcomes")
       continue;
     if (spec.type === "check" && key === "check" && isRecord(value))
-      out.push(...checkSites(`${path}.args.check`, value));
+      out.push(...checkSites(`${path2}.args.check`, value));
     else
-      visit2(`${path}.args.${key}`, value);
+      visit2(`${path2}.args.${key}`, value);
   }
   return out;
 }
 function exprSites(world) {
   const out = [];
-  const push = (path, expr) => {
+  const push = (path2, expr) => {
     if (typeof expr === "string")
-      out.push({ path, expr, effectArg: false });
+      out.push({ path: path2, expr, effectArg: false });
   };
   for (const [id, k] of Object.entries(world.kinds)) {
     for (const [name, f] of Object.entries(k.fields)) {
@@ -25809,8 +26649,8 @@ function exprSites(world) {
     if (isRecord(combat.initiative))
       out.push(...checkSites("ruleset.combat.initiative", combat.initiative));
   }
-  for (const { path, effects } of effectLists(world))
-    effects.forEach((spec, i) => out.push(...argSites(`${path}.${i}`, spec)));
+  for (const { path: path2, effects } of effectLists(world))
+    effects.forEach((spec, i) => out.push(...argSites(`${path2}.${i}`, spec)));
   return out;
 }
 function columnsOf(world, id) {
@@ -25828,9 +26668,9 @@ function columnsOf(world, id) {
 }
 function lintRuleset(world, reg) {
   const issues = [];
-  const err = (path, code, message) => void issues.push({ severity: "error", path, code, message });
-  const warn = (path, code, message) => void issues.push({ severity: "warning", path, code, message });
-  const info = (path, code, message) => void issues.push({ severity: "info", path, code, message });
+  const err = (path2, code, message) => void issues.push({ severity: "error", path: path2, code, message });
+  const warn = (path2, code, message) => void issues.push({ severity: "warning", path: path2, code, message });
+  const info = (path2, code, message) => void issues.push({ severity: "info", path: path2, code, message });
   for (const site of exprSites(world)) {
     let calls;
     try {
@@ -25859,16 +26699,16 @@ function lintRuleset(world, reg) {
         warn(site.path, "table_row", `The data table "${id}" has no row "${key}"; the read gives nothing.`);
     }
   }
-  const lintCheck = (path, check, opponents) => {
+  const lintCheck = (path2, check, opponents) => {
     let natural = false;
     try {
       natural = naturalDie(parseDice(check.dice)) !== null;
       diceDistribution(check.dice);
     } catch (e) {
-      err(`${path}.dice`, "dice", `"${String(check.dice)}" can't be rolled with exact odds: ${e instanceof Error ? e.message : String(e)}`);
+      err(`${path2}.dice`, "dice", `"${String(check.dice)}" can't be rolled with exact odds: ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
-    for (const site of checkSites(path, check)) {
+    for (const site of checkSites(path2, check)) {
       try {
         compile(site.expr);
       } catch (e) {
@@ -25877,26 +26717,26 @@ function lintRuleset(world, reg) {
     }
     const bands = Array.isArray(check.bands) ? check.bands : [];
     if (!natural && bands.some((b) => b.natural))
-      err(`${path}.bands`, "natural_band", `Natural bands read one kept die, but "${check.dice}" doesn't start with one (use d20, 2d20kh1 or 2d20kl1).`);
+      err(`${path2}.bands`, "natural_band", `Natural bands read one kept die, but "${check.dice}" doesn't start with one (use d20, 2d20kh1 or 2d20kl1).`);
     if (!natural && check.advantage !== undefined)
-      err(`${path}.advantage`, "advantage", `Advantage adds a natural die, but "${check.dice}" doesn't start with one (use d20, d100, 2d20kh1…).`);
+      err(`${path2}.advantage`, "advantage", `Advantage adds a natural die, but "${check.dice}" doesn't start with one (use d20, d100, 2d20kh1…).`);
     const hasDc = check.dc !== undefined || check.vs !== undefined;
     if (!hasDc && bands.some((b) => b.margin))
-      err(`${path}.bands`, "margin_band", "Margin bands measure from a DC, and this check has neither a dc nor an opponent.");
+      err(`${path2}.bands`, "margin_band", "Margin bands measure from a DC, and this check has neither a dc nor an opponent.");
     if (bands.length === 0 && !hasDc)
-      warn(`${path}.bands`, "no_bands", "With no bands and no DC every roll reads none.");
+      warn(`${path2}.bands`, "no_bands", "With no bands and no DC every roll reads none.");
     const vs = check.vs;
     if (!vs)
       return;
     if ([vs.check, vs.modifier, vs.passive].filter((x) => x !== undefined).length > 1)
-      err(`${path}.vs`, "vs", "An opponent rolls a check, rolls this check's dice with a modifier, or has a passive score: give one of check, modifier and passive.");
+      err(`${path2}.vs`, "vs", "An opponent rolls a check, rolls this check's dice with a modifier, or has a passive score: give one of check, modifier and passive.");
     if (vs.check !== undefined && !own(world.checks, vs.check))
-      err(`${path}.vs.check`, "refs", `The opponent's check "${vs.check}" doesn't exist.`);
+      err(`${path2}.vs.check`, "refs", `The opponent's check "${vs.check}" doesn't exist.`);
     if (vs.passive !== undefined && check.dc !== undefined)
-      warn(`${path}.dc`, "dc_passive", "The opponent's passive score is the DC, so dc is never read.");
+      warn(`${path2}.dc`, "dc_passive", "The opponent's passive score is the DC, so dc is never read.");
     const who = vs.who ?? "target";
     if (opponents && !opponents.includes(who))
-      err(`${path}.vs.who`, "vs_who", `The opponent is "${who}", which isn't one of this action's people (${opponents.length > 0 ? opponents.join(", ") : "it names none"}).`);
+      err(`${path2}.vs.who`, "vs_who", `The opponent is "${who}", which isn't one of this action's people (${opponents.length > 0 ? opponents.join(", ") : "it names none"}).`);
   };
   for (const [id, c] of Object.entries(world.checks))
     lintCheck(`checks.${id}`, c, null);
@@ -25912,9 +26752,9 @@ function lintRuleset(world, reg) {
         err(`actions.${id}.check`, "vs_who", `"${a.label}" rolls an opposed check against "${named.vs.who ?? "target"}", which isn't one of its people.`);
     }
   }
-  for (const { path, effects } of effectLists(world)) {
+  for (const { path: path2, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
-      const at = `${path}.${i}.args`;
+      const at = `${path2}.${i}.args`;
       if (spec.type === "check") {
         const c = spec.args?.check;
         if (typeof c === "string" && !c.startsWith("=") && !own(world.checks, c))
@@ -26093,14 +26933,14 @@ function lintRuleset(world, reg) {
       if (p.kind === undefined && kinds.length === 0)
         warn(at, "progression", `No kind has both ${p.xpField} and ${p.levelField}, so this progression applies to no one.`);
       for (const k of p.kind !== undefined && (own(world.kinds, p.kind) || reg.kinds.has(p.kind)) ? kinds : []) {
-        for (const [key, field] of [["xpField", p.xpField], ["levelField", p.levelField]]) {
-          const def = fieldDef(reg, world, k, field);
+        for (const [key, field2] of [["xpField", p.xpField], ["levelField", p.levelField]]) {
+          const def = fieldDef(reg, world, k, field2);
           if (!def)
-            err(`${at}.${key}`, "progression", `The kind ${k} has no field ${field}.`);
+            err(`${at}.${key}`, "progression", `The kind ${k} has no field ${field2}.`);
           else if (def.type !== "number")
-            err(`${at}.${key}`, "progression", `${field} must be a number field.`);
+            err(`${at}.${key}`, "progression", `${field2} must be a number field.`);
           else if (def.derived !== undefined)
-            err(`${at}.${key}`, "progression", `${field} is derived, so the engine can't set it.`);
+            err(`${at}.${key}`, "progression", `${field2} is derived, so the engine can't set it.`);
         }
       }
       const t = p.thresholds;
@@ -26126,8 +26966,8 @@ function lintRuleset(world, reg) {
       for (const [eid, e] of Object.entries(world.entities)) {
         if (!progressionApplies(reg, world, p, e.kind))
           continue;
-        const numberOf = (field) => {
-          const v = own(e.fields, field) ?? fieldDef(reg, world, e.kind, field)?.default;
+        const numberOf = (field2) => {
+          const v = own(e.fields, field2) ?? fieldDef(reg, world, e.kind, field2)?.default;
           return typeof v === "number" ? v : null;
         };
         const levelDef = fieldDef(reg, world, e.kind, p.levelField);
@@ -26289,16 +27129,16 @@ function goesIn(ctx, id) {
   const goes = kindGoesIn(ctx.registry, ctx.world, e.kind);
   return goes === "any" && fixedOf(ctx, id) !== null ? "nowhere" : goes;
 }
-function holdProblem(ctx, thing, holder) {
-  const e = own(ctx.state.entities, thing);
+function holdProblem(ctx, thing2, holder) {
+  const e = own(ctx.state.entities, thing2);
   const h = own(ctx.state.entities, holder);
   if (!e || !h)
     return null;
   const as = holdsAs(ctx, holder);
   if (as === null)
     return `${h.name} can't hold anything`;
-  const goes = goesIn(ctx, thing);
-  const fixed = fixedOf(ctx, thing);
+  const goes = goesIn(ctx, thing2);
+  const fixed = fixedOf(ctx, thing2);
   if (goes === "nowhere")
     return fixed === "part" ? `${e.name} is built into what holds it` : fixed === "fixed" ? `${e.name} is fixed in place` : `${e.name} isn't a thing that goes inside anything`;
   if (goes === "vehicle" && as !== "vehicle")
@@ -26380,10 +27220,10 @@ function grants(state) {
     for (const r of own(state.entities, borrower)?.relations ?? []) {
       if (r.type !== "uses")
         continue;
-      const thing = own(state.entities, r.to);
-      if (!thing)
+      const thing2 = own(state.entities, r.to);
+      if (!thing2)
         continue;
-      const owner = typeof thing.fields.owner === "string" ? thing.fields.owner : null;
+      const owner = typeof thing2.fields.owner === "string" ? thing2.fields.owner : null;
       out.push({ thing: r.to, borrower, owner, until: r.until ?? null, overdue: r.until !== undefined && r.until <= state.clock });
     }
   }
@@ -26775,8 +27615,8 @@ function authoredMoves(world) {
       note(things, e.kind, `${holder.name} holds ${e.name}`);
     }
   }
-  for (const { path, effects } of effectLists(world)) {
-    const action = path.startsWith("actions.") ? own(world.actions, path.split(".")[1] ?? "") : undefined;
+  for (const { path: path2, effects } of effectLists(world)) {
+    const action = path2.startsWith("actions.") ? own(world.actions, path2.split(".")[1] ?? "") : undefined;
     const named = (arg) => {
       const at = argName(arg);
       if (!at)
@@ -26798,13 +27638,13 @@ function authoredMoves(world) {
         if (!action || !carried || !requiresCarried(action, carried.name))
           continue;
       }
-      const by = action?.label ?? path;
+      const by = action?.label ?? path2;
       const into = named(spec.args?.[move2.into]);
       if (into)
         note(holders, into.kind, `${by} gives things to ${into.words}`);
-      const thing = move2.thing === undefined ? null : named(spec.args?.[move2.thing]);
-      if (thing)
-        note(things, thing.kind, `${by} moves ${thing.words}`);
+      const thing2 = move2.thing === undefined ? null : named(spec.args?.[move2.thing]);
+      if (thing2)
+        note(things, thing2.kind, `${by} moves ${thing2.words}`);
     }
   }
   return { things, holders };
@@ -26817,8 +27657,8 @@ function presentGearLines(ctx, scope) {
   const here = placeOfEntity(ctx.state, pov);
   const lines = [];
   for (const who of Object.keys(ctx.state.entities).sort()) {
-    const person = own(ctx.state.entities, who);
-    if (!person || who === pov || !kindIs(ctx.registry, ctx.world, person.kind, "person") || isGone(ctx.state, who) || !see(pov, who) || !together(ctx.world, here, placeOfEntity(ctx.state, who)))
+    const person3 = own(ctx.state.entities, who);
+    if (!person3 || who === pov || !kindIs(ctx.registry, ctx.world, person3.kind, "person") || isGone(ctx.state, who) || !see(pov, who) || !together(ctx.world, here, placeOfEntity(ctx.state, who)))
       continue;
     const level = Math.max(1, ctx.levelOf(who, "gear"));
     const worn = wornBy(ctx, who);
@@ -26831,16 +27671,16 @@ function presentGearLines(ctx, scope) {
     const heldSeen = held2.filter((id) => see(pov, id));
     const parts = [...wornSeen.length > 0 ? [`wears ${say(wornSeen)}`] : [], ...heldSeen.length > 0 ? [`carries ${say(heldSeen)}`] : []];
     if (parts.length > 0)
-      lines.push({ text: `${person.name} ${parts.join("; ")}.`, known: "pov" });
+      lines.push({ text: `${person3.name} ${parts.join("; ")}.`, known: "pov" });
     if (scope === "player")
       continue;
     const hidden = [...worn, ...held2].filter((id) => !see(pov, id));
     const theirs = hidden.filter((id) => see(who, id));
     const gms = hidden.filter((id) => !see(who, id));
     if (theirs.length > 0)
-      lines.push({ text: `${person.name} has ${say(theirs)}.`, known: "scene", who: person.name });
+      lines.push({ text: `${person3.name} has ${say(theirs)}.`, known: "scene", who: person3.name });
     if (scope === "gm" && gms.length > 0)
-      lines.push({ text: `${person.name} has ${say(gms)}.`, known: "gm" });
+      lines.push({ text: `${person3.name} has ${say(gms)}.`, known: "gm" });
   }
   return lines;
 }
@@ -26913,21 +27753,21 @@ function cashGift(text3, currency) {
   const word = new RegExp(`^${article}([a-z]+)(?:[ -]${unit3})?${tail}$`).exec(t)?.[1];
   return word !== undefined && hasOwn(CASH_WORDS, word) ? { amount: CASH_WORDS[word] ?? null } : null;
 }
-function gearLevel(ctx, thing, to) {
+function gearLevel(ctx, thing2, to) {
   const toEntity = to ? own(ctx.state.entities, to) : undefined;
   if (to && toEntity && kindIs(ctx.registry, ctx.world, toEntity.kind, "person"))
     return ctx.levelOf(to, "gear");
-  const owner = own(ctx.state.entities, thing)?.fields.owner;
+  const owner = own(ctx.state.entities, thing2)?.fields.owner;
   return ctx.levelOf(typeof owner === "string" && own(ctx.state.entities, owner) ? owner : ctx.world.pov, "gear");
 }
-function detach(ctx, thing) {
-  const e = own(ctx.state.entities, thing);
+function detach(ctx, thing2) {
+  const e = own(ctx.state.entities, thing2);
   const out = [];
   if (!e)
     return out;
   for (const r of e.relations)
     if (r.type === "in" || r.type === "worn_by" || r.type === "equipped")
-      out.push({ type: "unlink", rel: r.type, from: thing, to: r.to });
+      out.push({ type: "unlink", rel: r.type, from: thing2, to: r.to });
   return out;
 }
 var transfer2 = (ctx, item, to, told = false) => {
@@ -26958,19 +27798,19 @@ var transfer2 = (ctx, item, to, told = false) => {
   out.push(...optionalService(ctx, "space.lay")?.(ctx, item, null, null) ?? []);
   return out;
 };
-var drop = (ctx, item, place) => {
+var drop = (ctx, item, place2) => {
   if (!own(ctx.state.entities, item))
     return reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
-  if (!own(ctx.world.places, place))
-    return reject9("missing_place", `no place ${labelOf(ctx, place)}`);
+  if (!own(ctx.world.places, place2))
+    return reject9("missing_place", `no place ${labelOf(ctx, place2)}`);
   if (gearLevel(ctx, item) === 0)
     return [];
-  return [...detach(ctx, item), { type: "set", entity: item, field: "place", value: place }, ...optionalService(ctx, "space.lay")?.(ctx, item, place, holderOf(ctx.state, item)) ?? []];
+  return [...detach(ctx, item), { type: "set", entity: item, field: "place", value: place2 }, ...optionalService(ctx, "space.lay")?.(ctx, item, place2, holderOf(ctx.state, item)) ?? []];
 };
-function endLoans(ctx, thing) {
-  const out = grants(ctx.state).filter((g) => g.thing === thing).map((g) => ({ type: "unlink", rel: "uses", from: g.borrower, to: thing }));
-  if (own(ctx.state.entities, thing)?.fields.overdue === true)
-    out.push({ type: "set", entity: thing, field: "overdue", value: false });
+function endLoans(ctx, thing2) {
+  const out = grants(ctx.state).filter((g) => g.thing === thing2).map((g) => ({ type: "unlink", rel: "uses", from: g.borrower, to: thing2 }));
+  if (own(ctx.state.entities, thing2)?.fields.overdue === true)
+    out.push({ type: "set", entity: thing2, field: "overdue", value: false });
   return out;
 }
 var give = (ctx, item, from, to, told = false) => {
@@ -27041,8 +27881,8 @@ var spawn = (ctx, spec) => {
   if (relations.length === 0 && spec.place)
     fields.place = spec.place;
   const kind = spec.kind ?? (row && typeof row.capacity_l === "number" ? "container" : "item");
-  const entity = { id, kind, name: spec.name, tier: "background", fields, relations };
-  return [{ type: "spawn", entity }];
+  const entity2 = { id, kind, name: spec.name, tier: "background", fields, relations };
+  return [{ type: "spawn", entity: entity2 }];
 };
 function usedUp(ctx, item, done) {
   const e = own(ctx.state.entities, item);
@@ -27051,15 +27891,15 @@ function usedUp(ctx, item, done) {
 function search(ctx, who, target) {
   if (!own(ctx.state.entities, who))
     return reject9("missing_entity", `no searcher ${labelOf(ctx, who)}`);
-  const place = placeOfEntity(ctx.state, who);
+  const place2 = placeOfEntity(ctx.state, who);
   if (target !== null) {
     if (!own(ctx.state.entities, target))
       return reject9("missing_entity", `no ${labelOf(ctx, target)} to search`);
-    if (placeOfEntity(ctx.state, target) !== place)
+    if (placeOfEntity(ctx.state, target) !== place2)
       return reject9("not_here", `${labelOf(ctx, target)} isn't here`);
-  } else if (!place)
+  } else if (!place2)
     return reject9("no_place", `${labelOf(ctx, who)} is nowhere`);
-  const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place).sort();
+  const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place2).sort();
   return found.filter((id) => id !== who && !isGone(ctx.state, id) && isDiscoverable(ctx.world, ctx.state, id) && !knows(ctx.state, who, id)).map((id) => ({ type: "link", rel: "knows", from: who, to: id }));
 }
 function heldItem(ctx, item, from) {
@@ -27070,9 +27910,9 @@ function heldItem(ctx, item, from) {
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
 }
 function lyingNamed(ctx, item, who) {
-  const place = placeOfEntity(ctx.state, who);
+  const place2 = placeOfEntity(ctx.state, who);
   const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
-  const fits = Object.keys(ctx.state.entities).filter((id) => !isGone(ctx.state, id) && !heldByPerson(ctx, id) && placeOfEntity(ctx.state, id) === place && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
+  const fits = Object.keys(ctx.state.entities).filter((id) => !isGone(ctx.state, id) && !heldByPerson(ctx, id) && placeOfEntity(ctx.state, id) === place2 && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
 }
 function heldByPerson(ctx, id) {
@@ -27097,8 +27937,8 @@ var claim = (ctx, c) => {
     return reject9("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
   const name = c.name.trim();
   if (c.existing && own(ctx.state.entities, c.existing)) {
-    const place2 = placeOfEntity(ctx.state, c.by);
-    const moved = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place2 ? drop(ctx, c.existing, place2) : reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    const place3 = placeOfEntity(ctx.state, c.by);
+    const moved = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place3 ? drop(ctx, c.existing, place3) : reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
     return Array.isArray(moved) ? { entity: c.existing, events: moved } : moved;
   }
   if (c.at === "held") {
@@ -27109,15 +27949,15 @@ var claim = (ctx, c) => {
     if (held2)
       return { entity: held2, events: [] };
   }
-  const place = placeOfEntity(ctx.state, c.by);
-  if (c.at === "here" && !place)
+  const place2 = placeOfEntity(ctx.state, c.by);
+  if (c.at === "here" && !place2)
     return reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
   const row = c.like ? rowOf(ctx, "gear.items", c.like) ?? rowOf(ctx, "gear.containers", c.like) : undefined;
   const fields = { claimed: true, notable: true };
   if (c.at === "held")
     fields.owner = c.by;
-  else if (place)
-    fields.place = place;
+  else if (place2)
+    fields.place = place2;
   if (c.catalog)
     fields.catalog = c.catalog;
   if (c.category)
@@ -27163,44 +28003,44 @@ var takePiece = (ctx, kit, piece, to) => {
   }
   return [...spawned, { type: "set", entity: kit, field: "taken", value: { ...taken, [p.name]: (own(taken, p.name) ?? 0) + 1 } }];
 };
-var lend = (ctx, thing, to, until) => {
-  const e = own(ctx.state.entities, thing);
+var lend = (ctx, thing2, to, until) => {
+  const e = own(ctx.state.entities, thing2);
   if (!e)
-    return reject9("missing_entity", `no ${labelOf(ctx, thing)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, thing2)}`);
   if (!own(ctx.state.entities, to))
     return reject9("missing_entity", `no ${labelOf(ctx, to)}`);
   if (!Number.isFinite(until) || until <= ctx.state.clock)
     return reject9("bad_until", "a loan needs a future end");
   const out = [];
-  if (typeof e.fields.place !== "string" || holderOf(ctx.state, thing)) {
-    const moved = transfer2(ctx, thing, to);
+  if (typeof e.fields.place !== "string" || holderOf(ctx.state, thing2)) {
+    const moved = transfer2(ctx, thing2, to);
     if (!Array.isArray(moved))
       return moved;
     out.push(...moved);
   }
   if (e.fields.overdue === true)
-    out.push({ type: "set", entity: thing, field: "overdue", value: false });
-  out.push({ type: "link", rel: "uses", from: to, to: thing, until: Math.round(until) });
+    out.push({ type: "set", entity: thing2, field: "overdue", value: false });
+  out.push({ type: "link", rel: "uses", from: to, to: thing2, until: Math.round(until) });
   return out;
 };
-var retrieve = (ctx, thing) => {
-  const e = own(ctx.state.entities, thing);
+var retrieve = (ctx, thing2) => {
+  const e = own(ctx.state.entities, thing2);
   if (!e)
-    return reject9("missing_entity", `no ${labelOf(ctx, thing)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, thing2)}`);
   const out = [];
   for (const g of grants(ctx.state))
-    if (g.thing === thing)
-      out.push({ type: "unlink", rel: "uses", from: g.borrower, to: thing });
+    if (g.thing === thing2)
+      out.push({ type: "unlink", rel: "uses", from: g.borrower, to: thing2 });
   const owner = typeof e.fields.owner === "string" ? e.fields.owner : null;
   if (typeof e.fields.home === "string" && own(ctx.world.places, e.fields.home))
-    out.push(...detach(ctx, thing), { type: "set", entity: thing, field: "place", value: e.fields.home });
+    out.push(...detach(ctx, thing2), { type: "set", entity: thing2, field: "place", value: e.fields.home });
   else if (owner && own(ctx.state.entities, owner)) {
-    const moved = transfer2(ctx, thing, owner);
+    const moved = transfer2(ctx, thing2, owner);
     if (Array.isArray(moved))
       out.push(...moved);
   }
   if (e.fields.overdue === true || out.some((x) => x.type === "unlink"))
-    out.push({ type: "set", entity: thing, field: "overdue", value: false });
+    out.push({ type: "set", entity: thing2, field: "overdue", value: false });
   return out;
 };
 var wear = (ctx, item, wearer, slot) => {
@@ -27256,11 +28096,11 @@ var gearPack = {
     r.query("gear.containment", (ctx, id) => ({ holds: holdsAs(ctx, id), goes: goesIn(ctx, id) }));
     r.formula("has_item", (ctx, holder, what) => hasItem(ctx, String(holder ?? ""), String(what ?? "")));
     r.formula("carries", (ctx, holder, item) => isInside(ctx.state, String(item ?? ""), String(holder ?? "")));
-    r.formula("movable", (ctx, thing) => fixedOf(ctx, String(thing ?? "")) === null);
+    r.formula("movable", (ctx, thing2) => fixedOf(ctx, String(thing2 ?? "")) === null);
     r.formula("carried_kg", (ctx, holder) => carriedBy(ctx.state, String(holder ?? "")).filter((id) => holderOf(ctx.state, id) === holder).reduce((a, id) => a + weightOf(ctx.state, id), 0) / 1000);
     r.formula("kit_present", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.present ?? 0);
     r.formula("kit_complete", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.complete ?? false);
-    r.formula("lent_out", (ctx, thing) => grants(ctx.state).some((g) => g.thing === thing));
+    r.formula("lent_out", (ctx, thing2) => grants(ctx.state).some((g) => g.thing === thing2));
     const wrap = (type, args, f) => r.effect({ type, args, resolve: (a, ctx) => f(a, ctx) });
     wrap("gear.transfer", ["item", "to"], (a, ctx) => {
       const item = strOf(a.item);
@@ -27362,12 +28202,12 @@ var gearPack = {
       step(slot, ctx) {
         const out = [];
         for (const g of grants(ctx.state)) {
-          const thing = own(ctx.state.entities, g.thing);
-          if (!thing || g.until === null || g.until > slot.end || thing.fields.overdue === true)
+          const thing2 = own(ctx.state.entities, g.thing);
+          if (!thing2 || g.until === null || g.until > slot.end || thing2.fields.overdue === true)
             continue;
           out.push({ type: "set", entity: g.thing, field: "overdue", value: true });
           const borrower = own(ctx.state.entities, g.borrower)?.name ?? g.borrower;
-          out.push({ type: ENGINE_EVENTS.signal, data: { class: "overdue", text: `${thing.name} is overdue from ${borrower}.`, ...g.owner ? { entity: g.owner } : {} } });
+          out.push({ type: ENGINE_EVENTS.signal, data: { class: "overdue", text: `${thing2.name} is overdue from ${borrower}.`, ...g.owner ? { entity: g.owner } : {} } });
         }
         return out;
       }
@@ -27375,15 +28215,15 @@ var gearPack = {
     r.materializer({
       domain: "gear",
       version: 1,
-      materialize(entity, ctx, rng) {
-        const e = own(ctx.state.entities, entity);
-        if (!e || ctx.levelOf(entity, "gear") < 2)
+      materialize(entity2, ctx, rng) {
+        const e = own(ctx.state.entities, entity2);
+        if (!e || ctx.levelOf(entity2, "gear") < 2)
           return [];
         const out = [];
         if (kindIs(ctx.registry, ctx.world, e.kind, "person")) {
-          const hasWallet = carriedBy(ctx.state, entity).some((id) => own(ctx.state.entities, id)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(ctx.state.entities, id)?.name ?? ""));
+          const hasWallet = carriedBy(ctx.state, entity2).some((id) => own(ctx.state.entities, id)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(ctx.state.entities, id)?.name ?? ""));
           if (!hasWallet) {
-            const w = spawn(ctx, { name: "Wallet", owner: entity, holder: entity, catalog: "wallet", kind: "container", salt: "materialize" });
+            const w = spawn(ctx, { name: "Wallet", owner: entity2, holder: entity2, catalog: "wallet", kind: "container", salt: "materialize" });
             if (Array.isArray(w))
               out.push(...w);
           }
@@ -27396,11 +28236,11 @@ var gearPack = {
           for (let i = 0;i < n; i++) {
             const id = rng.pick(rows);
             const row = rowOf(ctx, "gear.items", id);
-            const made = spawn(ctx, { name: strOf(row?.name, id), owner: typeof e.fields.owner === "string" ? e.fields.owner : null, holder: entity, catalog: id, salt: `stock:${i}` });
+            const made = spawn(ctx, { name: strOf(row?.name, id), owner: typeof e.fields.owner === "string" ? e.fields.owner : null, holder: entity2, catalog: id, salt: `stock:${i}` });
             if (Array.isArray(made))
               out.push(...made);
           }
-          out.push({ type: "set", entity, field: "sampled", value: true });
+          out.push({ type: "set", entity: entity2, field: "sampled", value: true });
         }
         return out;
       }
@@ -27652,14 +28492,14 @@ function buildGarageView(ctx) {
     const grant = Object.keys(ctx.state.entities).sort().map((b) => ({ b, r: own(ctx.state.entities, b)?.relations.find((x) => x.type === "uses" && x.to === id) })).find((x) => x.r);
     if (e.fields.owner !== pov && grant?.b !== pov)
       continue;
-    const place = placeOfEntity(ctx.state, id);
+    const place2 = placeOfEntity(ctx.state, id);
     const cls = rowOf(ctx, "vehicles.classes", strOf(e.fields.class));
     const v = {
       id,
       name: e.name,
       kind: strOf(cls?.domain, "road"),
       status: level <= 1 ? e.fields.status === "broken" ? "broken" : "runs fine" : strOf(e.fields.status, "ok").replace(/_/g, " "),
-      place: place ? canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? own(ctx.world.places, place)?.name ?? place : HIDDEN_PLACE_NAME : null
+      place: place2 ? canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? own(ctx.world.places, place2)?.name ?? place2 : HIDDEN_PLACE_NAME : null
     };
     if (level >= 2) {
       v.fuelPct = Math.round(numOf(e.fields.fuel_pct, 100));
@@ -27814,7 +28654,7 @@ function vehicleLines(ctx, scope) {
   const here = placeOfEntity(ctx.state, pov);
   const site = siteOf(ctx.world, here);
   const ownerName = (owner) => see(pov, owner) ? own(ctx.state.entities, owner)?.name ?? "someone" : "someone";
-  const placeText = (place) => !place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere";
+  const placeText = (place2) => !place2 ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? `at ${own(ctx.world.places, place2)?.name ?? place2}` : "somewhere";
   const classText = (v, kind) => {
     const name = classRow(ctx, v)?.name;
     if (typeof name !== "string" || name.trim() === "" || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "class"))
@@ -27836,17 +28676,17 @@ function vehicleLines(ctx, scope) {
       continue;
     const owner = accessOf(ctx.state, v).owners[0]?.party ?? null;
     const grant = grants2.get(v);
-    const place = placeOfEntity(ctx.state, v);
+    const place2 = placeOfEntity(ctx.state, v);
     const whose = owner === pov ? "yours" : level >= 2 && owner !== null && isMemberOf(ctx.state, pov, owner) ? `${ownerName(owner)}'s` : level >= 3 && grant ? `${owner ? `${ownerName(owner)}'s, ` : ""}${grant.until !== undefined ? `lent to you until ${formatClock(cal, grant.until)}` : "assigned to you"}` : null;
     if (whose === null) {
-      if (site !== null && siteOf(ctx.world, place) === site)
-        others.push({ v, owner, place });
+      if (site !== null && siteOf(ctx.world, place2) === site)
+        others.push({ v, owner, place: place2 });
       continue;
     }
     if (owner !== pov && !see(pov, v))
       continue;
-    const elsewhere = site !== null && siteOf(ctx.world, place) !== site;
-    const head = [placeText(place), ...level === 1 ? [] : [whose], ...elsewhere ? ["away from here"] : []];
+    const elsewhere = site !== null && siteOf(ctx.world, place2) !== site;
+    const head = [placeText(place2), ...level === 1 ? [] : [whose], ...elsewhere ? ["away from here"] : []];
     const parts = classText(v, e.kind);
     if (level === 1)
       parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
@@ -27858,7 +28698,7 @@ function vehicleLines(ctx, scope) {
       if (e.fields.status !== "ok" && e.fields.status !== undefined)
         parts.push(String(e.fields.status).replace(/_/g, " "));
     }
-    parts.push(...thingDetails(ctx, v, (field) => TOLD_APART[field] === true || field === "condition" && level < 3));
+    parts.push(...thingDetails(ctx, v, (field2) => TOLD_APART[field2] === true || field2 === "condition" && level < 3));
     const interval = level >= 4 ? serviceInterval(ctx, v) : null;
     if (interval !== null && canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "last_service")) {
       const unit3 = domainOf(ctx, v) === "road" ? "mi" : "h";
@@ -27879,7 +28719,7 @@ function vehicleLines(ctx, scope) {
   }
   const seen = others.filter((o) => see(pov, o.v)).map((o) => {
     const e = own(ctx.state.entities, o.v);
-    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field, def) => TOLD_APART[field] === true || def.domain !== undefined)] : [];
+    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field2, def) => TOLD_APART[field2] === true || def.domain !== undefined)] : [];
     const description = thingDescription(ctx, o.v);
     return { text: `${e?.name ?? o.v}: ${[`${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}`, ...looks].join("; ")}.${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
   });
@@ -28266,20 +29106,20 @@ var vehiclesPack = {
     r.materializer({
       domain: "vehicles",
       version: 1,
-      materialize(entity, ctx, rng) {
-        const e = own(ctx.state.entities, entity);
-        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, entity) < 2)
+      materialize(entity2, ctx, rng) {
+        const e = own(ctx.state.entities, entity2);
+        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, entity2) < 2)
           return [];
         const out = [];
-        if (typeof e.fields.fuel_pct !== "number" && burnsFuel(ctx, entity))
-          out.push({ type: "set", entity, field: "fuel_pct", value: rng.int(40, 90) });
-        if (ownerLevel(ctx, entity) >= 3) {
-          if (domainOf(ctx, entity) === "road" && typeof e.fields.odometer_mi !== "number")
-            out.push({ type: "set", entity, field: "odometer_mi", value: rng.int(15000, 120000) });
-          if (domainOf(ctx, entity) !== "road" && typeof e.fields.engine_hours !== "number")
-            out.push({ type: "set", entity, field: "engine_hours", value: rng.int(50, 900) });
+        if (typeof e.fields.fuel_pct !== "number" && burnsFuel(ctx, entity2))
+          out.push({ type: "set", entity: entity2, field: "fuel_pct", value: rng.int(40, 90) });
+        if (ownerLevel(ctx, entity2) >= 3) {
+          if (domainOf(ctx, entity2) === "road" && typeof e.fields.odometer_mi !== "number")
+            out.push({ type: "set", entity: entity2, field: "odometer_mi", value: rng.int(15000, 120000) });
+          if (domainOf(ctx, entity2) !== "road" && typeof e.fields.engine_hours !== "number")
+            out.push({ type: "set", entity: entity2, field: "engine_hours", value: rng.int(50, 900) });
           if (typeof e.fields.condition !== "number")
-            out.push({ type: "set", entity, field: "condition", value: rng.int(60, 95) });
+            out.push({ type: "set", entity: entity2, field: "condition", value: rng.int(60, 95) });
         }
         return out;
       }
@@ -28393,8 +29233,8 @@ function climateOf(ctx, region) {
 function climateSeason(climate, month) {
   return climate.seasons.find((s) => s.months.includes(month)) ?? climate.seasons[0] ?? null;
 }
-function regionOf2(ctx, place) {
-  let cur = place ?? undefined;
+function regionOf2(ctx, place2) {
+  let cur = place2 ?? undefined;
   for (let guard = 0;cur && guard < 32; guard++) {
     const r = own(ctx.world.places, cur)?.fields.region;
     if (typeof r === "string" && own(ctx.state.entities, r))
@@ -28403,8 +29243,8 @@ function regionOf2(ctx, place) {
   }
   return Object.keys(ctx.state.entities).sort().find((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "region")) ?? null;
 }
-function stateAt(ctx, place) {
-  const region = regionOf2(ctx, place);
+function stateAt(ctx, place2) {
+  const region = regionOf2(ctx, place2);
   if (!region)
     return null;
   const id = strOf(own(ctx.state.entities, region)?.fields.weather);
@@ -28480,19 +29320,19 @@ var weatherPack = {
   requires: ["space"],
   register(r) {
     r.kind(REGION);
-    r.query("weather.sky", (ctx, place) => {
+    r.query("weather.sky", (ctx, place2) => {
       if (ctx.levelOf(ctx.world.pov, "weather") < 2)
         return null;
-      const region = regionOf2(ctx, place);
+      const region = regionOf2(ctx, place2);
       return region ? strOf(own(ctx.state.entities, region)?.fields.weather) || null : null;
     });
-    r.query("weather.travel_factor", (ctx, place, mode) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? 1 : own(stateAt(ctx, place)?.travel ?? {}, mode) ?? 1);
-    r.query("weather.closed_modes", (ctx, place) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? [] : stateAt(ctx, place)?.closes ?? []);
+    r.query("weather.travel_factor", (ctx, place2, mode) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? 1 : own(stateAt(ctx, place2)?.travel ?? {}, mode) ?? 1);
+    r.query("weather.closed_modes", (ctx, place2) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? [] : stateAt(ctx, place2)?.closes ?? []);
     r.query("weather.season", (ctx, at) => ctx.levelOf(ctx.world.pov, "weather") < 1 ? null : seasonAt(ctx, at));
-    r.query("weather.foul", (ctx, place) => {
+    r.query("weather.foul", (ctx, place2) => {
       if (ctx.levelOf(ctx.world.pov, "weather") < 2)
         return null;
-      const st = stateAt(ctx, place);
+      const st = stateAt(ctx, place2);
       return st ? st.closes.length > 0 || Object.keys(st.travel).length > 0 : null;
     });
     r.query("weather.fix", (ctx) => {
@@ -28503,8 +29343,8 @@ var weatherPack = {
         return null;
       return { entity: region, field: "weather", type: "text", value: strOf(own(ctx.state.entities, region)?.fields.weather, "clear"), options: climateOf(ctx, region).states.map((s) => ({ value: s.id, label: s.label })) };
     });
-    r.formula("weather", (ctx, place) => {
-      const region = regionOf2(ctx, typeof place === "string" && place !== "" ? place : placeOfEntity(ctx.state, ctx.world.pov));
+    r.formula("weather", (ctx, place2) => {
+      const region = regionOf2(ctx, typeof place2 === "string" && place2 !== "" ? place2 : placeOfEntity(ctx.state, ctx.world.pov));
       return region ? strOf(own(ctx.state.entities, region)?.fields.weather, "clear") : "";
     });
     r.formula("season", (ctx) => seasonAt(ctx));
@@ -28765,15 +29605,15 @@ function anchorAfter(ctx, from, to, deltas, at) {
   return out;
 }
 function writeRegard(state2, from, to, anchor, entry) {
-  const entity = own(state2.entities, from);
-  if (!entity)
+  const entity2 = own(state2.entities, from);
+  if (!entity2)
     return;
   const prev = relationOf(state2, from, to) ?? {};
   const fields = { ...prev, ...anchor };
   if (entry)
     fields.history = [...Array.isArray(prev.history) ? prev.history.slice(-(HISTORY - 1)) : [], entry];
-  entity.relations = entity.relations.filter((r) => !(r.type === "regard" && r.to === to));
-  entity.relations.push({ type: "regard", to, fields });
+  entity2.relations = entity2.relations.filter((r) => !(r.type === "regard" && r.to === to));
+  entity2.relations.push({ type: "regard", to, fields });
 }
 var regardEvent = {
   type: "relationships.regard",
@@ -29337,7 +30177,7 @@ function occasionOf(ctx, who, day2) {
     return other !== who && !!e && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other) && birthdayOn(cal, e.fields.birthday, date) && regard(ctx, who, other) >= FOND;
   }) : [];
   const home = own(ctx.state.entities, who)?.fields.home;
-  const place = typeof home === "string" && own(ctx.world.places, home) ? home : null;
+  const place2 = typeof home === "string" && own(ctx.world.places, home) ? home : null;
   return {
     weekend,
     dayOff: weekend || holidays.some((h) => h.dayOff),
@@ -29345,7 +30185,7 @@ function occasionOf(ctx, who, day2) {
     birthday: birthdayOn(cal, own(ctx.state.entities, who)?.fields.birthday, date),
     friends,
     season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day2, 12 * 60)) ?? null,
-    foul: place ? optionalQuery(ctx, "weather.foul")?.(ctx, place) ?? null : null
+    foul: place2 ? optionalQuery(ctx, "weather.foul")?.(ctx, place2) ?? null : null
   };
 }
 
@@ -29370,9 +30210,9 @@ function chatFollow(state2, who) {
   return mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips };
 }
 function chatRoles(state2) {
-  return Object.keys(objOf(sliceOf(state2, "castlife").follow)).sort().flatMap((entity) => {
-    const role = chatFollow(state2, entity)?.role ?? null;
-    return role === null ? [] : [{ entity, role }];
+  return Object.keys(objOf(sliceOf(state2, "castlife").follow)).sort().flatMap((entity2) => {
+    const role = chatFollow(state2, entity2)?.role ?? null;
+    return role === null ? [] : [{ entity: entity2, role }];
   });
 }
 function chatBlocks(state2, who) {
@@ -29629,7 +30469,7 @@ function withPov(ctx, who) {
 function routineLived(ctx, who, skip) {
   return routineRole(ctx, who) === "enforced" || skip && skipLifeOf(ctx, who) === "routine";
 }
-function routineYields(ctx, who, field, expected, opts) {
+function routineYields(ctx, who, field2, expected, opts) {
   const pov = who === ctx.world.pov;
   const enforced = routineRole(ctx, who) === "enforced";
   if ((pov || enforced || opts.skip !== true) && opts.scene !== false && withPov(ctx, who))
@@ -29642,7 +30482,7 @@ function routineYields(ctx, who, field, expected, opts) {
     if ((!enforced || tier !== "background" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true)
       return true;
   }
-  const current = own(ctx.state.entities, who)?.fields[field];
+  const current = own(ctx.state.entities, who)?.fields[field2];
   const diverged = expected === null || expected === undefined ? !opts.edge : current !== undefined && current !== expected;
   if (!opts.edge)
     return diverged;
@@ -29666,8 +30506,8 @@ function routineIssues(world, reg, id, value, state2) {
   }
   const def = value;
   const issues = [];
-  const warn = (code, path, message) => {
-    issues.push({ severity: "warning", code, path, message });
+  const warn = (code, path2, message) => {
+    issues.push({ severity: "warning", code, path: path2, message });
   };
   if (def.id !== id)
     warn(ROUTINE_LINT.shape, `${at}.id`, `Routine ${id} is saved under another id (${def.id}).`);
@@ -29681,45 +30521,45 @@ function routineIssues(world, reg, id, value, state2) {
   const holidays = new Set(world.calendar.holidays.map((h) => h.id));
   const scenes = new Set(Object.values(world.places).flatMap((p) => p.sceneType ? [p.sceneType] : []));
   def.blocks.forEach((entry, i) => {
-    const path = `${at}.blocks.${i}`;
+    const path2 = `${at}.blocks.${i}`;
     const source = entry.source ?? def.source;
     if (source?.type === "lore" && !own(world.lore, source.entry))
-      warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on lore entry ${source.entry}, which the world doesn't have.`);
+      warn(ROUTINE_LINT.source, `${path2}.source`, `Routine ${id}, block ${entry.id}: rests on lore entry ${source.entry}, which the world doesn't have.`);
     if (source?.type === "sheet" && !own(world.entities, source.entity))
-      warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on ${source.entity}'s sheet, who isn't in the world.`);
+      warn(ROUTINE_LINT.source, `${path2}.source`, `Routine ${id}, block ${entry.id}: rests on ${source.entity}'s sheet, who isn't in the world.`);
     if (isOff(entry))
       return;
     const b = entry;
     const name = `Routine ${id}, block ${b.id}`;
     if (b.place !== undefined && typeof b.place === "object" && "place" in b.place && !own(world.places, b.place.place))
-      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: there's no place ${b.place.place}; it happens at home.`);
+      warn(ROUTINE_LINT.place, `${path2}.place`, `${name}: there's no place ${b.place.place}; it happens at home.`);
     if (b.place !== undefined && typeof b.place === "object" && "nearest" in b.place && !scenes.has(b.place.nearest))
-      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: no place has the scene type ${b.place.nearest}; it happens at home.`);
+      warn(ROUTINE_LINT.place, `${path2}.place`, `${name}: no place has the scene type ${b.place.nearest}; it happens at home.`);
     if (b.place === "with" && !b.company && b.days?.birthday !== "friend")
-      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: happens with its company, but names none; it happens at home.`);
+      warn(ROUTINE_LINT.place, `${path2}.place`, `${name}: happens with its company, but names none; it happens at home.`);
     if (b.company && isRecord(b.company.who)) {
       for (const p of selectorProblems(reg, world, b.company.who))
-        warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company ${p}.`);
+        warn(ROUTINE_LINT.company, `${path2}.company`, `${name}: its company ${p}.`);
       if (selectEntities(reg, world, state2, b.company.who).length === 0)
-        warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company matches nobody as a chat starts.`);
+        warn(ROUTINE_LINT.company, `${path2}.company`, `${name}: its company matches nobody as a chat starts.`);
     }
     for (const n of b.needs ?? [])
       if (!["hunger", "fatigue", "social", "fun"].includes(n))
-        warn(ROUTINE_LINT.need, `${path}.needs`, `${name}: there's no need ${n} (hunger, fatigue, social, fun).`);
+        warn(ROUTINE_LINT.need, `${path2}.needs`, `${name}: there's no need ${n} (hunger, fatigue, social, fun).`);
     for (const h of [...b.days?.holidays ?? [], ...b.days?.except ?? []])
       if (!holidays.has(h))
-        warn(ROUTINE_LINT.days, `${path}.days`, `${name}: the calendar has no holiday ${h}.`);
+        warn(ROUTINE_LINT.days, `${path2}.days`, `${name}: the calendar has no holiday ${h}.`);
     if (b.days?.weekdays?.length === 0)
-      warn(ROUTINE_LINT.days, `${path}.days`, `${name}: lists no weekdays, so it's never on.`);
+      warn(ROUTINE_LINT.days, `${path2}.days`, `${name}: lists no weekdays, so it's never on.`);
     if (b.window) {
       const span = windowSpan(b.window);
       if (span.to - span.from + b.minutes > MINUTES_PER_DAY * 2)
-        warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window and length run past the next day.`);
+        warn(ROUTINE_LINT.window, `${path2}.window`, `${name}: its window and length run past the next day.`);
       if (b.window.from === b.window.to)
-        warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window opens and closes at ${b.window.from}, which reads as a whole day; give it a span.`);
+        warn(ROUTINE_LINT.window, `${path2}.window`, `${name}: its window opens and closes at ${b.window.from}, which reads as a whole day; give it a span.`);
     }
     if (b.perWeek !== undefined && b.days?.weekdays && b.perWeek > b.days.weekdays.length)
-      warn(ROUTINE_LINT.days, `${path}.perWeek`, `${name}: ${b.perWeek} times a week, but it's on only ${b.days.weekdays.length} weekdays.`);
+      warn(ROUTINE_LINT.days, `${path2}.perWeek`, `${name}: ${b.perWeek} times a week, but it's on only ${b.days.weekdays.length} weekdays.`);
   });
   return issues;
 }
@@ -29730,7 +30570,7 @@ function routinesLint(world, reg, state2) {
     issues.push(...routineIssues(world, reg, id, own(raw, id), state2));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
   const known = ROUTINE_SETTING_VALUES;
-  const warn = (path, message) => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
+  const warn = (path2, message) => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path2}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);
     if (!allowed)
@@ -29779,11 +30619,11 @@ function routinesLint(world, reg, state2) {
 function schedulesLint(world, reg, state2) {
   const issues = [];
   const time = /^([01]\d|2[0-4]):[0-5]\d$/;
-  const sourceIssue = (source, path, name) => {
+  const sourceIssue = (source, path2, name) => {
     if (source?.type === "lore" && !own(world.lore, source.entry))
-      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on lore entry ${source.entry}, which the world doesn't have.` });
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path: path2, message: `${name} rests on lore entry ${source.entry}, which the world doesn't have.` });
     if (source?.type === "sheet" && !own(world.entities, source.entity))
-      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on ${source.entity}'s sheet, who isn't in the world.` });
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path: path2, message: `${name} rests on ${source.entity}'s sheet, who isn't in the world.` });
   };
   for (const s of allSchedules(reg, world)) {
     if (!own(world.schedules, s.id))
@@ -29873,8 +30713,8 @@ function authored(ctx, who, start, end) {
       if (!close || typeof value !== "string" || close.at <= start || e.at >= end)
         continue;
       const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
-      const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
-      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind, option: `schedule:${s.id}` }, rank });
+      const place2 = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
+      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place: place2, reason: kind === "other" ? "commitment" : kind, kind, option: `schedule:${s.id}` }, rank });
     }
   }
   const routine = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
@@ -29940,8 +30780,8 @@ function precedence(a, b) {
   return b.priority - a.priority || a.made - b.made || a.id.localeCompare(b.id);
 }
 function planBlock(ctx, who, { p, played }, start, end) {
-  const place = p.where !== null && own(ctx.world.places, p.where) ? p.where : p.kind === "rest" ? homeOf(ctx, who) : null;
-  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place, reason: "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
+  const place2 = p.where !== null && own(ctx.world.places, p.where) ? p.where : p.kind === "rest" ? homeOf(ctx, who) : null;
+  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place: place2, reason: "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
 }
 function placed(ctx, who, l, tier, a, stronger) {
   if (tight(l))
@@ -30075,7 +30915,7 @@ function personKind(world, kind) {
 }
 function hiddenNames3(world) {
   const out = [];
-  const label = (name, secret, entity) => void out.push({ name, secret, ...entity !== undefined ? { entity } : {}, said: (text3) => namesAny(text3, [], [name]) });
+  const label = (name, secret, entity2) => void out.push({ name, secret, ...entity2 !== undefined ? { entity: entity2 } : {}, said: (text3) => namesAny(text3, [], [name]) });
   for (const e of Object.values(world.entities)) {
     const v = visibilityOf(e.visibility);
     if (v === "public")
@@ -30103,7 +30943,7 @@ function hiddenNames3(world) {
 }
 function cueIssues(world) {
   const issues = [];
-  const issue = (severity, path, message) => void issues.push({ severity, path, code: "castlife.cues", message });
+  const issue = (severity, path2, message) => void issues.push({ severity, path: path2, code: "castlife.cues", message });
   const secrets = [...Object.values(world.tracks).flatMap((t) => Object.values(t.stages).flatMap((s) => s.truth ? [s.truth] : [])), ...Object.values(world.lore).flatMap((l) => loreIsSecret(l) && typeof l.content === "string" ? lorePhrases(l.content) : [])];
   const hidden = hiddenNames3(world);
   for (const e of Object.values(world.entities)) {
@@ -30117,34 +30957,34 @@ function cueIssues(world) {
     if (e.cues.length > 0 && !personKind(world, e.kind))
       issue("warning", at, `${e.name} isn't a person, so its cues never show: the Stance section tells people.`);
     e.cues.forEach((raw, i) => {
-      const path = `${at}.${i}`;
+      const path2 = `${at}.${i}`;
       const text3 = isRecord(raw) && typeof raw.text === "string" ? raw.text.trim() : "";
       if (text3 === "")
-        return issue("error", `${path}.text`, `A cue of ${e.name}'s has no text: say what the narrator sees them do.`);
+        return issue("error", `${path2}.text`, `A cue of ${e.name}'s has no text: say what the narrator sees them do.`);
       const cue = readCue(raw);
       if (!cue)
-        return issue("error", path, `${e.name}'s cue "${text3}" needs exactly one secret it stands for: a lore entry, a track or a story flag.`);
+        return issue("error", path2, `${e.name}'s cue "${text3}" needs exactly one secret it stands for: a lore entry, a track or a story flag.`);
       const { kind, id } = cue.secret;
       if (kind === "lore") {
         const entry = own(world.lore, id);
         if (!entry)
-          issue("error", `${path}.lore`, `${e.name}'s cue "${text3}" is for lore "${id}", which this world doesn't have.`);
+          issue("error", `${path2}.lore`, `${e.name}'s cue "${text3}" is for lore "${id}", which this world doesn't have.`);
         else if (!loreIsSecret(entry))
-          issue("warning", `${path}.lore`, `${e.name}'s cue "${text3}" is for "${entry.title}", which isn't secret lore, so it never shows.`);
+          issue("warning", `${path2}.lore`, `${e.name}'s cue "${text3}" is for "${entry.title}", which isn't secret lore, so it never shows.`);
       } else if (kind === "track") {
-        const track = own(world.tracks, id);
-        if (!track)
-          issue("error", `${path}.track`, `${e.name}'s cue "${text3}" is for track "${id}", which this world doesn't have.`);
-        else if (visibilityOf(track.visibility) === "public" && !Object.values(track.stages).some((s) => s.truth))
-          issue("warning", `${path}.track`, `${e.name}'s cue "${text3}" is for "${track.label}", a public track with no truth to reveal, so it never shows.`);
+        const track2 = own(world.tracks, id);
+        if (!track2)
+          issue("error", `${path2}.track`, `${e.name}'s cue "${text3}" is for track "${id}", which this world doesn't have.`);
+        else if (visibilityOf(track2.visibility) === "public" && !Object.values(track2.stages).some((s) => s.truth))
+          issue("warning", `${path2}.track`, `${e.name}'s cue "${text3}" is for "${track2.label}", a public track with no truth to reveal, so it never shows.`);
       }
       const lower = text3.toLowerCase();
       const secret = secrets.find((s) => s.trim() !== "" && lower.includes(s.toLowerCase()));
       const named = secret === undefined ? hidden.find((h) => h.entity !== e.id && h.said(text3)) : undefined;
       if (secret !== undefined)
-        issue("error", `${path}.text`, `${e.name}'s cue "${text3}" gives away a secret ("${secret}"): a cue says how they act, never what they hide.`);
+        issue("error", `${path2}.text`, `${e.name}'s cue "${text3}" gives away a secret ("${secret}"): a cue says how they act, never what they hide.`);
       else if (named)
-        issue("warning", `${path}.text`, `${e.name}'s cue "${text3}" names "${named.name}", which the player may not know; it is left out while they don't.`);
+        issue("warning", `${path2}.text`, `${e.name}'s cue "${text3}" names "${named.name}", which the player may not know; it is left out while they don't.`);
     });
   }
   for (const t of Object.values(world.tracks)) {
@@ -30159,11 +30999,11 @@ function cueIssues(world) {
       const named = hidden.find((h) => h.entity !== owner.id && h.said(cue) && !(h.secret && h.name.length > 3 && lower.includes(h.name.toLowerCase()) && lower !== h.name.toLowerCase()));
       if (!named)
         continue;
-      const path = `tracks.${t.id}.stages.${stage}.cue`;
+      const path2 = `tracks.${t.id}.stages.${stage}.cue`;
       if (named.secret)
-        issue("error", path, `The cue of "${t.label}" at "${s.label}" gives away a secret ("${named.name}"): a cue says how someone acts, never who or what is hidden.`);
+        issue("error", path2, `The cue of "${t.label}" at "${s.label}" gives away a secret ("${named.name}"): a cue says how someone acts, never who or what is hidden.`);
       else
-        issue("warning", path, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
+        issue("warning", path2, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
     }
   }
   return issues;
@@ -30340,7 +31180,7 @@ function startBlock(ctx, who, p) {
   const named = keyword === "home" || keyword === "work" ? null : placeOf2(ctx, p.place);
   if (named === null && keyword !== "" && keyword !== "home" && keyword !== "work")
     return refuse("there's no such place");
-  const place = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : activity === "work" ? "work" : basic ? basic.place ?? "home" : "here";
+  const place2 = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : activity === "work" ? "work" : basic ? basic.place ?? "home" : "here";
   const company2 = [];
   for (const raw of Array.isArray(p.with) ? p.with : []) {
     const id2 = text3(raw);
@@ -30359,7 +31199,7 @@ function startBlock(ctx, who, p) {
     minutes,
     priority: STORY_PRIORITY,
     ...Object.keys(days).length > 0 ? { days } : {},
-    place,
+    place: place2,
     ...company2.length > 0 ? { company: { who: { ids: company2 } } } : {}
   };
 }
@@ -30571,12 +31411,12 @@ function usualRoutine(ctx, who, read) {
       continue;
     const { text: text4, start } = blockClause(cal, day2, block);
     let today2 = false;
-    let place = null;
+    let place2 = null;
     try {
       today2 = blockOnDay(ctx, who, block, day2);
-      place = blockPlace(ctx, who, block);
+      place2 = blockPlace(ctx, who, block);
     } catch {}
-    out.push({ text: text4, place, start, minutes: block.minutes, today: today2, private: block.private === true, own: from.level === "own" || from.level === "chat" });
+    out.push({ text: text4, place: place2, start, minutes: block.minutes, today: today2, private: block.private === true, own: from.level === "own" || from.level === "chat" });
   }
   const spans = new Map;
   for (const s of chatSchedulesIn(ctx)) {
@@ -30619,7 +31459,7 @@ function usualRoutine(ctx, who, read) {
   const rank = (c) => c.today && c.start + c.minutes > minute ? 0 : 1;
   return out.sort((a, b) => rank(a) - rank(b) || a.start - b.start || a.text.localeCompare(b.text));
 }
-function presentUsual(ctx, place) {
+function presentUsual(ctx, place2) {
   const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state2, pov);
@@ -30633,7 +31473,7 @@ function presentUsual(ctx, place) {
       continue;
     if (routineRole(ctx, id) === "off")
       continue;
-    const told = knownUsual(ctx, id, place, (t) => (safe ??= povSafe(ctx))(t)).slice(0, 3);
+    const told = knownUsual(ctx, id, place2, (t) => (safe ??= povSafe(ctx))(t)).slice(0, 3);
     if (told.length > 0)
       out.push({ id, name: e.name, told });
   }
@@ -30645,12 +31485,12 @@ function povSafe(ctx) {
   const namesHidden2 = hiddenNameCheck(reg, world, state2, world.pov);
   return (t) => findLeaks(t, secrets).length === 0 && !namesHidden2(t);
 }
-function knownUsual(ctx, who, place, safe) {
+function knownUsual(ctx, who, place2, safe) {
   const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
   const named = (p) => {
     const def = own(world.places, p);
-    return def && canSeePlace(reg, world, state2, pov, p) ? place(p, def.name) : null;
+    return def && canSeePlace(reg, world, state2, pov, p) ? place2(p, def.name) : null;
   };
   const clauses = usualRoutine(ctx, who, { place: named, activity: canSeeField(reg, world, state2, pov, who, "activity") }).filter((c) => !c.private && c.text !== "");
   if (clauses.length === 0)
@@ -30774,8 +31614,8 @@ function within3(dayStart, fromH, toH) {
 var AGENDA_OPTION = "agenda:";
 var AGENDA_ACTIVITY = "agenda";
 var INVITED_OPTION = "invited:";
-function publicTrack(world, track) {
-  return visibilityOf(own(world.tracks, track)?.visibility) === "public";
+function publicTrack(world, track2) {
+  return visibilityOf(own(world.tracks, track2)?.visibility) === "public";
 }
 function shownActivity(ctx, who, activity) {
   if (activity !== AGENDA_ACTIVITY)
@@ -30885,10 +31725,10 @@ function planFor(ctx, who, day2, rng, legacy = false) {
   const start = clockAt(cal, day2, 0);
   const end = start + MINUTES_PER_DAY;
   const fixed = commitments(ctx, who, start, end);
-  const person = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
+  const person3 = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
   const level = ctx.levelOf(who, "castlife");
-  const routine = !legacy && person ? routineDay(ctx, who, day2, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => needsMetBy(ctx, activity) }) : { fixed: [], options: [] };
-  const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day2, [...fixed, ...routine.fixed]);
+  const routine = !legacy && person3 ? routineDay(ctx, who, day2, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => needsMetBy(ctx, activity) }) : { fixed: [], options: [] };
+  const invited = legacy || !person3 ? [] : invitedBlocks(ctx, who, day2, [...fixed, ...routine.fixed]);
   const options = legacy ? legacyDayOptions(ctx, who, start) : [...routine.options, ...groundedOptions(ctx, who, start)];
   const plan2 = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
   return {
@@ -30917,16 +31757,16 @@ var ACQUAINT_CHANCE = 0.15;
 function acquainted(state2, a, b) {
   return !!own(state2.entities, a)?.relations.some((r) => r.type === "regard" && r.to === b) || !!own(state2.entities, b)?.relations.some((r) => r.type === "regard" && r.to === a);
 }
-function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = false) {
+function takeUp(ctx, who, place2, activity, at, holdUntil, quiet = false, seen = false) {
   const out = [];
   const e = own(ctx.state.entities, who);
-  if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true)
+  if (!e || routineStays(ctx, who, place2) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true)
     return out;
-  if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
+  if (!held2(ctx.state, who, "place", at) && place2 && own(ctx.world.places, place2) && placeOfEntity(ctx.state, who) !== place2) {
     if (seen && withPov(ctx, who))
       out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
-    out.push(...movesOf(relocate(ctx, who, place, { party: true })));
-    if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
+    out.push(...movesOf(relocate(ctx, who, place2, { party: true })));
+    if (who !== ctx.world.pov && place2 === placeOfEntity(ctx.state, ctx.world.pov))
       out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
   }
   if (activity !== null && !held2(ctx.state, who, "activity", at) && e.fields.activity !== activity)
@@ -30965,11 +31805,11 @@ function liveBlock(ctx, who, plan2, block, from, at, scene, skip) {
   const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
   const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
   const opts = { edge, release: block.activity === "sleep", scene, skip };
-  const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
+  const place2 = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
   const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
   const skipLife = skip && who !== ctx.world.pov && routineRole(ctx, who) !== "enforced";
-  const tier = skip && place !== null ? optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background" : "background";
-  return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near" || skipLife, skipLife);
+  const tier = skip && place2 !== null ? optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background" : "background";
+  return takeUp(ctx, who, place2, doing, at, undefined, tier === "live" || tier === "near" || skipLife, skipLife);
 }
 function planOutcomes(ctx, who, slot) {
   if (who === ctx.world.pov)
@@ -30992,14 +31832,14 @@ function planOutcomes(ctx, who, slot) {
   return out;
 }
 var INVITE_LEAD = 6 * 60;
-function mayInvite(ctx, host, place) {
+function mayInvite(ctx, host, place2) {
   const pov = ctx.world.pov;
   if (followOf(ctx, host).mode !== "follows" || withPov(ctx, host) || !acts2(ctx, pov))
     return false;
   const tier = optionalQuery(ctx, "minds.tier")?.(ctx, host) ?? "background";
   if (tier === "live" || tier === "near")
     return false;
-  if (held2(ctx.state, pov, "place", ctx.state.clock) || place !== null && placeOfEntity(ctx.state, pov) === place)
+  if (held2(ctx.state, pov, "place", ctx.state.clock) || place2 !== null && placeOfEntity(ctx.state, pov) === place2)
     return false;
   if (!acquainted(ctx.state, host, pov) && !knows(ctx.state, host, pov))
     return false;
@@ -31070,9 +31910,9 @@ function bookInvitation(ctx, host) {
   const cal = calendarOf(ctx.world);
   const blocks = plan2 ? laidPlans(ctx, host, [plan2]).get(plan2.id) ?? [] : dayPlan(ctx, host, dateAt(cal, at).dayIndex).blocks;
   const end = blocks.find((b) => b.start === at)?.end;
-  const place = typeof inv.place === "string" && own(ctx.world.places, inv.place) && canSeePlace(ctx.registry, ctx.world, ctx.state, pov, inv.place) ? inv.place : null;
+  const place2 = typeof inv.place === "string" && own(ctx.world.places, inv.place) && canSeePlace(ctx.registry, ctx.world, ctx.state, pov, inv.place) ? inv.place : null;
   const people = [...new Set([host, ...plan2?.with ?? []])].filter((id) => id !== pov);
-  const appointment = { at, minutes: end !== undefined && end > at ? end - at : 60, ...place ? { place } : {}, label: `With ${own(ctx.state.entities, host)?.name ?? host}`, with: people, invitation: key };
+  const appointment = { at, minutes: end !== undefined && end > at ? end - at : 60, ...place2 ? { place: place2 } : {}, label: `With ${own(ctx.state.entities, host)?.name ?? host}`, with: people, invitation: key };
   return [{ type: "set", entity: pov, field: "appointments", value: [...booked, appointment] }];
 }
 function planMoments(ctx, who, slot) {
@@ -31151,9 +31991,9 @@ function livedAtMinute(ctx, who, slot) {
       blocks.forEach((b, i) => {
         if (b.end <= from || b.start >= to)
           return;
-        const place = b.place ?? (blocks.slice(0, i).some((x) => x.place !== null) ? home : here);
-        if (place !== null)
-          out.add(place);
+        const place2 = b.place ?? (blocks.slice(0, i).some((x) => x.place !== null) ? home : here);
+        if (place2 !== null)
+          out.add(place2);
       });
     }
     return out;
@@ -31325,13 +32165,13 @@ function stepAgent2(slot, ctx, rngFor, who) {
     return out;
   const pov = ctx.world.pov;
   if (block.activity.startsWith("retrieve:")) {
-    const thing = block.activity.slice("retrieve:".length);
-    const lent = own(ctx.state.entities, thing)?.fields.owner === who && Object.values(ctx.state.entities).some((x) => x.relations.some((r) => r.type === "uses" && r.to === thing));
+    const thing2 = block.activity.slice("retrieve:".length);
+    const lent = own(ctx.state.entities, thing2)?.fields.owner === who && Object.values(ctx.state.entities).some((x) => x.relations.some((r) => r.type === "uses" && r.to === thing2));
     const retrieve2 = lent ? optionalService(ctx, "gear.retrieve") : null;
     if (retrieve2) {
-      const got = retrieve2(ctx, thing);
+      const got = retrieve2(ctx, thing2);
       if (Array.isArray(got))
-        out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
+        out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing2)?.name ?? thing2} back.`, entity: who, visibility: "known_by" } });
     }
   }
   if (who !== pov || slot.povRoutine !== false)
@@ -31371,8 +32211,8 @@ function stepAgent2(slot, ctx, rngFor, who) {
       out.push(...invitation(ctx, who, a));
   return out;
 }
-function invitationText(ctx, agent, place, at, viewer) {
-  const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? own(ctx.world.places, place)?.name ?? place : null;
+function invitationText(ctx, agent, place2, at, viewer) {
+  const named = place2 !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place2)) ? own(ctx.world.places, place2)?.name ?? place2 : null;
   return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
 function dropUnlived(slot, ctx) {
@@ -31402,12 +32242,12 @@ function stepTrips(slot, ctx) {
       const t = objOf(raw);
       const from = numOf(t.from, NaN);
       const until = numOf(t.until, NaN);
-      const place = strOf(t.place);
+      const place2 = strOf(t.place);
       const holding = objOf(e.fields.holds).place === until;
-      const away = holding && e.fields.place === place;
-      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place) && !(slot.povRoutine === false && withPov(ctx, who))) {
+      const away = holding && e.fields.place === place2;
+      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place2) && !(slot.povRoutine === false && withPov(ctx, who))) {
         holds = { ...holds, place: until, activity: until };
-        out.push({ type: "set", entity: who, field: "holds", value: holds }, ...movesOf(relocate(ctx, who, place, { party: true })), { type: "set", entity: who, field: "activity", value: "trip" });
+        out.push({ type: "set", entity: who, field: "holds", value: holds }, ...movesOf(relocate(ctx, who, place2, { party: true })), { type: "set", entity: who, field: "activity", value: "trip" });
       }
       if (!(until <= slot.end && (until > slot.start || holding)))
         continue;
@@ -31703,8 +32543,8 @@ function buildCastView(ctx) {
     const e = own(ctx.state.entities, id);
     if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id))
       continue;
-    const place = placeOfEntity(ctx.state, id);
-    const present2 = place !== null && place === here;
+    const place2 = placeOfEntity(ctx.state, id);
+    const present2 = place2 !== null && place2 === here;
     if (!(present2 ? shown3(id) : playerKnows(ctx.registry, ctx.world, ctx.state, pov, id)))
       continue;
     const classes = {};
@@ -31713,7 +32553,7 @@ function buildCastView(ctx) {
       if (values.length > 0)
         classes[facet] = [...values];
     }
-    const sees = (field) => canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field);
+    const sees = (field2) => canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field2);
     const role = sees("role") ? strOf(e.fields.role) : "";
     const p = {
       id,
@@ -31732,7 +32572,7 @@ function buildCastView(ctx) {
       if (typeof e.fields.activity === "string" && sees("activity") && !still)
         p.activity = shownActivity(ctx, id, e.fields.activity).replace(/_/g, " ");
       if (sees("place"))
-        p.place = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? own(ctx.world.places, place)?.name ?? place : HIDDEN_PLACE_NAME;
+        p.place = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? own(ctx.world.places, place2)?.name ?? place2 : HIDDEN_PLACE_NAME;
     } else if (level >= 2) {
       const last = lastSighting(ctx.state, id);
       if (last)
@@ -31822,8 +32662,8 @@ function stanceLines(ctx) {
     if (doing !== null && safe(doing))
       parts.push(`Right now they are ${doing}.`);
     const agenda = agendaFor(world, state2, id).filter((a) => publicTrack(world, a.track)).map((a) => {
-      const track = own(world.tracks, a.track);
-      const cue = track ? own(track.stages, a.stage)?.cue?.trim() : undefined;
+      const track2 = own(world.tracks, a.track);
+      const cue = track2 ? own(track2.stages, a.stage)?.cue?.trim() : undefined;
       return cue ? cue : a.stageLabel;
     }).filter(safe);
     if (agenda.length > 0)
@@ -31842,9 +32682,9 @@ function stanceFeed(ctx, scope) {
   for (const id of stanceCast(ctx).people) {
     const name = own(ctx.state.entities, id)?.name ?? id;
     for (const a of agendaFor(ctx.world, ctx.state, id).filter((x) => !publicTrack(ctx.world, x.track))) {
-      const track = own(ctx.world.tracks, a.track);
-      const secret = visibilityOf(track?.visibility) === "secret";
-      const text4 = `${name}'s private agenda, ${track?.label ?? a.track}: ${a.stageLabel}.`;
+      const track2 = own(ctx.world.tracks, a.track);
+      const secret = visibilityOf(track2?.visibility) === "secret";
+      const text4 = `${name}'s private agenda, ${track2?.label ?? a.track}: ${a.stageLabel}.`;
       if (!secret)
         lines.push({ text: text4, known: "scene", who: name });
       else if (scope === "gm")
@@ -31909,7 +32749,7 @@ var castlifePack = {
     for (const def of EVENTS3)
       r.event(def);
     r.service("castlife.edit", routineEdit);
-    r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
+    r.query("castlife.yields", (ctx, who, field2, expected, release, scene, skip) => routineYields(ctx, who, field2, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
     r.query("castlife.chat_roles", (ctx) => chatRoles(ctx.state));
@@ -32191,13 +33031,13 @@ function buildSheetView(ctx) {
     return { label: s.label, value: level >= 3 ? `${v} (${mod2 >= 0 ? "+" : ""}${mod2})` : String(v), detail: word, fix: { entity: pov, field: s.id, type: "number", value: v, min: s.min, max: s.max } };
   });
   const derived = level >= 3 && !designed ? Object.entries(derivedOf(ctx)).map(([id, d]) => ({ label: d.label, value: String(derivedValue(ctx, pov, id)) })) : [];
-  const place = povPlace(ctx.registry, ctx.world, ctx.state);
+  const place2 = povPlace(ctx.registry, ctx.world, ctx.state);
   const activity = strOf(e?.fields.activity);
   return {
     level,
     name: e?.name ?? pov,
     tier: e ? tierLabel(ctx.world, e.tier) : "",
-    ...place ? { place: place.name } : {},
+    ...place2 ? { place: place2.name } : {},
     ...activity !== "" ? { activity } : {},
     conditions: activeConditions(ctx, pov).map((c) => c.label),
     sections: designed ?? [...stats.length > 0 ? [{ title: "Stats", rows: stats }] : [], ...derived.length > 0 ? [{ title: "Derived", rows: derived }] : []]
@@ -32363,13 +33203,13 @@ function leakyLabels(world) {
     if (p.visibility === "secret" && p.name.length > 3)
       secrets.push(p.name);
   const out = [];
-  const check = (path, text4) => {
+  const check = (path2, text4) => {
     if (!text4)
       return;
     const l = text4.toLowerCase();
     for (const s of secrets)
       if (l.includes(s.toLowerCase()) && l !== s.toLowerCase())
-        out.push({ path, text: text4, secret: s });
+        out.push({ path: path2, text: text4, secret: s });
   };
   for (const t of Object.values(world.tracks)) {
     check(`tracks.${t.id}.label`, t.label);
@@ -32394,7 +33234,7 @@ function nameWords(name) {
   return name.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 4);
 }
 function leakyIds(world, registry) {
-  const person = (kind) => {
+  const person3 = (kind) => {
     if (registry)
       return kindIs(registry, world, kind, "person");
     let k = kind;
@@ -32411,7 +33251,7 @@ function leakyIds(world, registry) {
       for (const w of nameWords(p.name))
         known.add(w);
   for (const e of Object.values(world.entities))
-    if (e.visibility !== "secret" && person(e.kind))
+    if (e.visibility !== "secret" && person3(e.kind))
       for (const w of nameWords(e.name))
         known.add(w);
   const secrets = [...Object.values(world.entities).filter((e) => e.visibility === "secret"), ...Object.values(world.places).filter((p) => p.visibility === "secret")].map((s) => ({
@@ -32545,10 +33385,10 @@ function askedForGm(ctx, ref) {
   const t = own(ctx.world.tracks, ref);
   return t ? `"${ref}" (${t.label})` : `"${ref}"`;
 }
-function answerTo(ctx, track, a) {
+function answerTo(ctx, track2, a) {
   const decision = typeof a.decision === "number" ? a.decision : undefined;
   const answer = typeof a.answer === "number" && Number.isFinite(a.answer) ? String(a.answer) : strOf(a.answer);
-  const check = checkAnswer(ctx.world, ctx.state, track, answer, decision);
+  const check = checkAnswer(ctx.world, ctx.state, track2, answer, decision);
   if (check.needsDecision)
     return reject14("needs_decision", "this answer needs a judgement");
   return check.event ? [check.event] : reject14("no_answer", "there is nothing to answer here");
@@ -32586,19 +33426,19 @@ var storyPack = {
           return answerTo(ctx, id, a);
         }
         const ref = strOf(a.puzzle);
-        const asked = ref.trim() === "" ? "" : askedFor(ctx, ref);
+        const asked2 = ref.trim() === "" ? "" : askedFor(ctx, ref);
         const fits = puzzlesFor(ctx, ref);
         if (fits.length > 1) {
           return {
             code: "ambiguous_puzzle",
-            reason: asked === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${asked ?? "that name"}`,
+            reason: asked2 === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${asked2 ?? "that name"}`,
             gm: `${fits.length} open puzzles fit ${askedForGm(ctx, ref)}: ${fits.map((id) => labelOf(ctx, id)).join(", ")}`
           };
         }
-        const track = fits[0];
-        if (track === undefined)
-          return { code: "not_a_puzzle", reason: asked === "" ? "there is no open puzzle to answer" : `no open puzzle ${asked ?? "by that name"}`, gm: `no open puzzle in the quest log fits ${askedForGm(ctx, ref)}` };
-        return answerTo(ctx, track, a);
+        const track2 = fits[0];
+        if (track2 === undefined)
+          return { code: "not_a_puzzle", reason: asked2 === "" ? "there is no open puzzle to answer" : `no open puzzle ${asked2 ?? "by that name"}`, gm: `no open puzzle in the quest log fits ${askedForGm(ctx, ref)}` };
+        return answerTo(ctx, track2, a);
       }
     });
     r.action({
@@ -32630,11 +33470,11 @@ var storyPack = {
     });
     r.lint({
       code: "story.answer_track",
-      check: (world) => effectLists(world).flatMap(({ path, effects }) => effects.flatMap((spec, i) => {
-        const track = spec.type === "story.answer" ? spec.args.track : undefined;
-        if (typeof track !== "string" || !track.startsWith("="))
+      check: (world) => effectLists(world).flatMap(({ path: path2, effects }) => effects.flatMap((spec, i) => {
+        const track2 = spec.type === "story.answer" ? spec.args.track : undefined;
+        if (typeof track2 !== "string" || !track2.startsWith("="))
           return [];
-        return [{ severity: "warning", code: "story.answer_track", message: `This answer's track is a formula (${track}), but track takes a puzzle's own id as written, such as "p_safe": the puzzle the formula gives is answered even when the player can't see it. To let the player say which puzzle, pass their words as puzzle instead.`, path: `${path}.${i}.args.track` }];
+        return [{ severity: "warning", code: "story.answer_track", message: `This answer's track is a formula (${track2}), but track takes a puzzle's own id as written, such as "p_safe": the puzzle the formula gives is answered even when the player can't see it. To let the player say which puzzle, pass their words as puzzle instead.`, path: `${path2}.${i}.args.track` }];
       }))
     });
     r.lint({
@@ -33431,12 +34271,12 @@ function startFight(a, ctx) {
   if (encounterOf(ctx.state))
     return reject15("in_fight", "a fight is already under way");
   const pov = ctx.world.pov;
-  const place = placeOfEntity(ctx.state, pov);
-  if (place === null)
+  const place2 = placeOfEntity(ctx.state, pov);
+  if (place2 === null)
     return reject15("nowhere", "there's nowhere to fight");
   if (!canFight(ctx, rules, pov))
     return reject15("cannot_fight", "you can't fight here");
-  const here = Object.keys(ctx.state.entities).sort().filter((id) => id !== pov && placeOfEntity(ctx.state, id) === place && canFight(ctx, rules, id));
+  const here = Object.keys(ctx.state.entities).sort().filter((id) => id !== pov && placeOfEntity(ctx.state, id) === place2 && canFight(ctx, rules, id));
   const named = namedFoes(ctx, a.foes, here);
   if (named !== null && !Array.isArray(named))
     return named;
@@ -33465,7 +34305,7 @@ function startFight(a, ctx) {
   }
   rolled.sort((x, y) => y.init - x.init || y.tie - x.tie || Number(y.id === pov) - Number(x.id === pov) || Number(y.side === "party") - Number(x.side === "party") || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
   const order = rolled.map((r) => ({ id: r.id, side: r.side, init: r.init, left: fullEconomy(ctx, rules, r.id) }));
-  return [{ type: "combat.start", data: { encounter: hashParts(ctx.rng.seed, "encounter").slice(0, 12), place, order } }];
+  return [{ type: "combat.start", data: { encounter: hashParts(ctx.rng.seed, "encounter").slice(0, 12), place: place2, order } }];
 }
 function describeSide(e, side) {
   const order = Array.isArray(e.data.order) ? e.data.order : [];
@@ -33907,7 +34747,7 @@ function noteOf(v) {
 function commitmentOf(v) {
   return { id: v.id, kind: v.kind, with: [...v.with], text: v.text, due: v.due, status: v.status, made: v.made, closed: v.closed };
 }
-function person(ctx, data) {
+function person3(ctx, data) {
   return str13(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: "a minds event names someone who isn't in the world" };
 }
 function fidelityWords(level) {
@@ -33938,8 +34778,8 @@ var round = {
   describe: (e, _ctx, viewer) => viewer !== undefined ? "" : e.data.on === true ? "A round of character minds ran" : "Character minds are switched off"
 };
 function validMind(data) {
-  const { at, place, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
-  if (!finite2(at) || !(place === null || str13(place)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str13(reason))
+  const { at, place: place2, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
+  if (!finite2(at) || !(place2 === null || str13(place2)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str13(reason))
     return bad("a mind needs its clock, place, level, moment and reason");
   if (!str13(monologue) || !str13(depiction) || !str13(intent) || !texts(reactions) || plans !== undefined && (!Array.isArray(plans) || !plans.every((p) => isPlan(p))))
     return bad("a mind needs its monologue, depiction, intent and reactions, and any plans it carries well formed");
@@ -33949,7 +34789,7 @@ function validMind(data) {
 }
 var mind = {
   type: MINDS_EVENTS.mind,
-  validate: (e, ctx) => person(ctx, e.data) ?? validMind(e.data),
+  validate: (e, ctx) => person3(ctx, e.data) ?? validMind(e.data),
   apply: (e, state2) => {
     const d = e.data;
     if (!str13(d.entity))
@@ -33992,7 +34832,7 @@ function validMemory(data) {
 }
 var memory = {
   type: MINDS_EVENTS.memory,
-  validate: (e, ctx) => person(ctx, e.data) ?? validMemory(e.data),
+  validate: (e, ctx) => person3(ctx, e.data) ?? validMemory(e.data),
   apply: (e, state2, ctx) => {
     const d = e.data;
     if (!str13(d.entity))
@@ -34040,10 +34880,10 @@ var presence = {
   apply: (e, state2) => {
     const d = e.data;
     const at = finite2(d.at) ? d.at : state2.clock;
-    const place = str13(d.place) ? d.place : null;
+    const place2 = str13(d.place) ? d.place : null;
     const who = ids(d.who) ? d.who.filter((id) => own(state2.entities, id)) : [];
     const s = writeSlice(state2);
-    s.presence.push({ msg: str13(d.msg) ? d.msg : null, at, place, who: [...who] });
+    s.presence.push({ msg: str13(d.msg) ? d.msg : null, at, place: place2, who: [...who] });
     if (s.presence.length > MINDS_KEEP.presence)
       s.presence.splice(0, s.presence.length - MINDS_KEEP.presence);
     const saw = texts(d.saw) ? d.saw : [];
@@ -34051,7 +34891,7 @@ var presence = {
       const c = writeCharacter(state2, id);
       c.lastPresent = at;
       for (const what of saw)
-        addWitness(c, { at, what, how: "saw", by: null, place });
+        addWitness(c, { at, what, how: "saw", by: null, place: place2 });
     }
   },
   describe: (e, ctx, viewer) => {
@@ -34067,7 +34907,7 @@ var planStatus = {
     const d = e.data;
     if (!str13(d.plan) || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str13(d.reason)))
       return bad("a plan's status needs the plan, a status, its clock and a reason or null");
-    const missing = person(ctx, d);
+    const missing = person3(ctx, d);
     if (missing)
       return missing;
     return readCharacter(ctx.state, String(d.entity)).plans.some((p) => p.id === d.plan) ? null : { code: "missing_plan", reason: "that plan isn't theirs any more" };
@@ -34093,7 +34933,7 @@ function editDef(type, key, valid, list, put, remove) {
     type,
     validate: (e, ctx) => {
       const d = e.data;
-      const missing = person(ctx, d);
+      const missing = person3(ctx, d);
       if (missing)
         return missing;
       const id = d[key];
@@ -34138,7 +34978,7 @@ var commitmentStatus = {
     const d = e.data;
     if (!str13(d.commitment) || typeof d.status !== "string" || !COMMITMENT_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str13(d.reason)))
       return bad("a commitment's status needs the commitment, a status, its clock and a reason or null");
-    const missing = person(ctx, d);
+    const missing = person3(ctx, d);
     if (missing)
       return missing;
     return readCharacter(ctx.state, String(d.entity)).commitments.some((x) => x.id === d.commitment) ? null : { code: "missing_commitment", reason: "that commitment isn't theirs any more" };
@@ -34156,7 +34996,7 @@ var commitmentStatus = {
 };
 var consolidated = {
   type: MINDS_EVENTS.consolidated,
-  validate: (e, ctx) => person(ctx, e.data) ?? (finite2(e.data.at) && ids(e.data.notes) && str13(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
+  validate: (e, ctx) => person3(ctx, e.data) ?? (finite2(e.data.at) && ids(e.data.notes) && str13(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
   apply: (e, state2) => {
     const d = e.data;
     const c = writeCharacter(state2, String(d.entity));
@@ -34170,7 +35010,7 @@ var consolidated = {
 };
 var pin = {
   type: MINDS_EVENTS.pin,
-  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.level === null || isFidelity(e.data.level) ? null : bad("a pin is a fidelity level or null")),
+  validate: (e, ctx) => person3(ctx, e.data) ?? (e.data.level === null || isFidelity(e.data.level) ? null : bad("a pin is a fidelity level or null")),
   apply: (e, state2) => {
     writeCharacter(state2, String(e.data.entity)).pin = isFidelity(e.data.level) ? e.data.level : null;
   },
@@ -34178,7 +35018,7 @@ var pin = {
 };
 var refresh = {
   type: MINDS_EVENTS.refresh,
-  validate: (e, ctx) => person(ctx, e.data),
+  validate: (e, ctx) => person3(ctx, e.data),
   apply: (e, state2) => {
     writeCharacter(state2, String(e.data.entity)).refresh = true;
   },
@@ -34192,7 +35032,7 @@ function isIntent(v) {
 }
 var intent = {
   type: MINDS_EVENTS.intent,
-  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.intent === null || isIntent(e.data.intent) ? null : bad("an intent is its text, its approach or both, or null to clear it")),
+  validate: (e, ctx) => person3(ctx, e.data) ?? (e.data.intent === null || isIntent(e.data.intent) ? null : bad("an intent is its text, its approach or both, or null to clear it")),
   apply: (e, state2) => {
     const c = writeCharacter(state2, String(e.data.entity));
     const v = e.data.intent;
@@ -34729,10 +35569,10 @@ ${texts2.reply}`);
       continue;
     const reasons = [];
     let score = 0;
-    const place = placeOfEntity(state2, id);
-    if (here !== null && place === here)
+    const place2 = placeOfEntity(state2, id);
+    if (here !== null && place2 === here)
       score += reason(reasons, "In the scene", w.here);
-    else if (closeBy(world, place, here))
+    else if (closeBy(world, place2, here))
       score += reason(reasons, "Close by", w.nearby);
     if (namedIn(e.name, said3))
       score += reason(reasons, "Named this turn", w.mentioned);
@@ -34771,7 +35611,7 @@ ${texts2.reply}`);
     const always = config3.always !== null && selectorMatches(reg, world, state2, config3.always, id);
     const author = never ? "background" : always ? "live" : null;
     const t = config3.thresholds;
-    const atHand = here !== null && place === here || namedIn(e.name, said3);
+    const atHand = here !== null && place2 === here || namedIn(e.name, said3);
     const scored = score >= t.live ? atHand ? "live" : "near" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
     if (score >= t.live && !atHand)
       reasons.push({ label: "Not at hand, so Near at most", points: 0 });
@@ -34892,8 +35732,8 @@ function worldSecrets(ctx) {
     if (ref?.kind === "wi")
       return true;
     if (ref?.kind === "lore") {
-      const lore = own(ctx.world.lore, ref.lore);
-      return lore !== undefined && loreIsSecret(lore) && !open(lore);
+      const lore2 = own(ctx.world.lore, ref.lore);
+      return lore2 !== undefined && loreIsSecret(lore2) && !open(lore2);
     }
     if (ref?.kind === "track")
       return !!own(ctx.world.tracks, ref.track)?.stages[ref.stage]?.truth && !(own(revealed, ref.track) ?? []).includes(ref.stage);
@@ -34911,9 +35751,9 @@ function knowledgeLines(ctx, scope) {
   const threshold2 = knowledgeThreshold(slice2);
   const words4 = { texts: settings, threshold: threshold2, nameOf: name };
   const people = presentPeople(ctx);
-  const place = placeOfEntity(state2, pov);
+  const place2 = placeOfEntity(state2, pov);
   const secret = worldSecrets(ctx);
-  const play = { here: [pov, ...people, ...place ? [place] : []], recent: latestTurns(slice2, settings.inPlayTurns), secret };
+  const play = { here: [pov, ...people, ...place2 ? [place2] : []], recent: latestTurns(slice2, settings.inPlayTurns), secret };
   const claim2 = (fact, id) => applyMarks(fact?.claim ?? id, { world, state: state2 }, "omit");
   const others = scope === "player" ? [] : people;
   const listed2 = [pov, ...others].flatMap((who) => rankedHoldings(slice2, who, play).slice(0, settings.perPerson).map((h) => ({ who, h })));
@@ -34994,8 +35834,8 @@ function configIssues(world, registry) {
   if (raw === undefined)
     return [];
   const out = [];
-  const err = (path, message) => void out.push({ severity: "error", path, code: "minds.config", message });
-  const warn = (path, message) => void out.push({ severity: "warning", path, code: "minds.config", message });
+  const err = (path2, message) => void out.push({ severity: "error", path: path2, code: "minds.config", message });
+  const warn = (path2, message) => void out.push({ severity: "warning", path: path2, code: "minds.config", message });
   if (!isRecord(raw)) {
     err("minds", "The minds config is an object (secrecy, weights, thresholds, always, never, memory, holdings); the defaults play instead.");
     return out;
@@ -35005,11 +35845,11 @@ function configIssues(world, registry) {
       warn(`minds.${key}`, `"${key}" isn't part of the minds config; nothing reads it.`);
   if (raw.secrecy !== undefined && raw.secrecy !== "full" && raw.secrecy !== "brief")
     err("minds.secrecy", 'Secrecy is "full" (the narrator gets each mind to depict) or "brief" (a leak-checked depiction only); "full", the default, plays instead.');
-  const number = (path, v, [lo, hi], whole4) => {
+  const number = (path2, v, [lo, hi], whole4) => {
     if (v === undefined)
       return;
     if (typeof v !== "number" || !Number.isFinite(v) || v < lo || v > hi || whole4 && !Number.isInteger(v))
-      err(path, `${whole4 ? "A whole number" : "A number"} from ${lo} to ${hi}; the default plays instead.`);
+      err(path2, `${whole4 ? "A whole number" : "A number"} from ${lo} to ${hi}; the default plays instead.`);
   };
   const weights = raw.weights;
   if (weights !== undefined && !isRecord(weights))
@@ -35079,14 +35919,14 @@ function configIssues(world, registry) {
         continue;
       }
       for (const [key, v] of Object.entries(fields)) {
-        const field = hasOwn(spec, key) ? spec[key] : undefined;
-        if (!field)
+        const field2 = hasOwn(spec, key) ? spec[key] : undefined;
+        if (!field2)
           warn(`minds.memory.${part}.${key}`, `"${key}" isn't a ${part} setting; nothing reads it.`);
-        else if (field === "bool") {
+        else if (field2 === "bool") {
           if (typeof v !== "boolean")
             err(`minds.memory.${part}.${key}`, "On (true) or off (false); the default plays instead.");
-        } else if (!(field.none && v === "none"))
-          number(`minds.memory.${part}.${key}`, v, field.range, field.whole);
+        } else if (!(field2.none && v === "none"))
+          number(`minds.memory.${part}.${key}`, v, field2.range, field2.whole);
       }
     }
   }
@@ -35096,10 +35936,10 @@ function missingRef(world, registry, ref) {
   if (ref.kind === "lore")
     return hasOwn(world.lore, ref.lore) ? null : `The world has no lore entry "${ref.lore}".`;
   if (ref.kind === "track") {
-    const track = hasOwn(world.tracks, ref.track) ? world.tracks[ref.track] : undefined;
-    if (!track)
+    const track2 = hasOwn(world.tracks, ref.track) ? world.tracks[ref.track] : undefined;
+    if (!track2)
       return `The world has no track "${ref.track}".`;
-    return hasOwn(track.stages, ref.stage) ? null : `The track "${track.label}" has no stage "${ref.stage}".`;
+    return hasOwn(track2.stages, ref.stage) ? null : `The track "${track2.label}" has no stage "${ref.stage}".`;
   }
   if (ref.kind === "field") {
     const e = hasOwn(world.entities, ref.entity) ? world.entities[ref.entity] : undefined;
@@ -35114,13 +35954,13 @@ function holdingIssues(world, raw, registry) {
   if (raw === undefined)
     return [];
   const out = [];
-  const err = (path, message) => void out.push({ severity: "error", path, code: "minds.holdings", message });
-  const warn = (path, message) => void out.push({ severity: "warning", path, code: "minds.holdings", message });
+  const err = (path2, message) => void out.push({ severity: "error", path: path2, code: "minds.holdings", message });
+  const warn = (path2, message) => void out.push({ severity: "warning", path: path2, code: "minds.holdings", message });
   if (!isRecord(raw)) {
     err("minds.holdings", "What people hold from the start is an object of facts by person; no one holds anything from the start instead.");
     return out;
   }
-  const person2 = (id) => {
+  const person4 = (id) => {
     const e = hasOwn(world.entities, id) ? world.entities[id] : undefined;
     return e !== undefined && (registry === undefined || kindIs(registry, world, e.kind, "person"));
   };
@@ -35128,45 +35968,45 @@ function holdingIssues(world, raw, registry) {
     const at = `minds.holdings.${who}`;
     if (!hasOwn(world.entities, who))
       err(at, `The world has no one "${who}", so these holdings are never read.`);
-    else if (!person2(who))
+    else if (!person4(who))
       err(at, `${world.entities[who]?.name ?? who} isn't a person, so these holdings are never read.`);
     if (!isRecord(facts)) {
       err(at, "Each person's holdings are an object of facts by id; they hold nothing from the start instead.");
       continue;
     }
     for (const [fact, v] of Object.entries(facts)) {
-      const path = `${at}.${fact}`;
+      const path2 = `${at}.${fact}`;
       const ref = parseFactId(fact);
       if (!ref || !AUTHORED_FACT_KINDS.includes(ref.kind)) {
-        err(path, "A fact held from the start is lore:<entry>, track:<track>:<stage> or field:<entity>:<field>; this one is left out.");
+        err(path2, "A fact held from the start is lore:<entry>, track:<track>:<stage> or field:<entity>:<field>; this one is left out.");
         continue;
       }
       const missing = missingRef(world, registry, ref);
       if (missing)
-        warn(path, `${missing} The holding seeds a fact nothing refers to.`);
+        warn(path2, `${missing} The holding seeds a fact nothing refers to.`);
       if (!isRecord(v)) {
-        err(path, "A holding is an object (belief, confidence, keptFrom); this one is left out.");
+        err(path2, "A holding is an object (belief, confidence, keptFrom); this one is left out.");
         continue;
       }
       for (const key of Object.keys(v))
         if (key !== "belief" && key !== "confidence" && key !== "keptFrom")
-          warn(`${path}.${key}`, `"${key}" isn't part of a holding; nothing reads it.`);
+          warn(`${path2}.${key}`, `"${key}" isn't part of a holding; nothing reads it.`);
       if (v.belief !== undefined && !HOLDING_BELIEFS.includes(v.belief))
-        err(`${path}.belief`, 'A belief is "true", "false" or "uncertain"; "true" plays instead.');
+        err(`${path2}.belief`, 'A belief is "true", "false" or "uncertain"; "true" plays instead.');
       if (v.confidence !== undefined && !isConfidence(v.confidence))
-        err(`${path}.confidence`, "A confidence is a number from 0 to 1; 1 plays instead.");
+        err(`${path2}.confidence`, "A confidence is a number from 0 to 1; 1 plays instead.");
       const kept2 = v.keptFrom;
       if (kept2 === undefined || kept2 === "everyone")
         continue;
       if (!Array.isArray(kept2) || !kept2.every((id) => typeof id === "string")) {
-        err(`${path}.keptFrom`, 'Whom it is kept from is "everyone" or a list of people; it is kept from no one instead.');
+        err(`${path2}.keptFrom`, 'Whom it is kept from is "everyone" or a list of people; it is kept from no one instead.');
         continue;
       }
       for (const id of kept2) {
         if (id === who)
-          warn(`${path}.keptFrom`, "No one keeps a fact from themselves; that name is passed over.");
-        else if (!person2(id))
-          err(`${path}.keptFrom`, `"${id}" isn't a person in the world; that name is passed over.`);
+          warn(`${path2}.keptFrom`, "No one keeps a fact from themselves; that name is passed over.");
+        else if (!person4(id))
+          err(`${path2}.keptFrom`, `"${id}" isn't a person in the world; that name is passed over.`);
       }
     }
   }
@@ -61340,12 +62180,12 @@ function fieldChanges(before, after, base, limit) {
     else
       more++;
   };
-  const walk2 = (a, b, path) => {
+  const walk2 = (a, b, path2) => {
     if (jsonEqual(a, b))
       return;
     if (isRecord(a) && isRecord(b)) {
       for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-        const at = `${path}${pointerOf([key])}`;
+        const at = `${path2}${pointerOf([key])}`;
         if (!hasOwn(a, key))
           note({ path: at, kind: "added", to: shown3(b[key]) });
         else if (!hasOwn(b, key))
@@ -61356,10 +62196,10 @@ function fieldChanges(before, after, base, limit) {
       return;
     }
     if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
-      a.forEach((v, i) => walk2(v, b[i], `${path}/${i}`));
+      a.forEach((v, i) => walk2(v, b[i], `${path2}/${i}`));
       return;
     }
-    note({ path, kind: "changed", from: shown3(a), to: shown3(b) });
+    note({ path: path2, kind: "changed", from: shown3(a), to: shown3(b) });
   };
   walk2(before, after, base);
   return { changes, more };
@@ -61413,8 +62253,8 @@ function sectionTemplateProblem(text5) {
 // src/engine/lore-lint.ts
 function lintLore(world) {
   const issues = [];
-  const push = (severity, path, code, message) => {
-    issues.push({ severity, path, code, message });
+  const push = (severity, path2, code, message) => {
+    issues.push({ severity, path: path2, code, message });
   };
   const truths = [];
   for (const t of Object.values(world.tracks))
@@ -61469,29 +62309,29 @@ function lintLore(world) {
     }
   }
   for (const [term, raw] of Object.entries(world.loreIndex.terms)) {
-    const path = `loreIndex.terms.${term}`;
+    const path2 = `loreIndex.terms.${term}`;
     const entries2 = ids2(raw);
     const matched = loreTerm(term);
     if (matched === "")
-      push("warning", path, "empty_term", "a blank term matches nothing");
+      push("warning", path2, "empty_term", "a blank term matches nothing");
     else if (matched !== term)
-      push("warning", path, "term_case", `lookups match this term as "${matched}"`);
+      push("warning", path2, "term_case", `lookups match this term as "${matched}"`);
     if (entries2.length === 0)
-      push("warning", path, "empty_term", `"${term}" leads to no entry`);
+      push("warning", path2, "empty_term", `"${term}" leads to no entry`);
     for (const id of entries2)
       if (!hasOwn(world.lore, id))
-        push("warning", path, "missing_ref", `"${id}" is not a lore entry`);
+        push("warning", path2, "missing_ref", `"${id}" is not a lore entry`);
     const elsewhere = [...new Set(aliases.get(matched) ?? [])].filter((id) => !entries2.includes(id));
     if (elsewhere.length > 0)
-      push("warning", path, "alias_elsewhere", `"${term}" is an alias of ${elsewhere.map((id) => `"${world.lore[id]?.title ?? id}"`).join(", ")}, but the term doesn't lead there`);
+      push("warning", path2, "alias_elsewhere", `"${term}" is an alias of ${elsewhere.map((id) => `"${world.lore[id]?.title ?? id}"`).join(", ")}, but the term doesn't lead there`);
   }
   for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
-    const path = `loreIndex.topics.${id}`;
+    const path2 = `loreIndex.topics.${id}`;
     if (typeof topic.label !== "string" || topic.label.trim() === "")
-      push("warning", path, "topic_label", "the topic needs a label");
+      push("warning", path2, "topic_label", "the topic needs a label");
     for (const entry of ids2(topic.entries))
       if (!hasOwn(world.lore, entry))
-        push("warning", path, "missing_ref", `"${entry}" is not a lore entry`);
+        push("warning", path2, "missing_ref", `"${entry}" is not a lore entry`);
   }
   issues.push(...lintLorePins(world));
   issues.push(...lintLoreBooks(world));
@@ -61520,8 +62360,8 @@ function lintLorePins(world) {
   if (raw === undefined)
     return [];
   const issues = [];
-  const push = (severity, path, code, message) => {
-    issues.push({ severity, path, code, message });
+  const push = (severity, path2, code, message) => {
+    issues.push({ severity, path: path2, code, message });
   };
   if (!isRecord(raw))
     return [{ severity: "error", path: "lorePins", code: "pin_shape", message: "Lore pins are an object of characters, places and steps; none are read." }];
@@ -61537,36 +62377,36 @@ function lintLorePins(world) {
       continue;
     }
     for (const [id, list] of Object.entries(targets)) {
-      const path = `lorePins.${part}.${id}`;
+      const path2 = `lorePins.${part}.${id}`;
       const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : part === "places" ? hasOwn(world.places, id) ? world.places[id]?.name : undefined : hasOwn(STEP_OUTPUTS, id) ? id : undefined;
       if (name === undefined)
-        push("warning", path, "pin_target", part === "steps" ? `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
+        push("warning", path2, "pin_target", part === "steps" ? `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
       if (!Array.isArray(list)) {
-        push("error", path, "pin_shape", "The pins are a list; none are read.");
+        push("error", path2, "pin_shape", "The pins are a list; none are read.");
         continue;
       }
       const seen = new Set;
       for (const [i, pin2] of list.entries()) {
         if (!isLorePin(pin2)) {
-          push("error", path, "pin_shape", `Pin ${i + 1} is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}, so it is ignored.`);
+          push("error", path2, "pin_shape", `Pin ${i + 1} is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}, so it is ignored.`);
           continue;
         }
         const key = lorePinKey(pin2);
         if (seen.has(key))
-          push("warning", path, "pin_duplicate", `${"lore" in pin2 ? `"${pin2.lore}"` : ("entry" in pin2) ? "A book entry" : "A book"} is pinned here twice; it is read once.`);
+          push("warning", path2, "pin_duplicate", `${"lore" in pin2 ? `"${pin2.lore}"` : ("entry" in pin2) ? "A book entry" : "A book"} is pinned here twice; it is read once.`);
         seen.add(key);
         if (!("lore" in pin2))
           continue;
         const entry = hasOwn(world.lore, pin2.lore) ? world.lore[pin2.lore] : undefined;
         if (!entry) {
-          push("warning", path, "pin_missing", `"${pin2.lore}" is not a lore entry, so nothing is pinned.`);
+          push("warning", path2, "pin_missing", `"${pin2.lore}" is not a lore entry, so nothing is pinned.`);
           continue;
         }
         const source = loreSourceOf(entry.source);
         if (source.kind === "ai" && source.status === "pending")
-          push("warning", path, "pin_pending", `"${entry.title}" was written by an indexing job and isn't reviewed yet; no call reads it until it is.`);
+          push("warning", path2, "pin_pending", `"${entry.title}" was written by an indexing job and isn't reviewed yet; no call reads it until it is.`);
         if (part === "characters" && name !== undefined && loreIsSecret(entry) && !loreHeldBy(world, entry, id))
-          push("warning", path, "pin_unread", `"${entry.title}" is a secret that isn't ${name}'s own, so their mind never reads it; name them among its holders, or pin something else.`);
+          push("warning", path2, "pin_unread", `"${entry.title}" is a secret that isn't ${name}'s own, so their mind never reads it; name them among its holders, or pin something else.`);
       }
     }
   }
@@ -61626,8 +62466,8 @@ function overlayOf(reg, world, kind) {
 }
 function lintStructure(world, reg) {
   const issues = [];
-  const err = (path, code, message) => void issues.push({ severity: "error", path, code, message });
-  const warn = (path, code, message) => void issues.push({ severity: "warning", path, code, message });
+  const err = (path2, code, message) => void issues.push({ severity: "error", path: path2, code, message });
+  const warn = (path2, code, message) => void issues.push({ severity: "warning", path: path2, code, message });
   const known = (id) => !!own(world.entities, id) || !!own(world.places, id);
   const typed = new Map;
   for (const [id, e] of Object.entries(world.entities)) {
@@ -61682,10 +62522,10 @@ function lintStructure(world, reg) {
           err(at, "refs", `${a.label}'s ${p.label ?? name} names rows of the data table "${p.table}", which this world doesn't have.`);
       }
       if (p.claim !== undefined) {
-        const place = p.claim;
+        const place2 = p.claim;
         const at = `actions.${id}.params.${name}.claim`;
-        if (place !== "held" && place !== "here")
-          err(at, "claims", `${a.label}'s ${p.label ?? name} says a claimed thing appears "${String(place)}"; it should be "held" (in the actor's hands) or "here" (where the actor is).`);
+        if (place2 !== "held" && place2 !== "here")
+          err(at, "claims", `${a.label}'s ${p.label ?? name} says a claimed thing appears "${String(place2)}"; it should be "held" (in the actor's hands) or "here" (where the actor is).`);
         else if (p.type !== "ref")
           warn(at, "claims", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so no claimed thing ever fills it.`);
       }
@@ -61707,12 +62547,12 @@ function lintStructure(world, reg) {
       continue;
     const packFields = new Map;
     for (let cur = pack, guard = 0;cur && guard < 32; cur = cur.extends ? reg.kinds.get(cur.extends) : undefined, guard++) {
-      for (const [field, def] of Object.entries(cur.fields))
-        if (!packFields.has(field))
-          packFields.set(field, def);
+      for (const [field2, def] of Object.entries(cur.fields))
+        if (!packFields.has(field2))
+          packFields.set(field2, def);
     }
     const kept2 = kindFields(reg, world, id);
-    const lost = [...packFields].filter(([field]) => !hasOwn(kept2, field)).map(([field, def]) => def.label ?? field);
+    const lost = [...packFields].filter(([field2]) => !hasOwn(kept2, field2)).map(([field2, def]) => def.label ?? field2);
     if (lost.length > 0)
       warn(`kinds.${id}`, "kind_shadow", `Kind ${k.label} (${id}) lies over the ${pack.pack ?? "engine"} pack's ${pack.label} but builds on ${k.extends || "nothing"} instead of ${pack.extends ?? "nothing"}, so it and every kind built on it lose ${lost.length} of that kind's fields (${lost.slice(0, 6).join(", ")}${lost.length > 6 ? ", …" : ""}): forms show those values as untyped text and the levels that gate them no longer apply. ${pack.extends ? `Set its Extends back to ${pack.extends}` : "Clear its Extends"}, or give the kind its own id.`);
   }
@@ -61721,17 +62561,17 @@ function lintStructure(world, reg) {
       err(`classifications.${id}.id`, "id_mismatch", "the id must match its key");
     const values = isRecord(f.values) ? f.values : {};
     for (const [vid, v] of Object.entries(values)) {
-      const path = `classifications.${id}.values.${vid}.parent`;
+      const path2 = `classifications.${id}.values.${vid}.parent`;
       if (v.parent === undefined)
         continue;
       if (!hasOwn(values, v.parent)) {
-        err(path, "refs", `${f.label}: "${v.label}" nests under "${v.parent}", which isn't one of its values.`);
+        err(path2, "refs", `${f.label}: "${v.label}" nests under "${v.parent}", which isn't one of its values.`);
         continue;
       }
       let cur = v.parent;
       for (let guard = 0;cur !== undefined && guard < 64; guard++) {
         if (cur === vid) {
-          err(path, "cycles", `${f.label}: "${v.label}" nests under itself.`);
+          err(path2, "cycles", `${f.label}: "${v.label}" nests under itself.`);
           break;
         }
         cur = own(values, cur)?.parent;
@@ -61786,21 +62626,21 @@ function lintStructure(world, reg) {
       if (key !== "knowledge" && key !== "secrets")
         warn(`narrator.${key}`, "narrator_key", `The narrator's knowledge has no part "${key}", only knowledge and secrets; it is ignored.`);
   }
-  for (const { path, effects } of effectLists(world)) {
+  for (const { path: path2, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       if (spec.type !== "spawn")
         return;
       const tier = spec.args.tier;
       if (typeof tier === "string" && !tierOf(world, tier))
-        warn(`${path}.${i}`, "unknown_tier", `A spawn in ${path} names tier "${tier}", which isn't one of the world's tiers; it gets the spawn tier instead.`);
+        warn(`${path2}.${i}`, "unknown_tier", `A spawn in ${path2} names tier "${tier}", which isn't one of the world's tiers; it gets the spawn tier instead.`);
       const raw = spec.args.class;
       if (raw === undefined || isRecord(raw) && Object.values(raw).some((v) => typeof v === "string" && v.startsWith("=")))
         return;
       const classes = classOf(raw);
-      const who = `A spawn in ${path}`;
+      const who = `A spawn in ${path2}`;
       const problems = classes ? classProblems(world, classes, who) : [{ code: "unknown_facet", message: `${who} gives a class that isn't a facet → values map.` }];
       for (const p of problems)
-        warn(`${path}.${i}`, p.code, `${p.message} The spawn is refused.`);
+        warn(`${path2}.${i}`, p.code, `${p.message} The spawn is refused.`);
     });
   }
   for (const [id, def] of Object.entries(isRecord(world.lifeStates) ? world.lifeStates : {})) {
@@ -61824,11 +62664,11 @@ function lintStructure(world, reg) {
   const downLife = world.ruleset?.combat?.down?.life;
   if (downLife !== undefined && (typeof downLife !== "string" || !isLifeState(world, downLife)))
     err("ruleset.combat.down.life", "unknown_life", `Combat's down rule names life state "${String(downLife)}", which isn't one of the world's.`);
-  for (const { path, effects } of effectLists(world)) {
+  for (const { path: path2, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       const to = spec.args.to;
       if (spec.type === "life" && typeof to === "string" && !to.startsWith("=") && !isLifeState(world, to))
-        warn(`${path}.${i}`, "unknown_life", `A life change in ${path} names life state "${to}", which isn't one of the world's; it is refused.`);
+        warn(`${path2}.${i}`, "unknown_life", `A life change in ${path2} names life state "${to}", which isn't one of the world's; it is refused.`);
     });
   }
   for (const [id, t] of Object.entries(world.tracks)) {
@@ -61903,7 +62743,7 @@ function lintStructure(world, reg) {
       if (!own(world.entities, id))
         err(`${s.path}.knownBy`, "refs", `${s.what}'s Known by names "${id}", which isn't in the world.`);
   }
-  for (const { path, effects } of effectLists(world)) {
+  for (const { path: path2, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       if (spec.type !== "post" || !Array.isArray(spec.args.lines))
         return;
@@ -61912,7 +62752,7 @@ function lintStructure(world, reg) {
         return;
       const sum = amounts.reduce((a, b) => a + (b ?? 0), 0);
       if (sum !== 0)
-        err(`${path}.${i}`, "unbalanced_posting", `A posting in ${path} doesn't balance (it sums to ${sum}).`);
+        err(`${path2}.${i}`, "unbalanced_posting", `A posting in ${path2} doesn't balance (it sums to ${sum}).`);
     });
   }
   for (const domain of DOMAINS) {
@@ -62293,15 +63133,15 @@ function billFlows(doc, owner, taken) {
   }
   return out;
 }
-function jobOf(doc, person2, taken) {
-  const f = person2.fields;
+function jobOf(doc, person4, taken) {
+  const f = person4.fields;
   const occupation = typeof f.occupation === "string" ? f.occupation : "";
   const hourly = typeof f.hourly_cents === "number" && f.hourly_cents > 0 ? f.hourly_cents : null;
   const salary = typeof f.salary_cents === "number" ? f.salary_cents : typeof f.annual_income_cents === "number" ? f.annual_income_cents : null;
   if (occupation === "retired" || occupation === "" && hourly === null && salary === null)
     return null;
   const employer = typeof f.employer === "string" && f.employer !== "" ? f.employer : occupation !== "" ? occupation.replace(/_/g, " ") : "Employer";
-  const job = { worker: person2.id, employer, ...occupation !== "" ? { occupation } : {}, status: "active" };
+  const job = { worker: person4.id, employer, ...occupation !== "" ? { occupation } : {}, status: "active" };
   if (hourly !== null) {
     job.basis = "hourly";
     job.rate = hourly;
@@ -62326,7 +63166,7 @@ function jobOf(doc, person2, taken) {
     job.splits = [{ to: f.deposit_to, pct: 100 }];
   if (typeof f.shift_pattern === "string")
     job.shift_pattern = f.shift_pattern;
-  return { id: freeId(doc, taken, `job_${person2.id}`), kind: "job", name: `${person2.name}'s work`, tier: "background", fields: job, relations: [] };
+  return { id: freeId(doc, taken, `job_${person4.id}`), kind: "job", name: `${person4.name}'s work`, tier: "background", fields: job, relations: [] };
 }
 function holdingId(account2, asset) {
   return `${account2}:${asset}`;
@@ -62360,16 +63200,16 @@ function migrateMoney(doc) {
     }
     if (Array.isArray(e.fields.bills))
       added.push(...billFlows(doc, e, taken));
-    const person2 = isPerson2(doc, e.kind);
-    if (person2 && !employed.has(id) && (typeof e.fields.occupation === "string" || PAYROLL.some((k) => e.fields[k] !== undefined))) {
+    const person4 = isPerson2(doc, e.kind);
+    if (person4 && !employed.has(id) && (typeof e.fields.occupation === "string" || PAYROLL.some((k) => e.fields[k] !== undefined))) {
       const job = jobOf(doc, e, taken);
       if (job)
         added.push(job);
     }
-    if (Array.isArray(e.fields.bills) || person2 && PAYROLL.some((k) => e.fields[k] !== undefined)) {
+    if (Array.isArray(e.fields.bills) || person4 && PAYROLL.some((k) => e.fields[k] !== undefined)) {
       const fields = { ...next.fields };
       delete fields.bills;
-      if (person2)
+      if (person4)
         for (const k of PAYROLL)
           delete fields[k];
       next = { ...next, fields };
@@ -62398,8 +63238,8 @@ var PARTS2 = ["pins", "calendar", "realism", "time", "start"];
 var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins", "routineSettings", "sectionTemplates", "narrator"];
 function shapeIssues(doc) {
   const issues = [];
-  const err = (path, message) => {
-    issues.push({ severity: "error", path, code: "shape", message });
+  const err = (path2, message) => {
+    issues.push({ severity: "error", path: path2, code: "shape", message });
   };
   if (!isRecord(doc))
     return [{ severity: "error", path: "", code: "shape", message: "not a JSON object" }];
@@ -62453,7 +63293,7 @@ var RETIRED_PURPOSES = ["select", "contradiction"];
 function migrateWorld(stored) {
   const doc = migrateMoney(stored);
   const currency = doc.currency;
-  const lore = doc.lore;
+  const lore2 = doc.lore;
   const loreIndex = doc.loreIndex;
   const indexed = isRecord(loreIndex) && isRecord(loreIndex.terms) && isRecord(loreIndex.topics);
   const classifications = doc.classifications;
@@ -62464,7 +63304,7 @@ function migrateWorld(stored) {
   const retiredPurpose = (purpose) => typeof purpose === "string" && RETIRED_PURPOSES.includes(purpose);
   const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => isRecord(t) && retiredPurpose(t.purpose) ? [id] : []) : [];
   const resignaled = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => isRecord(t) && !retiredPurpose(t.purpose) && Array.isArray(t.signals) && hasRetiredSignal(t.signals.filter((s) => typeof s === "string")) ? [id] : []) : [];
-  const readers = isRecord(lore) ? Object.entries(lore).flatMap(([id, l]) => isRecord(l) && Array.isArray(l.audience) && l.audience.some(retiredPurpose) ? [id] : []) : [];
+  const readers = isRecord(lore2) ? Object.entries(lore2).flatMap(([id, l]) => isRecord(l) && Array.isArray(l.audience) && l.audience.some(retiredPurpose) ? [id] : []) : [];
   const lorePins = doc.lorePins;
   const pinned = isRecord(lorePins) && isRecord(lorePins.steps) && Object.keys(lorePins.steps).some(retiredPurpose);
   const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
@@ -62472,9 +63312,9 @@ function migrateWorld(stored) {
   const economy = isRecord(doc.packs) ? doc.packs.economy : undefined;
   const config3 = isRecord(economy) && isRecord(economy.config) ? economy.config : null;
   const oldCap = config3 !== null && "unpricedCapCents" in config3;
-  if (isCurrency(currency) && isRecord(lore) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && resignaled.length === 0 && readers.length === 0 && !pinned && !legacyPov && !oldCap)
+  if (isCurrency(currency) && isRecord(lore2) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && resignaled.length === 0 && readers.length === 0 && !pinned && !legacyPov && !oldCap)
     return compileMaps(doc);
-  const out = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, maps: isRecord(maps) ? doc.maps : {}, tiers };
+  const out = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore2) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, maps: isRecord(maps) ? doc.maps : {}, tiers };
   if (!indexed)
     out.loreIndex = { terms: isRecord(loreIndex) && isRecord(loreIndex.terms) ? doc.loreIndex.terms : {}, topics: isRecord(loreIndex) && isRecord(loreIndex.topics) ? doc.loreIndex.topics : {} };
   if (retired.length > 0 || resignaled.length > 0) {
@@ -62525,8 +63365,8 @@ function softLocks(id, action) {
 }
 function lintWorld(world, registry) {
   const issues = [];
-  const err = (path, code, message) => {
-    issues.push({ severity: "error", path, code, message });
+  const err = (path2, code, message) => {
+    issues.push({ severity: "error", path: path2, code, message });
   };
   if (world.format !== WORLD_FORMAT)
     err("format", "format", `format must be ${WORLD_FORMAT}`);
@@ -62555,8 +63395,8 @@ function lintWorld(world, registry) {
     if (!world.places[r.to])
       err(`routes.${id}.to`, "missing_place", `unknown place "${r.to}"`);
   }
-  const warn = (path, code, message) => {
-    issues.push({ severity: "warning", path, code, message });
+  const warn = (path2, code, message) => {
+    issues.push({ severity: "warning", path: path2, code, message });
   };
   for (const [id, a] of Object.entries(world.actions)) {
     if (!a.check && Object.keys(a.outcomes).some((o) => o !== "default"))
@@ -62570,19 +63410,19 @@ function lintWorld(world, registry) {
   }
   const builtIn = new Set(builtInSectionsOf(world).map((s) => s.id));
   for (const [id, text5] of Object.entries(world.sectionTemplates ?? {})) {
-    const path = `sectionTemplates.${id}`;
+    const path2 = `sectionTemplates.${id}`;
     const label = DEFAULT_SECTIONS[id]?.label ?? id;
     if (typeof text5 !== "string") {
-      err(path, "section_template", `the wording of "${label}" must be text`);
+      err(path2, "section_template", `the wording of "${label}" must be text`);
       continue;
     }
     const problem = hasOwn(DEFAULT_SECTIONS, id) ? sectionTemplateProblem(text5) : `there is no built-in section "${id}"`;
     if (problem !== null)
-      err(path, "section_template", `"${label}": ${problem}`);
+      err(path2, "section_template", `"${label}": ${problem}`);
     if (macroHazards(text5, ["{{lines}}"]).length > 0)
-      err(path, "section_macro", `"${label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
+      err(path2, "section_macro", `"${label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
     if (hasOwn(DEFAULT_SECTIONS, id) && !builtIn.has(id))
-      warn(path, "section_template_unused", `"${label}" is the world's own section, so its own template is used and this wording isn't`);
+      warn(path2, "section_template_unused", `"${label}" is the world's own section, so its own template is used and this wording isn't`);
   }
   const sources = new Set(registry.renderers.map((r) => sourceOf(r)));
   for (const [id, s] of Object.entries(world.sections)) {
@@ -62620,9 +63460,9 @@ function lintWorld(world, registry) {
 }
 function macrosIn(world) {
   const out = [];
-  const scan2 = (path, text5) => {
+  const scan2 = (path2, text5) => {
     for (const macro of macroHazards(text5, ["{{lines}}"]))
-      out.push({ path, macro });
+      out.push({ path: path2, macro });
   };
   for (const [id, l] of Object.entries(world.lore))
     scan2(`lore.${id}.content`, l.content);
@@ -62735,12 +63575,12 @@ function pickReader(registry, world, state2, typed, heard) {
   const nameOf7 = (value) => {
     if (typeof value !== "string" || value === "")
       return null;
-    const entity = own(state2.entities, value);
-    if (entity)
-      return povMayKnow(registry, world, state2, value) ? entity.name : null;
-    const place = own(world.places, value);
-    if (place)
-      return canSeePlace(registry, world, state2, world.pov, value) ? place.name : null;
+    const entity2 = own(state2.entities, value);
+    if (entity2)
+      return povMayKnow(registry, world, state2, value) ? entity2.name : null;
+    const place2 = own(world.places, value);
+    if (place2)
+      return canSeePlace(registry, world, state2, world.pov, value) ? place2.name : null;
     return null;
   };
   const asTyped = (value) => {
@@ -62776,9 +63616,9 @@ function pickReader(registry, world, state2, typed, heard) {
       return screened(words5);
     if (typeof value !== "string" || value === "")
       return null;
-    const entity = own(state2.entities, value);
-    if (entity)
-      return canSeeEntity(registry, world, state2, world.pov, value) ? entity.name : null;
+    const entity2 = own(state2.entities, value);
+    if (entity2)
+      return canSeeEntity(registry, world, state2, world.pov, value) ? entity2.name : null;
     if (value !== outsideOf(def))
       return nameOf7(value) ?? asTyped(value);
     const key = value.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? value.slice(EXTERNAL_ACCOUNT_PREFIX.length).replace(/[_:]+/g, " ").trim() : "";
@@ -62847,7 +63687,7 @@ function toldAction(registry, world, state2, res, before) {
   for (const e of res.events)
     if (e.type === "set" && e.entity === res.actor)
       last.set(e.field, e.value);
-  const unchanged = new Set([...last].filter(([field, value]) => JSON.stringify(value) === JSON.stringify(before.fields[field] ?? null)).map(([field]) => field));
+  const unchanged = new Set([...last].filter(([field2, value]) => JSON.stringify(value) === JSON.stringify(before.fields[field2] ?? null)).map(([field2]) => field2));
   const events3 = res.events.filter((e) => !(e.type === "set" && e.entity === res.actor && unchanged.has(e.field)));
   return { what: parts.length > 0 ? `${label} (${parts.join(", ")})` : label, changes: playerLines(registry, world, state2, world.pov, events3, TOLD_CHANGES), minutes: res.duration };
 }
@@ -63294,8 +64134,8 @@ function contentsOf2(world) {
 function entityKindsOf(world) {
   const counts2 = new Map;
   const entities = isRecord(world) && isRecord(world.entities) ? Object.values(world.entities) : [];
-  for (const entity of entities) {
-    const kind = isRecord(entity) && typeof entity.kind === "string" ? entity.kind : "(no kind)";
+  for (const entity2 of entities) {
+    const kind = isRecord(entity2) && typeof entity2.kind === "string" ? entity2.kind : "(no kind)";
     counts2.set(kind, (counts2.get(kind) ?? 0) + 1);
   }
   return Object.fromEntries([...counts2].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])));
@@ -63305,7 +64145,7 @@ function json(value) {
 }
 
 // docs/AGENT-GUIDE.md
-var AGENT_GUIDE_default = "# Writing LumiRPEngine worlds: a guide for agents\n\nRead this before you touch a LumiRPEngine world through the `lumirpengine` MCP server or command line ([MCP.md](MCP.md)): the world model, how to work on a user's worlds, and the mistakes that are easy to make and hard to see. Every kind, field, effect and formula function is in the reference (`lre_docs`); complete worlds to learn from are the starters (`lre_template`). How outside agents reach LumiRPEngine is DESIGN §23.\n\n## The world model\n\nA world is one JSON document in the `lre-world-v1` format, with a published JSON Schema (`lre_schema`). Each commit makes an immutable **revision**, named by its content hash; the newest is the world's **head**, and a chat plays the revision it was started on until the player upgrades it. Changes go to a **draft** first: a working copy that a commit turns into the next revision.\n\n- **Collections** are objects keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `packs`, `lore`, `classifications`, `tiers`, and `lifeStates` and `routines` when the world has them.\n- **Parts** are single values: `calendar`, `realism`, `time`, `start` (`{place, at}`), `pov` (the entity the player plays), `currency`, `loreIndex`, `pins`, and the optional `ruleset`, `mapSettings`, `spawnTier`, `spawnCap`, `routineSettings`, `sectionTemplates` and `narrator` (the narrator's knowledge in the world's chats, whole: `{\"knowledge\": \"scene\" or \"pov\", \"secrets\": \"marked\" or \"omit\"}`; left out, each user's Settings → Narrator decides, and a chat's own choice beats either).\n- **Checks:** `ruleset.adjudication` decides how checks are decided, and `ruleset.inferred` how a typed attempt no action with its own check covers is read as a check of the world's sheet (`mode`, `when`, `who`, `skills`, `difficulty`, `detail`, `others`, `guidance`, `most`; it must name its `mode`). A world without one leaves inferred checks to each chat's realism preset. The skills it rolls are the world's own: the rows of a skill action's table (Use a skill, Make a save) or the Sheets pack's stats, so give an attempt that matters to the story its own action with its own check, which keeps it.\n- **Kinds** are types with fields and single inheritance (`extends`). The packs define the common ones: `thing` (with `owner` and `place`), `person`, `item`, `container`, `kit`, `vehicle`, `region`, the money kinds (`account`, `card`, `flow`, `job`, `holding`, `property`, `business`, `trust`, `invoice`), and `group` with its `faction`, `family`, `household` and `company`. A world kind with a pack kind's id replaces it whole, so extend a pack kind rather than redefine it.\n- **Entities** are the people and things: `{id, kind, name, tier, fields, relations}`, plus `life`, `lifeKnownBy`, `agent`, `cues`, `class`, `tags`, `visibility` and `knownBy` as needed. Fields hold values; relations are `{type, to, fields?}` links to other entities.\n- **Actions** need a one-line `description`: typed messages are read against each action's label and description.\n- **Formulas** are strings in a small, safe expression language (`lre_docs` with `doc: \"expressions\"`): `at(pov, 'archive')`, `stage.hale_debt == 'revealed'`, `hour >= 18`. Dice are notation strings (`1d20`).\n- **Money** is always a whole number of the currency's minor units: 4250 is $42.50 in a dollar world. **Times** are local ISO date-times (`2026-09-14T18:30`).\n\n## How to work on a user's world\n\n1. **Read before you write.** `lre_worlds` lists the worlds and whether each has a draft stored. A draft that is already there when you start is the user's work in progress: ask them before you edit, commit or discard it. `lre_world` reads one at a JSON Pointer: `\"\"` gives an outline of the whole world (collections with their ids), `/entities/mara` one item. `lre_search` finds an item by what it says.\n2. **Edit the draft.** `lre_edit` takes JSON Patch (RFC 6902) operations whose paths point into the whole world: `add` creates an item or a field, `replace` changes one that exists, `remove` deletes, `test` guards a value. All the operations of one call apply, or none do. Pass `expectVersion`, the draft version from your last read (`lre_world`, `lre_draft` and `lre_worlds` give it even with no draft stored; each `lre_edit` answers the new one): if the draft has changed since, the edit is refused.\n3. **Check.** Every `lre_edit` answers the lint the draft has now and any macro hazard the edit brought in. `lre_draft` sums up the draft against the head; `lre_diff` shows field by field what changed. `lre_playtest` plays typed turns and `lre_check_world` simulates whole days, both with the bundled engine and no model.\n4. **Commit, or discard.** `lre_commit` with a short note makes the draft the head; the note goes into the world's history (`lre_history`). It is refused while the draft has lint errors, which it lists. `lre_discard` throws the draft away. Pass both the `expectVersion` you last saw, as for `lre_edit`.\n\n**The draft is the user's Build draft.** Build edits the same single draft: the user sees your changes as you make them, and you see theirs. Don't leave a draft behind: commit what you finished, discard what you didn't, and say which you did. If an edit is refused because the version moved, read the draft again: the user may be editing it.\n\n**A commit takes the whole draft.** When the user presses Commit in Build, your unfinished changes go into that revision with theirs; when you commit, their changes go in with yours. So finish one change before you start the next, and tell the user what you are in the middle of. With `expectVersion`, `lre_commit`, `lre_discard` and `lre_restore` are refused if the draft moved since you read it. A commit is refused, too, when the head is no longer the revision the draft began from: compare with `lre_diff`, discard, and redo the change on the new head.\n\n**Chats keep their revision.** Committing changes no running chat. `lre_chats` says which chats are behind; `lre_upgrade` with `preview` shows what an Upgrade would bring in; without it, it applies the default picks: what play never touched takes the new revision, what play changed stays. So keep every id a chat uses: a renamed id is a new thing, and the old one stays in the chat.\n\n**Offline work.** Without a Lumiverse, write the world as a file: start from a starter (`lumirpengine template <id> --out world.json`), check it with `lre_check` after each change, run it with `lre_playtest` and `lre_check_world`, and bring it in with `lre_world_import` (or Build's Import) once it is clean.\n\n## JSON Patch on a world\n\n- An item is added whole: `{\"op\": \"add\", \"path\": \"/entities/mara\", \"value\": {\"id\": \"mara\", \"kind\": \"person\", …}}`. Adding to a key that exists replaces it, so to change one field, point at the field: `/entities/mara/fields/place`.\n- `replace` and `remove` need something there; `add` needs the parent to exist (`/entities/mara/fields` must be an object before `/entities/mara/fields/place` can be added).\n- In a list, a number is the index and `-` is the end: `{\"op\": \"add\", \"path\": \"/entities/mara/relations/-\", \"value\": {\"type\": \"knows\", \"to\": \"pov\"}}`.\n- In a key, `~1` stands for `/` and `~0` for `~`: the table `economy.catalog` is `/tables/economy.catalog`, and a key `a/b` is `/x/a~1b`.\n- `test` makes an edit conditional on what you read: `{\"op\": \"test\", \"path\": \"/entities/mara/name\", \"value\": \"Mara\"}` first, and the whole patch is refused if Mara was renamed meanwhile.\n- `/id`, `/format`, `/engineVersion`, `/suppressed` and `/pins` are the engine's: a patch may not change them.\n- One patch carries at most 500 operations and brings in at most 4 MiB of JSON (what it adds, replaces and copies), and the world may nest at most 64 levels deep. An item the engine can't read (`/lore/x` set to `{}`) is refused before anything is written, so add items whole.\n\n## Ids and keys\n\n- Every item's `id` repeats its key. Lint refuses a mismatch for entities, lore entries, step templates and classifications; keep them equal everywhere.\n- Ids are lower snake_case by convention (`old_bram`, `quay_to_market`) and are what everything else refers to: `fields.place`, `fields.owner`, relation targets, track ids in formulas, lore `links`. Look them up rather than guess them; every reference to an id the world doesn't have is a lint error or a dead link.\n- An item's key must be 1 to 200 characters and never `__proto__`, `constructor` or `prototype`; the engine refuses any other.\n- A world's own id (`w_…`) is the host's: `lre_world_create` and import assign it.\n\n## People\n\n- **The POV** (`pov`) is the entity the player plays, a `person` on a lead tier, never capped by realism. `start` is where and when play begins, and the POV stands there unless its `fields.place` says otherwise.\n- **Tiers** say how deeply someone is simulated: by default `principal` (Leads), `supporting` and `background`. `\"agent\": true` makes someone pursue their own agenda off-screen, and live the plans the story gives them. Anyone else only follows their schedules: their plans are never lived and lapse, so mark `agent` on whoever should act on their own plans. An agent's ordinary day comes from their routine (see Routines and schedules).\n- **Who knows the POV.** Everyone who has met the POV holds a `knows` relation toward the POV, or a `regard`. The narrator learns from exactly that whether Mara knows you, so a friend without either greets the player as a stranger.\n- **Regard** is one directed relation with `warmth`, `trust` and `respect` from −100 to 100; write each direction that matters. Kinship (`parent_of` and `child_of`, `sibling_of`, `spouse_of`, `partner_of`) is kept two-sided: write both sides.\n- **Life and death.** `life` is the state someone starts in: `alive` when unset, `dying`, `dead`, or one of the world's own `lifeStates`. The dead keep their place: give a body a `fields.place` where it lies, and no schedule (someone who doesn't act follows none).\n\n### lifeKnownBy: who knows how someone starts\n\nWhen someone starts dead or dying, `lifeKnownBy` lists the ids of the people who know it; everyone else, the POV included, takes them for alive until they see the body or are told. **Left out or empty, everyone knows**, which tells the player at once. So:\n\n- a death the player hasn't learned of lists who does know, including everyone who starts in the same place as the body;\n- when nobody else knows yet, list the person themself (the list is then not empty, and no one else learns it);\n- on someone who starts alive it changes nothing (lint warns), and every id in it must be an entity of the world.\n\n```json\n{ \"id\": \"old_bram\", \"kind\": \"person\", \"name\": \"Old Bram\", \"tier\": \"supporting\", \"life\": \"dead\", \"lifeKnownBy\": [\"corin\"], \"fields\": { \"place\": \"net_loft\" }, \"relations\": [] }\n```\n\n## Character minds\n\nA character can have a **mind**: a model call made as that character alone, on what they know (their entity's fields, never a Lumiverse character card; the lore they may read, the turns they were there for, their notes and commitments, their money and their day). It answers with their private read of the moment and what they intend; the narrator then depicts it. Minds are blind to each other; Playtest and Check world call no model, so they play a world without minds. So write who someone is into their fields (`description`, `traits` and the rest): no character card fills it in. A mind knows the truths of the tracks its character owns, of a secret their cue stands for, and of secret lore whose `holders` name them; a secret held from the start goes on the agenda's start stage (entering a stage tells the player its truth).\n\nWho gets a mind is decided each turn by a **focus score**: points for being in the POV's scene or close by, being named, a relation with the POV, a stake in tracks and rules under way, plans with the POV, and their tier. The score puts each character on a ladder: **Live** (a mind every turn), **Near** and **Far** (a mind on their refresh), **Background** (routine only). The world tunes the ladder and what minds remember in its `minds` part:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/minds\", \"value\": {\n  \"secrecy\": \"brief\",\n  \"weights\": { \"mentioned\": 50 },\n  \"thresholds\": { \"live\": 60, \"near\": 35, \"far\": 15 },\n  \"always\": { \"ids\": [\"marcus_delgado\"] },\n  \"never\": { \"tag\": [\"crowd\"] },\n  \"memory\": { \"notes\": { \"show\": 10, \"keep\": 30 }, \"salience\": { \"halfLifeDays\": 14 } },\n  \"holdings\": { \"marcus_delgado\": { \"track:s_shop_trouble:truth\": { \"keptFrom\": \"everyone\" } } } } }]\n```\n\n- **`secrecy`** decides what the narrator gets. `full` (the default, for a world that says nothing): the monologue, intent, reactions and mood too, to depict and never state. `brief`: only a depiction, written as behaviour anyone present could see and withheld when it would give away a secret or a name the POV can't know, while the monologue stays in the GM view. A mind knows its own character's secrets, so set `brief` where a private thought reaching the narrator would give one away.\n- **`weights`** are the points each input adds, from −100 to 200: `here` 45, `nearby` 20, `mentioned` 40, `regard` 10, `knows` 10, `owner` (owns a track under way) 15, `track` (named in one) 8, `rule` 5, `pending` (an invitation, appointment or plan with the POV) 15, `recent` 10, `band` 15, 5 and 0 for principal, supporting and background, and `roles` by classification value id (`antagonist` 20). A role weight counts only where one of the world's classifications has that value (lint warns about one that none has), and a world's `roles` replaces the default map whole.\n- **`thresholds`** are the lowest scores for Live, Near and Far (60, 35 and 15); below Far is Background. Live is only for someone at hand: in the POV's scene or named this turn. Being close by adds points but never makes someone Live; anyone not at hand is Near at most, whatever their score.\n- **`always`** and **`never`** are selectors (`ids`, `kind`, `tier`, `memberOf`, `tag`, `class`): `always` keeps people Live wherever they are; `never` keeps them Background, mindless, and wins over `always`. A GM's pin in a chat wins over both. An id, kind, tier, group or classification the world doesn't have is a lint error.\n- **`memory`** is what a mind is shown and how long a note lasts, in entries unless named: `witness.show` (what they saw lately, 8), `recall.recent` and `recall.relevant` (their latest turns and those best matching the moment, 4 each) within `recall.tokens` (1200), `notes.show` (8) and `notes.keep` (24 before the oldest are folded into their summary), `commitments.show` (8; open ones are kept until resolved), `salience.halfLifeDays` (a note's weight halves every 7 game days) and `salience.floor` (below 0.5 it has faded), and `consolidate.enabled` (true: faded and surplus notes fold into the summary, not lost). The user's own settings win over the world's.\n- **`holdings`** is what each person, the POV included, knows from the start: by entity id, each fact by its id, `lore:<entry>`, `track:<track>:<stage>` (a stage's truth) or `field:<entity>:<field>`, with `belief` (`\"true\"`, `\"false\"` or `\"uncertain\"`; true when left out), `confidence` (0 to 1; 1 when left out) and `keptFrom` (`\"everyone\"` or a list of people; no one when left out). They seed each chat's knowledge. A World Info entry's secret marks name their own holders, so don't list those here; lint (`minds.holdings`) flags a holder who isn't a person and a fact the world doesn't have.\n- Every part is optional; one left out or out of range reads as its default, and lint says so. The user decides in their settings whether minds run at all, and how many Live minds a turn may have.\n\n**Prompts.** The five minds steps, `mind`, `memory`, `skip` (a time skip's turning points), `consolidate` (folding old notes into a summary) and `knowledge` (after each reply, while the chat tracks who knows what: who learned which fact, by seeing it or being told, what someone worked out and how sure, and what someone now doubts), take world step templates as the other steps do, with `\"output\": \"text\"` and `\"signals\": []`: minds run on their own cadence, so signals are ignored (lint notes any as info). The template is the step's instructions only, with `{{character}}` the character's name (empty for a `knowledge` call about the whole scene, the default) and `{{world}}` the world's: the engine appends the answer's format itself, which no template replaces, so write how to think, never the JSON. The engine checks a `knowledge` answer whatever the template says: no one witnesses what they weren't there for, a teller holds what they tell, an inference rests on what its person holds or saw, and the player character never infers or doubts. The player's own prompt wins over the world's template, which wins over the built-in; give each purpose one at most (lint warns of a second, and a blank one is skipped).\n\n```json\n[{ \"op\": \"add\", \"path\": \"/steps/mind_port_alder\", \"value\": { \"id\": \"mind_port_alder\", \"purpose\": \"mind\", \"output\": \"text\", \"signals\": [],\n  \"template\": \"You are the private mind of {{character}} in {{world}}, a lake town where everyone knows everyone's business and says less than they mean. Think as {{character}}, from only what they know below. Decide how they read this moment and what they intend; never script anyone else, and keep to what a neighbour would notice.\" } }]\n```\n\n## Routines and schedules\n\nA **routine** is what someone can be relied on to do on an ordinary day; a **schedule** is a commitment with set hours (a shift, school). Both are defaults the world leans on, never authority over the story: what the story established (a place or activity an action, the narration or the GM set, a trip, the GM's intent) always comes first, then schedules and appointments, then story plans, then the routine, then the basic needs (sleep, breakfast, lunch, dinner), then chores and agenda steps. Nothing else fills a day. A routine never moves anyone out of a scene with the POV and never moves a Live or Near character; it matters most for the Background cast off screen. So write a routine as a person's habits, not a timetable they must keep: leave people with no routine at all when the world says nothing about their days, and they live on the story, their commitments and their basic needs.\n\nA routine is one item of `routines`: `{id, label?, owner?, inherit?, blocks, source?}`. Its **owner** is read as a schedule's is: an entity, a group (its members), a kind, a selector, or none for the world's default for everyone. For each block id the most specific owner wins (their own, a group's, a kind's, a selector's, the world's, then the basic needs), and `inherit: false` drops the less specific routines' blocks for whom it covers. Each block has an `id`, a `label`, an `activity` (`work`, `socialize`, `leisure`, a meal, `sleep` or the world's own), `minutes`, and a `kind`:\n\n- **`fixed`** starts at `at` (`HH:MM`);\n- **`flexible`** takes its minutes somewhere in its `window` (`{from, to}`, `HH:MM`; a `to` at or before `from` runs past midnight), and `perWeek` makes it a floating block (\"the gym three times a week\");\n- **`optional`** is flexible by `chance` (above 0, at most 1): the first thing a busy day leaves out.\n\nThe rest is optional: `days` (`weekdays` with 0 for Sunday, `off: \"only\"` or `\"never\"` for days off, `holidays` and `except` by the calendar's ids, `birthday`, `seasons`, `weather`), `place` (`home`, the default, `work`, `here`, `with` its company's home, `{place}` or `{nearest: sceneType}`), `company` (`{who: selector, invite?}`), `priority` (1 to 5), `needs`, `private` (the player reads it as \"Busy\") and `source`. Give a block its ground when the world has one: `{\"type\": \"lore\", \"entry\": …, \"quote\": …}` or `{\"type\": \"sheet\", \"entity\": …, \"field\": …, \"quote\": …}`, with the short quote it rests on, so the GM sees why it's there. `{\"id\": \"lunch\", \"off\": true}` turns off a less specific block or a basic need.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/routines\", \"value\": { \"dale_mornings\": {\n  \"id\": \"dale_mornings\", \"label\": \"Dale at the marina\", \"owner\": \"dale_whitcomb\",\n  \"blocks\": [\n    { \"id\": \"open_marina\", \"label\": \"Opens the marina\", \"activity\": \"work\", \"kind\": \"fixed\", \"at\": \"06:30\", \"minutes\": 90, \"place\": { \"place\": \"alder_harbor_marina\" }, \"days\": { \"weekdays\": [1, 2, 3, 4, 5, 6] },\n      \"source\": { \"type\": \"lore\", \"entry\": \"lore_marina\", \"quote\": \"Dale Whitcomb has run it for twenty-five years.\" } },\n    { \"id\": \"coffee\", \"label\": \"Coffee at the Bluebird\", \"activity\": \"socialize\", \"kind\": \"flexible\", \"window\": { \"from\": \"09:00\", \"to\": \"11:00\" }, \"minutes\": 30, \"perWeek\": 3, \"place\": { \"place\": \"bluebird_coffee\" } }\n  ] } } }]\n```\n\nA block that asks someone along makes an invitation only when the world's settings allow it: here the POV, on Thursday evenings, from the Rusty Anchor's trivia night the lore tells of.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/routines/marcus_trivia\", \"value\": {\n  \"id\": \"marcus_trivia\", \"owner\": \"marcus_delgado\",\n  \"blocks\": [{ \"id\": \"trivia\", \"label\": \"Trivia night at the Anchor\", \"activity\": \"socialize\", \"kind\": \"fixed\", \"at\": \"19:30\", \"minutes\": 120, \"days\": { \"weekdays\": [4] }, \"place\": { \"place\": \"rusty_anchor\" },\n    \"company\": { \"who\": { \"ids\": [\"pov\"] }, \"invite\": true },\n    \"source\": { \"type\": \"lore\", \"entry\": \"lore_anchor\", \"quote\": \"a Thursday trivia night that gets competitive\" } }] } }]\n```\n\n**Tuning** is the `routineSettings` part; each part left out keeps its default, and the defaults are no part at all:\n\n- **`awareness`**: how long someone the story put somewhere stays there against their routine. `story_first` keeps them until the story or the GM releases them; `balanced` (the default) until their night, with Background characters keeping their routine and Far ones bending for story plans and the GM's intent; `routine_first` lets the routine's next edge take them back.\n- **`invitations`**: `off`, `player` (the default: routine blocks may invite the POV) or `everyone` (people's days take each other's invitations too). Story plans and the GM invite under any setting.\n- **`sociability`**: `reserved`, `usual` or `outgoing`, how fast NPCs' social and fun needs grow.\n- **`planBend`**: which story plans take their time from work and school: `must`, `strong`, `standard` (the default) or `ordinary`.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/routineSettings\", \"value\": { \"awareness\": \"story_first\" } }]\n```\n\n**Editing.** `lre_routine_put` and `lre_routine_delete` write one routine whole, and `lre_routine_settings` the settings, each at the version you read; `lre_edit` works on `/routines` and `/routineSettings` as above. A routine whose shape the engine can't read, or a setting or value it doesn't take, is refused before anything is written, with a message naming the field (`window`, `kind`, `minutes`, `awareness`…), exactly as Build's save is: fix that field and send it again. What a routine names that the world lacks (a place, an owner who matches nobody, a lore entry) is a lint warning after the write. `lre_schedules`, `lre_schedule`, `lre_schedule_put` and `lre_schedule_delete` do the same for schedules.\n\n**In a chat** the world's routines are only where it starts. Change someone's routine in one chat with `lre_routine_edit` (`routine_follow` for whether and how strictly they keep it, `routine_block` for one block, `schedule_override` for a schedule; each is one Undo-able fix), read their day and why each block is there with `lre_day`, and what the chat changed with `lre_routine_changes`. Change the world's routine only for what is true of the world; what happened in one story belongs to that chat.\n\n## Things and who owns them\n\n- Where a thing is: `fields.place` for something lying in a place, a relation `{\"type\": \"in\", \"to\": \"rhea\"}` for something carried or inside a container.\n- **Whose a thing is lives in `fields.owner`**, the owner's id. That puts it on their gear, a vehicle in their garage and at their levels, and lets them drive it. The `owns` relation only changes how the Journal words a change: an item with an `owns` link and no `fields.owner` belongs to no one. Set `fields.owner` on everything someone owns. Money is owned differently: see Money.\n\n## Money\n\nMoney is entities, a few fields and the economy pack's config. Amounts are whole minor units (4250 is $42.50 in a dollar world) and percentages are percent units (22 is 22 %). What runs for someone depends on their Money level: the world's `realism.levels.money`, capped by their tier's band (the POV is never capped). At 0 money is off; at 1 a person's `wealth` band is all there is; at 2 their cash and one everyday account are real, and a payment they can't cover is declined; from 3 all their accounts, and more as below.\n\n| From | What runs | Its feature ids |\n|---|---|---|\n| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate | `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `property`, `withholding` |\n| Money 4 | statements and minimum payments, interest (on the average daily balance where an account asks for it), fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, investments, options, capital gains | `statements`, `interest`, `average_daily`, `fees`, `delinquency`, `credit`, `atm`, `holds`, `daily_limits`, `overdraft`, `tax_brackets`, `sales_tax`, `business_tax`, `investments`, `options`, `capital_gains` |\n\nA world switches a feature on or off for itself in `packs.economy.config.features` by its id (`{\"sales_tax\": true}`), down to its floor: Money 2 for `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `atm`, `daily_limits` and `overdraft`, Money 3 for the rest. Lint warns about an id it doesn't know.\n\n### Who owns money\n\nA **party** is a person, or an entity of kind `business`, `trust` or `household`. An account, a business, a holding or a property names its holders in `owners`, each with a role: `[{\"party\": \"pov\", \"role\": \"owner\"}]`.\n\n| Role | Spends from it | Counts toward their net worth | Manages it |\n|---|---|---|---|\n| `owner`, `joint` | yes | yes | yes |\n| `custodian`, `trustee` | yes | no | yes |\n| `beneficiary` | no | yes | no |\n| `authorized_user` | yes | no | no |\n\n`share` divides the worth between the holders whose role counts it, in percent; given by none, they share equally. A **household** is the relationships pack's `household` group: its members hold a `member_of` relation to it, and it shares flows between them (below).\n\n### Accounts and products\n\nAn `account` entity is one purse, wallet, bank account, card account, loan or investment account: `owners`, `product`, `opening` (the balance at the start, from the holder's side: a debt is negative) and `institution`. `product` is an account class, each a built-in product with the finance tables' terms (`cash`, `checking`, `business_checking`, `savings`, `money_market`, `cd`, `trust`, `escrow`, `credit_card`, `charge_card`, `line_of_credit`, `loan`, `mortgage`, `brokerage`, `retirement`), or one of the world's own products, `packs.economy.config.products` by id. An account's own `limit`, `apr_pct`, `apy_pct`, `statement_day`, `due_day`, `payment`, `months_left`, `overdraft` and the rest win over its product's; `autopay` (`minimum`, `statement`, `full` or `fixed`) with `autopay_from` pays a credit account by itself.\n\nRead `/packs/economy/config` before adding to it; the modern starter's has no `products` map yet. Where the world has none, add the map whole with the first product in it, as below (JSON Patch adds into a map only once it exists); where it has one, add each product by its own path, `/packs/economy/config/products/<id>`, since adding the whole map replaces it and drops every product already in it. `assets` works the same, and in the modern starter it is added to by id, as further down. The same goes for entities: `add` on an id that is taken replaces that item whole, so look an id up before you use it.\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/products\", \"value\": { \"lakeshore_rewards\": { \"label\": \"Lakeshore Rewards Visa\", \"class\": \"credit_card\", \"institution\": \"Lakeshore Credit Union\", \"limit\": 300000, \"apr_pct\": 21.9, \"rewards_pct\": 1.5 } } },\n  { \"op\": \"add\", \"path\": \"/entities/acct_pov_rewards\", \"value\": { \"id\": \"acct_pov_rewards\", \"kind\": \"account\", \"name\": \"Rewards Visa\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"pov\", \"role\": \"owner\" }], \"product\": \"lakeshore_rewards\", \"opening\": -12500, \"autopay\": \"statement\", \"autopay_from\": \"acct_pov_checking\" }, \"relations\": [] } }\n]\n```\n\nA **card** is its own entity, kind `card`: the `account` it draws on, its `holder`, its `network` (`debit`, `credit` or `charge`), its `state` (`active`, `frozen`, `lost` or `cancelled`) and `item`, the physical card in the holder's gear. An authorized user holds a card on someone else's account.\n\n### Flows: money that moves on its own\n\nA **flow** is every scheduled or one-off movement of money: rent, bills, a transfer to savings, an allowance, a loan payment. It is an entity of kind `flow`:\n\n- **`flow_kind`**: `transfer`, `bill`, `rent`, `utility`, `subscription`, `premium`, `loan_payment`, `card_payment`, `savings`, `income`, `payroll`, `allowance`, `living`, `tax`, `distribution`, `invoice`, `draw` or `other`.\n- **`from` and `to`**: an account; a party, paying as their preferences choose, or paid into their deposit account; or an outside payer or payee by name, in words (`\"Harbor Mutual\"`). A name shaped like an id (`acct_pov_chequing`) that names no entity draws a lint warning: it would be read as an outside party, so money would come from or go to nowhere.\n- **The amount**, the first of: `amount_cents`; `amount_formula`; `amount_table` (`table.row`, or `table.row.column`); `amount_min` and `amount_max`, a seeded draw between them; `amount_pct` of `amount_of`'s balance; `amount_due` (`minimum`, `statement` or `balance`, of the credit account it pays).\n- **When**: `every` (`day`, `week`, `month` or `year`) with `interval` (biweekly is `week` with 2), `weekdays` (0 is Sunday), `days` of the month (31 is the last day of a short month, −1 always the last), `months`, `except` (holiday ids), `roll` (`before` or `after`, for a day that isn't a business day) and `at` (`HH:MM`, 09:00 by default); or `once`, a local date-time. `start`, `end` and `count` bound it.\n- **When the money isn't there**, `shortfall`: `skip` this time, pay what there is (`partial`), `retry` after `retry_days` up to `retries` times, pay from `fallback`, let the account `overdraft` as its policy allows, or `defer` the amount to the next time.\n- `splits` sends parts elsewhere (fixed `cents` first, then `pct` of the rest); `shares` splits a household's flow between its members by `pct`; `link` ties it to what it belongs to (a property, a job, a loan); `status` is `active`, `paused` or `ended`.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/flow_pov_boat_fund\", \"value\": { \"id\": \"flow_pov_boat_fund\", \"kind\": \"flow\", \"name\": \"Boat fund\", \"tier\": \"background\", \"fields\": { \"flow_kind\": \"savings\", \"from\": \"acct_pov_checking\", \"to\": \"acct_pov_savings\", \"amount_cents\": 4000, \"every\": \"week\", \"interval\": 2, \"weekdays\": [5], \"start\": \"2026-09-18\", \"shortfall\": \"skip\", \"category\": \"savings\" }, \"relations\": [] } }]\n```\n\n### Businesses and invoices\n\nA **business** is an entity of kind `business`, a party with `owners` (and their `share`s) and a `structure`: `sole_proprietorship`, `partnership`, `llc` (the default), `s_corp` or `c_corp`.\n\n- **Where it sells:** a purchase at one of its `places` (else where it stands) pays it. `daily_sales` is what walk-in customers from outside the world spend there on each of its `trading_days` (0 is Sunday; Monday to Friday when left out), give or take `sales_spread_pct` (30 when left out), paid at closing and never on a day-off holiday.\n- **Its money** is in the accounts it owns. `operating_account`, one of them, is where takings land and payroll comes from (else its best deposit account). It keeps `margin_pct` of a sale (all of it when left out) and owes the rest to its suppliers, paid on the 10th; the sales tax it collects is paid on the 20th. Its rent, bills and loan payments are flows from its accounts.\n- **Its owners** take draws in play, except from a `c_corp`. `distribution_pct` pays that share of each period's profit out to the owners by share, every `distribution_every` (`month`, `quarter` (the default) or `year`), on the 10th after the period closes.\n- **Its books**, month by month, are kept by the engine from all of that: there is nothing to write.\n\nA business's own Money level is its tier's cap, as a person's is: it decides whether the business collects sales tax and pays business taxes (Money 4) and whether its invoices go late (Money 3). Its payroll, takings and other flows go through its accounts, and an account runs at the highest level of those who may spend from it (the business and its authorized users), whatever the account's own tier. So give a business the `principal` tier, as the modern starter does, for all of it to run.\n\nDale's marina has run on his own account so far, its takings flowing into it and its bills out. Making it a business moves the account to the business, with Dale still able to spend from it as an authorized user, and a purchase at the marina then pays it. The account was all Dale had, so he gets a checking account of his own as well: without one, his own spending and bills would come out of the business's.\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/alder_harbor_marina_co\", \"value\": { \"id\": \"alder_harbor_marina_co\", \"kind\": \"business\", \"name\": \"Alder Harbor Marina\", \"tier\": \"principal\", \"fields\": { \"owners\": [{ \"party\": \"dale_whitcomb\", \"role\": \"owner\" }], \"structure\": \"sole_proprietorship\", \"places\": [\"alder_harbor_marina\"], \"operating_account\": \"acct_dale_marina\", \"industry\": \"marina\", \"margin_pct\": 70, \"late_fee_pct\": 1.5 }, \"relations\": [] } },\n  { \"op\": \"replace\", \"path\": \"/entities/acct_dale_marina/fields/owners\", \"value\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }, { \"party\": \"dale_whitcomb\", \"role\": \"authorized_user\" }] },\n  { \"op\": \"add\", \"path\": \"/entities/acct_dale_checking\", \"value\": { \"id\": \"acct_dale_checking\", \"kind\": \"account\", \"name\": \"Dale's checking account\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"dale_whitcomb\", \"role\": \"owner\" }], \"product\": \"checking\", \"opening\": 640000, \"institution\": \"Great Lakes Bank\" }, \"relations\": [] } }\n]\n```\n\nAn **invoice** is an entity of kind `invoice`: the `business` that issued it, the `customer` (a party's id, or an outside customer by name), `cents`, `memo`, `issued`, `due` (30 days after `issued` when left out), `state` (`open` when left out, `paid`, `late` or `void`) and `paid`, what is paid of it so far. Lint requires the business, the customer and an amount above zero. An open invoice is paid as a bill from the customer's accounts on its due date and every week after until it is paid; an outside customer pays on the due date. Unpaid when its due day ends, it goes `late` and takes the business's `late_fee_pct` of the amount, and the fee again every 30 days. A business's `invoice_days` (30 when left out) are the terms of the invoices it issues in play.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/inv_pov_winter_storage\", \"value\": { \"id\": \"inv_pov_winter_storage\", \"kind\": \"invoice\", \"name\": \"Winter storage\", \"tier\": \"background\", \"fields\": { \"business\": \"alder_harbor_marina_co\", \"customer\": \"pov\", \"cents\": 48000, \"memo\": \"Winter storage for the fishing boat\", \"issued\": \"2026-09-14\", \"due\": \"2026-10-14\", \"state\": \"open\" }, \"relations\": [] } }]\n```\n\n### Work and pay\n\nA **job** is an entity of kind `job`, one worker's employment:\n\n- **Who and where:** `worker`; `employer`, a business entity (paying from its operating account), a place (the business trading there, else an outside employer) or an outside employer named in words, an id-shaped one that names no one and no place drawing a lint warning; `workplace`, the place the work is (else the business's `places`); `title`; and `occupation`, a row of the occupations table (else the worker's own `occupation`).\n- **Pay:** `basis`, which is `salary` (a year), `hourly`, `per_shift`, `commission`, `tips` or `stipend` (a period), and `rate`, both from the occupation's row when left out; `commission_pct` of the sales credited to the worker; `tips_per_hour` on top of hourly pay.\n- **When it pays:** `pay_every`, the occupation's when left out: `weekly` or `biweekly` on the weekday of `pay_anchor` (the first payday), else of `pay_weekday` (Friday); `semimonthly` on `pay_days` (the 15th and the last); `monthly` on one day (the last); `per_job`, each evening at 21:00 for that day's work; or `custom`, a flow's schedule with `pay_` before each part (`pay_unit`, `pay_interval`, `pay_weekdays`, `pay_days`, `pay_months`, `pay_except`). A payday on a weekend or a day-off holiday moves to the business day before it (`pay_roll`: `before`, `after` or `none`).\n- **What it pays for:** the days from `start` to `end`, and inside the season (`season_from` to `season_to`, `MM-DD`, which may wrap the new year). Hourly and per-shift pay count what `hours` names: the worker's scheduled commitments at the workplace (`scheduled`, laid out by `shift_pattern`, a row of the `calendar.shifts` table), the shifts the POV turns up for (`attended`), or `hours_per_week` and `shifts_per_week` over `weeks_per_year` (`contract`). Left out, it is `attended` for the POV and `scheduled` for anyone else while they have a routine at the job, and `contract` without one. `status` is `active`, `leave` (paid nothing) or `ended`.\n- **The paycheck:** `deductions` come off the gross first, each `{label, cents or pct, pretax, kind, to, match_pct}`. A `pretax` one comes off income-tax wages (a `retirement` one still counts as wages for Social Security and Medicare; any other doesn't). `to` is an account of the worker's, else an outside payee by name, and a business employer adds `match_pct` of the gross, up to the deduction, to that account. Withholding follows (Taxes, below), and none for a `contractor` (the occupation's `self_employed` when left out). `splits` route the net among the worker's own accounts, each `{to, cents}` or `{to, pct}`: fixed amounts first, then percentages of the rest, and what's left to their deposit account.\n\nEach job pays through a flow from its employer to the worker. A paycheck covers the work since the last one paid, so a payday the employer can't cover is paid with the next. In play, a business's owner hires, ends jobs and raises pay; a GM edit of the job's fields does the same.\n\nA second job beside the POV's work at the garage: one shift a week on the marina's fall haul-out crew, paid on Fridays with half of each check into savings, and nothing outside the season:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/job_pov_haulout\", \"value\": { \"id\": \"job_pov_haulout\", \"kind\": \"job\", \"name\": \"Haul-out crew at Alder Harbor Marina\", \"tier\": \"background\", \"fields\": { \"worker\": \"pov\", \"employer\": \"alder_harbor_marina_co\", \"workplace\": \"alder_harbor_marina\", \"title\": \"Haul-out crew\", \"basis\": \"per_shift\", \"rate\": 11000, \"hours\": \"contract\", \"shifts_per_week\": 1, \"season_from\": \"09-15\", \"season_to\": \"11-15\", \"pay_every\": \"weekly\", \"pay_anchor\": \"2026-09-18\", \"splits\": [{ \"to\": \"acct_pov_savings\", \"pct\": 50 }] }, \"relations\": [] } }]\n```\n\nAnd a 401(k) at the garage: 5 % of the POV's pay before income tax into a retirement account of theirs, which the shop matches up to 3 % of pay:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/acct_pov_401k\", \"value\": { \"id\": \"acct_pov_401k\", \"kind\": \"account\", \"name\": \"Your 401(k)\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"pov\", \"role\": \"owner\" }], \"product\": \"retirement\", \"opening\": 0, \"institution\": \"Great Lakes Bank\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/job_pov_mechanic/fields/deductions\", \"value\": [{ \"label\": \"401(k)\", \"kind\": \"retirement\", \"pretax\": true, \"pct\": 5, \"match_pct\": 3, \"to\": \"acct_pov_401k\" }] }\n]\n```\n\n### Taxes\n\n- **On pay**, withholding runs from Money 3 at a flat rate: the occupation's withholding rate (federal tax, Social Security and Medicare together) and the worker's state rate, plus their region's local rate when they have `local_tax: true`. At Money 4 it goes through the federal brackets and standard deduction for their `filing_status` (`single` when left out, `married_filing_jointly` or `head_of_household`), with Social Security and Medicare, then the state and local rates.\n- **Regions** are rows of the regions table (`mi`, `il`…), with their state, local and sales tax rates. The economy config's `region` is the world's own (the modern starter's is `mi`); without one, what it would cover runs at the national row's rates. A party's income tax follows its own `region` field, else the config's.\n- **Income nobody withholds from** is paid as estimated tax on 15 April, June and September and 15 January: a contractor's pay, and an owner's share of the profit of any business but a `c_corp` where that business pays business taxes. A `c_corp` pays corporate tax on its own profit, at the config's `taxes.corporatePct` (21 when left out) plus the state rate.\n- **Sales tax** runs only at the top level, Money 4 (or from 3 where the world switches `sales_tax` on), and at the buyer's level: below it a price is as listed, and a business below it neither collects nor remits. The rate at a place is its `sales_tax_pct` (or an enclosing place's), else that of its tax region: a `tax_region` on it or an enclosing place, else the config's `region`. Nothing is charged on a category in the config's `taxes.exempt` (the modern starter's holds `groceries_staples`, `groceries_baskets` and `medical`) or in a place's `tax_exempt`, nor on what a business with `collects_sales_tax: false` sells.\n\nThe modern starter's economy is in Michigan, so a purchase in Chicago is taxed at Michigan's rate. To tax it for Illinois at Chicago's own combined rate, and the POV's pay at Michigan's typical local rate:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/places/chicago_il/fields/tax_region\", \"value\": \"il\" },\n  { \"op\": \"add\", \"path\": \"/places/chicago_il/fields/sales_tax_pct\", \"value\": 10.25 },\n  { \"op\": \"add\", \"path\": \"/entities/pov/fields/local_tax\", \"value\": true }\n]\n```\n\n### Paying: preferences, cash machines and credit\n\n- **`pay_prefs`**, a person field, orders how they pay: tiers of `use` (`cash`, `debit`, `credit`, `charge`, `checking`, `savings`, or a card or account id), each for an amount from `min` to `max` and `categories`, but not those in `except`. A payment tries the tiers that fit it in order, then cash, debit, credit and charge; the first that covers it pays, and with none it is declined. Left out, the tiers follow their wealth band and their `traits`: a frugal or careful person keeps to cash and debit longer, an impulsive or flashy one reaches for credit first, a business pays by debit, then credit.\n- **Cash machines and branches** are place fields: `atm`, `{\"bank\", \"fee\", \"limit\", \"deposits\"}` (`fee` is the machine's own surcharge, `limit` the most one withdrawal takes), and `branch`, `{\"bank\"}`, a counter where that bank's customers withdraw and deposit. Where cash machines run (Money 4), cash comes out and goes in only at one of the two; at another bank's machine the product's `fees.atm` comes on top of the surcharge, a card's `daily_atm_limit` caps a day's withdrawals, and a deposit at a machine stays on hold for the account's `hold_days`. This applies only once the world places at least one `atm` or `branch`; place none and cash moves freely at every level.\n- **Credit** is played, not written: each person's report and monthly score (300 to 850) come from how their credit accounts are used and paid, and set the rates they are offered. An account's `opened` date counts toward its age.\n\n**Player claims.** A typed action on a thing the player says they have that the world doesn't may make it (the chat's Player claims setting): an item with `fields.claimed: true`, the POV's, priced against `economy.catalog`. It is never money and never an authored thing: a requirement or gate on an id (`carries(self, 'shop_office_key')`) never passes on a claimed key, while `has_item` by name counts one, so test ids for what must be earned. Keys, weapons and documents always ask the player first; `packs.economy.config.claimCap` (minor units; unset, twice `meals_out`'s typical price) caps what a capped policy makes without asking.\n\n## Holdings and property\n\nEverything a party owns besides the money in its accounts: positions in assets, real estate and stakes in businesses, each counted in its net worth. Prices, payouts, trades and gains run where the `investments` feature does (Money 4), options where `options` does (Money 4), and property from Money 3 (`property`). The examples here build on the marina business of Money.\n\n### Assets\n\nAn **asset** is defined once, in `packs.economy.config.assets` by id (the modern starter lists `broad_us_equity_index`, `glbd`, `lkfr`, `tnote_2030` and `btc`): a `label`, a `class` (`security`, `fund`, `bond`, `option`, `property`, `business_stake`, `crypto` or `other`), a `symbol` to show, and its `price` per unit at the start (100.00 when left out).\n\n- **How its price moves:** each class follows a recipe row of the finance table's `investing` section: securities and funds the stock index (`broad_us_equity_index`), bonds `bonds_aggregate`, crypto `crypto`. `model` names another row (`cash` holds its price), and an asset's own `annual_return_pct` (its total return), `annual_volatility_pct` and `correlation` (0 to 1, how closely it moves with its market) override the recipe. Prices are marked at 16:00 on each business day, every day for crypto.\n- **What it pays:** `yield_pct` of its value a year, paid `pays_per_year` times (4 for securities and funds, 12 for a bond fund, none for crypto). A payout comes out of the total return, so it is never counted twice. A single bond has a `face`, a `coupon_pct` and a `maturity`: it pays its coupon twice a year and is redeemed at its face on its maturity date.\n- **An option** names its `underlying` (an asset the world lists), `strike` (per unit), `expiry` (`YYYY-MM-DD`), `right` (`call` or `put`), `multiplier` (100 units a contract) and `settlement` (`physical`, the default, or `cash`). It is priced from its underlying, so it takes no `price`.\n\nLint (`economy.assets`) requires a class, an option's terms, a bond's maturity with its face and a price above zero, and warns about a `model` the table doesn't list. A regional fund with its own return and twice-yearly payouts, and a December call on Lakefront Freight:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/assets/glix\", \"value\": { \"label\": \"Great Lakes Index Fund\", \"class\": \"fund\", \"symbol\": \"GLIX\", \"price\": 11240, \"annual_return_pct\": 8, \"annual_volatility_pct\": 18, \"yield_pct\": 2.2, \"pays_per_year\": 2 } },\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/assets/lkfr_c4500_dec26\", \"value\": { \"label\": \"LKFR December 2026 45 call\", \"class\": \"option\", \"underlying\": \"lkfr\", \"strike\": 4500, \"expiry\": \"2026-12-18\", \"right\": \"call\" } }\n]\n```\n\n### Holdings, trades and payouts\n\nA **holding** is an entity of kind `holding`, a position in one asset: in an `account` (a brokerage or retirement account, its owners the holding's by their shares) or held directly by its `owners`. Its `lots` are its purchases, oldest first, each `qty`, its whole `cost` and when it was bought (`at`); for an option, `qty` counts contracts. Lint (`economy.holdings`) requires an asset the world lists, an account that is one, owners for a holding in none, and lots as a list.\n\n- **Trades are played** (the `trade` action): buy or sell an asset or a holding, in units or for an amount (a sale with neither sells it all), held in an `account` (else directly), paid `from` an account (else the investment account's own cash, else the buyer's deposit account), with the proceeds `to` an account (else the holding's account, else the seller's deposit account). Units go first in, first out, and each sale realises its gain, short term on lots held under a year. A retirement account keeps a sale's proceeds.\n- **Options** trade whole contracts. Before expiry, a holder exercises in play (`exercise_option`): a call pays the strike for 100 units of the underlying, which land in the same account. At the close on its expiry date a contract in the money settles in cash at what it is worth, and one out of the money expires worthless.\n- **Payouts** are flows: dividends mid-month in evenly spaced months ending in December (quarterly: March, June, September and December), a bond fund's monthly, a bond's on its coupon dates, each the units held then times what a unit pays. One lands where the holding's `route` says: `reinvest` buys more units at that day's price, as a new lot; an account id pays it there; left out, it goes to the holding's account, else each owner's deposit account by share. A retirement account keeps what its holdings pay unless they reinvest. In play, `route_distributions` changes a holding's route.\n\nTwenty units of the fund, its payouts reinvested, and two of the calls, in the POV's brokerage account:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/hold_pov_glix\", \"value\": { \"id\": \"hold_pov_glix\", \"kind\": \"holding\", \"name\": \"Great Lakes Index Fund\", \"tier\": \"background\", \"fields\": { \"account\": \"acct_pov_brokerage\", \"asset\": \"glix\", \"lots\": [{ \"qty\": 20, \"cost\": 196000, \"at\": \"2025-03-02\" }], \"route\": \"reinvest\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/hold_pov_lkfr_calls\", \"value\": { \"id\": \"hold_pov_lkfr_calls\", \"kind\": \"holding\", \"name\": \"LKFR December calls\", \"tier\": \"background\", \"fields\": { \"account\": \"acct_pov_brokerage\", \"asset\": \"lkfr_c4500_dec26\", \"lots\": [{ \"qty\": 2, \"cost\": 37000, \"at\": \"2026-08-20\" }] }, \"relations\": [] } }\n]\n```\n\n### Property\n\nA **property** is an entity of kind `property`, real estate tied to a `place`, with `owners` (and their `share`s):\n\n- **Its value** is `value` now. It moves on the 1st of each month at its `appreciation_pct` a year with its `volatility_pct` swings (else the finance table's home prices); `purchase_price` and `purchased` are what it cost and when, for the gain on a sale.\n- **Its costs** are flows its owners pay by share: property tax at `tax_pct` of its value a year (else the regions table's rate for its `region`, else its first owner's, else the economy's), in `tax_installments` bills (2 a year); `insurance` a month (else the table's typical, scaled to its value); and upkeep, `upkeep_pct` of its value a year (1 when left out), each month.\n- **A mortgage** is an account of the `mortgage` product, with its own `apr_pct`, `payment`, `months_left` and the rest as any loan has, whose `secured_by` names the property; the property's `mortgage` names it back, and lint warns when the two don't. Equity is the value less what it secures.\n- **A lease** is a `rent` flow from the tenant to an owner (or into an account of theirs), `link`ed to the property, with `start` and `end` for its term. Each lease covers one of its `units` (1 when left out). With `managed: true`, each unit no lease covers is let to outside tenants at `market_rent`, lease after lease of `lease_months` (12) with about `vacancy_months` (1) empty between, from `let_from` (else the world's start), their rent into `rent_to` (else the owners' deposit accounts by share).\n- In play, `property_buy` buys one with an `asking_price` or nobody's, `property_sell` sells a share, and `lease_start` and `lease_end` let a unit and end a lease.\n\nThe marina's grounds, owned by the marina business, with a mortgage it pays from its operating account and its bait shop let to an outside tenant:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/prop_alder_harbor_marina\", \"value\": { \"id\": \"prop_alder_harbor_marina\", \"kind\": \"property\", \"name\": \"Alder Harbor Marina grounds\", \"tier\": \"background\", \"fields\": { \"place\": \"alder_harbor_marina\", \"owners\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }], \"value\": 65000000, \"appreciation_pct\": 2.5, \"purchase_price\": 41000000, \"purchased\": \"2001-03-15\", \"mortgage\": \"acct_marina_mortgage\", \"insurance\": 42000, \"upkeep_pct\": 1.2 }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/acct_marina_mortgage\", \"value\": { \"id\": \"acct_marina_mortgage\", \"kind\": \"account\", \"name\": \"Marina mortgage\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }], \"product\": \"mortgage\", \"institution\": \"Great Lakes Bank\", \"opening\": -18000000, \"apr_pct\": 5.1, \"payment\": 191800, \"months_left\": 120, \"due_day\": 1, \"autopay\": \"minimum\", \"autopay_from\": \"acct_dale_marina\", \"secured_by\": \"prop_alder_harbor_marina\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/lease_marina_bait_shop\", \"value\": { \"id\": \"lease_marina_bait_shop\", \"kind\": \"flow\", \"name\": \"Rent, bait shop\", \"tier\": \"background\", \"fields\": { \"flow_kind\": \"rent\", \"from\": \"Gull Point Bait & Tackle\", \"to\": \"alder_harbor_marina_co\", \"amount_cents\": 65000, \"every\": \"month\", \"days\": [1], \"start\": \"2026-05-01\", \"end\": \"2027-04-30\", \"shortfall\": \"skip\", \"link\": \"prop_alder_harbor_marina\" }, \"relations\": [] } }\n]\n```\n\n### Business stakes and net worth\n\n**A stake** is an owner's share of a business: of its `value` when one is set, else of its book value (its own net worth from its accounts, holdings, property and stakes, plus what its customers owe it less what it owes) plus its last twelve months' profit times its `valuation_multiple` (3 when left out). Each owner's share of a profit distribution lands where they route it in play (`route_distributions`; `reinvest` keeps it in the business, adding to the stake), and `stake_sell` sells part of a stake.\n\n**Net worth** is a party's share of the accounts it holds with a role that counts worth, plus its share of every holding at market, of every property's value and of every stake. A mortgage is one of its accounts, so a property's debt counts once. A party with accounts has the wealth band of its net worth; one without keeps its `wealth` field.\n\nThe marina, with a waiting list for its slips, is worth four years' profit over its books:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/alder_harbor_marina_co/fields/valuation_multiple\", \"value\": 4 }]\n```\n\n## Places, routes and maps\n\n- Places form a tree through `parent` (a town holds streets, a building its rooms). A place the player hasn't heard of yet is `\"visibility\": \"discoverable\"`.\n- Routes join places with minutes per travel mode (`walk`, `road`, `offroad`, `water`), both ways unless `bidirectional` is false.\n- **A map owns what it draws.** A map (`/maps/<id>`, format `lre-map-v1`) draws one place's inside, as a grid of characters or as linked places, and compiles into places, a grid and routes that carry `\"map\": \"<map id>\"`. Those are the map's: **edit the map, never them**. A write to a place, grid or route a map draws is refused (\"drawn by the map …; edit it there\"), and so is setting `map` on anything else. After a change to the map, the engine draws its places, grid and routes again; delete the map and they go with it. A place, grid or route you write yourself with the same id as one a map would make wins over the map's.\n\n## Tracks: quests and secrets\n\nA track is a small state machine: `start` names its first stage, and each stage's `next` lists `{\"to\": stage, \"when\": formula}`, taken in order when the formula holds. A stage may carry a `cue` (what the player can know now), `objectives`, `effects` on entering, `rewards` on leaving it onward, `hints`, a `gate` and a `fail`. A stage with no `next` ends the track, and an end stage, which is never left, grants its `rewards` as the track reaches it: put a quest's payout there. Secrets advance only by their formulas, never by a model.\n\n- **Quests** start at the stage the story has reached, not at the beginning: `start` is today's stage.\n- **Secrets** keep a `truth` (what is really so, kept from the player) on the stage that reveals it, and a `cue` (what the player can notice) on the stages before. A cue never states the truth.\n- **Puzzles** an action of yours answers take `story.answer`'s `track`: the puzzle's own id, written out, never a formula.\n- **Hints** on a puzzle stage with an `answer` open up one per wrong answer given at that stage; on any other stage they are all there once the track reaches it. The player opens them one at a time, and the narrator is told only the opened ones.\n- **Every flag a track or a secret's gate reads needs a setter**: a `story.flag` effect in an action's outcomes, a rule or a stage's effects. One nothing sets keeps its starting value for good, and lint warns (`story.unset_flag`).\n- **A story step's action stays out of sight until the story reaches it.** An action whose requirement reads `stage(…)`, `since(…)` or `flag(…)` and none of its params isn't listed anywhere (the Actions sheet, interpret's catalog) while that requirement fails, so gate the steps of a quest or a secret that way (`\"stage('s_debt') == 'ledger'\"`, `\"not flag('ledger_read')\"`), and the player is never shown what lies ahead. Requirements on where they are or what they carry still show the action, locked.\n\n### A revealed secret starts one stage earlier\n\nThe engine records a reveal only when a track **enters** a stage with a `truth`. A track that starts on its truth stage never enters it, so the truth is never revealed: the Journal never shows it and the narrator is kept from saying it. **Never start a secret track on a stage that has a `truth`.** For a secret the player has already learned, start one stage earlier on a stage that moves on at once, so the first turn reveals it:\n\n```json\n{ \"id\": \"corin_debt\", \"kind\": \"secret\", \"label\": \"What Corin owes\", \"visibility\": \"secret\", \"owner\": \"corin\", \"start\": \"rumor\", \"stages\": {\n  \"rumor\": { \"label\": \"Something is off\", \"next\": [{ \"to\": \"known\", \"when\": \"true\" }] },\n  \"known\": { \"label\": \"Corin owes the guild\", \"truth\": \"Corin borrowed the guild's harbor dues to pay a gambling debt.\", \"next\": [] } } }\n```\n\n### Cues never name the secret\n\nA person's `cues` are what the narrator sees them do while a secret of theirs stays hidden: `{\"text\": \"Changes the subject whenever the guild comes up.\", \"track\": \"corin_debt\"}`.\n\n- Each cue stands for exactly one secret: a `track` (while it keeps something hidden), a secret `lore` entry (until its gate holds) or a story `flag` (until it is set). A cue keyed to none, or to several, never shows.\n- Write behaviour, never the secret: a cue that holds a track's truth or a phrase of secret lore is a lint error, because it gives the secret away.\n- Name no one the player may not know: such a cue is left out while they don't (lint warns).\n- Only people have cues that show; the stage cues of the tracks a person owns reach the narrator the same way, in Stance only, never as a quest row, while the track keeps something hidden.\n\n## Lore\n\nLore entries (`/lore/<id>`) are what the world knows, read by the engine's own helpers: `{id, title, content, keys, links, aliases?, topics?}`, where `links` are the ids of the people and places an entry is about.\n\n- `\"visibility\": \"known_by\"` keeps an entry back until the player knows every person and place it links.\n- **A secret entry** holds a secret itself: `\"secret\": true`, a `gate` formula that reveals it (lint refuses a secret without one), and an `audience` of the helpers that may read it before then (`npc.choose`, `puzzle.answer`, `judge`, `interpret`). The helpers that write for the narrator or the player (`brief`, `outline`, `choices`, `extract`) never read it early, even when listed. A mind reads a secret entry only when its `holders` name the character or a cue of theirs stands for it; `links` and an opened gate never do.\n- A public entry must never repeat a track's truth: lint refuses it (`secret_truth`).\n- `loreIndex` routes the helpers' lookups: `terms` maps a lowercase term to entry ids, `topics` gathers entries under a label.\n\n## Data tables\n\nPrices, pay, taxes, occupations, regions, gear and the calendar's holiday rules come from data tables (`/tables/<id>`): typed `columns` and `rows` keyed by row id, read by the packs and by `table(id, key, column)` in formulas.\n\n- Every new world, blank or a starter, carries the seventeen default tables; edit them in place. A new table comes whole, with `id`, `pack`, `schema`, `label`, `columns` and `rows`: adapt one (`lre_template` at `/world/tables/<id>`).\n- Cells follow their column: a `band` is `{\"min\", \"typical\", \"max\"}`, money columns are in the currency's minor units, and a `ref` names a row of another table.\n- A table's `revision` and its pin in `pins.tables` are the engine's: every write that changes a table computes both again (`hashJson` of its schema, columns and rows). Don't write either, and don't patch `/pins`.\n- Each revision of the world keeps its own copy of its tables, so a running chat sees a table change only through an Upgrade.\n\n## Host macros\n\nLumiverse runs macros (`{{…}}`) in its prompt and acts on its control characters and `<user>`, `<char>` and `<bot>`. LumiRPEngine keeps authored text as written, so in lore and in section and step templates these are hazards:\n\n- A section template may use only `{{lines}}`, where its lines go; anything else in one is a lint error (`section_macro`). A world words a built-in section it doesn't list in `/sectionTemplates` (`{\"<slot>\": \"<text with {{lines}}>\"}`), only where it differs from the built-in text; a write whose wording lacks `{{lines}}` is refused.\n- Step templates use the engine's own placeholders (`{{world}}`, `{{pov}}`, `{{place}}`…); lint warns about one it doesn't know.\n- Keep `{{user}}` and `{{char}}` out of lore unless the user put them there on purpose. `lre_edit` and `lre_commit` list every hazard a change brings in; say which ones you added.\n\n## Setup, lore and jobs\n\nBeyond a world's document, the tools reach what the user sets up once and what Build runs for them. Settings and the preset are the user's own, for every chat: change them only when asked, and say what you changed.\n\n### Settings and presets\n\n`lre_settings` reads the settings as Settings shows them; a `section` narrows it to one page's part: `helper` (Helper model), `modelUse` (Model use, and Steps and connections under `steps`), `minds`, `timeouts`, `realism` (Realism, and Player claims under `claims`), `adjudication` (Checks), `time`, `extraction` (Changes from the reply), `swipeDefault` (Swipes), `hideJsonBlocks` (Preset), `narrator` (Narrator), and the two switches that make new chats use these over a world's own (`overrideWorldDefaults`, `overrideWorldAdjudication`). `extractionModes` is read-only: each change type's mode now and where it comes from (pinned, learned on the connection, or the default).\n\n`lre_settings_set` takes a JSON merge patch, as the pages send: objects merge, a list or a value replaces, `null` deletes (unpin a change type with `{\"extraction\": {\"purchase\": null}}`).\n\n- A named preset expands: `{\"realism\": {\"preset\": \"grounded\"}}` sets every level and band cap, `{\"modelUse\": {\"preset\": \"standard\"}}` every step, budget and the minds' policy. A change to what a named preset sets makes it `custom`, as Settings does; the answer's `presets` says so.\n- LumiRPEngine keeps every value within what it takes. `adjusted` lists what came out other than sent (a value out of range, a key it doesn't know, a preset's own values): read it, don't assume the patch landed as written.\n- A step's route names a Lumiverse connection by id (`route.connectionId`, null for the helper model's); its template (`template`) is the user's own prompt for the step, which wins over the world's step template for the purpose (the time-skip step's is the skip plan's; a mind's, a memory's and consolidation's are `minds.prompts`). A world's own step templates are its document's `/steps`, written with `lre_edit`.\n- `narrator` is the narrator's knowledge in every chat that sets none and whose world sets none: `knowledge` (`scene`, what everyone in the scene knows, each fact beyond the player character's marked, the default; or `pov`, the player character's only) and `secrets` (`marked`, the default: a line carrying a secret's words goes in marked as a secret; or `omit`: it is left out). `marks` holds the user's own wording of a secret's mark, part by part (`known`, `kept`, `both`, `everyone`), each keeping the placeholders it needs (`{{text}}`, `{{known}}`, `{{kept}}`); `{\"narrator\": {\"marks\": {\"known\": null}}}` returns a part to the shipped text. It applies from each chat's next turn.\n- Realism, checks and time seed new chats only. A running chat changes through its own markers (GM → This chat).\n- The answer carries the caveats as they read now; `lre_settings_caveats` reads them alone. They dry-run the chat the user plays, which takes a while on a long chat: \"still checking\" means ask again in a moment.\n\n`lre_preset` reads the active Lumiverse preset as the engine does: the section outlets its enabled blocks hold (`{{outlet::lre_<section>}}`) and each guidance block (\"RPEngine · <step>\"): missing, empty (notes only), read (switched off but written: its text goes to that helper) or enabled (switched on, so it also lands in the main prompt; it should be off). `lre_preset_add_blocks` adds the missing ones, switched off, under an RPEngine category, and touches none already there. The engine learns which preset is active from the user's open page or the chat they last played: with neither, it can't tell, and says so.\n\n### Diagnostics\n\n`lre_diag {chatId}` reads a chat's activity line (what the engine is doing now, or the step that failed last) and counts its records. The records themselves (each turn's steps, model calls with connection, model, tokens and finish reason, failures with what to do, the sections each run wrote, slow requests) come only with `spoilers: true`: a step's reason can name someone the player hasn't met. Keep them out of anything the player reads. `failures: true` keeps the failed steps, warnings and errors; `last` the newest n. A failing step's `fix` says what the user can do, often a timeout or a step's model in Settings. `lre_diag_clear` forgets the records; `lre_activity_dismiss` clears a failure from the activity line.\n\n### Lore books, pins and drift\n\nA world's lore is its document's (`/lore`, and pins at `/lorePins`), written with `lre_edit`. A pin makes a character's mind calls, or every call at a place, always read an entry: `{\"lore\": \"<id>\"}` for the world's own, `{\"book\": \"<bookId>\", \"entry\": \"<entryId>\"}` for an entry of one of the user's World Info books, either with `\"keep\": \"end\"` to keep an entry's end when it must be cut. `lre_lore_books` lists the books a pin may name (with `chatId`, that chat's own first), `lre_lore_entries {bookId}` a book's entries, with the secret marks in each. The helpers also read World Info as lore, live: the chat's books, the user's global ones and the world's `/loreBooks` (a character's or persona's book only when listed there). What in a World Info entry is secret is written in its own text, as a secret mark: `{{// Secret: TEXT}}`, `{{// Secret (known to Marcus Delgado): TEXT}}`, `{{// Secret (kept from Jordan Ellis): TEXT}}` or `{{// Secret (known to Marcus Delgado; kept from Jordan Ellis): TEXT}}`, each name a person's name or id, and \"you\" or \"the player character\" the player character. Lumiverse strips a mark from every prompt by itself; in a world chat LumiRPEngine gives the narrator its text marked as a secret, or leaves it out, as the narrator's knowledge says, and its holders' minds read it, no helper. No tool writes an entry's text: a mark is the user's to write, with Build's **Make this entry secret** or **Add a secret line**, or in Lumiverse's own World Info editor, so when an entry should be secret, tell the user which and why. `lre_lore_fields {bookId, entryId, fields}` writes its `visibility`, `links` and `aliases` into the user's book at once, so ask the user first. An entry an earlier build kept secret by its fields (`secret`, `gate`) stays so until the user moves its book's secrecy (Build → Lore → Secrecy in your World Info).\n\n`lre_lore_pins {worldId}` reads every pin of the draft now: its entry's title, its source, and its status (`ok`, `missing`, `pending`: an AI-written entry not reviewed yet, which nothing reads; `off`: switched off in its book, which a pin still reads). With `chatId` it reads the revision the chat plays, as GM → Minds does, and needs `spoilers: true`.\n\n`lre_lore_drift {worldId}` lists the entries indexed from a book whose book entry changed since (with its text now) or is gone. To take the new text, write it into the entry's `content` with `lre_edit`. `lre_lore_save {chatId}` makes the chat's latest reply (or `text`, an excerpt of a message) a new lore entry in the draft of the chat's world, sourced to its message.\n\n### Build's jobs\n\n`lre_job_start {worldId, kind, …}` runs one of Build's jobs on the user's Lumiverse and answers its id at once:\n\n- `import_lore {bookIds}`: entities, places and facts from World Info books;\n- `index_book {bookId}`: a lore entry per book entry, keeping the book's text, with aliases, topics, links and lookup terms;\n- `index_text {text}`: lore entries in the text's own words, marked as written by the AI;\n- `refine {instructions}`: world edits for a request in words;\n- `describe_map {scope, prose, mapId?}`: a map of a place from its description;\n- `propose_routines {owners?, after?}`: routines and schedules for people and groups from the lore and their sheets. Each block or schedule cites the entry or field it rests on, with a quote, and is checked against the draft. It reads people and groups in id order within twelve calls; when `lre_jobs` shows `next`, start the job again with those inputs for the rest;\n- `playtest {turns}` and `check_world {days?}`: the engine alone on the draft, as `lre_playtest` and `lre_check_world`, but on the host.\n\nModel jobs spend the user's helper model calls: start one when the user asked for it. `lre_jobs {worldId}` shows each job's status and progress and what it found in counts (with how many proposals have problems); `lre_job {worldId, jobId, pointer}` reads it whole. `/result/proposals/0` is one proposal: collection, key, the value it writes, source, confidence and note, and for routines and schedules the `owner` it is for and the `problems` the draft check found (a clash with their schedules or routine, a place or person that isn't there, company with no ground). A job proposes; nothing changes until `lre_job_apply {worldId, jobId, proposals?, expectVersion}` writes the ones you accept into the draft in one write, as Build's review does (an AI-written entry then counts as reviewed, and accepted lore joins the lookup table). Without `proposals` it applies every proposal but those with problems. Read each proposal before you apply it, then check the draft with `lre_draft`. A proposal's key replaces an item there by that key, and a schedule's `_activity` and `_place` proposals go together. `lre_job_cancel` stops a job; `lre_job_dismiss` forgets one that ended, with its proposals.\n\n### Profiles, the sheet and lint\n\n- `lre_profile {worldId, profile, preview: true}` says what a ruleset profile (`modern`, `classic`, `fifth`, `custom`) would add, what is the same already, and where it conflicts with the draft; without `preview` it applies in one write. Each conflict keeps the draft's own unless `take` names its path; `values` are people's stored values a taken field can't hold, and what they become.\n- `lre_sheet {worldId}` previews the character sheet a new chat would start with, from the draft's ruleset or one you pass as `ruleset`, on the point of view or `entity`. Nothing is saved.\n- `lre_lint {worldId}` lints the head on the host; `lre_draft` lints the draft.\n\n### A chat's map\n\n`lre_map_walk {chatId, x, y}` says what Walk here would take to a cell of the grid the point of view stands on, judged on the real ground; nothing moves. `lre_map_display {chatId, display}` shows the map as what the point of view knows (`knowledge`) or under fog (`fog`): presentation only, kept beside the chat.\n\n### A chat's knowledge\n\n`lre_chat_knowledge {chatId}` reads a chat's own knowledge choices (GM → This chat → Knowledge): `knowledge`, whether the engine tracks what each character knows in it, and `narrator`, the narrator's knowledge (`{\"knowledge\": \"scene\" or \"pov\", \"secrets\": \"marked\" or \"omit\"}`), each null where the chat follows: the narrator's knowledge follows the world's `narrator`, else Settings → Narrator; tracking follows Settings. Pass either to set it, or null to return it to following. They are kept in the chat's metadata, never its story: no recorded turn changes, a Branch keeps them, and they apply from the next turn.\n\n## Playing a chat\n\nThe chat tools reach a chat that plays a world as the user's Play does; `lre_chats` gives the chat ids. They see what the player sees, unless you pass `spoilers: true`, and change the chat the way Play's own controls do. The chat is the user's game: change it when they ask, and say what you changed.\n\nA session goes like this:\n1. `lre_chats` for the chat's id, then `lre_chat_state` with pointer `\"\"` for an outline of what Play shows, and the parts you need from there.\n2. Before a turn, read what it can be: `/palette/entries/<i>` for an action's options and their `params`, `/palette/timelapse` for the skips on offer and what interrupts them.\n3. Make the change or post the turn, then read the state again for what it did: the HUD, the journal, the chips.\n4. Tell the user what you did, what is waiting on them (a reply to start, a chip to answer), and the Undo chip that can take a correction back.\n\n**Reading.** `lre_chat_state` reads the chat's state view at a JSON Pointer, the view the chat's page is sent: `/hud` (the clock, place, weather, cash and, at `/hud/fixes`, the ✎ fixes it offers), `/scene` (who is present), `/chips`, `/journal`, `/keepReport`, `/palette` (the actions at `/palette/entries`, the timelapse at `/palette/timelapse`), `/controls` (the realism, time controls, player-claims policy and checks policy the chat plays by), `/panels` (each pack's panel: Money, Gear, Calendar, the map…) and `activity`, what the engine is doing for the chat now (null when idle). It holds only what the player can know. `lre_chips` lists the chips under the messages with their actions; `lre_inspector` reads the context inspector: what the engine put in each of the last ten prompts, what its steps read of the lore, and its warnings.\n\n**Behind the curtain.** `lre_gm` (the GM view: every entity, secrets, hidden places, track truths, everyone's money, the edits in force) and `lre_minds` (each character's fidelity, latest mind, plans, notes and commitments) need `spoilers: true`, and so do the tools that edit them and Run minds now. Pass it only when the user asked to look behind the curtain, and keep what it shows out of anything the player reads: the chat, a message you post, a fix.\n\n**Changing the chat.** A write lands on the chat's latest message, as Play's do. During a reply it is held (`pending: true`) and lands when the reply finishes. A chat whose status is `paused` (the player edited an earlier message of theirs) refuses every write until `lre_keep` settles it, naming the edited message: `keep` re-checks the later turns against the edit and lists what no longer holds in `/keepReport`; `discard` removes the later turns' records for good (their messages stay as plain text, and the world forgets them), so ask the user first; `convert` brings chosen dropped lines of the keep report back.\n- `lre_fix` is the player's ✎: `fix` names a HUD fix (`place`, `weather`, `cash`, `scene`; each at `/hud/fixes` with its type and options), or give `entity` and `field`, with the `value` in the field's type; `time` (`\"2026-09-14 18:30\"`) sets the clock, running the time between when it is later. A locked field is refused.\n- `lre_gm_edit` is the GM editor: operations in order, all or none, on any entity, locked fields included. They are the engine's own edits, not JSON Patch: each names its `op` and what it touches (the tool lists them all), with ids from `lre_gm`:\n\n```json\n[{ \"op\": \"move\", \"entity\": \"pov\", \"to\": \"bluebird_coffee\" },\n { \"op\": \"adjust\", \"account\": \"acct_pov_checking\", \"cents\": 5000 },\n { \"op\": \"stage\", \"track\": \"q_pontoon_weekend\", \"to\": \"diagnose\" }]\n```\n\n- A `stage` op moves a track as the story would: on to a stage that follows, it plays that stage's entry (rewards, effects, its reveal); back, it only sets the stage. It is made from where the track stands now, so if the reply it waits for, or a swipe or re-read of that reply, moves the track first, it is dropped whole, rewards included, never paid twice, and the chat says it didn't apply.\n- `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes), `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back) and `infer` (when typed attempts roll skill checks, the same way from `/controls/inferred`). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.\n- `lre_view_open` opens a panel as the player does, which settles detail the chat hadn't decided yet (a balance first looked at); opening `core.context` checks the active preset.\n- `lre_chip` answers a chip with one of its action ids (an amount or a pick in `payload` when the action asks for one).\n- Each ✎ fix and GM edit leaves an Undo chip; tell the user it is there.\n\n**Playing a turn.** `lre_action` plays a palette entry (its `action`, and the picked option's `params`) and `lre_timelapse` a skip (`target` as `/palette/timelapse/until` lists them, or `{\"type\": \"duration\", \"minutes\": 120}`); `text` is the player's words for how they do it. Each posts the player's message, and the engine prepares the turn at once. **The reply is Lumiverse's to start, not yours:** a page that shows the chat starts it on its own; with none, it waits until the user opens the chat in Lumiverse. So ask the user to open the chat, then read `activity` and the state for what the turn did. The same goes for a chip's Send (a suggested move) and for the actions `lre_chips` marks `regenerates` (Re-narrate, Re-run, Retry read, a claim's Add): those take effect on the reply's next swipe, which the user makes with Regenerate or a swipe, and a plain Regenerate is only that.\n\n**Minds.** `lre_minds` reads them; `lre_mind_edit` pins a character's fidelity (`mind_pin`, `level` null to unpin), asks for a fresh mind next turn (`mind_refresh`), edits, adds (`id` null) or deletes (`value` null) a note, commitment or plan (`mind_memory`), or sets what they mean to do now, in words their own mind reads first and works from, and how they go about it (`mind_intent {entity, text?, approach?}`: `approach` `\"reactive\"`, `\"proactive\"` or null for their mind to decide; a part left out is kept, and `\"\"` with null clears it); `lre_minds_run` runs Run minds now for `who` (default everyone Live and Near), in the background, with model calls on the user's connection, so ask before you run it; `lre_minds_cancel` stops it, and a cancelled run records nothing. A run, like a GM edit, is one edit with an Undo chip.\n\n**What they know.** `lre_minds` shows the chat's facts at `/knowledge/facts` (each with its holders), the player character's holdings at `/knowledge/pov`, and each character's at `/characters/<n>/holdings`. `lre_mind_edit`'s `mind_knowledge {entity, fact, holding}` sets one person's holding of a fact the chat holds, whole (`{how, by, evidence, since: {msg, at}, belief, confidence, keptFrom?}`; a told one names its teller in `by`), or takes it away with `holding` null. A holding already so, or one taken away that isn't held, changes nothing.\n\n**What they can't do.** A chat tool never starts a generation, regenerates or swipes, and never writes a message but the player's turn: those are the user's, in Lumiverse. An Upgrade is `lre_upgrade`.\n\n## Before you commit\n\n- `lre_draft` shows no lint errors, and you know what each warning means.\n- The POV exists and stands at the start place; the start time is the story's present.\n- Every id an item names (a place, an owner, a relation target, a track in a formula, a lore link) exists.\n- Everyone who has met the POV holds a `knows` or a `regard` toward them.\n- A death or dying the player hasn't learned of sets `lifeKnownBy`; the dead lie at a `fields.place`.\n- Everything someone owns names them in `fields.owner`; every account, business, holding and property names its holders in `fields.owners`.\n- Every flow pays from and to something that exists, with an amount and a schedule (or `once`); every job names its worker and an existing or worded employer.\n- A business is on a tier whose Money level runs what it does (4 for sales tax and business taxes), and its `operating_account` is one of its own accounts.\n- Every holding names an asset the world lists, and every mortgage and its property name each other.\n- With `\"secrecy\": \"full\"`, no character would think a secret openly.\n- No secret track starts on a stage with a `truth`, no cue states its secret, and no public text gives one away.\n- Nothing a map draws was edited outside its map; no `revision` or pin was written by hand.\n- `lre_playtest` and `lre_check_world` run without failures or leaks in their notes.\n- Commit with a note that says what changed, and tell the user what you changed and what you left for them.\n";
+var AGENT_GUIDE_default = "# Writing LumiRPEngine worlds: a guide for agents\n\nRead this before you touch a LumiRPEngine world through the `lumirpengine` MCP server or command line ([MCP.md](MCP.md)): the world model, how to work on a user's worlds, and the mistakes that are easy to make and hard to see. Every kind, field, effect and formula function is in the reference (`lre_docs`); complete worlds to learn from are the starters (`lre_template`). How outside agents reach LumiRPEngine is DESIGN §23.\n\n## The world model\n\nA world is one JSON document in the `lre-world-v1` format, with a published JSON Schema (`lre_schema`). Each commit makes an immutable **revision**, named by its content hash; the newest is the world's **head**, and a chat plays the revision it was started on until the player upgrades it. Changes go to a **draft** first: a working copy that a commit turns into the next revision.\n\n- **Collections** are objects keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `packs`, `lore`, `classifications`, `tiers`, and `lifeStates` and `routines` when the world has them.\n- **Parts** are single values: `calendar`, `realism`, `time`, `start` (`{place, at}`), `pov` (the entity the player plays), `currency`, `loreIndex`, `pins`, and the optional `ruleset`, `mapSettings`, `spawnTier`, `spawnCap`, `routineSettings`, `sectionTemplates` and `narrator` (the narrator's knowledge in the world's chats, whole: `{\"knowledge\": \"scene\" or \"pov\", \"secrets\": \"marked\" or \"omit\"}`; left out, each user's Settings → Narrator decides, and a chat's own choice beats either).\n- **Checks:** `ruleset.adjudication` decides how checks are decided, and `ruleset.inferred` how a typed attempt no action with its own check covers is read as a check of the world's sheet (`mode`, `when`, `who`, `skills`, `difficulty`, `detail`, `others`, `guidance`, `most`; it must name its `mode`). A world without one leaves inferred checks to each chat's realism preset. The skills it rolls are the world's own: the rows of a skill action's table (Use a skill, Make a save) or the Sheets pack's stats, so give an attempt that matters to the story its own action with its own check, which keeps it.\n- **Kinds** are types with fields and single inheritance (`extends`). The packs define the common ones: `thing` (with `owner` and `place`), `person`, `item`, `container`, `kit`, `vehicle`, `region`, the money kinds (`account`, `card`, `flow`, `job`, `holding`, `property`, `business`, `trust`, `invoice`), and `group` with its `faction`, `family`, `household` and `company`. A world kind with a pack kind's id replaces it whole, so extend a pack kind rather than redefine it.\n- **Entities** are the people and things: `{id, kind, name, tier, fields, relations}`, plus `life`, `lifeKnownBy`, `agent`, `cues`, `class`, `tags`, `visibility` and `knownBy` as needed. Fields hold values; relations are `{type, to, fields?}` links to other entities.\n- **Actions** need a one-line `description`: typed messages are read against each action's label and description.\n- **Formulas** are strings in a small, safe expression language (`lre_docs` with `doc: \"expressions\"`): `at(pov, 'archive')`, `stage.hale_debt == 'revealed'`, `hour >= 18`. Dice are notation strings (`1d20`).\n- **Money** is always a whole number of the currency's minor units: 4250 is $42.50 in a dollar world. **Times** are local ISO date-times (`2026-09-14T18:30`).\n\n## How to work on a user's world\n\n1. **Read before you write.** `lre_worlds` lists the worlds and whether each has a draft stored. A draft that is already there when you start is the user's work in progress: ask them before you edit, commit or discard it. `lre_world` reads one at a JSON Pointer: `\"\"` gives an outline of the whole world (collections with their ids), `/entities/mara` one item. `lre_search` finds an item by what it says.\n2. **Edit the draft.** `lre_edit` takes JSON Patch (RFC 6902) operations whose paths point into the whole world: `add` creates an item or a field, `replace` changes one that exists, `remove` deletes, `test` guards a value. All the operations of one call apply, or none do. Pass `expectVersion`, the draft version from your last read (`lre_world`, `lre_draft` and `lre_worlds` give it even with no draft stored; each `lre_edit` answers the new one): if the draft has changed since, the edit is refused.\n3. **Check.** Every `lre_edit` answers the lint the draft has now and any macro hazard the edit brought in. `lre_draft` sums up the draft against the head; `lre_diff` shows field by field what changed. `lre_playtest` plays typed turns and `lre_check_world` simulates whole days, both with the bundled engine and no model.\n4. **Commit, or discard.** `lre_commit` with a short note makes the draft the head; the note goes into the world's history (`lre_history`). It is refused while the draft has lint errors, which it lists. `lre_discard` throws the draft away. Pass both the `expectVersion` you last saw, as for `lre_edit`.\n\n**The draft is the user's Build draft.** Build edits the same single draft: the user sees your changes as you make them, and you see theirs. Don't leave a draft behind: commit what you finished, discard what you didn't, and say which you did. If an edit is refused because the version moved, read the draft again: the user may be editing it.\n\n**A commit takes the whole draft.** When the user presses Commit in Build, your unfinished changes go into that revision with theirs; when you commit, their changes go in with yours. So finish one change before you start the next, and tell the user what you are in the middle of. With `expectVersion`, `lre_commit`, `lre_discard` and `lre_restore` are refused if the draft moved since you read it. A commit is refused, too, when the head is no longer the revision the draft began from: compare with `lre_diff`, discard, and redo the change on the new head.\n\n**Chats keep their revision.** Committing changes no running chat. `lre_chats` says which chats are behind; `lre_upgrade` with `preview` shows what an Upgrade would bring in; without it, it applies the default picks: what play never touched takes the new revision, what play changed stays. So keep every id a chat uses: a renamed id is a new thing, and the old one stays in the chat.\n\n**Offline work.** Without a Lumiverse, write the world as a file: start from a starter (`lumirpengine template <id> --out world.json`), check it with `lre_check` after each change, run it with `lre_playtest` and `lre_check_world`, and bring it in with `lre_world_import` (or Build's Import) once it is clean.\n\n## JSON Patch on a world\n\n- An item is added whole: `{\"op\": \"add\", \"path\": \"/entities/mara\", \"value\": {\"id\": \"mara\", \"kind\": \"person\", …}}`. Adding to a key that exists replaces it, so to change one field, point at the field: `/entities/mara/fields/place`.\n- `replace` and `remove` need something there; `add` needs the parent to exist (`/entities/mara/fields` must be an object before `/entities/mara/fields/place` can be added).\n- In a list, a number is the index and `-` is the end: `{\"op\": \"add\", \"path\": \"/entities/mara/relations/-\", \"value\": {\"type\": \"knows\", \"to\": \"pov\"}}`.\n- In a key, `~1` stands for `/` and `~0` for `~`: the table `economy.catalog` is `/tables/economy.catalog`, and a key `a/b` is `/x/a~1b`.\n- `test` makes an edit conditional on what you read: `{\"op\": \"test\", \"path\": \"/entities/mara/name\", \"value\": \"Mara\"}` first, and the whole patch is refused if Mara was renamed meanwhile.\n- `/id`, `/format`, `/engineVersion`, `/suppressed` and `/pins` are the engine's: a patch may not change them.\n- One patch carries at most 500 operations and brings in at most 4 MiB of JSON (what it adds, replaces and copies), and the world may nest at most 64 levels deep. An item the engine can't read (`/lore/x` set to `{}`) is refused before anything is written, so add items whole.\n\n## Ids and keys\n\n- Every item's `id` repeats its key. Lint refuses a mismatch for entities, lore entries, step templates and classifications; keep them equal everywhere.\n- Ids are lower snake_case by convention (`old_bram`, `quay_to_market`) and are what everything else refers to: `fields.place`, `fields.owner`, relation targets, track ids in formulas, lore `links`. Look them up rather than guess them; every reference to an id the world doesn't have is a lint error or a dead link.\n- An item's key must be 1 to 200 characters and never `__proto__`, `constructor` or `prototype`; the engine refuses any other.\n- A world's own id (`w_…`) is the host's: `lre_world_create` and import assign it.\n\n## People\n\n- **The POV** (`pov`) is the entity the player plays, a `person` on a lead tier, never capped by realism. `start` is where and when play begins, and the POV stands there unless its `fields.place` says otherwise.\n- **Tiers** say how deeply someone is simulated: by default `principal` (Leads), `supporting` and `background`. `\"agent\": true` makes someone pursue their own agenda off-screen, and live the plans the story gives them. Anyone else only follows their schedules: their plans are never lived and lapse, so mark `agent` on whoever should act on their own plans. An agent's ordinary day comes from their routine (see Routines and schedules).\n- **Who knows the POV.** Everyone who has met the POV holds a `knows` relation toward the POV, or a `regard`. The narrator learns from exactly that whether Mara knows you, so a friend without either greets the player as a stranger.\n- **Regard** is one directed relation with `warmth`, `trust` and `respect` from −100 to 100; write each direction that matters. Kinship (`parent_of` and `child_of`, `sibling_of`, `spouse_of`, `partner_of`) is kept two-sided: write both sides.\n- **Life and death.** `life` is the state someone starts in: `alive` when unset, `dying`, `dead`, or one of the world's own `lifeStates`. The dead keep their place: give a body a `fields.place` where it lies, and no schedule (someone who doesn't act follows none).\n\n### lifeKnownBy: who knows how someone starts\n\nWhen someone starts dead or dying, `lifeKnownBy` lists the ids of the people who know it; everyone else, the POV included, takes them for alive until they see the body or are told. **Left out or empty, everyone knows**, which tells the player at once. So:\n\n- a death the player hasn't learned of lists who does know, including everyone who starts in the same place as the body;\n- when nobody else knows yet, list the person themself (the list is then not empty, and no one else learns it);\n- on someone who starts alive it changes nothing (lint warns), and every id in it must be an entity of the world.\n\n```json\n{ \"id\": \"old_bram\", \"kind\": \"person\", \"name\": \"Old Bram\", \"tier\": \"supporting\", \"life\": \"dead\", \"lifeKnownBy\": [\"corin\"], \"fields\": { \"place\": \"net_loft\" }, \"relations\": [] }\n```\n\n## Character minds\n\nA character can have a **mind**: a model call made as that character alone, on what they know (their entity's fields, never a Lumiverse character card; the lore they may read, the turns they were there for, their notes and commitments, their money and their day). It answers with their private read of the moment and what they intend; the narrator then depicts it. Minds are blind to each other; Playtest and Check world call no model, so they play a world without minds. So write who someone is into their fields (`description`, `traits` and the rest): no character card fills it in. A mind knows the truths of the tracks its character owns, of a secret their cue stands for, and of secret lore whose `holders` name them; a secret held from the start goes on the agenda's start stage (entering a stage tells the player its truth).\n\nWho gets a mind is decided each turn by a **focus score**: points for being in the POV's scene or close by, being named, a relation with the POV, a stake in tracks and rules under way, plans with the POV, and their tier. The score puts each character on a ladder: **Live** (a mind every turn), **Near** and **Far** (a mind on their refresh), **Background** (routine only). The world tunes the ladder and what minds remember in its `minds` part:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/minds\", \"value\": {\n  \"secrecy\": \"brief\",\n  \"weights\": { \"mentioned\": 50 },\n  \"thresholds\": { \"live\": 60, \"near\": 35, \"far\": 15 },\n  \"always\": { \"ids\": [\"marcus_delgado\"] },\n  \"never\": { \"tag\": [\"crowd\"] },\n  \"memory\": { \"notes\": { \"show\": 10, \"keep\": 30 }, \"salience\": { \"halfLifeDays\": 14 } },\n  \"holdings\": { \"marcus_delgado\": { \"track:s_shop_trouble:truth\": { \"keptFrom\": \"everyone\" } } } } }]\n```\n\n- **`secrecy`** decides what the narrator gets. `full` (the default, for a world that says nothing): the monologue, intent, reactions and mood too, to depict and never state. `brief`: only a depiction, written as behaviour anyone present could see and withheld when it would give away a secret or a name the POV can't know, while the monologue stays in the GM view. A mind knows its own character's secrets, so set `brief` where a private thought reaching the narrator would give one away.\n- **`weights`** are the points each input adds, from −100 to 200: `here` 45, `nearby` 20, `mentioned` 40, `regard` 10, `knows` 10, `owner` (owns a track under way) 15, `track` (named in one) 8, `rule` 5, `pending` (an invitation, appointment or plan with the POV) 15, `recent` 10, `band` 15, 5 and 0 for principal, supporting and background, and `roles` by classification value id (`antagonist` 20). A role weight counts only where one of the world's classifications has that value (lint warns about one that none has), and a world's `roles` replaces the default map whole.\n- **`thresholds`** are the lowest scores for Live, Near and Far (60, 35 and 15); below Far is Background. Live is only for someone at hand: in the POV's scene or named this turn. Being close by adds points but never makes someone Live; anyone not at hand is Near at most, whatever their score.\n- **`always`** and **`never`** are selectors (`ids`, `kind`, `tier`, `memberOf`, `tag`, `class`): `always` keeps people Live wherever they are; `never` keeps them Background, mindless, and wins over `always`. A GM's pin in a chat wins over both. An id, kind, tier, group or classification the world doesn't have is a lint error.\n- **`memory`** is what a mind is shown and how long a note lasts, in entries unless named: `witness.show` (what they saw lately, 8), `recall.recent` and `recall.relevant` (their latest turns and those best matching the moment, 4 each) within `recall.tokens` (1200), `notes.show` (8) and `notes.keep` (24 before the oldest are folded into their summary), `commitments.show` (8; open ones are kept until resolved), `salience.halfLifeDays` (a note's weight halves every 7 game days) and `salience.floor` (below 0.5 it has faded), and `consolidate.enabled` (true: faded and surplus notes fold into the summary, not lost). The user's own settings win over the world's.\n- **`holdings`** is what each person, the POV included, knows from the start: by entity id, each fact by its id, `lore:<entry>`, `track:<track>:<stage>` (a stage's truth) or `field:<entity>:<field>`, with `belief` (`\"true\"`, `\"false\"` or `\"uncertain\"`; true when left out), `confidence` (0 to 1; 1 when left out) and `keptFrom` (`\"everyone\"` or a list of people; no one when left out). They seed each chat's knowledge. A World Info entry's secret marks name their own holders, so don't list those here; lint (`minds.holdings`) flags a holder who isn't a person and a fact the world doesn't have.\n- Every part is optional; one left out or out of range reads as its default, and lint says so. The user decides in their settings whether minds run at all, and how many Live minds a turn may have.\n\n**Prompts.** The five minds steps, `mind`, `memory`, `skip` (a time skip's turning points), `consolidate` (folding old notes into a summary) and `knowledge` (after each reply, while the chat tracks who knows what: who learned which fact, by seeing it or being told, what someone worked out and how sure, and what someone now doubts), take world step templates as the other steps do, with `\"output\": \"text\"` and `\"signals\": []`: minds run on their own cadence, so signals are ignored (lint notes any as info). The template is the step's instructions only, with `{{character}}` the character's name (empty for a `knowledge` call about the whole scene, the default) and `{{world}}` the world's: the engine appends the answer's format itself, which no template replaces, so write how to think, never the JSON. The engine checks a `knowledge` answer whatever the template says: no one witnesses what they weren't there for, a teller holds what they tell, an inference rests on what its person holds or saw, and the player character never infers or doubts. The player's own prompt wins over the world's template, which wins over the built-in; give each purpose one at most (lint warns of a second, and a blank one is skipped).\n\n```json\n[{ \"op\": \"add\", \"path\": \"/steps/mind_port_alder\", \"value\": { \"id\": \"mind_port_alder\", \"purpose\": \"mind\", \"output\": \"text\", \"signals\": [],\n  \"template\": \"You are the private mind of {{character}} in {{world}}, a lake town where everyone knows everyone's business and says less than they mean. Think as {{character}}, from only what they know below. Decide how they read this moment and what they intend; never script anyone else, and keep to what a neighbour would notice.\" } }]\n```\n\n## Routines and schedules\n\nA **routine** is what someone can be relied on to do on an ordinary day; a **schedule** is a commitment with set hours (a shift, school). Both are defaults the world leans on, never authority over the story: what the story established (a place or activity an action, the narration or the GM set, a trip, the GM's intent) always comes first, then schedules and appointments, then story plans, then the routine, then the basic needs (sleep, breakfast, lunch, dinner), then chores and agenda steps. Nothing else fills a day. A routine never moves anyone out of a scene with the POV and never moves a Live or Near character; it matters most for the Background cast off screen. So write a routine as a person's habits, not a timetable they must keep: leave people with no routine at all when the world says nothing about their days, and they live on the story, their commitments and their basic needs.\n\nA routine is one item of `routines`: `{id, label?, owner?, inherit?, blocks, source?}`. Its **owner** is read as a schedule's is: an entity, a group (its members), a kind, a selector, or none for the world's default for everyone. For each block id the most specific owner wins (their own, a group's, a kind's, a selector's, the world's, then the basic needs), and `inherit: false` drops the less specific routines' blocks for whom it covers. Each block has an `id`, a `label`, an `activity` (`work`, `socialize`, `leisure`, a meal, `sleep` or the world's own), `minutes`, and a `kind`:\n\n- **`fixed`** starts at `at` (`HH:MM`);\n- **`flexible`** takes its minutes somewhere in its `window` (`{from, to}`, `HH:MM`; a `to` at or before `from` runs past midnight), and `perWeek` makes it a floating block (\"the gym three times a week\");\n- **`optional`** is flexible by `chance` (above 0, at most 1): the first thing a busy day leaves out.\n\nThe rest is optional: `days` (`weekdays` with 0 for Sunday, `off: \"only\"` or `\"never\"` for days off, `holidays` and `except` by the calendar's ids, `birthday`, `seasons`, `weather`), `place` (`home`, the default, `work`, `here`, `with` its company's home, `{place}` or `{nearest: sceneType}`), `company` (`{who: selector, invite?}`), `priority` (1 to 5), `needs`, `private` (the player reads it as \"Busy\") and `source`. Give a block its ground when the world has one: `{\"type\": \"lore\", \"entry\": …, \"quote\": …}` or `{\"type\": \"sheet\", \"entity\": …, \"field\": …, \"quote\": …}`, with the short quote it rests on, so the GM sees why it's there. `{\"id\": \"lunch\", \"off\": true}` turns off a less specific block or a basic need.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/routines\", \"value\": { \"dale_mornings\": {\n  \"id\": \"dale_mornings\", \"label\": \"Dale at the marina\", \"owner\": \"dale_whitcomb\",\n  \"blocks\": [\n    { \"id\": \"open_marina\", \"label\": \"Opens the marina\", \"activity\": \"work\", \"kind\": \"fixed\", \"at\": \"06:30\", \"minutes\": 90, \"place\": { \"place\": \"alder_harbor_marina\" }, \"days\": { \"weekdays\": [1, 2, 3, 4, 5, 6] },\n      \"source\": { \"type\": \"lore\", \"entry\": \"lore_marina\", \"quote\": \"Dale Whitcomb has run it for twenty-five years.\" } },\n    { \"id\": \"coffee\", \"label\": \"Coffee at the Bluebird\", \"activity\": \"socialize\", \"kind\": \"flexible\", \"window\": { \"from\": \"09:00\", \"to\": \"11:00\" }, \"minutes\": 30, \"perWeek\": 3, \"place\": { \"place\": \"bluebird_coffee\" } }\n  ] } } }]\n```\n\nA block that asks someone along makes an invitation only when the world's settings allow it: here the POV, on Thursday evenings, from the Rusty Anchor's trivia night the lore tells of.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/routines/marcus_trivia\", \"value\": {\n  \"id\": \"marcus_trivia\", \"owner\": \"marcus_delgado\",\n  \"blocks\": [{ \"id\": \"trivia\", \"label\": \"Trivia night at the Anchor\", \"activity\": \"socialize\", \"kind\": \"fixed\", \"at\": \"19:30\", \"minutes\": 120, \"days\": { \"weekdays\": [4] }, \"place\": { \"place\": \"rusty_anchor\" },\n    \"company\": { \"who\": { \"ids\": [\"pov\"] }, \"invite\": true },\n    \"source\": { \"type\": \"lore\", \"entry\": \"lore_anchor\", \"quote\": \"a Thursday trivia night that gets competitive\" } }] } }]\n```\n\n**Tuning** is the `routineSettings` part; each part left out keeps its default, and the defaults are no part at all:\n\n- **`awareness`**: how long someone the story put somewhere stays there against their routine. `story_first` keeps them until the story or the GM releases them; `balanced` (the default) until their night, with Background characters keeping their routine and Far ones bending for story plans and the GM's intent; `routine_first` lets the routine's next edge take them back.\n- **`invitations`**: `off`, `player` (the default: routine blocks may invite the POV) or `everyone` (people's days take each other's invitations too). Story plans and the GM invite under any setting.\n- **`sociability`**: `reserved`, `usual` or `outgoing`, how fast NPCs' social and fun needs grow.\n- **`planBend`**: which story plans take their time from work and school: `must`, `strong`, `standard` (the default) or `ordinary`.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/routineSettings\", \"value\": { \"awareness\": \"story_first\" } }]\n```\n\n**Editing.** `lre_routine_put` and `lre_routine_delete` write one routine whole, and `lre_routine_settings` the settings, each at the version you read; `lre_edit` works on `/routines` and `/routineSettings` as above. A routine whose shape the engine can't read, or a setting or value it doesn't take, is refused before anything is written, with a message naming the field (`window`, `kind`, `minutes`, `awareness`…), exactly as Build's save is: fix that field and send it again. What a routine names that the world lacks (a place, an owner who matches nobody, a lore entry) is a lint warning after the write. `lre_schedules`, `lre_schedule`, `lre_schedule_put` and `lre_schedule_delete` do the same for schedules.\n\n**In a chat** the world's routines are only where it starts. Change someone's routine in one chat with `lre_routine_edit` (`routine_follow` for whether and how strictly they keep it, `routine_block` for one block, `schedule_override` for a schedule; each is one Undo-able fix), read their day and why each block is there with `lre_day`, and what the chat changed with `lre_routine_changes`. Change the world's routine only for what is true of the world; what happened in one story belongs to that chat.\n\n## Things and who owns them\n\n- Where a thing is: `fields.place` for something lying in a place, a relation `{\"type\": \"in\", \"to\": \"rhea\"}` for something carried or inside a container.\n- **Whose a thing is lives in `fields.owner`**, the owner's id. That puts it on their gear, a vehicle in their garage and at their levels, and lets them drive it. The `owns` relation only changes how the Journal words a change: an item with an `owns` link and no `fields.owner` belongs to no one. Set `fields.owner` on everything someone owns. Money is owned differently: see Money.\n\n## Money\n\nMoney is entities, a few fields and the economy pack's config. Amounts are whole minor units (4250 is $42.50 in a dollar world) and percentages are percent units (22 is 22 %). What runs for someone depends on their Money level: the world's `realism.levels.money`, capped by their tier's band (the POV is never capped). At 0 money is off; at 1 a person's `wealth` band is all there is; at 2 their cash and one everyday account are real, and a payment they can't cover is declined; from 3 all their accounts, and more as below.\n\n| From | What runs | Its feature ids |\n|---|---|---|\n| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate | `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `property`, `withholding` |\n| Money 4 | statements and minimum payments, interest (on the average daily balance where an account asks for it), fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, investments, options, capital gains | `statements`, `interest`, `average_daily`, `fees`, `delinquency`, `credit`, `atm`, `holds`, `daily_limits`, `overdraft`, `tax_brackets`, `sales_tax`, `business_tax`, `investments`, `options`, `capital_gains` |\n\nA world switches a feature on or off for itself in `packs.economy.config.features` by its id (`{\"sales_tax\": true}`), down to its floor: Money 2 for `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `atm`, `daily_limits` and `overdraft`, Money 3 for the rest. Lint warns about an id it doesn't know.\n\n### Who owns money\n\nA **party** is a person, or an entity of kind `business`, `trust` or `household`. An account, a business, a holding or a property names its holders in `owners`, each with a role: `[{\"party\": \"pov\", \"role\": \"owner\"}]`.\n\n| Role | Spends from it | Counts toward their net worth | Manages it |\n|---|---|---|---|\n| `owner`, `joint` | yes | yes | yes |\n| `custodian`, `trustee` | yes | no | yes |\n| `beneficiary` | no | yes | no |\n| `authorized_user` | yes | no | no |\n\n`share` divides the worth between the holders whose role counts it, in percent; given by none, they share equally. A **household** is the relationships pack's `household` group: its members hold a `member_of` relation to it, and it shares flows between them (below).\n\n### Accounts and products\n\nAn `account` entity is one purse, wallet, bank account, card account, loan or investment account: `owners`, `product`, `opening` (the balance at the start, from the holder's side: a debt is negative) and `institution`. `product` is an account class, each a built-in product with the finance tables' terms (`cash`, `checking`, `business_checking`, `savings`, `money_market`, `cd`, `trust`, `escrow`, `credit_card`, `charge_card`, `line_of_credit`, `loan`, `mortgage`, `brokerage`, `retirement`), or one of the world's own products, `packs.economy.config.products` by id. An account's own `limit`, `apr_pct`, `apy_pct`, `statement_day`, `due_day`, `payment`, `months_left`, `overdraft` and the rest win over its product's; `autopay` (`minimum`, `statement`, `full` or `fixed`) with `autopay_from` pays a credit account by itself.\n\nRead `/packs/economy/config` before adding to it; the modern starter's has no `products` map yet. Where the world has none, add the map whole with the first product in it, as below (JSON Patch adds into a map only once it exists); where it has one, add each product by its own path, `/packs/economy/config/products/<id>`, since adding the whole map replaces it and drops every product already in it. `assets` works the same, and in the modern starter it is added to by id, as further down. The same goes for entities: `add` on an id that is taken replaces that item whole, so look an id up before you use it.\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/products\", \"value\": { \"lakeshore_rewards\": { \"label\": \"Lakeshore Rewards Visa\", \"class\": \"credit_card\", \"institution\": \"Lakeshore Credit Union\", \"limit\": 300000, \"apr_pct\": 21.9, \"rewards_pct\": 1.5 } } },\n  { \"op\": \"add\", \"path\": \"/entities/acct_pov_rewards\", \"value\": { \"id\": \"acct_pov_rewards\", \"kind\": \"account\", \"name\": \"Rewards Visa\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"pov\", \"role\": \"owner\" }], \"product\": \"lakeshore_rewards\", \"opening\": -12500, \"autopay\": \"statement\", \"autopay_from\": \"acct_pov_checking\" }, \"relations\": [] } }\n]\n```\n\nA **card** is its own entity, kind `card`: the `account` it draws on, its `holder`, its `network` (`debit`, `credit` or `charge`), its `state` (`active`, `frozen`, `lost` or `cancelled`) and `item`, the physical card in the holder's gear. An authorized user holds a card on someone else's account.\n\n### Flows: money that moves on its own\n\nA **flow** is every scheduled or one-off movement of money: rent, bills, a transfer to savings, an allowance, a loan payment. It is an entity of kind `flow`:\n\n- **`flow_kind`**: `transfer`, `bill`, `rent`, `utility`, `subscription`, `premium`, `loan_payment`, `card_payment`, `savings`, `income`, `payroll`, `allowance`, `living`, `tax`, `distribution`, `invoice`, `draw` or `other`.\n- **`from` and `to`**: an account; a party, paying as their preferences choose, or paid into their deposit account; or an outside payer or payee by name, in words (`\"Harbor Mutual\"`). A name shaped like an id (`acct_pov_chequing`) that names no entity draws a lint warning: it would be read as an outside party, so money would come from or go to nowhere.\n- **The amount**, the first of: `amount_cents`; `amount_formula`; `amount_table` (`table.row`, or `table.row.column`); `amount_min` and `amount_max`, a seeded draw between them; `amount_pct` of `amount_of`'s balance; `amount_due` (`minimum`, `statement` or `balance`, of the credit account it pays).\n- **When**: `every` (`day`, `week`, `month` or `year`) with `interval` (biweekly is `week` with 2), `weekdays` (0 is Sunday), `days` of the month (31 is the last day of a short month, −1 always the last), `months`, `except` (holiday ids), `roll` (`before` or `after`, for a day that isn't a business day) and `at` (`HH:MM`, 09:00 by default); or `once`, a local date-time. `start`, `end` and `count` bound it.\n- **When the money isn't there**, `shortfall`: `skip` this time, pay what there is (`partial`), `retry` after `retry_days` up to `retries` times, pay from `fallback`, let the account `overdraft` as its policy allows, or `defer` the amount to the next time.\n- `splits` sends parts elsewhere (fixed `cents` first, then `pct` of the rest); `shares` splits a household's flow between its members by `pct`; `link` ties it to what it belongs to (a property, a job, a loan); `status` is `active`, `paused` or `ended`.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/flow_pov_boat_fund\", \"value\": { \"id\": \"flow_pov_boat_fund\", \"kind\": \"flow\", \"name\": \"Boat fund\", \"tier\": \"background\", \"fields\": { \"flow_kind\": \"savings\", \"from\": \"acct_pov_checking\", \"to\": \"acct_pov_savings\", \"amount_cents\": 4000, \"every\": \"week\", \"interval\": 2, \"weekdays\": [5], \"start\": \"2026-09-18\", \"shortfall\": \"skip\", \"category\": \"savings\" }, \"relations\": [] } }]\n```\n\n### Businesses and invoices\n\nA **business** is an entity of kind `business`, a party with `owners` (and their `share`s) and a `structure`: `sole_proprietorship`, `partnership`, `llc` (the default), `s_corp` or `c_corp`.\n\n- **Where it sells:** a purchase at one of its `places` (else where it stands) pays it. `daily_sales` is what walk-in customers from outside the world spend there on each of its `trading_days` (0 is Sunday; Monday to Friday when left out), give or take `sales_spread_pct` (30 when left out), paid at closing and never on a day-off holiday.\n- **Its money** is in the accounts it owns. `operating_account`, one of them, is where takings land and payroll comes from (else its best deposit account). It keeps `margin_pct` of a sale (all of it when left out) and owes the rest to its suppliers, paid on the 10th; the sales tax it collects is paid on the 20th. Its rent, bills and loan payments are flows from its accounts.\n- **Its owners** take draws in play, except from a `c_corp`. `distribution_pct` pays that share of each period's profit out to the owners by share, every `distribution_every` (`month`, `quarter` (the default) or `year`), on the 10th after the period closes.\n- **Its books**, month by month, are kept by the engine from all of that: there is nothing to write.\n\nA business's own Money level is its tier's cap, as a person's is: it decides whether the business collects sales tax and pays business taxes (Money 4) and whether its invoices go late (Money 3). Its payroll, takings and other flows go through its accounts, and an account runs at the highest level of those who may spend from it (the business and its authorized users), whatever the account's own tier. So give a business the `principal` tier, as the modern starter does, for all of it to run.\n\nDale's marina has run on his own account so far, its takings flowing into it and its bills out. Making it a business moves the account to the business, with Dale still able to spend from it as an authorized user, and a purchase at the marina then pays it. The account was all Dale had, so he gets a checking account of his own as well: without one, his own spending and bills would come out of the business's.\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/alder_harbor_marina_co\", \"value\": { \"id\": \"alder_harbor_marina_co\", \"kind\": \"business\", \"name\": \"Alder Harbor Marina\", \"tier\": \"principal\", \"fields\": { \"owners\": [{ \"party\": \"dale_whitcomb\", \"role\": \"owner\" }], \"structure\": \"sole_proprietorship\", \"places\": [\"alder_harbor_marina\"], \"operating_account\": \"acct_dale_marina\", \"industry\": \"marina\", \"margin_pct\": 70, \"late_fee_pct\": 1.5 }, \"relations\": [] } },\n  { \"op\": \"replace\", \"path\": \"/entities/acct_dale_marina/fields/owners\", \"value\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }, { \"party\": \"dale_whitcomb\", \"role\": \"authorized_user\" }] },\n  { \"op\": \"add\", \"path\": \"/entities/acct_dale_checking\", \"value\": { \"id\": \"acct_dale_checking\", \"kind\": \"account\", \"name\": \"Dale's checking account\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"dale_whitcomb\", \"role\": \"owner\" }], \"product\": \"checking\", \"opening\": 640000, \"institution\": \"Great Lakes Bank\" }, \"relations\": [] } }\n]\n```\n\nAn **invoice** is an entity of kind `invoice`: the `business` that issued it, the `customer` (a party's id, or an outside customer by name), `cents`, `memo`, `issued`, `due` (30 days after `issued` when left out), `state` (`open` when left out, `paid`, `late` or `void`) and `paid`, what is paid of it so far. Lint requires the business, the customer and an amount above zero. An open invoice is paid as a bill from the customer's accounts on its due date and every week after until it is paid; an outside customer pays on the due date. Unpaid when its due day ends, it goes `late` and takes the business's `late_fee_pct` of the amount, and the fee again every 30 days. A business's `invoice_days` (30 when left out) are the terms of the invoices it issues in play.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/inv_pov_winter_storage\", \"value\": { \"id\": \"inv_pov_winter_storage\", \"kind\": \"invoice\", \"name\": \"Winter storage\", \"tier\": \"background\", \"fields\": { \"business\": \"alder_harbor_marina_co\", \"customer\": \"pov\", \"cents\": 48000, \"memo\": \"Winter storage for the fishing boat\", \"issued\": \"2026-09-14\", \"due\": \"2026-10-14\", \"state\": \"open\" }, \"relations\": [] } }]\n```\n\n### Work and pay\n\nA **job** is an entity of kind `job`, one worker's employment:\n\n- **Who and where:** `worker`; `employer`, a business entity (paying from its operating account), a place (the business trading there, else an outside employer) or an outside employer named in words, an id-shaped one that names no one and no place drawing a lint warning; `workplace`, the place the work is (else the business's `places`); `title`; and `occupation`, a row of the occupations table (else the worker's own `occupation`).\n- **Pay:** `basis`, which is `salary` (a year), `hourly`, `per_shift`, `commission`, `tips` or `stipend` (a period), and `rate`, both from the occupation's row when left out; `commission_pct` of the sales credited to the worker; `tips_per_hour` on top of hourly pay.\n- **When it pays:** `pay_every`, the occupation's when left out: `weekly` or `biweekly` on the weekday of `pay_anchor` (the first payday), else of `pay_weekday` (Friday); `semimonthly` on `pay_days` (the 15th and the last); `monthly` on one day (the last); `per_job`, each evening at 21:00 for that day's work; or `custom`, a flow's schedule with `pay_` before each part (`pay_unit`, `pay_interval`, `pay_weekdays`, `pay_days`, `pay_months`, `pay_except`). A payday on a weekend or a day-off holiday moves to the business day before it (`pay_roll`: `before`, `after` or `none`).\n- **What it pays for:** the days from `start` to `end`, and inside the season (`season_from` to `season_to`, `MM-DD`, which may wrap the new year). Hourly and per-shift pay count what `hours` names: the worker's scheduled commitments at the workplace (`scheduled`, laid out by `shift_pattern`, a row of the `calendar.shifts` table), the shifts the POV turns up for (`attended`), or `hours_per_week` and `shifts_per_week` over `weeks_per_year` (`contract`). Left out, it is `attended` for the POV and `scheduled` for anyone else while they have a routine at the job, and `contract` without one. `status` is `active`, `leave` (paid nothing) or `ended`.\n- **The paycheck:** `deductions` come off the gross first, each `{label, cents or pct, pretax, kind, to, match_pct}`. A `pretax` one comes off income-tax wages (a `retirement` one still counts as wages for Social Security and Medicare; any other doesn't). `to` is an account of the worker's, else an outside payee by name, and a business employer adds `match_pct` of the gross, up to the deduction, to that account. Withholding follows (Taxes, below), and none for a `contractor` (the occupation's `self_employed` when left out). `splits` route the net among the worker's own accounts, each `{to, cents}` or `{to, pct}`: fixed amounts first, then percentages of the rest, and what's left to their deposit account.\n\nEach job pays through a flow from its employer to the worker. A paycheck covers the work since the last one paid, so a payday the employer can't cover is paid with the next. In play, a business's owner hires, ends jobs and raises pay; a GM edit of the job's fields does the same.\n\nA second job beside the POV's work at the garage: one shift a week on the marina's fall haul-out crew, paid on Fridays with half of each check into savings, and nothing outside the season:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/job_pov_haulout\", \"value\": { \"id\": \"job_pov_haulout\", \"kind\": \"job\", \"name\": \"Haul-out crew at Alder Harbor Marina\", \"tier\": \"background\", \"fields\": { \"worker\": \"pov\", \"employer\": \"alder_harbor_marina_co\", \"workplace\": \"alder_harbor_marina\", \"title\": \"Haul-out crew\", \"basis\": \"per_shift\", \"rate\": 11000, \"hours\": \"contract\", \"shifts_per_week\": 1, \"season_from\": \"09-15\", \"season_to\": \"11-15\", \"pay_every\": \"weekly\", \"pay_anchor\": \"2026-09-18\", \"splits\": [{ \"to\": \"acct_pov_savings\", \"pct\": 50 }] }, \"relations\": [] } }]\n```\n\nAnd a 401(k) at the garage: 5 % of the POV's pay before income tax into a retirement account of theirs, which the shop matches up to 3 % of pay:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/acct_pov_401k\", \"value\": { \"id\": \"acct_pov_401k\", \"kind\": \"account\", \"name\": \"Your 401(k)\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"pov\", \"role\": \"owner\" }], \"product\": \"retirement\", \"opening\": 0, \"institution\": \"Great Lakes Bank\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/job_pov_mechanic/fields/deductions\", \"value\": [{ \"label\": \"401(k)\", \"kind\": \"retirement\", \"pretax\": true, \"pct\": 5, \"match_pct\": 3, \"to\": \"acct_pov_401k\" }] }\n]\n```\n\n### Taxes\n\n- **On pay**, withholding runs from Money 3 at a flat rate: the occupation's withholding rate (federal tax, Social Security and Medicare together) and the worker's state rate, plus their region's local rate when they have `local_tax: true`. At Money 4 it goes through the federal brackets and standard deduction for their `filing_status` (`single` when left out, `married_filing_jointly` or `head_of_household`), with Social Security and Medicare, then the state and local rates.\n- **Regions** are rows of the regions table (`mi`, `il`…), with their state, local and sales tax rates. The economy config's `region` is the world's own (the modern starter's is `mi`); without one, what it would cover runs at the national row's rates. A party's income tax follows its own `region` field, else the config's.\n- **Income nobody withholds from** is paid as estimated tax on 15 April, June and September and 15 January: a contractor's pay, and an owner's share of the profit of any business but a `c_corp` where that business pays business taxes. A `c_corp` pays corporate tax on its own profit, at the config's `taxes.corporatePct` (21 when left out) plus the state rate.\n- **Sales tax** runs only at the top level, Money 4 (or from 3 where the world switches `sales_tax` on), and at the buyer's level: below it a price is as listed, and a business below it neither collects nor remits. The rate at a place is its `sales_tax_pct` (or an enclosing place's), else that of its tax region: a `tax_region` on it or an enclosing place, else the config's `region`. Nothing is charged on a category in the config's `taxes.exempt` (the modern starter's holds `groceries_staples`, `groceries_baskets` and `medical`) or in a place's `tax_exempt`, nor on what a business with `collects_sales_tax: false` sells.\n\nThe modern starter's economy is in Michigan, so a purchase in Chicago is taxed at Michigan's rate. To tax it for Illinois at Chicago's own combined rate, and the POV's pay at Michigan's typical local rate:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/places/chicago_il/fields/tax_region\", \"value\": \"il\" },\n  { \"op\": \"add\", \"path\": \"/places/chicago_il/fields/sales_tax_pct\", \"value\": 10.25 },\n  { \"op\": \"add\", \"path\": \"/entities/pov/fields/local_tax\", \"value\": true }\n]\n```\n\n### Paying: preferences, cash machines and credit\n\n- **`pay_prefs`**, a person field, orders how they pay: tiers of `use` (`cash`, `debit`, `credit`, `charge`, `checking`, `savings`, or a card or account id), each for an amount from `min` to `max` and `categories`, but not those in `except`. A payment tries the tiers that fit it in order, then cash, debit, credit and charge; the first that covers it pays, and with none it is declined. Left out, the tiers follow their wealth band and their `traits`: a frugal or careful person keeps to cash and debit longer, an impulsive or flashy one reaches for credit first, a business pays by debit, then credit.\n- **Cash machines and branches** are place fields: `atm`, `{\"bank\", \"fee\", \"limit\", \"deposits\"}` (`fee` is the machine's own surcharge, `limit` the most one withdrawal takes), and `branch`, `{\"bank\"}`, a counter where that bank's customers withdraw and deposit. Where cash machines run (Money 4), cash comes out and goes in only at one of the two; at another bank's machine the product's `fees.atm` comes on top of the surcharge, a card's `daily_atm_limit` caps a day's withdrawals, and a deposit at a machine stays on hold for the account's `hold_days`. This applies only once the world places at least one `atm` or `branch`; place none and cash moves freely at every level.\n- **Credit** is played, not written: each person's report and monthly score (300 to 850) come from how their credit accounts are used and paid, and set the rates they are offered. An account's `opened` date counts toward its age.\n\n**Player claims.** A typed action on a thing the player says they have that the world doesn't may make it (the chat's Player claims setting): an item with `fields.claimed: true`, the POV's, priced against `economy.catalog`. It is never money and never an authored thing: a requirement or gate on an id (`carries(self, 'shop_office_key')`) never passes on a claimed key, while `has_item` by name counts one, so test ids for what must be earned. Keys, weapons and documents always ask the player first; `packs.economy.config.claimCap` (minor units; unset, twice `meals_out`'s typical price) caps what a capped policy makes without asking.\n\n## Holdings and property\n\nEverything a party owns besides the money in its accounts: positions in assets, real estate and stakes in businesses, each counted in its net worth. Prices, payouts, trades and gains run where the `investments` feature does (Money 4), options where `options` does (Money 4), and property from Money 3 (`property`). The examples here build on the marina business of Money.\n\n### Assets\n\nAn **asset** is defined once, in `packs.economy.config.assets` by id (the modern starter lists `broad_us_equity_index`, `glbd`, `lkfr`, `tnote_2030` and `btc`): a `label`, a `class` (`security`, `fund`, `bond`, `option`, `property`, `business_stake`, `crypto` or `other`), a `symbol` to show, and its `price` per unit at the start (100.00 when left out).\n\n- **How its price moves:** each class follows a recipe row of the finance table's `investing` section: securities and funds the stock index (`broad_us_equity_index`), bonds `bonds_aggregate`, crypto `crypto`. `model` names another row (`cash` holds its price), and an asset's own `annual_return_pct` (its total return), `annual_volatility_pct` and `correlation` (0 to 1, how closely it moves with its market) override the recipe. Prices are marked at 16:00 on each business day, every day for crypto.\n- **What it pays:** `yield_pct` of its value a year, paid `pays_per_year` times (4 for securities and funds, 12 for a bond fund, none for crypto). A payout comes out of the total return, so it is never counted twice. A single bond has a `face`, a `coupon_pct` and a `maturity`: it pays its coupon twice a year and is redeemed at its face on its maturity date.\n- **An option** names its `underlying` (an asset the world lists), `strike` (per unit), `expiry` (`YYYY-MM-DD`), `right` (`call` or `put`), `multiplier` (100 units a contract) and `settlement` (`physical`, the default, or `cash`). It is priced from its underlying, so it takes no `price`.\n\nLint (`economy.assets`) requires a class, an option's terms, a bond's maturity with its face and a price above zero, and warns about a `model` the table doesn't list. A regional fund with its own return and twice-yearly payouts, and a December call on Lakefront Freight:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/assets/glix\", \"value\": { \"label\": \"Great Lakes Index Fund\", \"class\": \"fund\", \"symbol\": \"GLIX\", \"price\": 11240, \"annual_return_pct\": 8, \"annual_volatility_pct\": 18, \"yield_pct\": 2.2, \"pays_per_year\": 2 } },\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/assets/lkfr_c4500_dec26\", \"value\": { \"label\": \"LKFR December 2026 45 call\", \"class\": \"option\", \"underlying\": \"lkfr\", \"strike\": 4500, \"expiry\": \"2026-12-18\", \"right\": \"call\" } }\n]\n```\n\n### Holdings, trades and payouts\n\nA **holding** is an entity of kind `holding`, a position in one asset: in an `account` (a brokerage or retirement account, its owners the holding's by their shares) or held directly by its `owners`. Its `lots` are its purchases, oldest first, each `qty`, its whole `cost` and when it was bought (`at`); for an option, `qty` counts contracts. Lint (`economy.holdings`) requires an asset the world lists, an account that is one, owners for a holding in none, and lots as a list.\n\n- **Trades are played** (the `trade` action): buy or sell an asset or a holding, in units or for an amount (a sale with neither sells it all), held in an `account` (else directly), paid `from` an account (else the investment account's own cash, else the buyer's deposit account), with the proceeds `to` an account (else the holding's account, else the seller's deposit account). Units go first in, first out, and each sale realises its gain, short term on lots held under a year. A retirement account keeps a sale's proceeds.\n- **Options** trade whole contracts. Before expiry, a holder exercises in play (`exercise_option`): a call pays the strike for 100 units of the underlying, which land in the same account. At the close on its expiry date a contract in the money settles in cash at what it is worth, and one out of the money expires worthless.\n- **Payouts** are flows: dividends mid-month in evenly spaced months ending in December (quarterly: March, June, September and December), a bond fund's monthly, a bond's on its coupon dates, each the units held then times what a unit pays. One lands where the holding's `route` says: `reinvest` buys more units at that day's price, as a new lot; an account id pays it there; left out, it goes to the holding's account, else each owner's deposit account by share. A retirement account keeps what its holdings pay unless they reinvest. In play, `route_distributions` changes a holding's route.\n\nTwenty units of the fund, its payouts reinvested, and two of the calls, in the POV's brokerage account:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/hold_pov_glix\", \"value\": { \"id\": \"hold_pov_glix\", \"kind\": \"holding\", \"name\": \"Great Lakes Index Fund\", \"tier\": \"background\", \"fields\": { \"account\": \"acct_pov_brokerage\", \"asset\": \"glix\", \"lots\": [{ \"qty\": 20, \"cost\": 196000, \"at\": \"2025-03-02\" }], \"route\": \"reinvest\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/hold_pov_lkfr_calls\", \"value\": { \"id\": \"hold_pov_lkfr_calls\", \"kind\": \"holding\", \"name\": \"LKFR December calls\", \"tier\": \"background\", \"fields\": { \"account\": \"acct_pov_brokerage\", \"asset\": \"lkfr_c4500_dec26\", \"lots\": [{ \"qty\": 2, \"cost\": 37000, \"at\": \"2026-08-20\" }] }, \"relations\": [] } }\n]\n```\n\n### Property\n\nA **property** is an entity of kind `property`, real estate tied to a `place`, with `owners` (and their `share`s):\n\n- **Its value** is `value` now. It moves on the 1st of each month at its `appreciation_pct` a year with its `volatility_pct` swings (else the finance table's home prices); `purchase_price` and `purchased` are what it cost and when, for the gain on a sale.\n- **Its costs** are flows its owners pay by share: property tax at `tax_pct` of its value a year (else the regions table's rate for its `region`, else its first owner's, else the economy's), in `tax_installments` bills (2 a year); `insurance` a month (else the table's typical, scaled to its value); and upkeep, `upkeep_pct` of its value a year (1 when left out), each month.\n- **A mortgage** is an account of the `mortgage` product, with its own `apr_pct`, `payment`, `months_left` and the rest as any loan has, whose `secured_by` names the property; the property's `mortgage` names it back, and lint warns when the two don't. Equity is the value less what it secures.\n- **A lease** is a `rent` flow from the tenant to an owner (or into an account of theirs), `link`ed to the property, with `start` and `end` for its term. Each lease covers one of its `units` (1 when left out). With `managed: true`, each unit no lease covers is let to outside tenants at `market_rent`, lease after lease of `lease_months` (12) with about `vacancy_months` (1) empty between, from `let_from` (else the world's start), their rent into `rent_to` (else the owners' deposit accounts by share).\n- In play, `property_buy` buys one with an `asking_price` or nobody's, `property_sell` sells a share, and `lease_start` and `lease_end` let a unit and end a lease.\n\nThe marina's grounds, owned by the marina business, with a mortgage it pays from its operating account and its bait shop let to an outside tenant:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/prop_alder_harbor_marina\", \"value\": { \"id\": \"prop_alder_harbor_marina\", \"kind\": \"property\", \"name\": \"Alder Harbor Marina grounds\", \"tier\": \"background\", \"fields\": { \"place\": \"alder_harbor_marina\", \"owners\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }], \"value\": 65000000, \"appreciation_pct\": 2.5, \"purchase_price\": 41000000, \"purchased\": \"2001-03-15\", \"mortgage\": \"acct_marina_mortgage\", \"insurance\": 42000, \"upkeep_pct\": 1.2 }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/acct_marina_mortgage\", \"value\": { \"id\": \"acct_marina_mortgage\", \"kind\": \"account\", \"name\": \"Marina mortgage\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }], \"product\": \"mortgage\", \"institution\": \"Great Lakes Bank\", \"opening\": -18000000, \"apr_pct\": 5.1, \"payment\": 191800, \"months_left\": 120, \"due_day\": 1, \"autopay\": \"minimum\", \"autopay_from\": \"acct_dale_marina\", \"secured_by\": \"prop_alder_harbor_marina\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/lease_marina_bait_shop\", \"value\": { \"id\": \"lease_marina_bait_shop\", \"kind\": \"flow\", \"name\": \"Rent, bait shop\", \"tier\": \"background\", \"fields\": { \"flow_kind\": \"rent\", \"from\": \"Gull Point Bait & Tackle\", \"to\": \"alder_harbor_marina_co\", \"amount_cents\": 65000, \"every\": \"month\", \"days\": [1], \"start\": \"2026-05-01\", \"end\": \"2027-04-30\", \"shortfall\": \"skip\", \"link\": \"prop_alder_harbor_marina\" }, \"relations\": [] } }\n]\n```\n\n### Business stakes and net worth\n\n**A stake** is an owner's share of a business: of its `value` when one is set, else of its book value (its own net worth from its accounts, holdings, property and stakes, plus what its customers owe it less what it owes) plus its last twelve months' profit times its `valuation_multiple` (3 when left out). Each owner's share of a profit distribution lands where they route it in play (`route_distributions`; `reinvest` keeps it in the business, adding to the stake), and `stake_sell` sells part of a stake.\n\n**Net worth** is a party's share of the accounts it holds with a role that counts worth, plus its share of every holding at market, of every property's value and of every stake. A mortgage is one of its accounts, so a property's debt counts once. A party with accounts has the wealth band of its net worth; one without keeps its `wealth` field.\n\nThe marina, with a waiting list for its slips, is worth four years' profit over its books:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/alder_harbor_marina_co/fields/valuation_multiple\", \"value\": 4 }]\n```\n\n## Places, routes and maps\n\n- Places form a tree through `parent` (a town holds streets, a building its rooms). A place the player hasn't heard of yet is `\"visibility\": \"discoverable\"`.\n- Routes join places with minutes per travel mode (`walk`, `road`, `offroad`, `water`), both ways unless `bidirectional` is false.\n- **A map owns what it draws.** A map (`/maps/<id>`, format `lre-map-v1`) draws one place's inside, as a grid of characters or as linked places, and compiles into places, a grid and routes that carry `\"map\": \"<map id>\"`. Those are the map's: **edit the map, never them**. A write to a place, grid or route a map draws is refused (\"drawn by the map …; edit it there\"), and so is setting `map` on anything else. After a change to the map, the engine draws its places, grid and routes again; delete the map and they go with it. A place, grid or route you write yourself with the same id as one a map would make wins over the map's.\n\n## Tracks: quests and secrets\n\nA track is a small state machine: `start` names its first stage, and each stage's `next` lists `{\"to\": stage, \"when\": formula}`, taken in order when the formula holds. A stage may carry a `cue` (what the player can know now), `objectives`, `effects` on entering, `rewards` on leaving it onward, `hints`, a `gate` and a `fail`. A stage with no `next` ends the track, and an end stage, which is never left, grants its `rewards` as the track reaches it: put a quest's payout there. Secrets advance only by their formulas, never by a model.\n\n- **Quests** start at the stage the story has reached, not at the beginning: `start` is today's stage.\n- **Secrets** keep a `truth` (what is really so, kept from the player) on the stage that reveals it, and a `cue` (what the player can notice) on the stages before. A cue never states the truth.\n- **Puzzles** an action of yours answers take `story.answer`'s `track`: the puzzle's own id, written out, never a formula.\n- **Hints** on a puzzle stage with an `answer` open up one per wrong answer given at that stage; on any other stage they are all there once the track reaches it. The player opens them one at a time, and the narrator is told only the opened ones.\n- **Every flag a track or a secret's gate reads needs a setter**: a `story.flag` effect in an action's outcomes, a rule or a stage's effects. One nothing sets keeps its starting value for good, and lint warns (`story.unset_flag`).\n- **A story step's action stays out of sight until the story reaches it.** An action whose requirement reads `stage(…)`, `since(…)` or `flag(…)` and none of its params isn't listed anywhere (the Actions sheet, interpret's catalog) while that requirement fails, so gate the steps of a quest or a secret that way (`\"stage('s_debt') == 'ledger'\"`, `\"not flag('ledger_read')\"`), and the player is never shown what lies ahead. Requirements on where they are or what they carry still show the action, locked.\n\n### A revealed secret starts one stage earlier\n\nThe engine records a reveal only when a track **enters** a stage with a `truth`. A track that starts on its truth stage never enters it, so the truth is never revealed: the Journal never shows it and the narrator is kept from saying it. **Never start a secret track on a stage that has a `truth`.** For a secret the player has already learned, start one stage earlier on a stage that moves on at once, so the first turn reveals it:\n\n```json\n{ \"id\": \"corin_debt\", \"kind\": \"secret\", \"label\": \"What Corin owes\", \"visibility\": \"secret\", \"owner\": \"corin\", \"start\": \"rumor\", \"stages\": {\n  \"rumor\": { \"label\": \"Something is off\", \"next\": [{ \"to\": \"known\", \"when\": \"true\" }] },\n  \"known\": { \"label\": \"Corin owes the guild\", \"truth\": \"Corin borrowed the guild's harbor dues to pay a gambling debt.\", \"next\": [] } } }\n```\n\n### Cues never name the secret\n\nA person's `cues` are what the narrator sees them do while a secret of theirs stays hidden: `{\"text\": \"Changes the subject whenever the guild comes up.\", \"track\": \"corin_debt\"}`.\n\n- Each cue stands for exactly one secret: a `track` (while it keeps something hidden), a secret `lore` entry (until its gate holds) or a story `flag` (until it is set). A cue keyed to none, or to several, never shows.\n- Write behaviour, never the secret: a cue that holds a track's truth or a phrase of secret lore is a lint error, because it gives the secret away.\n- Name no one the player may not know: such a cue is left out while they don't (lint warns).\n- Only people have cues that show; the stage cues of the tracks a person owns reach the narrator the same way, in Stance only, never as a quest row, while the track keeps something hidden.\n\n## Lore\n\nLore entries (`/lore/<id>`) are what the world knows, read by the engine's own helpers: `{id, title, content, keys, links, aliases?, topics?}`, where `links` are the ids of the people and places an entry is about.\n\n- `\"visibility\": \"known_by\"` keeps an entry back until the player knows every person and place it links.\n- **A secret entry** holds a secret itself: `\"secret\": true`, a `gate` formula that reveals it (lint refuses a secret without one), and an `audience` of the helpers that may read it before then (`npc.choose`, `puzzle.answer`, `judge`, `interpret`). The helpers that write for the narrator or the player (`brief`, `outline`, `choices`, `extract`) never read it early, even when listed. A mind reads a secret entry only when its `holders` name the character or a cue of theirs stands for it; `links` and an opened gate never do.\n- A public entry must never repeat a track's truth: lint refuses it (`secret_truth`).\n- `loreIndex` routes the helpers' lookups: `terms` maps a lowercase term to entry ids, `topics` gathers entries under a label.\n\n## Data tables\n\nPrices, pay, taxes, occupations, regions, gear and the calendar's holiday rules come from data tables (`/tables/<id>`): typed `columns` and `rows` keyed by row id, read by the packs and by `table(id, key, column)` in formulas.\n\n- Every new world, blank or a starter, carries the seventeen default tables; edit them in place. A new table comes whole, with `id`, `pack`, `schema`, `label`, `columns` and `rows`: adapt one (`lre_template` at `/world/tables/<id>`).\n- Cells follow their column: a `band` is `{\"min\", \"typical\", \"max\"}`, money columns are in the currency's minor units, and a `ref` names a row of another table.\n- A table's `revision` and its pin in `pins.tables` are the engine's: every write that changes a table computes both again (`hashJson` of its schema, columns and rows). Don't write either, and don't patch `/pins`.\n- Each revision of the world keeps its own copy of its tables, so a running chat sees a table change only through an Upgrade.\n\n## Host macros\n\nLumiverse runs macros (`{{…}}`) in its prompt and acts on its control characters and `<user>`, `<char>` and `<bot>`. LumiRPEngine keeps authored text as written, so in lore and in section and step templates these are hazards:\n\n- A section template may use only `{{lines}}`, where its lines go; anything else in one is a lint error (`section_macro`). A world words a built-in section it doesn't list in `/sectionTemplates` (`{\"<slot>\": \"<text with {{lines}}>\"}`), only where it differs from the built-in text; a write whose wording lacks `{{lines}}` is refused.\n- Step templates use the engine's own placeholders (`{{world}}`, `{{pov}}`, `{{place}}`…); lint warns about one it doesn't know.\n- Keep `{{user}}` and `{{char}}` out of lore unless the user put them there on purpose. `lre_edit` and `lre_commit` list every hazard a change brings in; say which ones you added.\n\n## Setup, lore and jobs\n\nBeyond a world's document, the tools reach what the user sets up once and what Build runs for them. Settings and the preset are the user's own, for every chat: change them only when asked, and say what you changed.\n\n### Settings and presets\n\n`lre_settings` reads the settings as Settings shows them; a `section` narrows it to one page's part: `helper` (Helper model), `modelUse` (Model use, and Steps and connections under `steps`), `minds`, `timeouts`, `realism` (Realism, and Player claims under `claims`), `adjudication` (Checks), `time`, `extraction` (Changes from the reply), `swipeDefault` and `swipeTexts` (Swipes: what a swipe does, and whether a Re-narrate or a Re-run is sent the texts its turn was made with, `\"turn\"`, or the current ones, `\"current\"`), `prompts` (Agents → Prompts: `texts`, the user's own text for each editable text by its id, null to bring back the shipped one, and `maxChars`), `hideJsonBlocks` (Preset), `narrator` (Narrator), `retention` (Agents → Retention: how long agent call texts and unreferenced stored files are kept, and how often they are swept), `diagnostics` (Diagnostics: records kept per chat), and the two switches that make new chats use these over a world's own (`overrideWorldDefaults`, `overrideWorldAdjudication`). `extractionModes` is read-only: each change type's mode now and where it comes from (pinned, learned on the connection, or the default).\n\n`lre_settings_set` takes a JSON merge patch, as the pages send: objects merge, a list or a value replaces, `null` deletes (unpin a change type with `{\"extraction\": {\"purchase\": null}}`). The GM assistant's change types (`gm_spawn`, `despawn`, `destroy`, `money_adjust`, `stage`, `gm_edit` and `workspace`, Settings' \"The GM assistant's changes\") are listed in `extractionModes` beside the reply's and pinned the same way (`{\"extraction\": {\"despawn\": {\"mode\": \"confirm\"}}}`), with no max delta.\n\n- A named preset expands: `{\"realism\": {\"preset\": \"grounded\"}}` sets every level and band cap, `{\"modelUse\": {\"preset\": \"standard\"}}` every step, budget and the minds' policy. A change to what a named preset sets makes it `custom`, as Settings does; the answer's `presets` says so.\n- LumiRPEngine keeps every value within what it takes. `adjusted` lists what came out other than sent (a value out of range, a key it doesn't know, a preset's own values): read it, don't assume the patch landed as written.\n- A step's route names a Lumiverse connection by id (`route.connectionId`, null for the helper model's); its template (`template`) is the user's own prompt for the step, which wins over the world's step template for the purpose (the time-skip step's is the skip plan's; a mind's, a memory's and consolidation's are `minds.prompts`). A world's own step templates are its document's `/steps`, written with `lre_edit`.\n- `narrator` is the narrator's knowledge in every chat that sets none and whose world sets none: `knowledge` (`scene`, what everyone in the scene knows, each fact beyond the player character's marked, the default; or `pov`, the player character's only) and `secrets` (`marked`, the default: a line carrying a secret's words goes in marked as a secret; or `omit`: it is left out). It applies from each chat's next turn. How a secret is marked is in `prompts`: the texts `narrator.mark.known`, `narrator.mark.kept` and `narrator.mark.both` (each keeping `{{text}}` and the names it needs, `{{known}}`, `{{kept}}` or both), `narrator.mark.everyone` (the word for everyone) and the narrator rules' sentence on a mark, `narrator.secret_marks` (it keeps `{{forms}}`, every form the others make, and may use `{{everyone}}`); `{\"prompts\": {\"texts\": {\"narrator.mark.known\": null}}}` returns one to the shipped text.\n- `agents.assistant` is the user's GM assistant (GM → Assistant in Lumiverse): `connectionId` and `model` (null: their default connection and its model), `effort`, `knowledge` (whose knowledge its tools read with: `\"pov\"`, `\"everyone\"` with secrets marked, the default, or `\"gm\"`), `apply` (`\"ask\"`, the default: each change it proposes waits for the user's Apply; `\"at_once\"`: applied as soon as it answers, with an Undo chip), `historyTokens` (20,000: how much of its conversation goes with each message) and `budget` (limits of its own over `agents.budget`; null on one gives it back). Its conversation, proposals and GM → Workspace are the user's own pages, which no tool of yours reaches: you read and edit the chat yourself.\n- Realism, checks and time seed new chats only. A running chat changes through its own markers (GM → This chat).\n- The answer carries the caveats as they read now; `lre_settings_caveats` reads them alone. They dry-run the chat the user plays, which takes a while on a long chat: \"still checking\" means ask again in a moment.\n\n`lre_preset` reads the active Lumiverse preset as the engine does: the section outlets its enabled blocks hold (`{{outlet::lre_<section>}}`) and each guidance block (\"RPEngine · <step>\"): missing, empty (notes only), read (switched off but written: its text goes to that helper) or enabled (switched on, so it also lands in the main prompt; it should be off). `lre_preset_add_blocks` adds the missing ones, switched off, under an RPEngine category, and touches none already there. The engine learns which preset is active from the user's open page or the chat they last played: with neither, it can't tell, and says so.\n\n### Diagnostics\n\n`lre_diag {chatId}` reads a chat's activity line (what the engine is doing now, or the step that failed last) and counts its records. The records themselves (each turn's steps, model calls with connection, model, tokens and finish reason, failures with what to do, the sections each run wrote, slow requests, and agents' calls with role, connection, model, tokens in and out with cached and reasoning parts, outcome and the tools they called) come only with `spoilers: true`: a step's reason can name someone the player hasn't met. Keep them out of anything the player reads. An agent call's text stays behind Diagnostics' curtain in Lumiverse; its record names it only by hash. `failures: true` keeps the failed steps, warnings and errors; `last` the newest n. A failing step's `fix` says what the user can do, often a timeout or a step's model in Settings. `lre_diag_clear` forgets the records; `lre_activity_dismiss` clears a failure from the activity line.\n\n### Lore books, pins and drift\n\nA world's lore is its document's (`/lore`, and pins at `/lorePins`), written with `lre_edit`. A pin makes a character's mind calls, or every call at a place, always read an entry: `{\"lore\": \"<id>\"}` for the world's own, `{\"book\": \"<bookId>\", \"entry\": \"<entryId>\"}` for an entry of one of the user's World Info books, either with `\"keep\": \"end\"` to keep an entry's end when it must be cut. `lre_lore_books` lists the books a pin may name (with `chatId`, that chat's own first), `lre_lore_entries {bookId}` a book's entries, with the secret marks in each. The helpers also read World Info as lore, live: the chat's books, the user's global ones and the world's `/loreBooks` (a character's or persona's book only when listed there). What in a World Info entry is secret is written in its own text, as a secret mark: `{{// Secret: TEXT}}`, `{{// Secret (known to Marcus Delgado): TEXT}}`, `{{// Secret (kept from Jordan Ellis): TEXT}}` or `{{// Secret (known to Marcus Delgado; kept from Jordan Ellis): TEXT}}`, each name a person's name or id, and \"you\" or \"the player character\" the player character. Lumiverse strips a mark from every prompt by itself; in a world chat LumiRPEngine gives the narrator its text marked as a secret, or leaves it out, as the narrator's knowledge says, and its holders' minds read it, no helper. No tool writes an entry's text: a mark is the user's to write, with Build's **Make this entry secret** or **Add a secret line**, or in Lumiverse's own World Info editor, so when an entry should be secret, tell the user which and why. `lre_lore_fields {bookId, entryId, fields}` writes its `visibility`, `links` and `aliases` into the user's book at once, so ask the user first. An entry an earlier build kept secret by its fields (`secret`, `gate`) stays so until the user moves its book's secrecy (Build → Lore → Secrecy in your World Info).\n\n`lre_lore_pins {worldId}` reads every pin of the draft now: its entry's title, its source, and its status (`ok`, `missing`, `pending`: an AI-written entry not reviewed yet, which nothing reads; `off`: switched off in its book, which a pin still reads). With `chatId` it reads the revision the chat plays, as GM → Minds does, and needs `spoilers: true`.\n\n`lre_lore_drift {worldId}` lists the entries indexed from a book whose book entry changed since (with its text now) or is gone. To take the new text, write it into the entry's `content` with `lre_edit`. `lre_lore_save {chatId}` makes the chat's latest reply (or `text`, an excerpt of a message) a new lore entry in the draft of the chat's world, sourced to its message.\n\n### Build's jobs\n\n`lre_job_start {worldId, kind, …}` runs one of Build's jobs on the user's Lumiverse and answers its id at once:\n\n- `import_lore {bookIds}`: entities, places and facts from World Info books;\n- `index_book {bookId}`: a lore entry per book entry, keeping the book's text, with aliases, topics, links and lookup terms;\n- `index_text {text}`: lore entries in the text's own words, marked as written by the AI;\n- `refine {instructions}`: world edits for a request in words;\n- `describe_map {scope, prose, mapId?}`: a map of a place from its description;\n- `propose_routines {owners?, after?}`: routines and schedules for people and groups from the lore and their sheets. Each block or schedule cites the entry or field it rests on, with a quote, and is checked against the draft. It reads people and groups in id order within twelve calls; when `lre_jobs` shows `next`, start the job again with those inputs for the rest;\n- `playtest {turns}` and `check_world {days?}`: the engine alone on the draft, as `lre_playtest` and `lre_check_world`, but on the host.\n\nModel jobs spend the user's helper model calls: start one when the user asked for it. `lre_jobs {worldId}` shows each job's status and progress and what it found in counts (with how many proposals have problems); `lre_job {worldId, jobId, pointer}` reads it whole. `/result/proposals/0` is one proposal: collection, key, the value it writes, source, confidence and note, and for routines and schedules the `owner` it is for and the `problems` the draft check found (a clash with their schedules or routine, a place or person that isn't there, company with no ground). A job proposes; nothing changes until `lre_job_apply {worldId, jobId, proposals?, expectVersion}` writes the ones you accept into the draft in one write, as Build's review does (an AI-written entry then counts as reviewed, and accepted lore joins the lookup table). Without `proposals` it applies every proposal but those with problems. Read each proposal before you apply it, then check the draft with `lre_draft`. A proposal's key replaces an item there by that key, and a schedule's `_activity` and `_place` proposals go together. `lre_job_cancel` stops a job; `lre_job_dismiss` forgets one that ended, with its proposals.\n\n### Profiles, the sheet and lint\n\n- `lre_profile {worldId, profile, preview: true}` says what a ruleset profile (`modern`, `classic`, `fifth`, `custom`) would add, what is the same already, and where it conflicts with the draft; without `preview` it applies in one write. Each conflict keeps the draft's own unless `take` names its path; `values` are people's stored values a taken field can't hold, and what they become.\n- `lre_sheet {worldId}` previews the character sheet a new chat would start with, from the draft's ruleset or one you pass as `ruleset`, on the point of view or `entity`. Nothing is saved.\n- `lre_lint {worldId}` lints the head on the host; `lre_draft` lints the draft.\n\n### A chat's map\n\n`lre_map_walk {chatId, x, y}` says what Walk here would take to a cell of the grid the point of view stands on, judged on the real ground; nothing moves. `lre_map_display {chatId, display}` shows the map as what the point of view knows (`knowledge`) or under fog (`fog`): presentation only, kept beside the chat.\n\n### A chat's knowledge\n\n`lre_chat_knowledge {chatId}` reads a chat's own knowledge choices (GM → This chat → Knowledge): `knowledge`, whether the engine tracks what each character knows in it, and `narrator`, the narrator's knowledge (`{\"knowledge\": \"scene\" or \"pov\", \"secrets\": \"marked\" or \"omit\"}`), each null where the chat follows: the narrator's knowledge follows the world's `narrator`, else Settings → Narrator; tracking follows Settings. Pass either to set it, or null to return it to following. They are kept in the chat's metadata, never its story: no recorded turn changes, a Branch keeps them, and they apply from the next turn.\n\n## Playing a chat\n\nThe chat tools reach a chat that plays a world as the user's Play does; `lre_chats` gives the chat ids. They see what the player sees, unless you pass `spoilers: true`, and change the chat the way Play's own controls do. The chat is the user's game: change it when they ask, and say what you changed.\n\nA session goes like this:\n1. `lre_chats` for the chat's id, then `lre_chat_state` with pointer `\"\"` for an outline of what Play shows, and the parts you need from there.\n2. Before a turn, read what it can be: `/palette/entries/<i>` for an action's options and their `params`, `/palette/timelapse` for the skips on offer and what interrupts them.\n3. Make the change or post the turn, then read the state again for what it did: the HUD, the journal, the chips.\n4. Tell the user what you did, what is waiting on them (a reply to start, a chip to answer), and the Undo chip that can take a correction back.\n\n**Reading.** `lre_chat_state` reads the chat's state view at a JSON Pointer, the view the chat's page is sent: `/hud` (the clock, place, weather, cash and, at `/hud/fixes`, the ✎ fixes it offers), `/scene` (who is present), `/chips`, `/journal`, `/keepReport`, `/palette` (the actions at `/palette/entries`, the timelapse at `/palette/timelapse`), `/controls` (the realism, time controls, player-claims policy and checks policy the chat plays by), `/panels` (each pack's panel: Money, Gear, Calendar, the map…) and `activity`, what the engine is doing for the chat now (null when idle). It holds only what the player can know. `lre_chips` lists the chips under the messages with their actions; `lre_inspector` reads the context inspector: what the engine put in each of the last ten prompts, what its steps read of the lore, and its warnings.\n\n**Behind the curtain.** `lre_gm` (the GM view: every entity, secrets, hidden places, track truths, everyone's money, the edits in force) and `lre_minds` (each character's fidelity, latest mind, plans, notes and commitments) need `spoilers: true`, and so do the tools that edit them and Run minds now. Pass it only when the user asked to look behind the curtain, and keep what it shows out of anything the player reads: the chat, a message you post, a fix.\n\n**Changing the chat.** A write lands on the chat's latest message, as Play's do. During a reply it is held (`pending: true`) and lands when the reply finishes. While the engine works on a turn before its reply, a write lands at once and the turn's reply doesn't start (the player's Retry runs the engine again), unless the user's `holdWrites` (Settings → Writes) is on: then it is held (`pending: true`) until the turn's reply finishes, or the turn stops without one. A chat whose status is `paused` (the player edited an earlier message of theirs) refuses every write until `lre_keep` settles it, naming the edited message: `keep` re-checks the later turns against the edit and lists what no longer holds in `/keepReport`; `discard` removes the later turns' records for good (their messages stay as plain text, and the world forgets them), so ask the user first; `convert` brings chosen dropped lines of the keep report back.\n- `lre_fix` is the player's ✎: `fix` names a HUD fix (`place`, `weather`, `cash`, `scene`; each at `/hud/fixes` with its type and options), or give `entity` and `field`, with the `value` in the field's type; `time` (`\"2026-09-14 18:30\"`) sets the clock, running the time between when it is later. A locked field is refused.\n- `lre_gm_edit` is the GM editor: operations in order, all or none, on any entity, locked fields included. They are the engine's own edits, not JSON Patch: each names its `op` and what it touches (the tool lists them all), with ids from `lre_gm`:\n\n```json\n[{ \"op\": \"move\", \"entity\": \"pov\", \"to\": \"bluebird_coffee\" },\n { \"op\": \"adjust\", \"account\": \"acct_pov_checking\", \"cents\": 5000 },\n { \"op\": \"stage\", \"track\": \"q_pontoon_weekend\", \"to\": \"diagnose\" }]\n```\n\n- A `stage` op moves a track as the story would: on to a stage that follows, it plays that stage's entry (rewards, effects, its reveal); back, it only sets the stage. It is made from where the track stands now, so if the reply it waits for, or a swipe or re-read of that reply, moves the track first, it is dropped whole, rewards included, never paid twice, and the chat says it didn't apply.\n- `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes), `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back) and `infer` (when typed attempts roll skill checks, the same way from `/controls/inferred`). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.\n- `lre_view_open` opens a panel as the player does, which settles detail the chat hadn't decided yet (a balance first looked at); opening `core.context` checks the active preset.\n- `lre_chip` answers a chip with one of its action ids (an amount or a pick in `payload` when the action asks for one).\n- Each ✎ fix and GM edit leaves an Undo chip; tell the user it is there.\n\n**Playing a turn.** `lre_action` plays a palette entry (its `action`, and the picked option's `params`) and `lre_timelapse` a skip (`target` as `/palette/timelapse/until` lists them, or `{\"type\": \"duration\", \"minutes\": 120}`); `text` is the player's words for how they do it. Each posts the player's message, and the engine prepares the turn at once. **The reply is Lumiverse's to start, not yours:** a page that shows the chat starts it on its own; with none, it waits until the user opens the chat in Lumiverse. So ask the user to open the chat, then read `activity` and the state for what the turn did. The same goes for a chip's Send (a suggested move) and for the actions `lre_chips` marks `regenerates` (Re-narrate, Re-run, Retry read, a claim's Add): those take effect on the reply's next swipe, which the user makes with Regenerate or a swipe, and a plain Regenerate is only that.\n\n**Minds.** `lre_minds` reads them; `lre_mind_edit` pins a character's fidelity (`mind_pin`, `level` null to unpin), asks for a fresh mind next turn (`mind_refresh`), edits, adds (`id` null) or deletes (`value` null) a note, commitment or plan (`mind_memory`), or sets what they mean to do now, in words their own mind reads first and works from, and how they go about it (`mind_intent {entity, text?, approach?}`: `approach` `\"reactive\"`, `\"proactive\"` or null for their mind to decide; a part left out is kept, and `\"\"` with null clears it); `lre_minds_run` runs Run minds now for `who` (default everyone Live and Near), in the background, with model calls on the user's connection, so ask before you run it; `lre_minds_cancel` stops it, and a cancelled run records nothing. A run, like a GM edit, is one edit with an Undo chip.\n\n**What they know.** `lre_minds` shows the chat's facts at `/knowledge/facts` (each with its holders), the player character's holdings at `/knowledge/pov`, and each character's at `/characters/<n>/holdings`. `lre_mind_edit`'s `mind_knowledge {entity, fact, holding}` sets one person's holding of a fact the chat holds, whole (`{how, by, evidence, since: {msg, at}, belief, confidence, keptFrom?}`; a told one names its teller in `by`), or takes it away with `holding` null. A holding already so, or one taken away that isn't held, changes nothing.\n\n**What they can't do.** A chat tool never starts a generation, regenerates or swipes, and never writes a message but the player's turn: those are the user's, in Lumiverse. An Upgrade is `lre_upgrade`.\n\n## Before you commit\n\n- `lre_draft` shows no lint errors, and you know what each warning means.\n- The POV exists and stands at the start place; the start time is the story's present.\n- Every id an item names (a place, an owner, a relation target, a track in a formula, a lore link) exists.\n- Everyone who has met the POV holds a `knows` or a `regard` toward them.\n- A death or dying the player hasn't learned of sets `lifeKnownBy`; the dead lie at a `fields.place`.\n- Everything someone owns names them in `fields.owner`; every account, business, holding and property names its holders in `fields.owners`.\n- Every flow pays from and to something that exists, with an amount and a schedule (or `once`); every job names its worker and an existing or worded employer.\n- A business is on a tier whose Money level runs what it does (4 for sales tax and business taxes), and its `operating_account` is one of its own accounts.\n- Every holding names an asset the world lists, and every mortgage and its property name each other.\n- With `\"secrecy\": \"full\"`, no character would think a secret openly.\n- No secret track starts on a stage with a `truth`, no cue states its secret, and no public text gives one away.\n- Nothing a map draws was edited outside its map; no `revision` or pin was written by hand.\n- `lre_playtest` and `lre_check_world` run without failures or leaks in their notes.\n- Commit with a note that says what changed, and tell the user what you changed and what you left for them.\n";
 
 // docs/DESIGN.md
 var DESIGN_default = `# LumiRPEngine: design
@@ -63328,7 +64168,7 @@ Section numbers are stable: code comments and docs cite them as \`DESIGN §9.2\`
 | \`D1\`–\`D36\` | Design decisions (§2) |
 | \`G1\`–\`G12\` | Gaps in the host that I plan to propose fixes for (§16) |
 | \`P1\`–\`P4\` | The four principles behind the per-chat ledger (§4.3) |
-| \`L1\`–\`L47\` | The ledger's named invariants (§14); a number is never reused, so a retired one leaves a gap |
+| \`L1\`–\`L50\` | The ledger's named invariants (§14); a number is never reused, so a retired one leaves a gap |
 
 A few terms, in plain words:
 
@@ -63524,14 +64364,15 @@ Lore pins (§24.5) can name an entry of any of the user's World Info books, but 
 - **Attachment:** the book is appended to the chat's \`chat_world_book_ids\` (read-merge through \`runtimeState.write\`).
 
 ### 4.3 Run (per chat; D6)
-- **Chat metadata:** \`lumi_rp_engine = {v, worldId, revision, runSeed, startedAt, prefs?}\`; \`prefs\` holds the chat's own knowledge choices (§6.11); \`revision\` is the world revision the chat was attached to, which its starting \`migrate\` marker repeats.
+- **Chat metadata:** \`lumi_rp_engine = {v, worldId, revision, runSeed, startedAt, prefs?}\`; \`prefs\` holds the chat's own knowledge choices (§6.11); \`revision\` is the world revision the chat was attached to, which its starting \`migrate\` marker repeats. Beside the run, \`agents\` holds the learned area's index (§4.4), so a Branch copies it with the rest.
 - **Ledger** in \`spindle_metadata.lumi_rp_engine\` on assistant messages: \`{v, swipes:{[index]:Rec}, markers:[…]}\`.
 - **Ledger principles.** Four rules govern this section and §5; everything below applies them.
   - **P1. Path tags.** Every \`post\` entry and every marker records \`at\`, the parent path it was made under (the path hash, below, of everything before its message). An entry is **live** when \`at\` equals the current parent path, or when \`at\` equals its record's \`path\` (it was made with its record on-path, so it travels with the record into the record's rebased views). Only live entries fold and count toward the record and path hashes. Any other entry is **inert**: it changes nothing, and the Keep report lists it as "made on another branch". New \`post\` entries and markers go only to the head assistant message; that includes markers made during a regenerate of an earlier message, whose \`at\` therefore chains the new swipe. Switching back is therefore exact: whatever was made on the other branch is inert on this one. \`keep[parentPath]\` follows the same rule. Starting markers are the one untagged kind, since no branch made them (below).
   - **P2. One in-flight window per turn.** A turn is in flight from \`GENERATION_STARTED\` until its record commits, or until it closes as \`degraded\`, \`stopped\` or with its text accepted unread (§5.1 steps 5–6; Impersonate and Dry Run close at their end, with no record). Writes the user causes inside a window (materialization, ✎ fixes, chip confirms, markers, Keep, Discard, conversions and Re-read) are held in the journal and the UI shows "pending". Each is journaled, taking its \`seq\` and \`at\`, once every window that was open when it was made has closed. The user's directives win (§7): a GM edit or ✎ fix lands over whatever the turn changed, resolved again from what it asked for (its operations, or the time it set the clock to, kept on its entry as \`edit\`) against the state the turn left, so it says what it said rather than what it would have done to the state before the reply. An operation the turn already made so (an unlink of what the reply unlinked, a stage the reply reached) is passed over, and an edit the turn made wholly so is journaled all the same, with its request and no events of its own, so a later read, swipe or Undo that takes back what the turn did works it out again (P3, §11 Undo); the same request again (tapped twice while the reply streamed), already so only because an entry on the record that stands asks exactly that, is one with it and adds nothing, so one Undo takes it back whole. Only an edit that can't be made at all (a thing would go inside itself, a time set once an earlier held edit turned Calendar & time off) is refused. Any other held write is checked again as it was made. One refused is kept in the journal with its reason and shown as a notice, worded for the player, until dismissed; it is never dropped silently. A turn's post-step events are validated against exactly its **fold prefix**: the parent fold, the message's live markers with \`seq ≤ markersApplied\`, \`pre\`, then the earlier post-step events. Nothing made after the turn started can enter that prefix, so re-folding equals what was validated.
+    - **The pre-reply window.** The engine run before a reply (§5.1 step 3) puts no turn in flight, but it opens a window of its own (\`Journal.prereply\`, apart from the windows above): from the run's start until the generation that takes its turn takes the window over, so what it holds lands as that turn's window closes, after its record and over whatever the reply did, as above; or until the run ends without a reply (it fails, is cancelled or waits on a question, its turn goes stale or no generation takes it, a backend restart loses it), when what it holds lands at once on the chat as it then stands, or waits on for a reply under way. A turn the next engine run replaces passes what its window holds on to that run's. It holds only the writes made meanwhile that are held through the run: one flagged \`hold\` (a GM agent's write, a workspace save) always, and any other only while the user's **Hold writes during the engine run** (Settings → Writes, off by default) is on. A write it holds never makes the turn stale, so the reply starts as planned. Any other write lands at once and makes the turn stale (§5.1), as it always has, and an edit or deletion of a message does so whatever the window holds. Writes made while the run holds the chat's queue reach the journal only after it, in the order they were made; one the window would have held that finds the run already ended lands then (L50).
   - **P3. Re-narrate and Re-run.** A Re-narrate swipe copies the source's seed, \`pre\` events and \`markersApplied\`, plus the source's live ✎ fixes and materializations from \`post\`, keeping their \`seq\`s and their undos and taking the new swipe's parent path as \`at\`. Its narration renders from the new swipe's own fold prefix (parent, live markers ≤ \`markersApplied\`, then \`pre\`), and its post-step events are read there, as its source's were, into the record's own \`events\` after \`pre\`. The copied entries are carried at commit after that read, as a Re-run carries its fixes (below): each is re-validated event by event after the new \`events\` and the message's later live markers, by \`seq\`. A ✎ fix or GM edit among them is first resolved again from what it asked for (P2), so it lands over the new reply: the GM's Stage moves the quest on from wherever the new reply leaves it, and changes nothing where the new reply takes it there itself, staying on the record with its request and no events of its own so that a later swipe or read still works it out. One the new reply makes impossible (an entity only the source's reply spawned) fails and is dropped with a Journal note. A record journaled before Re-narrates read into \`events\` holds that read as one \`post\` entry of kind \`narr\`, which folds as any entry. The source's confirmed chips and \`cont\` entries belong to its prose and are not copied. When the source cannot be reproduced (no planned source record, a pause, or a copied \`pre\` event that no longer validates), Re-narrate falls back to a Re-run, because P3 cannot hold without the source's prefix. A **Re-run** (a swipe or regenerate, or that fallback) carries the source's live ✎ fixes and GM edits the same way, with their \`seq\`s and undos and the new record's \`path\` as \`at\`, at commit, after the new turn's events: each is resolved again (P2) and re-validated event by event after the new \`events\` and the message's later live markers, by \`seq\`, so the GM's corrections stay in force over the new outcome and only one the new turn makes impossible (an item its reply already lost) is dropped with the same note. The source is the nearest earlier swipe holding a record, the one swiped away from. A turn committed under a pause carries nothing, since nothing after the pause folds to re-validate against, not even when a Keep held in its own window lifts the pause right after: each fix or copy it would have carried (live where the swipe was made or on the chain in force, and not wholly undone) is dropped with the same note instead, so no correction leaves the new swipe unannounced. A Re-read edit (below) re-validates the entries it keeps the same way. A copy keeps its source's \`seq\`, so L9 reads "a \`seq\` never names two different entries".
   - **P4. The turn's own user messages.** The \`pending\` entry pins the hash of each user message the turn answers. The only change accepted to them is the host's macro re-render: a \`MESSAGE_EDITED\` for one of them that arrives after this generation's reply is saved and before its \`GENERATION_ENDED\` (normal generations only). The reply's save is its \`MESSAGE_SENT\` when the host creates it at the end, or its \`MESSAGE_EDITED\` when the host staged it empty before \`GENERATION_STARTED\`, which is what I observed on the reference host. I did not observe the re-render itself there, though the code path exists; the fake host generates it in both variants (§14), and a live run re-checks it. The commit's \`path\` uses that re-rendered hash, or the pinned hash otherwise. Any other change to them is a content edit (below).
-- **\`Rec\`** = \`{v, defHash, seq, swipeHash, path, readElsewhere, seed, pre, events[], post[], markersApplied, keep{}, status, undone[], intents{}, accepted, diag}\`:
+- **\`Rec\`** = \`{v, defHash, seq, swipeHash, path, readElsewhere, seed, pre, events[], post[], markersApplied, keep{}, status, undone[], intents{}, accepted, diag, session}\`:
   - **\`seq\`:** taken from the chat-wide counter (shared with \`post\` entries and markers) when the record is made. A tombstone matches the stored record, \`seq\` included, so a new record identical to a discarded one is never taken for it.
   - **\`swipeHash\`:** hash and length of the swipe content the engine last read (simulated, or re-read).
   - **\`path\`:** the parent path the turn was planned on (path hash below). When it differs from the current parent path, the record folds as a **rebased view** (below). A **bare record** (no turn: it holds only an \`accepted\` identity or player entries on a message the engine did not simulate) has \`path\` \`""\`: it folds as a plain message, and its entries are live only where they were made, never travelling with it.
@@ -63544,6 +64385,7 @@ Lore pins (§24.5) can name an entry of any of the user's World Info books, but 
   - \`status\`: \`ok | degraded | stopped\`. \`conflict\` is derived from a journal pause entry (below) and never written to records.
   - \`intents\`: always empty. The reading of a turn's text (\`interpret\`'s answer and any judgement) is kept in memory by the backend's turn bridge, keyed by the text, and a palette or chip action is recorded on its user message.
   - \`diag\`: a key into the \`userStorage\` diagnostics.
+  - \`session\`: the agent session's blobs the turn made (§4.4), by hash: its segment of the main session, and a compaction's summary (or a span a rollback restored) with what it replaced. Outside every hash but the tombstone's, written at the turn's close and never once the next turn is planned; a record without it folds as before.
 - **Markers** are message-level, **pure intents with no values**, each with \`at\` (P1) and a chat-wide sequence number (\`seq\`, shared with \`post\` entries). They attach to the head assistant message:
   - \`migrate{to, merge?}\`: world Upgrade; \`merge\` holds the owner's picks for the definition merge (below);
   - \`resolve{domain, scope, to}\`: realism change;
@@ -63617,6 +64459,35 @@ Lore pins (§24.5) can name an entry of any of the user's World Info books, but 
   - materialization is capped per write;
   - **timelapse and catch-up** record derivable events as per-period aggregates and period closes, never raw. They stay concrete deltas, so the fold is unchanged (L21, L29). A period close moves everyone once, which would lose or invent what the POV saw on the way (\`space.seen\`, §7), so a coarse record ends with one \`engine.observed\` event carrying the difference. Grid positions (\`space.pos\`) close the same way, one per entity from where it stood first to where it stands last. A stage entry (§10) is never coarsened: it is one unit that lands only where the track still stands where it left, and a reward summed into the period's aggregate would land wherever the record is replayed, even where the entry doesn't; nothing merges across it either. A dense synthetic 600-agent-day segment produced 57k events when measured: 2.0 MB raw and 155 KB even after coarsening. Time was never the binding limit (38 ms per segment on a child process); the record size and the 5,000-event unit cap (§9.2) are.
 
+### 4.4 Agent stores (AGENT-LOOP-PLAN §3.3-3.5, §4)
+What the agent loop keeps besides the ledger: blobs, the main agent's session, the chat's workspace, the learned area and the sweep. Increment 1 builds the stores; the turn agents that fill them come with Increment 2, so a classic turn writes none of it, and every chat folds as before.
+- **Blobs** (\`backend/agents/blobs.ts\`): every workspace file's body, session segment, summary and archived span, and the text of every agent call Diagnostics keeps (§6.9), is a blob in the user's storage at \`agents/blobs/<hash>\`, addressed by the content hash of its text (\`shared/stores.ts\` \`blobHash\`, over \`shared/hash.ts\`). They are shared by all of the user's chats, so a swipe, a Re-run or a Branch that keeps a file costs nothing, and none ever changes: a put writes the same text under the same address, so it is idempotent. A read is checked against its address, and one that doesn't match reads as missing. Work in flight holds what it put (\`hold\`, \`release\`) until a record or an index points at it.
+- **Sessions** (\`backend/agents/sessions.ts\`): the main agent's session is each turn's segment (the messages the turn added), compaction summaries and archived spans, all blobs. A turn record carries only their hashes, in \`Rec.session\` (\`segment\`, \`summary\`, \`archived\`). Reading the session walks the chat's active chain back from its end to the latest active record holding a \`summary\`, joining each record's segment, so swipes, Re-runs and Branches need no remapping: no key holds a chat id or a path.
+  - A summary is a base, \`{summary, segments}\`: the text standing for everything on the chain before its record, then the segments it kept whole; that record's own segment and those after it follow. A compaction writes one and archives the session it replaced as a base too. A rollback (GM → Workspace) brings an archived span back, with the segments after the base that replaced it, and archives that base in turn. Either lands on the record of the turn that makes it, so no earlier record ever changes, and a swipe from before it reads the session as it was.
+  - A segment the store no longer has is named as missing, and the rest of the session still reads.
+  - **Writing a record** (\`LedgerCore.recordSession\`, or \`LedgerService.recordSession\` from outside a turn's own ledger operation): a turn's session parts land on its record at the turn's close, on a swipe of the latest reply only, and never once the next turn is under way (a turn pending or in flight in the journal, or one its gate holds, such as a prepared turn waiting for Send): nothing is written into a record after the next turn is planned. A refused write leaves its blobs unreferenced, for the sweep. The field is outside the path hash, so no path moves and no fold changes. Only the agent stores read it, each checking it as it goes, so a damaged one costs the session link, never the record (\`isRec\` doesn't check it).
+- **The workspace** (\`engine/workspace.ts\`): the chat's files, each a path whose body is a blob. Each change is an engine-pack event in the turn record, \`engine.ws.write {path, hash}\` or \`engine.ws.delete {path}\` (the plan's \`ws.write\` and \`ws.delete\`, in the engine pack's namespace), folding into the workspace's index in the engine slice (\`state.packs.engine.ws\`, path → hash). Swipes, Re-run, Re-narrate and Branches therefore carry the workspace as they carry every event, and a chat that never wrote a file holds no index. A write checks its path (\`isWorkspacePath\`: names joined by \`/\`, none empty, \`.\` or \`..\`) and its hash, and writing the body a file has changes nothing; a delete of a file that isn't there is refused (\`missing_file\`), so a carried fix whose file is gone drops with a note. GM-chat and GM → Workspace writes land as \`fix\` post entries on the head (\`gm: true\`), as GM edits do, through the tool layer's writer (§7.2). Neither event has a player line.
+  - **Pins:** \`engine.ws.pin {path, pinned}\` (engine pack, \`wsPin\`) pins a file or takes its pin off, folding into a pins index beside the file index (\`state.packs.engine.wsPins\`, path → true; \`workspacePins\`). It is refused for a malformed path or flag (\`bad_event\`) or a file not in the workspace (\`missing_file\`). A delete drops the deleted file's pin, and a chat that never pinned holds no \`wsPins\` key, so older chats fold unchanged. It has no player Journal line; the GM's reads "workspace file notes/marcus.md pinned" (or "unpinned").
+  - **Who may read a file** (\`engine.ws.readers {path, readers}\`, engine pack, \`wsReaders\`): each file says whose knowledge may read it, its readers: the player character's (every agent), everyone's, or the GM's alone. It folds into a readers index beside the file index (\`state.packs.engine.wsReaders\`, path → \`pov\` or \`everyone\`); a file the index doesn't name is the GM's alone (\`readersOf\`), so setting the GM's drops its entry, and a chat that never shared a file beyond the GM holds no \`wsReaders\` key. A write sets them with its text (\`ws_write {path, hash, readers}\`; writing the text a file holds already, for the readers it has, changes nothing, and the same text for other readers is a change of readers alone); a move carries them to the new path with the pin; a delete drops them; \`ws_readers {path, readers}\` changes them alone. An agent's write is read with the knowledge it writes under (a GM assistant proposal's, the wider of the knowledge it was proposed under and the one it is applied under, §4.5), so a note written with the GM's knowledge never reaches an agent that reads as the player character, whatever the assistant reads with later; the GM's own writes (GM → Workspace) are the GM's alone until the GM chooses otherwise (a write naming its readers, or \`readers\` by itself), and a save that names none keeps the file's. Only the GM changes a file's readers without writing it: an agent asking to is refused (\`bad_op\`). A file no write named readers for (a turn's own) is the GM's alone. The GM's Journal reads "workspace file notes/marcus.md read with everyone's knowledge"; the player's has no line.
+  - **Who wrote it:** a GM-chat or GM → Workspace write's entry names the agent that made it (\`PostEntry.agent = {role, key, applied?, label, knowledge?}\`: its role, the batch's key, the keys of the operations it applied, the label it was applied with and the knowledge it wrote under). The GM's own GM → Workspace writes take role \`gm\` and no knowledge. It is GM-level and never on a player surface.
+  - **What an agent reads** (\`backend/agents/tools/workspace.ts\`, \`listWorkspace\` and \`readWorkspaceFile\`): the head's files and the learned area's (below) whose readers its knowledge reaches (the player character's is within everyone's, and everyone's within the GM's). Each comes with its path, hash, size (in characters), whether it is pinned, its readers, whether it is the learned area's, and its provenance: the role and key that wrote it, and \`turn\`, the 1-based position on the chat's chain of the reply whose record wrote it, or null when no record on the chain did (and for a learned file).
+- **The learned area** (\`backend/chat-agent-meta.ts\`): the files under \`learned/\`, which the agents keep across turns and no swipe takes back. Their index, path → \`{hash, readers, pinned?, role?}\`, lives in the chat's metadata under LRE's key, \`lumi_rp_engine.agents.learned\`, beside the chat's run, and the GM assistant's thread beside it (\`lumi_rp_engine.agents.assistant\`, §4.5). The writer (§7.2) sends every workspace operation on a path under \`learned/\` there instead of the ledger: written, deleted, moved within the area, pinned and shared as any file, read with the same readers rule, landing at once with no Undo chip (no turn holds it). No file moves into or out of the area (\`learned_move\`, \`tool.note.learned_move\`): a move across would be half a ledger write and half not. A swipe, a Re-run or an Undo never changes it, and a Lumiverse Branch copies it with the chat's metadata, as it stands when the branch is made.
+- **Writes of the chat's metadata** (\`backend/chat-meta-queue.ts\`): each of LRE's writes of a chat's metadata is a read-merge-write (the attach's run, the chat's own knowledge choices, the learned area and the assistant's thread, and the World Info book list, whose host merge writes the whole bag back with LRE's key in it), so each waits in one queue per chat for the one before; two at once both stand.
+- **The sweep** (\`backend/agents/sweep.ts\`) removes the blobs nothing references.
+  - **What it keeps:** every swipe's record on every assistant message in every one of the user's chats, whether or not the chat's metadata still shows it as LRE's (one whose key is gone can still hold records, so a chat that can't be told apart fails closed), read from the host's message metadata (LRE has journals only for chats it opened, and never sees a Branch), each read leniently (a record the folds would skip still names what it names): its session parts, the segments its summary and archived span name (once earlier messages are deleted, only they name a kept segment), and the hashes its \`engine.ws.write\` events name, in \`events\` and in every \`post\` entry; every chat's agent metadata (\`agentRefs\`: its learned index, and its GM assistant thread's messages and proposals); the call texts Diagnostics still keeps; the open chats' journals (a record not yet flushed, a pending turn's events and a Re-narrate's copies, a held write) and the stored journal of each chat that isn't open (what it writes back or lands when the chat opens again); and every blob work in flight holds. While what a chat references can't be read (the chat list or its messages, a ledger missing a chunk or failing its hash, a journal or diagnostics file the store can't read), the run removes nothing and starts no retention, and says so in the log.
+  - **When:** never while a turn of the user's runs (\`LedgerService.turning\`); one that sees a turn start stops removing, and the rest wait for the next. It runs when due (Settings → Agents → Retention, \`retention.sweepHours\` since the last; never with "none"), nudged after each ledger operation and when the user's settings load, since garbage only accrues with activity: no timer runs. A user who never stored a blob gets no file; the time stays in memory.
+  - **Retention:** the state file (\`agents/sweep.json\`: \`{v: 1, last, unreferenced: {hash: when first found}}\`, written temp-then-move; a damaged one is set aside and the sweep starts afresh) notes when a sweep first found each blob unreferenced. A later sweep removes it once \`retention.unreferencedDays\` have passed since and it is still unreferenced, held by nothing and not put meanwhile; a put starts its retention over, and a put of a blob a removal is under way for writes it again after. A referenced blob is never removed. Agent call texts expire from Diagnostics after \`retention.transcriptDays\` (§6.9), and the sweep collects them after.
+
+### 4.5 The GM assistant (AGENT-LOOP-PLAN §9, §11; INC1-SPEC R6a)
+GM → Assistant is the game master's chat with an agent about the chat's world (\`backend/agents/assistant.ts\`, \`lre.assistant\`). It runs outside every turn, on Settings → Agents → Assistant (\`UserSettings.agents.assistant\`), and nothing it does reaches a player surface but the activity line's label and the changes the GM applies.
+- **The thread** is kept per chat in its metadata (\`lumi_rp_engine.agents.assistant\`: \`messages\`, each message's blob hash in order, and \`proposals\`, each proposal's blob hash by id; §4.4), never in its ledger, so swipes never change it and a Branch keeps it as it stood. A message is \`{id, role, text, at}\`; the assistant's adds its trace (each tool call: the tool, its arguments in short, the error a failed one gave, its time), its usage (tokens in, of which cached, and out) and how it ended (\`answered\`, \`refused\`, \`stopped\`, \`cancelled\`, \`failed\`, with the reason). Each message and each proposal keeps, in its blob, the knowledge it was written under (one kept before it was is taken as the GM's); the view never shows it. The thread is GM data: it answers only \`lre.assistant\`, behind the GM gate, and each change to it is pushed (\`lre.assistant.update\`) only to the pages (frontend sessions) that asked about that chat's assistant, never to every page of the user's; a request from no page asks for none. **Clear** forgets it; its blobs, then unreferenced, go with the sweep.
+- **Each message** starts an agent (§3.1 of the plan, \`startAgent\`) as the role \`assistant\`: its connection, model and effort; its tools, the tool layer's read and GM tiers (\`toolsFor\`), reading the chat's head afresh on every call with the assistant's knowledge (\`pov\`, the player character's; \`everyone\`, everyone in the world's, secrets marked in the user's wording; \`gm\`, everything), so a turn that lands meanwhile is seen; its system prompt, \`gm.system\` (filled with the world's and the player character's names and \`{{knowledge}}\`, the \`gm.knowledge.*\` text for its knowledge) then \`gm.instructions\`; and the thread's latest exchanges, a message with the answer to it, newest first, as many as **History tokens** (\`historyTokens\`, 20,000) holds by the engine's estimate, and only those whose two messages were written under the assistant's knowledge now or a narrower one (\`historyOf\`): an answer given with everyone's knowledge never goes with a message sent with the player character's. When any of the thread's messages aren't sent, \`gm.history_note\` says how many, at the head of the first message sent. One answer runs at a time per chat. The request answers at once, and the answer goes on in the background.
+- **Its changes are proposals.** An edit tool's run never writes: it hands the writer (C7, \`outsideWriter\`) its operation for a dry run, which checks it against the head and words it for the assistant's knowledge, and the answer collects each change that passed, once per operation key, as one proposal (\`{id, messageId, ops: {key, changeType, lines, mode}[], status}\`), the operations themselves kept in its blob and never sent to a page. Under **Apply** \`ask\` (the default) it waits for **Apply** (all of it, or the changes picked) or **No**; under \`at_once\` it is applied as soon as the answer is in, unless the answer stopped short or a change's type asks first (mode \`confirm\`, Settings → Changes from the reply), which waits for Apply. Applied, its picked operations are one GM edit through the writer, written with the wider of the knowledge the proposal was made under and the assistant's then (so a note it writes is read only with as much as went into it, §4.4), held through a turn's engine run and reply (\`hold: true\`, §4.3 P2) and landing when the turn closes, never discarding it; the proposal keeps the edit's chip (\`chipId\`), whose Undo takes it back, or says it is \`pending\` while held. The write runs outside the thread's lock: Cancel, a new message and every other request of the thread never wait on it, and while it is under way the proposal can't be applied again or turned down (\`conflict\`). A held one is named its chip once its write lands (\`Runtime.onWritesLanded\`, the write found by its batch key), none when the turn had already made it so, and the thread is pushed: its card then shows Undo; a write that settles before its Apply has taken in its own result is kept for that Apply, which settles the proposal at once. One whose write the turn's close refuses (the notice's \`refused\`, from the journal's refused writes) has each change that write held marked \`write_refused\` (\`WRITE_REFUSED\`) with the journal's reason, and the thread is pushed; it waits for Apply or No again, unless a change it made in the learned area landed at Apply without that write: that change stays applied, and so does the proposal (\`settledProposal\`). Such a proposal's refused changes may be applied once more (**Apply again**): an Apply of an applied proposal sends only its changes marked \`write_refused\`, as one GM edit with its own chip, and leaves what landed as it is, so a learned note is never written twice; a change refused for what it is (any other code) isn't sent again, and with none left the Apply is refused (\`bad_request\`). An Undo of it, wherever it is pressed (its card, the chat, GM → Edits), marks it \`undone\`, and each change the chip took back \`undone\` too, only they counting as undone toward its learning: a change it made in the learned area is no chip's, and stays applied. A change the head refuses by then is marked on its op with the writer's code and reason, and a proposal none of whose changes landed stays open. A learned file's change (§4.4) lands at once, with no chip.
+- **Learning:** its change types learn for the role \`assistant\` on the connection a proposal was made on (its own, else your default's), with D4's thresholds (§7.2), once its changes land: Apply counts each change it applied as accepted and each one its pick left out as rejected (a held one when its write lands; one the turn's close refuses counts nothing, and a proposal whose learned-area change stood beside that refused write counts as one applied with that change alone), Apply again counts only the changes it sent (a held one, again, when its write lands), No counts each change as rejected, and an Undo turns an Apply's accepted into rejected, so a proposal counts once. A learned mode applies to its later changes, and Settings → Changes from the reply shows it; no chat chip tells of a flip, since the chat is a player surface.
+- **Limits:** the assistant's budget is every agent's (\`agents.budget\`) with the limits it sets of its own standing in (\`assistant.budget\`); the loop detector, clipping and throttles are the runtime's; there is no turn budget, so a limit set to none is no limit at all (Settings words it so). **Cancel** stops the answer under way, its model call and tools alike, at once: it never waits for the thread's lock, and the page keeps it pressable while another request of its is under way; what it said so far is kept, and it proposes nothing.
+- **Records:** each call it makes is a Diagnostics agent record outside any turn (§6.9), with the text that call was sent and answered, and one more for an answer stopped short of an answer, with why; a call its connection refused for its native tools is one too (outcome \`refused\`, with the provider's words), after which the answer goes on with its tools written as text. While it answers, the chat's activity line shows its label ("Asking the GM assistant…") and nothing else, unless a turn runs there, whose line comes first.
+- **GM → Workspace** (\`lre.workspace\`) reads the chat's workspace at its head and its learned area with the GM's knowledge (each file's path, hash, size, pin, readers, whether it is a learned file, and provenance: the agent's role and operation key, and the reply whose record holds the write) and writes it as the GM: each change one GM edit through the same writer as the agents (role \`gm\`, which no change type's mode applies to), with its Undo chip, held while a turn runs; a learned file's change lands at once, with none. A file the GM writes is the GM's alone until the GM says who else may read it (\`readers\` on a write, or \`{op: "readers"}\` by itself: \`gm\`, \`everyone\` or \`pov\`); a save that names none keeps the file's.
+
 ## 5. Turn pipeline
 
 ### 5.1 Hooks and lifecycle
@@ -63687,7 +64558,7 @@ Lore pins (§24.5) can name an entry of any of the user's World Info books, but 
 
 9. **Delivery** on \`WORLD_INFO_ACTIVATED\` for the generation the guard let through: a section whose entry activated is marked delivered (\`verified\`), one whose entry didn't is not (\`unverified\`: the host's World Info budget left it out, say), and the inspector record reads Activation confirmed once every entry the turn filled activated. Activation happens before the host resolves outlets, so it can't tell whether an assembled block holds a twin's outlet (§6.8).
 
-10. **Queued writes.** UI edits, between-turn materialization (\`post\`), confirmations, markers, Keep and Discard are journaled at once outside a window and held inside one (P2); each takes its \`seq\` and \`at\` when it is journaled. Journaled writes, late commits and re-asserts are flushed per message through its queue once no generation is in flight.
+10. **Queued writes.** UI edits, between-turn materialization (\`post\`), confirmations, markers, Keep and Discard are journaled at once outside a window and held inside one (P2), an engine run's pre-reply window holding those it holds through the run; each takes its \`seq\` and \`at\` when it is journaled. Journaled writes, late commits and re-asserts are flushed per message through its queue once no generation is in flight.
 
 ### 5.2 Steps
 - **Phases:**
@@ -63773,7 +64644,7 @@ Every model step reads the world lore it needs (§4.2) through the engine's own 
 - **Policy per step** (\`StepConfig.lore\`: \`{policy, tokens, transport?}\`): \`none\`, \`prefetch\`, \`lookup\` or \`prefetch+lookup\`. A settings file without one reads with its own preset's values (Custom fills in from Standard), and a step no preset configures prefetches 300 tokens. Presets: Lean prefetches 200 tokens and never looks up; Standard gives \`interpret\`, \`extract\`, \`npc.choose\` and \`judge\` both at 400; Full both at 600 for those, and a 400-token prefetch to \`brief\` and \`outline\`. The minds steps have none: what a mind reads of the lore is set in Settings → Minds (§24.6).
 - **Prefetch:** before a step's call, the index is searched with the step's own inputs: the player's message, the reply, the POV, its place and the places holding it, the people it can see there, the visible tracks' labels, stages and cues, a decision's agents and options, or a judged action's label, targets and place with the player's words. The hits go into the prompt as a "World lore" block, or into the state a Decision call reads, at no extra call. A world without lore changes no prompt.
 - **Lookups** (JSON helper steps, through quiet generation): the model is offered the lore tools (\`lore_search\`, \`lore_get\`, \`lore_list\`; JSON mode is off while they are) or, on a connection seen refusing tools, the two-phase \`{"need": [...]}\` form. The host has no tool-role messages, so a round's results (each round within the step's lore tokens, at most 3 asks) go back in a follow-up user message and the call is made again, after the model's ask replayed with only the calls the round answered. A \`lore_list\` answer names at most 12 entries, each costing the round's tokens as a snippet does, and says how many more there are; a call to a tool that isn't a lore tool is refused, never run as a search. The instructions name up to 12 of the lookup table's topics, and only those the step can read an entry under, so a topic only secrets it can't read are filed under stays unnamed.
-  - **Transport:** \`auto\` uses tools until a connection refuses them. A tool call that fails non-transiently is asked again in the need form on the round already held, and once that works the refusal is kept per connection, in memory and in \`userStorage/lore-tools.json\`. A step may pin \`tools\` or \`need\`.
+  - **Transport:** \`auto\` uses tools until a connection refuses them. A tool call that fails for a lasting reason (anything but a cancel, a dropped or timed-out connection, or a provider's 429 or 5xx: \`transientFailure\`) is asked again once in the need form on the round already held, so a provider that rejects the tools in words of its own still answers. Only a provider that says it takes no tools (\`isToolRefusal\`, the agents' own check, §7.1) has the refusal kept once the need form works, per connection, in memory and in \`userStorage/lore-tools.json\`; after any other failure the connection keeps its tools, and its next call offers them again. A step may pin \`tools\` or \`need\`.
   - **Budget:** each round is one call on the phase's lookup budget (§5.3), held before the model is offered it and released when it answers instead, so parallel steps never overdraw it; lookups therefore go to steps in priority order. A round starts only within the lookup window and while a third of the phase's time is left. A step that can't hold one gets no tools or need form and answers with its prefetch. Rounds are marked as lookups in the call meter.
 - **Decision pre-pass:** the Decisions API takes no tools, so a step on the Decision connection whose policy looks up gets one bounded helper call on the helper model first (§5.3), asking what lore the decision needs (tools or the need form), on a lookup round. It never answers the decision; its hits join the prefetch in the decision's state.
 - **Traces:** each step records its searches, the entries it was given with their token cost, its lookups, the transport and why a lookup didn't happen, for the inspector (§6.5), within what the player may know (§7).
@@ -63785,7 +64656,7 @@ The engine no longer selects user lore for the narrator; its own helpers read wo
 
 ### 6.1 The World Info interceptor (lore selection retired)
 The interceptor no longer builds candidates from user books (with pins, D19), skips pass-through books, pre-ranks a hit set capped at 64, asks the \`select\` step with its per-candidate cache (D13), spends a lore budget, votes user entries off for relevance, suppresses adopted sources (D11), syncs world lore into the engine book, overrides recursion or warns about Council World Info. Nor does it switch off an entry a section tells, or wait for a read of the user's books. Native World Info decides user entries in world chats, Council's included, and the interceptor changes some of them for the prompt at hand only, writing nothing in any book (\`backend/wi-interceptor.ts\`, registered at start, priority 100). In a world chat's every assembly (the context carries no generation type, and keeping a secret out is right in any), before activation, it reads the head state as the narrator sees it (\`LedgerService.narratorState\`: \`renderState\` of the chain, the turn's planned events included, a prepared turn the guard let a generation take included before that generation adopts it) and the narrator's knowledge in force (\`narratorView\`, §6.11), and for each of the user's entries the prompt has, held to its parts as every reader holds it (\`secrecyParts\`, §4.2, from the text the host sends with each entry, whatever book holds it, one the host builds from a card for the prompt included):
-- **An entry with secret marks** gets its text for the prompt through \`mutated.content\`, each mark put back worded as a secret with whom it is known to or kept from (\`renderMark\` \`"marked"\`, in the user's wording from Settings → Narrator, by default "TEXT [secret; known to Marcus Delgado]", "TEXT [secret; kept from Jordan Ellis]" or, for \`{{// Secret: TEXT}}\`, "TEXT [secret; kept from everyone]"), unless the narrator's knowledge leaves it out: a mark kept from the POV (one whose "kept from" names the POV, or one kept from everyone whose holders don't include the POV) while that knowledge is the POV's only or leaves secrets out. A "kept from" name that names no one, or more than one person, may be the POV, so unless the mark names the POV among its holders it is kept from the POV too (fail closed): left out there, and told with the POV among those it is kept from under a view that marks secrets; "you" and "the player character" name the POV (§4.2). A mark known to the POV, or kept only from others, stays, marked. A mark the POV holds by now (\`heldSecrets\` on the chat's minds slice: told, found out or revealed in play, by the mark's live lore id, §24.11) is theirs: it goes in under every view, the POV among its holders and out of its "kept from". A whole-entry secret is the mark's line alone, or, left out, voted \`disabled\`. Text that starts like a mark but can't be read stays out. This text is also what activation, recursion and the budget read for the prompt, where the stored mark's words would otherwise count (§4.2).
+- **An entry with secret marks** gets its text for the prompt through \`mutated.content\`, each mark put back worded as a secret with whom it is known to or kept from (\`renderMark\` \`"marked"\`, in the turn's wording of a mark: the prompt registry's Secret marks texts, §6.12, the user's own or a Re-narrate's turn's, which the guard's write hands the interceptor with the turn, \`Delivered.wording\`; by default "TEXT [secret; known to Marcus Delgado]", "TEXT [secret; kept from Jordan Ellis]" or, for \`{{// Secret: TEXT}}\`, "TEXT [secret; kept from everyone]"), unless the narrator's knowledge leaves it out: a mark kept from the POV (one whose "kept from" names the POV, or one kept from everyone whose holders don't include the POV) while that knowledge is the POV's only or leaves secrets out. A "kept from" name that names no one, or more than one person, may be the POV, so unless the mark names the POV among its holders it is kept from the POV too (fail closed): left out there, and told with the POV among those it is kept from under a view that marks secrets; "you" and "the player character" name the POV (§4.2). A mark known to the POV, or kept only from others, stays, marked. A mark the POV holds by now (\`heldSecrets\` on the chat's minds slice: told, found out or revealed in play, by the mark's live lore id, §24.11) is theirs: it goes in under every view, the POV among its holders and out of its "kept from". A whole-entry secret is the mark's line alone, or, left out, voted \`disabled\`. Text that starts like a mark but can't be read stays out. This text is also what activation, recursion and the budget read for the prompt, where the stored mark's words would otherwise count (§4.2). A prompt with no turn of its own is marked in the user's texts as they stand.
 - **A twin of a mark** (an entry whose whole text is a mark's text: the copy a character's card brings, say) reads as that mark: its line, or \`disabled\`.
 - **An entry with no marks that a secret holds back** (an earlier build's fields or a copy's note on it, the chat's world's secret entries indexed from it, or a text one of these is) is voted per prompt as before: \`disabled\` until every secret part's gate holds on the head state, then \`enabled\` when an earlier build stored it off for its secrecy (a secret of its own, or a copy that was on before it was kept), which switches it on; one only its text holds back stays as its author stored it. An entry with marks that such a part holds shut is voted \`disabled\` whole.
 
@@ -63849,16 +64720,19 @@ What the preset a chat generates with says applies to that chat (\`backend/prese
 - **A chat behind the head:** a chat on an older revision places each section where its own revision says: the engine run places the book's entries for that revision while the chat holds the book (§6.4).
 - **Outlets the host won't assemble:** a block limited to some generation types or to characters with certain tags (\`characterTagTrigger\`), and any switched-on block after the first under a radio category, place nothing. A block the host leaves out for reasons the engine can't see (prompt-activation regex scripts) still counts as placing its outlets: the twin activates, so the section reads as delivered, though no assembled block holds it. The interceptor-era test build that caught this went with the interceptor; a dry-run check of the routed outlets is a follow-up.
 - **Guidance:** a switched-off block named "RPEngine · <step>" (\`interpret\`, \`extract\`, \`brief\`, \`outline\`, \`choices\`, \`npc.choose\`, \`judge\`, \`puzzle.answer\`) is appended to that helper's prompt, after the world's step template or the built-in prompt and its output contract, as style and rules that never change the contract; on the Decision route it rides in the decision's state as \`rules\`. The engine resolves no macro in it: its braces, control characters and shorthands are neutralized (§6.3). Lines starting with \`//\` are notes and are skipped, and the rest is cut at a word to 1,500 characters. A switched-on block of that name reaches the narrator in every chat, so the engine doesn't read it. The first block of a name counts. A block named for the retired contradiction check (D36) is no longer read.
-- **Narrator rules:** every reply in a world chat gets them, as \`[Narrator rules]\` in the narrator entry (before the character) or its twin at \`{{outlet::lre_narrator}}\`, apart from the section budget (\`narratorRules\` in \`backend/book.ts\`). They say they come from LumiRPEngine, whose sections each start with their name in square brackets (\`NARRATOR_SOURCE\`), then give the order of authority (\`NARRATOR_AUTHORITY\`, D36), the top rule, which every rule after it works under: the player's own instructions first (what they say out of character, and what they write their character does, an attempt the engine rolled for going as the roll says, since the player chose to play with dice), then what the story has already established, then the engine's sections, the world as it stands now, kept up with the story and with the player's own changes, to follow unless the player directs otherwise; and people, places and things the story brings in become part of the world. Then comes what marked facts mean (\`MARKED_FACTS_RULE\`, §6.11, §7), as knowledge guidance under that order: a fact marked \`[unknown to you; known to …]\` or \`[unknown to you; GM only]\` is one the player character doesn't know, the mark saying who does; every character is kept consistent with what they know, so no one says, acts on or is narrated as knowing a fact they don't until the story reveals it to them or the player's own instructions make it known; unless the player's own instructions say otherwise, a marked fact isn't told in the narration or revealed by the reply, since knowledge barriers matter for the reply the player reads: it becomes known only through what the story has already established or what the player character does or finds; and marked facts are for steering the story and the people who know them. Then what a secret's mark means (\`secretMarksRule\`), under the same order, in the user's own sentence (Settings → Narrator, the wording's \`rule\`: the shipped sentence by default, with a reset; it needs \`{{forms}}\` and may hold \`{{everyone}}\`, both filled in one pass, and its own text is neutralized as the forms are, §6.3): \`{{forms}}\` is every form a mark takes in the user's wording (\`secretMarkForms\`: known to some, kept from some, kept from everyone, or known to some and kept from others, as the sections, Who knows what's secret lines and the interceptor write them), so an edited wording is still explained, and \`{{everyone}}\` the user's word for everyone; the shipped sentence says a fact so marked is known to whom its mark says and kept from whom it says, and is treated as a marked fact. The rules are one text in every world and on every turn, but for the user's wording of the marks and their sentence, whether or not the turn carries marked facts or the world keeps a secret, so they tell nothing of either. Last comes a switched-off "RPEngine · narrator" block, led as the player's own rules for the narrator (\`PRESET_RULES_LEAD\`).
+- **Narrator rules:** every reply in a world chat gets them, as \`[Narrator rules]\` in the narrator entry (before the character) or its twin at \`{{outlet::lre_narrator}}\`, apart from the section budget (\`narratorRules\` in \`backend/book.ts\`). They say they come from LumiRPEngine, whose sections each start with their name in square brackets (\`NARRATOR_SOURCE\`), then give the order of authority (\`NARRATOR_AUTHORITY\`, D36), the top rule, which every rule after it works under: the player's own instructions first (what they say out of character, and what they write their character does, an attempt the engine rolled for going as the roll says, since the player chose to play with dice), then what the story has already established, then the engine's sections, the world as it stands now, kept up with the story and with the player's own changes, to follow unless the player directs otherwise; and people, places and things the story brings in become part of the world. Then comes what marked facts mean (\`MARKED_FACTS_RULE\`, §6.11, §7), as knowledge guidance under that order: a fact marked \`[unknown to you; known to …]\` or \`[unknown to you; GM only]\` is one the player character doesn't know, the mark saying who does; every character is kept consistent with what they know, so no one says, acts on or is narrated as knowing a fact they don't until the story reveals it to them or the player's own instructions make it known; unless the player's own instructions say otherwise, a marked fact isn't told in the narration or revealed by the reply, since knowledge barriers matter for the reply the player reads: it becomes known only through what the story has already established or what the player character does or finds; and marked facts are for steering the story and the people who know them. Then comes what a secret's mark means, under the same order, in the sentence \`narrator.secret_marks\` (§4.2, §6.11): \`{{forms}}\`, which it needs, is every form a mark takes in the turn's wording of a mark (\`secretMarkForms\` over the registry's Secret marks texts, \`narrator.mark.*\`: known to some, kept from some, kept from everyone, or known to some and kept from others, \`…\` for its text and names, as the sections, Who knows what's secret lines and the interceptor write them), so an edited wording is still explained, and \`{{everyone}}\` the word for everyone; both are filled in one pass, and the sentence is neutralized as the forms are (§6.3). The shipped sentence (\`SECRET_MARK_WORDING.rule\`) says a fact so marked is known to those its mark says and kept from those it says, and is kept as a marked fact is: no one it is kept from says, acts on or is narrated as knowing it, and unless the player's own instructions say otherwise the narration and the reply don't tell or reveal it. The rules are one text in every world and on every turn, but for the user's own texts (or, on a Re-narrate, its turn's, §6.12), whether or not the turn carries marked facts or the world keeps a secret, so they tell nothing of either. Last comes a switched-off "RPEngine · narrator" block, led as the player's own rules for the narrator (\`PRESET_RULES_LEAD\`). Each part but the preset's own rules is a text of the prompt registry the user may edit, the wording of a secret's mark and its sentence too (§6.12).
 - **Some outlets but not all:** a preset that places some of the world's sections with their outlets and leaves others out lays the prompt out itself, so the rest landing at the world's placement, outside its blocks, is likely a mistake (one placed everything but People). The preset lint (D32) warns about it (\`preset_partial_outlets\`) with the outlets missing, read from the preset's own blocks as above, since the dry run resolves outlets away.
 - **Settings → Preset** shows the active preset, the \`lre_\` outlets its enabled blocks hold with the section each places, and each guidance block's state, and **Add RPEngine blocks to this preset** adds the missing ones, switched off and holding only \`//\` notes, under an "RPEngine" category (\`lre.preset\`). They are spliced into the preset's stored blocks, which are written back once, each exactly as stored, at the revision they were read at: the host's block API would re-normalize every block of the preset on each insert and drop what it doesn't know, a sealed block's protection among it.
 
 ### 6.9 Diagnostics and the activity line
 What the engine did for a chat, step by step, and what it is doing now (\`backend/diagnostics.ts\`, \`shared/diagnostics.ts\`).
 - **Records:** each turn (keyed by its generation id; an engine run's records start under its own id and follow the generation that takes its turn) records its phases as steps: \`pre\` (lore, \`interpret\`, the judge, \`npc.choose\`, minds and a time skip's beats), \`plan\`, \`prose\` (brief and outline), writing the sections (\`sections\`), \`read\` and \`memory\`, then the turn itself. The minds' post phase (memory and consolidation, §24.4, and the knowledge step, §24.11) runs beside the read as a step of its own (\`memory\`/\`minds\`) that takes the calls of its purposes wherever it sits among the steps under way, so a memory, a consolidation or a knowledge call cut off fails that step and never the read: the read stays \`ok\`, and the turn ends on "Failed: Updating the characters' memories". Each step has its start, end and duration and its outcome: \`ok\`, \`skipped\` with why, or \`failed\` with why and, where the engine can tell, a fix ("raise Max tokens for outline in Settings → Steps and connections"). Each model call made inside a step joins it with its purpose, connection, model, tokens in and out, \`max_tokens\`, \`finish_reason\`, time and error, and, when it was made again after a transient failure, which attempt it was. A step whose last call failed, came back empty or was cut off (\`finish_reason\` length) is failed even when it fell back quietly, and in the engine run any failure stops it (§5.1). A spared call (\`spared\`) is shown on its step's line and fails nothing: a skip plan's (its people keep to their basic needs), a mind's before the plan (the mind that didn't answer is the failure, named, §5.1), and a call its run stopped as no longer needed ("not needed: the message plays a timelapse…", "not needed: you cancelled the turn", a consolidation asked again after a memory rewrote the summary, §24.4). Also recorded: a generation the guard couldn't stop, a reply's generation that failed or was stopped, a prepared turn dropped because the chat changed, every error a ledger operation or a request couldn't recover from, the sections written (the generation path, each section, the preset outlet it goes to and whether it went out with text; failed when no section had text), and any request or state view slower than a second.
-- **Storage:** the last 400 records per chat, in \`userStorage/runs/<chat>/diagnostics.json\`, read the first time they are needed and written debounced, so a restart keeps them. Each record is also a line in the user's \`diagnostics.log\`, with its level (\`DEBUG\`, \`INFO\`, \`WARN\`, \`ERROR\`) and its turn's short id.
-- **Secrecy:** records are GM-level (a reason may name someone the player hasn't met), so like the GM view they answer only \`lre.diag\`, never a push; Settings → Diagnostics asks for them only once the player opens its curtain.
+- **Agent calls** (AGENT-LOOP-PLAN §3.5): each call an agent makes is a record of its own (\`kind: "agent"\`, \`Diagnostics.agentCall\`) under its turn, or outside one for the GM agent: the role, the connection and model, the usage (tokens in, of which cached, and out, of which reasoning; \`estimated\` names the counts the provider didn't report, which hold the runtime's estimate), the time, the outcome (\`ok\`, \`failed\`, \`cancelled\`, \`refused\`) with its error, and the tools it called by name. The call's text (its messages and answer) is a blob (§4.4) the record names by hash (\`agent.text\`); nothing else points at it. Until the agent turn loop decides what a failed agent means for its turn, an agent call is informational: it never fails a classic turn, halts its engine run or reaches the activity line.
+- **Transcript retention:** an agent call's text is kept \`retention.transcriptDays\` after the call ended (Settings → Agents → Retention, 30 by default; "none" keeps it as long as its record; 0 stores none). Past that, the record drops its hash as the records are read or saved, keeping the rest of the call, and the sweep removes the blob once nothing else references it. \`Diagnostics.transcripts(chat, user)\` lists the hashes a chat's records still keep (read from its file when the chat isn't loaded): the sweep's references from Diagnostics.
+- **Storage:** the last \`diagnostics.recordsPerChat\` records per chat (Settings → Diagnostics → Records per chat, 400 by default, the user's own), in \`userStorage/runs/<chat>/diagnostics.json\`, read the first time they are needed and written debounced, so a restart keeps them; a lower setting drops the oldest the next time the chat's records are read or written. A file written before agent calls reads as it did, and a malformed agent call is dropped from its record alone. Each record is also a line in the user's \`diagnostics.log\`, with its level (\`DEBUG\`, \`INFO\`, \`WARN\`, \`ERROR\`) and its turn's short id; an agent call's line has its model, tokens, outcome and tool names, never its text.
+- **Secrecy:** records are GM-level (a reason may name someone the player hasn't met), so like the GM view they answer only \`lre.diag\`, never a push; Settings → Diagnostics asks for them only once the player opens its curtain. An agent call's text is read one at a time behind that curtain (**Show text**), through \`lre.diag\`'s \`text\` op, which answers only a hash one of the chat's records keeps (any other blob is refused), and null when the blob is gone.
 - **Activity line:** while a turn runs the backend pushes \`lre.activity\` with a label and the turn's start: "Running the engine…", "Reading your action…", "Asking 3 minds…" (the model calls under way, minds counted), "Filling the prompt…", "Waiting for another chat of this world…", "Ready; reopen the chat to continue" (a restart no page has started yet), "Already started in another window" (to a page that doesn't hold the restart), "Ready: press Send for the reply", "Waiting for the reply…", "Reading the reply…", "Updating memory…", "Updating the characters' memories…". It carries a step's label and nothing else, so it is player-safe. A turn with a failed step ends on a failure ("Failed: Planning") that stays until the next turn or Dismiss. The HUD pill, the phone's status line and the drawer show it with the time taken; the failure links to Settings → Diagnostics. While an engine run or a reply read is under way the activity says it can be cancelled (\`cancellable\`), and the drawer's running line has **Cancel**, which stops it (§5.1); waiting for the reply or for Send, there is nothing to cancel and no Cancel.
+- **Agents outside a turn:** while the GM assistant answers (§4.5), the chat's line shows "Asking the GM assistant…" with \`turn: null\` (\`Diagnostics.agentWorking\`, \`agentDone\`): its label and nothing else, since what it reads and calls can name what the player hasn't met. A turn that runs there meanwhile shows its own line first.
 
 ### 6.10 Usual routines for the narrator
 Routines are informative by default (§8): the engine never moves Live, Near or Far characters by them, so for those the narrator's soft line is how their routine reaches the story, and the narrator decides what they do. While the world's \`routineSettings.narrator\` is on (the default), People carries a hint line (\`usualRoutineHints\`, in \`packs/castlife/core/usual.ts\`) for each person at the POV's place that the POV can see and who acts as it knows, whose routine role (§8) isn't \`off\`: "Maya usually: weekdays, working the counter at Daybreak Café 07:00–15:00; on Tue, swimming at the gym in the evening." A lead line says these are background the narrator may use or ignore, never a fact to state, and that what the story establishes comes first.
@@ -63886,9 +64760,20 @@ What goes into each section, and whose knowledge it comes from (\`engine/feed.ts
 
   Place and Property are shipped sections, ranked after the other facts so a small budget leaves them out first; a world that lists its own sections gets them only when it lists them, and the world or the GM can switch either off.
 - **Who owns or may use what** (\`engine/access.ts\`): one reading of the four shapes ownership is stored in, for items, vehicles, property and accounts alike: an \`owner\` or an \`owners\` list (role and share, \`ownersIn\`, with each owner's part of the worth), a holder (\`heldBy\`), and a \`uses\` relation to the thing (with \`until\`, a lend still in force; without, an assignment). \`owns\` counts a member of an owning group; \`mayUse\` adds a grant in force. Vehicles, Property and the Place section's things read it.
-- **Secrecy:** only the narrator's copy of a section gets scoped lines. They are in the prompt and the engine's book, so whatever in the host shows those shows them too: a wider scope, or the narrator's knowledge, is the user's or the GM's choice to put them there. Player surfaces (chips, the Journal, Play panels, the HUD, the helpers' facts) read \`render\`, the player scope. A secret line (\`FeedLine.secret\`, Who knows what's, §24.11) goes in marked with whom it is known to and kept from, by name (\`secretLineText\`: \`secretMarkText\` in the user's wording from Settings → Narrator), or, under \`omit\`, not at all, and never in the \`player\` scope. A line carrying an unrevealed secret's words (the leak screen, \`findLeaks\` against \`unrevealedSecrets\`) goes as the narrator's knowledge says, in every scope: under \`marked\` a plain line goes in marked as a secret kept from the POV (\`secretMarkText\`) and rides first among the section's marked facts, a fact already marked as beyond the POV's keeps its own mark, and a Stance hint or a Minds line (§24.3) gets the secret mark in place; under \`omit\` each of them is left out, a \`gm\`-scoped section's included. A fact told in several lines (\`FeedLine.group\`) goes whole either way: a plain line of it carrying a secret's words takes the fact's other plain lines with it (marked, or left out), and under \`omit\` a fact that loses a line beyond the POV's to secrecy loses the rest of those too; its marked lines ride only with its plain ones, when it has any. Marked lines, secret-marked ones among them, ride after every section has its place, like hints (§6.2), a line (or a fact's lines) at a time while the budget and the section's \`maxTokens\` allow, and no size, clip or total the Context panel shows counts them; a section of marked lines alone goes in with no inspector row, and "Activation confirmed" reads only the entries with a row and the preset's own narrator rules, so a marked-facts entry the host leaves out leaves no trace there. The GM's preview (\`lre.sections\`) counts them among a section's marked lines. The narrator rules explain every form the marks take, in the user's wording (\`secretMarksRule\`, §6.8).
-- **The narrator's knowledge** (\`NarratorView\`, \`backend/chat-knowledge-prefs.ts\`): two parts, \`knowledge\` (\`scene\`: everyone in the scene's, each fact beyond the POV's marked; \`pov\`: the POV's only) and \`secrets\` (\`marked\` or \`omit\`), by default \`scene\` and \`marked\`, for every chat, old and new, from its next turn. A chat's own choice comes first (GM → This chat → Knowledge, \`lre.chat.knowledge\`), then its world's \`narrator\` (Build → World), then the user's (Settings → Narrator, \`settings.narrator\`, which also holds the user's wording of a secret's mark and the narrator rules' sentence on marks, \`marks.rule\`, each part with the shipped text as its default and a reset). A chat's own choice, with its own knowledge tracking switch, is kept in its host metadata (\`lumi_rp_engine.prefs\`, beside the chat's run), never its ledger: no recorded turn changes, a Branch keeps it, and it applies from the next turn; a turn the engine prepared before the chat's choice changed is prepared again.
+- **Secrecy:** only the narrator's copy of a section gets scoped lines. They are in the prompt and the engine's book, so whatever in the host shows those shows them too: a wider scope, or the narrator's knowledge, is the user's or the GM's choice to put them there. Player surfaces (chips, the Journal, Play panels, the HUD, the helpers' facts) read \`render\`, the player scope. A secret line (\`FeedLine.secret\`, Who knows what's, §24.11) goes in marked with whom it is known to and kept from, by name (\`secretLineText\`: \`secretMarkText\` in the turn's wording of a mark, the registry's Secret marks texts, §6.12), or, under \`omit\`, not at all, and never in the \`player\` scope. A line carrying an unrevealed secret's words (the leak screen, \`findLeaks\` against \`unrevealedSecrets\`) goes as the narrator's knowledge says, in every scope: under \`marked\` a plain line goes in marked as a secret kept from the POV (\`secretMarkText\`) and rides first among the section's marked facts, a fact already marked as beyond the POV's keeps its own mark, and a Stance hint or a Minds line (§24.3) gets the secret mark in place; under \`omit\` each of them is left out, a \`gm\`-scoped section's included. A fact told in several lines (\`FeedLine.group\`) goes whole either way: a plain line of it carrying a secret's words takes the fact's other plain lines with it (marked, or left out), and under \`omit\` a fact that loses a line beyond the POV's to secrecy loses the rest of those too; its marked lines ride only with its plain ones, when it has any. Marked lines, secret-marked ones among them, ride after every section has its place, like hints (§6.2), a line (or a fact's lines) at a time while the budget and the section's \`maxTokens\` allow, and no size, clip or total the Context panel shows counts them; a section of marked lines alone goes in with no inspector row, and "Activation confirmed" reads only the entries with a row and the preset's own narrator rules, so a marked-facts entry the host leaves out leaves no trace there. The GM's preview (\`lre.sections\`) counts them among a section's marked lines. The narrator rules explain every form the marks take, in the same wording (\`narrator.secret_marks\`, §6.8).
+- **The narrator's knowledge** (\`NarratorView\`, \`backend/chat-knowledge-prefs.ts\`): two parts, \`knowledge\` (\`scene\`: everyone in the scene's, each fact beyond the POV's marked; \`pov\`: the POV's only) and \`secrets\` (\`marked\` or \`omit\`), by default \`scene\` and \`marked\`, for every chat, old and new, from its next turn. A chat's own choice comes first (GM → This chat → Knowledge, \`lre.chat.knowledge\`), then its world's \`narrator\` (Build → World), then the user's (Settings → Narrator, \`settings.narrator\`, which holds these two parts only: how a secret is marked is the registry's, §6.12). A chat's own choice, with its own knowledge tracking switch, is kept in its host metadata (\`lumi_rp_engine.prefs\`, beside the chat's run), never its ledger: no recorded turn changes, a Branch keeps it, and it applies from the next turn; a turn the engine prepared before the chat's choice changed is prepared again.
 - **World Info in a section is told, never carried:** a \`FeedLine\` names no World Info entry and a turn's delivery record lists none, so no section keeps an entry out of the prompt (Place, above).
+
+### 6.12 Editable texts
+Every text the engine sends to a model is the user's to edit, starting as its shipped text (\`shared/prompts.ts\`, the registry; \`backend/prompts.ts\`, resolution, prompt sets and Test). Increment 1 holds the final output (the narrator rules and every built-in section's guidance) and the GM agent's own texts; later agents add theirs.
+- **The registry:** each text has a stable dotted id (\`narrator.source\`, \`narrator.authority\`, \`narrator.marked_facts\`, \`narrator.preset_lead\`, \`narrator.mark.known\`, \`narrator.mark.kept\`, \`narrator.mark.both\`, \`narrator.mark.everyone\`, \`narrator.secret_marks\`, \`section.<slot>\`, \`gm.system\`, \`gm.instructions\`), the Prompts page it is edited on, its shipped text, the placeholders it may use with what each holds (a section's guidance must keep \`{{lines}}\`; each part of a secret's mark keeps \`{{text}}\` and the names it gives, \`{{known}}\`, \`{{kept}}\` or both; the secret marks' sentence must keep \`{{forms}}\`, each form a mark takes in the turn's wording joined with " or ", and may use \`{{everyone}}\`, the word for everyone, §6.8), and, where its answer keeps one, its output contract. Ids, the \`{{name}}\` syntax and the placeholders a text requires are stored formats (§16 of the agent-loop plan). The shipped narrator rules are today's (\`NARRATOR_SOURCE\`, \`NARRATOR_AUTHORITY\`, \`MARKED_FACTS_RULE\`, \`PRESET_RULES_LEAD\`), the secret marks' texts ship as \`SECRET_MARK_WORDING\`, and each section's guidance ships as \`DEFAULT_SECTIONS\`' template, so nothing changes until the user edits.
+- **Resolution:** a built-in section reads the world's own wording (\`sectionTemplates\`, §4.2) first, then the user's own text, then the shipped template (\`sectionsOf\`); a world's own section keeps its own template. A text with no world level reads the user's own, else the shipped one. A text is filled from its own placeholders only; anything else in double braces is left out, and the narrator rules are neutralized as any engine text is (§6.3). A part of the narrator rules the user empties is left out.
+- **Checks:** a placeholder a text doesn't have, one it must keep that is missing, an empty text where the text can't be empty (a secret's mark), and a text past **Longest text of your own** (20,000 characters by default) are flagged as the text is typed and refused when a write stores one (\`promptsWritten\`): what was saved stays. The shipped text word for word is never stored as the user's own, and lowering the limit never cuts a text already saved. Test checks a text as Settings saves it and, for a text whose answer keeps a contract, runs it once and checks the answer against the contract's schema.
+- **The tools' texts:** each agent tool's description is the text \`tool.<name>\` and each of its arguments' \`tool.<name>.<path>\`, made from the tools' own texts (\`shared/agent-tools.ts\`, \`TOOL_TEXTS\`) the way each section's guidance is made from its section, so the GM agent page's **Tools** group lists exactly the tools there are; the notes the tool layer answers with (\`tool.note.*\`: no such person, place, thing, track, fact or field here; several match; a missing argument or a value it doesn't take; beyond the player character's knowledge) are its **Tool answers**. \`toolsFor\` sends each in the user's own words where they wrote them (§7.1); a schema's shape stays the tool's fixed contract.
+- **Prompt sets:** each turn records the texts its narrator prompt was made from: every final-output text as the user had it (their own, else the shipped one), stored once by its hash in \`userStorage/prompts/sets/<hash>.json\` and named on the turn's record (\`Rec.prompts\`), outside every hash, like \`diag\`, so replay and paths never change. A world's own wording isn't in it: that comes with the turn's world revision. The secret marks' texts are among them, so a Re-narrate's sections, rules and World Info are marked as its turn's were.
+- **Re-narrate and Re-run:** by default (**Settings → Swipes**, *The texts the turn was made with*) a Re-narrate is sent its source turn's set, so only the prose changes, and a Re-run, a new run of the turn, is sent the set of the swipe it was made in place of (the nearest at or before its own holding a live record, found as a Re-narrate's source is); *My current texts* sends the user's texts now to both. A source recorded before turns named their texts was made with the shipped texts and gets them, but for a secret's mark, whose wording was Settings' then and is the user's own now (below); one whose set is gone from storage gets the current texts, and Diagnostics says so; a turn that replaces no recorded one (a retried reply) gets the current texts. Saving a text or the choice makes a prepared turn stale (§5.1), so it runs again with them.
+- **Settings → Agents → Prompts** lists each page (Final output, GM agent), its texts under their headings with the shipped text, the placeholders and Reset, and the limit. The GM agent page's own texts are \`gm.system\` (may use \`{{world}}\`, \`{{pov}}\` and \`{{knowledge}}\`, the text of the knowledge the assistant reads with), \`gm.instructions\`, \`gm.knowledge.pov\`, \`gm.knowledge.everyone\` and \`gm.knowledge.gm\` (what fills \`{{knowledge}}\`), and \`gm.history_note\` (\`{{count}}\`: how many earlier messages of the conversation are left out, §4.5). The user's texts are \`UserSettings.prompts\` (\`texts\` by id, \`maxChars\`); the Re-narrate choice is \`swipeTexts\`.
+- **Secret marks** (\`MARK_TEXT_IDS\`, Final output's **Secret marks** group): how a secret is marked for the narrator is five texts, \`narrator.mark.known\`, \`narrator.mark.kept\` and \`narrator.mark.both\` (the forms, \`secretMarkText\`), \`narrator.mark.everyone\` (the word for everyone, no placeholders) and the narrator rules' sentence on a mark, \`narrator.secret_marks\`; none may be empty (\`nonEmpty\`: an empty one is never saved, nor sent where one was stored). A turn resolves them from its texts (\`markWording\`: the user's own, or a Re-narrate's or a Re-run's turn's, else the shipped ones), and its sections, its narrator rules and the World Info entries in its prompt are all marked in what it resolves; the agents' tools mark secrets in the user's texts as they stand. A turn's set that doesn't hold them (one recorded before turns named their texts, or before the wording was the registry's) was marked in the wording Settings held then, so its Re-narrate and Re-run take the user's own now, where that wording moved (\`sourceTexts\`), the rest from the set. Settings → Narrator keeps only the narrator's knowledge, and points here. A settings file from before the wording was the registry's keeps it: each part of its \`narrator.marks\` is read as the user's own text for that part (\`marks.rule\` as \`narrator.secret_marks\`) unless the file already holds a text there. Each write keeps the field as a copy of the user's own mark texts (\`storedForm\`), so a build from before the move reads the same wording, and one set back to the shipped text is gone from both.
 
 ## 7. Knowledge and visibility
 - **Values:** \`public\`; \`known_by\`, seen by whoever knows the subject: a \`knows\` relation to it, or matching its \`knownBy\` selector (§4.1: the members of a group, people of a kind or tier); \`secret\` (GM only). Entities, fields, places and tracks take \`knownBy\` beside \`known_by\`. A place may also be \`discoverable\`: hidden until the POV has been there, has a \`knows\` link to it or lists it in \`known_places\`, and found for good after that; its \`knownBy\` counts as for \`known_by\`. An entity may be \`discoverable\` too (a thing hidden in a room or a container): hidden until the POV finds it, which the built-in **Search** (\`search\`, \`gear.search\`) does by writing the POV's \`knows\` to every \`discoverable\` thing it doesn't know yet lying loose where it stands, or, with a \`target\`, lying directly in that container (searching or opening it; nothing in a container is found by searching the room, and nothing on anyone); found, it is known for good, and its \`knownBy\` counts as for \`known_by\`. Every other reader takes a \`discoverable\` entity for \`secret\`, failing closed. What the world document puts in a container (entities \`in\` it) is found as above, and a container with a \`stock\` category also samples a few things of it the first time it is opened, beside them: \`stock\` is the author asking for more. A world that wants a roll to find things authors its own \`search\` action, with its check and \`gear.search\` in its passing outcomes; it replaces the built-in by id. A reader that doesn't understand a value (an unknown string, \`discoverable\` on a track or a field) hides the subject, and a \`knownBy\` with a constraint the engine doesn't read, a malformed list or no constraint at all grants nobody: every rule fails closed, and lint flags both.
@@ -63913,6 +64798,52 @@ What goes into each section, and whose knowledge it comes from (\`engine/feed.ts
 - **Changes read as sentences** (\`shared/words.ts\`, \`engine/player-events.ts\`): every line that says what changed (a chip, the Journal, a Montage, a witness log, the GM's Edits log and its notices, Check world) names who, what the setting means and the value in words, never a field's form label glued to a value. A field reads by its label without the form's bracketed hint ("Bed (a place or an item)" is a bed), a unit in brackets or a trailing % after its number; a place with the places around it, outermost first ("Alder Automotive (Lakeshore County › Port Alder)", on a player's line only the ones the POV may see); a thing with where it is ("Camper van (at Alder Automotive)"). A place, a bed, a home and an owner read as what they mean ("Marcus Delgado now sleeps at Alder Automotive (Lakeshore County › Port Alder)", "Dev Patel is now at Rosie's Diner"); a yes-or-no field as marked or not; a list as its items; an \`add\` as went up or down by; a relation as who now knows, carries, owns, wears or belongs to whom; a track as the stage it is at; a GM edit's tier, level, classes, life state, mind, routine and section settings each as a sentence ("Danny Okafor is now in the Supporting tier and has Money detail at level 2 (Simple)", "In this chat, the Outline section tells what your character knows, cut to at most 400 tokens"). A reply-read chip says what it changes the same way ("You went to Bluebird Coffee", "Danny Okafor's trust toward you rose by 8"), and the narrator's Montage words its changes as sentences too.
 - **Secret World Info entries** (§4.2): a secret mark reads as secret lore with its holders, for the helpers, minds and leak checks of the run that read it live: its holders' minds read it, no helper does, and its sentences count for the leak checks as any shut secret's do; an earlier build's secret reads as it did, by its gate. In the prompt, the interceptor (§6.1) gives the narrator each mark as the narrator's knowledge says, marked or left out, and switches an earlier build's secret on only once its gate holds on the head state; when that state can't be read, or the interceptor throws, every secret stays out, and when it fails in the host or runs out of time, the host strips the marks itself.
 - **Acceptance:** truth text and judged paraphrases are absent from Breakdown, choices, the Journal and panels until reveal.
+
+### 7.1 The agent tool layer (AGENT-LOOP-PLAN §6; INC1-SPEC C6)
+What LRE's agents read the world through, and the reads it holds; the writes, the workspace and the lore tools register through the same registry (§7.2). Increment 1's GM assistant is its first user; Increment 2's turn agents get the same tools, read and written inside the turn's engine op.
+- **The registry** (\`backend/agents/tools/registry.ts\`): every tool is a \`ToolDefinition\`: its name, its family (people, places, items, money, quests, knowledge, time, checks, minds, lore, workspace), its tier (\`read\`, or \`gm\`: a change, always held and previewed), a hand-written JSON Schema for its arguments, and its run. \`toolsFor\` gives an agent the tools of the tiers and families its role has, as the runtime takes them (\`AgentTool\`): each description and each argument's is its registry text (§6.12) in the user's own words where they wrote one; each schema is filled with the world's ids as enums (kinds, fields, places, actions; the packs' under the world's own, \`schemaWorld\`), except that under the player character's knowledge it offers no place or action ids and only the fields anyone may see, since a secret room's id or a secret's later step would name what it can't know, and such an argument is then a free name the resolver checks; and each call runs with the agent's \`ToolEnv\`, its id and its cancel signal the runtime's. A schema's shape is a fixed contract (§16 of the agent-loop plan), its descriptions editable, and one every provider takes: each node has one type of its own, never none or a list of types, none is a union (\`anyOf\`, \`oneOf\`), and no object below the root lacks its \`properties\`, each of which a Gemini connection refuses. A value that would be one of two kinds is one kind with a value that stands for the other (\`gm_set_entity\`'s level: −1 follows the tier); a value of any field's type is text holding it as JSON (\`JSON_VALUE\`, \`jsonArg\`: \`gm_set_field\`'s and \`gm_fix\`'s \`value\`; text that isn't JSON is read as the words it is, and a text or enum field's value is always its words unless they are written as a JSON string, so 1999 stays the text 1999); and an object whose keys are free (a map of fields, a facet's values, an effect's arguments, a mind's or a routine's value, \`gm_feed\`'s settings, \`checks_odds\`'s params) is text holding a JSON object (\`jsonObject\`, \`objectArg\`), whose argument text says so; text that isn't one is refused as a missing argument.
+- **Native tools or text** (\`backend/agents/provider.ts\`): an agent's tools go to its connection natively; a call the provider refuses because it takes no tools (its error says so: "does not support tools", "No endpoints found that support tool use", \`Unsupported parameter: 'tools'\`, vLLM's \`--enable-auto-tool-choice\`, llama.cpp's \`--jinja\`, Gemini's "Function calling is not enabled"; \`isToolRefusal\`, \`backend/steps.ts\`, which the lore lookups use too, §5.4) is asked again with its tools written as text, on the agent's record (\`tools_refused\`, a Diagnostics agent record of its own, outcome \`refused\`), and once that works the connection's agents get them as text from then on. Any other failure of a call with tools (a prompt too long, a bad value, a provider's own fault) is that call's: the connection keeps its native tools.
+- **One read view** (\`ToolReadView\`, \`backend/agents/tools/read-view.ts\`): every tool reads through \`env.reader\`, which outside a turn (\`outsideReader\`) reads the chat's head as the GM view does (\`renderState\`, a planned turn included) and never through the ledger's queue, so a long agent run neither waits behind a turn nor stales one. Each call reads the head afresh, so a turn that lands during a run is seen. The view filters by the agent's knowledge (\`AgentKnowledge\`):
+  - **\`pov\`**, the player character's, reads as Play's player scope: the people and things it may know of (\`povMayKnow\`), the places it can see (\`canSeePlace\`), the tracks of its quest log under the ids and labels Play gives them (\`playerTrack\`, \`shownTrackId\`) and the fields it may see (\`canSeeField\`), each plain, with nothing that tells how hidden something is. Someone away from it shows only where and when it last saw them; what it can't know (another's mind or knowledge, who is somewhere it isn't, another's odds) is answered with a note saying so, never the answer.
+  - **\`everyone\`**, everyone in the world's, reads as the narrator's \`scene\` view: everything, with each secret marked in the user's wording of a mark (the registry's Secret marks texts, §6.12, \`secretMarkText\`), naming who knows it: a secret, Known by or discoverable person, thing, place or field, a track that isn't public, a lore entry before its gate holds, a fact someone keeps from others.
+  - **\`gm\`**, the GM's, reads everything unmarked, each restricted thing with its visibility, removed entities, track truths, predicates and minds included.
+- **User entry text:** a World Info entry's text reaches a tool only through \`applyMarks\`: under \`pov\` each mark the player character holds is marked and every other left out; under \`everyone\` and \`gm\` every mark is marked. World lore reads as the narrator reads it under \`pov\` (a secret once its gate holds, a Known by entry by what the player character knows, plus a secret it holds itself); an AI-written entry still waiting for review reaches no one but the GM.
+- **The resolver** (\`backend/agents/tools/resolve.ts\`): a person, a thing, a place or a track as a model wrote it (its id in any case; its whole name; its name followed by a mark, as an \`everyone\` answer writes it; words of one name only) resolves only among what the view may name. A hidden one is answered exactly as one that doesn't exist ("No such person here: …"), and a name that fits several lists only those the view may name.
+- **The read families** (\`backend/agents/tools/read/\`), each answering in compact JSON with every named thing as \`{id, name}\` and reusing the engine's own readers: people (find, sheet, where, regard), places and travel (a place, who and what is there, route and travel time), items (inventory, holder, condition), money (balances by visibility, prices), quests and secrets (tracks, stage, what moves one on), knowledge (who knows a fact, what someone knows: each holding with how and from whom, since when, belief, confidence, a suspicion under the threshold, and whom it is kept from), time (the clock, someone's day), checks (an action's odds) and minds (a mind, its notes, commitments and plans).
+- **Answers and limits:** a tool returns what it found whole; the runtime clips a long result to **Tool results clipped past** and keeps the rest in the agent's scratch (§15 of the agent-loop plan). A refusal is one of the tool layer's notes (\`tool.note.*\`), editable on the GM agent page.
+### 7.2 The tool layer's writes (C7)
+Every change an agent makes goes through one writer (\`backend/agents/tools/writer.ts\`). \`outsideWriter(rt, env)\` is the writer outside a turn's engine run (the GM agent's chat and GM → Workspace; a turn agent's comes with Increment 2), with two calls: \`dryRun(op)\`, which checks one operation as it would be written and says what it would change, and \`apply(ops, label)\`, which writes a batch. A write tool only proposes: it answers with the dry run, and nothing changes until the GM assistant's collected proposals are applied.
+- **Operations** (\`AgentOp\`): \`gm_edit {op}\` (an \`EditOp\`, as \`lre.edit\` takes it), \`mind_edit {edit}\`, \`routine_edit {edit}\`, \`fix {fix}\` (the clock, \`{time}\`, or a field as the player corrects it, \`{entity, field, value}\`), and the workspace's \`ws_write {path, text, readers?}\` (\`readers\` the GM's alone to give), \`ws_delete {path}\`, \`ws_move {from, to}\`, \`ws_pin {path, pinned}\` and, for the GM alone, \`ws_readers {path, readers}\`.
+- **The write path,** the same for every operation:
+  1. It is read for its shape and turned into what the engine writes, its FixOps (\`engine/edits.ts\`): a GM edit as \`lre.edit\` takes it; a ✎ fix as \`lre.fix\` does (locked fields refused, a place only one the player character can see, a moved person's activity left behind), each field as a \`fix_set\` operation, which keeps the player's rules inside the GM edit, so one held through a turn is worked out again under them, never the GM's; a file's body as the hash of the blob it will be, with its readers (§4.4): an agent's, the knowledge it writes under; the GM's, the readers it gave, else the file's, a new one the GM's alone. An operation on a path under \`learned/\` is the learned area's (§4.4): it is made in the chat's metadata, not the ledger, and a move into or out of the area is refused (\`learned_move\`).
+  2. It is held to the agent's knowledge (§7.1): an id the agent's view may not name and an id that doesn't exist read exactly alike, as \`not_found\` with the tool layer's note for what the operation's slot takes (a person, a holding's teller and those it is kept from included: \`no_person\`; any entity: \`no_thing\`; a relation's far end: \`no_thing\`, unless it is a place the view sees; a place: \`no_place\`; a track: \`no_track\`; a fact, \`mind_knowledge\`'s and those its holding rests on: \`no_fact\`, under the player character's knowledge any it doesn't hold), never by what the hidden one is. Under every knowledge but the GM's, so are the ids a value names where the engine reads one, missing or hidden alike (\`unseenValues\`): a reference field's value (each item of a list of them), set or fixed, and a relation's own reference fields (\`no_thing\`), a routine block's place (\`no_place\`) and its company's people and groups (\`no_person\`, \`no_thing\`), and a schedule override's slot values (and what they follow) when its target is a reference field. Under the player character's knowledge a field it sets or adds to is one it may see (\`seesField\`) that its kind has: a hidden one and one there is no such field as are refused alike (\`not_found\`, \`tool.note.no_field\`), so no answer tells of a hidden field or, by how a change to it would land, of its value. An entity the batch brought in earlier passes. A workspace file whose readers the knowledge doesn't reach (§4.4) reads as no file. Under the player character's knowledge no effect is proposed at all: every \`effect\` is refused alike (\`pov_effect\`, \`tool.note.pov_effect\`), whatever it would touch, since an effect works on what the player character may not know of. Under it a spawn takes no id of its own: every id it asks for is refused alike (\`bad_id\`, \`tool.note.spawn_id\`), since a refusal of only a taken one would tell an id someone it can't know holds from a free one. Under it too, only the player character's own mind may be changed: a minds change (\`mind_pin\`, \`mind_refresh\`, \`mind_memory\`, \`mind_intent\`, \`mind_knowledge\`) aimed at anyone else is refused alike (\`not_your_mind\`, \`tool.note.not_your_mind\`), before anything of that mind is read, so no answer tells what another knows or thinks.
+  3. Its change type's mode for this role, connection and type (\`effectiveMode\`, below) says how it may land: Never refuses it (\`mode_never\`); Auto and Confirm say how the proposal may land. The GM's own writes (role \`gm\`, GM → Workspace) take no mode and no cap.
+  4. The caps apply: a GM spawn of a person is refused (\`spawn_cap\`) once the chat has brought in as many people as the world's spawn cap (Build → World, §9.4), counting every person the world document doesn't have, gone or not.
+  5. The engine validates it as it validates GM edits (\`resolveEdit\`): a dry run against the head, an apply against the head plus the batch's operations before it. An operation that fails is left out, and the rest still go.
+  6. Apply writes the operations that pass as one \`fix\` post entry on the head (§4.3): \`gm: true\`, one Undo chip (\`fixChip\`), and \`edit: {ops}\` holding every FixOp: the GM edits, the workspace ops (\`ws_write\`, \`ws_delete\`, \`ws_move\`, \`ws_pin\`, \`ws_readers\`), \`clock\` and \`fix_set\`, each resolved by \`resolveEdit\` and read back by \`parseFixOps\`. The entry names the agent (\`PostEntry.agent\`, §4.4). The learned area's operations in the batch are made in the chat's metadata (\`ChatAgentMeta.setLearned\`) at once, beside it, with no chip.
+- **Held through a turn:** every agent write is flagged \`hold: true\` (P2, §4.3), whatever **Hold writes during the engine run** says, so one made while a turn runs lands when the turn closes, worked out again over what the turn did (\`resolveFix\`), and never discards the turn. A delete of a file already gone counts as already so when it is worked out again. A learned file's change isn't a ledger write: it lands at once, outside the turn.
+- **Bodies:** a file's body is stored as a blob before the write and held for it (§4.4) until the record or the journal points at it.
+- **Keys and retries:** an operation's key is the hash of the operation (\`opKey\`), and a batch's (\`batchKey\`) is the hash of its role and the keys of all the operations it was asked for, as given, checked before anything else. A retry is recognised only when that key is the same role's latest write: its last held write in the journal, else its latest write standing on the head reply (\`appliedEvents\`' \`agents\`), one the turn it was held through had already made so, with no events of its own, included. A batch asked for again after another one (pin, unpin, pin) is a new write. A retry writes nothing: it gives back the applied keys recorded on the entry (\`PostEntry.agent.applied\`), the same chip (null while held, or when its entry holds no events), and \`no_change\` for each operation it didn't apply.
+- **What it answers:** \`apply\` gives \`{applied, refused, chipId, pending}\`: the keys it wrote; the refusals in the operations' order, each \`{code, reason}\` with its key, where a refusal of the whole batch (the engine rejecting it as one edit, a batch that changes nothing, a paused chat, a refused write) stands in place of each operation it kept; the batch's Undo chip, null while it is held or when nothing was written; and whether it is held for a turn under way. \`dryRun\` gives a preview (\`OpPreview {key, changeType, mode, lines}\`, \`mode\` \`auto\` or \`confirm\`) or a refusal.
+- **Worded by knowledge:** a preview's lines are the author's lines (\`authorLines\`), with a clock fix's line, under \`gm\`; the same under \`everyone\`, with a line carrying an unrevealed secret's words marked in the user's wording of a secret's mark (the registry's Secret marks texts, §6.12) as kept from the player character; under \`pov\`, the player's lines (\`playerLines\`), else "About Marcus" or "Behind the scenes" (\`unseenFixLine\`). A workspace change, the learned area's included, reads as the GM's line does ("workspace file notes/marcus.md written"). An engine refusal gives the GM's reason under \`gm\` and the GM's reason with secrets marked under \`everyone\`; under \`pov\` every one, whatever its reason or code, is one note (\`refused\`, \`tool.note.pov_refused\`), never the engine's text, and so is a change that would change nothing (elsewhere \`no_change\`), so no refusal tells what the player character can't know, a value at its bound included. A write the ledger refuses after the check (the chat changed meanwhile: a turn landed) is \`write_refused\` with the ledger's reason under \`gm\`, the same with secrets marked under \`everyone\`, and under \`pov\` the same one note.
+- **Its own answers are editable:** the writer's and the write tools' answers are registry texts (§6.12) on the GM agent page, group "Tool answers" (\`shared/agent-tools-write.ts\` \`WRITE_NOTE\`, \`WRITE_TOOL_NOTES\`): \`tool.note.no_writer\`, \`bad_op\`, \`bad_path\`, \`no_file\`, \`path_taken\`, \`never\`, \`spawn_cap\`, \`spawn_id\` (an id a spawn asks for under the player character's knowledge), \`not_your_mind\` (a change to another's mind under it), \`pov_effect\` (an effect under it), \`pov_refused\` (any engine refusal under it), \`learned_move\` (a move into or out of learned/), \`file_exists\` (a learned file's move onto one there already), \`too_many\`, \`edit_missing\`, \`edit_several\`, \`no_lore\`, \`draft_path\`, \`cancelled\`, \`paused\`, \`no_world\`, \`no_change\` (a change that changes nothing; under the player character's knowledge \`pov_refused\` instead) and \`stale\` (an apply whose chat changed between the check and the write: a turn landed), each with its reset like every text. A value an argument doesn't take is answered with the values it takes (\`tool.note.bad_value\`), or, with none the agent may be given, without a list (\`bad_value_unlisted\`).
+- **Change types and modes** (\`shared/settings.ts\` \`AGENT_CHANGE_TYPES\`, \`backend/settings-store.ts\`): seven agent change types sit beside the reply's. They are not extraction types: no reply proposes them, so the \`extract\` step never lists them.
+  - \`gm_spawn\` "Adding people or things" (\`confirm\`), \`despawn\` "Removing people" (\`confirm\`), \`destroy\` "Destroying things" (\`confirm\`: removing anything but a person), \`money_adjust\` "Money adjustments" (\`confirm\`: an \`adjust\`, a set or add of a money field, or a ✎ fix of one), \`stage\` "Quest and secret stages" (\`confirm\`), \`gm_edit\` "Other GM edits (fields, tiers, minds, routines, sections, the clock)" (\`auto\`) and \`workspace\` "Workspace notes" (\`auto\`).
+  - Their pins share \`UserSettings.extraction\` (\`{extraction: {despawn: {mode}}}\`), with no max delta.
+  - \`effectiveMode(settings, learning, connection, type, role?)\` takes the pinned mode, then the mode learned for the role, the connection and the type, then the type's default, then \`confirm\`. \`recordOutcome(…, role?)\` counts an agent's outcome under its role with D4's thresholds (§11), in \`extraction-learning.json\`'s \`roles\` (\`{role: {connection: {type: stats}}}\`); its \`undone\` turns an outcome counted accepted into rejected (an applied change undone), so a proposal counts once. The GM assistant counts its Apply, No and Undo (§4.5). The reply's types learn per connection as before, and only they reach the chat's mode-change chips (\`ExtractionType\`): an agent's type never reaches the extract step's code.
+  - Settings → Changes from the reply shows them in a section of their own, "The GM assistant's changes" (Auto, Confirm or Never, where the mode comes from, Unpin), each as the assistant's role learned it on the assistant's connection (its own, else your default; \`SettingsStore.result\`'s \`agent\`), as the reply's types show theirs on the extract step's. With the assistant set to apply at once, an Auto change applies with its Undo, a Confirm one waits for Apply and a Never one is refused; the GM's own edits are never held back by them.
+  - Outside agents (§23): \`lre_settings\` lists them in \`extractionModes\`, and \`lre_settings_set\` pins them the same way.
+- **The write tools** (\`backend/agents/tools/write/\`, one file per family, joined in \`write/index.ts\` as \`WRITE_TOOLS\`, 19 tools; registered through the tool layer's registry, §7.1): each tool's description and each argument's are registry texts (\`tool.<name>\`, \`tool.<name>.<arg>\`) on the GM agent page, group "Tools" (\`shared/agent-tools-write.ts\` \`WRITE_TOOL_TEXTS\`). Every write tool only proposes, through \`env.writer.dryRun\` (\`backend/agents/tools/propose.ts\` \`propose\`, which also holds the argument helpers the families share), and answers \`{proposed: {key, changeType, mode, lines}}\` or \`{refused: {code, reason}}\`. Names resolve to ids through the tool layer's resolver, so one the agent's view can't see is not found. The GM tier, by family:
+  - people (\`write/people.ts\`, \`PEOPLE_WRITES\`): \`gm_set_field\`, \`gm_add_to_field\`, \`gm_set_entity\`, \`gm_classify\`, \`gm_set_life\`, \`gm_spawn\`, \`gm_despawn\`, \`gm_restore\`, \`gm_link\`, \`gm_unlink\`;
+  - places \`gm_move\` (\`write/places.ts\`); items \`gm_put\` (\`write/items.ts\`); money \`gm_adjust_money\`, \`gm_effect\` (\`write/money.ts\`); quests \`gm_set_stage\` (\`write/quests.ts\`; under the player character's knowledge a stage only as its quest log names one, the one the track stands at, any other reading as a stage it doesn't have); knowledge \`gm_feed\` (\`write/knowledge.ts\`); each family's list is \`<FAMILY>_WRITES\`;
+  - minds (\`write/minds.ts\`): \`gm_mind_edit\` (\`mind_pin\`, \`mind_refresh\`, \`mind_memory\`, \`mind_intent\`, \`mind_knowledge\`), proposed as a \`mind_edit\` operation;
+  - time (\`write/time.ts\`): \`gm_routine_edit\` (\`routine_follow\`, \`routine_block\`, \`schedule_override\`), proposed as a \`routine_edit\` operation, and \`gm_fix\` (the clock, or a field as the player corrects it), proposed as a \`fix\` operation.
+- **The workspace's tools** (family \`workspace\`, \`backend/agents/tools/workspace.ts\` \`WORKSPACE_TOOLS\`): \`workspace_list\`, \`workspace_read\` and \`workspace_grep\` (read tier) read, as the agent's knowledge may (§4.4); \`workspace_write\`, \`workspace_edit\` (find and replace, exactly once unless \`all\` is set), \`workspace_move\`, \`workspace_delete\` and \`workspace_pin\` (GM tier) propose.
+- **The lore's tools** (family \`lore\`, \`backend/agents/tools/lore.ts\` \`LORE_TOOLS\`), over the view's live lore: the world's lore and the World Info books the chat reads, as the helpers read them live (§5.4); an entry the view gives nothing of reads as one that doesn't exist.
+  - Read tier: \`lore_search\` gives ids, titles and why each matched; \`lore_grep\`, the lines holding a text (each with its entry's id, title and line number). Outside the player character's knowledge both mark a secret entry (\`secret\`); under it, an entry it may read carries no marker.
+  - Read tier: \`lore_read\`, one entry whole by id, its text through \`applyMarks\` for the view: under the player character's knowledge only the marks it holds, marked; under everyone's and the GM's every mark, marked; a secret entry marked with who knows it.
+  - GM tier: \`lore_save\` proposes the entry's text as read to a workspace file (\`lore/<id>.md\` by default), and \`lore_draft\` proposes a draft under \`lore-drafts/\` (\`lore-drafts/<id>.md\` by default; a path elsewhere is refused, \`tool.note.draft_path\`): a front matter naming the entry (\`lore:\` its id, \`title:\` its title, or the id when the view can't read it), then the text. Both are \`ws_write\` operations.
+- **No tool writes lore:** no tool writes a user's book or the world's lore. The user applies a draft in Build, on their own press (Build's own Save).
 
 ## 8. NPC simulation (level of detail)
 - **LOD0 (every NPC):**
@@ -64116,6 +65047,7 @@ Each pack ships a pure \`core\` (kinds, relations, level contract, services, que
 | Skip plan (\`castlife.skip_plan\`) | Spared helper calls as a timelapse span starts, planning how the informative people whose skip life is \`model\` (§8) spend it, as a few fixed blocks of place and activity each, only for what they do other than simply being at home asleep: gaps are fine, since any minute no block covers is their basic needs (§8), so it never plans hour by hour or names a home. The world's \`routineSettings.skipPlanCalls\` says how it asks: \`together\` (the default), one call for everyone; or \`parallel\`, one call per person, all at once, each with the same instructions and only that person's input, so no answer grows with the cast × the span, and their checked answers merged into the one event. It is told only what the POV may know: the span; each person's place when the POV may know it, else "somewhere of their own"; their activity when the POV can see it; their usual routine as the narrator reads it (\`knownUsual\`, never a private block); the story's appointments, trips and plans in the span, leak-screened; the places the POV can see; the world's activities; the latest reply (bounded) and the Journal's recent lines, never a mind's. It shares the \`skip\` step with the beats' call (§24.7), so it reads that step's pins as the beats' call does, read as no one (a secret entry stays out), within the pinned lore limit minds read (§24.5); and, while minds read Recent chat (§24.5), the chat before the skip's turn within that row's limits, less the latest reply it reads already, each line leak-screened as the Journal's are. Routines are context, never rules. A block holds only when its person was asked about, its place was offered, its activity is the world's, it lies inside the span without overlapping another, and its label passes the leak checks (\`findLeaks\`, hidden names); the rest are dropped and logged, and anyone left with nothing keeps to their basic needs. Recorded ahead of the timelapse in the same swipe, so a replay, Re-run or Re-narrate reads it and never asks again, and a Continue inside the span reuses it. Each call runs on the \`skip\` step's own settings (Settings → Steps and connections → Time-skip beats: its connection, model, max tokens and sampling, else the helper model's), with the preset's \`RPEngine · skip\` block (§6.8), and its answer is bounded by that max tokens. On a call's failure, its timeout (Settings → Timeouts, Time skip plan, which each parallel call runs inside) or an answer cut off at that limit, no one that call asked about is planned and they keep to their basic needs; the event carries a note for the GM that counts them (how many of how many, never who), and the calls are spared: the turn's run doesn't halt on them, and the skip still runs. |
 | Prompted \`effects\` | Same validation and bounds as extraction. |
 | \`puzzle.answer\` | Authored opt-in per puzzle; a threshold on a probability. The puzzle is named by words from its label, or left out when exactly one is open. |
+| An agent's GM-tier operation (the write tools, §7.2) | Only proposed, through the writer's dry run; nothing changes until it is applied. Held to the agent's knowledge: an id its view can't see, in an operation or in a value the engine reads as one, is not found exactly as a missing one is, and a workspace file whose readers its knowledge doesn't reach is no file; under the player character's knowledge a field it can't see is no field, no effect is proposed, and every refusal of the engine's, a change that would change nothing included, is one note. Its change type's mode for the agent's role, connection and type: Never refuses it; with the assistant set to apply at once, Auto applies it with its Undo and Confirm waits for the GM's Apply. A GM spawn of a person stops at the world's spawn cap (\`spawn_cap\`, counting everyone the chat brought in). Validated as a GM edit is (\`resolveEdit\`), on apply against the head plus the batch's operations before it; one that fails is left out and the rest still go. A batch is one \`fix\` entry with one Undo, held through a turn under way and worked out again over what the turn did, never discarding it; a learned file's change lands at once in the chat's metadata. No tool writes a user's book or the world's lore. |
 
 Everything else (balances, prices, interest, payroll, fuel, travel, time ticks, timelapse intervals and interrupts, weather, schedules, planner days) is engine-only.
 
@@ -64269,6 +65201,7 @@ I then re-measured with the engine's own \`extract\` step as shipped (strict rul
   - **Promotion:** at ≥ 0.90 acceptance over at least 30 outcomes, both read from a rolling window of the latest 30, a \`confirm\` type flips to \`auto\` on that connection, with a notification chip and undo ("Purchases now apply automatically: undo").
   - **Demotion:** an \`auto\` type flips back to \`confirm\` when the window's undo rate rises past 0.10, with the same chip. Undo on either chip restores the previous mode and holds the type there for another 30 outcomes.
   - **Precedence:** a mode the player set in Settings pins the type (it is still counted, never flipped), then the mode learned for the turn's connection, then the cold-start default, then the field bound. Counters live in \`userStorage/extraction-learning.json\`, under the connection's own key only; nothing is recorded for an unsafe connection id.
+  - **Agent change types** (§7.2) are counted under the agent's role, with these thresholds, and learn per role × connection × type (\`roles\` in the same file); the reply's types keep their per-connection counters.
 - Locked fields are never offered to the model.
 - Spawns are capped and deduplicated.
 - **The turn's own outcome is read once:** an extraction that tells it again is that outcome, never a second change (Confirm chips, below).
@@ -64292,7 +65225,7 @@ I then re-measured with the engine's own \`extract\` step as shipped (strict rul
 | **Map display and the grid** | **Known** and **Fog** at the map's bottom left switch the display for this chat (\`lre.map\`; the world's \`mapSettings.display\` until the player picks), and the map is built for the one in force. By knowledge, a place known of but never visited is a dashed ring and its card says so; in fog, unvisited places are dimmed and the cells the POV hasn't seen (with the grid system), or else the areas of rooms it hasn't been in, go out blank and lie under fog. By knowledge a room the POV can't see is solid nothing; in fog, where the POV hasn't seen it, it is fog like any other unseen cell. Things lying in cells are amber diamonds, shown only where the POV sees them now: within its sight on the grid it stands on with the grid system, else in the place it is in. A thing it saw before isn't shown where it has gone since, nor kept where it was. With the grid system, a tap on a cell of the grid the POV stands on picks it: its card names what lies there and offers **Walk here** with the walk's minutes, or why not ("No way there from here."). The backend judges the walk as the step will run, on the real ground (\`lre.map\` \`walk\`): the page's grid lacks what fog hides, walls included, so it can't. |
 | **HUD pill** | Time (⏸ when paused; the scale when not 1×), place, weather, cash. Docking; collapsed below 760 px; ✎ fixes. Phone and desktop save its position under separate keys, and it stays centred as its content sizes it until the player moves it. The host restores saved geometry only when it creates a widget, so a viewport that crosses the phone breakpoint rebuilds the pill under the other layout's key (\`frontend/hud-float.ts\`). |
 | **✎ fixes** | Each writes where its value lives, as a \`fix\` post entry with one \`set\` (§4.3), so undo, Keep, swipes, Re-narrate and Re-run treat them alike. A fix is checked as that \`set\` against the field's definition: its type, enum values, min and max (a pool's evaluated max included); a value outside them is refused with the reason, never clamped, and a locked field is never offered. Each fix on the latest reply has a **Corrected** chip, worded for the player, with **Undo**. A fix is the player's directive, so it wins over the story as a GM edit does (§7): the entry keeps what it asked for (\`edit\`), and one made during a reply is held (P2) and then lands over whatever the reply changed, resolved again from that request (a time set lands at that time, after any the reply narrated); one the reply already made so is kept with that request and nothing of its own. A later read of a reply written before the fix (a Re-read edit, a Retry read, a Re-run carrying it) folds before it, and the fix is resolved again after it; a Re-read of an earlier reply leaves the later reply holding the fix a rebased view, which works it out again from its request (§4.3). Only a fix that can't be made at all after the reply (a time set once an edit held with it turned Calendar & time off) gets a "… didn't apply after the reply" chip, until dismissed, and the GM view keeps the raw reason. **Time** (Calendar ≥1): a date and a time of day in the world's calendar (a date picker in a Gregorian one, the calendar's own months otherwise), local to the POV's place and starting from now; \`lre.fix\` sends it as \`time\`, and the backend runs it as §9.2's clock fix, a later time as an applied advance and an earlier one set back (L48). Its chip, Journal line and GM edit lead with how it moved the clock ("Clock moved on 5 h 15 min", "Clock set back 3 h"). **Place:** the POV's \`place\`. **Weather** (Weather ≥2): the \`weather\` field of the region over the POV, picked from its climate's states (the \`weather.fix\` query). The climate process still steps the region, so a fix holds until the climate next changes the sky, or, under a scripted hold, until the hold ends. **Scene type:** the POV's \`scene\` field, picked from the engine's four scene types and those of the places the POV can see (§7), or "" to follow the place again; it wins over the place default until an action, rule or fix sets it. |
-| **GM view** | Behind a spoiler gate; loaded with \`lre.gm\` when it opens and again as the chat moves on. **Entities:** search and a kind filter, with removed, spawned, agent, non-public and claimed entities marked; above them, while there are any, **Claimed by the player**: the things a player's claim made real (\`fields.claimed\`, \`GmEntity.claimed\`, §9.4) that are still in the world, by name, each with who holds it or where it lies, so the GM finds one and removes it from its page (one removed or used up leaves the list); each entity opens a form typed by its field definitions (enum and reference pickers, bounds shown, 🔒 on locked fields, derived values shown but not edited, values the kind doesn't declare edited as JSON), its designed sheet, placement and balance, relations with one input per declared relation field, its tier, agent flag and levels, and its classification (Build's picker, one per facet, hidden facets included) and tags; Remove or Restore; Spawn. **Places** with their visibility, **Tracks** with a stage picker and every truth, then a tab per pack that adds one (\`UiRegistry.gm\`): **Money** shows anyone's money as their money hub at their own level (§25), with the GM's controls in place of the player's actions (money in and out, status, autopay, closing an account that holds and owes nothing, card states, holds, flows, jobs, prices, household members and every declared field, the ones no field holds as GM effects); and **Edits**: the corrections in force, each on the latest reply with its Undo, and the held writes that didn't apply. While a fight is under way, **Fight** shows everyone in it, seen or not, in initiative order, with HP exact and the round's acts. Each save is one \`lre.edit\` (§7) with its own GM edit chip, and a notice pinned above the tab bar says what it did, with that Undo. |
+| **GM view** | Behind a spoiler gate; loaded with \`lre.gm\` when it opens and again as the chat moves on. **Entities:** search and a kind filter, with removed, spawned, agent, non-public and claimed entities marked; above them, while there are any, **Claimed by the player**: the things a player's claim made real (\`fields.claimed\`, \`GmEntity.claimed\`, §9.4) that are still in the world, by name, each with who holds it or where it lies, so the GM finds one and removes it from its page (one removed or used up leaves the list); each entity opens a form typed by its field definitions (enum and reference pickers, bounds shown, 🔒 on locked fields, derived values shown but not edited, values the kind doesn't declare edited as JSON), its designed sheet, placement and balance, relations with one input per declared relation field, its tier, agent flag and levels, and its classification (Build's picker, one per facet, hidden facets included) and tags; Remove or Restore; Spawn. **Places** with their visibility, **Tracks** with a stage picker and every truth, then a tab per pack that adds one (\`UiRegistry.gm\`): **Money** shows anyone's money as their money hub at their own level (§25), with the GM's controls in place of the player's actions (money in and out, status, autopay, closing an account that holds and owes nothing, card states, holds, flows, jobs, prices, household members and every declared field, the ones no field holds as GM effects); the core pack's **Assistant** (§4.5), the thread asked for with \`lre.assistant\` and kept live by \`lre.assistant.update\`: your messages with **Send** (or Ctrl+Enter) and **Clear**, the answer under way as a row with its label, the tokens it has spent so far and **Cancel**, each answer with how it ended, what it spent and its tool calls folded, and each proposal as a card of plain-words changes with **Apply all**, **Apply picked** and **No**, then what landed and what was refused, with the edit's **Undo** while its chip stands; **Workspace** (§4.4, \`lre.workspace\`): each file's path, who wrote it at which reply, its size and pin, opening to read, edit and **Save**, **Pin**, **Move** and **Delete**, each change one GM edit said in the notice below with its Undo; and **Edits**: the corrections in force, each on the latest reply with its Undo, and the held writes that didn't apply. While a fight is under way, **Fight** shows everyone in it, seen or not, in initiative order, with HP exact and the round's acts. Each save is one \`lre.edit\` (§7) with its own GM edit chip, and a notice pinned above the tab bar says what it did, with that Undo. |
 | **Chips** | What changed, elapsed time, rolls and odds (or, when the adjudication policy rolled nothing, why, with the judged approach and a close call; §11), prices and transactions, confirm chips (until the next send), declines, not tracked (what the reply told that the engine has no place for, which the story keeps; §11), undo, Corrected (a ✎ fix) and GM edit (a GM edit or a GM's minds run) on the latest reply, with Undo, didn't apply after the reply (a held write that couldn't be made at all, with Dismiss), Retry read, Retry (an empty reply to a turn the engine didn't prepare, D32), the reply failed (Retry the reply, Re-run the engine, Diagnostics; §5.1), Not an action?, what a typed message's turn didn't play (Send, §5.2), Re-narrate/Re-run, overdue use grants, Timelapse offers, Continue timelapse, Keep report (one row per dropped group, convert per row, one-tap Discard, entries "made on another branch"), Re-read edit (an edited reply, or a Continue accepted unread), mode change (a type learned \`auto\` or went back to \`confirm\` on this connection, with undo; §11). Detail opened during a turn's in-flight window shows "pending" (§9.2). |
 | **Palette** | Tabs by the action id's last part: Actions with targets and odds (moving money between one's own accounts among them), Buy (catalog), Pay, Transfer (only an action whose id's last part starts with \`transfer\`; none of the packs' does), Drive and Lend; in a world with combat, **Combat** (the actions that start a fight; during one, the combat actions and End turn under the round, whose turn it is and what the POV has left of each budget; first while it's the POV's turn); **Timelapse** (a bottom sheet at 390 px: duration chips, *until* targets, interrupt-policy overrides), Pause/Resume clock. A check the adjudication policy won't roll shows its verdict instead of the odds bar ("No roll needed", "Too hard to try", "Retry needs a change"); one the story decides keeps the bar as guidance (§11). An action that needs a second target (Drive's destination, Lend's borrower: at most 12, nearest first), a piece (Take from a kit lists each kit, then the pieces still in it with how many are left) or a number (Lend's days, default 1) asks for it as a second step; only final picks are judged. Before a chat's first turn the palette, like Settings → Realism → This chat, judges at the levels that turn will use (the starting markers: the world's defaults with the user's settings filling in, §9.1), so an option it offers is not declined when the turn runs. |
 
@@ -64440,7 +65373,8 @@ The ledger is accepted by this executable suite, not by review on paper.
   - restart, and foreign or frontend clobbering;
   - any of these interleaved inside an in-flight turn, while it streams and during its post pass;
   - after the rest, from a stream of their own (so every sequence before them plays as it did): turns the engine plans with life changes (the \`life\` effect and a rule that tells of a death) and queued actions that stop at a check, a failure or an interruption, GM life edits, and the Re-runs, edits, swipes, Keep choices, Upgrades and in-flight turns that move them onto another view. The suite asserts that life changes, tellings and queues of each kind happen.
-- **Oracle:** after every operation, the optimized fold equals the reference fold (state, Journal notes and Keep report), and the invariants the runner checks hold: L1–L3, L5–L9, L11, L13–L20, L31, L34 and L38–L47 (\`test/support/ops.ts\`). The rest are checked case by case: L4, L10 and L12 in the ledger scenarios and reference cases, L27 and L37 in the fake-host tests, L48 in unit and fake-host tests, and L21–L24, L26, L28, L29, L32, L33 and L36 in unit tests; L30 has no test of its own.
+  - last, from a stream of their own as well: turns (a new reply, a Re-run, a Continue) with writes made while the engine runs them before the reply, flagged as a GM agent's or not, with **Hold writes during the engine run** on or off, at times with an earlier reply edited then too, its event arriving while the engine runs or as the turn waits. The suite asserts that a turn plays while its pre-reply window holds a write, that one goes stale holding one, and that a write the window doesn't hold makes a turn stale.
+- **Oracle:** after every operation, the optimized fold equals the reference fold (state, Journal notes and Keep report), and the invariants the runner checks hold: L1–L3, L5–L9, L11, L13–L20, L31, L34, L38–L47 and L50 (\`test/support/ops.ts\`). The rest are checked case by case: L4, L10 and L12 in the ledger scenarios and reference cases, L27 and L37 in the fake-host tests, L48 in unit and fake-host tests, and L21–L24, L26, L28, L29, L32, L33 and L36 in unit tests; L30 has no test of its own.
 - **Volume:** a default run executes a fixed-seed sample of 200 sequences of up to 60 operations; \`LRE_PROPERTY_RUNS\`, \`LRE_PROPERTY_OPS\`, \`LRE_PROPERTY_SEED\`, \`LRE_PROPERTY_BASE\` and \`LRE_PROPERTY_FROM\` set the count, the longest sequence, one seed to replay, the seed base and the first seed index, so a long run can be split into shards, and \`LRE_PROPERTY_COVERAGE\` names a file for a shard's coverage counts, so the shards together are held to the whole run's coverage (\`test/support/coverage.ts\`). The release gate runs the fixed sample in ten shards of 20, held together to its coverage, and 200 fresh sequences in five shards of 40, each held to the minds' coverage as any 40 sequences are. \`test/ledger/regressions.test.ts\` replays the fixed regression seed set (every seed that has ever failed, shrunk) on every run of the suite. The ledger gate passes only when all of them pass.
 - **Named invariants.**
 
@@ -64493,6 +65427,7 @@ The ledger is accepted by this executable suite, not by review on paper.
 | **L47 A reply only where it can start** | Where the guard stops generations, a reply for an earlier message (Edit and Send in place, a swipe of it) is refused: nothing is generated and no message's swipes change (§5.1). |
 | **L48 Set back, never rerun** | After a ✎ fix sets the clock back, nothing that ran up to where it stood is undone or runs again: passing that window again, by any way time moves, adds only the clock's move, and past it the world steps as it would have. Undoing the fix restores the clock and the mark. |
 | **L49 A request holds on its own path** | A GM edit or ✎ fix that keeps its request holds on its own path what that request works out to there, after any Undo, read or swipe of what it leaned on: folding every record as a view, each request worked out again, ends where the chat does. |
+| **L50 The pre-reply window** | A write made while the engine runs a turn before its reply that the turn's pre-reply window holds (flagged \`hold\`, or any with Hold writes during the engine run on) never makes the turn stale and is journaled only once that turn closes, after its events, or once its run ends without a reply; a write the window doesn't hold, and an edit of the chain the turn was planned on, make the turn stale, as before. Between operations no pre-reply window is open and nothing is held. |
 
 **Loop-sim** (including mixed-level and Story-default scenarios)
 - the clock advances every turn unless paused; timelapses stop only on \`stop\`-class interrupts;
@@ -65470,7 +66405,7 @@ Leave Gear and Money in the background unless the reply turns on them.
 var RECIPES_default = "# LumiRPEngine recipes\n\nSmall worlds that each show one thing working end to end. Every recipe here is a fragment of a world document: the parts it adds to a new world (Build's **Blank** template, or `lre_world_create` with no template). Merge it object by object: a collection gains the items shown, an item gains the fields shown, and a list replaces the one already there. In Build, enter each item in its editor; an agent merges the JSON with `lre_edit`. A new world carries every default data table, pinned as a template's are, so a recipe that needs a table of its own carries the whole table, rows and all, and it replaces the world's copy rather than merging into it; in Build, edit that copy in the **Data tables** editor. `test/docs/recipes.test.ts` builds every fragment on this page and plays it through the engine, so what each recipe says happens does happen.\n\nThe formulas are explained in [EXPRESSIONS.md](EXPRESSIONS.md), and every effect, function and pack kind used here is listed in the [reference](REFERENCE.md). Fights are set up in the user guide's [Combat and encounters](USER-GUIDE.md#combat-and-encounters).\n\n## XP and levels\n\nA progression keeps experience in one field and the level in another, and the level follows the XP both ways. After any effect changes an entity's XP (an award, a quest reward, a ✎ fix, a GM edit), the engine raises its level to the last threshold reached, one level at a time, and runs `onLevel` for each level gained; XP that falls below the level's threshold drops the level straight back, running nothing, and a pool left above its lower max comes down to it. Nothing else writes the level: to change one, change XP. Here sparring earns 150 XP, Level 2 starts at 300, and every level adds a point of Grit. The maximum hit points are derived from the level, so the pool grows with it, and the sheet shows the level, the XP to the next one, and the pool as a bar.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"xp\": { \"type\": \"number\", \"label\": \"XP\", \"min\": 0, \"default\": 0 },\n        \"level\": { \"type\": \"number\", \"label\": \"Level\", \"min\": 1, \"default\": 1 },\n        \"grit\": { \"type\": \"number\", \"label\": \"Grit\", \"default\": 10 },\n        \"hp_max\": { \"type\": \"number\", \"label\": \"Max HP\", \"derived\": \"8 + self.level * 4\" },\n        \"hp\": { \"type\": \"number\", \"label\": \"Hit points\", \"pool\": { \"max\": \"hp_max\" } }\n      }\n    }\n  },\n  \"actions\": {\n    \"spar\": {\n      \"id\": \"spar\",\n      \"label\": \"Spar at the yard\",\n      \"params\": {},\n      \"requires\": [],\n      \"outcomes\": { \"default\": [{ \"type\": \"award\", \"args\": { \"entity\": \"self\", \"progression\": \"adventurer\", \"amount\": 150 } }] },\n      \"duration\": \"60\",\n      \"lexicon\": [\"spar\"]\n    }\n  },\n  \"ruleset\": {\n    \"progression\": {\n      \"adventurer\": {\n        \"label\": \"Level\",\n        \"xpField\": \"xp\",\n        \"levelField\": \"level\",\n        \"thresholds\": [0, 300, 900, 2700],\n        \"maxLevel\": 4,\n        \"kind\": \"person\",\n        \"onLevel\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"grit\", \"delta\": 1 } }]\n      }\n    },\n    \"sheet\": {\n      \"sections\": [{ \"id\": \"growth\", \"label\": \"Growth\", \"rows\": [{ \"progression\": \"adventurer\" }, { \"pool\": \"hp\" }, { \"field\": \"grit\" }] }]\n    }\n  }\n}\n```\n\n**Try it.** In Playtest, type *I spar* three times. The second spar reaches 300 XP: you reach Level 2, Grit goes from 10 to 11, the Journal says \"You reached Level 2.\", and your hit points can now reach 16. The third leaves you at 450 XP, still Level 2.\n\nThe thresholds can come from a data table instead (`\"thresholds\": { \"table\": \"xp_levels\", \"column\": \"xp\" }`, read in row order). `onLevel` sees `level` and `from` in its formulas, so `\"delta\": \"=level % 2 == 0 ? 1 : 0\"` adds a point only on even levels.\n\n## A skill challenge\n\nA puzzle track that opens after three successful checks, under the **Balanced** adjudication policy. Each lock is a little harder than the last (the DC is 12, then 14, then 16). Balanced rolls every check between two limits: a check with a 95 % chance or better passes without a roll (\"No roll needed\"), one with 5 % or worse fails without one (\"Too hard to try\"), and a close roll is told to the narrator as a close call. A failed attempt stands until something changes: an hour passes, the odds change, or you leave and come back.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"finesse\": { \"type\": \"number\", \"label\": \"Finesse\", \"default\": 0 },\n        \"locks_open\": { \"type\": \"number\", \"label\": \"Locks open\", \"min\": 0, \"default\": 0 }\n      }\n    }\n  },\n  \"entities\": { \"you\": { \"fields\": { \"finesse\": 4 } } },\n  \"checks\": {\n    \"tumbler\": { \"id\": \"tumbler\", \"dice\": \"1d20\", \"modifier\": \"self.finesse\", \"dc\": \"12 + self.locks_open * 2\" }\n  },\n  \"actions\": {\n    \"work_lock\": {\n      \"id\": \"work_lock\",\n      \"label\": \"Work a lock\",\n      \"params\": {},\n      \"requires\": [\"stage.vault_door == 'locked'\"],\n      \"check\": \"tumbler\",\n      \"outcomes\": {\n        \"success\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"locks_open\", \"delta\": 1 } }],\n        \"failure\": [{ \"type\": \"note\", \"args\": { \"text\": \"A tumbler slips back into place.\" } }]\n      },\n      \"duration\": \"10\",\n      \"lexicon\": [\"work the lock\", \"pick the lock\"]\n    }\n  },\n  \"tracks\": {\n    \"vault_door\": {\n      \"id\": \"vault_door\",\n      \"kind\": \"puzzle\",\n      \"label\": \"The vault door\",\n      \"start\": \"locked\",\n      \"visibility\": \"public\",\n      \"stages\": {\n        \"locked\": {\n          \"label\": \"Three locks hold the door\",\n          \"objectives\": [{ \"label\": \"Open all three locks\", \"when\": \"pov.locks_open >= 3\" }],\n          \"next\": [{ \"to\": \"open\", \"when\": \"pov.locks_open >= 3\" }],\n          \"hints\": [\"Each lock gives a little under steady hands.\"]\n        },\n        \"open\": { \"label\": \"The door swings open\", \"next\": [] }\n      }\n    }\n  },\n  \"ruleset\": {\n    \"adjudication\": {\n      \"preset\": \"balanced\",\n      \"checks\": \"every\",\n      \"riskyAt\": 0.75,\n      \"trivialAt\": 0.95,\n      \"impossibleAt\": 0.05,\n      \"description\": { \"weight\": \"bonus\", \"max\": 2, \"advantageAt\": 2 },\n      \"authority\": \"hybrid\",\n      \"closeBy\": 2,\n      \"retry\": \"changed\",\n      \"retryAfter\": 60\n    }\n  }\n}\n```\n\n**Try it.** Type *I work the lock* until the door opens. With Finesse 4 each lock rolls (a 65 %, then 55 %, then 45 % chance), and the palette shows the odds before you choose. Raise Finesse to 15 and every lock is a sure thing: three tries, no rolls, and the door is open. Lower it to −30 and no lock can be picked: each try fails without a roll.\n\nThese values are Balanced's own, so the policy reads as Balanced. A policy's values are its own: change any of them and it plays as Custom with them (lint says so, and suggests naming it `\"custom\"`). The policy here is the world's default; a player can pick another for a chat in **Settings → Checks**. The check names no `pass`, so `success` counts as passing, the outcome a DC check reads when it isn't failed. To have the player's described approach count, keep `description.weight` at `bonus`: the judge step rates it, and the rating adds to the roll.\n\n## A shop with a priced catalog\n\nThe Buy action prices what you ask for from the world's `economy.catalog` table, finding the row by its id or by its name (with an `economy.categories` table, naming a whole category prices from its band instead). A row's `price_cents` is a band in minor units of the world's currency; a price drawn from it varies a little around `typical`, so a fixed price sets `min`, `typical` and `max` alike. At Money 2 the shop takes cash from the buyer's cash account and declines what they can't cover, and at Gear 1 or more a physical thing you buy (the categories `tools_hardware`, `groceries_staples`, `clothing` and the like) comes into being in your hands.\n\n```json\n{\n  \"realism\": { \"levels\": { \"money\": 2 } },\n  \"places\": { \"store\": { \"id\": \"store\", \"name\": \"Hollow Creek General Store\", \"fields\": {} } },\n  \"start\": { \"place\": \"store\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"store\" } },\n    \"purse\": { \"id\": \"purse\", \"kind\": \"account\", \"name\": \"Your purse\", \"tier\": \"background\", \"fields\": { \"owner\": \"you\", \"type\": \"cash\", \"opening\": 2000 }, \"relations\": [] }\n  },\n  \"tables\": {\n    \"economy.catalog\": {\n      \"id\": \"economy.catalog\",\n      \"pack\": \"economy\",\n      \"schema\": \"lre-table/economy.catalog/v1\",\n      \"revision\": \"05c9407d21cade2a99c5351d90b8e57d\",\n      \"label\": \"Hollow Creek General Store\",\n      \"columns\": {\n        \"name\": { \"type\": \"text\" },\n        \"category\": { \"type\": \"text\" },\n        \"unit\": { \"type\": \"text\" },\n        \"price_cents\": { \"type\": \"band\", \"unit\": \"cents\" }\n      },\n      \"rows\": {\n        \"lantern\": { \"name\": \"Brass lantern\", \"category\": \"tools_hardware\", \"unit\": \"each\", \"price_cents\": { \"min\": 1250, \"typical\": 1250, \"max\": 1250 } },\n        \"rope\": { \"name\": \"Hemp rope\", \"category\": \"tools_hardware\", \"unit\": \"50 ft\", \"price_cents\": { \"min\": 600, \"typical\": 800, \"max\": 1000 } },\n        \"jerky\": { \"name\": \"Beef jerky\", \"category\": \"groceries_staples\", \"unit\": \"bag\", \"price_cents\": { \"min\": 350, \"typical\": 350, \"max\": 350 } }\n      }\n    }\n  }\n}\n```\n\n**Try it.** With $20.00 in your purse, *I buy a brass lantern* costs $12.50 and puts the lantern in your hands; *I buy beef jerky* costs $3.50. A second lantern is declined: $4.00 doesn't cover it. Rope costs between $6.00 and $10.00, close to $8.00.\n\nThe `revision` is computed from the table's schema, columns and rows, never written by hand: whenever a table is saved to a draft (by Build's table editor, or by an agent's patch), the engine computes it and pins it in `pins.tables`. For a store that charges more than the world's usual prices, the `economy.price_modifier` effect raises a category, or everything, at one place (`\"percent\": 25` is a quarter dearer).\n\n## Secret lore behind a track\n\nA secret track reveals the mayor's debt once you reach the mill office, and a lore entry holds the secret itself. The entry is `secret`, so its `gate` keeps it shut until the track reaches `revealed`, and its `audience` names the one helper that may read it before then: `npc.choose`, the step that decides what NPCs do. No helper that writes prose for the narrator is in the audience, so nothing it reads can reach the story early.\n\n```json\n{\n  \"places\": {\n    \"mill\": { \"id\": \"mill\", \"name\": \"The mill\", \"fields\": {} },\n    \"mill_office\": { \"id\": \"mill_office\", \"name\": \"The mill office\", \"parent\": \"mill\", \"fields\": {} }\n  },\n  \"start\": { \"place\": \"mill\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"mill\" } },\n    \"hale\": { \"id\": \"hale\", \"kind\": \"person\", \"name\": \"Mayor Hale\", \"tier\": \"supporting\", \"fields\": { \"place\": \"mill\" }, \"relations\": [] }\n  },\n  \"tracks\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"kind\": \"secret\",\n      \"label\": \"The mayor's debt\",\n      \"owner\": \"hale\",\n      \"start\": \"hidden\",\n      \"visibility\": \"secret\",\n      \"stages\": {\n        \"hidden\": {\n          \"label\": \"The mill's books don't add up\",\n          \"cue\": \"The miller won't meet your eye when the mayor's name comes up.\",\n          \"next\": [{ \"to\": \"revealed\", \"when\": \"at(pov, 'mill_office')\" }]\n        },\n        \"revealed\": {\n          \"label\": \"The mayor owes the mill\",\n          \"truth\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts.\",\n          \"next\": []\n        }\n      }\n    }\n  },\n  \"lore\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"title\": \"Hale's debt\",\n      \"content\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts. He means to repay it before the harvest audit.\",\n      \"keys\": [\"mayor\", \"debt\", \"grain money\"],\n      \"links\": [\"hale\", \"mill\"],\n      \"secret\": true,\n      \"gate\": \"stage.hale_debt == 'revealed'\",\n      \"audience\": [\"npc.choose\"]\n    }\n  }\n}\n```\n\n**Try it.** Check world runs a day without a leak: the truth never shows in a section. In Playtest, *I go to the mill office* reveals the track, and from then on the gate holds.\n\nLint guards the secret. The entry repeats the track's truth, so without `\"secret\": true` it is an error (`secret_truth`); a secret entry needs a gate (`no_gate`); and putting a prose step such as `brief` in the audience is a warning (`prose_audience`). The GM view shows every track with its truth whatever the player knows.\n\n## A room on the grid\n\nA walled garden drawn as a grid map, with the optional grid system on: walls and doors steer you, things lie in cells, and stepping into a zone fires a rule. The potting shed is a room behind a door, an iron key lies on the path, and the fountain is a zone. Cells outside every room (the paths here) count as the map's own place, the garden.\n\n```json\n{\n  \"mapSettings\": { \"display\": \"knowledge\", \"grid\": { \"movement\": true, \"sightRadius\": 3 } },\n  \"places\": { \"garden\": { \"id\": \"garden\", \"name\": \"The walled garden\", \"fields\": {} } },\n  \"start\": { \"place\": \"garden\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"garden\" } },\n    \"key\": { \"id\": \"key\", \"kind\": \"item\", \"name\": \"Iron key\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] }\n  },\n  \"maps\": {\n    \"garden\": {\n      \"id\": \"garden\",\n      \"scope\": \"garden\",\n      \"title\": \"The walled garden\",\n      \"cellMeters\": 2,\n      \"layout\": [\"#########\", \"#sss#...#\", \"#sss+.F.#\", \"#sss#.K.#\", \"######+##\"],\n      \"legend\": { \"s\": { \"place\": \"shed\" }, \"F\": { \"zone\": \"fountain\" }, \"K\": { \"item\": \"key\" } },\n      \"places\": [{ \"id\": \"shed\", \"name\": \"Potting shed\" }]\n    }\n  },\n  \"rules\": {\n    \"fountain_coins\": {\n      \"id\": \"fountain_coins\",\n      \"on\": { \"zone\": \"fountain\", \"in\": \"garden\" },\n      \"do\": [{ \"type\": \"note\", \"args\": { \"text\": \"Coins glint under the water.\" } }]\n    }\n  }\n}\n```\n\n**Try it.** You start at the gate in the bottom wall, x 6 and y 4 (x counts from the left, y from the top, both from 0). On the map, tap the fountain two squares up and **Walk here**: the rule fires and the Journal notes the coins. Standing there doesn't fire it again; stepping off and back on does. The key lies on the square below the fountain, close enough to **Take** from where you stand. Walk to the shed and you're in the potting shed: its door is the only way in.\n\nA zone trigger without `who` counts only the POV; `\"who\": { \"kind\": [\"person\"] }` counts anyone. Each room's area is also a zone named by the room, so `{ \"zone\": \"shed\", \"in\": \"garden\" }` fires on stepping into the shed. Lint checks the zone and cell triggers against the map.\n\n## A family\n\nA family is a group (the Relationships pack's `family` kind) whose members hold `member_of`, with kinship between them. `parent_of` and `child_of` are each other's inverse and `spouse_of` is symmetric, so the engine keeps both sides: the `link` and `unlink` effects write and remove the other side with them, and a chat starts with any side the world left out. Write both sides, as here, and lint has nothing to say. A schedule owned by the group applies to every member who isn't a group, so one schedule brings the whole family home for supper.\n\n```json\n{\n  \"places\": {\n    \"okafor_house\": { \"id\": \"okafor_house\", \"name\": \"The Okafor house\", \"fields\": {} },\n    \"bakery\": { \"id\": \"bakery\", \"name\": \"Okafor's Bakery\", \"fields\": {} }\n  },\n  \"start\": { \"at\": \"2026-01-01T17:00\" },\n  \"entities\": {\n    \"okafors\": { \"id\": \"okafors\", \"kind\": \"family\", \"name\": \"The Okafors\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] },\n    \"ada\": {\n      \"id\": \"ada\",\n      \"kind\": \"person\",\n      \"name\": \"Ada Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Mother\" } },\n        { \"type\": \"spouse_of\", \"to\": \"emeka\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"emeka\": {\n      \"id\": \"emeka\",\n      \"kind\": \"person\",\n      \"name\": \"Emeka Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Father\" } },\n        { \"type\": \"spouse_of\", \"to\": \"ada\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"tobi\": {\n      \"id\": \"tobi\",\n      \"kind\": \"person\",\n      \"name\": \"Tobi Okafor\",\n      \"tier\": \"background\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Son\" } },\n        { \"type\": \"child_of\", \"to\": \"ada\" },\n        { \"type\": \"child_of\", \"to\": \"emeka\" }\n      ]\n    }\n  },\n  \"schedules\": {\n    \"okafor_supper\": {\n      \"id\": \"okafor_supper\",\n      \"owner\": \"okafors\",\n      \"target\": \"place\",\n      \"recurrence\": { \"every\": \"day\" },\n      \"slots\": [{ \"start\": \"18:00\", \"end\": \"20:00\", \"value\": \"okafor_house\" }]\n    }\n  }\n}\n```\n\n**Try it.** The day starts at five in the afternoon with the family at the bakery. Timelapse an hour and a half: at six they all go home for supper. Formulas can ask about them: `member_of(tobi, 'okafors')` is true, and so is `has_rel(ada, 'parent_of', 'tobi')`.\n\nA selector picks the family wherever one is asked for: `{ \"memberOf\": [\"okafors\"] }` matches the three of them, for a schedule's owner, a rule's `who`, an action parameter's candidates or who knows a secret (`knownBy`). The person's own schedule wins over the group's for the same field, so Tobi can keep his own Saturday plans.\n";
 
 // docs/REFERENCE.md
-var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to`, `activity?`, `told?`, `with?` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `member_of(entity, group)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `knowledge` | `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `gear`, `knowledge`, `money`, `outcome`, `place`, `positions`, `pov`, `present`, `property`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget. A world words any built-in slot it has without listing it in its `sectionTemplates` part, by slot id: a template holding `{{lines}}`, stored only where it differs from the built-in text.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n| `place` | Place | 11 |\n| `property` | Property | 12 |\n| `knowledge` | Who knows what | 13 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Lore pins\n\nThe world's `lorePins` part: `characters`, `places` and `steps`, each a map from an id (a step's purpose, for `steps`) to a list of pins, where a pin is `{\"lore\": id}` (one of the world's lore entries), `{\"book\": id, \"entry\": id}` (an entry of one of the user's World Info books) or `{\"book\": id}` (a whole book: its switched-on entries in the book's order, read whenever a call reads it, so entries added later are read too). A character's pins reach only their own mind's calls; a step's reach every call of that step whatever its lore policy (the mind step's, every mind, after the character's own); a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.\n\n| Lint | Means |\n|---|---|\n| `pin_duplicate` | the same entry or book pinned twice to one character, place or step |\n| `pin_missing` | a pin naming a lore entry the world doesn't have |\n| `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |\n| `pin_shape` | a pin that is none of {\"lore\": id}, {\"book\": id, \"entry\": id} and {\"book\": id}: it is ignored |\n| `pin_target` | pins under a character, place or step the world doesn't have: no call reads them |\n| `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.book_invitation` | `host` |\n| `castlife.company` | `with`, `to` |\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |\n| `castlife.satisfy` | `need`, `entity?`, `minutes?`, `activity?`, `after?` |\n| `castlife.to_bed` | `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |\n| `get_up` | Get up | Get up from bed or from a rest and get on with the day. |  |  | `default` | `2` | get up, wake up, get out of bed |\n| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |\n| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |\n\n### Rules\n\n- `castlife.conversation`: on `{\"event\":\"relationships.regard\"}`\n\n### Events\n\nIts own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`, `castlife.skip_plan`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `routine` | `routine` |\n\n### Panels and slots\n\nPanels: `castlife.cast`, `castlife.needs`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.needs`, `castlife.routines`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `end_turn` | End turn | End your turn in a fight. |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (a business, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid | enum: weekly, biweekly, semimonthly, monthly, per_job, custom |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?` |\n| `economy.card_replace` | `card`, `who?` |\n| `economy.card_state` | `card`, `state`, `who?` |\n| `economy.close_account` | `account` |\n| `economy.deposit` | `account`, `cents`, `who?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.stake_sell` | `business`, `share`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?` |\n| `economy.withdraw` | `account`, `cents`, `who?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(business, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card` |  | `default` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | Order a replacement card. | `card: ref → card` |  | `default` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |\n| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners. | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |\n| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow` |  | `default` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow` |  | `default` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text` |  | `default` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | End a job: quit your own, or let someone go from a business you run. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | Hire someone into a business you run, with a title and pay. | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |\n| `job_raise` | Give a raise | Change the pay of someone who works for a business you run. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |\n| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text` |  | `default` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |\n| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |\n| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |\n| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |\n| `stake_sell` | Sell a share of a business | Sell part of your share of a business. | `business: ref → business`, `share: number`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell my share of the business, sell the shop |\n| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `purchase` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`, `property`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), category (ref), unit (text), price_cents (band), notes (text, optional) | 340 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 19 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.holdings`, `economy.property`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `fixed` | Fixed in place (can't be picked up) | bool |  |  |  |  | locked |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2 |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | none |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.give` | `item`, `from`, `to`, `told?` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.search` | `who`, `target?` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n- `movable(thing)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default` | `1` | drop, put down, leave |\n| `give` | Give | Hand something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, hand, pass |\n| `lend` | Lend | Lend something of yours to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |\n| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `drop` | `ref` |\n| `give` | `ref` |\n| `item_condition` | `number` |\n| `lose` | `ref` |\n| `quantity` | `number` |\n| `take` | `ref` |\n| `use_up` | `number` |\n| `wear` | `ref` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`, `people`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), price_cents (band), notes (text, optional) | 90 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |\n\n### Lint codes\n\n`gear.contents`, `gear.holders`, `gear.kits`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `minds.know` | `facts`, `learn` |\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `learn` | `knowledge` |\n| `reveal` | `knowledge` |\n\n### Panels and slots\n\nPanels: `minds.known`. Slots it writes: `knowledge`, `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.holdings`, `minds.steps`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `group`: Group\n\nExtends `thing`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person`, `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `bed` | Bed (a place or an item) | ref |  |  |  |  | live from castlife 1 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n| `travels_with` | Travels with | `person` | `person` | many_one |  |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `can_go(from, to)`\n- `distance_km(from, to, mode)`\n- `go_minutes(from, to)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `place`, `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.answer_track`, `story.leaky_id`, `story.leaky_label`, `story.unset_flag`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `colour` | Colour | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `make` | Make | text |  |  |  |  |  |\n| `model` | Model | text |  |  |  |  |  |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `plate` | Plate | text |  |  |  |  |  |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `year` | Year | number |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to, from)`\n- `fuel_ok(vehicle, to, from)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drive` | Drive | Drive, ride or sail a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to |\n| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 19 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 3 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
+var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to`, `activity?`, `told?`, `with?` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `member_of(entity, group)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `knowledge` | `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `gear`, `knowledge`, `money`, `outcome`, `place`, `positions`, `pov`, `present`, `property`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget. A world words any built-in slot it has without listing it in its `sectionTemplates` part, by slot id: a template holding `{{lines}}`, stored only where it differs from the built-in text.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n| `place` | Place | 11 |\n| `property` | Property | 12 |\n| `knowledge` | Who knows what | 13 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Lore pins\n\nThe world's `lorePins` part: `characters`, `places` and `steps`, each a map from an id (a step's purpose, for `steps`) to a list of pins, where a pin is `{\"lore\": id}` (one of the world's lore entries), `{\"book\": id, \"entry\": id}` (an entry of one of the user's World Info books) or `{\"book\": id}` (a whole book: its switched-on entries in the book's order, read whenever a call reads it, so entries added later are read too). A character's pins reach only their own mind's calls; a step's reach every call of that step whatever its lore policy (the mind step's, every mind, after the character's own); a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.\n\n| Lint | Means |\n|---|---|\n| `pin_duplicate` | the same entry or book pinned twice to one character, place or step |\n| `pin_missing` | a pin naming a lore entry the world doesn't have |\n| `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |\n| `pin_shape` | a pin that is none of {\"lore\": id}, {\"book\": id, \"entry\": id} and {\"book\": id}: it is ignored |\n| `pin_target` | pins under a character, place or step the world doesn't have: no call reads them |\n| `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.book_invitation` | `host` |\n| `castlife.company` | `with`, `to` |\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |\n| `castlife.satisfy` | `need`, `entity?`, `minutes?`, `activity?`, `after?` |\n| `castlife.to_bed` | `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |\n| `get_up` | Get up | Get up from bed or from a rest and get on with the day. |  |  | `default` | `2` | get up, wake up, get out of bed |\n| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |\n| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |\n\n### Rules\n\n- `castlife.conversation`: on `{\"event\":\"relationships.regard\"}`\n\n### Events\n\nIts own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`, `castlife.skip_plan`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `routine` | `routine` |\n\n### Panels and slots\n\nPanels: `castlife.cast`, `castlife.needs`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.needs`, `castlife.routines`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `end_turn` | End turn | End your turn in a fight. |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (a business, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid | enum: weekly, biweekly, semimonthly, monthly, per_job, custom |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?` |\n| `economy.card_replace` | `card`, `who?` |\n| `economy.card_state` | `card`, `state`, `who?` |\n| `economy.close_account` | `account` |\n| `economy.deposit` | `account`, `cents`, `who?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.stake_sell` | `business`, `share`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?` |\n| `economy.withdraw` | `account`, `cents`, `who?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(business, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card` |  | `default` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | Order a replacement card. | `card: ref → card` |  | `default` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |\n| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners. | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |\n| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow` |  | `default` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow` |  | `default` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text` |  | `default` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | End a job: quit your own, or let someone go from a business you run. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | Hire someone into a business you run, with a title and pay. | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |\n| `job_raise` | Give a raise | Change the pay of someone who works for a business you run. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |\n| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text` |  | `default` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |\n| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |\n| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |\n| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |\n| `stake_sell` | Sell a share of a business | Sell part of your share of a business. | `business: ref → business`, `share: number`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell my share of the business, sell the shop |\n| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `purchase` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`, `property`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), category (ref), unit (text), price_cents (band), notes (text, optional) | 340 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 19 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.holdings`, `economy.property`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `fixed` | Fixed in place (can't be picked up) | bool |  |  |  |  | locked |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2 |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | none |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.give` | `item`, `from`, `to`, `told?` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.search` | `who`, `target?` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n- `movable(thing)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default` | `1` | drop, put down, leave |\n| `give` | Give | Hand something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, hand, pass |\n| `lend` | Lend | Lend something of yours to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |\n| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `drop` | `ref` |\n| `give` | `ref` |\n| `item_condition` | `number` |\n| `lose` | `ref` |\n| `quantity` | `number` |\n| `take` | `ref` |\n| `use_up` | `number` |\n| `wear` | `ref` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`, `people`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), price_cents (band), notes (text, optional) | 90 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |\n\n### Lint codes\n\n`gear.contents`, `gear.holders`, `gear.kits`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `minds.know` | `facts`, `learn` |\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `learn` | `knowledge` |\n| `reveal` | `knowledge` |\n\n### Panels and slots\n\nPanels: `minds.known`. Slots it writes: `knowledge`, `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.holdings`, `minds.steps`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `group`: Group\n\nExtends `thing`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person`, `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `bed` | Bed (a place or an item) | ref |  |  |  |  | live from castlife 1 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n| `travels_with` | Travels with | `person` | `person` | many_one |  |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `can_go(from, to)`\n- `distance_km(from, to, mode)`\n- `go_minutes(from, to)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `place`, `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.answer_track`, `story.leaky_id`, `story.leaky_label`, `story.unset_flag`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `colour` | Colour | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `make` | Make | text |  |  |  |  |  |\n| `model` | Model | text |  |  |  |  |  |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `plate` | Plate | text |  |  |  |  |  |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `year` | Year | number |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to, from)`\n- `fuel_ok(vehicle, to, from)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drive` | Drive | Drive, ride or sail a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to |\n| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 19 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 3 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
 
 // docs/USER-GUIDE.md
 var USER_GUIDE_default = `# LumiRPEngine user guide
@@ -65527,7 +66462,7 @@ Details open as sheets inside the drawer: a person, a place, an item, an account
 
 If the chat isn't a world chat, Play says **Not a world chat** and lists **Your worlds**, each with an **Attach** button. Tap **Attach** and confirm in the **Attach world** box. **Open Build** takes you to the editors. A chat keeps the world it started with: attaching the same world again only re-attaches its lore book, and attaching a different one is refused with "This chat already plays another world. Start a new chat for this one."
 
-The other modes: **GM** shows and edits everything, secrets included (see [GM mode](#gm-mode)), **Build** is where you make worlds (see [Authoring](#authoring)), and **Settings** holds your own defaults. Settings opens on a list of pages in groups: **Getting started** (**Helper model**, **Model use**, **Steps and connections**, **Minds**), **Defaults for new chats** (**Realism**, **Checks**, **Time**), **Replies** (**Changes from the reply**, **Swipes**), **Your preset** (**Preset**), **Display** and **About** (**Caveats**, **[Diagnostics](#diagnostics)**). Tap a page to open it; its back button, or Escape, returns to the list. **Realism**, **Checks** and **Time** there set up chats you start from now on; the chat you have open has its own in GM mode, and each of those pages says so, with **Open GM → This chat** to go there. **Settings → Display → Show ids** is off by default. Turn it on to see the id the engine and the world's files use beside each name, in Build's lists, in Problems and in GM mode. Play never shows them: it names things only as your character knows them.
+The other modes: **GM** shows and edits everything, secrets included (see [GM mode](#gm-mode)), **Build** is where you make worlds (see [Authoring](#authoring)), and **Settings** holds your own defaults. Settings opens on a list of pages in groups: **Getting started** (**Helper model**, **Model use**, **Steps and connections**, **Minds**, **[Narrator](#what-the-narrator-is-fed)**, **Timeouts**), **Agents** (**[Agents](#settings--agents)**, **[Assistant](#settings--agents)**, **[Prompts](#your-own-prompts)**, **[Writes](#changes-while-a-turn-runs)**, **[Retention](#retention)**), **Defaults for new chats** (**Realism**, **Checks**, **Time**), **Replies** (**Changes from the reply**, **Swipes**), **Your preset** (**Preset**), **Display**, **Your agent** (**MCP server**) and **About** (**Caveats**, **[Diagnostics](#diagnostics)**). Tap a page to open it; its back button, or Escape, returns to the list. **Realism**, **Checks** and **Time** there set up chats you start from now on; the chat you have open has its own in GM mode, and each of those pages says so, with **Open GM → This chat** to go there. **Settings → Display → Show ids** is off by default. Turn it on to see the id the engine and the world's files use beside each name, in Build's lists, in Problems and in GM mode. Play never shows them: it names things only as your character knows them.
 
 What you can see is always filtered to what your point-of-view character knows. Facts are public, known by particular characters, or secret, and a secret stays out of every place, sheet, chip, choice and Journal line until the story reveals it.
 
@@ -65621,7 +66556,7 @@ Tap the edit button (✎) next to a value to correct it: the time, your place, t
 - **Scene type** lists the four built-in scene types (conversation, action, exploration and downtime) and those of the places you know. Any other, such as one only a place you don't know about has, is never listed, nor named as the place default's, even when the world gives it a tick of its own. When the scene you're in has such a type, the details and the scene card call it **Conversation**, the engine's default scene, though the clock keeps that type's own tick. Your pick holds until an action, a rule or another fix sets the scene type, even when you move. **Place default** goes back to the scene type of wherever you are.
 - **Cash** has a fix from Money level 2. Amounts are typed in the world's own money: "5" is 5 bits in Brindlemere, 5d in Harrowmere and $5.00 in Port Alder, with as many decimals as the currency has. When your cash is held in cash accounts (your wallet), a cash fix doesn't overwrite a number: it moves the difference between your wallet and an outside **Correction** account, so **Play → Me → Money** shows it as a correction and the books still balance. In a new chat whose accounts aren't on your books yet, the fix puts them on first, so the difference is measured from the cash you start with. Undo and swipes treat it like any other fix.
 
-Every ✎ fix is checked before it is saved: a value outside the field's range (energy above 100, cash below zero) or not among its choices is refused with the reason, and nothing changes. A saved fix shows a **Corrected** chip on the latest reply, with **Undo**. What you fix wins over the story. A fix you make while a reply is streaming waits for the reply to finish, then lands over whatever the reply changed: a time you set is the time once the reply is in, however much time it narrates, and a place you set is where your character is. A reply written before your fix never undoes it, even read again later (a **Re-read edit**, a **Retry read**, a swipe), and that holds when the reply already did what you asked: the fix stays, and is made again if a later read or swipe takes that back. Only a fix that can't be made at all once the reply is in (a time you set after Calendar & time was switched off for your character) gets a chip saying it didn't apply.
+Every ✎ fix is checked before it is saved: a value outside the field's range (energy above 100, cash below zero) or not among its choices is refused with the reason, and nothing changes. A saved fix shows a **Corrected** chip on the latest reply, with **Undo**. What you fix wins over the story. A fix you make while a reply is streaming waits for the reply to finish, then lands over whatever the reply changed: a time you set is the time once the reply is in, however much time it narrates, and a place you set is where your character is. One you make while the engine is still working on the turn, before its reply starts, waits the same way only with **Hold writes during the engine run** on (see [Changes while a turn runs](#changes-while-a-turn-runs)). A reply written before your fix never undoes it, even read again later (a **Re-read edit**, a **Retry read**, a swipe), and that holds when the reply already did what you asked: the fix stays, and is made again if a later read or swipe takes that back. Only a fix that can't be made at all once the reply is in (a time you set after Calendar & time was switched off for your character) gets a chip saying it didn't apply.
 
 ### Under each reply
 
@@ -65674,7 +66609,7 @@ A reply's chips belong to the swipe they came with: they show, and act, only whi
 | **Continue timelapse (n left)** | Offer | A long Timelapse was cut at the safety cap; **Continue** carries on from there, with the time left. |
 | **The narration skipped ahead — run it as a timelapse?** | Offer | The reply jumped ahead further than a turn can cover. **Run timelapse** runs the interval so the world catches up. |
 | **Mode change** | Receipt | A type of change is now applied automatically (or went back to asking) because of how you've been answering. It has an **Undo** button. See [Learning on your own model](#learning-on-your-own-model). |
-| **pending** | A mark | Not a chip but a mark: detail you opened, or changes you made, while a reply was still streaming. They land right after the reply finishes; a ✎ fix or GM edit lands over whatever the reply changed. |
+| **pending** | A mark | Not a chip but a mark: detail you opened, or changes you made, while a reply was still streaming, or, with **Hold writes during the engine run** on, while the engine worked on the turn before it. They land right after the reply finishes (or as soon as the turn stops without one); a ✎ fix or GM edit lands over whatever the reply changed. |
 
 Chips that start a turn (the Timelapse ones) work like actions from the Actions sheet, and they lapse when you send your next message.
 
@@ -65771,7 +66706,7 @@ The truth sits behind a spoiler gate, **Spoilers ahead**: tap **Show the truth**
 
 ### The GM bar
 
-A gold bar along the bottom of the drawer holds the GM's places: **World**, **Places** and **Story**, then a place for each pack that adds one (**Minds**, **Routines** and **Money**), then **This chat**. All but **This chat** are behind the gate.
+A gold bar along the bottom of the drawer holds the GM's places: **World**, **Places** and **Story**, then a place for each pack that adds one (**Minds**, **Routines** and **Money**), then the agents' **Assistant** and **Workspace**, then **This chat**. All but **This chat** are behind the gate.
 
 - **World**: every person, item, vehicle, group and account in the world, including the ones spawned during this chat and the removed ones, with **Search by name** and a kind filter. Badges mark **You**, **Removed**, a life state other than alive, anything that isn't public (**Known by**, **Secret**) and **Claimed**, a thing you said you had that the engine made real (see [Player claims](#player-claims)), and a row says when someone lives their own day or was spawned here. Tap one to open its page (see below). **Spawn** opens a page that adds someone or something new to this chat: a name, a kind, a place and a tier. While a fight is under way, a **Fight under way** card leads the list; tap it for the **Fight** page, with everyone in the fight, seen or not, in initiative order, with HP exact and the round's acts. While there are claimed things, **Claimed by the player** comes next: each one still in the world, by name, with who holds it or where it lies ("held by Sam Rivera", "at Rosie's Diner"). Tap one to open its page, where **Remove from the world** takes it out of the story; one removed, or a drink or a meal used up, leaves that list. Kinds and the world's places are the world's own definitions: the button at the bottom of the list, **Kinds and places are the world's: edit them in Build**, takes you to Build.
 - **Places**: every place, under the place it's in, with its visibility (public, discoverable, secret and so on).
@@ -65779,9 +66714,23 @@ A gold bar along the bottom of the drawer holds the GM's places: **World**, **Pl
 - **Minds**: every character's place on the fidelity ladder and why, their latest mind, plans, commitments, notes and summary, with pins and edits (see [Minds in GM mode](#minds-in-gm-mode)).
 - **Routines**: every character's routine and schedules as this chat has them, how much their routine binds them now, today as laid, their invitations and what the story changed, with per-chat changes (see [Routines in GM mode](#routines-in-gm-mode)).
 - **Money**: anyone's money, as their own money hub with the GM's controls (see [Everyone else's money](#everyone-elses-money)).
+- **Assistant**: a chat with the GM assistant about this chat's world, whose changes wait for you (see [Assistant](#assistant)).
+- **Workspace**: the notes the agents keep for this chat (see [Workspace](#workspace)).
 - **This chat**: this chat's rules, its edits and the inspector (see [This chat](#this-chat)).
 
 **Changing many at once.** **Select** (beside **Spawn**) turns the **World** list into a list you pick from: tap rows to pick them (a character's row shows their fidelity level), and the bar under the list, which stays above GM mode's tabs, shows how many you've picked, with **Select all** (everyone the list shows, its search and kind filter as they stand), a button for each fidelity level under **Select a level** (exactly the characters at that level) and **Clear**. Under its title, **Change…** says who is picked ("7 people, you among them and 8 things") and opens one change for everyone picked: **Tier**, **Detail in one area** (a level, or **From the tier**), **Their routine** (its role in this chat, or **As the world has it**), **Pin their fidelity** (or **By score**), **Your intent for them** and **Move to a place**. Every control starts on **Choose…**, and **Apply** stays off until you pick a value; each card says how those it reaches stand now ("Now: 3 Leads, 2 Supporting cast"). A tier or a level goes to the people picked, unless you turn on **Also the … picked that aren't people**; a routine, pin or intent change goes to the characters among them, never your own character; and a move to anyone not removed. **Apply** says how many it reaches, and is off when none of them fit. A change is sent as edits of at most 64 each; if one is refused, the ones before it stay and the rest aren't sent. **Done** stops picking. What you pick stays in GM mode: nothing in Play shows it.
+
+### Assistant
+
+**GM → Assistant** is a chat with the GM assistant about this chat's world, behind the gate. Type a message and **Send** it (or press Ctrl+Enter). Ask it anything ("Who knows about the shop's debt?", "Where is Danny?", "What does Jordan carry?"): it looks things up with the engine's own tools and answers only from what they show it, reading the world as **Settings → Agents → Assistant → Knowledge** lets it (your character's knowledge, everyone's with each secret marked, or everything, as you see it). Each message it is sent goes with the conversation so far, but only the part written with as much knowledge as it reads with now, or less: switch it from everyone's knowledge to your character's and what it said of a secret before stays out, and the first message it is sent says how many of the earlier ones are left out. While it answers, a running row shows its label, the tokens it has spent so far and **Cancel**, which works at once, even while an Apply is still landing, and **Send** waits for it; the drawer's activity line says only "Asking the GM assistant…". Each answer says what it spent and folds away what it looked up (each tool it called, in short, with what a failed call gave back); one that stopped short says how (at a limit, repeating a call, cancelled, or failed) and why. Ask it to change something and it proposes the change instead of making it: a card under its answer lists each change in plain words, with **Apply all**, **Apply picked** for the ones you tick, or **No**; a change of a kind you've set to ask first says so. Reading with your character's knowledge, it changes no one's mind but your character's own knowledge, proposes no effects, and names nothing your character can't know: a person, place or account it can't know of, and one that doesn't exist, are answered alike, as are a field your character can't see and one there is no such field as, and so is every change the engine refuses or that would change nothing. Applied, the changes are one GM edit with its **Undo** chip, as an edit you make yourself, and the card shows what landed and what was refused, and why, with **Undo** until the next reply; changes applied while a turn runs wait for the turn and land once its reply is in, so the turn goes on as planned, and their card shows **Undo** then, as the chat does; if the turn's close refuses one, its card says why and waits for Apply or No again, unless a learned note it wrote beside it already landed: that note stays applied, and so does the card, which offers **Apply again** for the refused changes alone, so the note isn't written twice. An Undo pressed in the chat or in GM → Edits marks the card undone too; a learned note it wrote beside the edit stays, as no Undo reaches the learned notes, and the card says so. A note it proposes keeps the knowledge it was proposed with: applied after you narrow the assistant's knowledge, it is still read only with what went into it. With **Apply** set to *At once*, its changes apply as soon as it has answered, each with Undo, except a kind of change you've set to ask first. What you apply, turn down and undo teaches it, per kind of change, on its connection, as your confirms and undos teach the reply's changes: a kind you nearly always apply comes to apply at once, and one you often undo goes back to asking. **Settings → Changes from the reply** shows each kind's mode under *The GM assistant's changes*, with where it came from, and pins it. The conversation is this chat's: a Branch keeps it as it stood, and **Clear** forgets it, after asking; the changes you applied stay. If its connection turns out to take no tools, the assistant asks again with them written out, and Diagnostics shows the refused call.
+
+### Workspace
+
+**GM → Workspace** lists the notes the agents keep for this chat, each with who wrote it (you, or the agent by its name), at which reply, who may read it, its size and whether it is pinned. Open one to read it, edit and **Save** it, **Pin** or **Unpin** it (a pinned note goes with every agent turn, once agent turns come; the agents read the rest when they need them), choose **Who may read it**, **Move** it to a new path (names joined by /, such as notes/marcus.md, that no other note has), or **Delete** it. Each change is one GM edit: the notice over the bar says what it did, with its **Undo**, and one made while a turn runs waits for the turn. The notes follow the story: a swipe from before a note was written lacks it.
+
+An agent reads a note only when its knowledge may: a note an agent wrote is read with the knowledge it wrote it under (one written with everything you know never reaches an agent reading as your character), and a move keeps that. A note of your own is **GM only** until you choose otherwise on its page: **Everyone's, secrets marked** lets agents reading with everyone's knowledge see it too, and **Your character's** lets every agent see it, so keep anything your character doesn't know out of it. Saving new text keeps the choice.
+
+Notes under **learned/** are the learned notes: what the agents keep across the story, which a swipe, a Re-run or an Undo never changes and a Branch takes along as they stand. They are listed, read, pinned and shared like the others, marked **Learned**, but a change to one lands at once, with no Undo, and none moves into or out of learned/: write it at its new path and delete the old one.
 
 ### A character's sheet
 
@@ -65849,7 +66798,7 @@ Each section the narrator reads (Outcome, Scene, People and the rest) has settin
 
   What each section adds: People, someone here your character can't see (and, from what people carry, a thing on them he can't see); Scene, the place around his and nearby exits he doesn't know; Stance, people's private agendas; Money, the money of the people with him; Gear, a thing on him he doesn't know of; Vehicles, cars at his site he can't see; Quest, quests and secrets he doesn't know; Place, hidden things here, hidden ways out and, under **Everything**, who is next door; Property, other people's property.
 
-**The narrator's knowledge.** How much the narrator knows has two parts. **Whose knowledge the narrator gets**: **Everyone in the scene** (the default), every fact, with what your character doesn't know marked for the narrator; or **Your character's only**, what your character knows. **Secrets**: **Marked** (the default), a line that would give away a secret you haven't found goes in marked as a secret kept from your character; or **Left out**, such a line is dropped. A section whose **Whose knowledge** is set keeps its own; one left on **The narrator's knowledge** takes it. The default is yours, in **Settings → Narrator**. Its **How a secret is marked** holds the mark's wording in four parts (**Known to some**, **Kept from some**, **Known to some, kept from others**, **The word for everyone**), and **What the narrator is told a mark means**, the sentence in the narrator's rules that explains them; each has **Save**, **Revert** and **Reset to the default** and the placeholders it needs (\`{{text}}\`, \`{{known}}\`, \`{{kept}}\`; the sentence needs \`{{forms}}\`, every way your wording marks a secret, and may use \`{{everyone}}\`). A world sets its own in **Build → World** (**The narrator's knowledge**, with **This world sets what the narrator knows** on), which beats yours in its chats, and **GM → This chat → Knowledge** sets one chat's, which beats both. A change applies from the chat's next turn; a reply already prepared is prepared again.
+**The narrator's knowledge.** How much the narrator knows has two parts. **Whose knowledge the narrator gets**: **Everyone in the scene** (the default), every fact, with what your character doesn't know marked for the narrator; or **Your character's only**, what your character knows. **Secrets**: **Marked** (the default), a line that would give away a secret you haven't found goes in marked as a secret kept from your character; or **Left out**, such a line is dropped. A section whose **Whose knowledge** is set keeps its own; one left on **The narrator's knowledge** takes it. The default is yours, in **Settings → Narrator**, which holds these two choices. How a secret is marked is yours to word too, in **Settings → Agents → Prompts → Final output** under **Secret marks** (see [Your own prompts](#your-own-prompts)): **Known to some**, **Kept from some**, **Known to some, kept from others**, **The word for everyone**, and **What a mark means**, the sentence in the narrator's rules that explains them; Settings → Narrator points there. A world sets its own knowledge in **Build → World** (**The narrator's knowledge**, with **This world sets what the narrator knows** on), which beats yours in its chats, and **GM → This chat → Knowledge** sets one chat's, which beats both. A change applies from the chat's next turn; a reply already prepared is prepared again.
 
 Two sections are new, both on unless the world or the GM switches them off, and ranked last, so a small budget leaves them out first. A world that lists its own sections gets them only when it adds them.
 
@@ -65870,6 +66819,12 @@ There are two ways to retry a reply:
 - **Re-narrate** keeps everything the engine decided (the same dice, the same outcome, the same events) and only asks for **new prose**. Use it when you like what happened but not how it was told.
 
 Which one a plain swipe uses is a setting (**Settings → Swipes**, under *Replies*: *Re-run (new roll)* or *Re-narrate (same outcome)*). Either way, the **Swipe as…** chip on a reply has **Re-run** and **Re-narrate** buttons for a single swipe. Anything you fixed by hand (✎) or changed in GM mode carries over to the new swipe either way, made again after everything the new reply tells, so it still says what you said: Re-narrate after the same outcome, and Re-run after the new turn and everything the new roll did. Cash you set is that amount whatever the new roll spent, and a quest you moved on with **Stage** moves on from wherever the new reply leaves it, or stays as it is when the new reply takes it there too. One that can't be made at all (the thing it changed was only in the old reply) is dropped with a **Not carried** note in the Journal, and a correction you undid stays undone. With Re-narrate, any detail you opened on the original reply carries over too, and anything that depended on results of the original narration is dropped with a note in the Journal.
+
+A Re-narrate is sent the texts its turn was made with: your narrator rules and section guidance as they were then (**Settings → Agents → Prompts**), so only the prose changes. A Re-run is sent the texts of the reply it plays again, so it differs by its roll and not by an edit you made since. To see an edit of yours on an older turn, set **Settings → Swipes → Swipe with** to *My current texts*, which both then use. A turn from before LumiRPEngine kept its texts was made with the shipped ones.
+
+### Your own prompts
+
+**Settings → Agents → Prompts** holds every text LumiRPEngine sends to a model. **Final output** is what goes into the narrator's prompt: the narrator rules (where they come from, the order of authority, what a marked fact means, and what leads your preset's own rules), how a secret is marked (**Secret marks**: a secret known to some, kept from some, or both, the word for everyone, and **What a mark means**, the narrator rules' sentence that explains every form your marks take; the sections, the narrator rules and your World Info entries in the prompt all mark a secret in these words), and the guidance that leads each section's lines. A wording of a secret's mark you set on Settings → Narrator before it moved here is among your texts here, as you wrote it; a Re-narrate or a Re-run of a turn from before then marks secrets in it too, as that turn did, and an earlier LumiRPEngine you go back to still finds your wording. **GM agent** holds the game master's assistant's texts. Its **Instructions** are the assistant's system prompt and role instructions; **What it sees** words each knowledge it may read with (the one **Settings → Agents → Assistant** names fills the system prompt's \`{{knowledge}}\`); **The conversation** holds the note it is sent when older messages of a long conversation are left out (**History tokens**); under **Tools** is what the assistant is told each tool it may call does and what each of the tool's arguments means, one text for every tool and every argument, so the page lists exactly the tools there are; and under **Tool answers**, what a tool answers when a name finds no one it may name ("No such person here: …": someone hidden from the knowledge the assistant reads with is answered exactly as someone who doesn't exist), when a name fits several, when an argument is missing or not one the tool takes, or when the player character can't know what was asked. Each starts as the shipped text: open one, write your own and **Save**; it is sent from the next turn, or the assistant's next message, and **Reset to the default** brings the shipped text back. A text may use only its own placeholders, listed beside it (a section's guidance must keep \`{{lines}}\`, where its lines go; each form of a secret's mark keeps \`{{text}}\` and the names it gives, \`{{known}}\`, \`{{kept}}\` or both; and **What a mark means** keeps \`{{forms}}\`, where every form of your mark goes); anything else in double braces is flagged and can't be saved, and so is a text longer than **Longest text of your own**, or an empty secret's mark. A world that words a section its own way (**Build → Sections**) keeps its wording in its chats.
 
 ### Switching to an earlier swipe
 
@@ -65906,6 +66861,12 @@ When you use Lumiverse's Continue on the latest reply, the engine reads only the
 - **Apply / No chips** from a reply expire when you send your next message, and nothing is applied.
 - **Timelapse chips** (offers and Continue), **suggested choices** and **your other action** lapse at the next send as well.
 - A reply that fails or comes back empty keeps the engine's work for its turn: **Retry the reply** (or Lumiverse's own Regenerate of that reply, or its Continue for a Continue) writes it again from that turn, and **Re-run the engine** runs the turn again first; a new reply after a reply that failed before writing anything goes out again when you press **Send** with nothing typed (see **The reply failed** in [Under each reply](#under-each-reply)). An empty reply the engine didn't prepare is *degraded* and shows **Retry**. The engine never regenerates on its own.
+
+### Changes while a turn runs
+
+A change you make while a reply is being written (a ✎ fix, a chip you answer, detail you open, a settings change for this chat, Keep or Discard) waits for that reply and lands once it is in, over whatever it changed; until then it shows as **pending**.
+
+Before the reply starts, the engine works on the turn: it reads your message, plans what happens and writes the turn's sections. A change you make then lands at once, and the turn's reply doesn't start, since it was planned without your change: the chat says so (**The reply didn't start, so nothing was generated**), and **Retry** runs the engine again with it. Turn on **Settings → Writes → Hold writes during the engine run** (under *Agents*) to have it wait for the turn instead, as it does during the reply: the reply starts as planned, and your change lands once the reply is in, or as soon as the turn stops without a reply (it failed, you cancelled it, or it waits on a question). Changes the GM assistant makes and workspace saves always wait for the turn, whatever the setting says. Editing or deleting a message still stops the turn's reply either way.
 
 ### Branches
 
@@ -66297,7 +67258,7 @@ The page ends with **Lumiverse's own limits**, which no setting changes. When a 
 The engine's own helpers read the world's lore ([World lore](#world-lore)) to do their jobs: \`interpret\` resolves names and aliases, \`extract\` recognises who and what the reply is about, \`npc.choose\` weighs a person's past and motives, \`judge\` weighs your described approach against what the world says, and the brief, the outline and puzzle answers read what bears on the scene. The narrator reads the lore about where your character is in the **Place** section; the rest of the world's public lore reaches it only through what the brief and the prose outline write, since they may read it to plan the scene.
 
 - **Prefetch.** Before a step asks its model, the engine searches the lore with the step's own inputs: your message or the reply, the people and places in the scene, the quests you can see, or the people and options of an NPC choice. What it finds goes into that step's prompt, cut to fit the step's lore tokens. A prefetch costs no call.
-- **Lookups.** A step can also ask for more. On most connections it calls the lore tools (search, read one entry, list a topic); on a connection that refused tools once, it asks in a plain form instead (\`{"need": [...]}\`), and the engine remembers that connection. Each time the model asks, the engine answers and the step is asked again: one more call, a **lore lookup**. Steps on the Decision connection can't use tools, so before deciding they get one lookup on the helper that asks what lore the decision needs.
+- **Lookups.** A step can also ask for more. On most connections it calls the lore tools (search, read one entry, list a topic); when a call with them fails for good (not a timeout or a busy provider), the step asks once more in a plain form instead (\`{"need": [...]}\`), and only a connection that said it takes no tools is remembered, to ask in that form from then on. Each time the model asks, the engine answers and the step is asked again: one more call, a **lore lookup**. Steps on the Decision connection can't use tools, so before deciding they get one lookup on the helper that asks what lore the decision needs.
 - **Per step**, in **Settings → Steps and connections**, under each step's **Advanced: signals and lore**: **Lore** (*Off*, *Prefetch*, *Look up* or *Both*), **Lore tokens**, and **Lookups by** (*Auto*, *Tools* or *Ask form*). A step without its own setting takes its preset's.
 - **Per phase**, in **Settings → Model use** under **Advanced: budgets and the engine budget**: **Lore lookups**; in **Settings → Timeouts**, how long after the phase starts one may begin. Each lookup takes one from its phase's lookup budget, apart from the phase's calls, and the steps that run first get them first. A lookup starts only while a third of the phase's time is left, so a step still has time to answer. When none is left, the step answers with what its prefetch found. **Lean** makes no lookups.
 - **Pinned lore.** In **Build**, a character's page and a place's page (a place drawn on a map too) have **Pinned lore**, and **Pinned lore** in Build's **World** list has a section for each step, with what holds for every step's pins said once at its top. **Pin world lore** picks one of the world's entries, and **Pin from World Info** picks one of your World Info books (the ones attached to the open chat first) and then **The whole book** or one of its entries, even one switched off in its book. A whole book is read as it is each time a call reads it: its switched-on entries, in the book's order, so entries added to it later (the chapters another extension writes, say) are read without pinning them again. What is pinned to a character is read first by their mind every time they think; what is pinned to **Character minds** is read by every character's mind, after their own pins, and what is pinned to **Time-skip beats** by every mind at a time skip's beat too, after those; what is pinned to any other step is read first by every call of that step, whatever its **Lore** setting; what is pinned to a place is read first by every helper and mind there, or in a place inside it. **Character memory**, **Memory consolidation** and **Time-skip beats**' own call read only what is pinned to them, and so does the time skip's plan for those whose skip the model plans, which reads what is pinned to **Time-skip beats**. For a helper, pinned text comes first within the step's **Lore tokens**; for a mind, the other minds steps and the skip's plan, within **Lore pinned to them and to where they are** in **Settings → Minds → What a mind reads** (no limit by default). When it doesn't all fit it is cut, and the **Context** panel says so and which limit to raise. Each pin chooses what a cut keeps, under its name: **When it doesn't fit, keep the start** (the default), or **keep the end** for an entry written oldest first, such as a running timeline, a log or a journal, whose newest part matters most; a whole book's entries each keep the part its pin keeps. Pins are part of the world: commit, then **Upgrade** the chat, to use a new pin in it; a pinned book's text is always read as it is now. A pinned entry is as secret as it is everywhere else. A pinned World Info entry is read without its secret lines, and one that is only a secret line reaches only the minds of the people it is known to. A secret one, the world's, a World Info entry an earlier version made secret with its fields, one a secret entry of the world was indexed from or one with the same text as any of these, still reaches only its audience and its holders' minds until its gate holds (both gates, when it is secret in its book and in the world), and the **Context** panel doesn't name it before then; one a Known-by entry of the world was indexed from reads only for those who know what it links; a pinned entry the AI wrote waits for your review like any other. **Check** warns of a pin to an entry that is gone, twice over, or that nobody can read, and opens the page it is on.
@@ -66319,10 +67280,34 @@ While a turn runs, the pill, the status line and the top of the drawer say what 
 
 - **Errors** lists what failed, newest first, with the reason and what to change: for example, an answer cut off at its max tokens tells you to raise **Max tokens** for that step in **Settings → Steps and connections**.
 - Each **turn** lists its steps in order (planning, the plan, the outline, filling the prompt, reading the reply, the characters' memories, memory) with their time and outcome, and under each the model calls it made: the connection and model, tokens in and out, why the answer ended, and the time. Filling the prompt lists each section, the preset outlet it goes to, and whether it got text.
+- An **agent's call** is a row of its own (the GM agent's, outside any turn): the agent's role, the model on its connection, tokens in (with how many came from the provider's cache) and out (with how many were reasoning), the time, and how it ended (ok, failed, cancelled or refused) with the error and the tools it called. A count the provider didn't report is the engine's estimate, marked **~**. **Show text** opens what the agent was sent and answered, in a scrolling block; once its retention (**Settings → Agents → Retention**, 30 days by default) has passed, the row stays but its text is gone, and it says so.
 - **Slow** marks a view or an edit that took over a second.
-- **Show** filters to **Problems**, **Model calls** or **Slow**; **Copy** puts the shown records on the clipboard as text, **Download** saves them all as JSON for a bug report, and **Clear** forgets them.
+- **Show** filters to **Problems**, **Model calls** (agents' calls included) or **Slow**; **Copy** puts the shown records on the clipboard as text, **Download** saves them all as JSON for a bug report, and **Clear** forgets them.
 
-The engine keeps the last 400 records of each chat, so they survive a restart, and writes each as a line to your \`diagnostics.log\`.
+The engine keeps the newest records of each chat, so they survive a restart, and writes each as a line to your \`diagnostics.log\` (an agent's call without its text). **Records per chat**, on the page even before you open the curtain, sets how many: 400 by default, with **Default** to go back. Agents' calls fill them faster than the engine's steps; lowering it drops the oldest.
+
+### Retention
+
+The agents keep what they write once, in your LumiRPEngine storage, shared by all your chats: each turn's part of their session (with the summaries compaction writes and the spans they replace), the workspace's files, each chat's learned files, and what each of their calls was sent and answered. A reply's record, a chat's learned files and Diagnostics point at these texts, so a swipe, a Re-run or a Branch copies nothing. **Settings → Agents → Retention** says how long a text stays once nothing points at it; each setting has **Default** to go back:
+
+- **Agent call texts** (30 days): how long Diagnostics keeps what each agent call was sent and answered, after the call. The call's row stays as long as **Records per chat** keeps it; only its text goes. **No limit** keeps each text as long as its row, and 0 keeps none.
+- **Unused texts** (7 days): how long a text nothing points at any more is kept before a sweep removes it. It counts from the first sweep that finds it unused, so the sweep that first finds a text unused never removes it, however long ago it stopped being used; with 0, the sweep after that one does.
+- **Sweep** (every 24 hours): how often a sweep looks. It runs while you use LumiRPEngine and never while a turn runs, and one under way stops removing when a turn starts. **Never** removes nothing.
+
+A sweep never removes a text anything still points at: a record on any swipe of any reply in any of your world chats (a Branch included, whether or not LumiRPEngine has opened it), the session parts a compaction's summary or archived span reads, any chat's learned files, the call texts Diagnostics keeps, and what a turn under way, a change waiting for a turn to end or a chat's journal holds that isn't on its messages yet. While a chat's messages, or the engine data on one of them, can't be read, a sweep removes nothing and says why in the log. So deleting a reply, a swipe or a chat frees only what nothing else points at, once **Unused texts** has passed.
+
+### Settings → Agents
+
+**Settings → Agents**, the first page of its own group (**Agents**, **Assistant**, **Prompts**, **Writes**, **Retention**), holds what LumiRPEngine's agents run under: the GM assistant now, and agent turns once they come. No classic step reads any of it, so nothing here changes a turn played the classic way.
+
+- **Thinking in agent tool loops** (off): while it's off, every agent call that offers tools goes with reasoning off, whatever the agent's effort, because Lumiverse doesn't yet pass back what a reasoning model thought before a tool call, which it must be sent again. Calls without tools keep their effort. Switch it on once Lumiverse passes it back.
+- **Budgets**, each with what it limits, what happens when it's reached, its default and **Default**: for **each agent**, the prompt and the answer of one call (the answer at 8,192 tokens), the time of one call, the tool calls one answer may make, its prompt and answer tokens in all, its rounds of tool calls (10), its time, its **revisions** (2: the messages it may be sent after its first answer) and how many of its tool calls run at once (4); for **each turn**, every agent together: prompt tokens (100,000), answer tokens (10,000), rounds and time. A call never asks for more answer tokens than the agent or the turn has left, and one that its prompt would take past a budget isn't sent: the agent stops with what it has, and its record says which limit stopped it.
+- **Loop detector** (3): the same tool call with the same arguments three times in a row stops the agent before it's run. **Tool results clipped past** (4,000 characters): a longer result reaches the model clipped, and the rest waits in the agent's scratch, which it reads with its built-in **scratch_read** tool.
+- **Throttles**, per connection: requests and tokens per minute, each off by default. A call waits until its connection's minute has room; only one bigger than a whole minute's tokens is refused.
+- **Caching**: on for every agent, with a switch per agent. The stable part of an agent's prompt goes first, with cache breakpoints where the provider takes them (Anthropic's 4 per request, its connection's own prompt caching included). **Bust** puts a new key at the top of the prompt, so the next call reads nothing from the provider's cache; off sends a new key every call, which also defeats a provider's automatic caching.
+- **Acceptance runs**: none of your connections is guarded until you add one here; a connection you add starts marked **Only in acceptance runs**, with ceilings of 300,000 prompt and 30,000 answer tokens per run. A connection so marked is refused unless you've opened a run, here, with a label; an outside agent (the \`lumirpengine\` CLI or its MCP server) can neither open one nor change these settings: a settings change of its that would leave them otherwise, a reset of the whole Agents section included, is refused whole. A **Model Roulette** connection sends each call on one of its connections, picked at random, so an agent's call on one is refused while any of them is guarded here; and while any connection is marked **Only in acceptance runs**, an agent's call on a connection LumiRPEngine can't read is refused too, since it might be such a roulette. While a run is open, each guarded connection's calls count against its ceilings for the run (prompt and answer tokens), and every call first holds its estimated prompt plus its max tokens, so one that would pass a ceiling isn't sent. A model that hasn't reported real usage yet holds its estimate times the **estimate factor** (2). The page and a line at the top of the drawer show what the run has spent, cached and held; **Close the run** keeps its report as the last run's. The guarded connections are kept with the runs, apart from your other settings, so a build from before the agents, which keeps no agent settings, never drops them: back on this one, they are guarded as you left them.
+
+**Settings → Agents → Assistant** is the GM assistant's own page (GM → Assistant), each setting with its default and **Default** to go back to it: its **connection** and **model** (your default connection and its model unless you pick one); its **effort** (*Connection's own* by default: the connection's reasoning setting, else yours in Lumiverse; *Set by the model* for a model that picks its own; while **Thinking in agent tool loops** is off, a call that offers tools goes with reasoning off, whatever this says); its **knowledge**, whose knowledge its tools read the world with: *Your character's*, *Everyone's, secrets marked* (the default) or *The GM's*; **How its changes land**, *Each waits for your Apply* (the default) or *At once, with an Undo chip*; **History tokens** (20,000): how much of the conversation goes with each message, the newest first, only what was written with its knowledge now or less, the older messages left out and the assistant told how many; and its own **budget**: each limit above is every agent's until you change it here, for the assistant alone, and **Every agent's** follows that one again. The assistant runs outside every turn, so a limit a turn would set when it is none (a call's time, the tokens in and out, the run's time) is no limit at all here, and the page says so. Its texts are on **Prompts**, page GM agent.
 
 ## Character minds
 
@@ -66463,6 +67448,24 @@ The starting modes come from measurements on a small model. Your model may do be
 - **Undo** on either chip restores the previous mode and holds it for another 30 outcomes.
 
 You can pin any type to **Auto**, **Confirm** or **Never** in **Settings → Changes from the reply** (under *Replies*): setting a mode pins it, and **Unpin** hands it back to learning. Each type shows where its mode comes from: *Pinned by you*, *Learned on <connection> (n kept, n rejected)*, *Default* (with *learning (n kept, n rejected)* once anything is counted) or *From the field's bound*. A pinned type is still counted but never flipped. The order of precedence is: your pinned mode, then what was learned on the turn's connection, then the starting mode, then the field's own bound.
+
+### The GM assistant's changes
+
+**Settings → Changes from the reply** has a second section, **The GM assistant's changes**: what an agent (the GM assistant) may change on its own, by type. No reply proposes these, so the engine's reading of a reply never uses them. Each type has **Auto**, **Confirm** or **Never**, where its mode comes from and **Unpin**, as the reply's types do:
+
+| Type | What it covers | Starting mode |
+|---|---|---|
+| **Adding people or things** | Someone or something new. The assistant can't add a person once the chat has brought in as many new people as the world allows (its spawn cap, in **Build → World**), counting everyone the chat brought in, gone or not | confirm |
+| **Removing people** | Taking a person out of the world | confirm |
+| **Destroying things** | Taking anything but a person out of the world | confirm |
+| **Money adjustments** | Adjusting someone's money, setting or adding to a money field, or correcting one | confirm |
+| **Quest and secret stages** | Moving a quest or a secret to a stage | confirm |
+| **Other GM edits (fields, tiers, minds, routines, sections, the clock)** | Every other edit the GM can make | auto |
+| **Workspace notes** | The assistant's files in the chat's workspace: writing, editing, moving, deleting or pinning one | auto |
+
+With the assistant set to apply at once, an **Auto** change applies with its **Undo**, a **Confirm** change waits for your **Apply**, and a **Never** change is refused. Your own GM edits are never held back by these. They learn from how you answer as the reply's types do, counted for each agent on each connection apart.
+
+The **workspace** is the chat's own files, kept for the GM: notes that follow the chat's turns as everything else does, so a swipe, a Re-run or a Branch carries them, that can be pinned, and that an agent reads only as far as each note's **Who may read it** lets it (GM → Workspace); the learned notes, under \`learned/\`, stay as they are whatever a swipe or an Undo does. The assistant can copy a lore entry into a file there (under \`lore/\`) or draft one under \`lore-drafts/\`, but it never writes your World Info books or the world's lore: you apply a draft yourself, in **Build**, with Build's own **Save**.
 
 ## The Context inspector
 
@@ -67274,15 +68277,15 @@ function templateTool(args) {
   return read.ok ? { text: read.text } : { text: read.text, isError: true };
 }
 function worldInput(args, readFile) {
-  const path = textArg(args, "path");
+  const path2 = textArg(args, "path");
   const inline2 = args.world;
-  if (path !== undefined && inline2 !== undefined)
+  if (path2 !== undefined && inline2 !== undefined)
     throw new ToolError("Give the world one way: path (a file) or world (inline), not both.");
-  if (path !== undefined) {
+  if (path2 !== undefined) {
     try {
-      return { value: readFile(path), from: path };
+      return { value: readFile(path2), from: path2 };
     } catch (error) {
-      throw new ToolError(`Can't read ${path}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new ToolError(`Can't read ${path2}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   if (inline2 === undefined || inline2 === null)
@@ -67668,17 +68671,17 @@ function patchOps(raw) {
       throw new ToolError(`${where}: op is one of add, remove, replace, move, copy and test.`);
     if (typeof op.path !== "string" || op.path !== "" && !op.path.startsWith("/"))
       throw new ToolError(`${where}: path must be a JSON Pointer ("/entities/mara").`);
-    const { path } = op;
+    const { path: path2 } = op;
     if (op.op === "remove")
-      return { op: "remove", path };
+      return { op: "remove", path: path2 };
     if (op.op === "move" || op.op === "copy") {
       if (typeof op.from !== "string" || op.from !== "" && !op.from.startsWith("/"))
         throw new ToolError(`${where}: ${op.op} needs from, a JSON Pointer.`);
-      return { op: op.op, from: op.from, path };
+      return { op: op.op, from: op.from, path: path2 };
     }
     if (op.value === undefined)
       throw new ToolError(`${where}: ${op.op} needs a value.`);
-    return { op: op.op === "add" ? "add" : op.op === "replace" ? "replace" : "test", path, value: op.value };
+    return { op: op.op === "add" ? "add" : op.op === "replace" ? "replace" : "test", path: path2, value: op.value };
   });
 }
 function stale(worldId, now, expected, refused2, then) {
@@ -68068,7 +69071,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "6c4351fe";
+var BUILD = "f0b471d1";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
@@ -68678,17 +69681,17 @@ function planOf3(world, profile, packKinds, choices) {
     if (!upChain(world, packKinds, e.kind, (k) => k === kind.id ? true : undefined))
       continue;
     people++;
-    for (const [field, def] of taken) {
-      if (def.derived !== undefined || !hasOwn(e.fields, field))
+    for (const [field2, def] of taken) {
+      if (def.derived !== undefined || !hasOwn(e.fields, field2))
         continue;
-      if (upChain(world, packKinds, e.kind, (k, d) => k === kind.id ? false : hasOwn(d.fields, field) ? true : undefined) === true)
+      if (upChain(world, packKinds, e.kind, (k, d) => k === kind.id ? false : hasOwn(d.fields, field2) ? true : undefined) === true)
         continue;
-      const from = e.fields[field];
+      const from = e.fields[field2];
       if (from === undefined)
         continue;
       const to = fitted(def, from);
       if (to !== undefined)
-        values.push({ entity: id, name: e.name, field, from, to });
+        values.push({ entity: id, name: e.name, field: field2, from, to });
     }
   }
   return { plan: { profile: profile.id, kind, items, people, values }, write };
@@ -68723,10 +69726,10 @@ async function profileTool(args, ctx) {
   if (expected !== undefined && read.version !== expected)
     throw new ToolError(`Nothing applied: the draft of ${worldId} is at version ${read.version}, not ${expected}. It was written since you read it (by the user in Build, or another agent). Read it again (lre_draft), then apply against version ${read.version}.`);
   const conflicts = plan2(read.draft, {}).items.filter((i) => i.status === "conflict").map((i) => i.path);
-  const strange = take.filter((path) => !conflicts.includes(path));
+  const strange = take.filter((path2) => !conflicts.includes(path2));
   if (strange.length > 0)
     throw new ToolError(`${strange.join(", ")} ${strange.length === 1 ? "is" : "are"} no conflict of the ${profile.label} profile with this draft. Its conflicts: ${conflicts.join(", ") || "none"}.`);
-  const choices = Object.fromEntries(take.map((path) => [path, "profile"]));
+  const choices = Object.fromEntries(take.map((path2) => [path2, "profile"]));
   const planned = plan2(read.draft, choices);
   const summary = {
     profile: { id: profile.id, label: profile.label, summary: profile.summary },
@@ -68754,16 +69757,16 @@ async function profileTool(args, ctx) {
 }
 async function sheetTool(args, ctx) {
   const worldId = worldIdOf2(args);
-  const entity = textArg(args, "entity");
+  const entity2 = textArg(args, "entity");
   const live = ctx.live();
   const given = args.ruleset;
   if (given !== undefined && !isRecord(given))
     throw new ToolError("ruleset is an object: the world's ruleset as it would be (the draft's own when left out).");
   const ruleset = given ?? (await live.draft(worldId)).draft.ruleset ?? {};
-  const body = await live.conn.request("lre.world", { op: "sheet", worldId, ruleset, ...entity !== undefined ? { entity } : {} });
+  const body = await live.conn.request("lre.world", { op: "sheet", worldId, ruleset, ...entity2 !== undefined ? { entity: entity2 } : {} });
   if (body.sheet === null || body.sheet === undefined)
     return { text: json({ worldId, sheet: null, note: "The ruleset designs no sheet (ruleset.sheet)." }) };
-  const read = readAt({ worldId, entity: entity ?? "the point of view", sheet: body.sheet }, { what: "the sheet preview", offset: intArg(args, "offset", 0, Number.MAX_SAFE_INTEGER) });
+  const read = readAt({ worldId, entity: entity2 ?? "the point of view", sheet: body.sheet }, { what: "the sheet preview", offset: intArg(args, "offset", 0, Number.MAX_SAFE_INTEGER) });
   return read.ok ? { text: read.text } : { text: read.text, isError: true };
 }
 function chatKnowledgeChange(args) {
@@ -68890,7 +69893,7 @@ var BUILD_TOOLS = [
 function token(id) {
   return id.replace(/~/g, "~0").replace(/\//g, "~1");
 }
-async function draftPatch(ctx, worldId, read, ops, expected, path) {
+async function draftPatch(ctx, worldId, read, ops, expected, path2) {
   if (expected !== undefined && read.version !== expected)
     throw new ToolError(`Nothing applied: the draft of ${worldId} is at version ${read.version}, not ${expected}. Read it again, then apply against version ${read.version}.`);
   if (ops.length === 0)
@@ -68906,7 +69909,7 @@ async function draftPatch(ctx, worldId, read, ops, expected, path) {
         throw new ToolError(`Nothing applied: LumiRPEngine refused it. ${error.message}`);
       throw error;
     }
-    return { text: json({ worldId, version: after.version, lint: lintSummary(after.lint.filter((i) => i.path === path || i.path.startsWith(`${path}.`)), 20), next: "It is in the draft (Build's too): lre_commit makes it the head." }) };
+    return { text: json({ worldId, version: after.version, lint: lintSummary(after.lint.filter((i) => i.path === path2 || i.path.startsWith(`${path2}.`)), 20), next: "It is in the draft (Build's too): lre_commit makes it the head." }) };
   });
 }
 function itemTools(collection, noun, one, many) {
@@ -68998,11 +70001,17 @@ var SECTIONS = {
   adjudication: 'Checks for new chats (preset "narrative", "balanced", "crunchy" or "custom"; checks, riskyAt, trivialAt, impossibleAt, description, authority, closeBy, retry, retryAfter).',
   overrideWorldAdjudication: "Checks: new chats use these over a world's own adjudication.",
   time: `Time for new chats: sceneTicks, scale, interrupts, speedThrough, montage, unitCap; and, for every chat, askBeyondMinutes: how long a typed or narrated skip runs without asking (whole minutes, 0 to ${TIMELAPSE_REACH_MINUTES}; longer becomes a Timelapse chip).`,
-  extraction: 'Changes from the reply: a pinned mode per change type ("auto", "confirm", "never", maxDelta); null unpins one, so learning decides it again.',
+  extraction: `Changes from the reply: a pinned mode per change type ("auto", "confirm", "never", maxDelta); null unpins one, so learning decides it again. The GM assistant's change types (gm_spawn, despawn, destroy, money_adjust, stage, gm_edit, workspace) take a pinned mode too (no maxDelta).`,
   swipeDefault: 'Swipes: what a swipe does ("rerun" or "renarrate").',
+  swipeTexts: 'Swipes: which texts a Re-narrate is sent ("turn": those its turn was made with; "current": the ones set now).',
+  prompts: "Agents → Prompts: texts, your own text for each editable text by its id (null brings back the shipped one; each must keep the placeholders its text requires and use no others), and maxChars, the longest a text of your own may be.",
   hideJsonBlocks: "Preset: hide each reply's <json> block in world chats.",
-  narrator: `Narrator: the narrator's knowledge in every chat that sets none and whose world sets none (knowledge "scene", everyone in the scene's with each fact beyond the player character's marked, or "pov", the player character's only; secrets "marked", fed marked as secrets, or "omit", left out), and marks: your own wording of a secret's mark (known, kept, both, everyone; a part left out, or null, is the shipped text). lre_chat_knowledge sets one chat's own.`,
-  gates: "Steps and connections → Preview before playing: intent shows a typed message's read action before it plays, outline the turn's outline before the reply is written; each waits on Play, Edit or Cancel."
+  narrator: `Narrator: the narrator's knowledge in every chat that sets none and whose world sets none (knowledge "scene", everyone in the scene's with each fact beyond the player character's marked, or "pov", the player character's only; secrets "marked", fed marked as secrets, or "omit", left out). lre_chat_knowledge sets one chat's own. How a secret is marked is in prompts: the texts narrator.mark.known, narrator.mark.kept, narrator.mark.both, narrator.mark.everyone and narrator.secret_marks.`,
+  gates: "Steps and connections → Preview before playing: intent shows a typed message's read action before it plays, outline the turn's outline before the reply is written; each waits on Play, Edit or Cancel.",
+  agents: `Agents: the agent runtime's thinkingInToolLoops, budget (each agent: callTokensIn, callTokensOut, callMs, callTools, tokensIn, tokensOut, toolTurns, wallMs, revisions, concurrency), turn (every agent of a turn: tokensIn, tokensOut, toolTurns, wallMs), loopRepeats, clipChars, throttles (per connection id: requestsPerMinute, tokensPerMinute), caching (on, nonce, roles); assistant, the GM assistant (Agents → Assistant: connectionId and model, null for your default; effort; knowledge, whose knowledge its tools read with: "pov", "everyone" with secrets marked, or "gm"; apply, "ask" to have each proposal wait for Apply or "at_once" to apply it with an Undo chip; historyTokens, how much of its thread goes with each message; budget, its own limits over every agent's budget, null giving one back); acceptance (the connections acceptance runs guard and their ceilings, estimateFactor) is yours to set in Settings → Agents, not through this tool. Tokens and counts are whole numbers, times milliseconds, "none" for no limit.`,
+  holdWrites: "Writes: true holds a chip, fix or any other change made while the engine works on a turn before its reply until that turn closes, landing over what it did; false (the default) lands it at once and the engine runs the turn again. A GM agent's writes and workspace saves are held either way.",
+  retention: `Agents → Retention: transcriptDays (days Diagnostics keeps an agent call's text, or "none" while its record stays), unreferencedDays (days a stored blob nothing references is kept before a sweep removes it), sweepHours (hours between sweeps, or "none" for never).`,
+  diagnostics: "Diagnostics: recordsPerChat, how many records each chat's diagnostics keep, the oldest going first."
 };
 var MODES_SECTION = "extractionModes";
 var NOT_PATCHED = { v: "the settings file's format", defaults: "which shipped defaults the file was last read against" };
@@ -69093,7 +70102,7 @@ function diagRecord(record3) {
 async function diagRead(args, ctx) {
   const chatId = neededText(args, "chatId", "the chat's id (lre_chats lists them)");
   const spoilers = boolArg(args, "spoilers");
-  const last = intArg(args, "last", 1, 400) ?? 30;
+  const last = intArg(args, "last", 1, Number.MAX_SAFE_INTEGER) ?? 30;
   const failures = boolArg(args, "failures");
   const body = await ctx.live().conn.request("lre.diag", { chatId, op: "get" });
   const records = failures ? body.records.filter((r) => r.status === "failed" || r.level === "error" || r.level === "warn") : body.records;
@@ -69131,7 +70140,7 @@ var CONFIG_TOOLS = [
   {
     name: "lre_settings_set",
     description: 'Change your LumiRPEngine settings with a JSON merge patch (RFC 7386) over them, as the Settings pages do: objects merge, a list or a value replaces, null deletes (unpin a change type with {"extraction": {"purchase": null}}). A named preset (realism.preset, modelUse.preset) expands into its levels and caps, or its steps, budgets and minds policy; a change to what a named preset sets makes it "custom", as Settings does. LumiRPEngine keeps every setting within what it takes: the answer lists the sections that changed with their values now, anything that came out other than sent (adjusted), and the caveats (Settings → Caveats) as they read now. Realism, checks and time seed new chats only.',
-    inputSchema: object({ patch: { type: "object", description: 'The merge patch: {"swipeDefault": "renarrate"}, {"modelUse": {"preset": "standard"}}, {"modelUse": {"steps": {"judge": {"enabled": true}}}}, {"timeouts": {"requestMs": 60000}}, {"narrator": {"knowledge": "pov"}}, {"narrator": {"marks": {"known": null}}} (back to the shipped wording).' } }, ["patch"]),
+    inputSchema: object({ patch: { type: "object", description: `The merge patch: {"swipeDefault": "renarrate"}, {"modelUse": {"preset": "standard"}}, {"modelUse": {"steps": {"judge": {"enabled": true}}}}, {"timeouts": {"requestMs": 60000}}, {"narrator": {"knowledge": "pov"}}, {"prompts": {"texts": {"narrator.mark.known": null}}} (a secret's mark back to the shipped wording).` } }, ["patch"]),
     write: { destructive: true, idempotent: true },
     run: settingsSet,
     cli: { command: "settings-set", section: "Settings and presets", usage: "settings-set --patch <file|json>", summary: "Change settings with a JSON merge patch", options: { "--patch": { arg: "patch", as: "json" } } }
@@ -69168,8 +70177,8 @@ var CONFIG_TOOLS = [
   },
   {
     name: "lre_diag",
-    description: "A chat's diagnostics (Settings → Diagnostics): the activity line (what the engine is doing for it now, or the step that failed last; player-safe), and the records of each turn's steps, model calls (connection, model, tokens, finish reason, time), failures and why, the sections each engine run wrote, and slow requests. The records are GM-level, since a step's reason can name what the player hasn't found: without spoilers: true only their counts come back. last: the newest records to show (default 30); failures: only failed, warning and error records.",
-    inputSchema: object({ chatId: CHAT_ID2, spoilers: { type: "boolean", description: "Show the records themselves." }, last: { type: "integer", minimum: 1, maximum: 400, description: "The newest records to show (default 30)." }, failures: { type: "boolean", description: "Only failed steps, warnings and errors." } }, ["chatId"]),
+    description: "A chat's diagnostics (Settings → Diagnostics): the activity line (what the engine is doing for it now, or the step that failed last; player-safe), and the records of each turn's steps, model calls (connection, model, tokens, finish reason, time), failures and why, the sections each engine run wrote, slow requests, and agents' calls (role, connection, model, tokens in and out with their cached and reasoning parts, an estimate marked as one, time, outcome, the tools called; a call's text only by its hash, read in Diagnostics behind its curtain). The records are GM-level, since a step's reason can name what the player hasn't found: without spoilers: true only their counts come back. last: the newest records to show (default 30); failures: only failed, warning and error records.",
+    inputSchema: object({ chatId: CHAT_ID2, spoilers: { type: "boolean", description: "Show the records themselves." }, last: { type: "integer", minimum: 1, description: "The newest records to show (default 30)." }, failures: { type: "boolean", description: "Only failed steps, warnings and errors." } }, ["chatId"]),
     write: false,
     run: diagRead,
     cli: { command: "diag", section: "Diagnostics", usage: "diag <chatId> [--spoilers] [--last <n>] [--failures]", summary: "A chat's activity line and diagnostics", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" }, "--last": { arg: "last", as: "int" }, "--failures": { arg: "failures", as: "flag" } } }
@@ -69620,12 +70629,12 @@ function fixTool(args, ctx) {
   const chatId = chatIdOf(args);
   const time = textArg(args, "time");
   const named = textArg(args, "fix");
-  const entity = textArg(args, "entity");
-  const field = textArg(args, "field");
+  const entity2 = textArg(args, "entity");
+  const field2 = textArg(args, "field");
   const hasValue = args.value !== undefined;
-  if (time !== undefined && (named !== undefined || entity !== undefined || field !== undefined || hasValue))
+  if (time !== undefined && (named !== undefined || entity2 !== undefined || field2 !== undefined || hasValue))
     throw new ToolError("Give time alone (the clock), or a field and its value: one fix at a time.");
-  if (named !== undefined && (entity !== undefined || field !== undefined))
+  if (named !== undefined && (entity2 !== undefined || field2 !== undefined))
     throw new ToolError("Give fix (a HUD fix's name) or entity and field, not both.");
   if (time === undefined && !hasValue)
     throw new ToolError("Give value: what the field should hold. Or time, to set the clock.");
@@ -69634,7 +70643,7 @@ function fixTool(args, ctx) {
       const body2 = await ask(ctx, chatId, "lre.fix", { chatId, time });
       return written(chatId, { fixed: { time } }, body2.pending);
     }
-    let target = { entity: entity ?? "", field: field ?? "" };
+    let target = { entity: entity2 ?? "", field: field2 ?? "" };
     if (named !== undefined) {
       const fix = HUD_FIXES.find((f) => f === named);
       if (fix === undefined)
@@ -69643,7 +70652,7 @@ function fixTool(args, ctx) {
       if (found === undefined)
         throw new ToolError(`Chat ${chatId}'s HUD has no ${fix} fix now (lre_chat_state shows the fixes it has at /hud/fixes).`);
       target = { entity: found.entity, field: found.field };
-    } else if (entity === undefined || field === undefined)
+    } else if (entity2 === undefined || field2 === undefined)
       throw new ToolError("Give entity and field (the field to fix), or fix (place, weather, cash or scene), or time.");
     const value = args.value;
     const body = await ask(ctx, chatId, "lre.fix", { chatId, entity: target.entity, field: target.field, value });
@@ -69776,11 +70785,11 @@ function keep(args, ctx) {
 function viewOpen(args, ctx) {
   const chatId = chatIdOf(args);
   const panel = neededText(args, "panel", `the panel's id, a key of /panels in lre_chat_state ("money.hub", "core.context"…)`);
-  const entity = textArg(args, "entity") ?? null;
+  const entity2 = textArg(args, "entity") ?? null;
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const body = await ask(ctx, chatId, "lre.view.open", { chatId, panel, entity });
+    const body = await ask(ctx, chatId, "lre.view.open", { chatId, panel, entity: entity2 });
     const note = panel === "core.context" ? "The inspector checks the active preset on a dry run of the prompt after this: read lre_inspector (its warnings) again in a moment." : body.materialized ? "Opening it settled detail the chat hadn't decided yet: lre_chat_state shows it now." : "Nothing needed settling: the panel reads as it was.";
-    return written(chatId, { panel, entity, materialized: body.materialized, note }, body.pending);
+    return written(chatId, { panel, entity: entity2, materialized: body.materialized, note }, body.pending);
   });
 }
 function action(args, ctx) {
@@ -70033,12 +71042,12 @@ var PLAY_TOOLS = [
 ];
 async function routineDay2(args, ctx) {
   const chatId = chatIdOf(args);
-  const entity = neededText(args, "entity", "the character's id (lre_gm lists them)");
+  const entity2 = neededText(args, "entity", "the character's id (lre_gm lists them)");
   const view = textArg(args, "view") === "player" ? "player" : "gm";
   if (view === "gm")
     gate(args, "lre_day", "shows a character's whole routine, secrets and the GM's changes included");
   const day2 = intArg(args, "day", Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
-  const body = await ask(ctx, chatId, "lre.routine", { chatId, op: "day", entity, view, ...day2 !== undefined && view === "gm" ? { day: day2 } : {} });
+  const body = await ask(ctx, chatId, "lre.routine", { chatId, op: "day", entity: entity2, view, ...day2 !== undefined && view === "gm" ? { day: day2 } : {} });
   return { text: json(body) };
 }
 
@@ -70251,12 +71260,12 @@ var TOOLS = [
   },
   ...MODULE_TOOLS
 ];
-var BY_NAME = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
+var BY_NAME2 = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
 function toolsFor(readOnly) {
   return readOnly ? TOOLS.filter((t) => !t.write) : TOOLS;
 }
 function findTool(name) {
-  return hasOwn(BY_NAME, name) ? BY_NAME[name] : undefined;
+  return hasOwn(BY_NAME2, name) ? BY_NAME2[name] : undefined;
 }
 async function statusTool(ctx) {
   let live;
@@ -70669,7 +71678,7 @@ function sessionFor(p, io, readOnly) {
   const queue = new KeyedQueue;
   const timeoutMs = timeoutOf(p, io.env);
   const ctx = {
-    readFile: (path) => io.readFile(path),
+    readFile: (path2) => io.readFile(path2),
     readOnly,
     live: () => live ??= liveFor(chooseBase(p, io), io, timeoutMs),
     serialize: (key, work) => queue.run(key, work)
@@ -70679,10 +71688,10 @@ function sessionFor(p, io, readOnly) {
 async function login(p, io) {
   const given = one(p, "--url") ?? io.env.LUMIVERSE_URL;
   const stored = io.credentials.bases();
-  const asked = given ?? (stored.length === 1 ? stored[0] : await io.ask("Lumiverse address (as you open it in a browser): ", false));
-  if (asked === null || asked === undefined || asked.trim() === "")
+  const asked2 = given ?? (stored.length === 1 ? stored[0] : await io.ask("Lumiverse address (as you open it in a browser): ", false));
+  if (asked2 === null || asked2 === undefined || asked2.trim() === "")
     throw new UsageError("login needs Lumiverse's address: --url <base>, or LUMIVERSE_URL.");
-  const base = normalizeBase(asked);
+  const base = normalizeBase(asked2);
   const clear = inClear(base);
   if (clear && p.flags["--allow-http"] !== true) {
     throw new UsageError(`${base} is plain http to another machine: your password now, and the session token on every call after, would cross the network in clear, readable by anyone on the way. Use Lumiverse's https address if it has one. If the network is yours and you accept that, sign in with --allow-http.`);
@@ -70839,7 +71848,7 @@ function toolContext(ctx) {
   if (made !== undefined)
     return made;
   const context = {
-    readFile: (path) => ctx.readFile(path),
+    readFile: (path2) => ctx.readFile(path2),
     readOnly: ctx.readOnly,
     serialize: (key, work) => ctx.serialize(key, work),
     live: () => {
