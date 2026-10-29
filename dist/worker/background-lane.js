@@ -7470,7 +7470,10 @@ var WRITE_NOTE = {
   paused: "tool.note.paused",
   noWorld: "tool.note.no_world",
   noChange: "tool.note.no_change",
-  stale: "tool.note.stale"
+  stale: "tool.note.stale",
+  notGranted: "tool.note.not_granted",
+  gmCap: "tool.note.gm_cap",
+  workspaceLine: "tool.note.workspace_line"
 };
 var filePath = { name: "path", text: "the workspace path the call gave" };
 var WRITE_TOOL_NOTES = [
@@ -7480,7 +7483,7 @@ var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.noFile, label: "No such file", note: "A workspace tool's answer when no file is at the path, or none the agent's knowledge may read.", text: "No workspace file {{path}} here.", vars: [filePath] },
   { id: WRITE_NOTE.pathTaken, label: "A path taken by a file it can't read", note: "A workspace write's answer when a file the agent's knowledge may not read (Who may read it, GM \u2192 Workspace) is at the path.", text: "A workspace file you can't read is already at {{path}}: pick another path.", vars: [filePath] },
   { id: WRITE_NOTE.never, label: "A change type set to Never", note: "A write's answer when the user set its change type to Never in Settings \u2192 Changes from the reply.", text: "{{type}} is set to Never (Settings \u2192 Changes from the reply), so this change isn't made.", vars: [{ name: "type", text: "the change type, as Settings names it", required: true }] },
-  { id: WRITE_NOTE.spawnCap, label: "The spawn cap", note: "A GM spawn's answer when the chat has brought in as many people as its world allows.", text: "This chat has brought in {{count}} people, all its world allows (its spawn cap, Build \u2192 World), so no one new can join it.", vars: [{ name: "count", text: "the people the chat has brought in", required: true }] },
+  { id: WRITE_NOTE.spawnCap, label: "The spawn cap", note: "A GM spawn's answer when the chat has brought in as many people as its world allows.", text: "This chat has brought in {{count}} {{people}}, all its world allows (its spawn cap, Build \u2192 World), so no one new can join it.", vars: [{ name: "count", text: "the people the chat has brought in", required: true }, { name: "people", text: '"person" for 1, else "people"' }] },
   { id: WRITE_NOTE.spawnId, label: "An id a spawn can't take", note: "A GM spawn's answer, under the player character's knowledge, when the id it asks for is taken or isn't an id: one answer whoever holds it, so it never tells of someone the player character can't know.", text: "{{id}} can't be used for someone or something new: leave the id out, and one is made.", vars: [{ name: "id", text: "the id the spawn asked for" }] },
   { id: WRITE_NOTE.notYourMind, label: "Another's mind", note: "A minds change's answer, under the player character's knowledge, for anyone but the player character: one answer whoever it is and whatever their mind holds, so it never tells what another knows or thinks.", text: "{{pov}} can't see into anyone else's mind, and you read the world as {{pov}} knows it: only what {{pov}} knows may be changed.", vars: [{ name: "pov", text: "the player character's name" }] },
   { id: WRITE_NOTE.povEffect, label: "An effect under your character's knowledge", note: "gm_effect's answer under the player character's knowledge: one answer for every effect, whatever it would touch, since an effect works on what the player character may not know of.", text: "Effects aren't proposed with {{pov}}'s knowledge: their workings reach past what {{pov}} knows. Use the other tools, or ask the game master.", vars: [{ name: "pov", text: "the player character's name" }] },
@@ -7496,7 +7499,10 @@ var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
   { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },
   { id: WRITE_NOTE.noChange, label: "A change that changes nothing", note: "A write's answer when the change would leave everything as it is, or, under the player character's knowledge, when it can't be made for a reason the player mustn't learn of.", text: "That changes nothing.", vars: [] },
-  { id: WRITE_NOTE.stale, label: "The chat changed meanwhile", note: "An apply's answer when the chat changed between the check and the write (a turn landed), so the engine no longer takes the change.", text: "The chat changed while this was being written, so it no longer applies: read it again and propose the change anew.", vars: [] }
+  { id: WRITE_NOTE.stale, label: "The chat changed meanwhile", note: "An apply's answer when the chat changed between the check and the write (a turn landed), so the engine no longer takes the change.", text: "The chat changed while this was being written, so it no longer applies: read it again and propose the change anew.", vars: [] },
+  { id: WRITE_NOTE.notGranted, label: "A change the role isn't granted", note: "A turn agent's write answer when its role's tier (Settings \u2192 Agents \u2192 Roles) doesn't take that kind of change: the GM's edits need the GM tier, and so does the pins manifest (.pins.json, which sets what every agent is shown first); a role that only reads changes nothing.", text: "This role may make {{tier}} changes only, and this one is a {{needs}} change, so it isn't made.", vars: [{ name: "tier", text: "what the role may change: read (nothing), story or gm", required: true }, { name: "needs", text: "what the change needs: story or gm", required: true }] },
+  { id: WRITE_NOTE.gmCap, label: "GM edits per turn", note: "A turn agent's write answer once the turn's agents have staged as many of the GM's edits as Settings \u2192 Agents \u2192 Budgets allows.", text: "This turn's agents have staged {{count}} of the GM's edits, all a turn allows (GM edits per turn, Settings \u2192 Agents \u2192 Budgets), so this one isn't made.", vars: [{ name: "count", text: "the GM edits the turn's agents have staged", required: true }] },
+  { id: WRITE_NOTE.workspaceLine, label: "A workspace change, below the GM", note: "The line a workspace change reads as under the player character's knowledge (the review card's) and everyone's: one line naming no file, as the player's Journal shows none. Under the GM's knowledge it reads as the GM's line, with its path.", text: "A note the story's agents keep changes.", vars: [] }
 ];
 
 // src/shared/agent-tools.ts
@@ -7687,6 +7693,32 @@ var wsReadersEvent = {
       delete writable2(state, READERS_KEY)[e.data.path];
   },
   describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `workspace file ${String(e.data.path)} read with ${e.data.readers === "pov" ? "the player character's" : e.data.readers === "everyone" ? "everyone's" : "the GM's"} knowledge`
+};
+
+// src/engine/outputs.ts
+var OUT_LINES = "engine.out.lines";
+var OUT_SCENE = "engine.out.scene";
+var OUTPUT_KINDS = ["outcome", "montage", "outline", "brief"];
+var strings = (v) => Array.isArray(v) && v.every((s) => typeof s === "string");
+var outLinesEvent = {
+  type: OUT_LINES,
+  validate: (e) => {
+    if (typeof e.data.kind !== "string" || !OUTPUT_KINDS.includes(e.data.kind))
+      return { code: "bad_event", reason: "an output's lines are the outcome, the montage, the outline or the brief" };
+    return strings(e.data.lines) ? null : { code: "bad_event", reason: "an output's lines are texts" };
+  },
+  apply: () => {
+    return;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `${String(e.data.kind)} lines told to the narrator`
+};
+var outSceneEvent = {
+  type: OUT_SCENE,
+  validate: (e) => strings(e.data.lore) && strings(e.data.notes) && (e.data.knowledge === undefined || isAgentKnowledge(e.data.knowledge)) ? null : { code: "bad_event", reason: "a scene's lore is entry ids, its notes are texts, and its knowledge is pov, everyone or gm" },
+  apply: () => {
+    return;
+  },
+  describe: (_e, _ctx, viewer) => viewer !== undefined ? "" : "the scene's lore and notes told to the narrator"
 };
 
 // src/engine/engine-pack.ts
@@ -8140,6 +8172,8 @@ var enginePack = {
     r.event(wsDeleteEvent);
     r.event(wsPinEvent);
     r.event(wsReadersEvent);
+    r.event(outLinesEvent);
+    r.event(outSceneEvent);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);
@@ -19801,7 +19835,7 @@ function dayOfField(cal, v) {
 function numbers(v) {
   return Array.isArray(v) ? v.filter((x) => typeof x === "number" && Number.isFinite(x)) : [];
 }
-function strings(v) {
+function strings2(v) {
   return Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : [];
 }
 function deductionsOf(v) {
@@ -19832,7 +19866,7 @@ function placesOf(ctx, business) {
   const e = own(ctx.state.entities, business);
   if (!e)
     return [];
-  const listed = strings(e.fields.places).filter((p) => own(ctx.world.places, p) !== undefined);
+  const listed = strings2(e.fields.places).filter((p) => own(ctx.world.places, p) !== undefined);
   if (listed.length > 0)
     return listed;
   const here = placeOfEntity(ctx.state, business);
@@ -19895,7 +19929,7 @@ function readJob(ctx, id) {
   const unit2 = f.pay_unit === "day" || f.pay_unit === "week" || f.pay_unit === "month" || f.pay_unit === "year" ? f.pay_unit : "month";
   const start = dayOfField(cal, f.start);
   const weekday = Math.round(numOf(f.pay_weekday, 5));
-  const custom = { every: unit2, interval: Math.max(1, Math.round(numOf(f.pay_interval, 1))), ...numbers(f.pay_weekdays).length > 0 ? { weekdays: numbers(f.pay_weekdays) } : unit2 === "week" ? { weekdays: [weekday] } : {}, ...numbers(f.pay_days).length > 0 ? { days: numbers(f.pay_days) } : {}, ...numbers(f.pay_months).length > 0 ? { months: numbers(f.pay_months) } : {}, ...strings(f.pay_except).length > 0 ? { except: strings(f.pay_except) } : {} };
+  const custom = { every: unit2, interval: Math.max(1, Math.round(numOf(f.pay_interval, 1))), ...numbers(f.pay_weekdays).length > 0 ? { weekdays: numbers(f.pay_weekdays) } : unit2 === "week" ? { weekdays: [weekday] } : {}, ...numbers(f.pay_days).length > 0 ? { days: numbers(f.pay_days) } : {}, ...numbers(f.pay_months).length > 0 ? { months: numbers(f.pay_months) } : {}, ...strings2(f.pay_except).length > 0 ? { except: strings2(f.pay_except) } : {} };
   return {
     id,
     worker,
