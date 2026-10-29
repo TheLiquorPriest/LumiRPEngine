@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { MEMORY_LIMIT_BYTES, MEMORY_REGROWTH_BYTES, MemoryBudget, watchMemory, type TrimReport } from "../../src/backend/memory-budget";
 
 const MB = 1024 * 1024;
-const GONE: TrimReport = { messages: 2, ledgers: 1, views: 3 };
+const GONE: TrimReport = { messages: 2, ledgers: 1, views: 3, bridges: 4 };
 
 function probe(rss: number): { at: { rss: number; collected: number; trims: number }; rss: () => number; collect: () => void; trim: () => TrimReport } {
   const at = { rss, collected: 0, trims: 0 };
@@ -31,7 +31,7 @@ describe("the memory budget", () => {
     p.at.rss = MEMORY_LIMIT_BYTES + 10 * MB;
     expect(budget.check()).toBe(true);
     expect(p.at).toEqual({ rss: MEMORY_LIMIT_BYTES + 10 * MB, collected: 1, trims: 1 });
-    expect(lines).toEqual([`memory: RSS ${Math.round(MEMORY_LIMIT_BYTES / MB) + 10} MB is past the ${Math.round(MEMORY_LIMIT_BYTES / MB)} MB budget; let go of the copies of 2 chats' messages, 1 open ledgers and 3 views of chats not in use`]);
+    expect(lines).toEqual([`memory: RSS ${Math.round(MEMORY_LIMIT_BYTES / MB) + 10} MB is past the ${Math.round(MEMORY_LIMIT_BYTES / MB)} MB budget; let go of the copies of 2 chats' messages, 1 open ledgers, 3 views and 4 turn bridges of chats not in use`]);
     p.at.rss += MEMORY_REGROWTH_BYTES - 1;
     expect(budget.check()).toBe(false);
     p.at.rss += 1;

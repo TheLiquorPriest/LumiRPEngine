@@ -284,6 +284,18 @@ describe("agent calls", () => {
     expect(records[1]).toMatchObject({ kind: "agent", step: "gm", status: "ok" });
     expect(records[1]?.agent).toBeUndefined();
   });
+
+  test("what a call wrote to the cache is kept when its provider said, read back from the file, and a count that isn't one is dropped alone", async () => {
+    const host = new FakeHost();
+    const diag = new Diagnostics(host);
+    await diag.agentCall(at(), null, gmCall({ usage: { in: 11_606, cachedIn: 0, cacheWrite: 11_592, out: 52, reasoningOut: 0 } }));
+    await diag.agentCall(at(), null, gmCall());
+    expect((await diag.records("chat-1", "u1")).map((r) => r.agent?.usage?.cacheWrite)).toEqual([11_592, undefined]);
+    const call = (seq: number, cacheWrite: unknown) => ({ seq, kind: "agent", level: "info", turn: null, phase: null, step: "gm", status: "ok", start: 3, end: 4, ms: 1, agent: { ...gmCall(), usage: { in: 900, cachedIn: 0, cacheWrite, out: 20, reasoningOut: 0 } } });
+    host.files.set("u1/runs/chat-2/diagnostics.json", JSON.stringify({ v: 1, records: [call(1, 880), call(2, -1), call(3, "lots")] }));
+    const read = await new Diagnostics(host).records("chat-2", "u1");
+    expect(read.map((r) => r.agent?.usage)).toEqual([{ in: 900, cachedIn: 0, cacheWrite: 880, out: 20, reasoningOut: 0 }, { in: 900, cachedIn: 0, out: 20, reasoningOut: 0 }, { in: 900, cachedIn: 0, out: 20, reasoningOut: 0 }]);
+  });
 });
 
 describe("an agent call's text through lre.diag", () => {

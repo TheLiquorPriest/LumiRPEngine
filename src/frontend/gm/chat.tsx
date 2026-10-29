@@ -1,4 +1,4 @@
-// GM → This chat: this chat's rules (Realism and Checks for this chat, the time
+// GM → This chat: this chat's rules (its engine, Realism and Checks for this chat, the time
 // controls, the sections' feed, its knowledge choices, Pins and upgrade), the Edits log behind the gate, and the Inspector with the call meter;
 // a grouped list where each opens as a page. The rules and the Inspector show nothing the player
 // mayn't see, so they don't wait behind the gate; Edits is the truth's (the `core.gm` panel).
@@ -18,9 +18,10 @@ import { TimeControlsEditor } from "../time-controls";
 import { PinsAndUpgrade } from "./pins";
 import { FeedThisChat } from "./feed";
 import { KnowledgeThisChat, knowledgeSummary } from "./chat-knowledge";
+import { EngineThisChat } from "./engine";
 import { GmPage, usePages } from "./ui";
 
-type ChatPage = "realism" | "checks" | "time" | "sections" | "knowledge" | "pins" | "edits" | { panel: PanelDef };
+type ChatPage = "engine" | "realism" | "checks" | "time" | "sections" | "knowledge" | "pins" | "edits" | { panel: PanelDef };
 
 /** This chat's time controls as `time` markers on the running chat (moved here from Play → Calendar). */
 function TimeThisChat(props: { view: StateView }) {
@@ -65,6 +66,7 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
       <div class="lre-stack lre-gm-list" hidden={page !== null}>
         <Section title="Rules" flush>
           <List>
+            <ListRow icon="function" title="Engine" subtitle="Classic steps or agents, for this chat's turns" chevron onClick={() => pages.open("engine")} />
             <ListRow icon="sliders" title="Realism" subtitle={controls ? `${humanize(controls.realism.preset)} · how deeply each part of the world is simulated` : "How deeply each part of the world is simulated"} chevron onClick={() => pages.open("realism")} />
             <ListRow icon="dice" title="Checks" subtitle={controls ? `${ADJUDICATION_PRESET_LABEL[controls.adjudication.preset]} · inferred checks: ${INFER_MODE_LABEL[controls.inferred.mode].toLowerCase()}` : "How checks are decided"} chevron onClick={() => pages.open("checks")} />
             <ListRow icon="clock" title="Time" subtitle={controls ? `${controls.time.scale}× time scale · montage ${controls.time.montage === "key" ? "by key events" : `per ${controls.time.montage}`}${controls.time.paused ? " · clock paused" : ""}` : "Ticks, interrupts, Speed through, Montage"} chevron onClick={() => pages.open("time")} />
@@ -90,7 +92,11 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
           </Section>
         ) : null}
       </div>
-      {page === "realism" ? (
+      {page === "engine" ? (
+        <GmPage name="engine" title="Engine" subtitle="This chat" backLabel="This chat" onBack={pages.back}>
+          <EngineThisChat chatId={view.chatId} />
+        </GmPage>
+      ) : page === "realism" ? (
         <GmPage name="realism" title="Realism" subtitle="This chat" backLabel="This chat" onBack={pages.back}>
           <RealismThisChat chatId={view.chatId} controls={controls} />
         </GmPage>

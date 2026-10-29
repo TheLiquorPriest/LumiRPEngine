@@ -54,7 +54,7 @@ export interface GmState {
   focus?: string;
 }
 
-export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "narrator" | "timeouts" | "agents" | "assistant" | "prompts" | "writes" | "retention" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats" | "diagnostics" | "mcp";
+export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "narrator" | "timeouts" | "agents" | "roles" | "main" | "assistant" | "prompts" | "writes" | "retention" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats" | "diagnostics" | "mcp";
 
 export type BuildRoute =
   | { view: "worlds" }

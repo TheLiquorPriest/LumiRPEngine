@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { QuietMessage, QuietRequest, QuietToolCall } from "../../src/backend/host";
-import { ACCEPTANCE_PATH, type AccountsClock, AgentAccounts, effortChoice, recoverToolCalls } from "../../src/backend/agents/provider";
+import { ACCEPTANCE_PATH, type AccountsClock, AgentAccounts, effortChoice, ownBreakpoints, recoverToolCalls } from "../../src/backend/agents/provider";
 import { type AgentSpec, type AgentTool, AgentTurn, SCRATCH_READ, startAgent } from "../../src/backend/agents/runtime";
 import { parseUsage } from "../../src/backend/agents/usage";
 import { cacheBreakpoints, createSpindleHost, reasoningOverride, rouletteTargets } from "../../src/backend/spindle-host";
@@ -12,6 +12,7 @@ import { type AgentSettings, agentSettingsOf, DEFAULT_ACCEPTANCE, defaultAgentSe
 import type { AcceptanceState } from "../../src/shared/agent-settings";
 import type { JsonObject } from "../../src/shared/json";
 import type { UserSettings } from "../../src/shared/settings";
+import { STOP_TEXT } from "../../src/shared/agent-failures";
 import { FakeHost, type QuietScript } from "../support/fake-host";
 import { Rig } from "../support/rig";
 
@@ -143,6 +144,10 @@ describe("tool round trips", () => {
       await host.models.quiet({ messages: [{ role: "user", content: "x" }], maxTokens: 100, json: false, connectionId: "c", model: null }, "u", new AbortController().signal);
       expect(sent[1]?.messages).toEqual([{ role: "user", content: "x" }]);
       expect(sent[1]?.parameters).not.toHaveProperty("_include_usage");
+      expect(sent[1]).not.toHaveProperty("reasoning");
+      // An effort of the call's own asking for its thinking summarized goes as Lumiverse's reasoning override.
+      await host.models.quiet({ messages: [{ role: "user", content: "x" }], maxTokens: 100, json: false, connectionId: "c", model: null, effort: "high", thinkingDisplay: "summarized" }, "u", new AbortController().signal);
+      expect(sent[2]?.reasoning).toEqual({ source: "custom", apiReasoning: true, effort: "high", thinkingDisplay: "summarized" });
     } finally {
       Object.assign(globalThis, { spindle: undefined });
     }
@@ -349,7 +354,9 @@ describe("budgets and ceilings", () => {
   test("Tool rounds per agent: the round past it isn't run", async () => {
     const lookup = tool("lookup");
     const r = rig([round(), round(), "never"]);
-    expect(await r.start(spec({ tools: [lookup], budget: { ...spec().budget, toolTurns: 1 } })).send("Go.")).toMatchObject({ status: "refused", code: "tool_turns" });
+    const reply = await r.start(spec({ tools: [lookup], budget: { ...spec().budget, toolTurns: 1 } })).send("Go.");
+    // A count of one is worded as one: "1 round", never "1 rounds".
+    expect(reply).toMatchObject({ status: "refused", code: "tool_turns", reason: "the agent has had its 1 round of tool calls (Tool rounds per agent)" });
     expect(lookup.runs.length).toBe(1);
   });
 
@@ -360,8 +367,12 @@ describe("budgets and ceilings", () => {
     expect(lookup.runs).toEqual([{ q: "1" }]);
     expect(lastOf(r.host, 1)?.parts).toMatchObject([
       { type: "tool_result", toolUseId: "a", content: "lookup done" },
-      { type: "tool_result", toolUseId: "b", isError: true },
+      { type: "tool_result", toolUseId: "b", isError: true, content: "Not run: one answer may call at most 1 tool. Call lookup again in your next answer if you still need it." },
     ]);
+    // Past a limit of more than one, the tools are counted as many.
+    const two = rig([{ content: "", toolCalls: [call("lookup", { q: "1" }, "a"), call("lookup", { q: "2" }, "b"), call("lookup", { q: "3" }, "c")] }, "Done."]);
+    await two.start(spec({ tools: [tool("lookup")], budget: { ...spec().budget, callTools: 2 } })).send("Go.");
+    expect(lastOf(two.host, 1)?.parts?.[2]).toMatchObject({ toolUseId: "c", isError: true, content: expect.stringContaining("at most 2 tools.") });
   });
 
   test("Time per call: a call that takes longer is stopped", async () => {
@@ -394,6 +405,17 @@ describe("budgets and ceilings", () => {
     expect(await agent.send("Shorter.")).toMatchObject({ status: "answered", text: "Second." });
     expect(await agent.send("Again.")).toMatchObject({ status: "refused", code: "revisions" });
     expect(r.host.quietCalls.length).toBe(2);
+  });
+
+  test("a stop's reason is its registry text on the Main agent page: the shipped words, or the user's own where edited (L4)", async () => {
+    const stopped = async (texts?: Record<string, string>): Promise<unknown> => {
+      const r = rig(["First.", "never"], settingsWith(), texts ? { texts } : {});
+      const agent = r.start(spec({ budget: { ...spec().budget, revisions: 0 } }));
+      await agent.send("Draft it.");
+      return agent.send("Again.");
+    };
+    expect(await stopped()).toMatchObject({ status: "refused", code: "revisions", reason: "it has had the 0 revisions it may have after its first answer" });
+    expect(await stopped({ [STOP_TEXT.revisions]: "EDITED-STOP: {{revisions}} spent" })).toMatchObject({ status: "refused", code: "revisions", reason: "EDITED-STOP: 0 revisions spent" });
   });
 
   test("a turn's budget is every agent's of the turn together: tokens in and out, rounds and time", async () => {
@@ -496,14 +518,26 @@ describe("the acceptance guard", () => {
     expect(await rig(["Fine."]).start().send("Go.")).toMatchObject({ status: "answered" });
   });
 
-  test("a call on a default connection that can't be read is refused while any connection is kept for acceptance runs", async () => {
-    const r = rig(["Fine.", "Fine."], guarded());
+  test("a call on a default connection that can't be read goes ahead while connections are guarded, counted against none of them, and the log warns once; a guarded connection is still refused outside a run", async () => {
+    const r = rig(["Fine.", "Fine again.", "During the run."], guarded());
     r.host.activeConnection = null;
-    expect(await r.start(spec({ connectionId: null })).send("Go.")).toMatchObject({ status: "refused", code: "acceptance" });
-    // A new user's settings keep none, so nothing is refused.
+    const warnings = (host: FakeHost) => host.logs.filter((l) => l.startsWith("warn:") && l.includes("the default connection, which couldn't be read"));
+    expect(await r.start(spec({ connectionId: null })).send("Go.")).toMatchObject({ status: "answered", text: "Fine." });
+    expect(await r.start(spec({ connectionId: null })).send("Go.")).toMatchObject({ status: "answered", text: "Fine again." });
+    expect(warnings(r.host)).toHaveLength(1);
+    expect((r.host.userLogs.get(r.host.userId) ?? []).filter((l) => l.includes("the default connection, which couldn't be read"))).toHaveLength(1);
+    expect(await r.start(spec({ connectionId: SONNET })).send("Go.")).toMatchObject({ status: "refused", code: "acceptance" });
+    expect(r.host.quietCalls).toHaveLength(2);
+    // In a run, what it spends counts against no guarded connection.
+    await r.accounts.open(r.host.userId, "Increment 2");
+    expect(await r.start(spec({ connectionId: null })).send("Go.")).toMatchObject({ status: "answered", text: "During the run." });
+    expect((await r.accounts.state(r.host.userId, r.deps.settings)).run?.connections.find((x) => x.id === SONNET)?.spent.calls).toBe(0);
+    expect(warnings(r.host)).toHaveLength(1);
+    // A new user's settings guard none, so there is nothing to warn of.
     const open = rig(["Fine."]);
     open.host.activeConnection = null;
     expect(await open.start(spec({ connectionId: null })).send("Go.")).toMatchObject({ status: "answered" });
+    expect(warnings(open.host)).toEqual([]);
   });
 
   test("only the user opens and closes a run, and only the user changes what the runs guard", async () => {
@@ -563,7 +597,7 @@ describe("the acceptance guard", () => {
     expect(stored()).toEqual([]);
   });
 
-  test("a damaged guard file, with settings that keep no copy of the guard, leaves it unknown: every agent call is refused, across a restart, until the user sets it again, and classic turns play", async () => {
+  test("a damaged guard file, with settings that keep no copy of the guard, lets agent calls go ahead under the settings file's own list, warned of once a start, until the user sets the list again; classic turns play", async () => {
     const host = new FakeHost();
     const { userId } = host;
     const kept = [{ id: SONNET, only: true, tokensIn: 1000, tokensOut: 100 }];
@@ -571,38 +605,54 @@ describe("the acceptance guard", () => {
     host.files.set(`${userId}/settings.json`, JSON.stringify({ v: 1, minds: { enabled: false } }));
     host.files.set(`${userId}/${ACCEPTANCE_PATH}`, JSON.stringify({ v: 1, run: null, last: null, connections: kept }).slice(0, 40));
     const reserve = async (r: Rig, connection: string) => r.rt.agentAccounts.reserve({ userId, connection, model: "m", tokensIn: 10, tokensOut: 10, settings: (await r.rt.settings.get(userId)).agents, signal: new AbortController().signal });
+    const warnings = () => host.logs.filter((l) => l.startsWith("warn:") && l.includes("the acceptance runs' file was damaged and set aside"));
     const rig = new Rig({ host });
-    // The settings serve, unkept, so each read tries the guard again; no agent call goes, on any connection.
+    // The settings serve, unkept, so each read tries the guard again; they keep no list, so every call goes, and the log says so once.
     expect((await rig.rt.settings.get(userId)).agents.acceptance.connections).toEqual([]);
     expect(rig.rt.settings.known(userId)).toBeUndefined();
-    await expect(reserve(rig, MAIN)).rejects.toMatchObject({ code: "acceptance" });
+    await expect(reserve(rig, MAIN)).resolves.toMatchObject({ connection: MAIN });
+    await expect(reserve(rig, SONNET)).resolves.toMatchObject({ connection: SONNET });
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]).toContain("no guard");
     expect([...host.files.keys()].some((k) => k.startsWith(`${userId}/${ACCEPTANCE_PATH}.corrupt-`))).toBe(true);
     const chatId = await rig.worldChat();
     await rig.turn(chatId, "I look around.", "The street is quiet.");
     expect((await rig.rt.diag.records(chatId, userId)).filter((r) => r.kind === "turn").at(-1)?.status).toBe("ok");
-    // The fresh file says the guard was lost, so a restart doesn't read it as none.
+    // The fresh file says the guard was lost, so a restart reads it as lost, not as none, and warns again.
     await rig.rt.agentAccounts.flushed(userId);
     expect(JSON.parse(host.files.get(`${userId}/${ACCEPTANCE_PATH}`) ?? "{}")).toMatchObject({ lost: true });
     const back = rig.restart();
-    await expect(reserve(back, MAIN)).rejects.toMatchObject({ code: "acceptance" });
+    await expect(reserve(back, MAIN)).resolves.toMatchObject({ connection: MAIN });
+    expect(warnings()).toHaveLength(2);
     // A settings change that leaves the guard as it reads writes no copy that would stand for it.
     back.body(await back.send({ type: "lre.settings.set", patch: { agents: { loopRepeats: 4 } } }));
     expect(back.rt.settings.known(userId)).toBeUndefined();
+    // A copy another writer left in the settings file guards meanwhile: a known guarded connection is refused outside a run.
+    const file = JSON.parse(host.files.get(`${userId}/settings.json`) ?? "{}") as { agents: { acceptance: { connections: unknown } } };
+    file.agents.acceptance.connections = kept;
+    host.files.set(`${userId}/settings.json`, JSON.stringify(file));
     const again = back.restart();
-    await expect(reserve(again, MAIN)).rejects.toMatchObject({ code: "acceptance" });
-    // The user sets it again: it is known, and kept.
-    again.body(await again.send({ type: "lre.settings.set", patch: { agents: { acceptance: { connections: kept } } } }));
-    expect(again.rt.settings.known(userId)?.agents.acceptance.connections).toEqual(kept);
     await expect(reserve(again, MAIN)).resolves.toMatchObject({ connection: MAIN });
     await expect(reserve(again, SONNET)).rejects.toMatchObject({ code: "acceptance" });
+    expect(warnings()).toHaveLength(3);
+    expect(warnings()[2]).toContain(SONNET);
+    // The user sets it again: it is known, and kept, and nothing more is warned of.
+    const both = [...kept, { id: CLAUDE, only: true, tokensIn: 1000, tokensOut: 100 }];
+    again.body(await again.send({ type: "lre.settings.set", patch: { agents: { acceptance: { connections: both } } } }));
+    expect(again.rt.settings.known(userId)?.agents.acceptance.connections).toEqual(both);
+    await expect(reserve(again, MAIN)).resolves.toMatchObject({ connection: MAIN });
+    await expect(reserve(again, CLAUDE)).rejects.toMatchObject({ code: "acceptance" });
+    await expect(reserve(again.restart(), SONNET)).rejects.toMatchObject({ code: "acceptance" });
+    expect(warnings()).toHaveLength(3);
   });
 
-  test("a guard file that can't be read leaves the guard unknown while it can't: a classic turn plays, every agent call is refused, and once it reads the guard holds", async () => {
+  test("a guard file that can't be read lets agent calls go ahead under the settings file's own list, warned of once: it still guards a known connection, a classic turn plays, nothing is written over the file, and once it reads the guard holds", async () => {
     const rig = new Rig();
     const { userId } = rig.host;
     const chatId = await rig.worldChat();
     const kept = [{ id: SONNET, only: true, tokensIn: 1000, tokensOut: 100 }];
     rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { acceptance: { connections: kept } } } }));
+    const stored = rig.host.files.get(`${userId}/${ACCEPTANCE_PATH}`);
     const back = rig.restart();
     const read = back.host.storage.read.bind(back.host.storage);
     let busy = true;
@@ -611,15 +661,28 @@ describe("the acceptance guard", () => {
       return read(path, user);
     };
     const reserve = async (connection: string) => back.rt.agentAccounts.reserve({ userId, connection, model: "m", tokensIn: 10, tokensOut: 10, settings: (await back.rt.settings.get(userId)).agents, signal: new AbortController().signal });
+    const warnings = () => back.host.logs.filter((l) => l.startsWith("warn:") && l.includes("the acceptance runs' file couldn't be read"));
     await back.turn(chatId, "I look around.", "The street is quiet.");
     expect((await back.rt.diag.records(chatId, userId)).filter((r) => r.kind === "turn").at(-1)?.status).toBe("ok");
+    // The settings serve with their own copy, unkept, so each read tries the guard again.
+    expect((await back.rt.settings.get(userId)).agents.acceptance.connections).toEqual(kept);
     expect(back.rt.settings.known(userId)).toBeUndefined();
-    await expect(reserve(MAIN)).rejects.toMatchObject({ code: "acceptance" });
+    const first = await reserve(MAIN);
+    back.rt.agentAccounts.settle(first, null);
+    await expect(reserve(MAIN)).resolves.toMatchObject({ connection: MAIN });
+    await expect(reserve(SONNET)).rejects.toMatchObject({ code: "acceptance" });
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]).toContain("storage busy");
+    expect(warnings()[0]).toContain(SONNET);
+    expect((back.host.userLogs.get(userId) ?? []).filter((l) => l.includes("the acceptance runs' file couldn't be read"))).toHaveLength(1);
+    await back.rt.agentAccounts.flushed(userId);
+    expect(back.host.files.get(`${userId}/${ACCEPTANCE_PATH}`)).toBe(stored);
     busy = false;
     expect((await back.rt.settings.get(userId)).agents.acceptance.connections).toEqual(kept);
     expect(back.rt.settings.known(userId)).toBeDefined();
     await expect(reserve(MAIN)).resolves.toMatchObject({ connection: MAIN });
     await expect(reserve(SONNET)).rejects.toMatchObject({ code: "acceptance" });
+    expect(warnings()).toHaveLength(1);
   });
 
   test("a Model Roulette is refused while any connection it may send the call on is guarded, and goes once none is", async () => {
@@ -634,16 +697,23 @@ describe("the acceptance guard", () => {
     const open = rig(["Fine."], guarded());
     open.host.connectionProfiles.push({ id: ROULETTE, name: "Roulette", models: null, provider: "model_roulette", targets: [MAIN, CLAUDE] });
     expect(await open.start(spec({ connectionId: ROULETTE })).send("Go.")).toMatchObject({ status: "answered", text: "Fine." });
-    // A connection whose profile can't be read might be a roulette over a guarded one: refused, as the default one is, until no connection is kept for runs.
-    const unread = rig(["Fine."], guarded());
+    // A connection whose profile can't be read might be a roulette over a guarded one: its calls go ahead, and the log warns once.
+    const unread = rig(["Fine.", "Fine again."], guarded());
     unread.host.connections.profile = async () => {
       throw new Error("the connections couldn't be listed");
     };
-    expect(await unread.start(spec({ connectionId: CLAUDE })).send("Go.")).toMatchObject({ status: "refused", code: "acceptance" });
-    expect(unread.host.quietCalls).toHaveLength(0);
+    const warnings = (host: FakeHost) => host.logs.filter((l) => l.startsWith("warn:") && l.includes(`connection ${CLAUDE} couldn't be read`));
+    expect(await unread.start(spec({ connectionId: CLAUDE })).send("Go.")).toMatchObject({ status: "answered", text: "Fine." });
+    expect(await unread.start(spec({ connectionId: CLAUDE })).send("Go.")).toMatchObject({ status: "answered", text: "Fine again." });
+    expect(warnings(unread.host)).toHaveLength(1);
+    // A guarded connection is known by its id, read or not: still refused outside a run.
+    expect(await unread.start(spec({ connectionId: SONNET })).send("Go.")).toMatchObject({ status: "refused", code: "acceptance" });
+    expect(unread.host.quietCalls).toHaveLength(2);
+    // With nothing guarded, there is nothing to warn of.
     const free = rig(["Fine."]);
     free.host.connections.profile = unread.host.connections.profile;
     expect(await free.start(spec({ connectionId: CLAUDE })).send("Go.")).toMatchObject({ status: "answered", text: "Fine." });
+    expect(warnings(free.host)).toEqual([]);
     // A roulette's connections are read from its own settings, each once, less itself, whether or not the host's list (100 at most) has them.
     expect(rouletteTargets({ id: ROULETTE, provider: "model_roulette", metadata: { connection_roulette: { connection_ids: [` ${SONNET} `, SONNET, ROULETTE, "conn-past-the-first-hundred", 7, ""] } } })).toEqual([SONNET, "conn-past-the-first-hundred"]);
     expect(rouletteTargets({ id: CLAUDE, provider: "anthropic", metadata: { connection_roulette: { connection_ids: [SONNET] } } })).toEqual([]);
@@ -711,14 +781,18 @@ describe("cancel", () => {
 });
 
 describe("effort", () => {
-  test("each effort maps to the host's reasoning choice: set by the model as auto, inherit as none", () => {
+  test("each effort maps to the host's reasoning choice: set by the model as auto, inherit as none; asked to, an effort of the call's own shows the model's thinking summarized", () => {
     expect((["off", "low", "medium", "high", "model", "inherit"] as const).map(effortChoice)).toEqual(["off", "low", "medium", "high", "auto", "inherit"]);
     expect(reasoningOverride(effortChoice("model"))).toMatchObject({ source: "custom", effort: "auto" });
     expect(reasoningOverride(effortChoice("inherit"))).toBeUndefined();
     expect(reasoningOverride(effortChoice("off"))).toEqual({ source: "off" });
+    expect(reasoningOverride("medium")).toEqual({ source: "custom", apiReasoning: true, effort: "medium" });
+    expect(reasoningOverride("medium", "summarized")).toEqual({ source: "custom", apiReasoning: true, effort: "medium", thinkingDisplay: "summarized" });
+    expect(reasoningOverride("off", "summarized")).toEqual({ source: "off" });
+    expect(reasoningOverride("inherit", "summarized")).toBeUndefined();
   });
 
-  test("while Thinking in agent tool loops is off, a call that offers tools goes with reasoning off; without tools, or with it on, the agent's effort", async () => {
+  test("while Thinking in agent tool loops is off, a call that offers tools goes with reasoning off; without tools, or with it on, the agent's effort, and with it on its thinking comes back summarized", async () => {
     const ask = async (effort: AgentSpec["effort"], tools: AgentTool[], thinking: boolean) => {
       const r = rig(["Done."], settingsWith((s) => (s.thinkingInToolLoops = thinking)));
       await r.start(spec({ effort, tools })).send("Go.");
@@ -730,6 +804,13 @@ describe("effort", () => {
     expect(await ask("model", [], false)).toBe("auto");
     expect(await ask("inherit", [], false)).toBe("inherit");
     expect(await ask("high", [tool("lookup")], true)).toBe("high");
+    const display = async (thinking: boolean) => {
+      const r = rig(["Done."], settingsWith((s) => (s.thinkingInToolLoops = thinking)));
+      await r.start(spec({ effort: "high", tools: [tool("lookup")] })).send("Go.");
+      return r.host.quietCalls[0]?.thinkingDisplay;
+    };
+    expect(await display(true)).toBe("summarized");
+    expect(await display(false)).toBeUndefined();
     // Tools offered as text are tools offered.
     const r = rig((req) => {
       if (req.tools?.length) throw new Error("400: tools unsupported");
@@ -761,6 +842,17 @@ describe("caching", () => {
     expect(plain.host.quietCalls[0]?.messages[0]).toEqual({ role: "system", content: "Digest.\n\nYou answer questions about the story." });
   });
 
+  test("the connection's tools caching marks the last tool alone: one of the four, however many tools, so the agent keeps its own", async () => {
+    const tools = { ...NO_CACHE_OF_ITS_OWN, system: true, automatic: true, tools: true };
+    expect([ownBreakpoints(tools, 0), ownBreakpoints(tools, 1), ownBreakpoints(tools, 54)]).toEqual([2, 3, 3]);
+    const r = rig([{ content: "", toolCalls: [call("lookup")] }, "Done."]);
+    for (const profile of r.host.connectionProfiles) if (profile.id === CLAUDE) profile.cache = cacheBreakpoints("anthropic", { prompt_caching: { breakpoints: { tools: true } } });
+    await r.start(spec({ connectionId: CLAUDE, tools: [tool("lookup"), tool("other")] })).send("Go.");
+    // System, automatic and the last tool are the connection's; the fourth marks the end of the agent's opening.
+    expect(r.host.quietCalls.map((c) => marks(c).length)).toEqual([1, 1]);
+    expect(r.host.quietCalls[0]?.messages[0]?.parts?.at(-1)?.cache).toBe(true);
+  });
+
   test("Bust heads the role's prompt with a new key; caching off sends a fresh key every call and no breakpoints", async () => {
     const busted = rig(["Done."], settingsWith((s) => (s.caching.roles.assistant = { on: true, nonce: "k-123" })));
     await busted.start(spec({ connectionId: CLAUDE })).send("Go.");
@@ -781,12 +873,30 @@ describe("usage", () => {
   const estimate = { in: 500, out: 40, reasoningOut: 30 };
 
   test("each provider's raw usage is read into tokens in, cached, out and reasoning; what it never reports is a flagged estimate", () => {
-    expect(parseUsage({ prompt_tokens: 1100, completion_tokens: 60, total_tokens: 1160, provider_raw: { input_tokens: 100, cache_read_input_tokens: 900, cache_creation_input_tokens: 100, output_tokens: 60 } }, "anthropic", estimate)).toEqual({ in: 1100, cachedIn: 900, out: 60, reasoningOut: 30, estimated: ["reasoningOut"] });
+    expect(parseUsage({ prompt_tokens: 1100, completion_tokens: 60, total_tokens: 1160, provider_raw: { input_tokens: 100, cache_read_input_tokens: 900, cache_creation_input_tokens: 100, output_tokens: 60 } }, "anthropic", estimate)).toEqual({ in: 1100, cachedIn: 900, cacheWrite: 100, out: 60, reasoningOut: 30, estimated: ["reasoningOut"] });
     expect(parseUsage({ prompt_tokens: 800, completion_tokens: 90, total_tokens: 890, provider_raw: { prompt_tokens: 800, completion_tokens: 90, prompt_cache_hit_tokens: 640, prompt_cache_miss_tokens: 160, completion_tokens_details: { reasoning_tokens: 50 } } }, "deepseek", estimate)).toEqual({ in: 800, cachedIn: 640, out: 90, reasoningOut: 50, estimated: [] });
     expect(parseUsage({ prompt_tokens: 700, completion_tokens: 20, total_tokens: 720, provider_raw: { prompt_tokens: 700, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 512 }, completion_tokens_details: { reasoning_tokens: 0 } } }, "openrouter", estimate)).toEqual({ in: 700, cachedIn: 512, out: 20, reasoningOut: 0, estimated: [] });
     expect(parseUsage({ prompt_tokens: 300, completion_tokens: 40, total_tokens: 400 }, "google", estimate)).toEqual({ in: 300, cachedIn: 0, out: 100, reasoningOut: 60, estimated: ["cachedIn"] });
     expect(parseUsage({ prompt_tokens: 300, completion_tokens: 40, total_tokens: 340 }, "openai", estimate)).toEqual({ in: 300, cachedIn: 0, out: 40, reasoningOut: 30, estimated: ["cachedIn", "reasoningOut"] });
     expect(parseUsage(undefined, "deepseek", estimate)).toEqual({ in: 500, cachedIn: 0, out: 70, reasoningOut: 30, estimated: ["in", "cachedIn", "out", "reasoningOut"] });
+  });
+
+  test("what a call wrote to the cache is the provider's count where it says, so a prefix never written tells apart from one written but not read; where it doesn't say, there is none, and no estimate", () => {
+    // Anthropic says on every call: a first call writes, a second reads.
+    const written = parseUsage({ prompt_tokens: 11_606, completion_tokens: 52, total_tokens: 11_658, provider_raw: { input_tokens: 14, cache_read_input_tokens: 0, cache_creation_input_tokens: 11_592, output_tokens: 52 } }, "anthropic", estimate);
+    const read = parseUsage({ prompt_tokens: 11_700, completion_tokens: 56, total_tokens: 11_756, provider_raw: { input_tokens: 108, cache_read_input_tokens: 11_592, cache_creation_input_tokens: 0, output_tokens: 56 } }, "anthropic", estimate);
+    expect([written.cachedIn, written.cacheWrite, read.cachedIn, read.cacheWrite]).toEqual([0, 11_592, 11_592, 0]);
+    // Anthropic's own counts, with the host's prompt tokens absent, add back to what was sent.
+    expect(parseUsage({ provider_raw: { input_tokens: 14, cache_read_input_tokens: 0, cache_creation_input_tokens: 11_592, output_tokens: 52 } }, "anthropic", estimate)).toMatchObject({ in: 11_606, cacheWrite: 11_592 });
+    // OpenRouter's under the prompt's details; a router passing Anthropic's own, or its own name for it.
+    expect(parseUsage({ prompt_tokens: 10_339, completion_tokens: 20, total_tokens: 10_359, provider_raw: { prompt_tokens: 10_339, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 10_318 } } }, "openrouter", estimate)).toMatchObject({ cachedIn: 0, cacheWrite: 10_318, estimated: ["reasoningOut"] });
+    expect(parseUsage({ prompt_tokens: 900, completion_tokens: 20, total_tokens: 920, provider_raw: { prompt_tokens: 900, completion_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 880 } }, "openai", estimate).cacheWrite).toBe(880);
+    expect(parseUsage({ prompt_tokens: 900, completion_tokens: 20, total_tokens: 920, provider_raw: { prompt_tokens: 900, completion_tokens: 20, cache_creation_tokens: 640 } }, "custom", estimate).cacheWrite).toBe(640);
+    // DeepSeek, OpenAI's own and Gemini say nothing of it: none, and nothing estimated for it.
+    for (const usage of [parseUsage({ prompt_tokens: 800, completion_tokens: 90, total_tokens: 890, provider_raw: { prompt_tokens: 800, completion_tokens: 90, prompt_cache_hit_tokens: 640, prompt_cache_miss_tokens: 160 } }, "deepseek", estimate), parseUsage({ prompt_tokens: 300, completion_tokens: 40, total_tokens: 340 }, "openai", estimate), parseUsage({ prompt_tokens: 300, completion_tokens: 40, total_tokens: 400 }, "google", estimate)]) {
+      expect(usage.cacheWrite).toBeUndefined();
+      expect(usage.estimated as string[]).not.toContain("cacheWrite");
+    }
   });
 
   test("every agent call asks for usage, and the agent's usage adds up what each call reported", async () => {
@@ -798,6 +908,16 @@ describe("usage", () => {
     const reply = await agent.send("Go.");
     expect(r.host.quietCalls.every((c) => c.usage === true)).toBe(true);
     expect(agent.usage()).toMatchObject({ calls: 2, in: 250, cachedIn: 192, out: 15, reasoningOut: 4, estimated: false });
+    // Neither call's provider said what it wrote to the cache: the agent's usage says none either.
+    expect(agent.usage().cacheWrite).toBeUndefined();
+    const anthropic = rig([
+      { content: "", toolCalls: [call("lookup")], usage: { prompt_tokens: 1000, completion_tokens: 10, total_tokens: 1010, provider_raw: { input_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 990, output_tokens: 10 } } },
+      { content: "Done.", usage: { prompt_tokens: 1050, completion_tokens: 5, total_tokens: 1055, provider_raw: { input_tokens: 60, cache_read_input_tokens: 990, cache_creation_input_tokens: 0, output_tokens: 5 } } },
+    ]);
+    const claude = anthropic.start(spec({ connectionId: CLAUDE, tools: [tool("lookup")] }));
+    await claude.send("Go.");
+    expect(claude.usage()).toMatchObject({ calls: 2, in: 2050, cachedIn: 990, cacheWrite: 990 });
+    expect(claude.transcript().entries.flatMap((e) => (e.kind === "answer" ? [e.usage.cacheWrite] : []))).toEqual([990, 0]);
     expect(reply.usage).toMatchObject({ calls: 2, in: 250 });
     expect(agent.transcript().entries.flatMap((e) => (e.kind === "answer" ? [e.usage.in] : []))).toEqual([100, 150]);
     // A provider that reports nothing leaves the runtime's estimate, flagged.
@@ -817,6 +937,12 @@ describe("the settings", () => {
     expect(agentSettingsOf(undefined)).toEqual(d);
     const read = agentSettingsOf({ loopRepeats: 1, clipChars: 0, budget: { revisions: -1, toolTurns: "none", concurrency: 0 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 0, connections: [{ id: "__proto__" }, { id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: 0, tokensPerMinute: 9000 }] });
     expect(read).toMatchObject({ loopRepeats: 3, clipChars: 4000, budget: { revisions: 2, toolTurns: "none", concurrency: 4 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 2, connections: [{ id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: "none", tokensPerMinute: 9000 }] });
+  });
+
+  test("what the engine keeps in memory for agent turns is 64 turns, 256 gates and 256 watched chats; a count under 1 or not whole falls back", () => {
+    expect(defaultAgentSettings().kept).toEqual({ runs: 64, gates: 256, watchers: 256 });
+    expect(agentSettingsOf({ kept: { runs: 0, gates: -3, watchers: 2.5 } }).kept).toEqual({ runs: 64, gates: 256, watchers: 256 });
+    expect(agentSettingsOf({ kept: { runs: 1, gates: 8, watchers: 12 } }).kept).toEqual({ runs: 1, gates: 8, watchers: 12 });
   });
 
   test("Settings saves them as the other pages' settings: a list replaces whole, and a reset goes back to the default", async () => {

@@ -172,7 +172,9 @@ export type ChipKind =
   /** The intent gate (DESIGN §5.1 preview gates): a typed message's read action waits, nothing generated, on Play, Edit (its params) or Cancel; Play and Edit resume the turn. */
   | "intent_gate"
   /** The outline gate (DESIGN §5.1 preview gates): the turn's outline waits, no reply written, on Play, Edit (its lines) or Cancel; Play and Edit resume the turn with that outline. */
-  | "outline_gate";
+  | "outline_gate"
+  /** An agent turn's review card (INC2-SPEC C13): its changes that ask first, with Apply all and No (a pick through `lre.review`); at a gate the turn waits on it. */
+  | "review";
 
 /**
  * A value a chip action asks for before it's sent, in its `lre.chip` payload: an amount in the
@@ -218,7 +220,7 @@ export interface Chip {
 export function chipStarts(chip: Pick<Chip, "kind" | "as">, choice: string): GenerateAs | null {
   if (choice === "regenerate" || choice === "continue") return choice;
   const kind = chip.kind;
-  const starts = (kind === "reply_failed" && choice === "rerun") || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit"));
+  const starts = (kind === "reply_failed" && choice === "rerun") || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit")) || (kind === "review" && chip.as !== undefined && (choice === "apply" || choice === "reject"));
   return starts ? (chip.as ?? "regenerate") : null;
 }
 

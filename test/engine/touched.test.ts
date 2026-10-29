@@ -164,6 +164,9 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "engine.ws.pin", data: { path: "notes/dev.md", pinned: true } },
   { type: "engine.ws.readers", data: { path: "notes/dev.md", readers: "everyone" } },
   { type: "engine.ws.delete", data: { path: "notes/dev.md" } },
+  // An agent turn's narrator-facing outputs change no state at all.
+  { type: "engine.out.lines", data: { kind: "outcome", lines: ["You buy a coffee."] } },
+  { type: "engine.out.scene", data: { lore: ["lighthouse"], notes: ["The harbour is quiet."] } },
   { type: "engine.check", data: { actor: "you", check: "initiative", outcome: "success" } },
   { type: "engine.entity", data: { entity: "dev", tier: "supporting", agent: false, levels: { money: 2 } } },
   { type: "engine.class", data: { entity: "dev", class: {}, tags: ["regular"], was: {} } },

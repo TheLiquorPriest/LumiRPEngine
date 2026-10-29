@@ -1,6 +1,8 @@
 // Settings (DESIGN §12): a home list of pages in groups, each page under a header with
 // Back. Getting started: Helper model, Model use, Steps and connections, Minds, Narrator, Timeouts.
-// Agents: Agents (the agent runtime's budgets, throttles, caching and acceptance runs), Assistant
+// Agents: Agents (how an agent turn runs, the agent runtime's budgets, compaction, recording,
+// throttles, caching and acceptance runs), Roles (each turn role's model, knowledge, tools, tier and
+// budget), Main agent (the main agent's model, knowledge, tools, turn task and budget), Assistant
 // (the GM assistant's connection, knowledge, how its changes land, its history and budget), Prompts,
 // every text sent to a model (DESIGN §6.12), Writes (what waits while the engine runs) and Retention
 // (how long the agents' stored texts are kept). Defaults for new chats: Realism, Checks, Time.
@@ -33,12 +35,16 @@ import { type Connection, HelperSection, helperSummary, ModelUseSection, StepsSe
 import { STEP_LABEL } from "../../shared/steps";
 import { AgentsSection, agentsSummary } from "./agents";
 import { AssistantPage, assistantSummary } from "./assistant";
+import { MainAgentPage, mainSummary } from "./main-agent";
+import { RolesPage, rolesSummary } from "./roles";
 import { limitText, TimeoutsSection } from "./timeouts";
 import { WritesPage } from "./writes";
 import { RetentionPage, retentionSummary } from "./retention";
 import { DiagnosticsPage } from "../diagnostics";
 import { McpServerPage } from "../agents";
-import { ownTextCount, PromptsPage } from "./agent-prompts";
+import { ownTextCount, promptTestRequest, PromptsPage } from "./agent-prompts";
+import type { PromptDef } from "../../shared/prompts";
+import { useSelect } from "../store";
 
 type Page = Exclude<SettingsPage, "home">;
 type Caveat = { code: string; message: string };
@@ -56,7 +62,9 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   minds: { title: "Minds", subtitle: "How characters think and remember", icon: "sparkle" },
   narrator: { title: "Narrator", subtitle: "What the narrator knows, and what of a secret", icon: "eye" },
   timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
-  agents: { title: "Agents", subtitle: "The agent runtime's budgets, caching and acceptance runs", icon: "function" },
+  agents: { title: "Agents", subtitle: "How agent turns run, and the runtime's budgets, caching and acceptance runs", icon: "function" },
+  roles: { title: "Roles", subtitle: "What each role of an agent turn runs with", icon: "branch" },
+  main: { title: "Main agent", subtitle: "The agent that decides each turn, when the pipeline has one", icon: "sparkle" },
   assistant: { title: "Assistant", subtitle: "The GM assistant's model, knowledge and budget", icon: "message" },
   realism: { title: "Realism", subtitle: "For new chats", icon: "layers" },
   checks: { title: "Checks", subtitle: "For new chats", icon: "dice" },
@@ -76,7 +84,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
 /** The home list's groups, in order. */
 const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
-  { title: "Agents", pages: ["agents", "assistant", "prompts", "writes", "retention"] },
+  { title: "Agents", pages: ["agents", "roles", "main", "assistant", "prompts", "writes", "retention"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -108,6 +116,10 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: `Engine run ${limitText(settings.timeouts.engineRunMs)} · reading the reply ${limitText(settings.timeouts.postReplyMs)}` };
     case "agents":
       return { subtitle: agentsSummary(settings.agents) };
+    case "roles":
+      return { subtitle: rolesSummary(settings.agents) };
+    case "main":
+      return { subtitle: mainSummary(settings.agents, connections) };
     case "assistant":
       return { subtitle: assistantSummary(settings.agents.assistant, connections) };
     case "steps": {
@@ -235,6 +247,8 @@ function CaveatsPage(props: { caveats: readonly Caveat[] | null; open(page: Page
 export function Settings() {
   const app = useApp();
   const view = useView();
+  // The open chat, which a role text's Test on Prompts runs on.
+  const chatId = useSelect(app.sync, (state) => state.chatId);
   const page = useUi((ui) => ui.settings.page);
   const [data, setData] = useState<SettingsResult | null>(null);
   const [failed, setFailed] = useState(false);
@@ -312,6 +326,10 @@ export function Settings() {
       <TimeoutsSection timeouts={settings.timeouts} patch={patch} busy={busy} />
     ) : page === "agents" ? (
       <AgentsSection agents={settings.agents} patch={patch} busy={busy} />
+    ) : page === "roles" ? (
+      <RolesPage agents={settings.agents} patch={patch} busy={busy} />
+    ) : page === "main" ? (
+      <MainAgentPage agents={settings.agents} patch={patch} busy={busy} />
     ) : page === "assistant" ? (
       <AssistantPage agents={settings.agents} patch={patch} busy={busy} />
     ) : page === "realism" ? (
@@ -335,7 +353,7 @@ export function Settings() {
     ) : page === "mcp" ? (
       <McpServerPage />
     ) : page === "prompts" ? (
-      <PromptsPage prompts={settings.prompts} patch={patch} busy={busy} />
+      <PromptsPage prompts={settings.prompts} patch={patch} busy={busy} {...(chatId ? { test: async (def: PromptDef, text: string) => (await app.request<"lre.prompts">(promptTestRequest(chatId, def.id, text)))?.test ?? null } : {})} />
     ) : page === "retention" ? (
       <RetentionPage retention={settings.retention} patch={patch} busy={busy} />
     ) : (

@@ -6,13 +6,15 @@
 // transcript retention passes, the record lets go of it and the sweep removes it.
 //
 // The records are GM-level and only ever answer `lre.diag`; the activity line carries a step's label
-// (or, for an agent at work outside a turn, the GM assistant answering, its label) and nothing else,
-// so it is safe on the player's surfaces.
+// (or, for an agent at work outside a turn, the GM assistant answering, its label) and, while an
+// agent turn runs, one row per agent at work with its role's label and its tokens so far (the live
+// trace), and nothing else, so it is safe on the player's surfaces.
 
+import { agentLabel } from "../shared/agent-settings";
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import { isRecord } from "../shared/json";
-import type { Activity, DiagAgentCall, DiagCall, DiagLevel, DiagPhase, DiagRecord, DiagSection, DiagStatus, DiagUsage } from "../shared/diagnostics";
+import type { Activity, ActivityAgent, DiagAgentCall, DiagCall, DiagLevel, DiagPhase, DiagRecord, DiagSection, DiagStatus, DiagUsage } from "../shared/diagnostics";
 import { callLabel, DIAG_AGENT_OUTCOMES, DIAG_PHASES, DIAG_RING, DIAG_USAGE_FIELDS, SLOW_MS, STEP_LABEL, suggestFix } from "../shared/diagnostics";
 import type { Limit } from "../shared/minds";
 import { limitOf } from "../shared/minds";
@@ -94,14 +96,14 @@ function isDiagRecord(raw: unknown): raw is DiagRecord {
 
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 
-/** A usage as stored or given: the four counts, and the estimated ones named only when there are some; undefined when it isn't one. */
+/** A usage as stored or given: the four counts, the cache write when the provider said it, and the estimated ones named only when there are some; undefined when it isn't one. */
 function usageOf(raw: unknown): DiagUsage | null | undefined {
   if (raw === null) return null;
   if (!isRecord(raw)) return undefined;
-  const { in: sent, cachedIn, out, reasoningOut, estimated } = raw;
+  const { in: sent, cachedIn, cacheWrite, out, reasoningOut, estimated } = raw;
   if (!isCount(sent) || !isCount(cachedIn) || !isCount(out) || !isCount(reasoningOut)) return undefined;
   const guessed = Array.isArray(estimated) ? DIAG_USAGE_FIELDS.filter((f) => estimated.includes(f)) : [];
-  return { in: sent, cachedIn, out, reasoningOut, ...(guessed.length > 0 ? { estimated: guessed } : {}) };
+  return { in: sent, cachedIn, ...(isCount(cacheWrite) ? { cacheWrite } : {}), out, reasoningOut, ...(guessed.length > 0 ? { estimated: guessed } : {}) };
 }
 
 /** An agent call as stored, or null when it doesn't read as one; a malformed tool list or text ref is left out of it. */
@@ -158,10 +160,23 @@ export class Diagnostics {
   private readonly activities = new Map<ChatId, Activity>();
   /** Agents at work in each chat outside any turn (the GM assistant answering), latest last. */
   private readonly working = new Map<ChatId, { id: string; label: string; since: number }[]>();
+  /** The agents at work in each chat's turn (the live trace), by agent id, in the order they started: each its role and the tokens it has spent so far. */
+  private readonly atWork = new Map<ChatId, Map<string, { role: string; tokens: { in: number; out: number } }>>();
+  /** What the agents of each role that stopped have spent in the chat's turn, by role: the role's row counts them. */
+  private readonly roleSpent = new Map<ChatId, Map<string, { in: number; out: number }>>();
   /** Model calls under way per user, by purpose, latest last. */
   private readonly inflight = new Map<UserId, string[]>();
   /** Whether the chat has an engine run or reply read Cancel can stop (the ledger's, `LedgerService.cancel`): what the running line offers Cancel by. */
   cancellable: (chatId: ChatId) => boolean = () => false;
+  /**
+   * Agent turns (INC2-SPEC lane T1), by `chat \0 turn`: their roles' failures follow the roles' own
+   * settings, and only a fatal record stops one (`failure`). Each is kept while its turn is under way:
+   * until its activity ends (`end`), or its run ends outside one (`agentTurnDone`).
+   */
+  private readonly agentTurns = new Set<string>();
+  /** The order each model call came in (`callMark`, `failedSince`); calls read back from a file have none. */
+  private readonly callOrder = new WeakMap<DiagCall, number>();
+  private callCount = 0;
   private seq: number;
 
   constructor(
@@ -281,8 +296,8 @@ export class Diagnostics {
     chat.records.push(full);
     const ring = this.ring(at.userId);
     if (chat.records.length > ring) chat.records.splice(0, chat.records.length - ring);
-    // An agent call is informational until the agent turn loop (Increment 2) decides what a failed one means for its turn.
-    if (record.status === "failed" && at.turn && record.kind !== "agent") {
+    // An agent call is informational; in an agent turn only its fatal records fail it (`failure`).
+    if (record.status === "failed" && at.turn && record.kind !== "agent" && (record.fatal === true || !this.agentTurns.has(`${at.chatId}\u0000${at.turn}`))) {
       const turn = this.turns.get(at.chatId);
       if (turn && turn.at.turn === at.turn && turn.failed === null) turn.failed = where;
     }
@@ -309,11 +324,14 @@ export class Diagnostics {
     this.publish(at.chatId, at.userId);
   }
 
-  /** The turn is over; it failed if any of its steps did, or `outcome` says so. */
+  /** The turn is over; it failed if any of its steps did, or `outcome` says so. An agent turn's policy goes with it. */
   end(at: DiagAt, outcome: DiagVerdict = null): void {
     const turn = this.turns.get(at.chatId);
     if (!turn || turn.at.turn !== at.turn) return;
     this.turns.delete(at.chatId);
+    if (at.turn !== null) this.agentTurns.delete(`${at.chatId}\u0000${at.turn}`);
+    this.atWork.delete(at.chatId);
+    this.roleSpent.delete(at.chatId);
     const end = this.now();
     const failed = outcome?.status === "failed" ? (outcome.reason ?? "failed") : turn.failed;
     const status: DiagStatus = failed !== null ? "failed" : (outcome?.status ?? "ok");
@@ -379,6 +397,23 @@ export class Diagnostics {
     this.add(at, { kind: "step", level: "warn", turn: at.turn, phase, step, status: "failed", start: t, end: t, ms: 0, reason, ...(hint ? { fix: hint } : {}) });
   }
 
+  /** The turn is an agent turn (INC2-SPEC lane T1): from now on only its fatal records stop it (`failure`). */
+  agentTurn(at: DiagAt): void {
+    if (at.turn !== null) this.agentTurns.add(`${at.chatId}\u0000${at.turn}`);
+  }
+
+  /** The agent turn's run ended with no activity of its own to end (a Retry read's or a Re-read edit's, one let go or dropped): its policy goes with it. */
+  agentTurnDone(at: DiagAt): void {
+    if (at.turn !== null) this.agentTurns.delete(`${at.chatId}\u0000${at.turn}`);
+  }
+
+  /** An agent turn's own failure: the role that stopped it under `stop`, its time running out, or its orchestration. The turn stops on it, the engine-failed card saying `step` and why. */
+  fatal(at: DiagAt, phase: DiagPhase, step: string, reason: string): void {
+    const t = this.now();
+    const fix = suggestFix(reason);
+    this.add(at, { kind: "step", level: "warn", turn: at.turn, phase, step, status: "failed", start: t, end: t, ms: 0, reason, ...(fix ? { fix } : {}), fatal: true });
+  }
+
   /**
    * A time limit that ran out (Settings → Timeouts), naming its setting and how to raise it: a failed
    * step in the chat's records (so its turn shows as failed), or, outside a chat, in the user's
@@ -407,6 +442,7 @@ export class Diagnostics {
 
   /** One model call: it joins the user's innermost step under way that takes its purpose, else the innermost that takes any, or stands alone. */
   call(userId: UserId, call: DiagCall): void {
+    this.callOrder.set(call, ++this.callCount);
     const list = this.inflight.get(userId);
     const i = list?.lastIndexOf(call.purpose) ?? -1;
     if (list && i >= 0) list.splice(i, 1);
@@ -468,9 +504,15 @@ export class Diagnostics {
    * helper's; a lore lookup a later call of its step answered after doesn't count.
    */
   failure(at: DiagAt): { step: string; reason: string } | null {
+    // An agent turn stops on its own failures alone: its roles' failed calls follow their settings (`fatal`).
+    const agent = at.turn !== null && this.agentTurns.has(`${at.chatId}\u0000${at.turn}`);
     for (const r of this.chats.get(at.chatId)?.records ?? []) {
-      // An agent call is informational until the agent turn loop (Increment 2) decides turn failure.
+      // An agent call is informational: a turn's agents fail it only through the orchestrator's fatal record.
       if (r.turn !== at.turn || r.kind === "agent") continue;
+      if (agent) {
+        if (r.fatal) return { step: r.step, reason: r.reason ?? "it failed" };
+        continue;
+      }
       const calls = r.calls ?? [];
       for (const [i, c] of calls.entries()) {
         const failed = c.retried ? null : callFailure([c]);
@@ -485,9 +527,42 @@ export class Diagnostics {
     return null;
   }
 
+  /** Where the model calls stand now: `failedSince` reads the calls made after it. */
+  callMark(): number {
+    return this.callCount;
+  }
+
+  /**
+   * The first of a turn's model calls since `mark` for one of `purposes` that failed as a classic
+   * turn stops on it (`failure`): failed, cut off or empty, not made again after a transient failure,
+   * and not answered after by a later call of its step. A step's calls count while it is still under
+   * way. What a prompt-only role's classic call left, which the role's `onFail` answers.
+   */
+  failedSince(at: DiagAt, mark: number, purposes: readonly string[]): { step: string; reason: string } | null {
+    const recorded = (this.chats.get(at.chatId)?.records ?? []).filter((r) => r.turn === at.turn && r.kind !== "agent").flatMap((r) => r.calls ?? []);
+    const open = (this.open.get(at.userId) ?? []).filter((s) => s.at.chatId === at.chatId && s.at.turn === at.turn).flatMap((s) => s.calls);
+    const order = (c: DiagCall): number => this.callOrder.get(c) ?? 0;
+    const calls = [...recorded, ...open].filter((c) => order(c) > mark && purposes.includes(c.purpose)).sort((a, b) => order(a) - order(b));
+    for (const [i, c] of calls.entries()) {
+      const failed = c.retried ? null : callFailure([c]);
+      if (!failed) continue;
+      if (calls.slice(i + 1).some((d) => d.purpose === c.purpose && !d.retried && !callFailure([d]) && (c.lookup === true || (c.via === "decision" && d.via === "helper")))) continue;
+      return { step: c.purpose, reason: failed.reason };
+    }
+    return null;
+  }
+
+  /** What stopped a turn, when anything did: its first fatal record (a role under `stop`, its main agent's failure, its time running out); null when nothing has. */
+  stopped(at: DiagAt): { step: string; reason: string } | null {
+    if (at.turn === null) return null;
+    const r = (this.chats.get(at.chatId)?.records ?? []).find((x) => x.turn === at.turn && x.fatal === true);
+    return r ? { step: r.step, reason: r.reason ?? "it failed" } : null;
+  }
+
   /** The turn under `from` goes on as `to` (a prepared turn a generation took): its records and its activity line. */
   rename(chatId: ChatId, from: string, to: string): void {
     for (const r of this.chats.get(chatId)?.records ?? []) if (r.turn === from) r.turn = to;
+    if (this.agentTurns.delete(`${chatId}\u0000${from}`)) this.agentTurns.add(`${chatId}\u0000${to}`);
     const turn = this.turns.get(chatId);
     if (turn?.at.turn === from) turn.at = { ...turn.at, turn: to };
     for (const stack of this.open.values()) for (const s of stack) if (s.at.chatId === chatId && s.at.turn === from) s.at = { ...s.at, turn: to };
@@ -528,11 +603,47 @@ export class Diagnostics {
       const open = [...(this.open.get(turn.at.userId) ?? [])].reverse().find((s) => s.at.chatId === chatId);
       const asking = open ? this.inflight.get(turn.at.userId)?.at(-1) : undefined;
       const label = asking !== undefined ? callLabel(asking, this.inflight.get(turn.at.userId)?.filter((p) => p === asking).length ?? 1) : (open?.label ?? turn.rest);
-      return { chatId, turn: turn.at.turn, state: "running", label, since: turn.start, ...(this.cancellable(chatId) ? { cancellable: true } : {}) };
+      const agents = this.rolesAtWork(chatId);
+      return { chatId, turn: turn.at.turn, state: "running", label, since: turn.start, ...(this.cancellable(chatId) ? { cancellable: true } : {}), ...(agents.length > 0 ? { agents } : {}) };
     }
     const agent = this.working.get(chatId)?.at(-1);
     if (agent) return { chatId, turn: null, state: "running", label: agent.label, since: agent.since };
     return this.activities.get(chatId) ?? null;
+  }
+
+  /**
+   * An agent of the chat's turn at work (`AgentTurn.watch`), with the tokens it has spent so far, or,
+   * with `spent` null, stopped. The live trace shows one row per role at work, never one per agent:
+   * how many agents a role runs would tell how many people it works for (choosers off-screen, minds
+   * the player character can't see), which classic's line never told. A role's row holds all its
+   * agents' tokens this turn, and shows while one of them works; the rows go with the turn.
+   */
+  agentAtWork(chatId: ChatId, userId: UserId, agent: { id: string; role: string }, spent: { in: number; out: number } | null): void {
+    const rows = this.atWork.get(chatId) ?? new Map<string, { role: string; tokens: { in: number; out: number } }>();
+    const stopped = spent === null ? rows.get(agent.id) : undefined;
+    if (stopped) {
+      const done = this.roleSpent.get(chatId) ?? new Map<string, { in: number; out: number }>();
+      const before = done.get(stopped.role) ?? { in: 0, out: 0 };
+      done.set(stopped.role, { in: before.in + stopped.tokens.in, out: before.out + stopped.tokens.out });
+      this.roleSpent.set(chatId, done);
+    }
+    if (spent === null) rows.delete(agent.id);
+    else rows.set(agent.id, { role: agent.role, tokens: { in: spent.in, out: spent.out } });
+    if (rows.size === 0) this.atWork.delete(chatId);
+    else this.atWork.set(chatId, rows);
+    this.publish(chatId, userId);
+  }
+
+  /** The live trace's rows: each role with an agent at work, in the order its first started, under its label, with what all its agents spent this turn. */
+  private rolesAtWork(chatId: ChatId): ActivityAgent[] {
+    const done = this.roleSpent.get(chatId);
+    const rows = new Map<string, ActivityAgent>();
+    for (const a of this.atWork.get(chatId)?.values() ?? []) {
+      const row = rows.get(a.role) ?? { id: a.role, label: agentLabel(a.role), tokens: { ...(done?.get(a.role) ?? { in: 0, out: 0 }) } };
+      row.tokens = { in: row.tokens.in + a.tokens.in, out: row.tokens.out + a.tokens.out };
+      rows.set(a.role, row);
+    }
+    return [...rows.values()];
   }
 
   /**

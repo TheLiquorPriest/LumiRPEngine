@@ -24,7 +24,6 @@
 
 import { AGENT_ROLES, type AgentSettings, type AssistantApply, assistantBudget } from "../../shared/agent-settings";
 import { type AgentKnowledge, isAgentKnowledge, knowledgeWithin, widerKnowledge } from "../../shared/agent-tools";
-import type { DiagAgentOutcome } from "../../shared/diagnostics";
 import { STEP_LABEL } from "../../shared/diagnostics";
 import type { ChatId, UserId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
@@ -43,11 +42,14 @@ import { recordOutcome } from "../settings-store";
 import { fixChip } from "../view";
 import { activeRecord } from "../../engine/ledger/path";
 import { AGENT_CHANGE_TYPES } from "../../shared/settings";
-import { type AgentHandle, type AgentHistoryMessage, type AgentReply, type AgentStatus, type AgentTool, type AgentTranscript, startAgent } from "./runtime";
+import { nounFor } from "../../shared/words";
+import { askRollback, sessionView } from "./compaction";
+import { type AgentHandle, type AgentHistoryMessage, type AgentReply, type AgentTool, type AgentTranscript, startAgent } from "./runtime";
 import { outsideReader } from "./tools/read-view";
 import { type ToolTier, toolsFor } from "./tools/registry";
 import { listWorkspace, readWorkspaceFile } from "./tools/workspace";
 import { type AgentOp, batchKey, GM_ROLE, isLearnedOp, type OpPreview, outsideWriter, type ToolWriter } from "./tools/writer";
+import { recordAgentCalls } from "./transcripts";
 import { emptyUsage } from "./usage";
 
 /** The assistant's role: its id in `AGENT_ROLES`, its budget's and caching's key, and its Diagnostics records' role. */
@@ -64,9 +66,6 @@ const TIERS: readonly ToolTier[] = ["read", "gm"];
 
 /** The label GM → Workspace's own writes carry on their entry (GM-only). */
 const WORKSPACE_LABEL = "GM → Workspace";
-
-/** Each call's outcome as Diagnostics records it, by how the answer ended there; the loop detector's stop is a refusal to run the call. */
-const OUTCOME: Readonly<Record<AgentStatus, DiagAgentOutcome>> = { answered: "ok", refused: "refused", stopped: "refused", cancelled: "cancelled", failed: "failed" };
 
 /** A request the assistant refuses, with the protocol's error code for it. */
 export class AssistantError extends Error {
@@ -196,27 +195,6 @@ function traceOf(t: AgentTranscript): TraceRow[] {
     }
   }
   return rows;
-}
-
-/**
- * The text each Diagnostics record of an answer keeps, one per call (one the connection refused for
- * its native tools among them) and one for a stop short of an answer: what that call was sent that
- * the one before it wasn't (the first, the system prompt and the thread's history too), then what it
- * answered, or why it was refused or stopped.
- */
-function callTexts(t: AgentTranscript): string[] {
-  const texts: string[] = [];
-  let lines: string[] = [`system:\n${[...t.prefix, t.system].join("\n\n")}`, ...t.history.map((m) => `${m.role}:\n${m.text}`)];
-  for (const e of t.entries) {
-    if (e.kind === "message") lines.push(`user:\n${e.text}`);
-    else if (e.kind === "result") lines.push(`tool ${e.name}${e.error ? " (failed)" : ""}:\n${e.text}`);
-    else {
-      lines.push(e.kind === "answer" ? `assistant:\n${e.text}${e.calls.map((c) => `\n→ ${c.name} ${JSON.stringify(c.args)}`).join("")}` : e.kind === "stop" ? `stopped (${e.code}): ${e.reason}` : e.reason);
-      texts.push(lines.join("\n\n"));
-      lines = [];
-    }
-  }
-  return texts;
 }
 
 function storedMessageOf(raw: JsonValue | null): StoredMessage | null {
@@ -467,7 +445,7 @@ export class Assistant {
       own.historyTokens,
       own.knowledge,
     );
-    const note = left > 0 ? renderPrompt(GM_TEXT.historyNote, texts, { ...vars, count: String(left) }).trim() : "";
+    const note = left > 0 ? renderPrompt(GM_TEXT.historyNote, texts, { ...vars, count: String(left), messages: nounFor(left, "message", "messages") }).trim() : "";
     const first = history[0];
     if (note !== "" && first) history[0] = { role: first.role, text: `${note}\n\n${first.text}` };
     const sent = note !== "" && !first ? `${note}\n\n${text}` : text;
@@ -539,7 +517,8 @@ export class Assistant {
         this.rt.diag.agentDone(chatId, userId, run.id);
       }
       const transcript = ask.handle.transcript();
-      await this.record(t, transcript, ask).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the GM assistant's calls weren't all recorded (${messageOf(error)})`, userId));
+      // Each call the answer made, and how it stopped short of an answer if it did, as Diagnostics agent records outside any turn.
+      await recordAgentCalls(this.rt.diag, { at: { chatId, userId, turn: null }, phase: null, role: ASSISTANT_ROLE, connection: ask.connection, model: ask.model ?? null, transcript }).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the GM assistant's calls weren't all recorded (${messageOf(error)})`, userId));
       const atOnce = await this.withThread(chatId, userId, async (u) => {
         try {
           const trace = traceOf(transcript);
@@ -550,7 +529,7 @@ export class Assistant {
             text: reply.text,
             at: Date.now(),
             ...(trace.length > 0 ? { trace } : {}),
-            usage: { in: reply.usage.in, out: reply.usage.out, cached: reply.usage.cachedIn },
+            usage: { in: reply.usage.in, out: reply.usage.out, cached: reply.usage.cachedIn, ...(reply.usage.cacheWrite !== undefined ? { written: reply.usage.cacheWrite } : {}) },
             status: reply.status,
             ...(reply.status !== "answered" && reply.reason ? { reason: reply.reason } : {}),
             knowledge: ask.knowledge,
@@ -573,31 +552,6 @@ export class Assistant {
     })();
     this.running.add(done);
     void done.finally(() => this.running.delete(done));
-  }
-
-  /**
-   * Each call the answer made, and how it stopped short of an answer if it did, as a Diagnostics
-   * agent record outside any turn; a call the connection refused for its native tools is one too,
-   * refused, saying why, so the turn to tools as text is on the record.
-   */
-  private async record(t: Thread, transcript: AgentTranscript, ask: Ask): Promise<void> {
-    const at = { chatId: t.chatId, userId: t.userId, turn: null };
-    const texts = callTexts(transcript);
-    let n = 0;
-    let model = ask.model ?? "";
-    let since = transcript.entries[0]?.at ?? Date.now();
-    for (const e of transcript.entries) {
-      if (e.kind === "answer") {
-        model = e.model || model;
-        const { estimated, ...counts } = e.usage;
-        await this.rt.diag.agentCall(at, null, { role: ASSISTANT_ROLE, connection: ask.connection, model: e.model, usage: { ...counts, ...(estimated.length > 0 ? { estimated: [...estimated] } : {}) }, ms: e.ms, outcome: "ok", ...(e.calls.length > 0 ? { tools: e.calls.map((c) => c.name) } : {}) }, texts[n++]);
-      } else if (e.kind === "tools_refused") {
-        await this.rt.diag.agentCall(at, null, { role: ASSISTANT_ROLE, connection: ask.connection, model, usage: null, ms: e.ms, outcome: "refused", error: e.reason }, texts[n++]);
-      } else if (e.kind === "stop") {
-        await this.rt.diag.agentCall(at, null, { role: ASSISTANT_ROLE, connection: ask.connection, model, usage: null, ms: Math.max(0, e.at - since), outcome: OUTCOME[e.status], error: e.reason }, texts[n++]);
-      }
-      since = e.at;
-    }
   }
 
   /** The connection a proposal's change types are keyed by: the one it was proposed on, else the assistant's own, else your default's. */
@@ -770,7 +724,8 @@ export class Assistant {
  * with the GM's knowledge, and your own changes to it, each one GM edit through the writer the
  * agents' tools use, with its Undo chip, held while the engine runs a turn (a learned file's at
  * once, in the chat's metadata). A file you write is yours alone until you say who else may read it
- * (`readers`, on the write or by itself).
+ * (`readers`, on the write or by itself). The main agent's session is there too, whose latest
+ * compaction you may roll back (`compaction.ts`).
  */
 export async function workspaceRequest(rt: Runtime, r: WorkspaceRequest, userId: UserId): Promise<ResultBodies["lre.workspace"]> {
   const base = { userId, chatId: r.chatId, knowledge: "gm" as const };
@@ -784,6 +739,12 @@ export async function workspaceRequest(rt: Runtime, r: WorkspaceRequest, userId:
   };
   if (r.op === "list") return { files: await listWorkspace(rt, base) };
   if (r.op === "read") return { text: await readWorkspaceFile(rt, base, text(r.path, "file's path")) };
+  if (r.op === "session") return { session: await sessionView(rt, r.chatId, userId) };
+  if (r.op === "rollback") {
+    const session = await askRollback(rt, r.chatId, userId);
+    if (!session) throw new AssistantError("validation", "The main agent's session has no compaction to roll back.");
+    return { session };
+  }
   let op: AgentOp;
   if (r.op === "write") op = { kind: "ws_write", path: text(r.path, "file's path"), text: text(r.text, "file's text"), ...(r.readers !== undefined ? { readers: readers(r.readers) } : {}) };
   else if (r.op === "delete") op = { kind: "ws_delete", path: text(r.path, "file's path") };
@@ -792,7 +753,7 @@ export async function workspaceRequest(rt: Runtime, r: WorkspaceRequest, userId:
     if (typeof r.pinned !== "boolean") throw new AssistantError("bad_request", "Say whether the file is pinned.");
     op = { kind: "ws_pin", path: text(r.path, "file's path"), pinned: r.pinned };
   } else if (r.op === "readers") op = { kind: "ws_readers", path: text(r.path, "file's path"), readers: readers(r.readers) };
-  else throw new AssistantError("bad_request", "op must be list, read, write, delete, move, pin or readers");
+  else throw new AssistantError("bad_request", "op must be list, read, write, delete, move, pin, readers, session or rollback");
   // Your own change is no agent's operation: the GM's role skips the change types' modes (`GM_ROLE`). The writer pushes the chat's state after it.
   const writer = outsideWriter(rt, { ...base, reader: outsideReader(rt, base), agent: { role: GM_ROLE, id: GM_ROLE }, signal: new AbortController().signal, connectionId: null });
   const result = await writer.apply([op], WORKSPACE_LABEL);

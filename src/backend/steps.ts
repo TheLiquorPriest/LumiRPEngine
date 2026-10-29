@@ -468,40 +468,56 @@ export class Steps {
     const system = `Answer each question about the state with probabilities. Output JSON only: {"<key>": {"probabilities": {"<option>": number}}} for choice and score questions, and {"<key>": {"p": number}} for yes/no questions.`;
     // A decision falling back to the helper runs on the helper model, with the step's max tokens if it set its own.
     const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}`, viaHelper && config ? config : { enabled: true, signals: [], ...(config?.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}) }, userId, signal, { lore, guidance, recent });
-    if (!isRecord(raw)) return null;
-    const answers: Answers = {};
-    for (const [key, q] of Object.entries(questions)) {
-      const a = raw[key];
-      if (!isRecord(a)) continue;
-      if (q.type === "noul") {
-        // A reply without `p` is no answer: a made-up 0.5 would be sampled as the model's.
-        if (typeof a.p !== "number" || !Number.isFinite(a.p)) continue;
-        answers[key] = { type: "noul", noul: Math.min(1, Math.max(0, a.p)) };
-        continue;
-      }
-      const probabilities: Record<string, number> = {};
-      if (isRecord(a.probabilities)) for (const [k, v] of Object.entries(a.probabilities)) if (typeof v === "number" && v >= 0) probabilities[k] = v;
-      const keys = q.type === "choice" ? Object.keys(q.criteria) : q.criteria.map((_, i) => String(i));
-      const best = keys.reduce((b, k) => ((probabilities[k] ?? 0) > (probabilities[b] ?? 0) ? k : b), keys[0] ?? "");
-      if (q.type === "choice") answers[key] = { type: "choice", choice: best, probabilities, confidence: probabilities[best] ?? 0 };
-      else answers[key] = { type: "score", score: Number(best), probabilities, confidence: probabilities[best] ?? 0 };
-    }
-    return { answers, via: "helper" };
+    const answers = decisionAnswers(raw, questions);
+    return answers ? { answers, via: "helper" } : null;
   }
+}
+
+/**
+ * A helper's answer to a decision's questions (the decision contract, §16): for each question it
+ * answers, the probabilities it gives its options (a choice's best, or a score's level), or the
+ * probability that a yes/no question is true. A question it leaves out, or answers out of shape, has
+ * no answer; null when the answer isn't an object at all.
+ */
+export function decisionAnswers(raw: JsonValue | null, questions: Questions): Answers | null {
+  if (!isRecord(raw)) return null;
+  const answers: Answers = {};
+  for (const [key, q] of Object.entries(questions)) {
+    const a = raw[key];
+    if (!isRecord(a)) continue;
+    if (q.type === "noul") {
+      // A reply without `p` is no answer: a made-up 0.5 would be sampled as the model's.
+      if (typeof a.p !== "number" || !Number.isFinite(a.p)) continue;
+      answers[key] = { type: "noul", noul: Math.min(1, Math.max(0, a.p)) };
+      continue;
+    }
+    const probabilities: Record<string, number> = {};
+    if (isRecord(a.probabilities)) for (const [k, v] of Object.entries(a.probabilities)) if (typeof v === "number" && v >= 0) probabilities[k] = v;
+    const keys = q.type === "choice" ? Object.keys(q.criteria) : q.criteria.map((_, i) => String(i));
+    const best = keys.reduce((b, k) => ((probabilities[k] ?? 0) > (probabilities[b] ?? 0) ? k : b), keys[0] ?? "");
+    if (q.type === "choice") answers[key] = { type: "choice", choice: best, probabilities, confidence: probabilities[best] ?? 0 };
+    else answers[key] = { type: "score", score: Number(best), probabilities, confidence: probabilities[best] ?? 0 };
+  }
+  return answers;
 }
 
 // ---------------------------------------------------------------- interpret
 
-/** The world as `extract` is told it: the player character, the entities it may know, and the places it is offered (`placeMenu`: the ones the reply names, then the nearest). */
-function worldBrief(world: WorldDoc, places: readonly PlaceChoice[]): string {
-  const pov = world.entities[world.pov];
-  const people = Object.values(world.entities)
+/** What `extract` is told the world holds by name: the entities besides the player character it may know of, and the places it is offered (`placeMenu`: the ones the reply names, then the nearest), each with its id. */
+export function worldLists(world: WorldDoc, places: readonly PlaceChoice[]): { entities: string; places: string } {
+  const entities = Object.values(world.entities)
     .filter((e) => e.id !== world.pov)
     .slice(0, 40)
     .map((e) => `${e.id} (${e.name}, ${e.kind})`)
     .join(", ");
-  const listed = places.map((p) => `${p.id} (${p.name})`).join(", ");
-  return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places, those the reply names and the nearest first: ${listed || "none"}.`;
+  return { entities, places: places.map((p) => `${p.id} (${p.name})`).join(", ") };
+}
+
+/** The world as `extract` is told it: the player character, the entities it may know, and the places it is offered. */
+function worldBrief(world: WorldDoc, places: readonly PlaceChoice[]): string {
+  const pov = world.entities[world.pov];
+  const lists = worldLists(world, places);
+  return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${lists.entities || "none"}. Places, those the reply names and the nearest first: ${lists.places || "none"}.`;
 }
 
 /** What `interpret` may say a thing the player says they have is, for a claim (DESIGN §9.4): food and drink are used up, money, keys, weapons and documents ask first. */
@@ -534,7 +550,7 @@ export interface InterpretContext {
 }
 
 /** A catalog action on one line: "id — label: what it does. Params: …. Needs: …. Said as: …." */
-function catalogLine(e: CatalogEntry): string {
+export function catalogLine(e: CatalogEntry): string {
   const parts = [`${e.id} — ${e.label}${e.description ? `: ${e.description.replace(/[\s.]+$/, "")}` : ""}`];
   if (e.params.length > 0) parts.push(`Params: ${e.params.join(", ")}`);
   if (e.needs.length > 0) parts.push(`Needs: ${e.needs.join("; ")}`);
@@ -615,7 +631,17 @@ export async function interpret(
   ]
     .filter((part) => part !== "")
     .join("\n");
-  const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { lore, guidance });
+  return interpretAnswer(await steps.helperJson("interpret", system, text, config, userId, signal, { lore, guidance }), actions);
+}
+
+/**
+ * `interpret`'s answer as its read (its output contract, §16): the first action, which only the
+ * catalog's actions may be, with its params and the player's words for it; the further ones it reads
+ * as catalog actions, up to the queue's bound, and the rest in words; time passing after them; the
+ * routine changes the input states; or no action, with its reason. Null for an answer that isn't
+ * one: the call failed, or said nothing in its contract's shape.
+ */
+export function interpretAnswer(raw: JsonValue | null, actions: readonly CatalogEntry[]): InterpretRead | null {
   if (!isRecord(raw)) return null;
   const action = typeof raw.action === "string" && actions.some((a) => a.id === raw.action) ? raw.action : null;
   const params: JsonObject = {};
@@ -741,6 +767,17 @@ export async function extract(
   // for what the reply means, never a change of its own, since only what the reply states happened.
   const message = said.trim() !== "" ? `The player's message this reply answers (context only; propose only what the narration states happened):\n${said.trim()}\n` : "";
   const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\n${routines ? `Usual routines (where a described move goes; never a move by itself):\n${usual.join("\n")}\n` : ""}${message}Narration:\n${narration}`, config, userId, signal, { lore, guidance, recent });
+  return extractAnswer(raw, { world, appliedMinutes, channels, moves });
+}
+
+/**
+ * `extract`'s answer as its read (its output contract, §16): each proposal of an enabled channel,
+ * narrated time only beyond what the turn already applied, money in minor units, duplicates gone;
+ * and, while `location` is a channel (`moves`), where the reply leaves the player character. An
+ * answer that isn't one reads as no change.
+ */
+export function extractAnswer(raw: JsonValue | null, o: { world: Pick<WorldDoc, "pov" | "currency">; appliedMinutes: number; channels: readonly string[]; moves: boolean }): ExtractRead {
+  const { world, appliedMinutes, channels, moves } = o;
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals: JsonObject[] = [];
   for (const p of list) {

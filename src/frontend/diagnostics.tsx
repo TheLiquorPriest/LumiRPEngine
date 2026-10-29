@@ -1,13 +1,16 @@
 // Diagnostics (DESIGN §6.9) on the frontend: the in-flight activity line the HUD, the status line and
 // the drawer show while the engine works (a step's label and the time it has taken, or a failure with
-// a way to Diagnostics), the drawer's error banner, and the Diagnostics page in Settings: each turn's
+// a way to Diagnostics), the drawer's live trace under it while an agent turn runs (one row per agent
+// at work: its label, its tokens so far and Cancel, never what it reads or calls), the drawer's error
+// banner, and the Diagnostics page in Settings: each turn's
 // steps with their model calls, agent calls with their text on request, the failures with their
 // reasons and fixes, filters, copy and download, and how many records a chat keeps. The records are
 // GM-level (a reason or an agent's text may name what the player hasn't met): the page asks for them
 // only once the player opens its curtain, and never keeps them in pushed state.
 
 import { useEffect, useState } from "preact/hooks";
-import { CANNOT_STOP, DIAGNOSTICS_DEFAULTS, type Activity, type DiagAgentCall, type DiagnosticsSettings, type DiagRecord, type DiagUsageField } from "../shared/diagnostics";
+import { CANNOT_STOP, DIAGNOSTICS_DEFAULTS, type Activity, type ActivityAgent, type DiagAgentCall, type DiagnosticsSettings, type DiagRecord, type DiagUsageField } from "../shared/diagnostics";
+import type { ChatId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import { useApp } from "./app";
 import { Badge, Banner, Button, Empty, List, ListRow, NumberStepper, Section, Seg, useBusy } from "./components";
@@ -42,16 +45,51 @@ function useActivity(): { activity: Activity | null; now: number } {
   return { activity, now };
 }
 
-/** Cancel on the activity line (DESIGN §5.1): stops the chat's engine run or reply read; a cancelled turn ends with no failure, and Regenerate runs it again. */
+/** Cancel on the activity line (DESIGN §5.1): stops the chat's engine run or reply read, every agent of an agent turn with it (AGENT-LOOP-PLAN §10); a cancelled turn ends with no failure, and Regenerate runs it again. */
+export function cancelTurn(chatId: ChatId, request: (body: { type: "lre.cancel"; chatId: ChatId }) => Promise<unknown>): Promise<unknown> {
+  return request({ type: "lre.cancel", chatId });
+}
+
 function CancelTurn(props: { chatId: string | null }) {
   const app = useApp();
   const [busy, run] = useBusy();
   if (!props.chatId) return null;
   const chatId = props.chatId;
   return (
-    <Button size="sm" variant="ghost" icon="close" label="Cancel the turn" disabled={busy} onClick={() => run(async () => void (await app.request({ type: "lre.cancel", chatId })))}>
+    <Button size="sm" variant="ghost" icon="close" label="Cancel the turn" disabled={busy} onClick={() => run(() => cancelTurn(chatId, (body) => app.request<"lre.cancel">(body)))}>
       Cancel
     </Button>
+  );
+}
+
+const n = (value: number): string => value.toLocaleString("en-US");
+
+/** An agent's tokens so far, as its row on the live trace says them. */
+export function agentTokensText(tokens: ActivityAgent["tokens"]): string {
+  return tokens.in === 0 && tokens.out === 0 ? "No tokens spent yet" : `${n(tokens.in)} tokens in · ${n(tokens.out)} out so far`;
+}
+
+/**
+ * The live trace (AGENT-LOOP-PLAN §9): while an agent turn runs, one row per agent at work, its label
+ * and the tokens it has spent so far, with Cancel while the turn can be stopped. Labels only: what an
+ * agent reads and the tools it calls can name what the player hasn't met, so the backend sends
+ * neither. Cancel stops the turn, and every agent of it (§10).
+ */
+export function AgentTrace(props: { agents: readonly ActivityAgent[]; cancellable: boolean; busy: boolean; onCancel(): void }) {
+  return (
+    <ol class="lre-activity-agents" data-lre-activity-agents aria-label="Agents at work">
+      {props.agents.map((a) => (
+        <li key={a.id} class="lre-activity-agent" data-lre-activity-agent={a.id}>
+          <span class="lre-activity-agent-label">{a.label}</span>
+          <span class="lre-num lre-activity-agent-tokens">{agentTokensText(a.tokens)}</span>
+          {props.cancellable ? (
+            <Button size="sm" variant="ghost" icon="close" label={`Cancel the turn: stops ${a.label} and every other agent`} disabled={props.busy} onClick={props.onCancel}>
+              Cancel
+            </Button>
+          ) : null}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -79,24 +117,29 @@ export function ActivityLine(props: { compact?: boolean }) {
   );
 }
 
-/** The drawer's banner: the engine at work, or the last turn's failure with Diagnostics and Dismiss. */
+/** The drawer's banner: the engine at work, with the live trace while an agent turn runs, or the last turn's failure with Diagnostics and Dismiss. */
 export function ActivityBanner() {
   const app = useApp();
   const chatId = useSelect(app.sync, (state) => state.chatId);
   const onPage = useSelect(app.ui, (ui) => ui.mode === "settings" && ui.settings.page === "diagnostics");
   const { activity, now } = useActivity();
+  const [busy, run] = useBusy();
   // On the Diagnostics page the failure is in its own list.
   if (onPage && activity?.state === "failed") return null;
   if (!activity || !chatId) return null;
-  if (activity.state === "running")
+  if (activity.state === "running") {
+    const agents = activity.agents ?? [];
     return (
       <div class="lre-activity-bar" data-lre-activity-bar="running" role="status" aria-live="polite">
         <span class="lre-chat-pulse" aria-hidden="true" />
         <span class="lre-activity-label">{activity.label}</span>
         <span class="lre-num lre-activity-time">{elapsedText(now - activity.since)}</span>
-        {activity.cancellable === true ? <CancelTurn chatId={chatId} /> : null}
+        {/* With agents at work, each row carries the Cancel. */}
+        {activity.cancellable === true && agents.length === 0 ? <CancelTurn chatId={chatId} /> : null}
+        {agents.length > 0 ? <AgentTrace agents={agents} cancellable={activity.cancellable === true} busy={busy} onCancel={() => run(() => cancelTurn(chatId, (body) => app.request<"lre.cancel">(body)))} /> : null}
       </div>
     );
+  }
   return (
     <div class="lre-activity-banner" data-lre-activity-bar="failed">
       <Banner
@@ -179,14 +222,15 @@ function callText(r: DiagRecord): string[] {
 }
 
 /**
- * An agent call as one line: on what; its tokens in, with the part read from the provider's cache,
- * and out, with the part spent reasoning (a count the provider didn't report is the runtime's
- * estimate, marked "~"); its time and how it ended; the tools it called; its error.
+ * An agent call as one line: on what; its tokens in, with the part read from the provider's cache and,
+ * when the provider says, the part written to it (so a prefix never written tells apart from one
+ * written but not read), and out, with the part spent reasoning (a count the provider didn't report is
+ * the runtime's estimate, marked "~"); its time and how it ended; the tools it called; its error.
  */
 function agentText(a: DiagAgentCall): string {
   const u = a.usage;
   const count = (field: DiagUsageField) => (u ? `${u.estimated?.includes(field) ? "~" : ""}${u[field]}` : "");
-  const usage = u ? `${count("in")} in (${count("cachedIn")} cached), ${count("out")} out (${count("reasoningOut")} reasoning)${u.estimated?.length ? ", ~ estimated" : ""}` : "no token counts";
+  const usage = u ? `${count("in")} in (${count("cachedIn")} cached${u.cacheWrite !== undefined ? `, ${u.cacheWrite} written` : ""}), ${count("out")} out (${count("reasoningOut")} reasoning)${u.estimated?.length ? ", ~ estimated" : ""}` : "no token counts";
   return `${a.model} on ${a.connection} · ${usage} · ${msText(a.ms)} · ${a.outcome}${a.tools?.length ? ` · tools ${a.tools.join(", ")}` : ""}${a.error ? ` · ${a.error}` : ""}`;
 }
 

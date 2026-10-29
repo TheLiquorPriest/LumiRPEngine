@@ -312,6 +312,11 @@ function identityLines(scope: MindScope): string[] {
 function knowledgeBlock(scope: MindScope, place: PlaceId | null): string {
   const settings = scope.knowledge;
   if (!settings || !scope.reads.knowledge.on) return "";
+  return heldKnowledge(scope, settings, place);
+}
+
+/** One person's own holdings as a mind reads them (`knowledgeBlock`), whether or not their mind reads them: what an NPC decision reads of its chooser (AGENT-LOOP-PLAN §5). Empty when they hold nothing. */
+export function heldKnowledge(scope: Pick<MindScope, "reg" | "world" | "state" | "who">, settings: KnowledgeSettings, place: PlaceId | null): string {
   const { world, state, who } = scope;
   const slice = readSlice(state);
   const here = place === null ? [] : Object.keys(state.entities).filter((id) => placeOfEntity(state, id) === place);

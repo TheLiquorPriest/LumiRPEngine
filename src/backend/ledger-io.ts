@@ -228,6 +228,9 @@ const REC_STATUSES: readonly unknown[] = ["ok", "degraded", "stopped"] satisfies
 /** A stored event as the folds read it: its type, and its group and the groups it is tied to, when it has them. */
 const isStoredEvent = (e: unknown): boolean => isRecord(e) && typeof e.type === "string" && (e.group === undefined || typeof e.group === "string") && (e.tiedTo === undefined || (Array.isArray(e.tiedTo) && e.tiedTo.every((g) => typeof g === "string")));
 
+/** An agent turn's attribution (`RecAgent`): its role, its operation's key and its events' range, in `events` or in the `post` entry its `seq` names. */
+const isRecAgent = (a: unknown): boolean => isRecord(a) && typeof a.role === "string" && typeof a.key === "string" && isInt(a.from) && isInt(a.to) && a.from >= 0 && a.to >= a.from && (a.seq === undefined || isInt(a.seq));
+
 /**
  * A stored turn record (DESIGN §4.3 `Rec`), checked through every field the folds, hashes and
  * ledger operations read. Records reach the engine from the journal file and from message
@@ -241,6 +244,7 @@ function isRec(rec: unknown): rec is Rec {
   if (!Array.isArray(rec.post) || !rec.post.every((p) => isRecord(p) && isInt(p.seq) && typeof p.at === "string" && POST_KINDS.includes(p.kind) && Array.isArray(p.events) && p.events.every(isStoredEvent) && (p.edit === undefined || (isRecord(p.edit) && (typeof p.edit.clock === "string" ? p.edit.ops === undefined : Array.isArray(p.edit.ops) && p.edit.clock === undefined))))) return false;
   if (rec.keep !== undefined && !(isRecord(rec.keep) && Object.values(rec.keep).every((k) => isRecord(k) && isRefs(k.convert)))) return false;
   if (rec.dropped !== undefined && !(Array.isArray(rec.dropped) && rec.dropped.every((d) => isRecord(d) && isInt(d.seq) && POST_KINDS.includes(d.kind) && typeof d.reason === "string"))) return false;
+  if (rec.agents !== undefined && !(Array.isArray(rec.agents) && rec.agents.every(isRecAgent))) return false;
   return (rec.accepted === undefined || isContent(rec.accepted)) && (rec.diag === undefined || typeof rec.diag === "string") && (rec.prompts === undefined || typeof rec.prompts === "string") && (rec.readElsewhere === undefined || rec.readElsewhere === true);
 }
 
@@ -366,6 +370,7 @@ const TURN_INPUTS = {
   revision: "the chat's world revision changed",
   settings: "your RPEngine settings changed",
   chat: "this chat's knowledge settings changed",
+  engine: "this chat's engine changed",
 } as const satisfies Record<string, string>;
 
 /** Each of a turn's other inputs (`TURN_INPUTS`), as one comparable value. */
@@ -441,7 +446,15 @@ export interface TurnHooks {
   changed(chatId: ChatId, userId: UserId): void;
   /** A swipe or regenerate is a Re-run or a Re-narrate (P3; `settings.swipeDefault` or a one-shot choice). */
   kindOf(input: { chatId: ChatId; userId: UserId; kind: GenerationKind }): Promise<GenerationKind>;
+  /**
+   * The engine run `turn` is over: it prepared its turn, waits on the player (a claim, a gate), was
+   * cancelled, or failed. What the run kept for itself alone goes; what a wait keeps for its resume stays.
+   */
+  ran?(input: { chatId: ChatId; userId: UserId; turn: string; outcome: RunOutcome }): void;
 }
+
+/** How an engine run ended (`TurnHooks.ran`). */
+export type RunOutcome = "prepared" | "waiting" | "cancelled" | "failed";
 
 /**
  * What the engine run made for a turn's prompt (DESIGN §6.4): each entry of the world's book and the
@@ -586,8 +599,8 @@ interface Lease {
   moved: PromiseWithResolvers<void>;
 }
 
-/** Why the engine run stopped: the step that failed, and what went wrong. */
-class EngineFailure extends Error {
+/** Why the engine run stopped: the step that failed, and what went wrong. The engine-failed card says both; an agent turn's role under `stop` throws one to end the run where it stopped. */
+export class EngineFailure extends Error {
   constructor(
     readonly step: string,
     reason: string,
@@ -1005,8 +1018,9 @@ export class LedgerService {
   /**
    * A saved reply's read and commit (DESIGN §5.1 step 5): the post phase reads its text (a Continue
    * only what it added, L13), the turn commits with what the read prepared, then what follows a
-   * commit runs. A read Cancel stopped commits as stopped, as a failed generation does: the reply
-   * stands unread, nothing its calls answered applies, and the reply's Retry read reads it again.
+   * commit runs. A read stopped part-way (its Cancel, or an agent role failing under `stop`) commits
+   * as stopped, as a failed generation does: the reply stands unread, nothing its calls answered
+   * applies, and the reply's Retry read reads it again.
    */
   private async commitReply(core: LedgerCore, observed: ChainMessage[], chatId: ChatId, userId: UserId | null, generationId: string, messageId: MessageId | undefined, content: string): Promise<void> {
     const at = userId ? { chatId, userId, turn: generationId } : null;
@@ -1021,8 +1035,13 @@ export class LedgerService {
     try {
       if (this.hooks && turn && p && p.kind !== "impersonate") {
         const hooks = this.hooks;
-        if (text !== "") await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
-        else if (at && diag) diag.skipped(at, "read", "read", "the reply had no new text to read");
+        try {
+          if (text !== "") await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
+          else if (at && diag) diag.skipped(at, "read", "read", "the reply had no new text to read");
+        } catch (error) {
+          // A call the stop cut short may throw (an agent role's does): the read commits stopped, below.
+          if (!flight.signal.aborted) throw error;
+        }
       }
       if (flight.signal.aborted) {
         core.stopped({ generationId, content }, observed);
@@ -1430,6 +1449,8 @@ export class LedgerService {
    */
   private engine(chatId: ChatId, userId: UserId, halt: Halt, kind: GenerationKind): Promise<void> {
     const at = { chatId, userId, turn: halt.id };
+    // How the run ends, for what the runtime kept for it alone (`TurnHooks.ran`).
+    let ending: RunOutcome = "failed";
     return this.run(chatId, userId, async (core, observed) => {
       const gate = this.gates.get(chatId);
       const hooks = this.hooks;
@@ -1493,14 +1514,19 @@ export class LedgerService {
         // gate, §5.1): the run waits on the answer, with nothing generated and no restart; the answer's
         // Regenerate runs it again.
         const waiting = (outcome: PreOutcome): void => {
+          ending = "waiting";
           core.take(halt.id);
           ended();
           this.diag?.end(at, { status: "skipped", reason: outcome.waiting });
         };
+        // An agent turn its roles stopped goes no further: it plans nothing, no gate hides the stop,
+        // and nothing it staged lands. A classic turn has no such stop (`stoppedRun`).
+        this.stoppedRun(at);
         if (pre) return waiting(pre);
         await step("plan", async () => core.plan(halt.id, observed, false));
         const held = await step("prose", () => hooks.afterPlan({ chatId, userId, core, observed, generationId: halt.id, as, signal }));
         going();
+        this.stoppedRun(at);
         if (held) return waiting(held);
         this.failedStep(at);
         // The book is taken only while the run makes and places its entries: it writes no section.
@@ -1522,6 +1548,7 @@ export class LedgerService {
         // Cancelled: its own end, not a failure. No flag and no Retry chip; the player's message
         // stays, so Regenerate (or sending again) runs the turn anew.
         if (signal.aborted) {
+          ending = "cancelled";
           this.diag?.end(at, { status: "skipped", reason: "you cancelled the turn; nothing was generated" });
           return;
         }
@@ -1540,6 +1567,7 @@ export class LedgerService {
       const holder = halt.session !== undefined && (this.reports(halt.session, chatId) || (viewer === null && this.shows(halt.session, chatId))) ? halt.session : viewer;
       const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, writing: null, as, holder, generationId: null, kept: null, failedSwipe: null };
       gate.prepared = prepared;
+      ending = "prepared";
       // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared) {
@@ -1551,7 +1579,10 @@ export class LedgerService {
       // A host that names no page asks every page.
       if (prepared.holder !== null) this.host.frontend.send(restartPush(chatId, prepared), userId, prepared.holder);
       else if (!this.host.capabilities.sessions) this.host.frontend.send(restartPush(chatId, prepared), userId);
-    }).finally(() => this.ran(chatId, halt.id));
+    }).finally(() => {
+      this.ran(chatId, halt.id);
+      this.hooks?.ran?.({ chatId, userId, turn: halt.id, outcome: ending });
+    });
   }
 
   /** Stops the engine run at its first failed step, with that step's reason. */
@@ -1560,11 +1591,21 @@ export class LedgerService {
     if (failure) throw new EngineFailure(failure.step, failure.reason);
   }
 
-  /** Stops the chat's engine run or reply read under way (DESIGN §5.1), when the chat is `userId`'s: false when nothing of theirs runs. */
-  cancel(chatId: ChatId, userId: UserId): boolean {
+  /** Stops an agent turn's engine run on what stopped it (a role under `stop`, its main agent's failure): the turn's fatal record. A classic turn has none. */
+  private stoppedRun(at: { chatId: ChatId; userId: UserId; turn: string }): void {
+    const stop = this.diag?.stopped(at);
+    if (stop) throw new EngineFailure(stop.step, stop.reason);
+  }
+
+  /**
+   * Stops the chat's engine run or reply read under way (DESIGN §5.1), when the chat is `userId`'s:
+   * false when nothing of theirs runs. `why` says what stopped it when the player didn't (an agent
+   * role failing under `stop`).
+   */
+  cancel(chatId: ChatId, userId: UserId, why?: string): boolean {
     const flight = this.inFlight.get(chatId);
     if (!flight || flight.signal.aborted || this.gates.get(chatId)?.userId !== userId) return false;
-    flight.abort(new TurnCancelled());
+    flight.abort(why === undefined ? new TurnCancelled() : new Error(why));
     return true;
   }
 

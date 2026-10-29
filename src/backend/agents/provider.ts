@@ -20,6 +20,7 @@
 import type { AcceptanceConnection, AcceptanceRunView, AcceptanceSpend, AcceptanceState, AgentEffort, AgentSettings, ConnectionThrottle } from "../../shared/agent-settings";
 import { acceptanceConnectionsOf, roleCaching } from "../../shared/agent-settings";
 import { RUNTIME_TEXT } from "../../shared/agent-prompts";
+import { STOP_TEXT } from "../../shared/agent-failures";
 import type { UserId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
 import { isRecord, safeKey } from "../../shared/json";
@@ -27,6 +28,7 @@ import type { Limit } from "../../shared/minds";
 import { limitOf } from "../../shared/minds";
 import type { PromptTexts } from "../../shared/prompts";
 import type { ReasoningChoice } from "../../shared/settings";
+import { counted } from "../../shared/words";
 import { tokensOf } from "../book";
 import type { HostConnectionProfile, HostPort, QuietMessage, QuietPart, QuietResult, QuietThinkingBlock, QuietTool } from "../host";
 import type { GuardRead } from "../settings-store";
@@ -59,13 +61,17 @@ export type AgentStopCode =
   | "cancelled"
   | "failed";
 
-/** A budget, a ceiling, the acceptance guard, the loop detector or a cancel stopping an agent, with its code and plain words. */
+/**
+ * A budget, a ceiling, the acceptance guard, the loop detector or a cancel stopping an agent, with its
+ * code and its words: a registry text on the Main agent page (`STOP_TEXT`) and what fills it, which the
+ * run renders with the user's texts (`AgentRun.end`); its message is the shipped wording, for logs.
+ */
 export class AgentStop extends Error {
   constructor(
     readonly code: AgentStopCode,
-    message: string,
+    readonly text: { id: string; vars?: Readonly<Record<string, string>> },
   ) {
-    super(message);
+    super(renderPrompt(text.id, {}, text.vars ?? {}));
     this.name = "AgentStop";
   }
 }
@@ -326,9 +332,13 @@ export function assemble(opening: Opening, conversation: readonly QuietMessage[]
   return out;
 }
 
-/** The breakpoints a connection's own prompt caching puts on every request on it: they count against the provider's limit. */
+/**
+ * The breakpoints a connection's own prompt caching puts on every request on it: they count against
+ * the provider's limit. Its tools' caching marks the last tool alone (Lumiverse `caching/anthropic.ts`),
+ * so it takes one breakpoint however many tools the call offers, and none with no tools.
+ */
 export function ownBreakpoints(cache: NonNullable<HostConnectionProfile["cache"]>, nativeTools: number): number {
-  return (cache.system ? 1 : 0) + (cache.lastMessage ? 1 : 0) + (cache.automatic ? 1 : 0) + (cache.tools ? nativeTools : 0);
+  return (cache.system ? 1 : 0) + (cache.lastMessage ? 1 : 0) + (cache.automatic ? 1 : 0) + (cache.tools && nativeTools > 0 ? 1 : 0);
 }
 
 // ---------------------------------------------------------------- accounts
@@ -365,7 +375,7 @@ export const SYSTEM_CLOCK: AccountsClock = {
  * connections they guard: kept here, not only in the settings file, so a build from before the agents
  * (Increment 0), whose settings writes keep only its own keys, never drops the guard. A damaged file
  * is set aside, and the fresh one says the guard was lost (`lost`) until a list is kept again: till
- * then which connections are guarded is unknown, and every agent call is refused.
+ * then agent calls go ahead under the settings file's own list, and the log says so.
  */
 export const ACCEPTANCE_PATH = "agent-acceptance.json";
 
@@ -384,7 +394,7 @@ interface UserAccounts {
   last: StoredRun | null;
   /** The connections acceptance runs guard, as this file keeps them; undefined until the settings' list moves here. */
   guard: AcceptanceConnection[] | undefined;
-  /** The file was damaged and set aside, and no list was kept since (`lost` in the fresh file, so a restart knows it too): which connections are guarded is unknown, and every agent call is refused. */
+  /** The file was damaged and set aside, and no list was kept since (`lost` in the fresh file, so a restart knows it too): calls go ahead under the settings file's own list. */
   lost: boolean;
   /** It was set aside as this extension read it, and no read of the guard has taken that in yet: only then may the settings' own copy of the list stand for it, since one written while the guard was unknown says nothing. */
   setAside: boolean;
@@ -398,6 +408,10 @@ interface UserAccounts {
   refusesTools: Set<string>;
   /** The file's writes, in order. */
   writing: Promise<void>;
+  /** Why the file couldn't be read, for the stand-in that serves calls meanwhile (`forCall`); null once it was read. */
+  unread: string | null;
+  /** What the log was warned of for these accounts (`warnOnce`): each once, not on each call. */
+  warned: Set<string>;
 }
 
 /** A call's hold on its connection, from `reserve` until `settle`. */
@@ -412,6 +426,8 @@ export interface Reservation {
   /** The run it counts in, if one was open. */
   run: StoredRun | null;
   entry: { at: number; tokens: number };
+  /** The accounts it holds on: the user's, or the stand-in while their file couldn't be read. */
+  accounts: UserAccounts;
 }
 
 const emptySpend = (): AcceptanceSpend => ({ tokensIn: 0, cachedIn: 0, tokensOut: 0, calls: 0, refused: 0, estimated: false });
@@ -438,8 +454,7 @@ function runOf(raw: unknown): StoredRun | null {
  * the acceptance runs, kept in user storage so a restart keeps what a run has spent.
  *
  * Every call `reserve`s before it is sent and `settle`s after. A connection under Acceptance runs
- * with `only` is refused unless a run is open (and a call whose connection can't be told is
- * refused while any is so marked: it might be one). While a run is open, a call holds its prompt's
+ * with `only` is refused unless a run is open. While a run is open, a call holds its prompt's
  * estimate, times the estimate factor until its model has reported real usage, and its
  * `max_tokens`, and one that would pass its connection's ceiling isn't sent; parallel calls hold
  * theirs side by side. A throttle waits for its minute to have room, and refuses only a call
@@ -449,6 +464,8 @@ export class AgentAccounts {
   private readonly users = new Map<UserId, UserAccounts>();
   private readonly loading = new Map<UserId, Promise<UserAccounts>>();
   private readonly listeners = new Set<(userId: UserId) => void>();
+  /** The stand-in accounts serving each user's calls while their file can't be read (`forCall`). */
+  private readonly unread = new Map<UserId, UserAccounts>();
 
   constructor(
     private readonly host: Pick<HostPort, "storage" | "log">,
@@ -474,7 +491,7 @@ export class AgentAccounts {
       let damaged = false;
       const raw = await readStoredJson(this.host, ACCEPTANCE_PATH, userId, "acceptance runs", (r) => isRecord(r) && r.v === 1, () => (damaged = true));
       const file = isRecord(raw) ? raw : {};
-      const u: UserAccounts = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map(), window: new Map(), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve() };
+      const u: UserAccounts = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map(), window: new Map(), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: null, warned: new Set() };
       this.users.set(userId, u);
       // The fresh file says the guard was lost, so a restart doesn't read the missing file as no guard.
       if (damaged) void this.save(userId, u);
@@ -527,16 +544,30 @@ export class AgentAccounts {
     }
   }
 
-  /** The user's accounts for a call, refused (`acceptance`) while which connections the runs guard is unknown: the file can't be read, or it was lost. */
-  private async guarded(userId: UserId): Promise<UserAccounts> {
-    let u: UserAccounts;
+  /**
+   * The user's accounts for a call. While their file can't be read, a stand-in serves (`unread`):
+   * it knows no run and keeps the throttles meanwhile, and is never written; each call reads the file
+   * again, and the stand-in goes once it reads.
+   */
+  private async forCall(userId: UserId): Promise<UserAccounts> {
     try {
-      u = await this.user(userId);
+      const u = await this.user(userId);
+      this.unread.delete(userId);
+      return u;
     } catch (error) {
-      throw new AgentStop("acceptance", `the acceptance runs' file couldn't be read (${error instanceof Error ? error.message : String(error)}), so which connections they guard isn't known: no agent call goes until it can be read`);
+      const known = this.unread.get(userId);
+      if (known) return known;
+      const u: UserAccounts = { run: null, last: null, guard: undefined, lost: false, setAside: false, held: new Map(), window: new Map(), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: error instanceof Error ? error.message : String(error), warned: new Set() };
+      this.unread.set(userId, u);
+      return u;
     }
-    if (u.lost) throw new AgentStop("acceptance", "the acceptance runs' file was damaged and set aside, and your settings kept no copy of the connections they guard, so which they guard isn't known: no agent call goes until you set them again in Settings → Agents → Acceptance runs");
-    return u;
+  }
+
+  /** Warns the host log and the user's diagnostics log of `key` once for these accounts, not on each call. */
+  private warnOnce(userId: UserId, u: UserAccounts, key: string, message: string): void {
+    if (u.warned.has(key)) return;
+    u.warned.add(key);
+    this.host.log("warn", `[LumiRPEngine] ${message}`, userId);
   }
 
   private view(run: StoredRun, u: UserAccounts, settings: Readonly<AgentSettings>): AcceptanceRunView {
@@ -583,11 +614,11 @@ export class AgentAccounts {
 
   /** Whether a connection was seen refusing native tools (this session). */
   async refusesTools(userId: UserId, connection: string): Promise<boolean> {
-    return (await this.user(userId)).refusesTools.has(connection);
+    return (await this.forCall(userId)).refusesTools.has(connection);
   }
 
   async refuseTools(userId: UserId, connection: string, reason: string): Promise<void> {
-    const u = await this.user(userId);
+    const u = await this.forCall(userId);
     if (u.refusesTools.has(connection)) return;
     u.refusesTools.add(connection);
     this.host.log("info", `[LumiRPEngine] connection ${connection} refused native tools (${reason.slice(0, 200)}); its agents are offered them as text from now on`, userId);
@@ -598,7 +629,7 @@ export class AgentAccounts {
     if (!throttle) return;
     const requests = limitOf(throttle.requestsPerMinute);
     const perMinute = limitOf(throttle.tokensPerMinute);
-    if (tokens > perMinute) throw new AgentStop("throttle", `the call's ${tokens} tokens are more than this connection's throttle lets through in a minute (${perMinute})`);
+    if (tokens > perMinute) throw new AgentStop("throttle", { id: STOP_TEXT.throttle, vars: { tokens: counted(tokens, "token", "tokens"), limit: String(perMinute) } });
     for (;;) {
       const now = this.clock.now();
       const recent = (u.window.get(connection) ?? []).filter((e) => e.at > now - MINUTE_MS);
@@ -612,25 +643,34 @@ export class AgentAccounts {
 
   /**
    * Holds a call's tokens on its connection (null: the default connection, which couldn't be told)
-   * before it is sent: the acceptance guard, the throttle, then the run's ceilings. While which
-   * connections the runs guard is unknown (`guarded`) every call is refused. A Model Roulette
-   * connection sends the call on one of its connections (`targets`), picked by the host at random,
-   * so the guard refuses it while any of them is guarded; a connection that couldn't be read (null
-   * `targets`) might be one, so while a connection is kept for acceptance runs it is refused too, as
-   * the default one is. The guard is the list the runs' file keeps, else the settings'. Throws an
-   * `AgentStop` when it may not go.
+   * before it is sent: the acceptance guard, the throttle, then the run's ceilings. The guard is the
+   * list the runs' file keeps, else the settings file's own (none when it keeps none): so while the
+   * runs' file can't be read, or was lost with no list kept since, calls go ahead under the
+   * settings' list, and the log says so once. A Model Roulette connection sends the call on one of
+   * its connections (`targets`), picked by the host at random, so the guard refuses it while any of
+   * them is guarded. A call whose connection can't be told (the default one, or one whose profile
+   * couldn't be read: null `targets`) goes ahead while connections are guarded, counted against none
+   * of them, and the log says so once per connection until it reads. Throws an `AgentStop` when it
+   * may not go.
    */
   async reserve(input: { userId: UserId; connection: string | null; targets?: readonly string[] | null; model: string; tokensIn: number; tokensOut: number; settings: Readonly<AgentSettings>; signal: AbortSignal }): Promise<Reservation> {
     const { userId, settings } = input;
-    const u = await this.guarded(userId);
+    const u = await this.forCall(userId);
     const guarded = u.guard ?? settings.acceptance.connections;
-    if (input.connection === null && guarded.some((c) => c.only)) throw new AgentStop("acceptance", "the call's connection is the default one, which couldn't be read, and a connection is kept for acceptance runs: it might be that one");
+    const list = guarded.length === 0 ? "no guard, as your settings file keeps no list of guarded connections" : `the list your settings file keeps (${guarded.map((c) => c.id).join(", ")})`;
+    if (u.unread !== null) this.warnOnce(userId, u, "unread", `the acceptance runs' file couldn't be read (${u.unread}), so which connections they guard, and whether a run is open, isn't known: agent calls go ahead under ${list}, with no run open, and the file is read again on each call`);
+    else if (u.lost) this.warnOnce(userId, u, "lost", `the acceptance runs' file was damaged and set aside, and no list of the connections they guard was kept since: agent calls go ahead under ${list} until you set the list again in Settings → Agents → Acceptance runs`);
     const connection = input.connection ?? "";
-    if (input.targets === null && guarded.some((c) => c.only)) throw new AgentStop("acceptance", `connection ${connection} couldn't be read, and a connection is kept for acceptance runs: it might be a Model Roulette that sends the call on that one`);
     const picked = (input.targets ?? []).find((target) => guarded.some((c) => c.id === target));
-    if (picked !== undefined) throw new AgentStop("acceptance", `connection ${connection} is a Model Roulette that may send the call on connection ${picked}, which acceptance runs guard: an agent never calls through it while any of its connections is guarded`);
+    if (picked !== undefined) throw new AgentStop("acceptance", { id: STOP_TEXT.acceptanceRoulette, vars: { connection, picked } });
     const entry = guarded.find((c) => c.id === connection);
-    if (entry?.only && !u.run) throw new AgentStop("acceptance", `connection ${connection} is kept for acceptance runs, and none is open: open one in Settings → Agents → Acceptance runs`);
+    // A connection that reads again is warned of again the next time it can't be read.
+    if (input.connection !== null && input.targets !== null) u.warned.delete(`unidentified:${connection}`);
+    if (guarded.length > 0 && entry === undefined) {
+      if (input.connection === null) this.warnOnce(userId, u, "unidentified default", "an agent's call is on the default connection, which couldn't be read, so acceptance runs can't tell whether it is one they guard: it goes ahead, and what it spends counts against no guarded connection");
+      else if (input.targets === null) this.warnOnce(userId, u, `unidentified:${connection}`, `connection ${connection} couldn't be read, so acceptance runs can't tell whether it is a Model Roulette over a connection they guard: its agents' calls go ahead until it can be read, and what they spend counts against no guarded connection`);
+    }
+    if (entry?.only && !u.run) throw new AgentStop("acceptance", { id: STOP_TEXT.acceptanceClosed, vars: { connection } });
     const throttle = settings.throttles.find((t) => t.id === connection);
     await this.throttle(u, connection, input.tokensIn + input.tokensOut, throttle, input.signal);
     const factor = u.calibration.get(`${connection}\u0000${input.model}`) ?? settings.acceptance.estimateFactor;
@@ -645,8 +685,8 @@ export class AgentAccounts {
         run.spend[connection] = { ...spent, refused: spent.refused + 1 };
         void this.save(userId, u);
         this.changed(userId);
-        const side = code === "ceiling_in" ? `${spent.tokensIn + held.tokensIn} of ${String(entry.tokensIn)} prompt tokens are spent or held, and it needs about ${tokensIn}` : `${spent.tokensOut + held.tokensOut} of ${String(entry.tokensOut)} answer tokens are spent or held, and it may write ${input.tokensOut}`;
-        throw new AgentStop(code, `the call would pass connection ${connection}'s ceiling for this acceptance run: ${side}`);
+        const vars = code === "ceiling_in" ? { connection, ceiling: counted(limitOf(entry.tokensIn), "prompt token", "prompt tokens"), used: String(spent.tokensIn + held.tokensIn), needs: String(tokensIn) } : { connection, ceiling: counted(limitOf(entry.tokensOut), "answer token", "answer tokens"), used: String(spent.tokensOut + held.tokensOut), needs: String(input.tokensOut) };
+        throw new AgentStop(code, { id: code === "ceiling_in" ? STOP_TEXT.ceilingIn : STOP_TEXT.ceilingOut, vars });
       }
     }
     const held = u.held.get(connection) ?? { tokensIn: 0, tokensOut: 0 };
@@ -655,7 +695,7 @@ export class AgentAccounts {
     const entryAt = { at: this.clock.now(), tokens: input.tokensIn + input.tokensOut };
     if (throttle) u.window.set(connection, [...(u.window.get(connection) ?? []), entryAt]);
     if (run) this.changed(userId);
-    return { userId, connection, model: input.model, estimate: input.tokensIn, tokensIn, tokensOut: input.tokensOut, run, entry: entryAt };
+    return { userId, connection, model: input.model, estimate: input.tokensIn, tokensIn, tokensOut: input.tokensOut, run, entry: entryAt, accounts: u };
   }
 
   /**
@@ -663,8 +703,7 @@ export class AgentAccounts {
    * its run counts its prompt as held, flagged as an estimate; what it wrote, if anything, is unknown.
    */
   settle(r: Reservation, usage: CallUsage | null): void {
-    const u = this.users.get(r.userId);
-    if (!u) return;
+    const u = r.accounts;
     const held = u.held.get(r.connection) ?? { tokensIn: 0, tokensOut: 0 };
     u.held.set(r.connection, { tokensIn: Math.max(0, held.tokensIn - r.tokensIn), tokensOut: Math.max(0, held.tokensOut - r.tokensOut) });
     if (usage) {
@@ -801,6 +840,8 @@ export class ProviderSession {
           model: this.spec.model,
           ...(p.tools.length > 0 ? { tools: p.tools } : {}),
           effort: callEffort(this.spec.effort, p.names.size > 0, settings.thinkingInToolLoops),
+          // With thinking in tool loops, the model's thinking comes back summarized, so its text reaches the agent once the host carries it.
+          ...(settings.thinkingInToolLoops ? { thinkingDisplay: "summarized" as const } : {}),
           usage: true,
         },
         userId,

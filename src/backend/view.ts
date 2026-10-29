@@ -416,9 +416,9 @@ export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { even
  * The Journal's turn entries: what each folded turn applied, in player-facing lines (only events
  * the POV may see, about things it has met, worded with labels, leak-checked). They are `note`
  * entries, each followed by a `fix` note per ✎ fix or GM edit the player may see; the fold's own
- * notes follow them.
+ * notes follow them. The latest `keep` of them.
  */
-function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: LedgerCore, registry: Registry, world: WorldDoc, state: WorldState): JournalNote[] {
+function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: LedgerCore, registry: Registry, world: WorldDoc, state: WorldState, keep = JOURNAL_TURNS): JournalNote[] {
   const out: JournalNote[] = [];
   chain.forEach((m, i) => {
     if (m.isUser) return;
@@ -434,7 +434,19 @@ function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: Ledge
       if (fixed.length > 0) out.push({ kind: "fix", messageId: m.id, ref: { in: "post", seq: fix.seq, index: 0 }, text: fixed.join(" · ") });
     }
   });
-  return out.slice(-JOURNAL_TURNS);
+  return out.slice(-keep);
+}
+
+/**
+ * Every turn's Journal entries on the chain before `index` (`turnNotes`, none left out), as the
+ * player sees them at that point: the main agent's digest of what changed since its last turn.
+ */
+export function journalNotes(core: LedgerCore, observed: readonly ChainMessage[], index: number, registry: Registry): JournalNote[] {
+  const prefix = observed.slice(0, Math.max(0, index));
+  const fold = core.fold(prefix);
+  const world = core.worldAt(fold.state.revision);
+  if (!world) return [];
+  return turnNotes(core.chain(prefix), fold, core, registry, world, fold.state, Number.POSITIVE_INFINITY);
 }
 
 /** Turns `{{recent}}` holds (DESIGN §5.2). */

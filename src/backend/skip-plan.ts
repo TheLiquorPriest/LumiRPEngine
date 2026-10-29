@@ -6,7 +6,7 @@
 // runs out of time isn't planned: the event carries a note for the GM, and the skip still runs.
 
 import type { ChatId, UserId } from "../shared/ids";
-import type { JsonObject } from "../shared/json";
+import { isRecord, type JsonObject } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { ROUTINE_EVENTS, routineSettingsOf, type SkipPlan } from "../shared/routines";
 import { type Limit, type MindsReads, SKIP_FILL_HEAD } from "../shared/minds";
@@ -32,6 +32,7 @@ import { livesPlans } from "../packs/castlife/core/commitments";
 import { povSafe } from "../packs/castlife/core/usual";
 import type { HostPort } from "./host";
 import { readPins } from "./lore-pins";
+import { askMind, type MindAsk } from "./mind-ask";
 import { chatBefore } from "./minds";
 import { pinnedLines, recentChat } from "./minds-context";
 import type { Steps } from "./steps";
@@ -40,17 +41,20 @@ import { renderTemplate, safeVars } from "./turn-steps";
 /** The most of the latest reply the call reads. */
 const REPLY_CAP = 2_000;
 
-/**
- * The call's instructions: the user's own prompt for the time-skip step (Settings → Steps and
- * connections, `config.template`), its placeholders filled, else the built-in; then the answer format,
- * which no prompt replaces.
- */
-export function skipPlanSystem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, from: number, config: Pick<StepConfig, "template"> | null): string {
+/** The placeholders the skip plan's own prompt is filled with, as the player character knows them: a secret place's real name never reaches the prompt. */
+export function skipPlanVars(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, from: number): Record<string, string> {
+  return safeVars({ world: world.name, pov: own(state.entities, world.pov)?.name ?? world.pov, place: povPlace(reg, world, state)?.name ?? "", clock: formatClock(calendarOf(world), from) }, unrevealedSecrets(reg, world, state));
+}
+
+/** The user's own prompt for the time-skip step (Settings → Steps and connections, `config.template`), its placeholders filled; null for the built-in. */
+export function skipPlanOwn(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, from: number, config: Pick<StepConfig, "template"> | null): string | null {
   const mine = config?.template ?? "";
-  if (mine.trim() === "") return `${SKIP_PLAN_PROMPT}\n${SKIP_PLAN_ANSWER}`;
-  // The place as the player character knows it: a secret place's real name never reaches the prompt.
-  const vars = safeVars({ world: world.name, pov: own(state.entities, world.pov)?.name ?? world.pov, place: povPlace(reg, world, state)?.name ?? "", clock: formatClock(calendarOf(world), from) }, unrevealedSecrets(reg, world, state));
-  return `${renderTemplate(mine, vars)}\n${SKIP_PLAN_ANSWER}`;
+  return mine.trim() === "" ? null : renderTemplate(mine, skipPlanVars(reg, world, state, from));
+}
+
+/** The call's instructions: the user's own prompt (`skipPlanOwn`), else the built-in; then the answer format, which no prompt replaces. */
+export function skipPlanSystem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, from: number, config: Pick<StepConfig, "template"> | null): string {
+  return `${skipPlanOwn(reg, world, state, from, config) ?? SKIP_PLAN_PROMPT}\n${SKIP_PLAN_ANSWER}`;
 }
 
 export interface SkipPlanInput {
@@ -81,6 +85,8 @@ export interface SkipPlanDeps {
   log: (message: string) => void;
   /** Where the lore pinned to the `skip` step and the recent chat come from (DESIGN §24.5). */
   host: Pick<HostPort, "books" | "log" | "chats">;
+  /** Who answers the plan's calls: none, the step itself; an agent turn's skip role (`askMind`). */
+  ask?: MindAsk;
 }
 
 /** Why a skip plan has no blocks when the `skip` step is off, for the GM's view of the people it would have planned. */
@@ -123,14 +129,30 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
   const extra = [fill !== "" && safe(fill) ? `${SKIP_FILL_HEAD}\n${fill}` : "", pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : "", chat.length > 0 ? `Recent chat (as the player sees it):\n${chat.join("\n")}` : ""].filter((part) => part !== "");
   const signal = within(input.signal, "skipPlanMs", input.limit);
   const system = skipPlanSystem(deps.registry, input.world, input.state, from, input.config);
+  const vars = skipPlanVars(deps.registry, input.world, input.state, from);
+  const mine = skipPlanOwn(deps.registry, input.world, input.state, from, input.config);
   const groups = routineSettingsOf(input.world).skipPlanCalls === "parallel" ? people.map((id) => [id]) : [people];
   // Each call is told only its own people; the calls run at once, each inside the same limit.
   const answers = await Promise.all(
     groups.map(async (group) => {
       const brief = skipPlanBrief(ctx, group, from, to);
       const failure = { reason: "" };
+      const context = [skipPlanText(ctx, brief, told, journal), ...extra].join("\n\n");
       // Spared: a failed plan leaves its people to their basic needs, and the skip runs without it.
-      const raw = signal.aborted ? null : await deps.steps.helperJson("skip", system, [skipPlanText(ctx, brief, told, journal), ...extra].join("\n\n"), input.config, input.userId, signal, { failure, spared: true, guidance: input.guidance });
+      const raw = signal.aborted
+        ? null
+        : await askMind(deps.ask, {
+            kind: "skip_plan",
+            who: null,
+            vars,
+            template: mine,
+            context,
+            signal,
+            usage: { tokens: 0 },
+            failure,
+            check: (answer) => isRecord(answer) && Array.isArray(answer.plans),
+            classic: () => deps.steps.helperJson("skip", system, context, input.config, input.userId, signal, { failure, spared: true, guidance: input.guidance }),
+          });
       if (raw !== null) return { people: group.length, checked: checkSkipPlan(ctx, brief, raw), why: null };
       const fired = firedTimeout(signal);
       return { people: group.length, checked: null, why: fired ? fired.message : failure.reason || "the call didn't answer" };

@@ -186,6 +186,24 @@ describe("GM → Assistant: each state and the buttons it offers", () => {
     expect(answer["data-lre-role"]).toBe("assistant");
     expect(textOf(answer.children)).toContain("Danny Okafor suspects something is wrong at Alder Automotive.");
     expect(textOf(answer.children)).toContain("4,120 tokens in (3,000 cached) · 230 out");
+    // When its provider says what it wrote to the cache, that shows beside what it read, none included.
+    const written = (usage: NonNullable<AssistantMessage["usage"]>) => textOf(marked(render(viewOf([asked, { ...answered, usage }]), h), "data-lre-assistant-message", "m2").children);
+    expect(written({ in: 11_606, out: 52, cached: 0, written: 11_592 })).toContain("11,606 tokens in (11,592 written) · 52 out");
+    expect(written({ in: 11_700, out: 56, cached: 11_592, written: 0 })).toContain("11,700 tokens in (11,592 cached, 0 written) · 56 out");
+    // Its answer reads as Markdown's safe subset; your own message stays as you wrote it, and HTML in either stays text.
+    const md = render(viewOf([{ ...asked, text: "Is **Danny** <b>in</b>?" }, { ...answered, text: "## Who knows\n**Danny Okafor** knows:\n\n- the debt\n- `people_where` <script>x</script>\n\n```\n<script>y</script>\n```\n> as he said" }]), h);
+    const yours = marked(md, "data-lre-assistant-message", "m1");
+    const its = marked(md, "data-lre-assistant-message", "m2");
+    expect(propsOf(yours.children, "strong")).toEqual([]);
+    expect(textOf(yours.children)).toContain("Is **Danny** <b>in</b>?");
+    const [said] = propsOf(its.children, "div").filter((p) => typeof p.class === "string" && p.class.split(" ").includes("lre-md"));
+    expect(propsOf(said?.children, "strong").map((p) => textOf(p.children))).toEqual(["Danny Okafor"]);
+    expect(propsOf(said?.children, "li").map((p) => textOf(p.children))).toEqual(["the debt", "people_where <script>x</script>"]);
+    expect(propsOf(said?.children, "code").map((p) => textOf(p.children))).toEqual(["people_where", "<script>y</script>"]);
+    expect(propsOf(said?.children, "p").filter((p) => p.role === "heading").map((p) => textOf(p.children))).toEqual(["Who knows"]);
+    expect(propsOf(said?.children, "pre")).toHaveLength(1);
+    expect(propsOf(said?.children, "blockquote").map((p) => textOf(p.children))).toEqual(["as he said"]);
+    expect(propsOf(its.children, "script")).toEqual([]);
     // Folded: a closed disclosure saying how many tools it called and how many failed.
     const [fold] = propsOf(answer.children, Disclosure);
     expect(fold?.summary).toBe("What it looked up: 3 tool calls, 1 failed");

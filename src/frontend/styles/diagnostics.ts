@@ -16,6 +16,11 @@ export const DIAGNOSTICS_CSS = `
 /* The drawer's bar under the mode bar, sticky with it; its tint laid over the bar's own background, so nothing shows through */
 .lre-activity-bar{position:sticky;top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px));z-index:5;display:flex;align-items:center;gap:var(--lre-s2);min-height:36px;margin:0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l));background:linear-gradient(var(--lre-accent-soft),var(--lre-accent-soft)),var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);font-size:var(--lre-fs-sm);color:var(--lre-fg)}
 .lre-activity-bar>.lre-activity-label{flex:1}
+.lre-activity-bar:has(.lre-activity-agents){flex-wrap:wrap}
+.lre-activity-agents{flex-basis:100%;display:flex;flex-direction:column;gap:var(--lre-s1);margin:0;padding:0;list-style:none}
+.lre-activity-agent{display:flex;align-items:center;gap:var(--lre-s2);min-width:0}
+.lre-activity-agent-label{flex:1;min-width:0;font-weight:600;overflow-wrap:anywhere}
+.lre-activity-agent-tokens{color:var(--lre-muted);font-variant-numeric:tabular-nums}
 .lre-activity-banner{margin-top:var(--lre-s3)}
 
 /* Settings → Diagnostics */

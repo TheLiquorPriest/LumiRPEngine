@@ -1,13 +1,16 @@
-// Settings → Agents (AGENT-LOOP-PLAN §15; INC1-SPEC R1, R6a): what the agent runtime runs under, kept
-// in `UserSettings.agents`, apart from the classic steps' settings, so no classic turn reads any of it.
-// Every limit the runtime keeps is a setting here, with its default and the words its page shows
-// (`BUDGET_DEFS`, `TURN_DEFS`, `LOOP_DEFS`), and so is everything the GM assistant runs with
-// (`assistant`: Settings → Agents → Assistant); the values that stay fixed are §16's: the effort
-// levels, "set by the model" as the host's `{source: "custom", effort: "auto"}`, and Anthropic's 4
-// cache breakpoints per request, which the host adapter keeps (`backend/spindle-host.ts`).
+// Settings → Agents (AGENT-LOOP-PLAN §15; INC1-SPEC R1, R6a; INC2-SPEC C12): what the agent runtime
+// runs under, kept in `UserSettings.agents`, apart from the classic steps' settings, so no classic
+// turn reads any of it. Every limit the runtime keeps is a setting here, with its default and the
+// words its page shows (`BUDGET_DEFS`, `TURN_DEFS`, `LOOP_DEFS`, `GM_OPS_DEF`, `KEPT_DEFS`, `COMPACTION_DEFS`, `MAIN_DEFS`, `OUTPUT_CHARS_DEF`), and so is
+// everything the GM assistant runs with (`assistant`: Settings → Agents → Assistant) and everything
+// an agent turn runs with (`pipeline`, `roles`, `main`, `gmOpsPerTurn`, `kept`, `compaction`, `recording`,
+// `review` and `vsClassic`); the values that stay fixed are §16's: the effort levels, "set by the model" as
+// the host's `{source: "custom", effort: "auto"}`, and Anthropic's 4 cache breakpoints per request,
+// which the host adapter keeps (`backend/spindle-host.ts`).
 
-import type { AgentKnowledge } from "./agent-tools";
-import { AGENT_KNOWLEDGE } from "./agent-tools";
+import type { AgentKnowledge, ToolFamily } from "./agent-tools";
+import { AGENT_KNOWLEDGE, TOOL_FAMILY_LABEL } from "./agent-tools";
+import { defaultRoleSettings, ROLE_IDS, ROLE_KNOWLEDGE, ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS, type RoleId, type RoleSettings } from "./agent-roles";
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { Limit } from "./minds";
 import { limitIn } from "./minds";
@@ -106,6 +109,72 @@ export interface AssistantSettings {
   budget: Partial<AgentBudget>;
 }
 
+/** How an agent turn is run (Settings → Agents → Pipeline): §5's roles in classic's order (`fixed`), or a main agent per chat deciding (`main`). */
+export type PipelineMode = "fixed" | "main";
+export const PIPELINE_MODES: readonly PipelineMode[] = ["fixed", "main"];
+
+/** When the minds' memory and consolidation run in an agent turn: after its reply, inside the read, as classic does (`after_reply`), or first in the next turn's pre phase (`before_next`), whose pre events they then are. */
+export type MemoryPlacement = "after_reply" | "before_next";
+export const MEMORY_PLACEMENTS: readonly MemoryPlacement[] = ["after_reply", "before_next"];
+
+/** Where an agent turn's changes that ask first wait (C13; Settings → Agents → Review card): on the review card after the reply, the narrator untold until you apply them (`chips`), or on the card before the reply, the turn waiting as at the outline gate (`gate`). */
+export type ReviewPlacement = "chips" | "gate";
+export const REVIEW_PLACEMENTS: readonly ReviewPlacement[] = ["chips", "gate"];
+
+export interface PipelineSettings {
+  mode: PipelineMode;
+  memory: MemoryPlacement;
+}
+
+/** The main session's compaction (Settings → Agents → Compaction): once it passes `atTokens`, all but the last `keepTurns` turns are summarized; `summarizeTool` gives the main agent its summarize tool. */
+export interface CompactionSettings {
+  atTokens: number;
+  keepTurns: number;
+  summarizeTool: boolean;
+}
+
+/** What an agent turn records for the narrator (Settings → Agents → Recording): each output event's text, in characters at most. */
+export interface RecordingSettings {
+  outputChars: number;
+}
+
+export interface ReviewSettings {
+  placement: ReviewPlacement;
+}
+
+/**
+ * What the engine keeps in memory for agent turns, each the most it holds at once (Settings → Agents
+ * → Budgets): turns under way (a turn that went stale unheard is let go with the oldest), a user's
+ * turns waiting at a gate, each with its whole run for the resume (one let go resumes afresh; a
+ * review gate's still replays its plan, but its record keeps neither what the run committed nor its
+ * lines for the narrator), and chats whose review cards a page listens to (one let go hears the
+ * cards again when it next asks for them).
+ */
+export interface KeptSettings {
+  runs: number;
+  gates: number;
+  watchers: number;
+}
+
+/**
+ * The main agent (Settings → Agents → Main agent; INC2-SPEC C14), while the pipeline has one decide:
+ * the connection and model it runs on (null: your default connection, and that connection's model),
+ * its effort, whose knowledge its tools and the engine's messages to it read with, its tool families
+ * (read only: it changes nothing itself), its own limits over `budget` for each stage it works, and
+ * its turn task's parts in tokens at most: the digest of what changed since its last turn, and its
+ * pinned files where `.pins.json` sets no budget for it, which is every role's pins budget too.
+ */
+export interface MainAgentSettings {
+  connectionId: string | null;
+  model: string | null;
+  effort: AgentEffort;
+  knowledge: AgentKnowledge;
+  families: ToolFamily[];
+  budget: Partial<AgentBudget>;
+  digestTokens: number;
+  pinsTokens: number;
+}
+
 export interface AgentSettings {
   /**
    * "Thinking in agent tool loops" (§2, decided A): while off, every call that offers tools goes
@@ -134,6 +203,22 @@ export interface AgentSettings {
   acceptance: { connections: AcceptanceConnection[]; estimateFactor: number };
   /** The GM assistant (Settings → Agents → Assistant). */
   assistant: AssistantSettings;
+  /** How an agent turn is run, and where its memory goes (Settings → Agents → Pipeline). */
+  pipeline: PipelineSettings;
+  /** Each role of an agent turn (Settings → Agents → Roles). */
+  roles: Record<RoleId, RoleSettings>;
+  /** The main agent, while `pipeline.mode` is `main` (Settings → Agents → Main agent). */
+  main: MainAgentSettings;
+  /** The GM's edits a turn's agents may stage in all, per turn (Settings → Agents → Budgets). */
+  gmOpsPerTurn: number;
+  /** What the engine keeps in memory for agent turns (Settings → Agents → Budgets). */
+  kept: KeptSettings;
+  compaction: CompactionSettings;
+  recording: RecordingSettings;
+  /** Where an agent turn's changes that ask first wait (Settings → Agents → Review card). */
+  review: ReviewSettings;
+  /** The acceptance comparison's target (Settings → Agents → Acceptance runs; INC2-ACCEPTANCE): per role, an agent turn's tokens at most this many times the classic turn's of the same scenario. Nothing in the engine enforces it: the comparison reads both turns' tokens from Diagnostics. */
+  vsClassic: number;
 }
 
 /**
@@ -155,6 +240,16 @@ export function defaultAgentSettings(): AgentSettings {
     acceptance: { connections: [], estimateFactor: 2 },
     // The assistant reads what everyone in the world knows, secrets marked, and its changes wait for your Apply.
     assistant: { connectionId: null, model: null, effort: "inherit", knowledge: "everyone", apply: "ask", historyTokens: 20_000, budget: {} },
+    pipeline: { mode: "fixed", memory: "after_reply" },
+    roles: defaultRoleSettings(),
+    // The main agent reads what everyone in the world knows, secrets marked, and the workspace; its digest and pins, 2,000 tokens each (§15).
+    main: { connectionId: null, model: null, effort: "inherit", knowledge: "everyone", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000 },
+    gmOpsPerTurn: 10,
+    kept: { runs: 64, gates: 256, watchers: 256 },
+    compaction: { atTokens: 32_000, keepTurns: 3, summarizeTool: true },
+    recording: { outputChars: 2000 },
+    review: { placement: "chips" },
+    vsClassic: 2,
   };
 }
 
@@ -163,8 +258,29 @@ export function assistantBudget(settings: Readonly<AgentSettings>): AgentBudget 
   return { ...settings.budget, ...settings.assistant.budget };
 }
 
+/** A turn role's budget: every agent's, with the limits its role sets of its own standing in. */
+export function roleBudget(settings: Readonly<AgentSettings>, role: RoleId): AgentBudget {
+  return { ...settings.budget, ...settings.roles[role].budget };
+}
+
+/** The main agent's budget for each stage it works: every agent's, with the limits it sets of its own standing in. */
+export function mainBudget(settings: Readonly<AgentSettings>): AgentBudget {
+  return { ...settings.budget, ...settings.main.budget };
+}
+
+/** The main agent's role, as the runtime, Diagnostics and the caching settings name it. */
+export const MAIN_AGENT_ROLE = "main";
+
 /** Roles the runtime runs, by id, as Settings → Agents names them (each role's own settings are keyed by its id). */
-export const AGENT_ROLES: readonly { id: string; label: string }[] = [{ id: "assistant", label: "GM assistant" }];
+export const AGENT_ROLES: readonly { id: string; label: string }[] = [
+  { id: "assistant", label: "GM assistant" },
+  { id: MAIN_AGENT_ROLE, label: "Main agent" },
+];
+
+/** An agent's name, by its role, as Settings → Agents names it: a turn role's label, the GM assistant's or the main agent's; else the role's id. What the drawer's live trace shows of it. */
+export function agentLabel(role: string): string {
+  return hasOwn(ROLE_LABEL, role) ? ROLE_LABEL[role as RoleId] : (AGENT_ROLES.find((r) => r.id === role)?.label ?? role);
+}
 
 // ---------------------------------------------------------------- the page's words
 
@@ -219,6 +335,38 @@ export const ASSISTANT_KNOWLEDGE_LABELS: Readonly<Record<AgentKnowledge, string>
 export const ASSISTANT_APPLY_LABELS: Readonly<Record<AssistantApply, string>> = { ask: "Each waits for your Apply", at_once: "At once, with an Undo chip" };
 
 export const HISTORY_TOKENS_DEF: AgentLimitDef = { label: "History tokens", limits: "How much of the conversation goes with each message you send, the newest messages first.", fires: "The older messages are left out, and the assistant is told how many.", unit: "tokens", min: 0, none: null };
+
+/** Settings → Agents → Budgets: the GM's edits an agent turn may stage. */
+export const GM_OPS_DEF: AgentLimitDef = { label: "GM edits per turn", limits: "How many of the GM's edits (a spawn, a removal, any field, a stage, the clock) a turn's agents may stage together.", fires: "The edits past it are refused, and the agent that asked is told so.", unit: "count", min: 0, none: null };
+
+/** Settings → Agents → Budgets: what the engine keeps in memory for agent turns, at least one of each, so a turn can run, wait at its gate and be heard. */
+export const KEPT_DEFS: Readonly<Record<keyof KeptSettings, AgentLimitDef>> = {
+  runs: { label: "Agent turns under way", limits: "How many agent turns, across your chats, the engine keeps running at once.", fires: "The oldest is let go when another starts: a turn that went stale with no end heard.", unit: "count", min: 1, none: null },
+  gates: { label: "Turns waiting at a gate", limits: "How many agent turns, across your chats, may wait at a gate (the intent or outline gate, a question asked first, the review card) with everything their agents had done kept for the resume.", fires: "The oldest waiting turn is let go: it resumes afresh, its agents asked again where the turn still needs them; a review gate's still plays its plan and lands what you let through, but its record no longer says which role wrote what it committed before the gate, nor keeps the lines its roles had for the narrator.", unit: "count", min: 1, none: null },
+  watchers: { label: "Chats whose review cards are watched", limits: "How many chats' review cards the pages that show them hear about as they change.", fires: "The chat watched longest ago stops hearing, until a page asks for its cards again.", unit: "count", min: 1, none: null },
+};
+
+/** Settings → Agents → Compaction: when the main session is summarized, and how much of it stays whole. */
+export const COMPACTION_DEFS: Readonly<Record<"atTokens" | "keepTurns", AgentLimitDef>> = {
+  atTokens: { label: "Compact the session past", limits: "How long the main agent's session may grow before everything but its latest turns is summarized.", fires: "The older turns become one summary, kept with the span it replaced for a rollback.", unit: "tokens", min: 1, none: null },
+  keepTurns: { label: "Recent turns kept whole", limits: "How many of the latest turns a compaction leaves as they were.", fires: "Older turns are summarized.", unit: "count", min: 0, none: null },
+};
+
+/** Settings → Agents → Main agent: how much of its turn task the digest and its pinned files may take. */
+export const MAIN_DEFS: Readonly<Record<"digestTokens" | "pinsTokens", AgentLimitDef>> = {
+  digestTokens: { label: "Turn digest", limits: "How much of the main agent's turn task the digest of what changed since its last turn may take: the newest replies first.", fires: "Older replies are left out, and the digest says how many.", unit: "tokens", min: 0, none: null },
+  pinsTokens: { label: "Pinned files, per role", limits: "How much of an agent's prompt its pinned files may take, where .pins.json sets no budget for it: the main agent's, and every role's.", fires: "A file past it comes as its headings, which workspace_read reads whole.", unit: "tokens", min: 0, none: null },
+};
+
+/** Settings → Agents → Recording: each line an agent turn records for the narrator. */
+export const OUTPUT_CHARS_DEF: AgentLimitDef = { label: "Narrator-facing output, each", limits: "How long each text an agent turn records for the narrator may be: an outcome, montage or outline line, the brief, a scene note.", fires: "A longer text is cut to it, ending in “…”; the cut is noted in your diagnostics.log, not on the Diagnostics page.", unit: "chars", min: 1, none: null };
+
+/** Settings → Agents → Pipeline's words for each choice. */
+export const PIPELINE_MODE_LABELS: Readonly<Record<PipelineMode, string>> = { fixed: "A fixed pipeline, in classic's order", main: "A main agent decides" };
+export const MEMORY_PLACEMENT_LABELS: Readonly<Record<MemoryPlacement, string>> = { after_reply: "After the reply", before_next: "Before the next turn" };
+
+/** Settings → Agents → Review card's words for where an agent turn's changes that ask first wait. */
+export const REVIEW_PLACEMENT_LABELS: Readonly<Record<ReviewPlacement, string>> = { chips: "On the review card after the reply", gate: "On the review card before the reply" };
 
 // ---------------------------------------------------------------- reading stored settings
 
@@ -283,6 +431,49 @@ function assistantOf(v: unknown, d: Readonly<AssistantSettings>): AssistantSetti
   };
 }
 
+/** Every tool family, by id. */
+const FAMILIES = Object.keys(TOOL_FAMILY_LABEL) as ToolFamily[];
+
+/** The main agent's settings as stored: each field checked, else `d`'s; a connection or model cleared with null is your default's. */
+function mainOf(v: unknown, d: Readonly<MainAgentSettings>): MainAgentSettings {
+  const m = isRecord(v) ? v : {};
+  return {
+    connectionId: m.connectionId === null ? null : safeKey(m.connectionId) ? m.connectionId : d.connectionId,
+    model: m.model === null ? null : safeKey(m.model) ? m.model : d.model,
+    effort: oneOf(m.effort, AGENT_EFFORTS, d.effort),
+    knowledge: oneOf(m.knowledge, AGENT_KNOWLEDGE, d.knowledge),
+    families: Array.isArray(m.families) ? [...new Set(m.families.filter((f): f is ToolFamily => typeof f === "string" && (FAMILIES as readonly string[]).includes(f)))] : [...d.families],
+    budget: ownBudgetOf(m.budget, d.budget),
+    digestTokens: whole(m.digestTokens, MAIN_DEFS.digestTokens.min) ?? d.digestTokens,
+    pinsTokens: whole(m.pinsTokens, MAIN_DEFS.pinsTokens.min) ?? d.pinsTokens,
+  };
+}
+
+/** A role's settings as stored: each field checked, else `d`'s; a connection or model cleared with null follows its classic step's. */
+function roleOf(v: unknown, d: Readonly<RoleSettings>): RoleSettings {
+  const r = isRecord(v) ? v : {};
+  const families = Array.isArray(r.families) ? [...new Set(r.families.filter((f): f is ToolFamily => typeof f === "string" && (FAMILIES as readonly string[]).includes(f)))] : [...d.families];
+  return {
+    connectionId: r.connectionId === null ? null : safeKey(r.connectionId) ? r.connectionId : d.connectionId,
+    model: r.model === null ? null : safeKey(r.model) ? r.model : d.model,
+    effort: oneOf(r.effort, AGENT_EFFORTS, d.effort),
+    knowledge: oneOf(r.knowledge, ROLE_KNOWLEDGE, d.knowledge),
+    families,
+    tier: oneOf(r.tier, ROLE_TIERS, d.tier),
+    promptOnly: typeof r.promptOnly === "boolean" ? r.promptOnly : d.promptOnly,
+    onFail: oneOf(r.onFail, ROLE_ON_FAIL, d.onFail),
+    budget: ownBudgetOf(r.budget, d.budget),
+  };
+}
+
+/** Every role's settings as stored: each role's own, else `d`'s. */
+function rolesOf(v: unknown, d: Readonly<Record<RoleId, RoleSettings>>): Record<RoleId, RoleSettings> {
+  const raw = isRecord(v) ? v : {};
+  const out = {} as Record<RoleId, RoleSettings>;
+  for (const id of ROLE_IDS) out[id] = roleOf(hasOwn(raw, id) ? raw[id] : undefined, d[id]);
+  return out;
+}
+
 /** A per-connection list as stored: entries with a safe id, the first of each id; a list that isn't one keeps `d`. */
 function listOf<T extends { id: string }>(v: unknown, d: readonly T[], entry: (raw: Record<string, unknown>, id: string) => T): T[] {
   if (!Array.isArray(v)) return d.map((x) => ({ ...x }));
@@ -319,6 +510,11 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
   } else for (const [role, value] of Object.entries(d.caching.roles)) roles[role] = { ...value };
   const acceptance = isRecord(a.acceptance) ? a.acceptance : {};
   const factor = acceptance.estimateFactor;
+  const pipeline = isRecord(a.pipeline) ? a.pipeline : {};
+  const compaction = isRecord(a.compaction) ? a.compaction : {};
+  const recording = isRecord(a.recording) ? a.recording : {};
+  const review = isRecord(a.review) ? a.review : {};
+  const kept = isRecord(a.kept) ? a.kept : {};
   return {
     thinkingInToolLoops: typeof a.thinkingInToolLoops === "boolean" ? a.thinkingInToolLoops : d.thinkingInToolLoops,
     budget: budgetOf(a.budget, d.budget),
@@ -332,6 +528,16 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
       estimateFactor: typeof factor === "number" && Number.isFinite(factor) && factor >= ESTIMATE_FACTOR_MIN ? factor : d.acceptance.estimateFactor,
     },
     assistant: assistantOf(a.assistant, d.assistant),
+    pipeline: { mode: oneOf(pipeline.mode, PIPELINE_MODES, d.pipeline.mode), memory: oneOf(pipeline.memory, MEMORY_PLACEMENTS, d.pipeline.memory) },
+    roles: rolesOf(a.roles, d.roles),
+    main: mainOf(a.main, d.main),
+    gmOpsPerTurn: whole(a.gmOpsPerTurn, GM_OPS_DEF.min) ?? d.gmOpsPerTurn,
+    kept: { runs: whole(kept.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole(kept.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole(kept.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers },
+    compaction: { atTokens: whole(compaction.atTokens, COMPACTION_DEFS.atTokens.min) ?? d.compaction.atTokens, keepTurns: whole(compaction.keepTurns, COMPACTION_DEFS.keepTurns.min) ?? d.compaction.keepTurns, summarizeTool: typeof compaction.summarizeTool === "boolean" ? compaction.summarizeTool : d.compaction.summarizeTool },
+    recording: { outputChars: whole(recording.outputChars, OUTPUT_CHARS_DEF.min) ?? d.recording.outputChars },
+    review: { placement: oneOf(review.placement, REVIEW_PLACEMENTS, d.review.placement) },
+    // A ratio, so any amount above none: under 1, an agent turn must spend less than classic's.
+    vsClassic: typeof a.vsClassic === "number" && Number.isFinite(a.vsClassic) && a.vsClassic > 0 ? a.vsClassic : d.vsClassic,
   };
 }
 

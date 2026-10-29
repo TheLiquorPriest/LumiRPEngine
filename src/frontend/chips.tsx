@@ -4,15 +4,17 @@
 // list, where every chip shows with its own buttons. A pack can override a kind's rendering through
 // `UiRegistry.chip`; its component replaces the default wherever that chip shows. Buttons send exactly
 // the request `chipIntent` builds; an action that asks for a value first (an amount, a catalog item)
-// opens a small form in the chip.
+// opens a small form in the chip. An agent turn's review card (`review`) shows as its own card
+// (review-card.tsx), its changes read through `lre.review`.
 
 import type { ComponentChildren, ComponentType } from "preact";
 import { Fragment } from "preact";
-import { useId, useState } from "preact/hooks";
+import { useEffect, useId, useState } from "preact/hooks";
 import type { ChatId, MessageId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import type { KeepLine } from "../shared/ledger";
 import { formatMoneyInput, parseMoneyInput } from "../shared/money";
+import type { GenerateAs, ReviewCardView } from "../shared/protocol";
 import type { Chip, ChipAction, ChipInput, ChipKind } from "../shared/state-view";
 import { DEFAULT_CURRENCY, type WorldCurrency } from "../shared/world";
 import { type App, useApp, useView } from "./app";
@@ -24,6 +26,7 @@ import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
 import type { ChipProps } from "./registry";
 import { chipIntent, convertRequest } from "./requests";
+import { followReview, ReviewCard, reviewHandlers, ReviewUnread } from "./review-card";
 
 const CHIP_ICON: Record<ChipKind, IconName> = {
   change: "check",
@@ -58,6 +61,7 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   refused: "alert",
   intent_gate: "pause",
   outline_gate: "list",
+  review: "list",
   untracked: "info",
 };
 
@@ -112,7 +116,7 @@ export function MessageChips(props: { messageId: MessageId }) {
         </span>
       ) : null}
       {done.length > 0 ? <Receipt chips={done} show={(chip) => show(chip, DefaultChip)} /> : null}
-      {chips.filter((chip) => chipRole(chip) === "decision").map((chip) => show(chip, chip.kind === "keep_report" ? KeepReportChip : DecisionCard))}
+      {chips.filter((chip) => chipRole(chip) === "decision").map((chip) => show(chip, chip.kind === "keep_report" ? KeepReportChip : chip.kind === "review" ? ReviewChip : DecisionCard))}
       {offers.length > 0 ? <div class="lre-chat-offers">{offers.map((chip) => show(chip, OfferChip))}</div> : null}
     </div>
   );
@@ -179,12 +183,49 @@ export async function sendChipChoice(app: App, chip: Chip, choice: string, chatI
     }
     if (message.request === "lre.chip" && message.body.pending && intent.start === null) app.toast("Saved — it applies when the reply finishes.", "info");
   }
-  if (intent.start === "send") app.toast("Press Send, with nothing typed, for the reply.", "info");
-  else if (intent.start !== null && !(await app.host.generate(intent.start))) {
-    const command = intent.start === "continue" ? "Continue" : "Regenerate";
+  await startGeneration(app, intent.start);
+  return true;
+}
+
+/** Starts the reply a choice waits for: Lumiverse's Regenerate or Continue, or, for a new reply after a reply, which only the player can start, a word to press Send. */
+export async function startGeneration(app: App, start: GenerateAs | null): Promise<void> {
+  if (start === "send") app.toast("Press Send, with nothing typed, for the reply.", "info");
+  else if (start !== null && !(await app.host.generate(start))) {
+    const command = start === "continue" ? "Continue" : "Regenerate";
     app.toast(`Couldn't start ${command} here; use the message's ${command} button.`, "error");
   }
-  return true;
+}
+
+/**
+ * An agent turn's review card (INC2-SPEC C13), in place of the chip's own buttons: the chat's cards
+ * asked for on mount (`lre.review get`) and followed by `lre.review.update`, the one for this chip's
+ * message and swipe shown with its pick. At a gate, an answer starts the turn again as it says. A
+ * `get` that failed, with no push since, says so with Retry, so a turn waiting at its gate always has
+ * something to press.
+ */
+function ReviewChip(props: ChipProps) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  const [cards, setCards] = useState<ReviewCardView[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  // Each Retry asks again.
+  const [asked, setAsked] = useState(0);
+  const [picked, setPicked] = useState<readonly string[]>([]);
+  useEffect(() => followReview(props.chatId, { onReview: (listener) => app.client.onReview(listener), get: () => app.request<"lre.review">({ type: "lre.review", op: "get", chatId: props.chatId }) }, { cards: setCards, failed: setFailed }), [props.chatId, asked]);
+  if (failed) return <ReviewUnread onRetry={() => setAsked((n) => n + 1)} />;
+  const card = cards?.find((c) => c.messageId === props.chip.messageId && c.swipeId === props.chip.swipeId);
+  if (!card) return null;
+  const on = reviewHandlers(props.chatId, card.turn, {
+    ask: (body) => app.request<"lre.review">(body),
+    run,
+    picked,
+    setPicked,
+    answered: async (next, start) => {
+      setCards(next);
+      await startGeneration(app, start);
+    },
+  });
+  return <ReviewCard card={card} picked={picked} busy={busy} on={on} />;
 }
 
 function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, payload?: JsonObject) => void] {

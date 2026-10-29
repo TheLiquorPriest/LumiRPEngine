@@ -98,9 +98,10 @@ export const RUNTIME_PROMPTS: readonly PromptDef[] = [
     page,
     label: "Too many calls in one answer",
     note: "The result of each call past Tool calls per answer.",
-    text: "Not run: one answer may call at most {{limit}} tools. Call {{name}} again in your next answer if you still need it.",
+    text: "Not run: one answer may call at most {{limit}} {{tools}}. Call {{name}} again in your next answer if you still need it.",
     vars: [
       { name: "limit", text: "Tool calls per answer" },
+      { name: "tools", text: '"tool" for 1, else "tools"' },
       { name: "name", text: "the tool not run" },
     ],
   },

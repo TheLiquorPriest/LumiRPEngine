@@ -54,13 +54,16 @@ export type DiagUsageField = "in" | "cachedIn" | "out" | "reasoningOut";
 export const DIAG_USAGE_FIELDS: readonly DiagUsageField[] = ["in", "cachedIn", "out", "reasoningOut"];
 
 /**
- * An agent call's tokens: `in` (of which `cachedIn` the provider read from its cache) and `out` (of
- * which `reasoningOut` reasoning). `estimated` names the counts the provider didn't report, which
- * hold the agent runtime's estimate; absent when every count is the provider's.
+ * An agent call's tokens: `in` (of which `cachedIn` the provider read from its cache, and `cacheWrite`
+ * it wrote to it) and `out` (of which `reasoningOut` reasoning). `estimated` names the counts the
+ * provider didn't report, which hold the agent runtime's estimate; absent when every count is the
+ * provider's. `cacheWrite` is never an estimate: absent when the provider doesn't say, so a call that
+ * wrote nothing tells apart from one whose provider doesn't report writes.
  */
 export interface DiagUsage {
   in: number;
   cachedIn: number;
+  cacheWrite?: number;
   out: number;
   reasoningOut: number;
   estimated?: DiagUsageField[];
@@ -116,6 +119,8 @@ export interface DiagRecord {
   sections?: DiagSection[];
   /** Agent records: the call. */
   agent?: DiagAgentCall;
+  /** An agent turn's own failure (INC2-SPEC lane T1): the one kind of record that stops an agent turn, as its roles' failures follow their own settings instead. */
+  fatal?: true;
 }
 
 /** Records kept per chat unless Settings → Diagnostics says otherwise; the oldest go first. */
@@ -149,6 +154,21 @@ export interface Activity {
   since: number;
   /** A running line whose engine run or reply read Cancel can stop now (DESIGN §5.1); absent while it only waits for the reply or for Send. */
   cancellable?: boolean;
+  /** While an agent turn runs, one row per agent at work (the live trace, AGENT-LOOP-PLAN §9); absent when none is. */
+  agents?: ActivityAgent[];
+}
+
+/**
+ * One role at work in the chat's turn, as the drawer's live trace shows it: its id (the role's, the
+ * handle the row is kept by), its label as Settings → Agents names it, and the tokens all its agents
+ * have sent and written this turn. One row per role, never one per agent, whose count would tell how
+ * many people it works for; and nothing else: what it reads and the tools it calls can name what the
+ * player hasn't met. Its Cancel is the line's own (`lre.cancel`), which stops every agent of the turn (§10).
+ */
+export interface ActivityAgent {
+  id: string;
+  label: string;
+  tokens: { in: number; out: number };
 }
 
 /** What the chat, Settings and Diagnostics say when this Lumiverse can't stop a generation for the engine run (DESIGN §5.1). */
@@ -187,6 +207,8 @@ export const STEP_LABEL: Record<string, string> = {
   minds: "Updating the characters' memories…",
   /** The GM assistant answering in GM → Assistant, outside any turn: its label is all the line shows of it. */
   assistant: "Asking the GM assistant…",
+  /** The main agent working a stage of an agent turn (`pipeline.mode: main`): its label is all the line shows of it. */
+  main: "The main agent is working…",
 };
 
 /** The line while `count` calls for `purpose` are under way: minds are counted ("Asking 3 minds…"). */

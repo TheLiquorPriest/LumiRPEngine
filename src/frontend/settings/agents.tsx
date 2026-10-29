@@ -1,20 +1,27 @@
-// Settings → Agents (AGENT-LOOP-PLAN §12, §15; INC1-SPEC R1): what the agent runtime runs under.
-// Thinking in agent tool loops; the budgets, each with what it limits, what happens when it's
-// reached, its default and a No limit switch where one may be lifted; throttles per connection;
-// caching for every role and each role's own, with Bust; and acceptance runs: the connections they
-// guard, the estimate factor, and the run itself, opened and closed here only, with its counter.
-// The drawer's AcceptanceBanner shows the same counter while a run is open. Every number and word
-// a limit shows comes from shared/agent-settings.ts. Settings save as a merge patch, so the
-// per-connection lists go whole and a role's own caching is dropped with null. Styles: styles/settings.ts.
+// Settings → Agents (AGENT-LOOP-PLAN §12, §15; INC1-SPEC R1; INC2-SPEC C12): what the agent runtime
+// runs under. Thinking in agent tool loops; how an agent turn runs (the pipeline, and where its
+// memory goes) and where its changes that ask first wait (the review card); the budgets, each with
+// what it limits, what happens when it's reached, its default and a No limit switch where one may be
+// lifted, the GM's edits per turn among them; the main session's compaction and the summarize tool;
+// what an agent turn records for the narrator; throttles per connection; caching for every role and
+// each role's own, with Bust; and acceptance runs: the connections they guard, the estimate factor,
+// the classic comparison ratio, and the run itself, opened and closed here only, with its counter.
+// Each role's own settings are Settings → Agents → Roles (roles.tsx), the main agent's Main agent
+// (main-agent.tsx). The drawer's AcceptanceBanner shows the same counter while a run is open. Every
+// number and word a limit shows comes from shared/agent-settings.ts. Settings save as a merge patch,
+// so a Default sends null, the per-connection lists go whole and a role's own caching is dropped with
+// null. What renders and what is pressed (`AgentTurnSettings`, `AcceptanceSection`, `LimitRow`,
+// `OwnLimitRow`) is hook-free, so tests press it without a DOM. Styles: styles/settings.ts.
 
 import { useEffect, useId, useState } from "preact/hooks";
-import type { AcceptanceConnection, AcceptanceRunView, AcceptanceState, AgentBudget, AgentLimitDef, AgentLimitUnit, AgentSettings, ConnectionThrottle, TurnBudget } from "../../shared/agent-settings";
-import { AGENT_ROLES, BUDGET_DEFS, CEILING_MIN, DEFAULT_ACCEPTANCE, defaultAgentSettings, ESTIMATE_FACTOR_MIN, LOOP_DEFS, roleCaching, THROTTLE_MIN, TURN_DEFS } from "../../shared/agent-settings";
+import type { AcceptanceConnection, AcceptanceRunView, AcceptanceState, AgentBudget, AgentLimitDef, AgentLimitUnit, AgentSettings, ConnectionThrottle, KeptSettings, MemoryPlacement, PipelineMode, ReviewPlacement, TurnBudget } from "../../shared/agent-settings";
+import { AGENT_ROLES, BUDGET_DEFS, CEILING_MIN, COMPACTION_DEFS, DEFAULT_ACCEPTANCE, defaultAgentSettings, ESTIMATE_FACTOR_MIN, GM_OPS_DEF, KEPT_DEFS, LOOP_DEFS, MEMORY_PLACEMENT_LABELS, MEMORY_PLACEMENTS, OUTPUT_CHARS_DEF, PIPELINE_MODE_LABELS, PIPELINE_MODES, REVIEW_PLACEMENT_LABELS, REVIEW_PLACEMENTS, roleCaching, THROTTLE_MIN, TURN_DEFS } from "../../shared/agent-settings";
 import { hasOwn, type JsonObject } from "../../shared/json";
 import type { Limit } from "../../shared/minds";
 import { formatMs } from "../../shared/timeouts";
+import { nounFor } from "../../shared/words";
 import { useApp } from "../app";
-import { Badge, Banner, Button, Empty, Field, HostSwitch, NumberStepper, Row, Section, useBusy } from "../components";
+import { Badge, Banner, Button, Empty, Field, HostSwitch, NumberStepper, Row, Section, Seg, useBusy } from "../components";
 import { type Connection, useConnections } from "./steps";
 
 /** The defaults each row's Default resets to (a reset deletes the stored value, so the reader falls back to these). */
@@ -32,7 +39,7 @@ const n = (value: number): string => value.toLocaleString("en-US");
 export function amountText(value: Limit, unit: AgentLimitUnit): string {
   if (value === "none") return "No limit";
   if (unit === "ms") return formatMs(value);
-  return unit === "tokens" ? `${n(value)} tokens` : unit === "chars" ? `${n(value)} characters` : n(value);
+  return unit === "tokens" ? `${n(value)} ${nounFor(value, "token", "tokens")}` : unit === "chars" ? `${n(value)} ${nounFor(value, "character", "characters")}` : n(value);
 }
 
 /** A connection's name, or its id while the names haven't come or when Lumiverse no longer has it. */
@@ -44,7 +51,7 @@ function nameOf(id: string, connections: readonly Connection[]): string {
  * A fresh cache nonce. From getRandomValues rather than randomUUID, which a page served over plain
  * http (Lumiverse on a home network) doesn't have.
  */
-function freshNonce(): string {
+export function freshNonce(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -93,6 +100,156 @@ export function LimitRow(props: { id: string; def: AgentLimitDef; value: Limit; 
   );
 }
 
+/** A setting's Default reset, while its value differs from the default; `label` names the setting and the default it goes back to. */
+export function defaultButton(label: string, busy: boolean, reset: () => void) {
+  return (
+    <Button size="sm" variant="ghost" icon="undo" label={label} disabled={busy} onClick={reset}>
+      Default
+    </Button>
+  );
+}
+
+/**
+ * One of an agent's own budget limits (the GM assistant's, the main agent's, a role's): what it
+ * limits, what happens when it's reached, and its value, every agent's until it has its own (`owner`
+ * names whose: "The assistant's"). Changing the number (or No limit, where it may be lifted) sets its
+ * own; Every agent's drops it, so every agent's limit applies again. An agent that runs outside any
+ * turn (`outsideTurn`: the GM assistant) has no turn to bound a limit lifted to none.
+ */
+export function OwnLimitRow(props: { id: keyof AgentBudget; owner: string; def: AgentLimitDef; own: Limit | undefined; every: Limit; busy: boolean; outsideTurn?: boolean; set(value: Limit | null): void }) {
+  const { def, own, every } = props;
+  const value = own ?? every;
+  const seconds = def.unit === "ms";
+  // Turning No limit off starts from every agent's limit when it's a number, else from the least the limit takes.
+  const onValue = every === "none" ? def.min : every;
+  const unitLabel = seconds ? "seconds" : def.unit === "tokens" ? "tokens" : def.unit === "chars" ? "characters" : null;
+  return (
+    <div class="lre-set-ext lre-set-timeout" data-lre-own-limit={props.id}>
+      <div class="lre-set-ext-head">
+        <span class="lre-set-ext-title">{def.label}</span>
+        {own === undefined ? null : (
+          <Button size="sm" variant="ghost" icon="undo" label={`Use every agent's ${def.label.toLowerCase()}, ${amountText(every, def.unit)}`} disabled={props.busy} onClick={() => props.set(null)}>
+            Every agent's
+          </Button>
+        )}
+      </div>
+      <span class="lre-set-timeout-text">{def.limits}</span>
+      <span class="lre-small lre-muted">When it's reached: {def.fires}</span>
+      {def.none !== null ? <HostSwitch label={`${def.label}: no limit`} checked={value === "none"} disabled={props.busy} onChange={(none) => props.set(none ? "none" : onValue)} /> : null}
+      {value === "none" ? null : (
+        <NumberStepper
+          label={unitLabel ? `${def.label} (${unitLabel})` : def.label}
+          value={seconds ? value / 1000 : value}
+          min={seconds ? def.min / 1000 : def.min}
+          step={STEP[def.unit]}
+          integer={!seconds}
+          disabled={props.busy}
+          onChange={(next) => props.set(seconds ? Math.round(next * 1000) : next)}
+        />
+      )}
+      <span class="lre-small lre-muted">
+        {own === undefined ? `Every agent's limit applies: ${amountText(every, def.unit)}` : `${props.owner} own; every agent's is ${amountText(every, def.unit)}`}
+        {/* Outside any turn, a "none" that leans on a turn's bounds is no limit at all. */}
+        {value === "none" && def.none ? (props.outsideTurn && def.turnBound ? "; no limit" : `; no limit: ${def.none}`) : ""}.
+      </span>
+    </div>
+  );
+}
+
+const PIPELINE_HELP: Record<PipelineMode, string> = {
+  fixed: "Each role runs in classic's order and gives classic's outputs, worked out by agents: the same steps, the same gates and cards.",
+  main: "A main agent for each chat decides which roles to run and what to tell them, in the order the engine keeps; it keeps a session from turn to turn.",
+};
+
+const MEMORY_HELP: Record<MemoryPlacement, string> = {
+  after_reply: "The minds' memory and consolidation run after the reply, as part of reading it, as classic does.",
+  before_next: "They run first in the next turn, before its plan, so reading the reply ends sooner; what they remember belongs to that turn.",
+};
+
+const REVIEW_HELP: Record<ReviewPlacement, string> = {
+  chips: "The turn goes on and the card waits under the reply; the narrator isn't told of a change until you apply it.",
+  gate: "The turn waits after its plan, as at the outline gate, until you answer the card; then it goes on without asking any agent again.",
+};
+
+/** The −/+ step of the classic comparison ratio: a convenience, not a limit; typing takes any amount above 0. */
+const RATIO_STEP = 0.5;
+
+/**
+ * How an agent turn runs, without hooks (INC2-SPEC C12): the pipeline and memory placement, where its
+ * changes that ask first wait, the main session's compaction and the summarize tool, and what it
+ * records for the narrator. Each shows its default and has a Default.
+ */
+export function AgentTurnSettings(props: { agents: AgentSettings; patch(patch: JsonObject): void; busy: boolean }) {
+  const { agents, busy } = props;
+  const set = (fields: JsonObject) => props.patch({ agents: fields });
+  return (
+    <>
+      <Section title="Pipeline" flush>
+        <div class="lre-set-rows">
+          <p class="lre-set-timeout-lead">How a chat's turns run once its engine is switched to agents (GM → This chat). A chat on classic reads none of this.</p>
+          <div class="lre-set-ext" data-lre-agent-setting="pipeline-mode">
+            <div class="lre-set-ext-head">
+              <span class="lre-set-ext-title">How a turn is run</span>
+              {agents.pipeline.mode === DEFAULTS.pipeline.mode ? null : defaultButton(`Reset how a turn is run to its default, ${PIPELINE_MODE_LABELS[DEFAULTS.pipeline.mode]}`, busy, () => set({ pipeline: { mode: null } }))}
+            </div>
+            <div class="lre-field">
+              <Seg<PipelineMode> label="How an agent turn is run" value={agents.pipeline.mode} options={PIPELINE_MODES.map((value) => ({ value, label: PIPELINE_MODE_LABELS[value] }))} disabled={busy} onChange={(mode) => set({ pipeline: { mode } })} />
+              <span class="lre-field-help">{PIPELINE_HELP[agents.pipeline.mode]}</span>
+            </div>
+            <span class="lre-small lre-muted">Default {PIPELINE_MODE_LABELS[DEFAULTS.pipeline.mode]}.</span>
+          </div>
+          <div class="lre-set-ext" data-lre-agent-setting="pipeline-memory">
+            <div class="lre-set-ext-head">
+              <span class="lre-set-ext-title">When memory runs</span>
+              {agents.pipeline.memory === DEFAULTS.pipeline.memory ? null : defaultButton(`Reset when memory runs to its default, ${MEMORY_PLACEMENT_LABELS[DEFAULTS.pipeline.memory]}`, busy, () => set({ pipeline: { memory: null } }))}
+            </div>
+            <div class="lre-field">
+              <Seg<MemoryPlacement> label="When the minds' memory runs" value={agents.pipeline.memory} options={MEMORY_PLACEMENTS.map((value) => ({ value, label: MEMORY_PLACEMENT_LABELS[value] }))} disabled={busy} onChange={(memory) => set({ pipeline: { memory } })} />
+              <span class="lre-field-help">{MEMORY_HELP[agents.pipeline.memory]}</span>
+            </div>
+            <span class="lre-small lre-muted">Default {MEMORY_PLACEMENT_LABELS[DEFAULTS.pipeline.memory]}.</span>
+          </div>
+        </div>
+      </Section>
+      <Section title="Review card" flush>
+        <div class="lre-set-rows">
+          <div class="lre-set-ext" data-lre-agent-setting="review-placement">
+            <div class="lre-set-ext-head">
+              <span class="lre-set-ext-title">Where changes that ask first wait</span>
+              {agents.review.placement === DEFAULTS.review.placement ? null : defaultButton(`Reset where changes that ask first wait to its default, ${REVIEW_PLACEMENT_LABELS[DEFAULTS.review.placement]}`, busy, () => set({ review: { placement: null } }))}
+            </div>
+            <p class="lre-set-timeout-lead">An agent turn's changes whose type is set to Confirm (Settings → Changes from the reply) go on one card for the turn, in plain words: Apply all, pick some, or No.</p>
+            <div class="lre-field">
+              <Seg<ReviewPlacement> label="Where an agent turn's changes that ask first wait" value={agents.review.placement} options={REVIEW_PLACEMENTS.map((value) => ({ value, label: REVIEW_PLACEMENT_LABELS[value] }))} disabled={busy} onChange={(placement) => set({ review: { placement } })} />
+              <span class="lre-field-help">{REVIEW_HELP[agents.review.placement]}</span>
+            </div>
+            <span class="lre-small lre-muted">Default {REVIEW_PLACEMENT_LABELS[DEFAULTS.review.placement]}.</span>
+          </div>
+        </div>
+      </Section>
+      <Section title="Compaction" flush>
+        <BudgetGroup<keyof typeof COMPACTION_DEFS> title="The main agent's session" lead="The main agent keeps a session from turn to turn. Past a size, its older turns become one summary; GM → Workspace rolls the latest one back." defs={COMPACTION_DEFS} values={{ atTokens: agents.compaction.atTokens, keepTurns: agents.compaction.keepTurns }} standard={{ atTokens: DEFAULTS.compaction.atTokens, keepTurns: DEFAULTS.compaction.keepTurns }} busy={busy} set={(key, value) => set({ compaction: { [key]: value } })} />
+        <div class="lre-set-rows">
+          <div class="lre-set-ext lre-set-timeout" data-lre-agent-setting="summarize-tool">
+            <div class="lre-set-ext-head">
+              <span class="lre-set-ext-title">Summarize tool</span>
+              {agents.compaction.summarizeTool === DEFAULTS.compaction.summarizeTool ? null : defaultButton(`Reset the summarize tool to its default, ${DEFAULTS.compaction.summarizeTool ? "on" : "off"}`, busy, () => set({ compaction: { summarizeTool: null } }))}
+            </div>
+            <HostSwitch label="The main agent's summarize tool" checked={agents.compaction.summarizeTool} disabled={busy} onChange={(summarizeTool) => set({ compaction: { summarizeTool } })} />
+            <span class="lre-small lre-muted">Lets the main agent compact its own session when it judges it time, before the size above. Default {DEFAULTS.compaction.summarizeTool ? "on" : "off"}.</span>
+          </div>
+        </div>
+      </Section>
+      <Section title="Recording" flush>
+        <div class="lre-set-rows lre-set-group" data-lre-agent-group="Recording">
+          <p class="lre-set-timeout-lead">What an agent turn records for the narrator, kept with the turn so a Re-narrate gives the narrator the same.</p>
+          <LimitRow id="outputChars" def={OUTPUT_CHARS_DEF} value={agents.recording.outputChars} standard={DEFAULTS.recording.outputChars} busy={busy} set={(outputChars) => set({ recording: { outputChars } })} />
+        </div>
+      </Section>
+    </>
+  );
+}
+
 /** A per-minute throttle or a run's ceiling: an Off or No limit switch, and the number while it's set. */
 function OptionalLimit(props: { label: string; offLabel: string; value: Limit; min: number; onValue: number; step: number; busy: boolean; set(value: Limit): void }) {
   return (
@@ -132,7 +289,7 @@ function AddConnection(props: { taken: readonly string[]; connections: readonly 
   );
 }
 
-function BudgetGroup<K extends string>(props: { title: string; lead: string; defs: Readonly<Record<K, AgentLimitDef>>; values: Readonly<Record<K, Limit>>; standard: Readonly<Record<K, Limit>>; busy: boolean; set(key: K, value: Limit | null): void }) {
+export function BudgetGroup<K extends string>(props: { title: string; lead: string; defs: Readonly<Record<K, AgentLimitDef>>; values: Readonly<Record<K, Limit>>; standard: Readonly<Record<K, Limit>>; busy: boolean; set(key: K, value: Limit | null): void }) {
   const keys = Object.keys(props.defs) as K[];
   return (
     <div class="lre-set-rows lre-set-group" data-lre-agent-group={props.title}>
@@ -346,7 +503,8 @@ function RunPanel(props: { connections: readonly Connection[] }) {
   );
 }
 
-function AcceptanceSection(props: { acceptance: AgentSettings["acceptance"]; connections: readonly Connection[]; patch(patch: JsonObject): void; busy: boolean }) {
+/** Acceptance runs, without hooks of its own: the connections they guard, the estimate factor, the classic comparison ratio, and the run (`RunPanel`). */
+export function AcceptanceSection(props: { acceptance: AgentSettings["acceptance"]; vsClassic: number; connections: readonly Connection[]; patch(patch: JsonObject): void; busy: boolean }) {
   const { connections: guarded, estimateFactor } = props.acceptance;
   // The list goes whole: a merge patch replaces an array, it never merges one.
   const save = (next: readonly AcceptanceConnection[]) => props.patch({ agents: { acceptance: { connections: next.map((c) => ({ id: c.id, only: c.only, tokensIn: c.tokensIn, tokensOut: c.tokensOut })) } } });
@@ -386,6 +544,19 @@ function AcceptanceSection(props: { acceptance: AgentSettings["acceptance"]; con
             <NumberStepper label="Estimate factor" value={estimateFactor} min={ESTIMATE_FACTOR_MIN} step={FACTOR_STEP} disabled={props.busy} onChange={(next) => props.patch({ agents: { acceptance: { estimateFactor: next } } })} />
             <span class="lre-small lre-muted">Default {DEFAULTS.acceptance.estimateFactor}.</span>
           </div>
+          <div class="lre-set-ext lre-set-timeout" data-lre-agent-limit="vsClassic">
+            <div class="lre-set-ext-head">
+              <span class="lre-set-ext-title">Against classic</span>
+              {props.vsClassic === DEFAULTS.vsClassic ? null : (
+                <Button size="sm" variant="ghost" icon="undo" label={`Reset Against classic to its default, ${DEFAULTS.vsClassic}×`} disabled={props.busy} onClick={() => props.patch({ agents: { vsClassic: null } })}>
+                  Default
+                </Button>
+              )}
+            </div>
+            <span class="lre-set-timeout-text">The target an acceptance comparison holds agent turns to: per role, an agent turn's tokens against the classic turn of the same scenario, at most this many times. The engine doesn't compare turns itself or stop one past it: read each turn's tokens, per role, in Settings → Diagnostics, and compare them against this.</span>
+            <NumberStepper label="Tokens against classic (times)" value={props.vsClassic} min={0} step={RATIO_STEP} disabled={props.busy} onChange={(next) => (next > 0 ? props.patch({ agents: { vsClassic: next } }) : undefined)} />
+            <span class="lre-small lre-muted">Any amount above 0; under 1, an agent turn should spend less than classic's. Default {DEFAULTS.vsClassic}×.</span>
+          </div>
         </div>
       </Section>
       <Section title="The acceptance run" flush>
@@ -398,26 +569,42 @@ function AcceptanceSection(props: { acceptance: AgentSettings["acceptance"]; con
   );
 }
 
+/** Settings → Agents → Budgets, without hooks: each agent's, each turn's, loops and large results, the GM's edits per turn, and what the engine keeps in memory for agent turns. */
+export function BudgetsSection(props: { agents: AgentSettings; patch(patch: JsonObject): void; busy: boolean }) {
+  const { agents, busy } = props;
+  return (
+    <Section title="Budgets" flush>
+      <BudgetGroup<keyof AgentBudget> title="Each agent" lead="Each agent's own budget, for the turn it runs in." defs={BUDGET_DEFS} values={agents.budget} standard={DEFAULTS.budget} busy={busy} set={(key, value) => props.patch({ agents: { budget: { [key]: value } } })} />
+      <BudgetGroup<keyof TurnBudget> title="Each turn, every agent together" lead="What a turn's agents use between them." defs={TURN_DEFS} values={agents.turn} standard={DEFAULTS.turn} busy={busy} set={(key, value) => props.patch({ agents: { turn: { [key]: value } } })} />
+      <BudgetGroup<keyof typeof LOOP_DEFS> title="Loops and large results" lead="An agent repeating itself, and a tool result too long to send whole." defs={LOOP_DEFS} values={{ loopRepeats: agents.loopRepeats, clipChars: agents.clipChars }} standard={{ loopRepeats: DEFAULTS.loopRepeats, clipChars: DEFAULTS.clipChars }} busy={busy} set={(key, value) => props.patch({ agents: { [key]: value } })} />
+      <div class="lre-set-rows lre-set-group" data-lre-agent-group="GM edits">
+        <p class="lre-set-timeout-lead">
+          <strong>The GM's edits.</strong> What a turn's agents may stage of the GM's own edits, which a role makes only when its tier grants them (Settings → Agents → Roles).
+        </p>
+        <LimitRow id="gmOpsPerTurn" def={GM_OPS_DEF} value={agents.gmOpsPerTurn} standard={DEFAULTS.gmOpsPerTurn} busy={busy} set={(gmOpsPerTurn) => props.patch({ agents: { gmOpsPerTurn } })} />
+      </div>
+      <BudgetGroup<keyof KeptSettings> title="Kept in memory" lead="What the engine holds at once for agent turns, across your chats: past each, the oldest is let go." defs={KEPT_DEFS} values={agents.kept} standard={DEFAULTS.kept} busy={busy} set={(key, value) => props.patch({ agents: { kept: { [key]: value } } })} />
+    </Section>
+  );
+}
+
 export function AgentsSection(props: { agents: AgentSettings; patch(patch: JsonObject): void; busy: boolean }) {
   const { agents, busy } = props;
   const connections = useConnections();
   return (
     <div class="lre-stack" data-lre-settings-page="agents">
-      <p class="lre-set-lead">What the agent runtime runs under: its budgets, throttles, caching and acceptance runs. No classic step reads any of these.</p>
+      <p class="lre-set-lead">What the agent runtime runs under: how an agent turn runs, its budgets, compaction, recording, throttles, caching and acceptance runs. No classic step reads any of these.</p>
       <Section title="Thinking in agent tool loops">
         <HostSwitch label="Thinking in agent tool loops" checked={agents.thinkingInToolLoops} disabled={busy} onChange={(on) => props.patch({ agents: { thinkingInToolLoops: on } })} />
         <span class="lre-small lre-muted">
           Off until Lumiverse passes a reasoning model's thinking back after a tool call. While off, every agent call that offers tools goes with reasoning off, whatever the role's effort; calls without tools keep it. Default {DEFAULTS.thinkingInToolLoops ? "on" : "off"}.
         </span>
       </Section>
-      <Section title="Budgets" flush>
-        <BudgetGroup<keyof AgentBudget> title="Each agent" lead="Each agent's own budget, for the turn it runs in." defs={BUDGET_DEFS} values={agents.budget} standard={DEFAULTS.budget} busy={busy} set={(key, value) => props.patch({ agents: { budget: { [key]: value } } })} />
-        <BudgetGroup<keyof TurnBudget> title="Each turn, every agent together" lead="What a turn's agents use between them." defs={TURN_DEFS} values={agents.turn} standard={DEFAULTS.turn} busy={busy} set={(key, value) => props.patch({ agents: { turn: { [key]: value } } })} />
-        <BudgetGroup<keyof typeof LOOP_DEFS> title="Loops and large results" lead="An agent repeating itself, and a tool result too long to send whole." defs={LOOP_DEFS} values={{ loopRepeats: agents.loopRepeats, clipChars: agents.clipChars }} standard={{ loopRepeats: DEFAULTS.loopRepeats, clipChars: DEFAULTS.clipChars }} busy={busy} set={(key, value) => props.patch({ agents: { [key]: value } })} />
-      </Section>
+      <AgentTurnSettings agents={agents} patch={props.patch} busy={busy} />
+      <BudgetsSection agents={agents} patch={props.patch} busy={busy} />
       <ThrottlesSection throttles={agents.throttles} connections={connections} patch={props.patch} busy={busy} />
       <CachingSection agents={agents} patch={props.patch} busy={busy} />
-      <AcceptanceSection acceptance={agents.acceptance} connections={connections} patch={props.patch} busy={busy} />
+      <AcceptanceSection acceptance={agents.acceptance} vsClassic={agents.vsClassic} connections={connections} patch={props.patch} busy={busy} />
     </div>
   );
 }

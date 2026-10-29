@@ -1,9 +1,10 @@
 // Token usage per agent call (AGENT-LOOP-PLAN §3.2; INC1-SPEC R1): what a call sent (and how much
-// of it the provider read from its cache) and what it wrote (and how much of that was reasoning),
-// read per provider from the usage Lumiverse passes on, the provider's own fields in
+// of it the provider read from its cache, and wrote to it) and what it wrote (and how much of that
+// was reasoning), read per provider from the usage Lumiverse passes on, the provider's own fields in
 // `provider_raw`. A count a provider never reports is the runtime's estimate, flagged as one: the
 // host passes no cached count for Gemini or OpenAI's Responses API, and Anthropic bills thinking
-// as output without saying how much.
+// as output without saying how much. What a call wrote to the cache is no estimate: it is there only
+// when the provider says, so a write of none tells apart from a provider that doesn't say.
 
 import type { JsonObject } from "../../shared/json";
 import { isRecord } from "../../shared/json";
@@ -12,10 +13,12 @@ import type { QuietMessage, QuietTool } from "../host";
 
 export type UsageField = "in" | "cachedIn" | "out" | "reasoningOut";
 
-/** One call's tokens: `in` (of which `cachedIn` read from the cache) and `out` (of which `reasoningOut` reasoning). */
+/** One call's tokens: `in` (of which `cachedIn` read from the cache, and `cacheWrite` written to it) and `out` (of which `reasoningOut` reasoning). */
 export interface CallUsage {
   in: number;
   cachedIn: number;
+  /** What the call wrote to the provider's cache, when the provider says (Anthropic's `cache_creation_input_tokens`, an OpenAI-compatible provider's where it reports one); absent when it doesn't. */
+  cacheWrite?: number;
   out: number;
   reasoningOut: number;
   /** The counts the provider didn't report, which hold the runtime's estimate. */
@@ -55,13 +58,16 @@ function count(o: unknown, key: string): number | undefined {
  * and the provider's own in `provider_raw`) by its connection's provider; `estimate` fills each
  * count it lacks, listed in `estimated`.
  * - Anthropic: `input_tokens` leaves out what was read from the cache and written to it, which the
- *   host's prompt tokens add back; `cache_read_input_tokens` is the cached part. Thinking is billed
- *   as output and never reported apart, so the reasoning is always an estimate.
+ *   host's prompt tokens add back; `cache_read_input_tokens` is the cached part, and
+ *   `cache_creation_input_tokens` what it wrote to the cache. Thinking is billed as output and never
+ *   reported apart, so the reasoning is always an estimate.
  * - Gemini (Google, Vertex): the host passes the prompt and candidate counts and the total, which
  *   also holds the thoughts, so the thoughts are the rest; it passes no cached count.
  * - Everything else is OpenAI-compatible: the provider's usage object whole, its cached tokens under
  *   `prompt_tokens_details.cached_tokens` (DeepSeek: `prompt_cache_hit_tokens`; some routers
- *   `cache_read_input_tokens` or `cached_tokens`) and its reasoning under
+ *   `cache_read_input_tokens` or `cached_tokens`), what it wrote to the cache where it says, under
+ *   `prompt_tokens_details.cache_write_tokens` (OpenRouter; some routers Anthropic's own
+ *   `cache_creation_input_tokens`, or `cache_creation_tokens`), and its reasoning under
  *   `completion_tokens_details.reasoning_tokens`. OpenAI's own Responses route passes only the two
  *   counts.
  */
@@ -77,9 +83,10 @@ export function parseUsage(raw: JsonObject | undefined, provider: string | null,
   if (provider === "anthropic") {
     const fresh = count(own, "input_tokens");
     const read = count(own, "cache_read_input_tokens");
-    const sent = prompt ?? (fresh === undefined ? undefined : fresh + (read ?? 0) + (count(own, "cache_creation_input_tokens") ?? 0));
+    const written = count(own, "cache_creation_input_tokens");
+    const sent = prompt ?? (fresh === undefined ? undefined : fresh + (read ?? 0) + (written ?? 0));
     const out = count(own, "output_tokens") ?? completion;
-    return { in: sent ?? guess("in", estimate.in), cachedIn: read ?? guess("cachedIn", 0), out: out ?? guess("out", estimate.out + estimate.reasoningOut), reasoningOut: guess("reasoningOut", estimate.reasoningOut), estimated };
+    return { in: sent ?? guess("in", estimate.in), cachedIn: read ?? guess("cachedIn", 0), ...(written !== undefined ? { cacheWrite: written } : {}), out: out ?? guess("out", estimate.out + estimate.reasoningOut), reasoningOut: guess("reasoningOut", estimate.reasoningOut), estimated };
   }
   if (provider === "google" || provider === "google_vertex") {
     const total = count(raw, "total_tokens");
@@ -95,10 +102,12 @@ export function parseUsage(raw: JsonObject | undefined, provider: string | null,
   const promptDetails = isRecord(own.prompt_tokens_details) ? own.prompt_tokens_details : {};
   const completionDetails = isRecord(own.completion_tokens_details) ? own.completion_tokens_details : {};
   const cached = count(promptDetails, "cached_tokens") ?? count(own, "prompt_cache_hit_tokens") ?? count(own, "cache_read_input_tokens") ?? count(own, "cached_tokens");
+  const written = count(promptDetails, "cache_write_tokens") ?? count(own, "cache_creation_input_tokens") ?? count(own, "cache_creation_tokens");
   const reasoning = count(completionDetails, "reasoning_tokens") ?? count(own, "reasoning_tokens");
   return {
     in: prompt ?? guess("in", estimate.in),
     cachedIn: cached ?? guess("cachedIn", 0),
+    ...(written !== undefined ? { cacheWrite: written } : {}),
     out: completion ?? guess("out", estimate.out + estimate.reasoningOut),
     reasoningOut: reasoning ?? guess("reasoningOut", estimate.reasoningOut),
     estimated,
@@ -111,6 +120,8 @@ export interface AgentUsage {
   toolTurns: number;
   in: number;
   cachedIn: number;
+  /** What its calls wrote to the provider's cache, of those whose provider said; absent while none did. */
+  cacheWrite?: number;
   out: number;
   reasoningOut: number;
   /** Some of the counts are the runtime's estimate. */
@@ -122,15 +133,29 @@ export function emptyUsage(): AgentUsage {
   return { calls: 0, toolTurns: 0, in: 0, cachedIn: 0, out: 0, reasoningOut: 0, estimated: false, ms: 0 };
 }
 
-/** Adds one call's usage to each tally. */
+/** Adds one call's usage to each tally; its cache write only when its provider said. */
 export function addCall(call: CallUsage, ms: number, ...tallies: AgentUsage[]): void {
   for (const t of tallies) {
     t.calls += 1;
     t.in += call.in;
     t.cachedIn += call.cachedIn;
+    if (call.cacheWrite !== undefined) t.cacheWrite = (t.cacheWrite ?? 0) + call.cacheWrite;
     t.out += call.out;
     t.reasoningOut += call.reasoningOut;
     t.estimated ||= call.estimated.length > 0;
     t.ms += ms;
   }
+}
+
+/** Adds one usage to another: several agents' work counted as one task's. */
+export function addUsage(into: AgentUsage, from: AgentUsage): void {
+  into.calls += from.calls;
+  into.toolTurns += from.toolTurns;
+  into.in += from.in;
+  into.cachedIn += from.cachedIn;
+  if (from.cacheWrite !== undefined) into.cacheWrite = (into.cacheWrite ?? 0) + from.cacheWrite;
+  into.out += from.out;
+  into.reasoningOut += from.reasoningOut;
+  into.estimated ||= from.estimated;
+  into.ms += from.ms;
 }

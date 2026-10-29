@@ -681,16 +681,27 @@ export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "
   const instructions = renderTemplate(run.template?.template ?? PROSE_PROMPTS[kind], vars);
   const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent });
   if (!isRecord(raw)) return null;
-  // A brief or an outline beat may run long and is cut, once checked whole. A suggestion is a chip's
-  // text and the player's next message: one too long for a chip is dropped rather than cut.
-  return kind === "brief" ? proseLines(raw.text, 1, withheld, BRIEF_CHARS) : kind === "outline" ? proseLines(raw.beats, OUTLINE_BEATS_MAX, withheld, BEAT_CHARS) : proseLines(raw.choices, 4, withheld, 120, "drop");
+  return proseAnswer(kind, kind === "brief" ? raw.text : kind === "outline" ? raw.beats : raw.choices, withheld);
+}
+
+/**
+ * A prose step's lines from its answer (its output contract, §16), checked as `promptedText` checks
+ * them: a brief or an outline beat may run long and is cut, once checked whole; a suggestion is a
+ * chip's text and the player's next message, so one too long for a chip is dropped rather than cut.
+ */
+export function proseAnswer(kind: "brief" | "outline" | "choices", v: JsonValue | undefined, withheld: (line: string) => boolean): string[] {
+  return kind === "brief" ? proseLines(v, 1, withheld, BRIEF_CHARS) : kind === "outline" ? proseLines(v, OUTLINE_BEATS_MAX, withheld, BEAT_CHARS) : proseLines(v, 4, withheld, 120, "drop");
 }
 
 /** A prompted `effects` step (a world template with `output: "effects"`): proposals, for the caller to validate and bound like extraction. */
 export async function promptedEffects(steps: Steps, run: StepRun, vars: Readonly<Record<string, string>>, currency: WorldCurrency, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<JsonObject[]> {
   if (!run.template) return [];
   const money = `Money amounts are plain amounts in ${currency.code} as written (8 for ${currency.symbol}8).`;
-  const raw = await steps.helperJson(run.purpose, `${renderTemplate(run.template.template, vars)}\n${CONTRACT.effects} ${money}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent });
+  return effectsAnswer(await steps.helperJson(run.purpose, `${renderTemplate(run.template.template, vars)}\n${CONTRACT.effects} ${money}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent }), currency);
+}
+
+/** An `effects` step's proposals from its answer (its output contract, §16): at most fifteen, each with a type, its money in minor units. */
+export function effectsAnswer(raw: JsonValue | null, currency: WorldCurrency): JsonObject[] {
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : [];
   const out: JsonObject[] = [];
   for (const p of list.slice(0, 15)) if (isRecord(p) && typeof p.type === "string") out.push(inMinorUnits(JSON.parse(JSON.stringify(p)) as JsonObject, currency));
@@ -712,38 +723,68 @@ export interface Tie {
 
 const humanize = (id: string): string => id.replace(/[_:.-]+/g, " ").trim();
 
+/** One probability map per tie, by the tie's key: what an NPC is likely to do, which the engine samples (`oddsDecisions`) on the turn's seeded generator. */
+export type TieOdds = Record<string, Record<string, number>>;
+
+/** The ties `npc.choose` asks about: those with a choice to make, at most twelve. */
+export function npcAsked(ties: readonly Tie[]): Tie[] {
+  return ties.filter((t) => t.options.length > 1).slice(0, 12);
+}
+
 /**
  * `npc.choose` (DESIGN §5.2): one choice question per open tie, answered as probabilities and
  * sampled with the turn's seeded rng; returns the decision events (`castlife.decision`, or the
  * tie's own). The questions may carry agents' private plans, so this call never includes prose.
  */
 export async function npcChoose(steps: Steps, run: StepRun, ties: readonly Tie[], describe: (tie: Tie) => JsonValue, rng: Rng, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<LedgerEvent[]> {
-  const asked = ties.filter((t) => t.options.length > 1).slice(0, 12);
-  if (asked.length === 0) return [];
+  const asked = npcAsked(ties);
+  const odds = await npcOdds(steps, run, asked, describe, userId, signal, lore);
+  return odds ? oddsDecisions(asked, odds, rng) : [];
+}
+
+/** `npc.choose`'s questions for `asked`: one choice per tie, keyed `t<i>`, over its options in words, with what is known of it (`describe`) as its state. */
+export function npcQuestions(asked: readonly Tie[], describe: (tie: Tie) => JsonValue, instructions: string): { questions: Questions; state: Record<string, JsonValue> } {
   const questions: Questions = {};
   const state: Record<string, JsonValue> = {};
   asked.forEach((t, i) => {
     const criteria: Record<string, string> = {};
     for (const o of t.options) criteria[o] = t.labels?.[o] ?? humanize(o);
-    questions[`t${i}`] = { type: "choice", instructions: run.template?.template ?? DECISION_PROMPTS["npc.choose"], criteria };
+    questions[`t${i}`] = { type: "choice", instructions, criteria };
     state[`t${i}`] = describe(t);
   });
-  const answer = await steps.decide("npc.choose", state, questions, run.config, userId, signal, lore, run.guidance, run.recent);
-  if (!answer) return [];
-  return decisionEvents(asked, answer.answers, rng);
+  return { questions, state };
 }
 
-export function decisionEvents(asked: readonly Tie[], answers: Answers, rng: Rng): LedgerEvent[] {
-  const out: LedgerEvent[] = [];
+/** The odds a decision's answers give each tie of `asked` (`npcQuestions`), by the tie's key; a tie its answers leave out has none. */
+export function npcOddsOf(asked: readonly Tie[], answers: Answers): TieOdds {
+  const odds: TieOdds = {};
   asked.forEach((t, i) => {
     const a = answers[`t${i}`];
-    if (!a || a.type !== "choice") return;
+    if (a?.type === "choice") odds[t.key] = { ...a.probabilities };
+  });
+  return odds;
+}
+
+/** `npc.choose`'s call alone: the odds its answer gives each tie of `asked` (`npcAsked`), by the tie's key; null when nothing was asked or no answer came. */
+export async function npcOdds(steps: Steps, run: StepRun, asked: readonly Tie[], describe: (tie: Tie) => JsonValue, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<TieOdds | null> {
+  if (asked.length === 0) return null;
+  const { questions, state } = npcQuestions(asked, describe, run.template?.template ?? DECISION_PROMPTS["npc.choose"]);
+  const answer = await steps.decide("npc.choose", state, questions, run.config, userId, signal, lore, run.guidance, run.recent);
+  return answer ? npcOddsOf(asked, answer.answers) : null;
+}
+
+/** The decisions `odds` sample for `asked`, each on its own fork of the turn's seeded rng: a tie with no odds, or none above zero, decides nothing. */
+export function oddsDecisions(asked: readonly Tie[], odds: TieOdds, rng: Rng): LedgerEvent[] {
+  const out: LedgerEvent[] = [];
+  for (const t of asked) {
+    const given = odds[t.key];
+    if (!given) continue;
     const probabilities: Record<string, number> = {};
-    for (const o of t.options) probabilities[o] = Math.max(0, a.probabilities[o] ?? 0);
-    if (Object.values(probabilities).every((p) => p === 0)) return;
+    for (const o of t.options) probabilities[o] = Math.max(0, given[o] ?? 0);
+    if (Object.values(probabilities).every((p) => p === 0)) continue;
     const choice = sample(probabilities, rng.fork(t.key), t.options);
     out.push({ type: t.decision ?? "castlife.decision", data: { key: t.key, choice } });
-  });
+  }
   return out;
 }
 
@@ -778,14 +819,8 @@ export interface JudgeAsk {
 export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<Judgement | null> {
   const scale = `0 (no particular approach, or one that works against them) to ${ask.max} (a clever, prepared approach that fits the situation)`;
   const choices = ask.odds ? Object.keys(ask.odds) : [];
-  const guidance = ask.odds ? Object.fromEntries(Object.entries(ask.odds).map(([o, p]) => [o, `${Math.round(p * 100)}%`])) : null;
+  const guidance = judgeOdds(ask);
   const lead = run.template?.template ?? DECISION_PROMPTS.judge;
-  const outcomesOf = (raw: unknown): Record<string, number> | undefined => {
-    if (!isRecord(raw)) return undefined;
-    const out: Record<string, number> = {};
-    for (const o of choices) if (typeof raw[o] === "number" && Number.isFinite(raw[o]) && raw[o] >= 0) out[o] = raw[o];
-    return Object.keys(out).length > 0 ? out : undefined;
-  };
   if (run.config.route?.provider === "decision") {
     const questions: Questions = { rating: { type: "score", instructions: `${lead} Rate it from ${scale}.`, criteria: Array.from({ length: ask.max + 1 }, (_, i) => String(i)) } };
     if (guidance) questions.outcome = { type: "choice", instructions: "How does it turn out? The dice's exact odds are guidance: a strong approach moves them toward success, a weak one away.", criteria: guidance };
@@ -793,7 +828,7 @@ export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: U
     const rating = answer?.answers.rating;
     if (!rating || rating.type !== "score") return null;
     const outcome = answer?.answers.outcome;
-    const outcomes = outcome?.type === "choice" ? outcomesOf(outcome.probabilities) : undefined;
+    const outcomes = outcome?.type === "choice" ? judgeOutcomes(outcome.probabilities, choices) : undefined;
     return { rating: Math.min(ask.max, Math.max(0, rating.score)), reason: "", ...(outcomes ? { outcomes } : {}) };
   }
   const system = [
@@ -804,10 +839,30 @@ export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: U
     .filter((line) => line !== "")
     .join("\n");
   const user = `Action: ${ask.action}\nThe player wrote: ${ask.text.slice(0, 2000)}\nScene: ${JSON.stringify(ask.scene)}${guidance ? `\nOutcomes with the dice's exact odds: ${JSON.stringify(guidance)}` : ""}`;
-  const raw = await steps.helperJson("judge", system, user, run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent });
-  // A reply without a rating is no answer: a made-up middle rating would read as the model's.
+  return judgeAnswer(await steps.helperJson("judge", system, user, run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent }), ask);
+}
+
+/** Under narrative authority, each outcome the judge picks from with the dice's exact odds in words ("40%"); null when the dice decide alone. */
+export function judgeOdds(ask: Pick<JudgeAsk, "odds">): Record<string, string> | null {
+  return ask.odds ? Object.fromEntries(Object.entries(ask.odds).map(([o, p]) => [o, `${Math.round(p * 100)}%`])) : null;
+}
+
+/** The probabilities an answer gives the outcomes the judge picks from: each a number from 0 up; none when it gives none. */
+function judgeOutcomes(raw: unknown, choices: readonly string[]): Record<string, number> | undefined {
+  if (!isRecord(raw)) return undefined;
+  const out: Record<string, number> = {};
+  for (const o of choices) if (typeof raw[o] === "number" && Number.isFinite(raw[o]) && raw[o] >= 0) out[o] = raw[o];
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * `judge`'s answer as its judgement (its output contract, §16): the rating, whole and within the
+ * scale, its reason in a line, and under narrative authority each outcome's probability. A reply
+ * without a rating is no answer: a made-up middle rating would read as the model's.
+ */
+export function judgeAnswer(raw: JsonValue | null, ask: Pick<JudgeAsk, "max" | "odds">): Judgement | null {
   if (!isRecord(raw) || typeof raw.rating !== "number" || !Number.isFinite(raw.rating)) return null;
   const reason = typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 240) : "";
-  const outcomes = outcomesOf(raw.outcomes);
+  const outcomes = judgeOutcomes(raw.outcomes, ask.odds ? Object.keys(ask.odds) : []);
   return { rating: Math.min(ask.max, Math.max(0, Math.round(raw.rating))), reason, ...(outcomes ? { outcomes } : {}) };
 }

@@ -28,13 +28,14 @@ import { skipPastFight, timelapseOptions, turnStart } from "../engine/turn";
 import { Working } from "../engine/working";
 import type { HostPort } from "./host";
 import { readPins } from "./lore-pins";
-import { chatBefore, localTime, mindPrompt, mindsStepConfig, type RunMindsInput, type RunMindsResult } from "./minds";
+import { askMind, type MindAsk } from "./mind-ask";
+import { chatBefore, localTime, mindPrompt, mindsStepConfig, ownMindPrompt, type RunMindsInput, type RunMindsResult } from "./minds";
 import { pinnedLines, recentChat } from "./minds-context";
 import type { Guidance } from "./preset-binding";
 import type { Steps } from "./steps";
 
-/** `runMinds` bound to the runtime: records nothing, and gives the validated `minds.mind` events in `who`'s order, as many as finished before the signal. */
-export type BeatMinds = (input: RunMindsInput) => Promise<RunMindsResult>;
+/** `runMinds` bound to the runtime: records nothing, and gives the validated `minds.mind` events in `who`'s order, as many as finished before the signal. `ask`: who answers each mind's call (an agent turn's), else the step itself. */
+export type BeatMinds = (input: RunMindsInput, ask?: MindAsk) => Promise<RunMindsResult>;
 
 /** A moment inside a skip worth stopping at: its time, why in the GM's words, where it came from, whom it names, and its weight when the beats are capped (lower counts more). */
 export interface Beat {
@@ -153,6 +154,8 @@ export interface SkipDeps {
   minds: BeatMinds;
   /** Where the lore pinned to the `skip` step and the recent chat it reads come from (DESIGN §24.5). */
   host: Pick<HostPort, "books" | "log" | "chats">;
+  /** Who answers the `skip` step's call: none, the step itself; an agent turn's skip role (`askMind`). */
+  ask?: MindAsk;
 }
 
 /** A skip as its pre phase ran it: its record for the plan, and the minds' traces for the inspector. */
@@ -187,10 +190,22 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
   const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, fill !== "" ? `${SKIP_FILL_HEAD}\n${fill}` : "", scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : "", pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : "", chat.length > 0 ? `Recent chat (as the player sees it):\n${chat.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
   // The placeholders the minds steps' docs promise; the step thinks for no one, so `character` is empty.
   const here = placeOfEntity(state, input.world.pov);
-  const prompt = mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name, character: "", clock: formatClock(cal, scanned.from), place: here ? (own(input.world.places, here)?.name ?? here) : "", pov: own(state.entities, input.world.pov)?.name ?? input.world.pov });
+  const vars = { world: input.world.name, character: "", clock: formatClock(cal, scanned.from), place: here ? (own(input.world.places, here)?.name ?? here) : "", pov: own(state.entities, input.world.pov)?.name ?? input.world.pov };
+  const prompt = mindPrompt("skip", input.world, input.settings.minds, vars);
   const usage = { tokens: 0 };
   const t0 = performance.now();
-  const raw = await deps.steps.helperJson("skip", prompt.text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "", usage });
+  const raw = await askMind(deps.ask, {
+    kind: "skip",
+    who: null,
+    vars,
+    template: ownMindPrompt("skip", input.world, input.settings.minds, vars)?.text ?? null,
+    context: user,
+    signal: input.signal,
+    usage,
+    failure: { reason: "" },
+    check: (answer) => isRecord(answer) && Array.isArray(answer.beats),
+    classic: () => deps.steps.helperJson("skip", prompt.text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "", usage }),
+  });
   const proposals = isRecord(raw) && Array.isArray(raw.beats) ? raw.beats : null;
   traces.push({ purpose: "skip", phase: "skip", who: "", level: null, outcome: proposals ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
   if (!proposals) return [];
@@ -226,7 +241,7 @@ async function mindsAt(deps: SkipDeps, input: SkipInput, w: Working, kind: MindM
   for (const id of who) levels[id] = scores.find((s) => s.entity === id)?.level ?? "background";
   // The player's own words for the span reach the minds in it, which those with the player character are told (`mindContext`).
   const skip = input.intent.text?.trim() ?? "";
-  const result = await deps.minds({ chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who, moment: { kind, at: w.state.clock, reason, user: "", reply: "", ...(skip !== "" ? { skip } : {}) }, levels, signal: input.signal, guidance: input.guidance?.mind ?? "", phase: "skip" });
+  const result = await deps.minds({ chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who, moment: { kind, at: w.state.clock, reason, user: "", reply: "", ...(skip !== "" ? { skip } : {}) }, levels, signal: input.signal, guidance: input.guidance?.mind ?? "", phase: "skip" }, deps.ask);
   traces.push(...result.traces);
   return result.events.filter((e) => e.type === MINDS_EVENTS.mind && "data" in e && typeof e.data.entity === "string" && who.includes(e.data.entity));
 }

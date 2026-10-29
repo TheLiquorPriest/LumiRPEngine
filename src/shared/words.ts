@@ -10,6 +10,16 @@ export function listWords(words: readonly string[]): string {
   return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1] ?? ""}`;
 }
 
+/** A noun in the number a count takes: `one` for 1, else `many` ("tool", "tools"). */
+export function nounFor(n: number, one: string, many: string): string {
+  return n === 1 ? one : many;
+}
+
+/** A count with its noun in the number it takes: "1 tool", "3 tools", "0 tools". */
+export function counted(n: number, one: string, many: string): string {
+  return `${n} ${nounFor(n, one, many)}`;
+}
+
 /** "Danny Okafor's"; the POV as a line names it, "You" or "you", reads "Your" or "your". */
 export function possessive(name: string): string {
   return name === "You" ? "Your" : name === "you" ? "your" : `${name}'s`;

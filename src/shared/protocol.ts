@@ -367,6 +367,8 @@ export interface ChatKnowledgeRequest extends Request<"lre.chat.knowledge"> {
   chatId: ChatId;
   knowledge?: boolean | null;
   narrator?: NarratorView | null;
+  /** Which engine plays the chat's turns (GM → This chat, INC2-SPEC C12): its classic steps, or the agent loop; null returns it to classic. A change drops a turn the engine prepared for it. */
+  engine?: "classic" | "agents" | null;
 }
 
 /**
@@ -842,8 +844,8 @@ export type AssistantStatus = "answered" | "refused" | "stopped" | "cancelled" |
 /**
  * One message of the thread, yours (`user`) or the assistant's. An assistant message has its tool
  * calls (`trace`), what its calls spent (`usage`: tokens in, of which `cached` the provider read from
- * its cache, and out) and how it ended (`status`), with why when it stopped short of an answer
- * (`reason`).
+ * its cache and, when the provider says, `written` it wrote to it, and out) and how it ended
+ * (`status`), with why when it stopped short of an answer (`reason`).
  */
 export interface AssistantMessage {
   id: string;
@@ -852,7 +854,7 @@ export interface AssistantMessage {
   /** Epoch ms. */
   at: number;
   trace?: TraceRow[];
-  usage?: { in: number; out: number; cached: number };
+  usage?: { in: number; out: number; cached: number; written?: number };
   status?: AssistantStatus;
   reason?: string;
 }
@@ -923,9 +925,41 @@ export interface AssistantView {
  * (`HeldWrite.hold`); a file under `learned/` changes at once, in the chat's metadata, with no Undo
  * chip. A write says whose knowledge may read the file (`readers`: the player character's,
  * everyone's or the GM's); left out, a file keeps its readers, and a new one is the GM's alone;
- * `readers` sets them by themselves. GM data, behind the gate as `lre.gm` is.
+ * `readers` sets them by themselves. `session` reads the main agent's session at the head, and
+ * `rollback` rolls its latest compaction back: the next agent turn's record carries the restore, so
+ * no earlier record changes (INC2-SPEC C14). GM data, behind the gate as `lre.gm` is.
  */
-export type WorkspaceRequest = Request<"lre.workspace"> & { chatId: ChatId } & ({ op: "list" } | { op: "read"; path: string } | { op: "write"; path: string; text: string; readers?: "pov" | "everyone" | "gm" } | { op: "delete"; path: string } | { op: "move"; from: string; to: string } | { op: "pin"; path: string; pinned: boolean } | { op: "readers"; path: string; readers: "pov" | "everyone" | "gm" });
+export type WorkspaceRequest = Request<"lre.workspace"> & { chatId: ChatId } & ({ op: "list" } | { op: "read"; path: string } | { op: "write"; path: string; text: string; readers?: "pov" | "everyone" | "gm" } | { op: "delete"; path: string } | { op: "move"; from: string; to: string } | { op: "pin"; path: string; pinned: boolean } | { op: "readers"; path: string; readers: "pov" | "everyone" | "gm" } | { op: "session" } | { op: "rollback" });
+
+/**
+ * The main agent's session at the chat's head (`lre.workspace session`): the compaction summary it
+ * reads from (null when none), the turns it holds whole and their size in tokens, estimated, and
+ * its latest compaction's rollback: `none` when there is none to roll back, `available`, or
+ * `pending` once asked for, until the next agent turn's record carries it.
+ */
+export interface SessionView {
+  summary: string | null;
+  turns: number;
+  tokens: number;
+  rollback: "none" | "available" | "pending";
+}
+
+/**
+ * Settings → Agents → Prompts' Test for a role's text (AGENT-LOOP-PLAN §9; DESIGN §6.12): `text`
+ * checked as it would be saved as text `id`'s, then the task whose contract it keeps, built from
+ * `chatId`'s latest exchange as a turn builds it, run once by its role with `text` in place, and the
+ * answer checked against that contract: one model call, none for a text with problems. It reads the
+ * chat, so it is GM data, behind the gate as `lre.gm` is. Only a role's texts are tested.
+ */
+export type PromptsRequest = Request<"lre.prompts"> & { op: "test"; chatId: ChatId; id: string; text: string };
+
+/** What a Test found, in words: `ok` when the text has no problems and the answer keeps its contract; else each problem with the text, then each way the answer breaks the contract. The answer itself isn't sent: it may hold what the page shouldn't. */
+export interface PromptTestView {
+  ok: boolean;
+  problems: string[];
+  /** What of the role's task the chat couldn't give, in words, each with why (a task only a turn under way has runs on the role's texts alone); empty when the task was built whole from the chat's latest exchange, or nothing ran. */
+  left: string[];
+}
 
 /**
  * A workspace file as GM → Workspace lists it: its path, its body's hash and size, whether it is
@@ -942,6 +976,45 @@ export interface WorkspaceFileView {
   readers: "pov" | "everyone" | "gm";
   learned: boolean;
   provenance: { role?: string; key?: string; turn: number | null };
+}
+
+// ---------------------------------------------------------------- an agent turn's review card (INC2-SPEC C13)
+
+/**
+ * An agent turn's review card (`backend/agents/review.ts`): every change of the turn that asks first,
+ * in plain words as the player character may read them. `get` reads the chat's cards, and pushes their
+ * changes to this page as `lre.review.update` from then on; `apply` applies a card's open changes, all
+ * or the ones `keys` picks; `reject` turns them all down. At a gate (Settings → Agents → Review card)
+ * either answers the card and the turn resumes: the answer says how to start it (`start`).
+ */
+export type ReviewRequest = Request<"lre.review"> & { chatId: ChatId } & ({ op: "get" } | { op: "apply"; turn: string; keys?: string[] } | { op: "reject"; turn: string });
+
+/**
+ * One change of a review card: its key (an operation's, or the read's confirm chip's), whether a role
+ * staged it (`agent`) or the reply's read proposed it (`read`), the role, its change type, its lines,
+ * and how it stands: waiting (`open`), let through at a gate (`approved`), `applied` (with its Undo chip
+ * for `lre.chip`, `undo`; `undone` once that was pressed), `rejected`, or `refused` when it no longer applied.
+ */
+export interface ReviewItemView {
+  key: string;
+  source: "agent" | "read";
+  role: string;
+  changeType: string;
+  lines: string[];
+  status: "open" | "approved" | "applied" | "rejected" | "refused";
+  refused?: { code: string; reason: string };
+  undo?: string;
+  undone?: true;
+}
+
+/** One turn's review card: the turn (`<message>:<swipe>`, or `<message>:gate`), the message it shows on, where its changes wait, its items, and at a gate how its turn resumes. */
+export interface ReviewCardView {
+  turn: string;
+  messageId: MessageId;
+  swipeId?: number;
+  placement: "chips" | "gate";
+  items: ReviewItemView[];
+  resume?: GenerateAs;
 }
 
 export type FrontendToBackend =
@@ -979,7 +1052,9 @@ export type FrontendToBackend =
   | CancelTurnRequest
   | ChatKnowledgeRequest
   | AssistantRequest
-  | WorkspaceRequest;
+  | WorkspaceRequest
+  | ReviewRequest
+  | PromptsRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -1053,8 +1128,8 @@ export interface ResultBodies {
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
-  /** The chat's own knowledge choices after the request, null where it follows. */
-  "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null };
+  /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop (absent: classic, which a chat with no choice plays). */
+  "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents" };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /**
@@ -1083,9 +1158,13 @@ export interface ResultBodies {
   /**
    * `list` and each change: the files at the head after it (a held change isn't among them until it
    * lands), and for a change whether it is held (`pending`) and the chip that undoes it (`undo`, null
-   * while it is held); `read`: the file's text, null when there is no such file.
+   * while it is held); `read`: the file's text, null when there is no such file; `session` and
+   * `rollback`: the main agent's session at the head, after the op.
    */
-  "lre.workspace": { files?: WorkspaceFileView[]; text?: string | null; pending?: boolean; undo?: string | null };
+  "lre.workspace": { files?: WorkspaceFileView[]; text?: string | null; pending?: boolean; undo?: string | null; session?: SessionView };
+  /** Every op: the chat's review cards after it; `apply` and `reject` at a gate, how to start the turn it resumes (`start`; null when nothing waits on a reply). */
+  "lre.review": { cards: ReviewCardView[]; start?: GenerateAs | null };
+  "lre.prompts": { test: PromptTestView };
 }
 
 export type ResultMessage = {
@@ -1180,6 +1259,12 @@ export interface AssistantUpdate extends Envelope<"lre.assistant.update"> {
   view: AssistantView;
 }
 
+/** A chat's review cards changed (`lre.review`): a card made, answered or lapsed. Sent to the sessions that asked about that chat's cards. */
+export interface ReviewUpdate extends Envelope<"lre.review.update"> {
+  chatId: ChatId;
+  cards: ReviewCardView[];
+}
+
 /** Update now (DESIGN §23): asks the MCP servers that checked in as `client` to check the extension's kit now; sent to every session of the user, and the others ignore it. */
 export interface KitReload extends Envelope<"lre.kit.reload"> {
   client: string;
@@ -1194,4 +1279,4 @@ export interface KitReconnect extends Envelope<"lre.kit.reconnect"> {
   client: string;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | AcceptanceChanged | AssistantUpdate | KitReload | KitReconnect;
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | AcceptanceChanged | AssistantUpdate | ReviewUpdate | KitReload | KitReconnect;

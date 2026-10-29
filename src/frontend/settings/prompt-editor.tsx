@@ -78,9 +78,11 @@ export function PromptVarsPanel(props: { vars: readonly PromptVar[] }) {
  * instructions it keeps, what those hold (`adds`), since they're made fresh each turn. `vars` is a
  * step's (its vars panel) or a registry text's own placeholders; `problems` says what is wrong with
  * the text as written (a placeholder it doesn't have, one it must keep), each shown under it. `save`
- * turns the text (null to reset) into the settings patch, or null when it can't be saved.
+ * turns the text (null to reset) into the settings patch, or null when it can't be saved. `test`,
+ * where the text can be tested (a role's, on Settings → Agents → Prompts), is its Test control for
+ * the text as written.
  */
-export function PromptEditor(props: { id: string; label: string; note: string; builtIn?: string; adds?: string; value: string | undefined; max: number; vars: VarsKey | readonly PromptVar[]; problems?(text: string): readonly string[]; busy: boolean; save(text: string | null): JsonObject | null; patch(patch: JsonObject): void; children?: ComponentChildren }) {
+export function PromptEditor(props: { id: string; label: string; note: string; builtIn?: string; adds?: string; value: string | undefined; max: number; vars: VarsKey | readonly PromptVar[]; problems?(text: string): readonly string[]; busy: boolean; save(text: string | null): JsonObject | null; patch(patch: JsonObject): void; test?(text: string): ComponentChildren; children?: ComponentChildren }) {
   const saved = props.value ?? props.builtIn ?? "";
   const [text, setText] = useState(saved);
   useEffect(() => setText(saved), [saved]);
@@ -123,6 +125,7 @@ export function PromptEditor(props: { id: string; label: string; note: string; b
             Reset to the default
           </Button>
         </div>
+        {props.test ? props.test(text) : null}
         {typeof props.vars === "string" ? <VarsPanel step={props.vars} /> : <PromptVarsPanel vars={props.vars} />}
         {props.builtIn !== undefined ? (
           <div class="lre-minds-default" data-lre-built-in="replaced">

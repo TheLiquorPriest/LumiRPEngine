@@ -60,6 +60,8 @@ The engine makes small model calls of its own around each turn. A switched-off b
 | `RPEngine · consolidate` | Folds a character's older notes into their summary | What a summary should keep in your preset's story |
 | `RPEngine · knowledge` | Works out after each reply who learned what, what they worked out and what they now doubt | How your preset's people take things in: how quickly they guess, how readily they believe what they're told |
 
+**On a chat that plays agents** (GM → This chat → Engine), the same blocks guide the roles that stand in for those helpers, until the classic steps are removed: each role gets the blocks of the steps it does, each under its step's name, after its own instructions, in this order: the intent, `interpret`, `judge` and `puzzle.answer`; the minds, `mind`; the knowledge step, `knowledge`; the director, `brief`, `outline`, `choices` and `npc.choose`; the read, `extract`; the memory, `memory` and `consolidate`; the skip, `skip`. The scene and the world's steps have no block of their own. A role set to **prompt-only** (Settings → Agents → Roles) is its classic step's own call, and reads its block as that helper does. How a role is told them is the **Every role** page's text on Settings → Agents → Prompts.
+
 How the engine reads a guidance block:
 
 - **It stays switched off.** A switched-on block of that name goes to the narrator in every chat, like any block, so the engine doesn't read it; Settings → Preset says so.

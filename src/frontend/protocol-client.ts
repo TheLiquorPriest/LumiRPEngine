@@ -20,7 +20,7 @@ import { formatMs, TIMEOUTS, timerMs } from "../shared/timeouts";
 import type { Activity } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { AssistantUpdate, AssistantView, DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, MindsRunUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
+import type { AssistantUpdate, AssistantView, DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, MindsRunUpdate, ResultBodies, ResultMessage, ReviewCardView, ReviewUpdate } from "../shared/protocol";
 import type { AgentsView } from "../shared/agents";
 import type { AcceptanceRunView, AcceptanceState } from "../shared/agent-settings";
 import type { StateView } from "../shared/state-view";
@@ -50,7 +50,7 @@ export interface ClientOptions {
 export type SyncStatus = "closed" | "syncing" | "live" | "resyncing";
 
 function isActivity(value: unknown): value is Activity {
-  return isRecord(value) && typeof value.chatId === "string" && (value.state === "running" || value.state === "failed") && typeof value.label === "string" && typeof value.since === "number" && (value.turn === null || typeof value.turn === "string");
+  return isRecord(value) && typeof value.chatId === "string" && (value.state === "running" || value.state === "failed") && typeof value.label === "string" && typeof value.since === "number" && (value.turn === null || typeof value.turn === "string") && (value.agents === undefined || (Array.isArray(value.agents) && value.agents.every((a) => isRecord(a) && typeof a.id === "string" && typeof a.label === "string" && isRecord(a.tokens))));
 }
 
 /** An acceptance run as pushed: a light check, as for the other pushes; the backend owns the rest of the shape. */
@@ -61,6 +61,11 @@ function isAcceptanceRun(value: unknown): value is AcceptanceRunView {
 /** The GM assistant's thread as pushed: a light check, as for the other pushes; the backend owns the rest of the shape. */
 function isAssistantView(value: unknown): value is AssistantView {
   return isRecord(value) && Array.isArray(value.thread) && Array.isArray(value.proposals) && (value.running === null || (isRecord(value.running) && typeof value.running.label === "string"));
+}
+
+/** An agent turn's review card as pushed: a light check, as for the other pushes; the backend owns the rest of the shape. */
+function isReviewCard(value: unknown): value is ReviewCardView {
+  return isRecord(value) && typeof value.turn === "string" && typeof value.messageId === "string" && (value.placement === "chips" || value.placement === "gate") && Array.isArray(value.items);
 }
 
 export interface SyncState {
@@ -129,6 +134,8 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.cancel": true,
   "lre.assistant": true,
   "lre.workspace": true,
+  "lre.review": true,
+  "lre.prompts": true,
 };
 
 function isRequestType(value: unknown): value is keyof ResultBodies {
@@ -156,6 +163,7 @@ export class ProtocolClient {
   private readonly agentsListeners = new Set<(view: AgentsView) => void>();
   private readonly acceptanceListeners = new Set<(state: AcceptanceState) => void>();
   private readonly assistantListeners = new Set<(update: AssistantUpdate) => void>();
+  private readonly reviewListeners = new Set<(update: ReviewUpdate) => void>();
   private readonly unsubscribe: () => void;
   private requestMs: Limit;
   private readonly newReqId: () => string;
@@ -233,6 +241,12 @@ export class ProtocolClient {
   onAssistant(listener: (update: AssistantUpdate) => void): () => void {
     this.assistantListeners.add(listener);
     return () => this.assistantListeners.delete(listener);
+  }
+
+  /** A chat's agent-turn review cards changed (`lre.review.update`): the chips area's card follows them. */
+  onReview(listener: (update: ReviewUpdate) => void): () => void {
+    this.reviewListeners.add(listener);
+    return () => this.reviewListeners.delete(listener);
   }
 
   /** Whether this page's document is on screen (setup reads `document.visibilityState`); sent with each hello, resync and `page`. */
@@ -428,6 +442,12 @@ export class ProtocolClient {
         if (typeof payload.chatId === "string" && isAssistantView(payload.view)) {
           const update: AssistantUpdate = { lre: PROTOCOL_VERSION, type: "lre.assistant.update", chatId: payload.chatId, view: payload.view };
           for (const listener of this.assistantListeners) listener(update);
+        }
+        return;
+      case "lre.review.update":
+        if (typeof payload.chatId === "string" && Array.isArray(payload.cards) && payload.cards.every(isReviewCard)) {
+          const update: ReviewUpdate = { lre: PROTOCOL_VERSION, type: "lre.review.update", chatId: payload.chatId, cards: payload.cards };
+          for (const listener of this.reviewListeners) listener(update);
         }
         return;
     }

@@ -18,12 +18,14 @@
 
 import type { AgentBudget, AgentEffort, AgentSettings, TurnBudget } from "../../shared/agent-settings";
 import { RUNTIME_TEXT } from "../../shared/agent-prompts";
+import { STOP_TEXT } from "../../shared/agent-failures";
 import type { UserId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
 import { jsonEqual } from "../../shared/json-patch";
 import { limitOf } from "../../shared/minds";
 import type { PromptTexts } from "../../shared/prompts";
 import { timerMs } from "../../shared/timeouts";
+import { counted, nounFor } from "../../shared/words";
 import type { HostPort, QuietMessage, QuietTool } from "../host";
 import { renderPrompt } from "../prompts";
 import { type AgentAccounts, type AgentCall, AgentStop, type AgentStopCode, type ModelReply, NATIVE_TURNS, type PreparedCall, ProviderSession, TEXT_TURNS, type ToolResult, ToolsRefused } from "./provider";
@@ -39,10 +41,15 @@ export interface ToolCtx {
   callId: string;
 }
 
-/** What a tool gives back for the model: its text, and whether that's a failure. */
+/**
+ * What a tool gives back for the model: its text, and whether that's a failure. `end` ends the send
+ * once the round's results are in, answered with this text and no further call (the main agent's
+ * commit, which hands its stage to the engine).
+ */
 export interface ToolOutcome {
   text: string;
   error?: true;
+  end?: true;
 }
 
 export interface AgentTool {
@@ -118,7 +125,14 @@ export interface AgentHandle {
   usage(): AgentUsage;
 }
 
-/** A turn's agents together (§10): their tokens and rounds of tool calls against the turn's budget, and its time from when the turn began. */
+/**
+ * Hears a turn's agents at work, for the drawer's live trace (AGENT-LOOP-PLAN §9): the agent's id
+ * and role, and what it has spent so far, each time it starts on a message and after each of its
+ * calls; `null` once it stops working that message. Nothing else: never what it reads or calls.
+ */
+export type AgentWatch = (agent: { id: string; role: string }, spent: { in: number; out: number } | null) => void;
+
+/** A turn's agents together (§10): their tokens and rounds of tool calls against the turn's budget, and its time from when the turn began; `watch` hears each of them at work. */
 export class AgentTurn {
   readonly startedAt: number;
   readonly used = { in: 0, out: 0, toolTurns: 0 };
@@ -126,6 +140,7 @@ export class AgentTurn {
   constructor(
     readonly budget: TurnBudget,
     now: () => number = () => Date.now(),
+    readonly watch: AgentWatch | null = null,
   ) {
     this.startedAt = now();
   }
@@ -179,6 +194,8 @@ class Agent implements AgentHandle {
   private answered = false;
   private revisions = 0;
   private busy = false;
+  /** A tool's result this round that ends the send (`ToolOutcome.end`): its text is the answer. */
+  private ending: string | null = null;
 
   constructor(
     private readonly spec: AgentSpec,
@@ -199,25 +216,33 @@ class Agent implements AgentHandle {
 
   async send(text: string, signal?: AbortSignal): Promise<AgentReply> {
     const used = emptyUsage();
-    if (this.controller.signal.aborted) return this.end(used, new AgentStop("cancelled", "the agent was cancelled"));
-    if (this.busy) return this.end(used, new AgentStop("busy", "the agent is still working on its last message"));
+    if (this.controller.signal.aborted) return this.end(used, new AgentStop("cancelled", { id: STOP_TEXT.cancelled }));
+    if (this.busy) return this.end(used, new AgentStop("busy", { id: STOP_TEXT.busy }));
     if (this.answered) {
-      if (this.revisions >= this.spec.budget.revisions) return this.end(used, new AgentStop("revisions", `it has had the ${this.spec.budget.revisions} revisions it may have after its first answer`));
+      if (this.revisions >= this.spec.budget.revisions) return this.end(used, new AgentStop("revisions", { id: STOP_TEXT.revisions, vars: { revisions: counted(this.spec.budget.revisions, "revision", "revisions") } }));
       this.revisions += 1;
     }
     this.busy = true;
+    this.ending = null;
     this.startedAt ??= this.now();
     this.conversation.push({ role: "user", content: text });
     this.entries.push({ kind: "message", text, at: this.now() });
     try {
+      this.watched();
       return await this.loop(used, signal);
     } finally {
       this.busy = false;
+      this.deps.turn?.watch?.({ id: this.id, role: this.spec.role }, null);
     }
   }
 
+  /** Tells the turn's watcher what this agent has spent so far, while it works a message. */
+  private watched(): void {
+    this.deps.turn?.watch?.({ id: this.id, role: this.spec.role }, { in: this.total.in, out: this.total.out });
+  }
+
   cancel(): void {
-    this.controller.abort(new AgentStop("cancelled", "the agent was cancelled"));
+    this.controller.abort(new AgentStop("cancelled", { id: STOP_TEXT.cancelled }));
   }
 
   transcript(): AgentTranscript {
@@ -263,6 +288,7 @@ class Agent implements AgentHandle {
         turn.used.in += reply.usage.in;
         turn.used.out += reply.usage.out;
       }
+      this.watched();
       said = reply.text;
       this.entries.push({ kind: "answer", text: reply.text, ...(reply.reasoning ? { reasoning: reply.reasoning } : {}), calls: reply.calls.map((c) => ({ id: c.id, name: c.name, args: c.args })), written: reply.written, tools: prepared.names.size === 0 ? "none" : prepared.textTools ? "text" : "native", usage: reply.usage, model: reply.model, finishReason: reply.finishReason, ms: reply.ms, at: this.now() });
       if (reply.calls.length === 0) {
@@ -290,15 +316,21 @@ class Agent implements AgentHandle {
       const encoding = reply.written ? TEXT_TURNS : NATIVE_TURNS;
       this.conversation.push(encoding.assistant(reply), encoding.results(results, this.deps.texts));
       if (tools.signal.aborted) return this.end(used, this.why(tools.signal.reason, tools.signal), said);
+      if (this.ending !== null) {
+        const text = this.ending;
+        this.ending = null;
+        this.answered = true;
+        return { status: "answered", text, usage: { ...used } };
+      }
     }
   }
 
   /** The agent's or the turn's time, run out before a call. */
   private timeUp(): AgentStop | null {
     const now = this.now();
-    if (now - (this.startedAt ?? now) >= limitOf(this.spec.budget.wallMs)) return new AgentStop("wall_time", "the agent's time ran out (Time per agent)");
+    if (now - (this.startedAt ?? now) >= limitOf(this.spec.budget.wallMs)) return new AgentStop("wall_time", { id: STOP_TEXT.wallTime });
     const turn = this.deps.turn;
-    if (turn && now - turn.startedAt >= limitOf(turn.budget.wallMs)) return new AgentStop("turn_time", "the turn's agent time ran out (Agent time per turn)");
+    if (turn && now - turn.startedAt >= limitOf(turn.budget.wallMs)) return new AgentStop("turn_time", { id: STOP_TEXT.turnTime });
     return null;
   }
 
@@ -306,11 +338,11 @@ class Agent implements AgentHandle {
   private overBudget(p: PreparedCall): AgentStop | null {
     const { budget } = this.spec;
     const turn = this.deps.turn;
-    if (p.estimate > limitOf(budget.callTokensIn)) return new AgentStop("call_tokens_in", `the call's prompt, about ${p.estimate} tokens, is past Prompt per call (${String(budget.callTokensIn)})`);
-    if (this.total.in + p.estimate > limitOf(budget.tokensIn)) return new AgentStop("tokens_in", `the call would take the agent's prompt tokens past ${String(budget.tokensIn)} (Prompt tokens per agent)`);
-    if (this.total.out >= limitOf(budget.tokensOut)) return new AgentStop("tokens_out", `the agent has written its ${String(budget.tokensOut)} tokens (Answer tokens per agent)`);
-    if (turn && turn.used.in + p.estimate > limitOf(turn.budget.tokensIn)) return new AgentStop("turn_tokens_in", `the call would take the turn's prompt tokens past ${String(turn.budget.tokensIn)} (Prompt tokens per turn)`);
-    if (turn && turn.used.out >= limitOf(turn.budget.tokensOut)) return new AgentStop("turn_tokens_out", `the turn's agents have written its ${String(turn.budget.tokensOut)} tokens (Answer tokens per turn)`);
+    if (p.estimate > limitOf(budget.callTokensIn)) return new AgentStop("call_tokens_in", { id: STOP_TEXT.callTokensIn, vars: { tokens: counted(p.estimate, "token", "tokens"), limit: String(budget.callTokensIn) } });
+    if (this.total.in + p.estimate > limitOf(budget.tokensIn)) return new AgentStop("tokens_in", { id: STOP_TEXT.tokensIn, vars: { limit: String(budget.tokensIn) } });
+    if (this.total.out >= limitOf(budget.tokensOut)) return new AgentStop("tokens_out", { id: STOP_TEXT.tokensOut, vars: { tokens: counted(limitOf(budget.tokensOut), "token", "tokens") } });
+    if (turn && turn.used.in + p.estimate > limitOf(turn.budget.tokensIn)) return new AgentStop("turn_tokens_in", { id: STOP_TEXT.turnTokensIn, vars: { limit: String(turn.budget.tokensIn) } });
+    if (turn && turn.used.out >= limitOf(turn.budget.tokensOut)) return new AgentStop("turn_tokens_out", { id: STOP_TEXT.turnTokensOut, vars: { tokens: counted(limitOf(turn.budget.tokensOut), "token", "tokens") } });
     return null;
   }
 
@@ -321,10 +353,10 @@ class Agent implements AgentHandle {
       const same = repeat.call !== null && repeat.call.name === call.name && jsonEqual(repeat.call.args, call.args);
       repeat.times = same ? repeat.times + 1 : 1;
       repeat.call = call;
-      if (repeat.times >= settings.loopRepeats) return new AgentStop("loop", `the agent called ${call.name} with the same arguments ${repeat.times} times in a row (Loop detector)`);
+      if (repeat.times >= settings.loopRepeats) return new AgentStop("loop", { id: STOP_TEXT.loop, vars: { tool: call.name, times: counted(repeat.times, "time", "times") } });
     }
-    if (this.total.toolTurns >= limitOf(this.spec.budget.toolTurns)) return new AgentStop("tool_turns", `the agent has had its ${String(this.spec.budget.toolTurns)} rounds of tool calls (Tool rounds per agent)`);
-    if (turn && turn.used.toolTurns >= limitOf(turn.budget.toolTurns)) return new AgentStop("turn_tool_turns", `the turn's agents have had its ${String(turn.budget.toolTurns)} rounds of tool calls (Tool rounds per turn)`);
+    if (this.total.toolTurns >= limitOf(this.spec.budget.toolTurns)) return new AgentStop("tool_turns", { id: STOP_TEXT.toolTurns, vars: { rounds: counted(limitOf(this.spec.budget.toolTurns), "round", "rounds") } });
+    if (turn && turn.used.toolTurns >= limitOf(turn.budget.toolTurns)) return new AgentStop("turn_tool_turns", { id: STOP_TEXT.turnToolTurns, vars: { rounds: counted(limitOf(turn.budget.toolTurns), "round", "rounds") } });
     return null;
   }
 
@@ -345,23 +377,25 @@ class Agent implements AgentHandle {
     };
     const now = this.now();
     const turn = this.deps.turn;
-    deadline(limitOf(this.spec.budget.wallMs) - (now - (this.startedAt ?? now)), new AgentStop("wall_time", "the agent's time ran out (Time per agent)"));
-    if (turn) deadline(limitOf(turn.budget.wallMs) - (now - turn.startedAt), new AgentStop("turn_time", "the turn's agent time ran out (Agent time per turn)"));
-    if (call) deadline(limitOf(this.spec.budget.callMs), new AgentStop("call_time", "the call took longer than Time per call"));
+    deadline(limitOf(this.spec.budget.wallMs) - (now - (this.startedAt ?? now)), new AgentStop("wall_time", { id: STOP_TEXT.wallTime }));
+    if (turn) deadline(limitOf(turn.budget.wallMs) - (now - turn.startedAt), new AgentStop("turn_time", { id: STOP_TEXT.turnTime }));
+    if (call) deadline(limitOf(this.spec.budget.callMs), new AgentStop("call_time", { id: STOP_TEXT.callTime }));
     return { signal: AbortSignal.any(sources), clear: () => clears.forEach((clear) => clear()) };
   }
 
   /** What stopped a call: a refusal or a deadline (as thrown, or as the signal's reason), a cancel, or a failure. */
   private why(error: unknown, signal: AbortSignal): AgentStop {
     if (error instanceof AgentStop) return error;
-    if (signal.aborted) return signal.reason instanceof AgentStop ? signal.reason : new AgentStop("cancelled", "the agent was cancelled");
-    return new AgentStop("failed", error instanceof Error ? error.message : String(error));
+    if (signal.aborted) return signal.reason instanceof AgentStop ? signal.reason : new AgentStop("cancelled", { id: STOP_TEXT.cancelled });
+    return new AgentStop("failed", { id: STOP_TEXT.failed, vars: { error: error instanceof Error ? error.message : String(error) } });
   }
 
+  /** The run stopped: its transcript says why, in the user's words for the stop (`STOP_TEXT`). */
   private end(used: AgentUsage, stop: AgentStop, said = ""): AgentReply {
     const status = STATUS[stop.code] ?? "refused";
-    this.entries.push({ kind: "stop", status, code: stop.code, reason: stop.message, at: this.now() });
-    return { status, text: said, code: stop.code, reason: stop.message, usage: { ...used } };
+    const reason = this.text(stop.text.id, stop.text.vars);
+    this.entries.push({ kind: "stop", status, code: stop.code, reason, at: this.now() });
+    return { status, text: said, code: stop.code, reason, usage: { ...used } };
   }
 
   /** A round's calls, as many at once as the budget lets, results in the calls' order. */
@@ -385,7 +419,7 @@ class Agent implements AgentHandle {
     const t0 = this.now();
     const tool = this.tools.get(call.name);
     let outcome: ToolOutcome;
-    if (!allowed) outcome = { text: this.text(RUNTIME_TEXT.tooManyCalls, { limit: String(this.spec.budget.callTools), name: call.name }), error: true };
+    if (!allowed) outcome = { text: this.text(RUNTIME_TEXT.tooManyCalls, { limit: String(this.spec.budget.callTools), tools: nounFor(limitOf(this.spec.budget.callTools), "tool", "tools"), name: call.name }), error: true };
     else if (!tool) outcome = { text: this.text(RUNTIME_TEXT.unknownTool, { name: call.name, tools: [...this.tools.keys()].join(", ") }), error: true };
     else {
       try {
@@ -397,6 +431,7 @@ class Agent implements AgentHandle {
     const kept = call.name === SCRATCH_READ ? null : this.clip(outcome.text);
     const text = kept?.text ?? outcome.text;
     this.entries.push({ kind: "result", callId: call.id, name: call.name, text, error: outcome.error === true, ...(kept ? { scratch: kept.handle } : {}), ms: this.now() - t0, at: this.now() });
+    if (outcome.end && outcome.error !== true) this.ending = outcome.text;
     return { call, text, error: outcome.error === true };
   }
 

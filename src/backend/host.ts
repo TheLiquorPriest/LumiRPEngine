@@ -279,6 +279,8 @@ export interface QuietRequest {
   tools?: QuietTool[];
   /** How hard the model reasons (a step's or the helper model's effort); absent or `inherit`: the connection's own reasoning settings. */
   effort?: ReasoningChoice;
+  /** How the model's thinking shows, with an effort of the call's own (the host's `thinkingDisplay`): `summarized` sends its text back; absent: the host's default. */
+  thinkingDisplay?: "summarized";
   /** Sampling parameters by the host's names; each left out is the connection's own (its preset's). */
   params?: SamplingParams;
   /** Asks the provider for its token usage (the host's `_include_usage`): only then does an OpenAI-compatible stream, which every call with tools is, report it. */

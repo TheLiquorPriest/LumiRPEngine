@@ -2,6 +2,7 @@
 // turn's delivery and the GM's preview of it (GM → This chat → Sections) read the same renderers,
 // scopes, caps, marks and budgets, so the preview is what the next prompt gets.
 
+import type { AgentKnowledge } from "../shared/agent-tools";
 import type { SlotId } from "../shared/ids";
 import { KNOWLEDGE_DEFAULTS, KNOWLEDGE_SLOT, MINDS_SLOT, type KnowledgeSettings } from "../shared/minds";
 import { secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
@@ -10,6 +11,7 @@ import type { ContextGeneration } from "../shared/state-view";
 import type { PromptTexts } from "../shared/prompts";
 import type { FeedScope, SectionFeed, SectionTemplate, WorldDoc } from "../shared/world";
 import { feedOf, linesOf, markedText, renderersOf, sectionScope, secretLineText, sourceOf } from "../engine/feed";
+import type { FeedLine } from "../engine/registry";
 import { optionalQuery } from "../engine/pack-kit";
 import { readPass } from "../engine/read-pass";
 import type { Registry } from "../engine/registry-impl";
@@ -43,8 +45,11 @@ export interface SectionsInput {
   knowledge?: KnowledgeSettings;
   /** The player's words this turn, which order the minds ladder; empty for none yet. */
   said: string;
-  /** What the turn itself tells: its resolution and a timelapse's Montage. */
-  planned: { outcome: readonly string[]; montage: readonly string[] };
+  /**
+   * What the turn itself tells: its resolution, a timelapse's Montage, and an agent turn's scene role's
+   * lore and notes (INC2-SPEC C11), the notes with the knowledge they were written with.
+   */
+  planned: { outcome: readonly string[]; montage: readonly string[]; scene?: readonly string[]; notes?: { lines: readonly string[]; knowledge: AgentKnowledge } };
   outline: readonly string[];
   /** The minutes the turn took, for Scene's elapsed-time line; null without a turn. */
   elapsed: number | null;
@@ -88,6 +93,9 @@ export interface SectionsBuilt {
   recorded: SlotId[];
   used: number;
 }
+
+/** What a scene note's knowledge reads as among a section's lines: the player character's, the scene's (everyone's), or the GM's. */
+const NOTE_KNOWN: Readonly<Record<AgentKnowledge, FeedLine["known"]>> = { pov: "pov", everyone: "scene", gm: "gm" };
 
 /** A line of a section as it is built, with the fact it tells part of (`FeedLine.group`, under its renderer's name); none, and it stands alone. */
 interface Told {
@@ -243,6 +251,25 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
         }
       }
       if (section.id === "outline") lines.push(...withoutMissing(input.outline, missingSections(sections, section.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && input.hasEntry(mindsSection))).map((text) => ({ text })));
+      if (section.id === "scene") {
+        // An agent turn's scene role's lore leads the Scene slot, each entry as the brief may read it.
+        lines.push(...(input.planned.scene ?? []).map((text) => ({ text })));
+        // Its notes, held to what Minds lines are: one written beyond the player character's knowledge
+        // never in the player scope (one the GM's knowledge wrote, in the GM's alone) and marked as
+        // beyond them elsewhere; one naming someone or something the player character can't see, or
+        // carrying a secret's words, marked as a secret kept from them, or left out.
+        const notes = input.planned.notes;
+        const known = notes ? NOTE_KNOWN[notes.knowledge] : "pov";
+        for (const text of notes?.lines ?? []) {
+          if (known !== "pov" && (scope === "player" || (known === "gm" && scope !== "gm"))) continue;
+          if (carries(text) || hidden(text)) {
+            if (marking) beyond.push({ text: secret(text) });
+            continue;
+          }
+          if (known === "pov") lines.push({ text });
+          else beyond.push({ text: markedText({ text, known }) });
+        }
+      }
       // DESIGN §9.2: every turn has an elapsed time, and the Scene slot states it.
       if (section.id === "scene" && input.elapsed !== null) lines.push({ text: input.elapsed > 0 ? `This turn took ${spanText(input.elapsed)}.` : "No time passes this turn." });
       // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.

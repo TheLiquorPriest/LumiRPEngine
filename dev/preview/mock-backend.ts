@@ -1001,6 +1001,9 @@ export class MockBackend {
         // As the backend's `workspaceRequest` does (R6a): the workspace at the chat's head, and your own change to it through the writer, as one GM edit with its Undo chip (never held: the preview runs no turn), or refused in plain words.
         if (message.op === "list") return this.result(reqId, "lre.workspace", { files: structuredClone(this.workspace.files) });
         if (message.op === "read") return this.result(reqId, "lre.workspace", { text: this.workspace.files.some((f) => f.path === message.path) ? (this.workspace.texts[message.path] ?? null) : null });
+        // The preview plays no agent turn, so its main agent has no session, and nothing to roll back.
+        if (message.op === "session") return this.result(reqId, "lre.workspace", { session: { summary: null, turns: 0, tokens: 0, rollback: "none" } });
+        if (message.op === "rollback") return this.error(reqId, "validation", "The main agent's session has no compaction to roll back.");
         const change: PreviewFileChange = message.op === "write" ? { kind: "ws_write", path: message.path, text: message.text, ...(message.readers !== undefined ? { readers: message.readers } : {}) } : message.op === "delete" ? { kind: "ws_delete", path: message.path } : message.op === "move" ? { kind: "ws_move", from: message.from, to: message.to } : message.op === "readers" ? { kind: "ws_readers", path: message.path, readers: message.readers } : { kind: "ws_pin", path: message.path, pinned: message.pinned };
         const before = this.editSnapshot();
         // Your own write is the GM's, credited to the reply it lands on.

@@ -150,5 +150,15 @@ export const COVERAGE: Coverage = {
     move: { excluded: "GM → Workspace's Move of a file to another path, the user's own; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
     pin: { excluded: "GM → Workspace's pin of a file for the agents, the user's own choice; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
     readers: { excluded: "GM → Workspace's choice of whose knowledge may read a file, the user's own; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
+    session: { excluded: "GM → Workspace's view of the main agent's session in the chat (its summary, turns and rollback), GM data for the page; the MCP server's tools reach the main agent once they move onto the agent tool layer (Increment 3)." },
+    rollback: { excluded: "GM → Workspace's rollback of the main agent's latest compaction, the user's own press, which the next agent turn carries; an outside agent keeps no main session." },
+  },
+  "lre.review": {
+    get: { excluded: "An agent turn's review card in the chat's chips area, which the page reads to show it; lre_chips reads the chips the card rides on, and the MCP server's tools reach agent turns once they move onto the agent tool layer (AGENT-LOOP-PLAN §11, Increment 3)." },
+    apply: { excluded: "Applies changes an agent turn asked to make, the player's own Apply or pick on its review card; an outside agent makes its own changes with lre_edit, each with its own Undo." },
+    reject: { excluded: "Turns down the changes an agent turn asked to make, the player's own No on its review card; nothing an outside agent does goes through those cards." },
+  },
+  "lre.prompts": {
+    test: { excluded: "Settings → Agents → Prompts' Test of a role's text, the user's own press that runs the role once on the chat; an outside agent edits no prompt texts." },
   },
 };

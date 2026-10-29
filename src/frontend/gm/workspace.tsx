@@ -8,17 +8,20 @@
 // your character's; a file you write is GM only until you choose), Move gives it a new path
 // (`{op: "move"}`, the page following it) and Delete removes it (`{op: "delete"}`). Each change is one
 // GM edit with its Undo chip, held while a reply is written: GmPanel says it (`changed`) with its
-// Undo, as after an edit; a learned file's changes land at once, with none. Workspace content never
-// goes to Play or the drawer's activity line.
+// Undo, as after an edit; a learned file's changes land at once, with none. Above the list, the main
+// agent's session at the head (`{op: "session"}`, read with the list): whether a compaction summary
+// stands in for its older turns, the turns it holds whole, and Roll back for its latest compaction
+// (`{op: "rollback"}`), which the next agent turn's record carries (INC2-SPEC C14). Workspace content
+// and the session never go to Play or the drawer's activity line.
 
 import { useEffect, useState } from "preact/hooks";
 import { AGENT_ROLES } from "../../shared/agent-settings";
 import type { AgentKnowledge } from "../../shared/agent-tools";
 import type { ChatId } from "../../shared/ids";
-import type { ResultBodies, WorkspaceFileView } from "../../shared/protocol";
+import type { ResultBodies, SessionView, WorkspaceFileView } from "../../shared/protocol";
 import { isLearnedPath, isWorkspacePath } from "../../shared/stores";
 import { useApp } from "../app";
-import { Badge, Button, Empty, Field, IdText, List, ListRow, Section, Seg, useBusy } from "../components";
+import { Badge, Button, Disclosure, Empty, Field, IdText, List, ListRow, Section, Seg, useBusy } from "../components";
 import { humanize } from "../format";
 import type { GmSectionProps, RequestBody } from "../registry";
 import { GmPage, usePages } from "./ui";
@@ -43,6 +46,10 @@ export interface WorkspaceControls {
   readers(path: string, readers: AgentKnowledge, landed?: () => void): Promise<boolean>;
   move(from: string, to: string, landed?: () => void): Promise<boolean>;
   remove(path: string, landed?: () => void): Promise<boolean>;
+  /** The main agent's session at the head, or null when the read failed. */
+  session(): Promise<SessionView | null>;
+  /** Asks for its latest compaction's rollback: the session after it, or null when it was refused. */
+  rollback(): Promise<SessionView | null>;
 }
 
 /** Whose knowledge may read a file, as its page offers the choice: the GM's alone, everyone's (and so the GM's), or your character's (every agent's). */
@@ -80,6 +87,8 @@ export function workspaceControls(chatId: ChatId, request: WorkspaceAsk, out: { 
     readers: (path, readers, landed) => change({ type: "lre.workspace", op: "readers", chatId, path, readers }, `Who may read ${path}: ${READERS_LABELS[readers]}`, landed),
     move: (from, to, landed) => change({ type: "lre.workspace", op: "move", chatId, from, to }, `Moved ${from} to ${to}`, landed),
     remove: (path, landed) => change({ type: "lre.workspace", op: "delete", chatId, path }, `Deleted ${path}`, landed),
+    session: async () => (await request({ type: "lre.workspace", op: "session", chatId }))?.session ?? null,
+    rollback: async () => (await request({ type: "lre.workspace", op: "rollback", chatId }))?.session ?? null,
   };
 }
 
@@ -116,16 +125,21 @@ export function WorkspaceSection(props: GmSectionProps) {
   const pages = usePages<string>();
   const [working, run] = useBusy();
   const [files, setFiles] = useState<WorkspaceFileView[] | null>(null);
+  // The main agent's session at the head: undefined while it is read, null when the read failed.
+  const [session, setSession] = useState<SessionView | null | undefined>(undefined);
   // The text read for the page's file (null: no such file), and the draft and move path over it.
   const [opened, setOpened] = useState<{ path: string; text: string | null } | null>(null);
   const [draft, setDraft] = useState("");
   const [moveTo, setMoveTo] = useState("");
   const controls = workspaceControls(props.chatId, (body) => app.request<"lre.workspace">(body), { files: setFiles, changed: props.changed });
-  // Read again whenever the GM view reloads: an Undo, a turn or a swipe may have changed the files.
+  // Read again whenever the GM view reloads: an Undo, a turn or a swipe may have changed the files and the session.
   useEffect(() => {
     let live = true;
     void controls.list().then((listed) => {
       if (live && listed !== null) setFiles(listed);
+    });
+    void controls.session().then((read) => {
+      if (live) setSession(read);
     });
     return () => {
       live = false;
@@ -168,6 +182,16 @@ export function WorkspaceSection(props: GmSectionProps) {
   return (
     <div ref={pages.host.ref} class="lre-gm-pages" onKeyDown={pages.host.onKeyDown} data-lre-gm-section="workspace">
       <div class="lre-stack lre-gm-list" hidden={selected !== undefined}>
+        <SessionPanel
+          session={session}
+          busy={props.busy || working}
+          onRollback={() =>
+            run(async () => {
+              const after = await controls.rollback();
+              if (after !== null) setSession(after);
+            })
+          }
+        />
         <WorkspaceList files={files} onOpen={open} />
       </div>
       {selected ? (
@@ -192,6 +216,52 @@ export function WorkspaceSection(props: GmSectionProps) {
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The main agent's session at the head (INC2-SPEC C14): whether a compaction summary stands in for its
+ * older turns (the summary folded under it), the turns it holds whole and their size, and its latest
+ * compaction's rollback: Roll back while one is there to roll back, then that it waits for the next
+ * agent turn, whose record carries it. Nothing while it is read; a read that failed says so.
+ */
+export function SessionPanel(props: { session: SessionView | null | undefined; busy: boolean; onRollback(): void }) {
+  const { session } = props;
+  if (session === undefined) return null;
+  return (
+    <Section title="The main agent's session" flush>
+      <div class="lre-stack" data-lre-workspace-session={session === null ? "failed" : session.rollback}>
+        {session === null ? (
+          <p class="lre-gm-note">The engine didn't answer with the main agent's session.</p>
+        ) : (
+          <>
+            <p class="lre-gm-note">
+              {`It holds ${session.turns} turn${session.turns === 1 ? "" : "s"} whole, about ${session.tokens.toLocaleString("en-US")} tokens. `}
+              {session.summary === null ? "No compaction yet: nothing of it is summarized." : "A compaction summary stands in for its older turns."}
+            </p>
+            {session.summary !== null ? (
+              <Disclosure summary="The summary it reads">
+                <p class="lre-gm-note lre-workspace-summary">{session.summary}</p>
+              </Disclosure>
+            ) : null}
+            {session.rollback === "available" ? (
+              <>
+                <p class="lre-gm-note">Roll back the latest compaction, and the main agent reads the turns its summary replaced again, from its next turn. The next agent turn's record carries it, so no earlier turn changes.</p>
+                <Button icon="undo" disabled={props.busy} onClick={props.onRollback}>
+                  Roll back the latest compaction
+                </Button>
+              </>
+            ) : session.rollback === "pending" ? (
+              <p class="lre-gm-note">
+                <Badge tone="warn">Rollback waits</Badge> The next agent turn rolls the latest compaction back and records it.
+              </p>
+            ) : (
+              <p class="lre-gm-note">No compaction to roll back.</p>
+            )}
+          </>
+        )}
+      </div>
+    </Section>
   );
 }
 

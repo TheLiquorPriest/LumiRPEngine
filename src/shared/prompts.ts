@@ -5,7 +5,10 @@
 // syntax `{{name}}` and the placeholders a text requires are stored formats (the user's own texts and
 // each turn's prompt set are kept by them), so they never change once shipped.
 
+import { AGENT_FAILURE_PROMPTS } from "./agent-failures";
 import { RUNTIME_PROMPT_PAGE, RUNTIME_PROMPTS } from "./agent-prompts";
+import { MAIN_AGENT_PAGE, MAIN_AGENT_PROMPTS } from "./main-agent-prompts";
+import { ROLE_PROMPT_PAGES, ROLE_PROMPTS } from "./role-prompts";
 import { TOOL_FAMILY_LABEL, TOOL_NOTES, TOOL_TEXTS, toolArgTextId, toolTextId } from "./agent-tools";
 import type { SlotId } from "./ids";
 import { isRecord } from "./json";
@@ -238,8 +241,8 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
     group: GM_THREAD,
     label: "Earlier messages left out",
     note: "Leads what is sent of the conversation when any of it isn't sent, past History tokens (Settings → Agents → Assistant) or written with more knowledge than the assistant reads with now: how many of its earlier messages aren't sent.",
-    text: "({{count}} earlier messages of this conversation are left out. If you need what was said in them, ask the game master.)",
-    vars: [...GM_VARS, { name: "count", text: "how many of the conversation's earlier messages aren't sent" }],
+    text: "({{count}} earlier {{messages}} of this conversation left out. If you need what was said there, ask the game master.)",
+    vars: [...GM_VARS, { name: "count", text: "how many of the conversation's earlier messages aren't sent" }, { name: "messages", text: '"message" for 1, else "messages"' }],
   },
   {
     id: GM_TEXT.knowledge.pov,
@@ -271,10 +274,10 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
 ];
 
 /** The Prompts pages, in the order Settings lists them. */
-export const PROMPT_PAGES: readonly PromptPage[] = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, RUNTIME_PROMPT_PAGE];
+export const PROMPT_PAGES: readonly PromptPage[] = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES];
 
 /** Every editable text. */
-export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...RUNTIME_PROMPTS];
+export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...MAIN_AGENT_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
 
 /** The pages whose texts a turn's prompt set records (DESIGN §6.12): what the narrator's prompt is made from. */
 export const TURN_PROMPT_PAGES: readonly string[] = [FINAL_OUTPUT_PAGE.id];

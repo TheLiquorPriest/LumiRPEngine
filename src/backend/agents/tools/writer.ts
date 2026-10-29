@@ -3,7 +3,8 @@
 // file written, deleted, moved or pinned (and, for the GM alone, a file's readers set). A dry run
 // checks one as it would be written and says what it would change; apply writes a batch of them as
 // one GM edit. This is the writer outside a turn's engine run (`outsideWriter`: the GM agent chat,
-// GM → Workspace); a turn agent's, which writes inside the engine op, is Increment 2's.
+// GM → Workspace, an agent turn's review card); a turn agent's, which stages into its turn instead,
+// is `turn-writer.ts`, through the same checks (`checkOp`, `opLines`, `contextOf`).
 //
 // The write path, for every operation:
 // 1. It is read for its shape and turned into what the engine writes (`FixOp`s): a GM edit as
@@ -55,6 +56,7 @@ import { EDIT_OPS_MAX, type EditOp, WRITE_REFUSED } from "../../../shared/protoc
 import { isOff, type RoutineEditOp } from "../../../shared/routines";
 import { AGENT_CHANGE_LABEL, type AgentChangeType, type ExtractionLearning, type UserSettings } from "../../../shared/settings";
 import { blobHash, isLearnedPath, isWorkspacePath } from "../../../shared/stores";
+import { nounFor } from "../../../shared/words";
 import { type FieldDef, spawnCapOf } from "../../../shared/world";
 import { parseEditOps, resolveEdit } from "../../../engine/edits";
 import { activeRecord } from "../../../engine/ledger/path";
@@ -163,7 +165,7 @@ export function outsideWriter(rt: Runtime, env: WriterEnv): ToolWriter {
 // ---------------------------------------------------------------- reading an operation
 
 /** The head an operation is checked against, read once per dry run or apply, with what its checks and wording read. */
-interface Ctx {
+export interface WriterCtx {
   head: ChatHead;
   /** The head as the agent's knowledge reads it: what it may name, its marks, the tool layer's notes in the user's words. */
   view: ToolReadView;
@@ -171,10 +173,14 @@ interface Ctx {
   learning: ExtractionLearning;
   /** The learned area as the chat's metadata holds it. */
   learned: Readonly<Record<string, LearnedFile>>;
+  /** The connection an agent naming none works on (the user's default): its changes' learned modes count there, the key the review card counts their outcomes under. */
+  active: string;
 }
 
+type Ctx = WriterCtx;
+
 /** An operation read: what the engine writes for it, how it validates, and a file's new body. */
-interface Prepared {
+export interface PreparedOp {
   key: string;
   op: AgentOp;
   ops: FixOp[];
@@ -184,13 +190,17 @@ interface Prepared {
   learned?: { changes: Record<string, LearnedFile | null>; shown: LedgerEvent[] };
 }
 
+type Prepared = PreparedOp;
+
 function refusal(code: string, reason: string, key?: string): OpRefusal {
   return { refused: true, code, reason, ...(key !== undefined ? { key } : {}) };
 }
 
-function isRefusal<T extends object>(v: T | OpRefusal): v is OpRefusal {
+export function isOpRefusal<T extends object>(v: T | OpRefusal): v is OpRefusal {
   return "refused" in v;
 }
+
+const isRefusal = isOpRefusal;
 
 /** The minds' controls a mind edit takes, and Cast life's a routine edit takes: lookups over the ops, so a new one fails the typecheck until it is here. */
 const MIND_OPS: Readonly<Record<MindEditOp["op"], true>> = { mind_pin: true, mind_refresh: true, mind_memory: true, mind_intent: true, mind_knowledge: true };
@@ -559,13 +569,13 @@ function gate(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>
   const { world } = ctx.head;
   const type = changeTypeOf(rt, ctx.head, state, p.op);
   if (env.agent.role === GM_ROLE) return { type, mode: "auto" };
-  const { mode } = effectiveMode(ctx.settings, ctx.learning, env.connectionId ?? null, type, env.agent.role);
+  const { mode } = effectiveMode(ctx.settings, ctx.learning, env.connectionId ?? ctx.active, type, env.agent.role);
   if (mode === "never") return refusal("mode_never", ctx.view.text(WRITE_NOTE.never, { type: AGENT_CHANGE_LABEL[type] }), p.key);
   const spawn = p.ops[0];
   if (type === "gm_spawn" && spawn?.op === "spawn" && kindIs(rt.registry, world, spawn.kind, "person")) {
     let introduced = 0;
     for (const [id, e] of Object.entries(state.entities)) if (own(world.entities, id) === undefined && kindIs(rt.registry, world, e.kind, "person")) introduced++;
-    if (introduced >= spawnCapOf(world)) return refusal("spawn_cap", ctx.view.text(WRITE_NOTE.spawnCap, { count: String(introduced) }), p.key);
+    if (introduced >= spawnCapOf(world)) return refusal("spawn_cap", ctx.view.text(WRITE_NOTE.spawnCap, { count: String(introduced), people: nounFor(introduced, "person", "people") }), p.key);
   }
   return { type, mode };
 }
@@ -588,11 +598,16 @@ function refused(rt: Runtime, ctx: Ctx, knowledge: AgentKnowledge, rejection: Re
   return refusal(rejection.code === WRITE_REFUSED ? WRITE_REFUSED : "refused", ctx.view.text(WRITE_NOTE.povRefused, { pov: ctx.view.name(ctx.view.pov) }), key);
 }
 
-/** What an operation's events change, in plain words, as the agent's knowledge may have them; `after` is the state they leave, which names whom they bring in. A workspace change reads as the GM's line of it under every knowledge: its paths are the agents' own names. */
-function linesOf(rt: Runtime, ctx: Ctx, knowledge: AgentKnowledge, type: AgentChangeType, after: Readonly<WorldState>, events: readonly LedgerEvent[]): string[] {
+/**
+ * What an operation's events change, in plain words, as the agent's knowledge may have them; `after`
+ * is the state they leave, which names whom they bring in. A workspace change reads as the GM's line
+ * of it, with its path, under the GM's knowledge alone: below it (the review card's, which is the
+ * player character's, and everyone's) it is one line naming no file, as the Journal shows it none.
+ */
+export function opLines(rt: Runtime, ctx: Ctx, knowledge: AgentKnowledge, type: AgentChangeType, after: Readonly<WorldState>, events: readonly LedgerEvent[]): string[] {
   const reg = rt.registry;
   const world = ctx.head.world;
-  if (type === "workspace") return authorLines(reg, world, after, events, events.length);
+  if (type === "workspace") return knowledge === "gm" ? authorLines(reg, world, after, events, events.length) : [ctx.view.text(WRITE_NOTE.workspaceLine)];
   const clock = clockFixLine(events);
   if (knowledge === "pov") {
     const lines = [...(clock ? [clock] : []), ...playerLines(reg, world, after, world.pov, events, events.length)];
@@ -610,14 +625,18 @@ async function context(rt: Runtime, env: WriterEnv): Promise<Ctx | OpRefusal> {
   if (env.signal.aborted) return refusal("cancelled", renderPrompt(WRITE_NOTE.cancelled, settings.prompts.texts, {}));
   const head = await chatHead(rt, env.chatId, env.userId);
   if (!head) return refusal("no_world", renderPrompt(WRITE_NOTE.noWorld, settings.prompts.texts, {}));
-  const learning = await rt.settings.learningOf(env.userId);
-  const view = readView({ knowledge: env.knowledge, registry: rt.registry, world: head.world, state: head.state, texts: settings.prompts.texts, wording: markWording(settings.prompts.texts), threshold: settings.minds.knowledge.threshold });
   const { learned } = await rt.chatAgents.get(env.chatId, env.userId);
-  return { head, view, settings, learning, learned };
+  return contextOf(rt, env, head, settings, await rt.settings.learningOf(env.userId), learned, await rt.activeConnectionId(env.userId));
+}
+
+/** The writer's context over a head and a learned area in hand: a turn's own, as its engine run reads them (`turn-writer.ts`), never through the ledger's queue. */
+export function contextOf(rt: Runtime, env: Pick<WriterEnv, "knowledge">, head: ChatHead, settings: UserSettings, learning: ExtractionLearning, learned: Readonly<Record<string, LearnedFile>>, active: string): Ctx {
+  const view = readView({ knowledge: env.knowledge, registry: rt.registry, world: head.world, state: head.state, texts: settings.prompts.texts, wording: markWording(settings.prompts.texts), threshold: settings.minds.knowledge.threshold });
+  return { head, view, settings, learning, learned, active };
 }
 
 /** A checked operation: what it writes in the head (none for a learned-area change), its type and mode, and the events that word it. */
-interface Checked {
+export interface CheckedOp {
   p: Prepared;
   type: AgentChangeType;
   mode: "auto" | "confirm";
@@ -626,7 +645,7 @@ interface Checked {
 }
 
 /** Prepares, holds to knowledge, gates and validates one operation against `state` and the learned area (`learned`): what it writes and its mode, or why not. */
-function check(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, learned: Readonly<Record<string, LearnedFile>>, op: AgentOp): Checked | OpRefusal {
+export function checkOp(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, learned: Readonly<Record<string, LearnedFile>>, op: AgentOp): CheckedOp | OpRefusal {
   const p = prepare(rt, ctx, env, state, learned, op);
   if (isRefusal(p)) return p;
   const pov = { pov: ctx.view.name(ctx.view.pov) };
@@ -658,11 +677,11 @@ function check(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState
 async function dryRun(rt: Runtime, env: WriterEnv, op: AgentOp): Promise<OpPreview | OpRefusal> {
   const ctx = await context(rt, env);
   if (isRefusal(ctx)) return ctx;
-  const checked = check(rt, ctx, env, ctx.head.state, ctx.learned, op);
+  const checked = checkOp(rt, ctx, env, ctx.head.state, ctx.learned, op);
   if (isRefusal(checked)) return checked;
   const after = new Working(rt.registry, ctx.head.world, ctx.head.state);
   after.applyAll(checked.events);
-  return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines: linesOf(rt, ctx, env.knowledge, checked.type, after.state, checked.shown) };
+  return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines: opLines(rt, ctx, env.knowledge, checked.type, after.state, checked.shown) };
 }
 
 /**
@@ -723,7 +742,7 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
   let learned: Record<string, LearnedFile> = { ...ctx.learned };
   const verdicts: (Prepared | OpRefusal)[] = [];
   for (const op of ops) {
-    const checked = check(rt, ctx, env, running.state, learned, op);
+    const checked = checkOp(rt, ctx, env, running.state, learned, op);
     if (isRefusal(checked)) {
       verdicts.push(checked);
       continue;
@@ -782,7 +801,7 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
 }
 
 /** The learned area with `changes` made: a file at each path, none where it is null. */
-function withLearned(learned: Readonly<Record<string, LearnedFile>>, changes: Readonly<Record<string, LearnedFile | null>>): Record<string, LearnedFile> {
+export function withLearned(learned: Readonly<Record<string, LearnedFile>>, changes: Readonly<Record<string, LearnedFile | null>>): Record<string, LearnedFile> {
   const out = { ...learned };
   for (const [path, file] of Object.entries(changes)) {
     if (file === null) delete out[path];

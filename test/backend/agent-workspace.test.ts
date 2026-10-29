@@ -286,6 +286,45 @@ describe("a workspace note", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
+  test("on an agents chat, follows a role-run Regenerate by the same rule: made from the swipe that showed, kept by a Retry read of it that stopped, and never carried from a later swipe", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" }));
+    await rig.turn(chatId, "I look around.", "The square is quiet.");
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    const recOf = async (swipe: number) => (await rig.rt.ledger.core(chatId, rig.host.userId))?.journal.messages[reply.id]?.ledger.swipes[String(swipe)];
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The square is quiet still.");
+    rig.host.navigate(chatId, reply.id, 0);
+    await rig.host.settle();
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: SQUARE, text: SQUARE_TEXT }));
+    rig.host.navigate(chatId, reply.id, 1);
+    await rig.host.settle();
+    expect(await files(rig, chatId)).toEqual({});
+    // The first swipe shows again: a Regenerate stopped part-way is made from it, and carries its note.
+    rig.host.navigate(chatId, reply.id, 0);
+    await rig.host.settle();
+    await rig.host.stop(await rig.host.start(chatId, { type: "regenerate" }), "The square");
+    expect(rig.host.message(chatId, reply.id).swipeId).toBe(2);
+    expect((await recOf(2))?.status).toBe("stopped");
+    expect(await files(rig, chatId)).toEqual({ [SQUARE]: blobHash(SQUARE_TEXT) });
+    // Its Retry read reads it on the chat's roles and keeps what it carried.
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "retry_read");
+    if (!chip) throw new Error("no Retry read");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "retry_read" }));
+    await rig.host.settle();
+    expect((await rig.rt.view(chatId, rig.host.userId)).chips.some((c) => c.kind === "retry_read")).toBe(false);
+    expect(await files(rig, chatId)).toEqual({ [SQUARE]: blobHash(SQUARE_TEXT) });
+    // From the second swipe, which never had it, the turn its roles run carries nothing.
+    rig.host.navigate(chatId, reply.id, 1);
+    await rig.host.settle();
+    await rig.host.finish(await rig.host.start(chatId, { type: "regenerate" }), "The square wakes slowly.");
+    expect(rig.host.message(chatId, reply.id).swipeId).toBe(3);
+    expect(typeof (await recOf(3))?.session?.segment).toBe("string");
+    expect(await files(rig, chatId)).toEqual({});
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
   test("is missing from a Branch made from before it, which keeps the chat's learned area as it stood: a file under learned/ lands at once in the chat's metadata, and no swipe changes it", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();

@@ -28,6 +28,7 @@ import type {
   HostCapabilities,
   HostRegexScript,
   QuietMessage,
+  QuietRequest,
   QuietThinkingBlock,
   QuietToolCall,
   SwipeAction,
@@ -274,11 +275,12 @@ async function takesJsonMode(connectionId: string | null | undefined, userId: st
 /**
  * A call's effort as the host's per-request reasoning override: none for `inherit` (the
  * connection's reasoning binding, else the user's setting, stands), the off-switch for `off`, else
- * that effort, which the host maps to the provider's own field.
+ * that effort, which the host maps to the provider's own field, with how the model's thinking shows
+ * when `display` says (`summarized`: its text comes back).
  */
-export function reasoningOverride(effort: ReasoningChoice | undefined): GenerationReasoningOverrideDTO | undefined {
+export function reasoningOverride(effort: ReasoningChoice | undefined, display?: QuietRequest["thinkingDisplay"]): GenerationReasoningOverrideDTO | undefined {
   if (effort === undefined || effort === "inherit") return undefined;
-  return effort === "off" ? { source: "off" } : { source: "custom", apiReasoning: true, effort };
+  return effort === "off" ? { source: "off" } : { source: "custom", apiReasoning: true, effort, ...(display ? { thinkingDisplay: display } : {}) };
 }
 
 /**
@@ -320,8 +322,8 @@ const ANTHROPIC_CACHE_BREAKPOINTS = 4;
  * The explicit cache breakpoints a connection takes, as the host's own prompt caching reads its
  * `prompt_caching` (Lumiverse `src/services/caching/anthropic.ts`, `resolveConfig`): only Anthropic
  * reads `cache_control` on a part; when the connection caches, it marks the end of the leading
- * system messages unless told not to, the last message and each tool only when told to, and its
- * automatic mode is on unless switched off.
+ * system messages unless told not to, the last message and the last tool (one breakpoint, however
+ * many tools) only when told to, and its automatic mode is on unless switched off.
  */
 export function cacheBreakpoints(provider: string, metadata: unknown): HostConnectionProfile["cache"] {
   if (provider !== "anthropic") return null;
@@ -526,7 +528,7 @@ export function createSpindleHost(): HostPort {
         if (request.model) parameters.model = request.model;
         // Only then does an OpenAI-compatible stream (every call with tools) report usage; every provider drops the key itself.
         if (request.usage) parameters._include_usage = true;
-        const reasoning = reasoningOverride(request.effort);
+        const reasoning = reasoningOverride(request.effort, request.thinkingDisplay);
         const raw = await spindle.generate.quiet({
           type: "quiet",
           messages: request.messages.map(messageDTO),

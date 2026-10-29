@@ -24,6 +24,7 @@ import { GM_TEXT, promptDef } from "../../src/shared/prompts";
 import { type AssistantView, type BackendToFrontend, WRITE_REFUSED } from "../../src/shared/protocol";
 import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
+import { nounFor } from "../../src/shared/words";
 import type { QuietScript } from "../support/fake-host";
 import { Rig } from "../support/rig";
 
@@ -674,7 +675,7 @@ describe("its texts and its thread", () => {
     rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { assistant: { historyTokens: room } } } }));
     await ask(rig, chatId, "Where am I?");
     const vars = { world: "Port Alder", pov: "Jordan Ellis" };
-    const note = (count: number): string => renderPrompt(GM_TEXT.historyNote, {}, { ...vars, count: String(count) });
+    const note = (count: number): string => renderPrompt(GM_TEXT.historyNote, {}, { ...vars, count: String(count), messages: nounFor(count, "message", "messages") });
     expect(asked[2]?.messages.slice(1).map((m) => [m.role, m.content])).toEqual([
       ["user", `${note(2)}\n\nAnd the time?`],
       ["assistant", "Answer 2."],
@@ -696,7 +697,7 @@ describe("its texts and its thread", () => {
     rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { assistant: { knowledge: "pov" } } } }));
     await ask(rig, chatId, "What do I know about the shop?");
     const vars = { world: "Port Alder", pov: "Jordan Ellis" };
-    const note = (count: number): string => renderPrompt(GM_TEXT.historyNote, {}, { ...vars, count: String(count) });
+    const note = (count: number): string => renderPrompt(GM_TEXT.historyNote, {}, { ...vars, count: String(count), messages: nounFor(count, "message", "messages") });
     // The first exchange was written with everyone's knowledge: left out, and counted in the note.
     expect(JSON.stringify(asked[1]?.messages)).not.toContain(MARK);
     expect(asked[1]?.messages.slice(1).map((m) => [m.role, m.content])).toEqual([["user", `${note(2)}\n\nWhat do I know about the shop?`]]);

@@ -30,7 +30,19 @@ export interface PreparedRead {
   minds?: LedgerEvent[];
   /** How long a narrated skip may run without asking (the user's `time.askBeyondMinutes`, DESIGN §9.4): one longer becomes a Timelapse chip. */
   askBeyond: number;
+  /**
+   * An agent turn's commit of what its roles staged after the reply (INC2-SPEC C10): applied on the
+   * read's state after its post steps, ahead of the minds, each operation re-validated in order.
+   */
+  commit?: TurnCommit;
 }
+
+/**
+ * An agent turn's commit (INC2-SPEC C10): what its roles staged, applied on `w` in the turn's fixed
+ * order (by role in AGENT-LOOP-PLAN §5's order, then by staging order), each operation re-validated
+ * against what the ones before it left; one that no longer holds applies nothing.
+ */
+export type TurnCommit = (w: Working) => void;
 
 /** The plan-phase prose steps' output for one plan (DESIGN §5.2): the brief and the prose outline. */
 export interface PlanProse {
@@ -236,6 +248,27 @@ export class TurnBridge implements TurnModel {
    * is read again, while a Re-run, a Retry or a held answer's Regenerate of the turn reuses it.
    */
   private readonly readAt = new Map<string, PathHash>();
+  /**
+   * A turn's minds' memory of the reply before it, run first in its pre phase when that reply left it
+   * to the turn (Settings → Agents → Pipeline, before the next turn), keyed like `intents`: applied
+   * ahead of everything else the plan applies. Kept, even when it remembered nothing, until the turn
+   * commits (`committed`), so a run of the turn after a wait asks for it no more.
+   */
+  private readonly memories = new Map<string, LedgerEvent[]>();
+  /** An agent turn's commit of what its roles staged before the plan, keyed like `intents`: applied after the plan's events (INC2-SPEC C10), once. */
+  private readonly commits = new Map<string, TurnCommit>();
+  /**
+   * The words whose turn an agent turn's review gate let through (INC2-SPEC C13): the next run of
+   * them replays the plan the gate held, as one let through the outline gate does, until the turn
+   * commits. A chat waits at one gate at a time, so a later gate's takes its place.
+   */
+  private replay: string | null = null;
+  /**
+   * A turn of the chat waits on the player: its engine run ended at a gate or a question (Ask first,
+   * a check card, the intent, outline or review gate), and the run the answer starts reads what this
+   * bridge holds for it. The memory budget keeps the bridge of a chat whose turn waits.
+   */
+  waiting = false;
 
   constructor(
     private readonly registry: Registry,
@@ -260,7 +293,8 @@ export class TurnBridge implements TurnModel {
    * next time it plays rather than coming back to the card the player cancelled.
    */
   forget(userText: string): void {
-    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.ownPlans, this.outlines]) kept.delete(userText);
+    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.ownPlans, this.outlines, this.memories, this.commits]) kept.delete(userText);
+    if (this.replay === userText) this.replay = null;
     this.interpreted.delete(userText);
     this.intentsPassed.delete(userText);
     this.unread.delete(userText);
@@ -408,10 +442,38 @@ export class TurnBridge implements TurnModel {
     trim(this.minds);
   }
 
-  /** What the plan applies before the pipeline, in order: the decisions, the minds, then the skip plan, so the timelapse that follows lives it. */
+  /** What the turn remembered of the reply before it, first in its pre phase: kept until the turn commits, whatever it holds. */
+  setMemory(userText: string, events: readonly LedgerEvent[]): void {
+    this.memories.set(userText, [...events]);
+    trim(this.memories);
+  }
+
+  /** What these words' turn remembered of the reply before it, if a run of it asked already; undefined when none did. */
+  memoryOf(userText: string): readonly LedgerEvent[] | undefined {
+    return this.memories.get(userText);
+  }
+
+  /**
+   * The turn whose words these are committed (its reply read, or stopped): what was kept only for
+   * its own runs goes, the memory it asked first and the review gate's replay, so a Re-run of it
+   * asks its agents again.
+   */
+  turnCommitted(userText: string): void {
+    this.memories.delete(userText);
+    if (this.replay === userText) this.replay = null;
+  }
+
+  /** An agent turn's commit of what its roles staged before the plan (null clears it): the plan applies it after its own events, once. */
+  setCommit(userText: string, commit: TurnCommit | null): void {
+    if (commit) this.commits.set(userText, commit);
+    else this.commits.delete(userText);
+    trim(this.commits);
+  }
+
+  /** What the plan applies before the pipeline, in order: a turn's memory of the reply before it, the decisions, the minds, then the skip plan, so the timelapse that follows lives it. */
   prePlan(userText: string): LedgerEvent[] {
     const plan = this.skipPlans.get(userText);
-    return [...(this.decisions.get(userText) ?? []), ...(this.minds.get(userText) ?? []), ...(plan ? [plan] : [])];
+    return [...(this.memories.get(userText) ?? []), ...(this.decisions.get(userText) ?? []), ...(this.minds.get(userText) ?? []), ...(plan ? [plan] : [])];
   }
 
   /** The skip plan this text's timelapse turn records (null: none), and whether one was made for it. */
@@ -492,12 +554,18 @@ export class TurnBridge implements TurnModel {
     const last = input.userTexts.at(-1) ?? "";
     // Only what this turn's own pre phase kept: the same words read at another path are another turn's.
     const own = this.readAt.get(last) === input.parentPath;
-    // An outline the player let through plays the plan it was shown for, never a fresh one whose rolls could differ.
-    const shown = own && this.outlines.has(last) ? this.ownPlans.get(last) : undefined;
+    // An agent turn's commit of what its roles staged before the plan applies here once, and isn't kept.
+    const commit = own ? this.commits.get(last) : undefined;
+    this.commits.delete(last);
+    // An outline the player let through, or an agent turn's plan its review gate held, plays the plan
+    // it was shown for, never a fresh one whose rolls could differ.
+    const shown = own && (this.outlines.has(last) || this.replay === last) ? this.ownPlans.get(last) : undefined;
     if (shown && shown.parentPath === input.parentPath) {
       this.plans.set(input.seed, shown.result);
       trim(this.plans);
-      return structuredClone(shown.events);
+      const events = structuredClone(shown.events);
+      // What the review gate let through lands after the plan it held, re-validated against it (INC2-SPEC C13).
+      return [...events, ...this.committed(commit, input, events)];
     }
     // Decisions and minds first: the plan then follows the choices they record (DESIGN §5.2 npc.choose, §24).
     const w = new Working(this.registry, input.ctx.world, input.state);
@@ -515,13 +583,26 @@ export class TurnBridge implements TurnModel {
     });
     this.plans.set(input.seed, result);
     trim(this.plans);
-    const events = [...w.events, ...result.events];
+    const planned = [...w.events, ...result.events];
+    // What an agent turn's roles staged before the plan lands after the plan's events (INC2-SPEC C10).
+    const committed = this.committed(commit, input, planned);
+    const events = committed.length > 0 ? [...planned, ...committed] : planned;
     // Kept by reference (a reuse clones it), so a turn that never meets the outline gate pays nothing for it.
     if (own) {
       this.ownPlans.set(last, { parentPath: input.parentPath, events, result });
       trim(this.ownPlans);
     }
     return events;
+  }
+
+  /** The events an agent turn's commit (`commit`) adds after `events`, the plan's, each operation re-validated on the state they leave; none without a commit. */
+  private committed(commit: TurnCommit | undefined, input: { state: WorldState; ctx: ReadContext }, events: readonly LedgerEvent[]): LedgerEvent[] {
+    if (!commit) return [];
+    const w = new Working(this.registry, input.ctx.world, input.state);
+    w.applyAll(events);
+    const from = w.events.length;
+    commit(w);
+    return w.events.slice(from);
   }
 
   /**
@@ -559,10 +640,23 @@ export class TurnBridge implements TurnModel {
     return this.outlines.get(userText);
   }
 
-  /** The turn shown at the outline gate was taken: its outline and kept plan go, so the next run of these words plans again. */
+  /** The turn shown at the outline gate (or an agent turn's review gate) was taken: its outline and kept plan go, so the next run of these words plans again. */
   dropOutline(userText: string): void {
     this.outlines.delete(userText);
+    if (this.replay === userText) this.replay = null;
     this.ownPlans.delete(userText);
+  }
+
+  /** An agent turn's review gate let its turn through (INC2-SPEC C13): the next run of these words replays the plan the gate held, with what it let through after it. False when no plan was held for them. */
+  passReview(userText: string): boolean {
+    if (!this.ownPlans.has(userText)) return false;
+    this.replay = userText;
+    return true;
+  }
+
+  /** Whether the next run of these words replays the plan an agent turn's review gate held. */
+  replaying(userText: string): boolean {
+    return this.replay === userText;
   }
 
   read(input: { state: WorldState; ctx: ReadContext; seed: string; text: string }): LedgerEvent[] {
@@ -574,6 +668,11 @@ export class TurnBridge implements TurnModel {
       const base = input.seed.split(":")[0] ?? input.seed;
       const applied = (this.plans.get(base)?.elapsedMinutes ?? 0) + clockMinutes(w.events);
       w.applyAll(this.pipeline.post({ registry: this.registry, world: input.ctx.world, state: w.state, runSeed: this.runSeed, seed: input.seed, appliedMinutes: applied, extracted: [...w.events] }));
+    }
+    // An agent turn's commit of what its roles staged after the reply, ahead of the minds (INC2-SPEC C10): applied once, and not kept.
+    if (prepared?.commit) {
+      prepared.commit(w);
+      delete prepared.commit;
     }
     w.applyAll(prepared?.minds ?? []);
     this.readChips.set(key, chips);

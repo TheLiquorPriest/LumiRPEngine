@@ -4,8 +4,8 @@
 // back the default (every agent's limit for the budget); and Settings home's line for the page.
 
 import { describe, expect, test } from "bun:test";
-import { LimitRow } from "../../src/frontend/settings/agents";
-import { AssistantLimitRow, AssistantSettingsBody, assistantBudgetPatch, assistantPatch, assistantSummary } from "../../src/frontend/settings/assistant";
+import { LimitRow, OwnLimitRow } from "../../src/frontend/settings/agents";
+import { AssistantSettingsBody, assistantBudgetPatch, assistantPatch, assistantSummary } from "../../src/frontend/settings/assistant";
 import { type Connection, ConnectionSelect } from "../../src/frontend/settings/steps";
 import { Button, HostModelPicker, HostSwitch, NumberStepper, Seg } from "../../src/frontend/components";
 import type { AgentBudget, AgentSettings, AssistantSettings } from "../../src/shared/agent-settings";
@@ -64,7 +64,7 @@ function historyRow(tree: unknown): unknown {
 
 /** One budget limit's row, laid out. */
 function budgetRow(tree: unknown, key: keyof AgentBudget): unknown {
-  return expand({ type: AssistantLimitRow, props: only(propsOf(tree, AssistantLimitRow).filter((p) => p.id === key)) });
+  return expand({ type: OwnLimitRow, props: only(propsOf(tree, OwnLimitRow).filter((p) => p.id === key)) });
 }
 
 const labels = (node: unknown): unknown[] => propsOf(node, Button).map((p) => p.label);
@@ -148,7 +148,7 @@ describe("Settings → Agents → Assistant patches", () => {
 
   test("each budget limit follows every agent's until set as the assistant's own, No limit only where it may be lifted", () => {
     const tree = page(DEFAULTS);
-    expect(propsOf(tree, AssistantLimitRow).map((p) => [p.id, p.own, p.every])).toEqual(BUDGET_KEYS.map((key) => [key, undefined, DEFAULTS.budget[key]]));
+    expect(propsOf(tree, OwnLimitRow).map((p) => [p.id, p.own, p.every])).toEqual(BUDGET_KEYS.map((key) => [key, undefined, DEFAULTS.budget[key]]));
 
     const rounds = budgetRow(tree, "toolTurns");
     const stepper = labelled(rounds, NumberStepper, "Tool rounds per agent");
@@ -251,7 +251,7 @@ describe("Settings → Agents → Assistant in the settings store", () => {
     expect(only(propsOf(shown, ConnectionSelect)).value).toBe("deepseek");
     expect(labelled(shown, HostModelPicker, "Model").value).toBe("deepseek-v4-flash");
     expect([only(propsOf(shown, "select")).value, labelled(shown, Seg, KNOWLEDGE_SEG).value, labelled(shown, Seg, APPLY_SEG).value]).toEqual(["high", "pov", "at_once"]);
-    expect(propsOf(shown, AssistantLimitRow).filter((p) => p.own !== undefined).map((p) => [p.id, p.own])).toEqual([
+    expect(propsOf(shown, OwnLimitRow).filter((p) => p.own !== undefined).map((p) => [p.id, p.own])).toEqual([
       ["callTokensOut", 2048],
       ["toolTurns", "none"],
     ]);

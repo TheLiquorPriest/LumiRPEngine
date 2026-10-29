@@ -22,6 +22,7 @@ import type {
   PendingTurn,
   PostEntry,
   Rec,
+  RecAgent,
   RecSession,
   RecStatus,
   CarryDrop,
@@ -675,6 +676,7 @@ export class LedgerCore {
     if (from.undone) p.undone = from.undone;
     if (from.dropped) p.dropped = from.dropped;
     if (from.prompts) p.prompts = from.prompts;
+    if (from.agents) p.agents = from.agents;
     return true;
   }
 
@@ -790,6 +792,10 @@ export class LedgerCore {
     const copies = source.post.filter((e) => (e.kind === "fix" || e.kind === "materialize") && isLive(e.at, parentPath, sourceTurn)).map((e) => ({ ...structuredClone(e), at: parentPath }));
     const undone = source.undone.filter((u) => u.in === "post" && copies.some((e) => e.seq === u.seq));
     Object.assign(p, { seed: source.seed, markersApplied: source.markersApplied, events: structuredClone(pre), copies, undone, startMarkers: [] } satisfies Partial<PendingTurn>);
+    // An agent turn's committed operations among the copied `pre` keep their attribution (`Rec.agents`).
+    const agents = (source.agents ?? []).filter((a) => a.seq === undefined && a.to <= source.pre);
+    if (agents.length > 0) p.agents = structuredClone(agents);
+    else delete p.agents;
     return true;
   }
 
@@ -1154,6 +1160,8 @@ export class LedgerCore {
     };
     if (at?.elsewhere) rec.readElsewhere = true;
     if (p.prompts) rec.prompts = p.prompts;
+    if (p.memoryNext) rec.memoryNext = true;
+    if (p.agents && p.agents.length > 0) rec.agents = structuredClone(p.agents);
     if (p.copies) {
       // P3: the new reply is read on the same fold prefix as its source's was (its `pre` after the
       // source's markers), and the copies, keeping their seqs and undos, are carried after that read:
@@ -1331,6 +1339,46 @@ export class LedgerCore {
     if (!rec) return "the reply has no turn record";
     rec.session = { ...rec.session, ...parts };
     return null;
+  }
+
+  /**
+   * An agent turn's committed operations, with their events' ranges (`Rec.agents`, INC2-SPEC C10):
+   * in the record's events, or in the `post` entry a range's `seq` names (a Continue's read). Written
+   * on the head reply's record at the turn's close, outside every hash but the tombstone's, on the
+   * guard `recordSession` keeps: refused once the next turn is pending or in flight, or when the reply
+   * is no longer the latest. Null once written, else why not.
+   */
+  recordAgents(messageId: MessageId, swipeId: number, agents: readonly RecAgent[], observed: readonly ChainMessage[]): string | null {
+    if (this.inFlight || Object.keys(this.journal.pending).length > 0) return "the next turn is already under way";
+    const chain = this.chain(observed);
+    const index = chain.findLastIndex((m) => !m.isUser);
+    const head = chain[index];
+    if (!head || head.id !== messageId) return "the turn's reply is no longer the latest";
+    const stored = head.ledger?.swipes[String(swipeId)];
+    if (!stored || stored.path === "" || isTombstoned(this.journal.tombstones, messageId, stored)) return "the reply has no turn record";
+    const rec = this.ledgerFor(messageId, observed[index]).swipes[String(swipeId)];
+    if (!rec) return "the reply has no turn record";
+    const kept = agents.filter((a) => Number.isInteger(a.from) && Number.isInteger(a.to) && a.from >= 0 && a.from < a.to && a.to <= (a.seq === undefined ? rec.events.length : (rec.post.find((p) => p.seq === a.seq)?.events.length ?? 0))).map((a) => ({ role: a.role, key: a.key, from: a.from, to: a.to, ...(a.seq !== undefined ? { seq: a.seq } : {}) }));
+    if (kept.length > 0) rec.agents = kept;
+    else delete rec.agents;
+    return null;
+  }
+
+  /**
+   * Events an agent turn records after its plan and before its reply (INC2-SPEC C10, C11): the
+   * narrator-facing output events, and what its roles staged between the plan and the reply. Each
+   * unit is validated on the planned state as the plan's own were (`applyValidUnits`), and those that
+   * hold join the turn's planned (`pre`) events, after the plan's; the kept ones are returned. None
+   * when the turn isn't planned.
+   */
+  appendPlanned(generationId: GenerationId, events: readonly LedgerEvent[], observed: readonly ChainMessage[]): LedgerEvent[] {
+    const p = this.journal.pending[generationId];
+    if (!p?.planned || events.length === 0) return [];
+    const planned = this.renderPlanned(observed, p);
+    if (!planned) return [];
+    const kept = applyValidUnits(this.env.types, events, structuredClone(planned.state), (s) => this.env.types.context(planned.world, s));
+    p.events.push(...kept);
+    return kept;
   }
 
   // ------------------------------------------------------------------ user writes
@@ -1515,11 +1563,14 @@ export class LedgerCore {
           if (!prefix) return "unknown revision";
           rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, readSeed(rec.seed), text)];
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
+          keepPlannedAgents(rec);
           this.keepAfter(rec, m, prefix);
           rec.undone = plannedUndos(rec);
           rec.status = "ok";
           rec.swipeHash = contentId(text);
           delete rec.accepted;
+          // A read of the reply remembers in it, whatever memory placement says, so the reply owes the next turn none.
+          delete rec.memoryNext;
           return undefined;
         }
         if (w.kind === "retry_read") {
@@ -1537,12 +1588,15 @@ export class LedgerCore {
           // detail are not the read's, so they stay. Its new chips offer anything still narrated. A
           // stopped reply is now read, so it no longer offers a Retry read.
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
+          keepPlannedAgents(rec);
           this.keepAfter(rec, m, prefix);
           rec.undone = plannedUndos(rec);
           if (rec.status === "stopped") rec.status = "ok";
         }
         rec.swipeHash = contentId(text);
         delete rec.accepted;
+        // As above: the read remembers in it, so the reply owes the next turn none.
+        delete rec.memoryNext;
         return undefined;
       }
     }
@@ -1603,6 +1657,18 @@ export class LedgerCore {
 /** A record's undos that still point at something it holds: its planned events and its remaining post entries (a read just replaced the rest). */
 function plannedUndos(rec: Pick<Rec, "undone" | "pre" | "post">): EventRef[] {
   return rec.undone.filter((u) => (u.in === "events" ? u.index < rec.pre : rec.post.some((p) => p.seq === u.seq)));
+}
+
+/**
+ * A read replaced a record's read events, and its Continue reads with them: only the attributions
+ * that still name events it holds stay (`Rec.agents`), its planned events' and those in its remaining
+ * post entries; the reads' own go with them, and the new read's run names its new ones.
+ */
+function keepPlannedAgents(rec: Rec): void {
+  if (!rec.agents) return;
+  const kept = rec.agents.filter((a) => (a.seq === undefined ? a.to <= rec.pre : rec.post.some((p) => p.seq === a.seq)));
+  if (kept.length > 0) rec.agents = kept;
+  else delete rec.agents;
 }
 
 /**

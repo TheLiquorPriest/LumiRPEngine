@@ -14,7 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { liveLore } from "../../src/backend/book-lore";
 import { checkKnowledge, knowledgeBatches, knowledgeContext, type KnowledgeChecked, type KnowledgeSpent, type KnowledgeTurn } from "../../src/backend/knowledge-step";
 import { toChain } from "../../src/backend/ledger-io";
-import { personNamed, postMinds } from "../../src/backend/minds";
+import { personNamed, postKnowledge, postMinds, postOpening } from "../../src/backend/minds";
 import { buildSections } from "../../src/backend/sections-build";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
@@ -1203,6 +1203,25 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     if (!danny) throw new Error("no Danny");
     danny.fields.place = MARINA;
     const ran = await postMinds(rig.rt.minds, { chatId, userId: rig.host.userId, world, start, state: end, pre: [], messageId: "m-leave", user: "I watch the street.", reply: "A black sedan idles at the curb. LEAVE-MARK", signal: new AbortController().signal, knowledge: true, read: Promise.resolve([]) });
+    expect(seen.knowledge.at(-1)).toContain(`Danny Okafor (id: ${DANNY}): there from the start, but not at its end`);
+    expect(learnings(ran.knowledge?.events ?? []).flatMap((l) => l.who)).toEqual([MARCUS]);
+    expect(ran.knowledge?.proposals.map((p) => p.learn.who)).toEqual([[POV]]);
+  });
+
+  test("an agent turn's post phase, split into its opening and the knowledge step, reads someone who left while the player character stayed the same: they witness none of it", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const seen = models(rig, (context): JsonObject => (context.includes("LEAVE-MARK") ? { facts: [{ ref: "s", claim: SEDAN }], learned: [{ fact: "s", how: "witnessed" }] } : {}));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "Morning.", "The shop opens.");
+    const { state: start, world } = await stateOf(rig, chatId);
+    const end = structuredClone(start);
+    const danny = end.entities[DANNY];
+    if (!danny) throw new Error("no Danny");
+    danny.fields.place = MARINA;
+    const input = { chatId, userId: rig.host.userId, world, start, state: end, pre: [], messageId: "m-leave", user: "I watch the street.", reply: "A black sedan idles at the curb. LEAVE-MARK", knowledge: true };
+    const opening = await postOpening(rig.rt.minds, input);
+    if (!opening) throw new Error("no opening");
+    const ran = await postKnowledge(rig.rt.minds, { ...input, signal: new AbortController().signal, read: Promise.resolve([]) }, opening);
     expect(seen.knowledge.at(-1)).toContain(`Danny Okafor (id: ${DANNY}): there from the start, but not at its end`);
     expect(learnings(ran.knowledge?.events ?? []).flatMap((l) => l.who)).toEqual([MARCUS]);
     expect(ran.knowledge?.proposals.map((p) => p.learn.who)).toEqual([[POV]]);

@@ -385,6 +385,20 @@ export interface RecSession {
   archived?: string;
 }
 
+/**
+ * What one agent's committed operation made of a turn's record (INC2-SPEC C10, attribution): the
+ * role that staged it, the operation's key (the hash of the operation, so a retry is the same key),
+ * and its events, `events[from]` up to but not including `events[to]`; with `seq`, those of the
+ * record's `post` entry of that seq instead (a Continue's read). Why it was made stays in Diagnostics.
+ */
+export interface RecAgent {
+  role: string;
+  key: string;
+  from: number;
+  to: number;
+  seq?: number;
+}
+
 /** One swipe's turn record (DESIGN §4.3, `Rec`). */
 export interface Rec {
   v: 1;
@@ -425,6 +439,18 @@ export interface Rec {
    * damaged one costs the session link, never the turn's world changes.
    */
   session?: RecSession;
+  /**
+   * An agent turn's committed operations, each with its events' range (`RecAgent`): outside every
+   * hash but the tombstone's, like `diag`, written at the turn's close and never once the next turn
+   * is planned (`LedgerCore.recordAgents`). GM-level, never on a player surface.
+   */
+  agents?: RecAgent[];
+  /**
+   * An agent turn whose minds' memory and consolidation run first in the next turn's pre phase
+   * (Settings → Agents → Pipeline, before the next turn), whose pre events they are: this record
+   * holds none of them. Outside every hash but the tombstone's.
+   */
+  memoryNext?: true;
 }
 
 /** `spindle_metadata.lumi_rp_engine` on an assistant message. Swipe keys are decimal indexes. */
@@ -566,6 +592,10 @@ export interface PendingTurn {
   dropped?: CarryDrop[];
   /** The prompt set the engine run made the turn's narrator prompt from (DESIGN §6.12), recorded on the turn's record at commit. */
   prompts?: string;
+  /** An agent turn whose memory runs before the next turn (`Rec.memoryNext`), recorded on its record at commit. */
+  memoryNext?: true;
+  /** An agent turn's committed operations among its planned events (`Rec.agents`), recorded on its record at commit; a Re-narrate copies its source's with its `pre`. */
+  agents?: RecAgent[];
 }
 
 /** Latest journal state of one message's ledger. */

@@ -51,7 +51,7 @@ import { pinBooks, pinEntries, pinViews } from "./lore-pins";
 import { markBookEntry, MarkChangeError, markChangeOf, writeBookFields } from "./book-lore";
 import { bookLoreFieldsOf, engineWroteEntry, OLD_SECRECY_FIELDS } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
-import { ACTIVE_CONNECTION, readRun, Runtime, unpricedChip } from "./runtime";
+import { ACTIVE_CONNECTION, readRun, replyReadKey, Runtime, unpricedChip } from "./runtime";
 import { playerReason } from "./requirement-words";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
@@ -63,6 +63,9 @@ import type { CharacterResult } from "../shared/character";
 import { type DraftNotice, newChatRun, WorldError } from "./worlds";
 import { SecrecyError, SecrecyMoves } from "./secrecy-migration";
 import { Assistant, AssistantError, ASSISTANT_ROLE, workspaceRequest } from "./agents/assistant";
+import { roleTextTest, testedRole } from "./agents/roles/test";
+import { promptDef } from "../shared/prompts";
+import { type Review, ReviewError } from "./agents/review";
 
 export class RequestError extends Error {
   constructor(
@@ -107,6 +110,8 @@ export class Dispatcher {
   private readonly secrecy: SecrecyMoves;
   /** GM → Assistant, the GM agent's chat about each chat's world (DESIGN §4.5): its answers run in the background. */
   readonly assistant: Assistant;
+  /** An agent turn's review card (INC2-SPEC C13): its changes that ask first, answered through `lre.review` or its chip. */
+  readonly review: Review;
 
   constructor(
     private readonly rt: Runtime,
@@ -115,6 +120,9 @@ export class Dispatcher {
     this.minds = new MindsRuns(rt);
     this.secrecy = new SecrecyMoves(rt.host);
     this.assistant = new Assistant(rt);
+    this.review = rt.review;
+    // A read proposal on a card applies, or is turned down, as its own confirm chip's Apply and No do.
+    this.review.readChip = async (chatId, userId, chipId, choice) => void (await this.chip(chatId, userId, chipId, choice));
   }
 
   start(): void {
@@ -647,11 +655,21 @@ export class Dispatcher {
         if (r.knowledge !== undefined && r.knowledge !== null && typeof r.knowledge !== "boolean") throw new RequestError("bad_request", "knowledge tracking is on (true), off (false) or as Settings has it (null)");
         const narrator = r.narrator === undefined || r.narrator === null ? r.narrator : narratorViewOf(r.narrator);
         if (narrator === null && r.narrator !== null) throw new RequestError("bad_request", 'the narrator\'s knowledge is {"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}, or null to follow the world\'s default, else Settings');
-        const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}) };
+        const engine = r.engine;
+        if (engine !== undefined && engine !== null && engine !== "classic" && engine !== "agents") throw new RequestError("bad_request", "the engine is classic or agents, or null to play classic");
+        // A turn finishes on the engine it started on: while one waits at a gate, what it kept for its
+        // resume (changes a review card approved among them) would be lost, so the switch waits for it.
+        if (engine !== undefined && (engine ?? "classic") !== (await this.rt.chatKnowledge.engine(r.chatId, userId))) {
+          const waiting = await this.rt.gateWaiting(r.chatId, userId);
+          if (waiting !== null) throw new RequestError("conflict", `This chat's turn is waiting on ${waiting}. Answer or cancel it before you switch the engine: a turn finishes on the engine it started on.`);
+        }
+        const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}), ...(engine !== undefined ? { engine } : {}) };
         const changes = Object.keys(change).length > 0;
         const prefs = changes ? await this.rt.chatKnowledge.set(r.chatId, userId, change) : await this.rt.chatKnowledge.get(r.chatId, userId);
         if (changes) this.rt.push.changed(r.chatId, userId);
-        reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null });
+        // A turn the other engine prepared goes at once: the switch is one of what a turn is made from (`TurnInputs.engine`).
+        if (engine !== undefined) this.rt.ledger.inputsChanged(userId);
+        reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null, ...(prefs.engine === "agents" ? { engine: "agents" as const } : {}) });
         return;
       }
       case "lre.job": {
@@ -791,6 +809,36 @@ export class Dispatcher {
           if (error instanceof AssistantError) throw new RequestError(error.code, error.message);
           throw error;
         }
+        return;
+      }
+      case "lre.review": {
+        // An agent turn's review card (INC2-SPEC C13): in the chat's chips area, a player surface, so
+        // every item is worded as the player character may read it.
+        await this.requireWorldChat(r.chatId, userId);
+        try {
+          if (r.op === "get") reply("lre.review", { cards: await this.review.cards(r.chatId, userId, session ?? "") });
+          else {
+            const answer = r.op === "apply" ? await this.review.apply(r.chatId, userId, r.turn, r.keys) : await this.review.reject(r.chatId, userId, r.turn);
+            reply("lre.review", { cards: await this.review.cards(r.chatId, userId), start: answer.start });
+          }
+        } catch (error) {
+          if (error instanceof ReviewError) throw new RequestError(error.code, error.message);
+          throw error;
+        }
+        return;
+      }
+      case "lre.prompts": {
+        // Settings → Agents → Prompts' Test for a role's text (DESIGN §6.12): it runs the role on the
+        // chat, so it reads the chat and is GM data, behind the gate as `lre.gm` is; one call a press.
+        await this.requireWorldChat(r.chatId, userId);
+        if (r.op !== "test") throw new RequestError("bad_request", "op must be test");
+        const def = typeof r.id === "string" ? promptDef(r.id) : undefined;
+        const role = def ? testedRole(def) : null;
+        if (!def || !role) throw new RequestError("bad_request", "Test runs a role's text: name one from a role's page on Prompts");
+        if (typeof r.text !== "string") throw new RequestError("bad_request", "give the text to test");
+        const found = await roleTextTest(this.rt, { userId, chatId: r.chatId, def, role, text: r.text, signal: new AbortController().signal });
+        const problems = [...found.problems.map((p) => p.message), ...(found.contract?.problems ?? []).map((p) => `the answer breaks its contract: ${p}`)];
+        reply("lre.prompts", { test: { ok: problems.length === 0 && found.contract !== null, problems, left: found.left } });
         return;
       }
     }
@@ -1000,10 +1048,25 @@ export class Dispatcher {
         if (refused) throw new RequestError("bad_request", refused);
         // Both read the whole text and replace the swipe's earlier read, so that read's chips go first.
         const context = core.readContext(messageId, now);
-        if (context) await this.rt.prepareRead(chatId, userId, messageId, m.swipeId, `${kind}:${messageId}:${m.swipeId}`, m.swipes[m.swipeId] ?? "", { ...context, recent: recentLines(core, now, now.findIndex((x) => x.id === messageId), this.rt.registry) }, true, true);
-        // What it read is offered once it lands, at once or behind a reply in flight (`writesLanded`).
-        const result = await this.write(chatId, userId, { kind, id: this.nextId(), messageId, swipeId: Number(swipe) });
-        return { applied: result.applied, pending: result.pending };
+        const key = replyReadKey(kind, messageId, m.swipeId);
+        // On an agent chat a Retry read or a Re-read edit reads on the chat's roles (`beginRead`); a role failing under `stop` stops it as it stops its turn's read.
+        const stopped = context ? await this.rt.orchestrator.beginRead({ chatId, userId, key, core, observed: now, messageId, world: context.world, state: context.state }) : null;
+        try {
+          // A call the stop cut short may throw (an agent role's does): the read then lands nothing.
+          if (context) {
+            await this.rt.prepareRead(chatId, userId, messageId, m.swipeId, key, m.swipes[m.swipeId] ?? "", { ...context, recent: recentLines(core, now, now.findIndex((x) => x.id === messageId), this.rt.registry) }, true, true, "", stopped ?? undefined).catch((error: unknown) => {
+              if (!stopped?.aborted) throw error;
+            });
+          }
+          if (stopped?.aborted) throw new RequestError("unavailable", `${stopped.reason instanceof Error ? stopped.reason.message : "a role stopped the read"}, so ${kind === "reread" ? "the edit stays unread; Re-read edit reads it again" : "the reply stays unread; Retry read reads it again"}`);
+          // What it read is offered once it lands, at once or behind a reply in flight (`writesLanded`).
+          const result = await this.write(chatId, userId, { kind, id: this.nextId(), messageId, swipeId: Number(swipe) });
+          return { applied: result.applied, pending: result.pending };
+        } catch (error) {
+          // An agent chat's Retry read or Re-read edit that lands nothing ends its run, and the chips its read stored go.
+          if (stopped) await this.rt.readDropped(chatId, userId, key);
+          throw error;
+        }
       });
     }
     if (kind === "overdue") {
@@ -1038,6 +1101,19 @@ export class Dispatcher {
       const result = await this.write(chatId, userId, w);
       return { applied: result.applied, pending: result.pending };
     }
+    if (kind === "review") {
+      // An agent turn's review card (INC2-SPEC C13): Apply all or No answers it, and the card stays
+      // with its applied changes' Undo; at a gate the page then starts the turn it resumes (`chipStarts`).
+      if (choice !== "apply" && choice !== "reject") throw new RequestError("bad_request", `unknown choice ${choice}`);
+      const turn = id.slice("review:".length);
+      try {
+        await (choice === "apply" ? this.review.apply(chatId, userId, turn) : this.review.reject(chatId, userId, turn));
+      } catch (error) {
+        if (error instanceof ReviewError) throw new RequestError(error.code, error.message);
+        throw error;
+      }
+      return { applied: true, pending: false };
+    }
     if (kind === "fix") {
       // Undo on a ✎ fix or GM edit (`fix:<message>:<swipe>:<seq>`), from the chat or GM → Edits: every
       // event of its entry stops folding. The undo names the entry, so the journal takes back what it
@@ -1053,6 +1129,8 @@ export class Dispatcher {
       const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: seq });
       // A GM assistant proposal's Undo, wherever it was pressed: its card says so, and its changes count as undone toward what the assistant learns.
       if (entry.agent?.role === ASSISTANT_ROLE && (result.applied || result.pending)) await this.assistant.undone(chatId, userId, id);
+      // An agent turn's change applied from its review card: its Undo counts toward its role's learning.
+      else if (entry.agent && (result.applied || result.pending)) await this.review.undone(chatId, userId, id);
       return { applied: result.applied, pending: result.pending };
     }
     if (kind === "refused") {

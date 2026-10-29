@@ -1,10 +1,12 @@
 // What a chat chose for knowledge (DESIGN §6.11, §24): whether it tracks who knows what, and what
-// the narrator knows (`NarratorView`). Each falls back in one order: this chat's own choice, then its
-// world's default, then the user's Settings. A chat's own choice lives in the host's chat metadata
-// under LRE's key (`lumi_rp_engine.prefs`, beside the chat's `ChatRun`), never in its ledger: it is
-// how the chat is played, not a fact of its story, so a swipe, a Re-run or an Undo never changes it,
-// recorded turns replay as they were, and a Lumiverse Branch, which copies the chat's metadata,
-// keeps it. A choice is written in the chat's turn among LRE's writes of its metadata (`ChatMetaQueue`).
+// the narrator knows (`NarratorView`); and which engine plays its turns (INC2-SPEC C12: classic, or
+// agents). Knowledge and the narrator fall back in one order: this chat's own choice, then its
+// world's default, then the user's Settings; the engine is classic unless the chat chose agents. A
+// chat's own choice lives in the host's chat metadata under LRE's key (`lumi_rp_engine.prefs`,
+// beside the chat's `ChatRun`), never in its ledger: it is how the chat is played, not a fact of its
+// story, so a swipe, a Re-run or an Undo never changes it, recorded turns replay as they were, and a
+// Lumiverse Branch, which copies the chat's metadata, keeps it. A choice is written in the chat's
+// turn among LRE's writes of its metadata (`ChatMetaQueue`).
 
 import type { ChatId, UserId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
@@ -14,18 +16,25 @@ import type { WorldDoc } from "../shared/world";
 import { ChatMetaQueue } from "./chat-meta-queue";
 import type { HostPort } from "./host";
 
-/** A chat's own choices; a part left out follows its world's default, else the user's Settings. */
+/** Which engine plays a chat's turns (GM → This chat): its classic steps, or the agent loop. */
+export type ChatEngine = "classic" | "agents";
+export const CHAT_ENGINES: readonly ChatEngine[] = ["classic", "agents"];
+
+/** A chat's own choices; a part left out follows its world's default, else the user's Settings; the engine left out is classic. */
 export interface ChatKnowledgePrefs {
   /** Knowledge tracking in this chat, on or off; absent, Settings → Minds → Knowledge's. */
   knowledge?: boolean;
   /** What the narrator knows in this chat; absent, the world's default, else Settings → Narrator's. */
   narrator?: NarratorView;
+  /** The engine that plays this chat's turns; absent, classic. */
+  engine?: ChatEngine;
 }
 
 /** A change to a chat's own choices: a value sets one, null returns it to what it follows, and a part left out stays as it is. */
 export interface ChatKnowledgeChange {
   knowledge?: boolean | null;
   narrator?: NarratorView | null;
+  engine?: ChatEngine | null;
 }
 
 /** Where a chat's own choices sit inside LRE's key of its metadata. */
@@ -40,7 +49,7 @@ export function chatKnowledgePrefsOf(meta: JsonObject): ChatKnowledgePrefs {
   const raw = isRecord(own) ? own[PREFS_KEY] : undefined;
   if (!isRecord(raw)) return {};
   const narrator = narratorViewOf(raw.narrator);
-  return { ...(typeof raw.knowledge === "boolean" ? { knowledge: raw.knowledge } : {}), ...(narrator ? { narrator } : {}) };
+  return { ...(typeof raw.knowledge === "boolean" ? { knowledge: raw.knowledge } : {}), ...(narrator ? { narrator } : {}), ...(raw.engine === "agents" ? { engine: "agents" as const } : {}) };
 }
 
 /** What the narrator knows: this chat's choice, else its world's default (when it is a whole one), else the user's. */
@@ -88,10 +97,23 @@ export class ChatKnowledge {
     return prefs;
   }
 
-  /** The chat's choices as known now, as one comparable value (a prepared turn's `TurnInputs.chat`); empty before they are read. */
+  /** The chat's knowledge choices as known now, as one comparable value (a prepared turn's `TurnInputs.chat`); empty before they are read. Its engine is an input of its own (`engineKey`). */
   key(chatId: ChatId, userId: UserId): string {
     const known = this.prefs.get(`${userId}\u0000${chatId}`);
-    return known ? JSON.stringify(known) : "";
+    if (!known) return "";
+    const { engine: _engine, ...knowledge } = known;
+    return JSON.stringify(knowledge);
+  }
+
+  /** The chat's engine as known now (a prepared turn's `TurnInputs.engine`); empty before its choices are read. */
+  engineKey(chatId: ChatId, userId: UserId): string {
+    const known = this.prefs.get(`${userId}\u0000${chatId}`);
+    return known ? (known.engine ?? "classic") : "";
+  }
+
+  /** The engine that plays the chat's turns: its own choice, else classic. */
+  async engine(chatId: ChatId, userId: UserId): Promise<ChatEngine> {
+    return (await this.get(chatId, userId)).engine ?? "classic";
   }
 
   /**
@@ -109,12 +131,16 @@ export class ChatKnowledge {
       else if (change.knowledge !== undefined) next.knowledge = change.knowledge;
       if (change.narrator === null) delete next.narrator;
       else if (change.narrator !== undefined) next.narrator = { knowledge: change.narrator.knowledge, secrets: change.narrator.secrets };
+      // Classic is what a chat with no choice plays, so choosing it stores nothing.
+      if (change.engine === null || change.engine === "classic") delete next.engine;
+      else if (change.engine !== undefined) next.engine = change.engine;
       const stored: JsonObject = { ...own };
       delete stored[PREFS_KEY];
       const prefs: JsonObject = {};
       if (next.knowledge !== undefined) prefs.knowledge = next.knowledge;
       if (next.narrator) prefs.narrator = { knowledge: next.narrator.knowledge, secrets: next.narrator.secrets };
-      // A chat that follows in both stores no `prefs` at all.
+      if (next.engine) prefs.engine = next.engine;
+      // A chat that follows in every part stores no `prefs` at all.
       if (Object.keys(prefs).length > 0) stored[PREFS_KEY] = prefs;
       await this.host.chats.mergeChatMetadata(chatId, { [LEDGER_NAMESPACE]: stored }, userId);
       this.keep(chatId, userId, next);

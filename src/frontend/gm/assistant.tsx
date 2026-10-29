@@ -18,6 +18,7 @@ import { type AssistantMessage, type AssistantProposal, type AssistantRun, type 
 import type { GmView } from "../../shared/state-view";
 import { formatMs } from "../../shared/timeouts";
 import { useApp } from "../app";
+import { markdown } from "../markdown";
 import { Badge, Button, Disclosure, Empty, useBusy } from "../components";
 import { humanize } from "../format";
 import { Icon } from "../icons";
@@ -139,7 +140,13 @@ export function Trace(props: { rows: readonly TraceRow[] }) {
   );
 }
 
-/** One message: yours, or the assistant's with how it ended, what it spent, its trace, and the proposal it made (`children`). */
+/** Of an answer's tokens in, what the cache gave it (when any) and what it wrote to the cache (when its provider says), in brackets; "" when neither. */
+function usageNote(u: NonNullable<AssistantMessage["usage"]>): string {
+  const parts = [...(u.cached > 0 ? [`${n(u.cached)} cached`] : []), ...(u.written !== undefined ? [`${n(u.written)} written`] : [])];
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
+}
+
+/** One message: yours as you wrote it, or the assistant's, its answer read as Markdown's safe subset (`markdown`), with how it ended, what it spent, its trace, and the proposal it made (`children`). */
 export function MessageView(props: { message: AssistantMessage; children?: ComponentChildren }) {
   const m = props.message;
   const mine = m.role === "user";
@@ -151,10 +158,10 @@ export function MessageView(props: { message: AssistantMessage; children?: Compo
         {ended ? <Badge tone={ended.tone}>{ended.text}</Badge> : null}
         <span class="lre-gm-assist-msg-at">{Number.isFinite(m.at) ? new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>
       </div>
-      {m.text.trim() !== "" ? <p class="lre-gm-assist-msg-text">{m.text}</p> : mine ? null : <p class="lre-gm-assist-msg-text lre-muted">It said nothing before it stopped.</p>}
+      {m.text.trim() === "" ? (mine ? null : <p class="lre-gm-assist-msg-text lre-muted">It said nothing before it stopped.</p>) : mine ? <p class="lre-gm-assist-msg-text">{m.text}</p> : markdown(m.text, "lre-gm-assist-msg-text")}
       {ended && m.reason ? <p class="lre-gm-assist-msg-why">{m.reason}</p> : null}
       {!mine && m.trace && m.trace.length > 0 ? <Trace rows={m.trace} /> : null}
-      {!mine && m.usage ? <span class="lre-gm-assist-msg-usage">{`${n(m.usage.in)} tokens in${m.usage.cached > 0 ? ` (${n(m.usage.cached)} cached)` : ""} · ${n(m.usage.out)} out`}</span> : null}
+      {!mine && m.usage ? <span class="lre-gm-assist-msg-usage">{`${n(m.usage.in)} tokens in${usageNote(m.usage)} · ${n(m.usage.out)} out`}</span> : null}
       {props.children}
     </div>
   );

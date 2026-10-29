@@ -174,7 +174,7 @@ describe("a chat's messages", () => {
     expect(rig.rt.ledger.preparedOf(waiting)).not.toBeNull();
     rig.body(await rig.send({ type: "lre.hello", chatId: left, viewing: true }, FakeHost.PAGE));
     rig.body(await rig.send({ type: "lre.hello", chatId: shown, viewing: true }, FakeHost.PAGE));
-    expect(rig.rt.trimIdle()).toEqual({ messages: 1, ledgers: 1, views: 1 });
+    expect(rig.rt.trimIdle()).toEqual({ messages: 1, ledgers: 1, views: 1, bridges: 1 });
     const reads = countReads(rig.host);
     for (const chatId of [shown, waiting]) await rig.rt.host.chats.messages(chatId, rig.host.userId);
     expect(reads.count()).toBe(0);
@@ -185,7 +185,7 @@ describe("a chat's messages", () => {
     expect(reads.count()).toBe(1);
     expect(rig.rt.ledger.errors).toEqual([]);
     // The page shows that chat now: the one it left is no one's.
-    expect(rig.rt.trimIdle()).toEqual({ messages: 1, ledgers: 1, views: 1 });
+    expect(rig.rt.trimIdle()).toEqual({ messages: 1, ledgers: 1, views: 1, bridges: 1 });
     await rig.rt.host.chats.messages(left, rig.host.userId);
     expect(reads.count()).toBe(1);
   });
@@ -194,7 +194,7 @@ describe("a chat's messages", () => {
     const rig = new Rig();
     const earlier = await playedChat(rig, 1);
     const latest = await playedChat(rig, 1);
-    expect(rig.rt.trimIdle()).toEqual({ messages: 1, ledgers: 1, views: 1 });
+    expect(rig.rt.trimIdle()).toEqual({ messages: 1, ledgers: 1, views: 1, bridges: 1 });
     const reads = countReads(rig.host);
     await rig.rt.host.chats.messages(latest, rig.host.userId);
     expect(reads.count()).toBe(0);

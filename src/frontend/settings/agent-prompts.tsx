@@ -1,15 +1,64 @@
 // Settings → Agents → Prompts (DESIGN §6.12): every text LumiRPEngine sends to a model, one page per
 // part it goes to (the final output, then each agent), each text on the step prompts' editor with its
 // placeholders, its shipped text and Reset. A text with a placeholder it doesn't have, or without one
-// it must keep, is flagged as it is typed and can't be saved; the backend refuses it too. Styles:
-// styles/minds.ts.
+// it must keep, is flagged as it is typed and can't be saved; the backend refuses it too. A role's
+// text has Test while a chat is open (`lre.prompts test`): the role runs once on that chat's latest
+// exchange with the text as written, one model call, and the page says whether its answer kept the
+// role's contract or, in words, how it didn't, and what of its task the chat couldn't give
+// (`PromptTestRow`). Styles: styles/minds.ts.
 
 import { useState } from "preact/hooks";
+import type { ChatId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
 import type { PromptDef, PromptPage, PromptSettings } from "../../shared/prompts";
 import { PROMPT_PAGES, PROMPTS, promptProblems } from "../../shared/prompts";
-import { NumberStepper, Section, Seg } from "../components";
+import type { PromptTestView } from "../../shared/protocol";
+import { ROLE_IDS } from "../../shared/agent-roles";
+import { rolePageId } from "../../shared/role-prompts";
+import type { RequestBody } from "../registry";
+import { Button, NumberStepper, Section, Seg } from "../components";
 import { PromptEditor } from "./prompt-editor";
+
+/** The request a Test press sends: `text`, as written, tested as text `id`'s on `chatId`. */
+export function promptTestRequest(chatId: ChatId, id: string, text: string): Extract<RequestBody, { type: "lre.prompts" }> {
+  return { type: "lre.prompts", op: "test", chatId, id, text };
+}
+
+/** Whether a text has Test: a role's, whose answer keeps a task's contract. */
+export function testable(def: PromptDef): boolean {
+  return def.contract !== undefined && ROLE_IDS.some((role) => def.page === rolePageId(role));
+}
+
+/** A Test's state on the page: under way, or what it found. */
+export type PromptTestState = "running" | PromptTestView;
+
+/**
+ * A role text's Test: the button, which tests the text as written (`send`, one model call), then
+ * what the last press found: that it passed, or each problem in words. Hook-free.
+ */
+export function PromptTestRow(props: { label: string; text: string; problems: readonly string[]; busy: boolean; state: PromptTestState | undefined; send(text: string): void }) {
+  const { state } = props;
+  return (
+    <div class="lre-minds-body" data-lre-prompt-test={state === undefined ? "none" : state === "running" ? "running" : state.ok ? "passed" : "failed"}>
+      <div class="lre-minds-actions">
+        <Button size="sm" variant="secondary" icon="play" label={`Test ${props.label} on this chat`} disabled={props.busy || state === "running" || props.problems.length > 0} onClick={() => props.send(props.text)}>
+          Test
+        </Button>
+      </div>
+      <p class="lre-minds-note">Runs the role once on this chat's latest exchange with the text as written (one model call) and checks its answer against the role's contract.</p>
+      {state === "running" ? <p class="lre-minds-note">Testing…</p> : null}
+      {state !== undefined && state !== "running" && state.ok ? <p class="lre-minds-note">Passed: the role's answer kept its contract.</p> : null}
+      {state !== undefined && state !== "running" && !state.ok ? (
+        <div class="lre-set-warn" role="note">
+          <span>
+            Failed: {state.problems.map((p) => `${p.charAt(0).toUpperCase()}${p.slice(1)}`).join("; ")}.
+          </span>
+        </div>
+      ) : null}
+      {state !== undefined && state !== "running" && state.left.length > 0 ? <p class="lre-minds-note">{`Left out of its task: ${state.left.join("; ")}.`}</p> : null}
+    </div>
+  );
+}
 
 /**
  * The patch saving `text` as the user's own for `def` (null resets it to the shipped text), or null
@@ -40,11 +89,22 @@ export function ownTextCount(prompts: PromptSettings): number {
   return PROMPTS.filter((def) => prompts.texts[def.id] !== undefined).length;
 }
 
-export function PromptsPage(props: { prompts: PromptSettings; patch(patch: JsonObject): void; busy: boolean }) {
+/** `test`: a role text's Test on the open chat, the press's answer, or null when it failed (the request says why); absent while no chat is open. */
+export function PromptsPage(props: { prompts: PromptSettings; patch(patch: JsonObject): void; busy: boolean; test?(def: PromptDef, text: string): Promise<PromptTestView | null> }) {
   const { prompts, busy } = props;
   const [pageId, setPageId] = useState(PROMPT_PAGES[0]?.id ?? "");
+  const [tests, setTests] = useState<Readonly<Record<string, PromptTestState>>>({});
   const page = PROMPT_PAGES.find((p) => p.id === pageId) ?? PROMPT_PAGES[0];
   if (!page) return null;
+  const run = async (def: PromptDef, text: string): Promise<void> => {
+    if (!props.test) return;
+    setTests((now) => ({ ...now, [def.id]: "running" }));
+    const found = await props.test(def, text);
+    setTests((now) => {
+      const { [def.id]: _was, ...rest } = now;
+      return found ? { ...rest, [def.id]: found } : rest;
+    });
+  };
   return (
     <div class="lre-stack lre-minds-set" data-lre-settings-page="prompts">
       <p class="lre-set-lead">Every text LumiRPEngine sends to a model, as shipped until you write your own. Yours is sent from the next turn; Reset brings back the shipped text. A Re-narrate is sent the texts its turn was made with unless Settings → Swipes says otherwise.</p>
@@ -69,6 +129,7 @@ export function PromptsPage(props: { prompts: PromptSettings; patch(patch: JsonO
                 busy={busy}
                 save={(text) => promptTextPatch(def, text, prompts.maxChars)}
                 patch={props.patch}
+                {...(props.test && testable(def) ? { test: (text: string) => <PromptTestRow label={def.label} text={text} problems={promptProblems(def, text).map((p) => p.message)} busy={busy} state={tests[def.id]} send={(t) => void run(def, t)} /> } : {})}
               />
             ))}
           </div>

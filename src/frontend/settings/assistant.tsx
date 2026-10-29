@@ -6,15 +6,15 @@
 // back. Connection sends {connectionId, model: null}; model, effort, knowledge, apply and historyTokens
 // each send that field; a limit of its own sends {budget: {[key]: value}}, and Every agent's sends
 // {budget: {[key]: null}}, so every agent's limit applies again. The page keeps the connections hook;
-// what renders and what is pressed (`AssistantSettingsBody`, `AssistantLimitRow`, `assistantPatch`,
-// `assistantBudgetPatch`) is hook-free, so tests press it without a DOM. Styles: styles/settings.ts.
+// what renders and what is pressed (`AssistantSettingsBody`, `assistantPatch`, `assistantBudgetPatch`,
+// and Settings → Agents' `OwnLimitRow`) is hook-free, so tests press it without a DOM. Styles: styles/settings.ts.
 
-import type { AgentBudget, AgentEffort, AgentLimitDef, AgentSettings, AssistantApply, AssistantSettings } from "../../shared/agent-settings";
+import type { AgentBudget, AgentEffort, AgentSettings, AssistantApply, AssistantSettings } from "../../shared/agent-settings";
 import { AGENT_EFFORTS, ASSISTANT_APPLY, ASSISTANT_APPLY_LABELS, ASSISTANT_KNOWLEDGE_LABELS, BUDGET_DEFS, defaultAgentSettings, HISTORY_TOKENS_DEF } from "../../shared/agent-settings";
 import type { JsonObject } from "../../shared/json";
 import type { Limit } from "../../shared/minds";
-import { Button, HostModelPicker, HostSwitch, NumberStepper, Section, Seg } from "../components";
-import { amountText, LimitRow, STEP } from "./agents";
+import { HostModelPicker, Section, Seg } from "../components";
+import { defaultButton, LimitRow, OwnLimitRow } from "./agents";
 import { type Connection, ConnectionSelect, placeOf, useConnections } from "./steps";
 
 type Knowledge = AssistantSettings["knowledge"];
@@ -25,8 +25,8 @@ const DEFAULTS = defaultAgentSettings().assistant;
 /** Where the assistant runs when no connection is chosen, as Settings → Helper model words it. */
 const DEFAULT_PLACE = placeOf(DEFAULTS, []);
 
-const EFFORT_LABEL: Record<AgentEffort, string> = { off: "Off", low: "Low", medium: "Medium", high: "High", model: "Set by the model", inherit: "Connection's own" };
-
+/** Each effort in the page's words; Settings → Agents → Roles and Main agent say them so too. */
+export const EFFORT_LABEL: Record<AgentEffort, string> = { off: "Off", low: "Low", medium: "Medium", high: "High", model: "Set by the model", inherit: "Connection's own" };
 const EFFORT_HELP: Record<AgentEffort, string> = {
   off: "The assistant answers without reasoning.",
   low: "Sent as Lumiverse's reasoning setting, which it turns into the provider's own.",
@@ -69,60 +69,6 @@ export function assistantPatch(fields: JsonObject): JsonObject {
 /** The patch for one of the assistant's own budget limits: `value` sets its own, null goes back to every agent's. */
 export function assistantBudgetPatch(key: keyof AgentBudget, value: Limit | null): JsonObject {
   return assistantPatch({ budget: { [key]: value } });
-}
-
-/** A setting's Default reset, while its value differs from the default; `label` names the setting and the default it goes back to. */
-function defaultButton(label: string, busy: boolean, reset: () => void) {
-  return (
-    <Button size="sm" variant="ghost" icon="undo" label={label} disabled={busy} onClick={reset}>
-      Default
-    </Button>
-  );
-}
-
-/**
- * One of the assistant's budget limits: what it limits, what happens when it's reached, and its value,
- * every agent's until it has its own. Changing the number (or No limit, where it may be lifted) sets
- * its own; Every agent's drops it, so every agent's limit applies again.
- */
-export function AssistantLimitRow(props: { id: keyof AgentBudget; def: AgentLimitDef; own: Limit | undefined; every: Limit; busy: boolean; set(value: Limit | null): void }) {
-  const { def, own, every } = props;
-  const value = own ?? every;
-  const seconds = def.unit === "ms";
-  // Turning No limit off starts from every agent's limit when it's a number, else from the least the limit takes.
-  const onValue = every === "none" ? def.min : every;
-  const unitLabel = seconds ? "seconds" : def.unit === "tokens" ? "tokens" : def.unit === "chars" ? "characters" : null;
-  return (
-    <div class="lre-set-ext lre-set-timeout" data-lre-assistant-limit={props.id}>
-      <div class="lre-set-ext-head">
-        <span class="lre-set-ext-title">{def.label}</span>
-        {own === undefined ? null : (
-          <Button size="sm" variant="ghost" icon="undo" label={`Use every agent's ${def.label.toLowerCase()}, ${amountText(every, def.unit)}`} disabled={props.busy} onClick={() => props.set(null)}>
-            Every agent's
-          </Button>
-        )}
-      </div>
-      <span class="lre-set-timeout-text">{def.limits}</span>
-      <span class="lre-small lre-muted">When it's reached: {def.fires}</span>
-      {def.none !== null ? <HostSwitch label={`${def.label}: no limit`} checked={value === "none"} disabled={props.busy} onChange={(none) => props.set(none ? "none" : onValue)} /> : null}
-      {value === "none" ? null : (
-        <NumberStepper
-          label={unitLabel ? `${def.label} (${unitLabel})` : def.label}
-          value={seconds ? value / 1000 : value}
-          min={seconds ? def.min / 1000 : def.min}
-          step={STEP[def.unit]}
-          integer={!seconds}
-          disabled={props.busy}
-          onChange={(next) => props.set(seconds ? Math.round(next * 1000) : next)}
-        />
-      )}
-      <span class="lre-small lre-muted">
-        {own === undefined ? `Every agent's limit applies: ${amountText(every, def.unit)}` : `The assistant's own; every agent's is ${amountText(every, def.unit)}`}
-        {/* The assistant runs outside any turn: a "none" that leans on a turn's bounds is no limit at all here. */}
-        {value === "none" && def.none ? (def.turnBound ? "; no limit" : `; no limit: ${def.none}`) : ""}.
-      </span>
-    </div>
-  );
 }
 
 /** The page's controls, without hooks: each one patches `agents.assistant` through `patch`. */
@@ -214,7 +160,7 @@ export function AssistantSettingsBody(props: { agents: AgentSettings; connection
         <div class="lre-set-rows lre-set-group" data-lre-agent-group="Assistant">
           <p class="lre-set-timeout-lead">What the assistant may spend answering each message you send it. Each limit is every agent's (Settings → Agents) until you change it here; Every agent's goes back to that one.</p>
           {budgetKeys.map((key) => (
-            <AssistantLimitRow key={key} id={key} def={BUDGET_DEFS[key]} own={a.budget[key]} every={agents.budget[key]} busy={busy} set={(value) => props.patch(assistantBudgetPatch(key, value))} />
+            <OwnLimitRow key={key} id={key} owner="The assistant's" def={BUDGET_DEFS[key]} own={a.budget[key]} every={agents.budget[key]} busy={busy} outsideTurn set={(value) => props.patch(assistantBudgetPatch(key, value))} />
           ))}
         </div>
       </Section>

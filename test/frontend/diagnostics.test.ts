@@ -78,6 +78,13 @@ describe("Diagnostics page", () => {
     expect(line).not.toContain("~1200");
   });
 
+  test("an agent call's line says what its provider wrote to the cache beside what it read, when the provider says", () => {
+    const call = (usage: { in: number; cachedIn: number; cacheWrite?: number; out: number; reasoningOut: number }) => diagText([rec({ seq: 6, turn: null, kind: "agent", phase: null, step: "gm", status: "ok", level: "info", start: 7000, ms: 900, agent: { role: "gm", connection: "c1", model: "claude-sonnet-5-5", usage, ms: 900, outcome: "ok" } })]).split("\n").find((l) => l.includes("claude-sonnet-5-5")) ?? "";
+    expect(call({ in: 11_606, cachedIn: 0, cacheWrite: 11_592, out: 52, reasoningOut: 0 })).toContain("11606 in (0 cached, 11592 written)");
+    expect(call({ in: 11_700, cachedIn: 0, cacheWrite: 0, out: 56, reasoningOut: 0 })).toContain("11700 in (0 cached, 0 written)");
+    expect(call({ in: 900, cachedIn: 0, out: 20, reasoningOut: 0 })).toContain("900 in (0 cached),");
+  });
+
   test("elapsed time reads in seconds, then minutes", () => {
     expect(elapsedText(8400)).toBe("8 s");
     expect(elapsedText(65_000)).toBe("1 m 05 s");

@@ -25,6 +25,8 @@ export interface TrimReport {
   messages: number;
   ledgers: number;
   views: number;
+  /** Turn bridges: what the engine kept of a chat's turns' reads and plans. */
+  bridges: number;
 }
 
 const MB = 1024 * 1024;
@@ -52,7 +54,7 @@ export class MemoryBudget {
     this.trimmedAt = rss;
     const gone = this.trim();
     this.probe.collect();
-    this.log(`memory: RSS ${Math.round(rss / MB)} MB is past the ${Math.round(this.limit / MB)} MB budget; let go of the copies of ${gone.messages} chats' messages, ${gone.ledgers} open ledgers and ${gone.views} views of chats not in use`);
+    this.log(`memory: RSS ${Math.round(rss / MB)} MB is past the ${Math.round(this.limit / MB)} MB budget; let go of the copies of ${gone.messages} chats' messages, ${gone.ledgers} open ledgers, ${gone.views} views and ${gone.bridges} turn bridges of chats not in use`);
     return true;
   }
 

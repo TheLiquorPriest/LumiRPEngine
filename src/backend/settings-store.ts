@@ -818,8 +818,8 @@ export class SettingsStore {
 
   /**
    * The user's settings, and whether they are kept: not while which connections acceptance runs
-   * guard is unknown (`withGuard`), so each read tries the guard again. The rest of them serve all
-   * the same (a classic turn reads them), and `loaded` hears them on each read.
+   * guard isn't known apart from them (`withGuard`), so each read tries the guard again. They serve
+   * all the same, and `loaded` hears them on each read.
    */
   private async read(userId: UserId): Promise<{ settings: UserSettings; kept: boolean }> {
     const known = this.settings.get(userId);
@@ -837,17 +837,16 @@ export class SettingsStore {
    * list (`copy`: whether the file holds one): a build from before the agents writes the settings
    * without them, and the guard holds all the same. A list only the settings file holds (kept before
    * the guard was kept apart) moves there; one that can't be moved yet is read from the settings
-   * file, and moved on a later start. False while which connections are guarded is unknown: the
-   * runs' file can't be read, or it was lost with no copy here from before to stand for it; every
-   * agent call is refused meanwhile (`AgentAccounts.reserve`).
+   * file, and moved on a later start. False while the runs' file can't be read, or it was lost with
+   * no copy here from before to stand for it: the settings file's own list serves meanwhile, agent
+   * calls go ahead under it, and `AgentAccounts.reserve` warns of it once.
    */
   private async withGuard(userId: UserId, settings: UserSettings, copy: boolean): Promise<boolean> {
     if (!this.guards) return true;
     let read: GuardRead;
     try {
       read = await this.guards.get(userId);
-    } catch (error) {
-      this.host.log("warn", `[LumiRPEngine] the acceptance runs' file couldn't be read (${error instanceof Error ? error.message : String(error)}): which connections they guard isn't known, and no agent call goes until it can be read`, userId);
+    } catch {
       return false;
     }
     if (read.connections !== undefined) {

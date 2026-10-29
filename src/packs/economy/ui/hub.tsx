@@ -11,6 +11,7 @@ import type { ComponentChildren } from "preact";
 import type { FinanceView, UpcomingLine } from "../../../shared/finance";
 import type { EditOp } from "../../../shared/protocol";
 import type { GmView, PaletteView } from "../../../shared/state-view";
+import { counted } from "../../../shared/words";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Banner, Button, Empty, List, ListRow, Section, Stat } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
@@ -65,10 +66,6 @@ export function upcomingValue(view: FinanceView, u: UpcomingLine, currency: Worl
   if (f && f.cents !== null) return { value: formatMoney(f.cents, currency), tone: "muted" };
   if (f) return { value: <span class="lre-money-row-words">{f.amount}</span> };
   return { value: `${u.cents > 0 ? "+" : ""}${formatMoney(u.cents, currency)}`, tone: u.cents < 0 ? "neg" : "pos" };
-}
-
-function counted(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 /** A section's row line, from the view: what's in it at a glance. */
