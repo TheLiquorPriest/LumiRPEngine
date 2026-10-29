@@ -40,7 +40,7 @@ import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/cor
 import { sectionsOf } from "./book";
 import type { HostMessage, HostPort } from "./host";
 import { seedKnowledge } from "./knowledge-seed";
-import { checkKnowledge, knowledgeBatches, knowledgeContext, type KnowledgeTurn } from "./knowledge-step";
+import { checkKnowledge, knowledgeBatches, knowledgeContext, type KnowledgeSpent, type KnowledgeTurn } from "./knowledge-step";
 import { pinReader, readPins } from "./lore-pins";
 import { consolidateContext, memoryContext, mindContext, pinnedLines, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
@@ -161,7 +161,7 @@ export function localTime(world: WorldDoc, now: number, text: string): number | 
 }
 
 /** A person named by a model: by id, whole name, or a word of their name that is no one else's. */
-function personNamed(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, name: string): EntityId | null {
+export function personNamed(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, name: string): EntityId | null {
   const n = name.trim().toLowerCase();
   if (n === "") return null;
   const people = Object.keys(state.entities).filter((id) => kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id));
@@ -652,8 +652,8 @@ async function knowledgeStep(deps: MindsDeps, input: PostMindsInput, settings: U
   });
   const w = new Working(reg, world, state);
   const out: KnowledgeRan = { events: [], proposals: [], traces: [], connection: helperCallOf(config, settings.helper).connectionId ?? null };
-  // The turn's limits hold across its calls: new facts and learnings are counted for the turn, not each call.
-  const spent = { facts: new Set<FactId>(), learnings: 0 };
+  // The turn's limits hold across its calls: new facts, learnings and witnessed facts are counted for the turn, not each call.
+  const spent: KnowledgeSpent = { facts: new Set(), learnings: 0, witnessed: new Set() };
   for (const call of await Promise.all(asked)) {
     const checked = call.raw === null ? null : checkKnowledge({ ...turn, state: w.state }, call.batch, call.raw, spent);
     for (const why of checked?.refused ?? []) deps.host.log("info", `[LumiRPEngine] knowledge ${input.messageId.slice(0, 8)}: refused ${why}`, userId);
@@ -695,7 +695,12 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   if (minds) for (const data of met ? [said, met] : [said]) record({ type: MINDS_EVENTS.presence, data });
   if (knowing) for (const event of await seedKnowledge(deps.host, { reg, world, state: w.state, settings: settings.minds.knowledge, userId })) record(event);
   // On the state as the seeding left it, apart from what the memories and consolidation add while it waits for the read.
-  const knowledge = knowing ? knowledgeStep(deps, input, settings, structuredClone(w.state), { said, met, left }) : Promise.resolve(null);
+  // Whoever heard the player's message but isn't with the player character at the turn's end was there
+  // for only part of it, even when the player character stayed: the knowledge step counts them as left
+  // partway, so they witness none of it (the memory step reads `left` as those the POV left behind).
+  const there = presentWith(reg, world, state);
+  const parted = [...new Set([...left, ...said.who.filter((id) => !there.includes(id))])];
+  const knowledge = knowing ? knowledgeStep(deps, input, settings, structuredClone(w.state), { said, met, left: parted }) : Promise.resolve(null);
   const traces: MindCallTrace[] = [];
   const memory = effectiveMemory(world, settings.minds);
   // Their level as they heard it: where the message was said.

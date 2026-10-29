@@ -190,7 +190,7 @@ const LIMIT_FIELD: Record<KnowledgeLimit, { label: string; note: string; step: n
   factsPerChat: { label: "Facts made in play, per chat", note: "Past it, the knowledge step makes no new fact; people still learn the ones there are.", step: 1 },
   holdersPerFact: { label: "People who may hold one fact", note: "Past it, no one else learns that fact from the knowledge step.", step: 1 },
   factsPerTurn: { label: "New facts a turn", note: "The most new facts one turn's knowledge step records.", step: 1 },
-  learningsPerTurn: { label: "Learnings a turn", note: "The most times one turn's knowledge step records someone coming to know a fact.", step: 1 },
+  learningsPerTurn: { label: "Learnings a turn", note: "The most learnings one turn's knowledge step records: each person told something counts one, and each fact seen or heard counts one however many were there.", step: 1 },
   inPlayTurns: { label: "A fact stays in play for (turns)", note: "A fact is in play while someone learned it within this many of the latest turns, or while it's about someone or somewhere here.", step: 1 },
 };
 
@@ -255,7 +255,7 @@ const TEXT_FIELD: Record<KnowledgeTextId, { group: TextGroup; label: string }> =
   stepSaid: { group: "step", label: "What the player character said or did" },
   stepStory: { group: "step", label: "The story, as written" },
   stepThroughout: { group: "step", label: "Present: throughout" },
-  stepLeft: { group: "step", label: "Present: left partway" },
+  stepLeft: { group: "step", label: "Present: not at its end" },
   stepCame: { group: "step", label: "Present: came in during the turn" },
   stepOpen: { group: "step", label: "An open question" },
   stepFalse: { group: "step", label: "A false fact" },

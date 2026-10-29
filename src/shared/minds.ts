@@ -496,8 +496,8 @@ export const KNOWLEDGE_TEXTS = Object.freeze({
   stepSaid: "{{name}} said or did: {{text}}",
   stepStory: "The story, as written: {{text}}",
   stepThroughout: "there throughout",
-  stepLeft: "there from the start, then left behind partway",
-  stepCame: "came in during the turn, or was met at its end: perceived only what came after",
+  stepLeft: "there from the start, but not at its end: witnessed none of it, though they may be told",
+  stepCame: "came in during the turn, or was met at its end: witnessed none of it, though they may be told",
   stepOpen: "(an open question)",
   stepFalse: "(false)",
   stepPinned: "Pinned lore",
@@ -507,8 +507,8 @@ export const KNOWLEDGE_TEXTS = Object.freeze({
   stepWitnessed: "Witnessed lately:",
   stepSomeone: "someone",
   stepAnswer: [
-    "- facts: the new facts this turn establishes or raises, each one short sentence, with a ref of your own (n1, n2…) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
-    '- learned: who came to know a fact this turn, and how: witnessed (they saw it, heard it said aloud or read it themselves, so they were there for it) or told (by: who told them, who must already know it). Name the player character "you". keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.',
+    "- facts: the new facts this turn establishes or raises that matter to someone: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; what someone now believes about another person, where it changes how they treat them; an open question someone is pursuing. Never small talk, how the scene looks, or plain events the story already shows: the story itself is what everyone there knows of those. Each one short sentence, with a ref of your own (n1, n2…) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
+    '- learned: who came to know a fact this turn, and how. witnessed: it happened, was said aloud or was shown in front of them, so everyone there throughout perceived it, the player character included; missed: only those there who didn\'t, such as someone out of earshot of a whisper, asleep or looking away ("you" for the player character); leave it out when no one did. told: who: whom they told; by: who told them, who must already know it. keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.',
     "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
     "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
     "Use empty lists for anything the turn didn't give.",
@@ -1330,12 +1330,14 @@ export type KnowledgeEventData = { on: boolean; threshold?: number };
 /**
  * The knowledge step's answer (DESIGN §24.11), JSON, names as the model wrote them: new facts (a ref
  * of its own the lists use, the claim, whom it is about, its truth), who learned which fact and how
- * (witnessed, or told by someone), what someone worked out with how sure they are and what it rests
- * on, and what someone now doubts.
+ * (witnessed, by everyone there throughout but whom it says missed it; or told by someone, to whom it
+ * names), what someone worked out with how sure they are and what it rests on, and what someone now
+ * doubts. A witnessed learning that names each witness (`who`, without `missed`) is the format's first
+ * version, still read as it names them.
  */
 export interface KnowledgeOutput {
   facts: { ref: string; claim: string; about?: string[]; truth?: FactTruth }[];
-  learned: { who: string[]; fact: string; how: "witnessed" | "told"; by?: string; keptFrom?: string[] | "everyone" }[];
+  learned: { fact: string; how: "witnessed" | "told"; who?: string[]; missed?: string[]; by?: string; keptFrom?: string[] | "everyone" }[];
   inferred: { who: string; fact: string; confidence: number; evidence: string[]; belief?: HoldingBelief }[];
   doubted: { who: string; fact: string; confidence: number; belief?: HoldingBelief }[];
 }
@@ -1596,14 +1598,21 @@ export const MIND_PROMPT_DEFAULTS: Readonly<Record<MindPurpose, string>> = Objec
     "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
   knowledge: [
     "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
-    "Record only what the turn as written gives each person. Someone learns by witnessing what happens in front of them (seeing it, hearing it said aloud, reading it) or by being told it; whoever wasn't there witnessed nothing, and whoever tells something must already know it. Someone may also work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
-    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it; make a new one only for what the turn establishes or raises. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold.",
+    "The story itself is what everyone who was there knows of the scene: never restate it. Record only what matters to someone: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; what someone now believes about another person, where it changes how they treat them; an open question someone is pursuing. Record nothing of small talk, of how the scene looks, or of plain events the story already shows.",
+    "Everyone there throughout witnessed what happened in front of them (seeing it, hearing it said aloud, reading it), the player character included: name only who missed something, such as a whisper out of earshot, or someone asleep or looking away. Whoever was there for only part of the turn, or wasn't there, witnessed none of it. Someone may also be told something by someone who already knows it, or work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
+    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold.",
   ].join("\n"),
 });
 
-/** The knowledge step's answer shape (DESIGN §24.11, a fixed output contract, §16): the engine reads these keys whatever its instructions say. */
+/**
+ * The knowledge step's answer shape (DESIGN §24.11, a fixed output contract, §16), its second version:
+ * a witnessed learning names who missed it (`missed`), everyone else there throughout perceiving it;
+ * a told one names whom it was told to (`who`) and by whom. The engine reads these keys whatever its
+ * instructions say, and reads the first version's witnessed learnings, which name each witness
+ * (`who`), beside them (`checkKnowledge`).
+ */
 export const KNOWLEDGE_ANSWER_SHAPE =
-  'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"who": ["a name"], "fact": "a fact id or n1", "how": "witnessed", "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
+  'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"fact": "a fact id or n1", "how": "witnessed", "missed": ["a name"], "keptFrom": ["a name"]}, {"fact": "a fact id or n2", "how": "told", "who": ["a name"], "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
 
 /** Each minds step's answer: the JSON the engine reads, appended after the instructions whoever wrote them. */
 export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object.freeze({

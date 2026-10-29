@@ -12,12 +12,13 @@
 
 import { describe, expect, test } from "bun:test";
 import { liveLore } from "../../src/backend/book-lore";
-import { checkKnowledge, knowledgeBatches, knowledgeContext, type KnowledgeTurn } from "../../src/backend/knowledge-step";
+import { checkKnowledge, knowledgeBatches, knowledgeContext, type KnowledgeChecked, type KnowledgeSpent, type KnowledgeTurn } from "../../src/backend/knowledge-step";
 import { toChain } from "../../src/backend/ledger-io";
+import { personNamed, postMinds } from "../../src/backend/minds";
 import { buildSections } from "../../src/backend/sections-build";
-import { isRecord, type JsonObject } from "../../src/shared/json";
+import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
-import { claimFactId, DEFAULT_MINDS_MEMORY, factId, KNOWLEDGE_DEFAULTS, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MINDS_EVENTS, witnessRef, type Holding, type KnowledgeFact, type KnowledgeSettings, type KnownView, type LearnEventData, type MindsGmView, type MindsSlice } from "../../src/shared/minds";
+import { claimFactId, DEFAULT_MINDS_MEMORY, factId, KNOWLEDGE_ANSWER_SHAPE, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, witnessRef, type Holding, type KnowledgeFact, type KnowledgeSettings, type KnownView, type LearnEventData, type MindsGmView, type MindsSlice } from "../../src/shared/minds";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import type { NarratorView } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
@@ -912,7 +913,7 @@ describe("the review's fixes (Increment 0)", () => {
 
     // L1: a new fact two calls both make counts once against the chat's limit.
     const one = { ...turn, settings: { ...KNOWLEDGE_DEFAULTS, factsPerChat: 1 } };
-    const spent = { facts: new Set<string>(), learnings: 0 };
+    const spent: KnowledgeSpent = { facts: new Set(), learnings: 0, witnessed: new Set() };
     expect(checkKnowledge(one, [MARCUS], sawSedan, spent).refused).toEqual([]);
     const again = checkKnowledge(one, [DANNY], { ...sawSedan, facts: [...sawSedan.facts, { ref: "r", claim: RUMOUR }] }, spent);
     expect(again.refused).toEqual([expect.stringContaining(RUMOUR)]);
@@ -1039,5 +1040,194 @@ describe("the re-review's fixes (Increment 0)", () => {
     expect([doubtful.events, doubtful.proposals, doubtful.refused]).toEqual([[], [], []]);
     const sure = checkKnowledge(turn, scene, { learned: [{ who: ["Danny Okafor"], fact: DEBT, how: "told", by: "Marcus Delgado" }] });
     expect(learnings(sure.events)).toEqual([expect.objectContaining({ who: [DANNY], fact: DEBT, how: "told", by: MARCUS, belief: "true", confidence: 1, keptFrom: [PRIYA] })]);
+  });
+});
+
+describe("knowledge rides on the story (KN-SPEC)", () => {
+  const QUIT = "Danny is leaving the shop at the end of the month for a job at the marina";
+  const LATCH = "Helen said the bathroom window latch hasn't seated in eleven years";
+  const SEDAN = "A black sedan idled outside the shop at dawn";
+  /** Everyone a checked answer gives a learning to: everyone else's events, then the player character's changes. */
+  const learnersOf = (out: KnowledgeChecked): string[] => [...learnings(out.events).flatMap((l) => l.who), ...out.proposals.flatMap((p) => p.learn.who)].sort();
+
+  test("a witnessed learning no one missed reaches everyone there throughout, the player character's as their learn change, and Who knows what tells it as theirs", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, onReply({ "QUIT-MARK": { facts: [{ ref: "q", claim: QUIT, about: ["Danny Okafor"] }], learned: [{ fact: "q", how: "witnessed" }] } }));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "Morning, Danny.", "Danny clears his throat: he's taking a job at the marina at the end of the month. QUIT-MARK");
+    const { state } = await stateOf(rig, chatId);
+    const quit = factOf(state, QUIT);
+    // Marcus and Danny were there throughout, Priya at the marina: the two of them and the player character hold it.
+    expect(knowersOf(readSlice(state), quit).sort()).toEqual([DANNY, MARCUS, POV].sort());
+    expect(holdingsOf(readSlice(state), POV)[quit]).toMatchObject({ how: "witnessed", belief: "true" });
+    expect((await chipsOf(rig, chatId)).some((c) => c.kind === "undo" && c.label.startsWith(`Learned: ${QUIT}`))).toBe(true);
+    expect(whatYouKnow(rig, chatId)?.items.map((i) => i.claim)).toEqual([QUIT]);
+    await atShop(rig, chatId);
+    await rig.turn(chatId, "So.", "Nobody says much.");
+    const told = rig.host.section("Who knows what") ?? "";
+    expect(told).toContain(`- You: ${QUIT} (saw it)`);
+    expect(told).not.toContain("unknown to you");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test('missed: ["you"] keeps it from the player character, and Who knows what then tells it as unknown to them', async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, onReply({ "QUIT-MARK": { facts: [{ ref: "q", claim: QUIT, about: ["Danny Okafor"] }], learned: [{ fact: "q", how: "witnessed", missed: ["you"] }] } }));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "I check the parts order.", "Behind the counter, Danny tells Marcus under his breath that he's taking the marina job. QUIT-MARK");
+    const { state } = await stateOf(rig, chatId);
+    const quit = factOf(state, QUIT);
+    expect(knowersOf(readSlice(state), quit).sort()).toEqual([DANNY, MARCUS].sort());
+    expect((await chipsOf(rig, chatId)).some((c) => c.label.startsWith("Learned: "))).toBe(false);
+    await atShop(rig, chatId);
+    await rig.turn(chatId, "So.", "Nobody says much.");
+    const told = (rig.host.section("Who knows what") ?? "").split("\n");
+    for (const name of ["Danny Okafor", "Marcus Delgado"]) expect(told).toContain(`- ${markedText({ text: `${name}: ${QUIT} (saw it)`, known: "scene", who: name })}`);
+    expect(told.some((l) => l.startsWith(`- You: ${QUIT}`))).toBe(false);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("no one there for part of the turn witnesses, a telling and an answer naming each witness read as before, and a per-person call answers for its person unless missed", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const turn = shopTurn(rig, world, state);
+    const scene = knowledgeBatches(turn)[0] ?? [];
+    const saw = (extra: JsonObject): JsonObject => ({ facts: [{ ref: "s", claim: SEDAN }], learned: [{ fact: "s", how: "witnessed", ...extra }] });
+    expect(learnersOf(checkKnowledge(turn, scene, saw({})))).toEqual([DANNY, MARCUS, POV].sort());
+    expect(learnersOf(checkKnowledge(turn, scene, saw({ missed: ["Marcus Delgado"] })))).toEqual([DANNY, POV].sort());
+    // Danny left partway: he witnessed none of it.
+    expect(learnersOf(checkKnowledge({ ...turn, presence: { ...turn.presence, left: [DANNY] } }, scene, saw({})))).toEqual([MARCUS, POV].sort());
+    // An answer naming each witness (the format's first version) reaches whom it names, but whom it says missed it; a lone name is a list of one, and an empty list names no one.
+    expect(learnersOf(checkKnowledge(turn, scene, saw({ who: ["Danny Okafor"] })))).toEqual([DANNY]);
+    expect(learnersOf(checkKnowledge(turn, scene, saw({ who: ["Danny Okafor"], missed: [] })))).toEqual([DANNY]);
+    expect(learnersOf(checkKnowledge(turn, scene, saw({ who: "Danny Okafor" })))).toEqual([DANNY]);
+    expect(learnersOf(checkKnowledge(turn, scene, saw({ who: ["Danny Okafor", "Marcus Delgado"], missed: ["Marcus Delgado"] })))).toEqual([DANNY]);
+    expect(learnersOf(checkKnowledge(turn, scene, saw({ who: [] })))).toEqual([DANNY, MARCUS, POV].sort());
+    // Witnesses that aren't names reach no one.
+    for (const who of [{ x: 1 }, 5]) {
+      const odd = checkKnowledge(turn, scene, saw({ who }));
+      expect([learnersOf(odd), odd.refused]).toEqual([[], [expect.stringContaining("witnesses aren't names")]]);
+    }
+    const told = checkKnowledge(turn, scene, { learned: [{ who: ["Danny Okafor"], fact: DEBT, how: "told", by: "Marcus Delgado" }] });
+    expect(learnings(told.events)).toEqual([expect.objectContaining({ who: [DANNY], fact: DEBT, how: "told", by: MARCUS })]);
+    const own = { ...turn, settings: { ...KNOWLEDGE_DEFAULTS, batch: "character" as const } };
+    expect(learnersOf(checkKnowledge(own, [DANNY], saw({})))).toEqual([DANNY]);
+    expect(learnersOf(checkKnowledge(own, [DANNY], saw({ missed: ["Danny Okafor"] })))).toEqual([]);
+  });
+
+  test("a chat recorded under the first answer format folds the same in a fresh runtime, and a later turn leaves what it recorded as it was", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, onReply({ "OLD-MARK": { facts: [{ ref: "l", claim: LATCH }], learned: [{ who: ["Danny Okafor", "Marcus Delgado"], fact: "l", how: "witnessed" }] }, "NEW-MARK": { facts: [{ ref: "q", claim: QUIT }], learned: [{ fact: "q", how: "witnessed" }] } }));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "Morning.", "Marcus passes on Helen's grumble about the bathroom window latch. OLD-MARK");
+    const before = readSlice((await stateOf(rig, chatId)).state).knowledge;
+    const latch = factOf((await stateOf(rig, chatId)).state, LATCH);
+    expect(knowersOf(readSlice((await stateOf(rig, chatId)).state), latch).sort()).toEqual([DANNY, MARCUS].sort());
+    await atShop(rig, chatId);
+    await rig.turn(chatId, "Go on.", "Danny says he's taking the marina job. NEW-MARK");
+    const after = readSlice((await stateOf(rig, chatId)).state).knowledge;
+    expect(after?.facts[latch]).toEqual(before?.facts[latch]);
+    for (const who of [DANNY, MARCUS, POV]) expect(after?.holdings[who]?.[latch]).toEqual(before?.holdings[who]?.[latch]);
+    const fresh = new Rig({ host: rig.host, shipped: true, minds: true });
+    expect(readSlice((await stateOf(fresh, chatId)).state).knowledge).toEqual(after);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("the step's default wording asks only for what matters to someone, and the user's own wording reaches the call", async () => {
+    for (const text of [MIND_PROMPT_DEFAULTS.knowledge, KNOWLEDGE_TEXTS.stepAnswer]) {
+      expect(text).toContain("matter");
+      expect(text).toContain("small talk");
+    }
+    expect(KNOWLEDGE_ANSWER_SHAPE).toContain('"missed"');
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { prompts: { stepAnswer: "- facts: OWN-WORDING, only what someone would lose sleep over." } } } } }));
+    await rig.turn(chatId, "Morning.", "The shop opens.");
+    const system = rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").startsWith(KNOWLEDGE)).at(-1)?.messages[0]?.content ?? "";
+    expect(system).toContain(`${KNOWLEDGE_ANSWER_SHAPE}\n- facts: OWN-WORDING`);
+    expect(system).not.toContain(KNOWLEDGE_TEXTS.stepAnswer);
+  });
+
+  test("who missed it is never guessed at: a name the world doesn't have, or that more than one person goes by, refuses the witnessing, and a lone name counts", async () => {
+    const WHISPER = "Danny whispered to Marcus that the township inspector comes on Friday";
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    // Names resolve as a turn's do: by id, whole name, or a word of a name no one else has (three Kowalczyks share theirs).
+    const turn = { ...shopTurn(rig, world, state), named: (name: string) => personNamed(rig.rt.registry, world, state, name) };
+    const scene = knowledgeBatches(turn)[0] ?? [];
+    const whisper = (missed: JsonValue): KnowledgeChecked => checkKnowledge(turn, scene, { facts: [{ ref: "w", claim: WHISPER }], learned: [{ fact: "w", how: "witnessed", missed }] });
+    for (const missed of [["the player"], ["Jordan Elis"], ["Kowalczyk"], ["Danny Okafor", "Marcus Delgad"], [42], { who: "you" }] as JsonValue[]) {
+      const out = whisper(missed);
+      expect([out.proposals, learnings(out.events)]).toEqual([[], []]);
+      expect(out.refused).toEqual([expect.stringContaining("says someone missed it")]);
+    }
+    expect(learnersOf(whisper("you"))).toEqual([DANNY, MARCUS].sort());
+    expect(learnersOf(whisper(["Okafor"]))).toEqual([MARCUS, POV].sort());
+    expect(learnersOf(whisper([]))).toEqual([DANNY, MARCUS, POV].sort());
+  });
+
+  test("someone who leaves while the player character stays was there for only part of the turn: the step reads them so, and they witness none of it", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const seen = models(rig, (context): JsonObject => (context.includes("LEAVE-MARK") ? { facts: [{ ref: "s", claim: SEDAN }], learned: [{ fact: "s", how: "witnessed" }] } : {}));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "Morning.", "The shop opens.");
+    const { state: start, world } = await stateOf(rig, chatId);
+    // Danny walks out to the marina during the turn; the player character stays at the shop.
+    const end = structuredClone(start);
+    const danny = end.entities[DANNY];
+    if (!danny) throw new Error("no Danny");
+    danny.fields.place = MARINA;
+    const ran = await postMinds(rig.rt.minds, { chatId, userId: rig.host.userId, world, start, state: end, pre: [], messageId: "m-leave", user: "I watch the street.", reply: "A black sedan idles at the curb. LEAVE-MARK", signal: new AbortController().signal, knowledge: true, read: Promise.resolve([]) });
+    expect(seen.knowledge.at(-1)).toContain(`Danny Okafor (id: ${DANNY}): there from the start, but not at its end`);
+    expect(learnings(ran.knowledge?.events ?? []).flatMap((l) => l.who)).toEqual([MARCUS]);
+    expect(ran.knowledge?.proposals.map((p) => p.learn.who)).toEqual([[POV]]);
+  });
+
+  test("a crowded scene's witnessings count once each against the turn's learnings, so a telling after six of them is still recorded, and past the limit a fact reaches no one rather than some", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const base = shopTurn(rig, world, state);
+    const crowd = { ...base, presence: { ...base.presence, said: { ...base.presence.said, who: [MARCUS, DANNY, PRIYA] } } };
+    const scene = knowledgeBatches(crowd)[0] ?? [];
+    expect(scene.length).toBe(4);
+    const said = ["the lift needs a new seal", "the parts order is late again", "the tow truck is low on diesel", "the bay door sticks in the cold", "the coffee maker gave out", "the inspection moved to Thursday"].map((what, i) => ({ ref: `f${i}`, claim: `Marcus said ${what}` }));
+    const answer: JsonObject = { facts: said, learned: [...said.map((f) => ({ fact: f.ref, how: "witnessed" })), { who: ["Danny Okafor"], fact: DEBT, how: "told", by: "Marcus Delgado" }] };
+    const out = checkKnowledge(crowd, scene, answer);
+    expect(out.refused).toEqual([]);
+    expect(learnersOf(out).length).toBe(6 * 4 + 1);
+    expect(learnings(out.events).find((l) => l.fact === DEBT)).toEqual(expect.objectContaining({ who: [DANNY], how: "told", by: MARCUS }));
+    const tight = checkKnowledge({ ...crowd, settings: { ...KNOWLEDGE_DEFAULTS, learningsPerTurn: 2 } }, scene, answer);
+    expect(learnersOf(tight).length).toBe(2 * 4);
+    expect(tight.refused.length).toBe(5);
+  });
+
+  test("in per-person calls a witnessed fact counts once in the turn, however many calls give it, so a telling in the last call is still recorded", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const base = shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, batch: "character" });
+    const own = { ...base, presence: { ...base.presence, said: { ...base.presence.said, who: [MARCUS, PRIYA, DANNY] } } };
+    const calls = knowledgeBatches(own);
+    expect(calls).toEqual([[POV], [MARCUS], [PRIYA], [DANNY]]);
+    const said = ["the lift needs a new seal", "the parts order is late again", "the tow truck is low on diesel", "the bay door sticks in the cold", "the coffee maker gave out", "the inspection moved to Thursday"].map((what, i) => ({ ref: `f${i}`, claim: `Marcus said ${what}` }));
+    const six = { facts: said, learned: said.map((f) => ({ fact: f.ref, how: "witnessed" })) };
+    const spent: KnowledgeSpent = { facts: new Set(), learnings: 0, witnessed: new Set() };
+    // Danny's call, the last, also has Marcus telling him his secret.
+    const outs = calls.map((batch) => checkKnowledge(own, batch, batch[0] === DANNY ? { ...six, learned: [...six.learned, { who: ["Danny Okafor"], fact: DEBT, how: "told", by: "Marcus Delgado" }] } : six, spent));
+    expect(outs.flatMap((o) => o.refused)).toEqual([]);
+    expect(spent.learnings).toBe(6 + 1);
+    expect(learnings(outs.at(-1)?.events ?? []).find((l) => l.fact === DEBT)).toEqual(expect.objectContaining({ who: [DANNY], how: "told", by: MARCUS }));
   });
 });
