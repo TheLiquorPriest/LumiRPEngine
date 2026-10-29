@@ -1,13 +1,13 @@
 // Settings → Minds as `lre.settings.set` merge patches (DESIGN §24.6). A cadence change (on or off,
 // the Live limit, refresh, which levels get memory notes, the section budget, the skip caps) is part
 // of the Model use preset, so it makes the preset Custom, as a step change does; what a mind reads,
-// prompts and memory overrides are the user's own and leave the preset alone. `null` deletes a key:
-// a prompt or a memory override set back to null reads the built-in prompt, or the world's memory
-// setting, again.
+// prompts, memory overrides and knowledge are the user's own and leave the preset alone. `null`
+// deletes a key: a prompt, a knowledge text or a memory override set back to null reads the built-in
+// prompt, the shipped text, or the world's memory setting, again.
 
 import type { JsonObject } from "../../shared/json";
-import type { Fidelity, Limit, MindHistoryRead, MindPurpose, MindSource, MindsMemoryConfig, MindsSettings } from "../../shared/minds";
-import { FIDELITIES, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_RANGES } from "../../shared/minds";
+import type { Fidelity, KnowledgeLimit, KnowledgeSettings, KnowledgeTextId, Limit, MindHistoryRead, MindPurpose, MindSource, MindsMemoryConfig, MindsSettings } from "../../shared/minds";
+import { FIDELITIES, KNOWLEDGE_TEXTS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_RANGES } from "../../shared/minds";
 
 /** The fields a Model use preset sets; changing one makes the preset Custom. */
 export type MindsPolicy = Partial<Pick<MindsSettings, "enabled" | "liveLimit" | "farRefreshMinutes" | "refreshLimit" | "memoryLevels" | "tokens">> & {
@@ -46,6 +46,40 @@ export function mindsPromptPatch(purpose: MindPurpose, text: string | null): Jso
   if (text !== null && text.length > MIND_PROMPT_MAX) return null;
   const own = text === null || text.trim() === "" || text.trim() === MIND_PROMPT_DEFAULTS[purpose].trim() ? null : text;
   return { minds: { prompts: { [purpose]: own } } };
+}
+
+/** A change to Settings → Minds → Knowledge: the switch, the suspicion threshold, how the step asks, or a limit. */
+export type KnowledgeSettingsChange = Partial<Pick<KnowledgeSettings, "enabled" | "threshold" | "batch" | KnowledgeLimit>>;
+
+/** Knowledge settings changed: the user's own, so the preset stays. */
+export function knowledgePatch(change: KnowledgeSettingsChange): JsonObject {
+  return { minds: { knowledge: { ...change } } };
+}
+
+/** One knowledge limit set, as `knowledgePatch` would. */
+export function knowledgeLimitPatch(limit: KnowledgeLimit, value: number): JsonObject {
+  return { minds: { knowledge: { [limit]: value } } };
+}
+
+/** The `{{name}}` placeholders a knowledge text's shipped wording fills, which the user's own must keep. */
+export function knowledgePlaceholders(id: KnowledgeTextId): string[] {
+  return [...new Set(KNOWLEDGE_TEXTS[id].match(/\{\{\w+\}\}/g) ?? [])];
+}
+
+/** The shipped placeholders a wording leaves out. */
+export function missingPlaceholders(id: KnowledgeTextId, text: string): string[] {
+  return knowledgePlaceholders(id).filter((p) => !text.includes(p));
+}
+
+/**
+ * The patch saving the user's own wording of a knowledge text, or null when it can't be saved (over
+ * `MIND_PROMPT_MAX`, or a shipped placeholder left out). Empty, or the shipped text word for word,
+ * saves no wording (null), so the shipped text keeps any later update.
+ */
+export function knowledgeTextPatch(id: KnowledgeTextId, text: string | null): JsonObject | null {
+  if (text !== null && text.trim() !== "" && (text.length > MIND_PROMPT_MAX || missingPlaceholders(id, text).length > 0)) return null;
+  const own = text === null || text.trim() === "" || text.trim() === KNOWLEDGE_TEXTS[id].trim() ? null : text;
+  return { minds: { knowledge: { prompts: { [id]: own } } } };
 }
 
 /** One memory tunable, as Settings (a user override) and Build (the world's default) show it. */

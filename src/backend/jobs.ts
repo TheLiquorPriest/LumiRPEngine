@@ -12,6 +12,7 @@ import type { EntityId, UserId, WorldId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { loreSourceOf } from "../shared/lore";
+import { publicText } from "../shared/secret-marks";
 import type { ErrorCode, JobKind, JobProposal, JobResult, JobSummary, JobUpdate, LintIssue, WorldCollection } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { StepConfig } from "../shared/settings";
@@ -502,7 +503,11 @@ export class JobRunner {
       const entries = [];
       for (const bookId of bookIds) {
         if (bookId === index?.loreBookId) continue;
-        for (const e of await this.host.books.entries(bookId, job.userId)) if (e.content.trim() !== "" && !e.disabled) entries.push(e);
+        // A helper reads what anyone may read of an entry: its secret marks left out (DESIGN §4.2), so none reaches a proposal.
+        for (const e of await this.host.books.entries(bookId, job.userId)) {
+          const content = publicText(e.content);
+          if (content.trim() !== "" && !e.disabled) entries.push({ ...e, content });
+        }
       }
       if (entries.length === 0) throw new Error("the chosen books have no entries with text");
       const system = proposalSystem("import", world, this.registry);
@@ -598,7 +603,8 @@ export class JobRunner {
             return s.kind === "book" && s.bookId === bookId ? [s.entryId] : [];
           }),
         );
-        const withText = (await this.host.books.entries(bookId, job.userId)).filter((e) => e.content.trim() !== "" && !e.disabled);
+        // Marks left out, as for Import: an entry that is secret whole has no text a helper may read.
+        const withText = (await this.host.books.entries(bookId, job.userId)).map((e) => ({ ...e, content: publicText(e.content) })).filter((e) => e.content.trim() !== "" && !e.disabled);
         const fresh = withText.filter((e) => !indexed.has(e.id));
         if (fresh.length === 0) throw new Error(withText.length > 0 ? "every entry of that book with text is already in the world's lore" : "that book has no entries with text");
         if (fresh.length < withText.length) notes.push(`${withText.length - fresh.length} entr${withText.length - fresh.length === 1 ? "y" : "ies"} already in the world's lore ${withText.length - fresh.length === 1 ? "was" : "were"} skipped.`);

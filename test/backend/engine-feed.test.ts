@@ -1,15 +1,13 @@
 // The engine feed (DESIGN §6.11): a section's switch, caps and sources as the world sets them, the
-// GM's per-chat settings over them with their Undo, and the scopes: the player's never names a
-// secret, the GM's names it marked for the narrator only, and no player surface gets it. The narrator
-// rules give the order of authority first, then what marked facts mean, in the same words with marked
-// facts or without.
+// GM's per-chat settings over them with their Undo, and the scopes: the player character's view never
+// names a secret, the GM's names it marked for the narrator only, and no player surface gets it. The
+// narrator rules give the order of authority first, then what marked facts mean, in the same words
+// with marked facts or without.
 
 import { describe, expect, test } from "bun:test";
 import { NARRATOR_AUTHORITY, NARRATOR_SOURCE } from "../../src/backend/book";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
-import type { Delivered } from "../../src/backend/ledger-io";
 import { MARKED_FACTS_RULE, markedText } from "../../src/engine/feed";
-import type { SectionRenderer } from "../../src/engine/registry";
 import { editRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";
 import type { EditOp } from "../../src/shared/protocol";
@@ -17,6 +15,8 @@ import type { SectionTemplate } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 
 const SECRET = "Vex Morrow";
+/** What the narrator knows as the player character knows it: no section marks a fact beyond his. */
+const POV_VIEW = { narrator: { knowledge: "pov", secrets: "omit" } };
 
 /** A Port Alder chat whose world has these sections (the shipped ones when none) and entities. */
 async function alder(rig: Rig, sections: Record<string, SectionTemplate> | null, entities: Record<string, JsonObject> = {}): Promise<string> {
@@ -134,8 +134,9 @@ describe("section settings", () => {
 });
 
 describe("feed scopes", () => {
-  test("the player scope never names a secret person here", async () => {
+  test("the player character's view never names a secret person here", async () => {
     const rig = new Rig({ shipped: true });
+    rig.body(await rig.send({ type: "lre.settings.set", patch: POV_VIEW }));
     const chatId = await alder(rig, null, secretHere);
     await rig.turn(chatId, "I look around.", "Quiet.");
     expect(rig.host.assembled.map((e) => e.content).join("\n")).not.toContain(SECRET);
@@ -158,6 +159,8 @@ describe("feed scopes", () => {
 
   test("the narrator rules give the order of authority before what marked facts mean, in the same words whether or not the turn carries marked facts", async () => {
     const rig = new Rig({ shipped: true });
+    // The player character's view first, so the turn carries no marked fact until the GM's scope adds one.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: POV_VIEW }));
     const chatId = await alder(rig, null, secretHere);
     const label = DEFAULT_SECTIONS.people?.label ?? "People";
     const marked = markedText({ text: `${SECRET} is here.`, known: "gm" });
@@ -193,24 +196,5 @@ describe("feed scopes", () => {
     const view = await rig.rt.view(chatId, rig.host.userId);
     expect(JSON.stringify(view)).not.toContain(FLASK);
     for (const panel of Object.keys(view.panels)) expect(JSON.stringify(rig.body(await rig.send({ type: "lre.view.open", chatId, panel })))).not.toContain(FLASK);
-  });
-});
-
-describe("World Info sources", () => {
-  test("a section line's World Info entry is in the turn's delivery record", async () => {
-    const rig = new Rig({ shipped: true });
-    const source = { bookId: "book-lore", entryId: "entry-7" };
-    const renderer: SectionRenderer = { slot: "scene", source: "probe", render: () => ["The fog rolls in."], feed: () => [{ text: "The fog rolls in.", known: "pov", source }] };
-    (rig.rt.registry.renderers as SectionRenderer[]).push(renderer);
-    const delivered: Delivered[] = [];
-    const deliver = rig.rt.deliver.bind(rig.rt);
-    rig.rt.deliver = async (input) => {
-      const d = await deliver(input);
-      delivered.push(d);
-      return d;
-    };
-    const chatId = await alder(rig, null);
-    await rig.turn(chatId, "I look around.", "Quiet.");
-    expect(delivered.at(-1)?.sources).toEqual([source]);
   });
 });

@@ -4,7 +4,7 @@
 
 import type { SlotId } from "./ids";
 import { hasOwn, isRecord } from "./json";
-import { MINDS_SLOT } from "./minds";
+import { KNOWLEDGE_SLOT, MINDS_SLOT } from "./minds";
 import type { SectionTemplate, WorldDoc } from "./world";
 
 /** Where a section's lines go in its template. */
@@ -27,20 +27,24 @@ export const DEFAULT_SECTIONS: Record<SlotId, SectionTemplate> = {
   vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: "The vehicles the player character may use, and others nearby, as they know them: where each is, whose it is, its fuel and its state. These lines are the authoritative record: call each vehicle by the name and details its line gives, keep its place, fuel and condition as stated, and bring them in whenever a vehicle comes up, never a generic \"the car\" where a line names one.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
   quest: { id: "quest", label: "Quest", rank: 7, template: "The player character's quests and goals, as far as they know them: the authoritative record of where each stands. Let the reply follow from these, keeping each one's names, objectives and stage as given; never reveal a step they haven't reached.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
   outline: { id: "outline", label: "Outline", rank: 8, template: "The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one and keeping the specific people, things, places and amounts it names; what a beat leaves open is yours to fill in.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  stance: { id: "stance", label: "Stance", rank: 9, template: "The narrator knows only what the player character knows. These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  stance: { id: "stance", label: "Stance", rank: 9, template: "These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   // Character minds (DESIGN §24.3): on their own token budget, apart from the section budget.
   [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: "Each mind below is scoped to what that character knows and is blind to everyone else's. Let each shape that character's own choices, words and manner this turn, as specifically as it says. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
   // Where the POV is and what it owns (DESIGN §6.11): ranked after the other facts, so the first left out on a small budget.
   place: { id: "place", label: "Place", rank: 11, template: "The place the player character is in: what it is like, what is here, where it leads, and the lore about it. These lines are the authoritative inventory of the place: name each thing, room, way out and detail as given whenever the prose touches it, and never reduce them to a summary or a generic stand-in (\"some furniture\", \"various goods\").\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
   property: { id: "property", label: "Property", rank: 12, template: "Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says \"yours\"; otherwise they only use, keep or benefit from it. These lines are the authoritative record: use each property's name, place and details as given whenever it comes up.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  // Who knows what (DESIGN §24.11): each person here's own knowledge, a fact at a time, as the narrator's knowledge lets it see them.
+  [KNOWLEDGE_SLOT]: { id: KNOWLEDGE_SLOT, label: "Who knows what", rank: 13, template: "Who knows what among the people here, a fact at a time, the player character (\"You\") first among those who hold it: the authoritative record of what each person holds and how they came by it. Each person acts and speaks only from what their own lines give them: never let anyone use, hint at or guess a fact their lines don't give them, nor know what a line says they don't. \"Suspects\" is a guess they aren't sure of; \"keeps it from\" is something they won't reveal to those named.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
 };
 
-/** The built-in sections a world has without listing them: all of them when it lists none, else the Minds section unless it lists its own. */
+/** The built-in sections a world has without listing them: all of them when it lists none, else the Minds and Who knows what sections unless it lists its own. */
 export function builtInSectionsOf(world: Pick<WorldDoc, "sections">): SectionTemplate[] {
   const own = Object.keys(world.sections);
   if (own.length === 0) return Object.values(DEFAULT_SECTIONS);
-  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
-  return minds && !own.includes(MINDS_SLOT) ? [minds] : [];
+  return [MINDS_SLOT, KNOWLEDGE_SLOT].flatMap((slot) => {
+    const section = DEFAULT_SECTIONS[slot];
+    return section && !own.includes(slot) ? [section] : [];
+  });
 }
 
 /** Why a section's template can't be used as written, or null: it must hold `{{lines}}`, where its lines go. */

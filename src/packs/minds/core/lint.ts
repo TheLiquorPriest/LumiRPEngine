@@ -1,13 +1,15 @@
 // Lint for character minds (DESIGN §24.2): the world's `minds` config, read as the engine plays it
-// (a value out of range or of the wrong kind falls back to its default, and lint says so), and the
-// world's step templates for the minds purposes.
+// (a value out of range or of the wrong kind falls back to its default, and lint says so), what each
+// person holds from the start (§24.11), and the world's step templates for the minds purposes.
 
 import { hasOwn, isRecord } from "../../../shared/json";
 import type { LintIssue } from "../../../shared/protocol";
-import { isMindPurpose, MINDS_RANGES, WORLD_MINDS_KEYS, worldMindTemplate } from "../../../shared/minds";
+import type { FactRef } from "../../../shared/minds";
+import { AUTHORED_FACT_KINDS, HOLDING_BELIEFS, isConfidence, isMindPurpose, MINDS_RANGES, parseFactId, WORLD_MINDS_KEYS, worldMindTemplate } from "../../../shared/minds";
 import type { WorldDoc } from "../../../shared/world";
 import type { LintRule } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
+import { fieldDef, kindIs } from "../../../engine/scope";
 import { selectorProblems } from "../../../engine/selector";
 
 const WEIGHT_KEYS = ["here", "nearby", "mentioned", "regard", "knows", "owner", "track", "rule", "pending", "recent"] as const;
@@ -29,11 +31,11 @@ function configIssues(world: WorldDoc, registry: Registry | undefined): LintIssu
   const err = (path: string, message: string): void => void out.push({ severity: "error", path, code: "minds.config", message });
   const warn = (path: string, message: string): void => void out.push({ severity: "warning", path, code: "minds.config", message });
   if (!isRecord(raw)) {
-    err("minds", "The minds config is an object (secrecy, weights, thresholds, always, never, memory); the defaults play instead.");
+    err("minds", "The minds config is an object (secrecy, weights, thresholds, always, never, memory, holdings); the defaults play instead.");
     return out;
   }
   for (const key of Object.keys(raw)) if (!(WORLD_MINDS_KEYS as readonly string[]).includes(key)) warn(`minds.${key}`, `"${key}" isn't part of the minds config; nothing reads it.`);
-  if (raw.secrecy !== undefined && raw.secrecy !== "full" && raw.secrecy !== "brief") err("minds.secrecy", 'Secrecy is "full" (the narrator gets each mind to depict) or "brief" (a leak-checked depiction only); "brief" plays instead.');
+  if (raw.secrecy !== undefined && raw.secrecy !== "full" && raw.secrecy !== "brief") err("minds.secrecy", 'Secrecy is "full" (the narrator gets each mind to depict) or "brief" (a leak-checked depiction only); "full", the default, plays instead.');
   const number = (path: string, v: unknown, [lo, hi]: readonly [number, number], whole: boolean): void => {
     if (v === undefined) return;
     if (typeof v !== "number" || !Number.isFinite(v) || v < lo || v > hi || (whole && !Number.isInteger(v))) err(path, `${whole ? "A whole number" : "A number"} from ${lo} to ${hi}; the default plays instead.`);
@@ -99,6 +101,80 @@ function configIssues(world: WorldDoc, registry: Registry | undefined): LintIssu
   return out;
 }
 
+/** What a fact id names in the world, in words for lint, or null when the world has it. */
+function missingRef(world: WorldDoc, registry: Registry | undefined, ref: FactRef): string | null {
+  if (ref.kind === "lore") return hasOwn(world.lore, ref.lore) ? null : `The world has no lore entry "${ref.lore}".`;
+  if (ref.kind === "track") {
+    const track = hasOwn(world.tracks, ref.track) ? world.tracks[ref.track] : undefined;
+    if (!track) return `The world has no track "${ref.track}".`;
+    return hasOwn(track.stages, ref.stage) ? null : `The track "${track.label}" has no stage "${ref.stage}".`;
+  }
+  if (ref.kind === "field") {
+    const e = hasOwn(world.entities, ref.entity) ? world.entities[ref.entity] : undefined;
+    if (!e) return `The world has no entity "${ref.entity}".`;
+    const defined = hasOwn(e.fields, ref.field) || (registry !== undefined && fieldDef(registry, world, e.kind, ref.field) !== undefined);
+    return defined ? null : `${e.name} has no field "${ref.field}".`;
+  }
+  return null;
+}
+
+/**
+ * `world.minds.holdings`: each holder a person in the world, each fact a world fact an author can
+ * give (lore, a track's stage, someone's field) that the world has, a belief and a confidence that
+ * read, and those it is kept from people in the world. Each says what the engine reads instead.
+ */
+function holdingIssues(world: WorldDoc, raw: unknown, registry: Registry | undefined): LintIssue[] {
+  if (raw === undefined) return [];
+  const out: LintIssue[] = [];
+  const err = (path: string, message: string): void => void out.push({ severity: "error", path, code: "minds.holdings", message });
+  const warn = (path: string, message: string): void => void out.push({ severity: "warning", path, code: "minds.holdings", message });
+  if (!isRecord(raw)) {
+    err("minds.holdings", "What people hold from the start is an object of facts by person; no one holds anything from the start instead.");
+    return out;
+  }
+  const person = (id: string): boolean => {
+    const e = hasOwn(world.entities, id) ? world.entities[id] : undefined;
+    return e !== undefined && (registry === undefined || kindIs(registry, world, e.kind, "person"));
+  };
+  for (const [who, facts] of Object.entries(raw)) {
+    const at = `minds.holdings.${who}`;
+    if (!hasOwn(world.entities, who)) err(at, `The world has no one "${who}", so these holdings are never read.`);
+    else if (!person(who)) err(at, `${world.entities[who]?.name ?? who} isn't a person, so these holdings are never read.`);
+    if (!isRecord(facts)) {
+      err(at, "Each person's holdings are an object of facts by id; they hold nothing from the start instead.");
+      continue;
+    }
+    for (const [fact, v] of Object.entries(facts)) {
+      const path = `${at}.${fact}`;
+      const ref = parseFactId(fact);
+      if (!ref || !AUTHORED_FACT_KINDS.includes(ref.kind)) {
+        err(path, "A fact held from the start is lore:<entry>, track:<track>:<stage> or field:<entity>:<field>; this one is left out.");
+        continue;
+      }
+      const missing = missingRef(world, registry, ref);
+      if (missing) warn(path, `${missing} The holding seeds a fact nothing refers to.`);
+      if (!isRecord(v)) {
+        err(path, "A holding is an object (belief, confidence, keptFrom); this one is left out.");
+        continue;
+      }
+      for (const key of Object.keys(v)) if (key !== "belief" && key !== "confidence" && key !== "keptFrom") warn(`${path}.${key}`, `"${key}" isn't part of a holding; nothing reads it.`);
+      if (v.belief !== undefined && !(HOLDING_BELIEFS as readonly unknown[]).includes(v.belief)) err(`${path}.belief`, 'A belief is "true", "false" or "uncertain"; "true" plays instead.');
+      if (v.confidence !== undefined && !isConfidence(v.confidence)) err(`${path}.confidence`, "A confidence is a number from 0 to 1; 1 plays instead.");
+      const kept = v.keptFrom;
+      if (kept === undefined || kept === "everyone") continue;
+      if (!Array.isArray(kept) || !kept.every((id) => typeof id === "string")) {
+        err(`${path}.keptFrom`, 'Whom it is kept from is "everyone" or a list of people; it is kept from no one instead.');
+        continue;
+      }
+      for (const id of kept) {
+        if (id === who) warn(`${path}.keptFrom`, "No one keeps a fact from themselves; that name is passed over.");
+        else if (!person(id)) err(`${path}.keptFrom`, `"${id}" isn't a person in the world; that name is passed over.`);
+      }
+    }
+  }
+  return out;
+}
+
 /** Step templates for the minds purposes: their signals never decide anything, and only the one `worldMindTemplate` picks per purpose is used. */
 function stepIssues(world: WorldDoc): LintIssue[] {
   const out: LintIssue[] = [];
@@ -114,5 +190,6 @@ function stepIssues(world: WorldDoc): LintIssue[] {
 
 export const MINDS_LINTS: readonly LintRule[] = [
   { code: "minds.config", check: (world, registry) => configIssues(world, registry) },
+  { code: "minds.holdings", check: (world, registry) => (isRecord(world.minds) ? holdingIssues(world, world.minds.holdings, registry) : []) },
   { code: "minds.steps", check: (world) => stepIssues(world) },
 ];

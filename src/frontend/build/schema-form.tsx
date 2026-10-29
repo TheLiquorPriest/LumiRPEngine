@@ -26,6 +26,8 @@ import { MoneyInput } from "../money-input";
 import type { FieldEditorDef } from "../registry";
 import { DOMAIN_LABEL, LEVEL_LABEL } from "../../shared/ids";
 import { ClaimsControl, floorNote } from "../settings/realism";
+import { NarratorViewControl } from "../settings/narrator";
+import { NARRATOR_DEFAULTS, narratorViewOf } from "../../shared/settings";
 import { useSelect } from "../store";
 import { EffectArgsInput } from "./effect-args";
 import { ExprEditor, ExprReadout } from "./expr-editor";
@@ -1345,6 +1347,24 @@ export function ClaimsInput(props: { label: string; value: JsonValue | undefined
   );
 }
 
+/**
+ * The world's default for the narrator's knowledge (DESIGN §6.11), with the control Settings and GM
+ * mode use. Switched on, it starts from the shipped default; off sends null, so the world's meta
+ * setter removes it and each chat follows its own choice, else the player's.
+ */
+export function NarratorInput(props: { label: string; value: JsonValue | undefined; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
+  const view = narratorViewOf(props.value);
+  const set = props.value !== undefined && props.value !== null;
+  return (
+    <div class="lre-field" data-lre-narrator="world">
+      <span class="label">{props.label}</span>
+      <HostSwitch label="This world sets what the narrator knows" checked={set} onChange={(on) => props.onChange(on ? { ...NARRATOR_DEFAULTS } : null)} />
+      {view ? <NarratorViewControl value={view} onChange={(next) => props.onChange({ knowledge: next.knowledge, secrets: next.secrets })} /> : !set ? <span class="lre-field-help">Not set: each chat follows its own choice (GM → This chat → Knowledge), else the player's Settings → Narrator.</span> : null}
+      <Issues issues={props.issues} />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- the form
 
 /** Whether a checkbox shows ticked: as the engine reads the value (a lore `secret` that isn't false is secret), else only `true`. */
@@ -1480,6 +1500,8 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
       return <BandCapsInput label={spec.label} value={props.value} issues={issues} onChange={props.onChange} />;
     case "claims":
       return <ClaimsInput label={spec.label} value={props.value} preset={props.parent.preset} issues={issues} onChange={props.onChange} />;
+    case "narrator":
+      return <NarratorInput label={spec.label} value={props.value} issues={issues} onChange={props.onChange} />;
     case "tier":
       return <RefInput label={spec.label} value={props.value} options={tiersInOrder(ctx.doc).map(([id, t]) => (t.label === BAND_LABEL[t.band] ? { value: id, label: t.label } : { value: id, label: t.label, sublabel: BAND_LABEL[t.band] }))} issues={issues} onChange={props.onChange} />;
     case "agent": {

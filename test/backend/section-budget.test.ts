@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { WorldDoc } from "../../src/shared/world";
 import { sectionTokens } from "../../src/backend/book";
 import { buildSections, type SectionsBuilt } from "../../src/backend/sections-build";
+import { SECRET_MARK_WORDING } from "../../src/shared/secret-marks";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "../packs/riverton";
@@ -21,8 +22,9 @@ function world(): WorldDoc {
   return w;
 }
 
+/** The sections on the budget, read as the player character knows the world, so only plain lines spend it. */
 function build(w: WorldDoc, budget: number): SectionsBuilt {
-  return buildSections({ registry: reg, world: w, state: startState(w, reg), secrets: [], budget, mindsBudget: 1000, said: "", planned: { outcome: ["You look around."], montage: [] }, outline: [], elapsed: 5, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
+  return buildSections({ registry: reg, world: w, state: startState(w, reg), secrets: [], narrator: { chat: null, view: { knowledge: "pov", secrets: "omit" } }, wording: SECRET_MARK_WORDING, budget, mindsBudget: 1000, said: "", planned: { outcome: ["You look around."], montage: [] }, outline: [], elapsed: 5, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
 }
 
 describe("a section over what is left of the section budget", () => {

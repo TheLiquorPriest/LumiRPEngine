@@ -20,6 +20,11 @@ describe("the GM's section settings form", () => {
     expect(chatFeedOf({ enabled: false, maxLines: 3 }, ["location", "weather"], ["place", "place_lore"])).toEqual({ enabled: false, maxLines: 3, include: ["location", "weather"] });
   });
 
+  test("a scope the GM sets is kept, the player's included; unset sends none and follows the narrator's knowledge", () => {
+    for (const scope of ["player", "scene", "gm"] as const) expect(chatFeedOf({ scope }, [], []).scope).toBe(scope);
+    expect(chatFeedOf({}, [], [])).toEqual({});
+  });
+
   test("ticking exactly a section's own sources, in any order, sends no pick", () => {
     const own = ownSources(SOURCES, "place");
     expect(own).toEqual(["place", "place_lore"]);
@@ -35,7 +40,8 @@ describe("the GM's section settings form", () => {
 
   test("a row says the scope in the dropdown's own words, and an off section only that it's off", () => {
     for (const scope of ["player", "scene", "gm"] as const) expect(feedSummary({ scope })).toContain(SCOPE_LABEL[scope]);
-    expect(feedSummary({})).toContain(SCOPE_LABEL.player);
+    // Unset follows the narrator's knowledge: it reads as none of the scopes.
+    for (const scope of ["player", "scene", "gm"] as const) expect(feedSummary({})).not.toBe(feedSummary({ scope }));
     const off = feedSummary({ enabled: false, scope: "gm" });
     expect(off).not.toContain(SCOPE_LABEL.gm);
     expect(off).not.toBe(feedSummary({ scope: "gm" }));

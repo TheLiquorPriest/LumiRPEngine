@@ -5,15 +5,18 @@
 // within its own limit: the story as it stands (the lore pinned to them and to where they are, the
 // lore the turn activates, how the latest reply ended and what the player says), their usual routine
 // (on by default: habits to weigh, never orders), their plans (on by default: what the turns stated
-// and the GM set), and, when switched on, their own summary, notes and what they saw, last thoughts,
-// recall of the turns they were there for, and their life (money, the day and commitments). Nothing
-// limits the whole: a part's own limit is the only one, so no room left by the others cuts what the user allowed. Never the GM view
+// and the GM set), what they know (on by default while the chat tracks knowledge, §24.11: their own
+// holdings, which then stand for the secrets an author gave them, a cue's aside), and, when switched
+// on, their own summary, notes and what they saw, last thoughts, recall of the turns they were there
+// for, and their life (money, the day and commitments). Nothing limits the whole: a part's own limit
+// is the only one, so no room left by the others cuts what the user allowed. Never the GM view
 // (but for the intent the GM set for them), another mind, what another character's memory says they
 // were told, or a turn they weren't present for.
 
 import type { EntityId, MessageId, PlaceId } from "../shared/ids";
-import type { Limit, MindMoment, MindsCharacter, MindsMemoryConfig, MindsReads } from "../shared/minds";
-import { limitOf, planWords } from "../shared/minds";
+import type { KnowledgeSettings, Limit, MindMoment, MindsCharacter, MindsMemoryConfig, MindsReads } from "../shared/minds";
+import { factId, knowledgeText, knowledgeThreshold, limitOf, planWords } from "../shared/minds";
+import { applyMarks } from "../shared/secret-marks";
 import { loreIsSecret } from "../shared/lore";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import { activitySpanEnd, ENGINE_FIELDS, formatMoney } from "../shared/world";
@@ -28,12 +31,14 @@ import { together } from "../engine/presence";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { agendaFor } from "../engine/tracks";
-import { canSeeEntity, knows, loreGateReader } from "../engine/visibility";
+import { canSeeEntity, knows, loreFactId, loreGateReader } from "../engine/visibility";
 import { dayPlan } from "../packs/castlife/core/index";
 import { usualRoutine } from "../packs/castlife/core/usual";
 import { routineRole } from "../packs/castlife/core/routines";
 import { intentLines, intentOf } from "../packs/minds/core/intent";
-import { faded, openCommitments, openPlans, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
+import { holdingLine, latestTurns, rankedHoldings } from "../packs/minds/core/knowledge";
+import { worldSecrets } from "../packs/minds/core/knowledge-section";
+import { faded, openCommitments, openPlans, readCharacter, readKnowledge, readSlice, salienceNow } from "../packs/minds/core/state";
 import { CHARS_PER_TOKEN, sectionTokens } from "./book";
 import type { HostMessage } from "./host";
 import { recentMessages } from "./interpret-context";
@@ -61,6 +66,12 @@ export interface MindScope {
   pinned?: readonly PinnedText[];
   /** The chat before the moment's turn (`chatBefore`), which Recent chat reads while it is on; absent, none. */
   history?: readonly HostMessage[];
+  /**
+   * The user's knowledge settings while the chat tracks knowledge (DESIGN §24.11): a mind then reads
+   * what it holds (What they know, while that source is on), in place of the secrets an author gave
+   * it in who they are. Absent: knowledge off, and a mind reads as before it.
+   */
+  knowledge?: KnowledgeSettings;
 }
 
 /** A lore entry as a mind's context gave it: whole, or cut to its source's limit, or left out over it (`left`). A `secret` one stays off every player surface. */
@@ -226,7 +237,7 @@ function occasion(scope: Pick<MindScope, "reg" | "world" | "state">, place: Plac
  * world's day and time in words (a bare count of minutes means nothing to a model), and only while
  * it is still ahead and still that activity's (`activitySpanEnd`): an end gone by tells nothing.
  */
-function sheetLines(scope: MindScope): string[] {
+export function sheetLines(scope: Pick<MindScope, "reg" | "world" | "state" | "who">): string[] {
   const { reg, world, state, who } = scope;
   const e = own(state.entities, who);
   if (!e) return [];
@@ -249,18 +260,25 @@ function sheetLines(scope: MindScope): string[] {
 /**
  * Their own secrets, whole (DESIGN §24.5): the truths of every track they own and of every track a
  * cue of theirs stands for, and the secret lore that is theirs (`loreHeldBy`), whatever the player has
- * found out. A character knows their own secret, revealed or not.
+ * found out. A character knows their own secret, revealed or not. While they read what they hold
+ * (`holdings`, DESIGN §24.11), a secret an author gave them that the chat records as a fact is there
+ * instead, held or not as the story left it: only a cue's stays here (decision 11 waits), and any the
+ * chat hasn't recorded yet.
  */
-function secretLines(scope: Pick<MindScope, "world" | "who">): string[] {
+function secretLines(scope: Pick<MindScope, "world" | "state" | "who">, holdings: boolean): string[] {
   const { world, who } = scope;
   const named = new Set(cuesOf(world, who).flatMap((c) => (c.secret.kind === "track" ? [c.secret.id] : [])));
+  const recorded = holdings ? readKnowledge(scope.state).facts : {};
   const out: string[] = [];
   for (const [id, t] of Object.entries(world.tracks).sort(([a], [b]) => a.localeCompare(b))) {
     if (t.owner !== who && !named.has(id)) continue;
-    const truths = Object.values(t.stages).flatMap((s) => (s.truth ? [s.truth] : []));
+    const truths = Object.entries(t.stages).flatMap(([stage, s]) => (s.truth && (named.has(id) || !own(recorded, factId({ kind: "track", track: id, stage }))) ? [s.truth] : []));
     if (truths.length > 0) out.push(`- Your secret, ${t.label}: ${tidy(truths.join(" "))}`);
   }
-  for (const l of heldLore(world, who)) out.push(`- Your secret, ${l.title}: ${tidy(l.content)}`);
+  for (const l of heldLore(world, who)) {
+    const byCue = !(l.holders ?? []).includes(who);
+    if (byCue || !own(recorded, loreFactId(l))) out.push(`- Your secret, ${l.title}: ${tidy(l.content)}`);
+  }
   return out;
 }
 
@@ -276,11 +294,32 @@ function heldLore(world: WorldDoc, who: EntityId): LoreEntryDef[] {
 
 /**
  * Who they are, in every context and never cut (DESIGN §24.5): their own fields, the aims they pursue
- * (their agendas, the author's) and their own secrets, whole.
+ * (their agendas, the author's) and their own secrets, whole, but those they read in what they hold.
  */
 function identityLines(scope: MindScope): string[] {
   const aims = agendaFor(scope.world, scope.state, scope.who).map((a) => `- Your aim, ${a.label}: ${a.stageLabel}`);
-  return [...sheetLines(scope), ...aims, ...secretLines(scope)];
+  return [...sheetLines(scope), ...aims, ...secretLines(scope, scope.knowledge !== undefined && scope.reads.knowledge.on)];
+}
+
+/**
+ * What they know (DESIGN §24.11), while the chat tracks knowledge and they read it: the facts they
+ * hold, the most relevant first (`byPlay`: a secret, theirs to keep or one of the world's, then what
+ * is about someone or somewhere here or came up lately), each with how they came by it, what they
+ * make of it and whom they keep it from, within the user's tokens (`mindTokens`). Their own holdings
+ * only: no one else's, and no fact they don't hold. A secret mark in a claim's text stays only where
+ * it names them (`holder:<id>`).
+ */
+function knowledgeBlock(scope: MindScope, place: PlaceId | null): string {
+  const settings = scope.knowledge;
+  if (!settings || !scope.reads.knowledge.on) return "";
+  const { world, state, who } = scope;
+  const slice = readSlice(state);
+  const here = place === null ? [] : Object.keys(state.entities).filter((id) => placeOfEntity(state, id) === place);
+  const play = { here: [...here, ...(place ? [place] : [])], recent: latestTurns(slice, settings.inPlayTurns), secret: worldSecrets(scope.reg.context(world, state)) };
+  const words = { texts: settings, threshold: knowledgeThreshold(slice), nameOf: (id: EntityId) => (id === world.pov ? povLabel(scope) : nameOf(scope, id)) };
+  const lines = rankedHoldings(slice, who, play).map((h) => `- ${holdingLine(applyMarks(h.fact?.claim ?? h.id, { world, state }, `holder:${who}`), h.holding, words)}`);
+  const kept = linesWithin(lines, settings.mindTokens);
+  return kept.length > 0 ? block(knowledgeText(settings, "mindTitle"), [knowledgeText(settings, "mindLead"), ...kept]) : "";
 }
 
 /**
@@ -384,13 +423,18 @@ function memoryLines(scope: Pick<MindScope, "state" | "memory" | "world">, c: Mi
  * first, within what they read of it, each whole until that runs out (the entry it runs out on cut at
  * a word, or left out once not even its title and a few words fit); then the lore the turn activates,
  * read as them: the entries `about` names by a key, an alias, a title or a lookup-table term, in rank
- * order, within their own limit. Their own secrets are in who they are, and a pin given is not given
- * again, so nothing comes twice. `report` hears what became of each entry.
+ * order, within their own limit. Their own secrets in who they are aren't given again, and a pin
+ * given is not given again, so nothing comes twice; a secret they read in what they hold (DESIGN
+ * §24.11) comes here whole when the turn calls for it, as any entry they may read. `report` hears
+ * what became of each entry.
  */
 function loreBlock(scope: MindScope, about: string, report?: MindContextReport): string {
   const { reg, world, state, who, reads } = scope;
   const reader = { reg, world, state, tokens: sectionTokens };
-  const held = heldLore(world, who).map((l) => l.id);
+  const recorded = scope.knowledge !== undefined && reads.knowledge.on ? readKnowledge(state).facts : {};
+  const held = heldLore(world, who)
+    .filter((l) => !(l.holders ?? []).includes(who) || !own(recorded, loreFactId(l)))
+    .map((l) => l.id);
   const given = new Set(held);
   const lines: string[] = [];
   if (reads.pinned.on) {
@@ -490,6 +534,7 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
     `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
     block("Who you are", identityLines(scope)),
     block("What you mean to do", intentLines(intentOf(state, who))),
+    knowledgeBlock(scope, place),
     block("Where you are", sceneLines(scope, place)),
     reads.summary.on && c.summary !== "" ? block("Your story so far", [clip(c.summary, charsOf(reads.summary.tokens))]) : "",
     block("Your usual routine (habits you may weigh, never orders: what is happening now comes first)", routine),

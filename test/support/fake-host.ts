@@ -804,9 +804,13 @@ export class FakeHost implements HostPort {
   /**
    * The World Info a prompt gets, read from the chat's books and the global ones as they are now, and
    * the entries the host builds from a character's card (`cardEntries`). The interceptor runs first,
-   * as Lumiverse's does: an off vote wins, `enabled` switches on an entry stored switched off, and a
-   * throw leaves the entries as stored. Then every enabled constant entry with text activates; an
-   * outlet-only one (position 8) reaches the prompt only where an assembled block holds its outlet.
+   * as Lumiverse's does: an off vote wins, `enabled` switches on an entry stored switched off,
+   * `mutated` gives an entry the prompt's own text, and a throw leaves the entries as stored. Then
+   * every enabled constant entry with text activates; an outlet-only one (position 8) reaches the
+   * prompt only where an assembled block holds its outlet. Each activated entry is inserted as the
+   * host's macro pass leaves it: a `{{// …}}` comment goes, from its `{{` to its first `}}`
+   * (Lumiverse reads it as a closing tag that closes nothing), so a secret mark never reaches a prompt
+   * as written.
    */
   private async worldInfo(chatId: ChatId): Promise<{ activated: (HostBookEntry & { outlet: string | null })[]; placed: AssembledEntry[] }> {
     const ids = this.chat(chatId).metadata.chat_world_book_ids;
@@ -817,7 +821,11 @@ export class FakeHost implements HostPort {
         const verdict = await this.worldInfoInterceptor({ chatId, userId: this.userId, entries: candidates.map((e) => ({ id: e.id, bookId: e.bookId, disabled: e.disabled, extensions: structuredClone(e.extensions), comment: e.comment, content: e.content })), chatMetadata: structuredClone(this.chat(chatId).metadata) });
         const off = new Set(verdict.disabled);
         const on = new Set(verdict.enabled);
-        for (const e of candidates) e.disabled = off.has(e.id) || (e.disabled && !on.has(e.id));
+        const text = new Map((verdict.mutated ?? []).map((m) => [m.id, m.content]));
+        for (const e of candidates) {
+          e.disabled = off.has(e.id) || (e.disabled && !on.has(e.id));
+          e.content = text.get(e.id) ?? e.content;
+        }
       } catch {
         // Lumiverse logs the failure and activates the entries as stored.
       }
@@ -827,7 +835,7 @@ export class FakeHost implements HostPort {
     const blocks = this.activePreset === null ? [] : this.activePreset === "preset-1" ? this.presetBlocks : (this.otherPresets.get(this.activePreset)?.blocks ?? []);
     const held = new Set(blocks.filter((b) => this.blockStates[b.id] ?? b.enabled).flatMap((b) => [...b.content.matchAll(/\{\{outlet::([^}]*)\}\}/gi)].map((m) => (m[1] ?? "").trim().toLowerCase())));
     const outlets = this.assembledOutlets ?? (this.presetPlacesOutlets ? held : null);
-    const placed = activated.filter((e) => e.position !== 8 || outlets === null || outlets.has(e.outlet ?? "")).map((e) => ({ id: e.id, content: e.content, position: e.position, depth: e.depth, role: e.role, outlet: e.outlet }));
+    const placed = activated.filter((e) => e.position !== 8 || outlets === null || outlets.has(e.outlet ?? "")).map((e) => ({ id: e.id, content: e.content.replace(/\{\{[ \t]*\/\/[\s\S]*?\}\}/g, ""), position: e.position, depth: e.depth, role: e.role, outlet: e.outlet })).filter((e) => e.content.trim() !== "");
     return { activated, placed };
   }
 
@@ -858,7 +866,7 @@ export class FakeHost implements HostPort {
   readonly bookStore = new Map<string, { name: string; character?: boolean; added?: number; updated: number; entries: Map<string, HostBookEntry & { outlet: string | null }> }>();
   private bookChanges = 0;
 
-  /** Entries whose writes the host refuses (`setExtensions` throws), as a write a host fails would. */
+  /** Entries whose writes the host refuses (`update` throws), as a write a host fails would. */
   readonly refusedWrites = new Set<string>();
 
   /**
@@ -949,9 +957,10 @@ export class FakeHost implements HostPort {
       this.fills.push({ entryId, content });
       this.changeEntry(entryId, (e) => ({ ...e, content: content ?? "", disabled: content === null, constant: content !== null }));
     },
-    setExtensions: async (entryId, extensions, disabled) => {
+    update: async (entryId, patch) => {
       if (this.refusedWrites.has(entryId)) throw new Error(`the host refused to write entry ${entryId}`);
-      this.changeEntry(entryId, (e) => ({ ...e, extensions: structuredClone(extensions), disabled: disabled ?? e.disabled }));
+      // Only the parts given, as the host writes them; the rest of the entry stays.
+      this.changeEntry(entryId, (e) => ({ ...e, ...(patch.content !== undefined ? { content: patch.content } : {}), ...(patch.keys !== undefined ? { keys: [...patch.keys] } : {}), ...(patch.disabled !== undefined ? { disabled: patch.disabled } : {}), ...(patch.extensions !== undefined ? { extensions: structuredClone(patch.extensions) } : {}) }));
     },
     deleteEntry: async (entryId) => {
       for (const [bookId, book] of this.bookStore) if (book.entries.delete(entryId)) this.touched(bookId);

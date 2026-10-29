@@ -1,5 +1,5 @@
 // Settings (DESIGN §12): a home list of pages in groups, each page under a header with
-// Back. Getting started: Helper model, Model use, Steps and connections, Minds, Timeouts. Defaults
+// Back. Getting started: Helper model, Model use, Steps and connections, Minds, Narrator, Timeouts. Defaults
 // for new chats: Realism, Checks, Time. Replies: Changes from the reply, Swipes. Your preset.
 // Display: Show ids. About: Caveats, fetched on their own (a dry run of the chat) by home and the
 // Caveats page, and Diagnostics (each turn's steps, model calls and failures; behind its own curtain).
@@ -22,6 +22,7 @@ import type { IconName } from "../icons";
 import { revealInScroller } from "../scroll";
 import { ChecksPage, RealismPage, TimePage } from "./defaults";
 import { MindsSection } from "./minds";
+import { NarratorPage, narratorViewSummary } from "./narrator";
 import { PresetPage } from "./preset";
 import { ExtractionPage, SwipesPage } from "./replies";
 import { type Connection, HelperSection, helperSummary, ModelUseSection, StepsSection, useConnections } from "./steps";
@@ -44,6 +45,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   model: { title: "Model use", subtitle: "How much the engine asks a model", icon: "bolt" },
   steps: { title: "Steps and connections", subtitle: "Which model runs each step", icon: "branch" },
   minds: { title: "Minds", subtitle: "How characters think and remember", icon: "sparkle" },
+  narrator: { title: "Narrator", subtitle: "What the narrator knows, and how a secret is marked", icon: "eye" },
   timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
   realism: { title: "Realism", subtitle: "For new chats", icon: "layers" },
   checks: { title: "Checks", subtitle: "For new chats", icon: "dice" },
@@ -59,7 +61,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
 
 /** The home list's groups, in order. */
 const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
-  { title: "Getting started", pages: ["helper", "model", "steps", "minds", "timeouts"] },
+  { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -69,7 +71,8 @@ const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
 ];
 
 const STATIC_CAVEATS = [
-  "Lumiverse's World Info works as usual in world chats, but for two cases: an entry LumiRPEngine keeps secret stays off until its gate holds, and an entry whose text a section already carries that turn (such as the lore about where your character is, in the Place section) is left out.",
+  "Lumiverse's World Info works as usual in world chats. A secret mark in an entry's text ({{// Secret …: …}}) reaches the narrator marked as a secret, or not at all, as the chat's narrator view says; when LumiRPEngine fails on a prompt or runs out of time for it, Lumiverse strips the mark itself, so the secret stays out. An entry an earlier build keeps secret stays switched off in its book until that book's secrecy moves to marks (Build → Lore); one you switched back on yourself goes into such a prompt unmarked.",
+  "Moving a book's secrecy to marks (Build → Lore → Secrecy in your World Info) writes each copy of a secret's text that an earlier build kept switched off as the same secret mark before it switches the copy back as it stood, so Lumiverse strips it from any prompt LumiRPEngine doesn't mark, even in a chat that reads the copy's book and not the secret's. A copy whose text a mark can't hold stays switched off.",
   "Realism, checks and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat in GM → This chat.",
   "Undo covers the latest reply; earlier changes go through Keep or Discard.",
 ];
@@ -84,6 +87,8 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: `${humanize(settings.modelUse.preset)} preset` };
     case "minds":
       return { subtitle: settings.minds.enabled ? `On · ${settings.minds.liveLimit === "none" ? "no Live limit" : `up to ${settings.minds.liveLimit} Live a turn`}` : "Off" };
+    case "narrator":
+      return { subtitle: narratorViewSummary(settings.narrator) };
     case "timeouts":
       return { subtitle: `Engine run ${limitText(settings.timeouts.engineRunMs)} · reading the reply ${limitText(settings.timeouts.postReplyMs)}` };
     case "steps": {
@@ -274,6 +279,8 @@ export function Settings() {
       <StepsSection modelUse={settings.modelUse} helper={settings.helper} jobs={settings.jobs} gates={settings.gates} prompts={settings.minds.prompts} patch={patch} openHelper={() => go("helper")} busy={busy} />
     ) : page === "minds" ? (
       <MindsSection minds={settings.minds} patch={patch} busy={busy} />
+    ) : page === "narrator" ? (
+      <NarratorPage narrator={settings.narrator} patch={patch} busy={busy} />
     ) : page === "timeouts" ? (
       <TimeoutsSection timeouts={settings.timeouts} patch={patch} busy={busy} />
     ) : page === "realism" ? (

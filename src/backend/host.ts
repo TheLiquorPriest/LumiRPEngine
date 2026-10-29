@@ -190,9 +190,9 @@ export type ContextVerdict = "go" | "cancel";
 
 /**
  * A World Info entry as the interceptor sees it before activation (DESIGN §6.1): its book, whether it
- * is off for this prompt so far, its extension data, and its comment and text, by which a copy of a
- * secret is known whatever book holds it (one the host builds from a character's card for the
- * prompt, which no book stores, included).
+ * is off for this prompt so far, its extension data, and its comment and text, by which its secret
+ * marks are read and a copy of a secret is known whatever book holds it (one the host builds from a
+ * character's card for the prompt, which no book stores, included).
  */
 export interface WorldInfoCandidate {
   id: string;
@@ -211,10 +211,15 @@ export interface WorldInfoInput {
   chatMetadata: JsonObject;
 }
 
-/** Its answer, for this prompt only: entries to switch off, and entries stored switched off to switch on (an off vote anywhere wins). */
+/**
+ * Its answer, for this prompt only and never stored: entries to switch off, entries stored switched
+ * off to switch on (an off vote anywhere wins), and entries whose text the prompt holds instead of
+ * their own (`mutated`, absent for none: the host activates and inserts that text).
+ */
 export interface WorldInfoVerdict {
   disabled: string[];
   enabled: string[];
+  mutated?: { id: string; content: string }[];
 }
 
 /** What the running Lumiverse does with a context handler's answer (DESIGN §5.1). */
@@ -311,6 +316,14 @@ export type HostBookEntryInput = Omit<HostBookEntry, "id" | "bookId"> & {
   /** The `{{outlet::name}}` the entry fills, kept in its `extensions.outlet_name`; none when absent. */
   outlet?: string | null;
 };
+
+/** The parts of an entry `books.update` writes, each only when given. */
+export interface HostEntryPatch {
+  content?: string;
+  keys?: string[];
+  disabled?: boolean;
+  extensions?: JsonObject;
+}
 
 /** Where an entry sits in the prompt. The host keeps the outlet beside the extension data, so reading an entry back doesn't show it. */
 export interface HostEntryPlacement {
@@ -480,8 +493,14 @@ export interface HostPort {
     place(entryId: string, placement: HostEntryPlacement, extensions: JsonObject, userId: UserId): Promise<void>;
     /** Fills an entry and switches it on as a constant one, or with null empties it and switches it off; where it sits stays. */
     fill(entryId: string, content: string | null, userId: UserId): Promise<void>;
-    /** Rewrites an entry's extension data and, unless null, whether it is stored switched off; nothing else of it changes. */
-    setExtensions(entryId: string, extensions: JsonObject, disabled: boolean | null, userId: UserId): Promise<void>;
+
+    /**
+     * Writes the parts of an entry `patch` gives, and nothing else of it: its text, its keywords,
+     * whether it is stored switched off and its extension data. Only the user's own press writes a
+     * user's entry this way (Build's make-secret, the secrecy move and its restore, DESIGN §4.2). The
+     * host indexes the entry's text afresh when its text or its switch is written.
+     */
+    update(entryId: string, patch: HostEntryPatch, userId: UserId): Promise<void>;
     deleteEntry(entryId: string, userId: UserId): Promise<void>;
   };
   /** A dry-run assembly of the chat's next prompt (deliverability check, DESIGN §4.2; the D32 preset lint). */

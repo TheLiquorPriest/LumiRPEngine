@@ -1,17 +1,20 @@
 // Settings → Minds (DESIGN §24.6): whether characters get minds, how many think a
 // turn, what refreshes a Near mind and how often a Far one thinks, which levels write memory notes,
 // what a mind reads (each source on or off with its own limit), the Minds section's own budget and a
-// time skip's caps (under Advanced), the user's memory overrides of the world's settings (a
-// disclosure, as they're long), and the four minds prompts, each beside its built-in default with
-// Reset. Every patch is `minds-patch.ts`'s. Styles: styles/minds.ts.
+// time skip's caps (under Advanced), knowledge (DESIGN §24.11: who knows what, its limits and the
+// wording of its texts), the user's memory overrides of the world's settings (a disclosure, as
+// they're long), and the minds prompts, each beside its built-in default with Reset. Every patch is
+// `minds-patch.ts`'s. Styles: styles/minds.ts.
 
+import { useEffect, useId, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
-import type { Limit, MindPurpose, MindSource, MindsReads, MindsSettings } from "../../shared/minds";
-import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, FIDELITIES, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_PURPOSES, MIND_SOURCES, MINDS_DEFAULTS } from "../../shared/minds";
-import { Badge, Button, Disclosure, HostSwitch, NumberStepper, Section } from "../components";
+import type { KnowledgeBatch, KnowledgeLimit, KnowledgeSettings, KnowledgeTextId, Limit, MindPurpose, MindSource, MindsReads, MindsSettings } from "../../shared/minds";
+import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, FIDELITIES, KNOWLEDGE_BATCHES, KNOWLEDGE_LIMITS, KNOWLEDGE_RANGES, KNOWLEDGE_TEXT_IDS, KNOWLEDGE_TEXTS, knowledgeLimitRange, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_PURPOSES, MIND_SOURCES, MINDS_DEFAULTS } from "../../shared/minds";
+import { Badge, Button, Disclosure, HostSwitch, NumberStepper, Section, Seg } from "../components";
+import { Icon } from "../icons";
 import { PromptEditor } from "./prompt-editor";
-import type { MemoryField } from "./minds-patch";
-import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsPolicyPatch, mindsPromptPatch, mindsReadPatch, withMemoryLevel } from "./minds-patch";
+import type { KnowledgeSettingsChange, MemoryField } from "./minds-patch";
+import { knowledgeLimitPatch, knowledgePatch, knowledgePlaceholders, knowledgeTextPatch, MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsPolicyPatch, mindsPromptPatch, mindsReadPatch, missingPlaceholders, withMemoryLevel } from "./minds-patch";
 import { STEP_LABEL } from "../../shared/steps";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
@@ -20,6 +23,7 @@ const PROMPT_NOTE: Record<MindPurpose, string> = {
   memory: "After the reply, per character who heard your message, at the levels you pick: the notes, commitments and plans they take from it.",
   skip: "Before a time skip: further moments in it worth stopping at.",
   consolidate: "Folds a character's faded and surplus notes into their summary.",
+  knowledge: "After the reply, one call per scene, or one per character as set in Knowledge: who learned what, what they worked out and what they now doubt.",
 };
 
 function Note(props: { children: string }) {
@@ -43,6 +47,7 @@ const READ_LABEL: Record<MindSource, string> = {
   routine: "Their usual routine",
   plans: "Their plans",
   life: "Their life: money, the day and commitments",
+  knowledge: "What they know: their own holdings",
 };
 
 const READ_NOTE: Record<MindSource, string> = {
@@ -58,34 +63,37 @@ const READ_NOTE: Record<MindSource, string> = {
   routine: "What they usually do, from their routine and schedules as the world and the story set them, while their routine isn't off: theirs to weigh, never what they must do. A private block only when it's their own, and never social life the planner made up.",
   plans: "What they mean to do later, soonest first, with when, where and who else is in it: the plans the story's turns stated for them and the ones you set in GM mode. A plan shared by several people is each one's. Never the day the planner lays.",
   life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings) and their commitments. None of it is the story as it stands.",
+  knowledge: "While the chat tracks knowledge, the facts they hold and how they came by them (saw it, were told, worked it out), in place of the secrets in who they are. Its limit is Knowledge's What they know tokens.",
 };
 
-/** Where each source is listed: the story as it stands, the chat as the player sees it, what they usually do, or their own memory and life. */
-type ReadGroup = "story" | "chat" | "usual" | "own";
-const READ_GROUP: Readonly<Record<MindSource, ReadGroup>> = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", plans: "usual", life: "own" };
+/** Where each source is listed: the story as it stands, what they know, the chat as the player sees it, what they usually do, or their own memory and life. */
+type ReadGroup = "story" | "known" | "chat" | "usual" | "own";
+const READ_GROUPS: readonly ReadGroup[] = ["story", "known", "chat", "usual", "own"];
+const READ_GROUP: Readonly<Record<MindSource, ReadGroup>> = { pinned: "story", activated: "story", reply: "story", message: "story", knowledge: "known", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", plans: "usual", life: "own" };
 
-const GROUP_TITLE: Record<ReadGroup, string> = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do and mean to do", own: "Their own memory and life" };
+const GROUP_TITLE: Record<ReadGroup, string> = { story: "The story as it stands", known: "What they know", chat: "The chat as you see it", usual: "What they usually do and mean to do", own: "Their own memory and life" };
 
 /** Each group's note; the story as it stands needs none. */
 const GROUP_NOTE: Record<ReadGroup, string | null> = {
   story: null,
+  known: "On unless you turn it off: what they know and how, so they act on that and no more. It reads nothing while the chat doesn't track knowledge.",
   chat: "Off unless you turn it on: it tells a mind of turns its character wasn't there for.",
   usual: "On unless you turn them off: their routine as context, and the plans the story made for them, so they can keep to their days and to what they agreed without the planner deciding for them.",
   own: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind.",
 };
 
 /** What a mind reads: every source in its group, each its own row. */
-export function ReadSources(props: { reads: MindsReads; memory: MindsSettings["memory"]; busy: boolean; patch(patch: JsonObject): void }) {
+export function ReadSources(props: { reads: MindsReads; memory: MindsSettings["memory"]; knowledge: KnowledgeSettings; busy: boolean; patch(patch: JsonObject): void }) {
   return (
     <>
-      {(["story", "chat", "usual", "own"] as const).map((group) => {
+      {READ_GROUPS.map((group) => {
         const note = GROUP_NOTE[group];
         return (
           <div key={group} class="lre-minds-group">
             <span class="lre-minds-group-title">{GROUP_TITLE[group]}</span>
             {note ? <Note>{note}</Note> : null}
             {MIND_SOURCES.filter((s) => READ_GROUP[s] === group).map((source) => (
-              <ReadRow key={source} source={source} reads={props.reads} memory={props.memory} busy={props.busy} patch={props.patch} />
+              <ReadRow key={source} source={source} reads={props.reads} memory={props.memory} knowledge={props.knowledge} busy={props.busy} patch={props.patch} />
             ))}
           </div>
         );
@@ -139,8 +147,8 @@ function MemoryOverride(props: { field: MemoryField; memory: MindsSettings["memo
   );
 }
 
-/** One source of what a mind reads: its switch and, while it's on, its limit (recall's is its memory override; the recent chat has a messages limit too). */
-export function ReadRow(props: { source: MindSource; reads: MindsReads; memory: MindsSettings["memory"]; busy: boolean; patch(patch: JsonObject): void }) {
+/** One source of what a mind reads: its switch and, while it's on, its limit (recall's is its memory override, what they know's is Knowledge's mind tokens; the recent chat has a messages limit too). */
+export function ReadRow(props: { source: MindSource; reads: MindsReads; memory: MindsSettings["memory"]; knowledge: KnowledgeSettings; busy: boolean; patch(patch: JsonObject): void }) {
   const { source, reads, busy } = props;
   const on = reads[source].on;
   const recall = MEMORY_FIELDS.find((f) => f.part === "recall" && f.key === "tokens");
@@ -149,6 +157,11 @@ export function ReadRow(props: { source: MindSource; reads: MindsReads; memory: 
       <HostSwitch label={READ_LABEL[source]} checked={on} disabled={busy} onChange={(next) => props.patch(mindsReadPatch(source, { on: next }))} />
       {!on ? null : source === "recall" ? (
         recall ? <MemoryOverride field={recall} memory={props.memory} busy={busy} patch={props.patch} /> : null
+      ) : source === "knowledge" ? (
+        <>
+          <KnowledgeLimitStepper limit="mindTokens" knowledge={props.knowledge} busy={busy} patch={props.patch} />
+          {props.knowledge.enabled ? null : <Note>Track who knows what is off (Knowledge, below), so this reads nothing unless a chat turns it on in GM → This chat.</Note>}
+        </>
       ) : (
         <>
           {source === "history" ? <LimitField label={`${READ_LABEL.history} (messages)`} noneLabel="no limit" value={reads.history.messages} min={1} fallback={DEFAULT_MIND_READS.history.messages} disabled={busy} onChange={(messages) => props.patch(mindsReadPatch("history", { messages }))} /> : null}
@@ -165,6 +178,203 @@ export function MindPromptEditor(props: { purpose: MindPurpose; value: string | 
   return <PromptEditor id={props.purpose} label={STEP_LABEL[props.purpose]} note={PROMPT_NOTE[props.purpose]} builtIn={MIND_PROMPT_DEFAULTS[props.purpose]} value={props.value} max={MIND_PROMPT_MAX} vars={props.purpose} busy={props.busy} save={(text) => mindsPromptPatch(props.purpose, text)} patch={props.patch} />;
 }
 
+const BATCH_LABEL: Record<KnowledgeBatch, string> = { scene: "One call per scene", character: "One call per character" };
+
+/** Each knowledge limit as Settings names it, with a short note and the stepper's step. */
+const LIMIT_FIELD: Record<KnowledgeLimit, { label: string; note: string; step: number }> = {
+  mindTokens: { label: "What they know, for each mind (tokens)", note: "What a mind reads of the facts it holds. What a mind reads shows it on its What they know row too.", step: 100 },
+  narratorTokens: { label: "Who knows what, for the narrator (tokens)", note: "The narrator's Who knows what: who here knows, suspects or doesn't know the facts in play.", step: 100 },
+  perPerson: { label: "Who knows what: facts per person", note: "The narrator gets each person's most relevant facts, up to this many.", step: 1 },
+  stepTokens: { label: "The knowledge step's context (tokens)", note: "What happened, who could perceive it, what each of them already knows and has seen lately, and the facts in play.", step: 100 },
+  claimChars: { label: "A fact's claim (characters)", note: "The longest claim the knowledge step records; a longer one is cut.", step: 10 },
+  factsPerChat: { label: "Facts made in play, per chat", note: "Past it, the knowledge step makes no new fact; people still learn the ones there are.", step: 1 },
+  holdersPerFact: { label: "People who may hold one fact", note: "Past it, no one else learns that fact from the knowledge step.", step: 1 },
+  factsPerTurn: { label: "New facts a turn", note: "The most new facts one turn's knowledge step records.", step: 1 },
+  learningsPerTurn: { label: "Learnings a turn", note: "The most times one turn's knowledge step records someone coming to know a fact.", step: 1 },
+  inPlayTurns: { label: "A fact stays in play for (turns)", note: "A fact is in play while someone learned it within this many of the latest turns, or while it's about someone or somewhere here.", step: 1 },
+};
+
+/** The limits Knowledge shows open; the rest fold under More limits. */
+const OPEN_LIMITS: readonly KnowledgeLimit[] = ["mindTokens", "narratorTokens", "perPerson", "stepTokens"];
+
+/** One knowledge limit: a whole number within its range (`knowledgeLimitRange`). */
+function KnowledgeLimitStepper(props: { limit: KnowledgeLimit; knowledge: KnowledgeSettings; busy: boolean; patch(patch: JsonObject): void }) {
+  const [min, max] = knowledgeLimitRange(props.limit);
+  const field = LIMIT_FIELD[props.limit];
+  return <NumberStepper label={field.label} value={props.knowledge[props.limit]} min={min} max={max} step={field.step} integer disabled={props.busy} onChange={(value) => props.patch(knowledgeLimitPatch(props.limit, value))} />;
+}
+
+function KnowledgeLimitRow(props: { limit: KnowledgeLimit; knowledge: KnowledgeSettings; busy: boolean; patch(patch: JsonObject): void }) {
+  return (
+    <div class="lre-minds-override" data-lre-knowledge-limit={props.limit}>
+      <KnowledgeLimitStepper limit={props.limit} knowledge={props.knowledge} busy={props.busy} patch={props.patch} />
+      <Note>{LIMIT_FIELD[props.limit].note}</Note>
+    </div>
+  );
+}
+
+/** Where each knowledge text is sent: what a mind reads of its own, how any holding reads, the narrator's Who knows what, and the knowledge step's context. */
+type TextGroup = "mind" | "holding" | "narrator" | "step";
+const TEXT_GROUPS: readonly TextGroup[] = ["mind", "holding", "narrator", "step"];
+const TEXT_GROUP_TITLE: Record<TextGroup, string> = {
+  mind: "What a mind reads",
+  holding: "How a fact someone holds reads",
+  narrator: "The narrator's Who knows what",
+  step: "The knowledge step's context",
+};
+const TEXT_GROUP_NOTE: Record<TextGroup, string> = {
+  mind: "The heading and lead over the facts a mind holds.",
+  holding: "Each line a mind, the narrator and the knowledge step read for a fact someone holds, and the words for how they came by it.",
+  narrator: "How Who knows what names a person's facts, and what they don't know.",
+  step: "The headings of what the knowledge step is given.",
+};
+
+/** Each knowledge text: its group and what it is. */
+const TEXT_FIELD: Record<KnowledgeTextId, { group: TextGroup; label: string }> = {
+  mindTitle: { group: "mind", label: "Heading" },
+  mindLead: { group: "mind", label: "Lead" },
+  known: { group: "holding", label: "A fact they know" },
+  suspected: { group: "holding", label: "A fact they suspect" },
+  disbelieved: { group: "holding", label: "A fact they don't believe" },
+  unsure: { group: "holding", label: "A fact they're unsure of" },
+  keeps: { group: "holding", label: "Whom they keep it from" },
+  everyone: { group: "holding", label: "Kept from everyone" },
+  authored: { group: "holding", label: "How: known from the start" },
+  witnessed: { group: "holding", label: "How: saw it" },
+  told: { group: "holding", label: "How: told by someone" },
+  inferred: { group: "holding", label: "How: worked it out" },
+  guessed: { group: "holding", label: "How: a guess" },
+  person: { group: "narrator", label: "A person's line" },
+  notKnown: { group: "narrator", label: "What someone doesn't know" },
+  stepHappened: { group: "step", label: "What happened" },
+  stepPresent: { group: "step", label: "Who could perceive it" },
+  stepPeople: { group: "step", label: "What each already knows" },
+  stepFacts: { group: "step", label: "Facts in play" },
+  stepPerson: { group: "step", label: "A person" },
+  stepYou: { group: "step", label: "The player character" },
+  stepSaid: { group: "step", label: "What the player character said or did" },
+  stepStory: { group: "step", label: "The story, as written" },
+  stepThroughout: { group: "step", label: "Present: throughout" },
+  stepLeft: { group: "step", label: "Present: left partway" },
+  stepCame: { group: "step", label: "Present: came in during the turn" },
+  stepOpen: { group: "step", label: "An open question" },
+  stepFalse: { group: "step", label: "A false fact" },
+  stepPinned: { group: "step", label: "Pinned lore" },
+  stepTraits: { group: "step", label: "Who they are" },
+  stepHolds: { group: "step", label: "What they hold" },
+  stepNothing: { group: "step", label: "Holding nothing yet" },
+  stepWitnessed: { group: "step", label: "What they witnessed lately" },
+  stepSomeone: { group: "step", label: "A teller with no name" },
+  stepAnswer: { group: "step", label: "What each list of the answer holds" },
+};
+
+/**
+ * One knowledge text as the user words it (`minds.knowledge.prompts[id]`): the saved wording, else
+ * the shipped text to start from, with Save, Revert and Reset. A wording that leaves out a shipped
+ * placeholder can't be saved: the engine fills each.
+ */
+function KnowledgeTextField(props: { id: KnowledgeTextId; value: string | undefined; busy: boolean; patch(patch: JsonObject): void }) {
+  const { id, busy } = props;
+  const input = useId();
+  const shipped = KNOWLEDGE_TEXTS[id];
+  const saved = props.value ?? shipped;
+  const [text, setText] = useState(saved);
+  useEffect(() => setText(saved), [saved]);
+  const save = knowledgeTextPatch(id, text);
+  const placeholders = knowledgePlaceholders(id);
+  const missing = text.trim() === "" ? [] : missingPlaceholders(id, text);
+  const error = text.length > MIND_PROMPT_MAX ? `Too long: at most ${MIND_PROMPT_MAX.toLocaleString()} characters.` : missing.length > 0 ? `Keep ${missing.join(", ")}: the engine fills ${missing.length === 1 ? "it" : "each"} in.` : null;
+  const label = TEXT_FIELD[id].label;
+  return (
+    <div class="lre-minds-tpl" data-lre-knowledge-text={id}>
+      <div class="lre-minds-tpl-head">
+        <span class="lre-minds-tpl-text">
+          <label class="lre-minds-subhead" for={input}>
+            {label}
+          </label>
+          {placeholders.length > 0 ? <span class="lre-minds-note">Keep {placeholders.join(", ")}.</span> : null}
+        </span>
+        {props.value !== undefined ? <Badge tone="accent">Your own</Badge> : <Badge>Shipped</Badge>}
+      </div>
+      <textarea id={input} class="lre-input lre-minds-text-input" rows={shipped.length > 80 ? 3 : 1} value={text} disabled={busy} onInput={(event) => setText(event.currentTarget.value)} />
+      {error ? (
+        <div class="lre-set-warn" role="note">
+          <Icon name="alert" size={16} />
+          <span>{error}</span>
+        </div>
+      ) : null}
+      <div class="lre-minds-actions">
+        <Button size="sm" variant="primary" disabled={busy || save === null || text === saved} onClick={() => save && props.patch(save)}>
+          Save
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy || text === saved} onClick={() => setText(saved)}>
+          Revert
+        </Button>
+        <Button size="sm" icon="undo" label={`Reset ${label} to the shipped text`} disabled={busy || props.value === undefined} onClick={() => props.patch(knowledgeTextPatch(id, null) ?? {})}>
+          Reset
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Settings → Minds → Knowledge (DESIGN §24.11): shown with minds on or off, as the knowledge step runs either way. */
+function KnowledgeSection(props: { knowledge: KnowledgeSettings; busy: boolean; patch(patch: JsonObject): void }) {
+  const { knowledge: k, busy } = props;
+  const set = (change: KnowledgeSettingsChange) => props.patch(knowledgePatch(change));
+  const [lo, hi] = KNOWLEDGE_RANGES.threshold;
+  return (
+    <Section title="Knowledge">
+      <div class="lre-minds-body" data-lre-knowledge-settings="">
+        <HostSwitch label="Track who knows what" checked={k.enabled} disabled={busy} onChange={(enabled) => set({ enabled })} />
+        <Note>On, each character holds the facts they know. After each reply the knowledge step works out who learned what; minds read what they know, the narrator gets Who knows what, and Play shows What you know. A chat's own switch in GM → This chat wins.</Note>
+        <NumberStepper label="Suspicion threshold (%)" value={Math.round(k.threshold * 100)} min={lo * 100} max={hi * 100} step={5} integer disabled={busy} onChange={(percent) => set({ threshold: percent / 100 })} />
+        <Note>A fact someone holds less surely than this is a suspicion, not something they know.</Note>
+        <div class="lre-minds-group">
+          <span class="lre-minds-group-title">The knowledge step</span>
+          <Seg<KnowledgeBatch> label="The knowledge step" value={k.batch} options={KNOWLEDGE_BATCHES.map((b) => ({ value: b, label: BATCH_LABEL[b] }))} disabled={busy} onChange={(batch) => set({ batch })} />
+          <Note>One call per scene works out everyone who could perceive the turn at once. One call per character asks about each of them alone: closer reading, a call each.</Note>
+        </div>
+        <div class="lre-minds-group">
+          <span class="lre-minds-group-title">Limits</span>
+          <div class="lre-minds-overrides">
+            {OPEN_LIMITS.map((limit) => (
+              <KnowledgeLimitRow key={limit} limit={limit} knowledge={k} busy={busy} patch={props.patch} />
+            ))}
+          </div>
+          <Disclosure summary="More limits">
+            <div class="lre-minds-overrides">
+              {KNOWLEDGE_LIMITS.filter((limit) => !OPEN_LIMITS.includes(limit)).map((limit) => (
+                <KnowledgeLimitRow key={limit} limit={limit} knowledge={k} busy={busy} patch={props.patch} />
+              ))}
+            </div>
+          </Disclosure>
+        </div>
+        <div class="lre-minds-group">
+          <span class="lre-minds-group-title">Texts</span>
+          <Note>The words knowledge sends a model, besides the knowledge step's own prompt (under Prompts). Yours replaces the shipped text; Reset goes back to it.</Note>
+          {TEXT_GROUPS.map((group) => (
+            <Disclosure
+              key={group}
+              summary={
+                <span class="lre-minds-summary">
+                  <span>{TEXT_GROUP_TITLE[group]}</span>
+                  {KNOWLEDGE_TEXT_IDS.some((id) => TEXT_FIELD[id].group === group && k.prompts[id] !== undefined) ? <Badge tone="accent">Yours</Badge> : null}
+                </span>
+              }
+            >
+              <Note>{TEXT_GROUP_NOTE[group]}</Note>
+              {KNOWLEDGE_TEXT_IDS.filter((id) => TEXT_FIELD[id].group === group).map((id) => (
+                <KnowledgeTextField key={id} id={id} value={k.prompts[id]} busy={busy} patch={props.patch} />
+              ))}
+            </Disclosure>
+          ))}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObject): void; busy: boolean }) {
   const { minds, busy } = props;
   const policy = (change: Parameters<typeof mindsPolicyPatch>[0]) => props.patch(mindsPolicyPatch(change));
@@ -177,7 +387,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
       <Section>
         <div class="lre-minds-body">
           <HostSwitch label="Character minds" checked={minds.enabled} disabled={busy} onChange={(enabled) => policy({ enabled })} />
-          <Note>Picking a Model use preset sets everything here but what a mind reads, your prompts and memory overrides; changing any of the rest makes it Custom.</Note>
+          <Note>Picking a Model use preset sets everything here but what a mind reads, knowledge, your prompts and memory overrides; changing any of the rest makes it Custom.</Note>
         </div>
       </Section>
       {minds.enabled ? (
@@ -217,7 +427,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
           <Section title="What a mind reads">
             <div class="lre-minds-body">
               <Note>Who they are (their own sheet, aims and secrets), where they are and whom they see there, and what they mean to do are always in it. Each source below is yours to switch on or off and to limit; within its limit it comes whole, and nothing else cuts it.</Note>
-              <ReadSources reads={minds.reads} memory={minds.memory} busy={busy} patch={props.patch} />
+              <ReadSources reads={minds.reads} memory={minds.memory} knowledge={minds.knowledge} busy={busy} patch={props.patch} />
             </div>
           </Section>
           <Section>
@@ -236,6 +446,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
           </Section>
         </>
       ) : null}
+      <KnowledgeSection knowledge={minds.knowledge} busy={busy} patch={props.patch} />
       <Section title="Memory">
         <div class="lre-minds-body">
           <Note>Each world sets how its characters remember (Build → World → Minds); what you set here wins in every world.</Note>

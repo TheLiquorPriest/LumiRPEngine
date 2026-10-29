@@ -1,29 +1,31 @@
 // Build → World → Minds (DESIGN §24.2): what the narrator gets of a mind (secrecy),
 // the fidelity ladder's thresholds and focus weights, who is always Live and who never gets a mind,
-// the memory defaults, and the world's own step templates for the minds steps, written in the
-// step-template editor. Saved whole as `lre.editor set part minds` from the sticky bar; a world left
-// at the defaults keeps no config. Each group shows the lint under its own path. Styles:
-// styles/minds.ts and styles/forms.ts.
+// the memory defaults, what each person knows from the start (§24.11), and the world's own step
+// templates for the minds steps, written in the step-template editor. Saved whole as `lre.editor set
+// part minds` from the sticky bar; a world left at the defaults keeps no config. Each group shows the
+// lint under its own path. Styles: styles/minds.ts and styles/forms.ts.
 
 import { useMemo, useState } from "preact/hooks";
+import { hasOwn } from "../../shared/json";
 import type { JsonObject } from "../../shared/json";
-import type { FidelityWeights, Limit, MindPurpose, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
-import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PURPOSES, MINDS_RANGES, worldMindsOf, worldMindTemplate } from "../../shared/minds";
+import type { AuthoredHolding, AuthoredHoldings, FidelityWeights, HoldingBelief, Limit, MindPurpose, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
+import { DEFAULT_WORLD_MINDS, factId, HOLDING_BELIEFS, MIND_PROMPT_DEFAULTS, MIND_PURPOSES, MINDS_RANGES, worldMindsOf, worldMindTemplate } from "../../shared/minds";
 import type { LintIssue } from "../../shared/protocol";
 import type { WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
-import { Badge, Button, Disclosure, IconButton, IdText, NumberStepper, PageHeader, SaveBar, useBusy } from "../components";
+import { Badge, Button, Disclosure, IconButton, IdText, NumberStepper, PageHeader, SaveBar, Seg, useBusy } from "../components";
 import { Icon } from "../icons";
 import { STEP_LABEL } from "../../shared/steps";
 import { MEMORY_FIELDS, memoryValue } from "../settings/minds-patch";
 import { useSelect } from "../store";
 import { itemLabel, PART_INFO } from "./chrome";
 import { draftSend } from "./draft";
-import { AddPicker, CheckField, FormGroup, Issues, ItemRow } from "./form-kit";
+import type { RefOption } from "./form-kit";
+import { AddPicker, CheckField, Chip, FormGroup, Issues, ItemRow, RefPicker } from "./form-kit";
 import { useHeld } from "./held";
 import { lintAt } from "./schema-form";
-import { SelectorEditor } from "./selector-editor";
-import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
+import { kindIs, SelectorEditor } from "./selector-editor";
+import { BELIEF_LABEL, FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
 export const SECRECY_EXPLAINED: Record<MindsSecrecy, { label: string; text: string }> = {
   brief: {
@@ -54,7 +56,7 @@ const WEIGHT_LABEL: Record<FlatWeight, string> = {
 const BAND_LABEL: Record<keyof FidelityWeights["band"], string> = { principal: "Tier band: leads", supporting: "Tier band: supporting", background: "Tier band: background" };
 
 /** The config's parts with a group of their own here; lint under any other path shows at the top. */
-const GROUPED = ["minds.secrecy", "minds.thresholds", "minds.weights", "minds.always", "minds.never", "minds.memory"] as const;
+const GROUPED = ["minds.secrecy", "minds.thresholds", "minds.weights", "minds.always", "minds.never", "minds.memory", "minds.holdings"] as const;
 
 /** The value the editor saves: none at all when it is the defaults, so the world keeps no config; an unset selector is left out. */
 export function mindsPartValue(config: WorldMindsConfig): JsonObject {
@@ -152,6 +154,134 @@ function MindTemplates(props: { doc: WorldDoc; worldId: string; unsaved: boolean
           </div>
         );
       })}
+    </FormGroup>
+  );
+}
+
+/** A label from the world's own kind, else the field's id in words. */
+function fieldWords(doc: WorldDoc, kind: string, field: string): string {
+  const def = hasOwn(doc.kinds, kind) ? doc.kinds[kind] : undefined;
+  const label = def && hasOwn(def.fields, field) ? def.fields[field]?.label : undefined;
+  return label ?? field.replace(/_/g, " ");
+}
+
+/** The facts an author can give someone from the start (DESIGN §24.11), as the picker offers them: lore by title, each track's stage, and each person's own fields. */
+function startFacts(doc: WorldDoc): RefOption[] {
+  const lore = Object.values(doc.lore).map((e) => ({ value: factId({ kind: "lore", lore: e.id }), label: e.title || e.id, sublabel: e.secret ? "Secret lore" : "Lore" }));
+  const stages = Object.values(doc.tracks).flatMap((t) => Object.entries(t.stages).map(([id, s]) => ({ value: factId({ kind: "track", track: t.id, stage: id }), label: `${t.label}: ${s.label}`, sublabel: s.truth ? `Its truth: ${s.truth}` : "A stage of a track" })));
+  const fields = Object.values(doc.entities)
+    .filter((e) => kindIs(doc, e.kind, "person"))
+    .flatMap((e) => Object.keys(e.fields).map((f) => ({ value: factId({ kind: "field", entity: e.id, field: f }), label: `${e.name}: ${fieldWords(doc, e.kind, f)}`, sublabel: "A person's field" })));
+  return [...lore, ...stages, ...fields].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+const KEPT_CHOICES: readonly { value: "none" | "everyone" | "some"; label: string }[] = [
+  { value: "none", label: "No one" },
+  { value: "everyone", label: "Everyone" },
+  { value: "some", label: "Some people" },
+];
+
+/** One fact someone holds from the start: what they make of it, how sure they are, whom they keep it from, and Remove. */
+function StartHolding(props: { people: readonly RefOption[]; holder: string; label: string; value: AuthoredHolding; lint: readonly LintIssue[]; disabled: boolean; onChange(next: AuthoredHolding | null): void }) {
+  const { value: h, disabled } = props;
+  const named = Array.isArray(h.keptFrom) ? h.keptFrom : [];
+  // Some people with none named yet is a choice in progress: until someone is added it keeps it from no one.
+  const [some, setSome] = useState(named.length > 0);
+  const kept = h.keptFrom === "everyone" ? "everyone" : named.length > 0 || some ? "some" : "none";
+  const others = props.people.filter((p) => p.value !== props.holder && !named.includes(p.value));
+  const nameOf = (id: string): string => props.people.find((p) => p.value === id)?.label ?? id;
+  const keep = (keptFrom: AuthoredHolding["keptFrom"]): void => props.onChange(keptFrom === undefined ? { belief: h.belief, confidence: h.confidence } : { ...h, keptFrom });
+  return (
+    <div class="lre-minds-role" data-lre-minds-held={props.label}>
+      <div class="lre-minds-role-field">
+        <span class="lre-minds-subhead">{props.label}</span>
+        <Seg<HoldingBelief> label={`What ${nameOf(props.holder)} makes of it`} value={h.belief} disabled={disabled} options={HOLDING_BELIEFS.map((b) => ({ value: b, label: BELIEF_LABEL[b] }))} onChange={(belief) => props.onChange({ ...h, belief })} />
+        <NumberStepper label="How sure, from 0 to 1" value={h.confidence} min={0} max={1} step={0.05} disabled={disabled} onChange={(confidence) => props.onChange({ ...h, confidence })} />
+        <Seg<(typeof KEPT_CHOICES)[number]["value"]>
+          label="Whom they keep it from"
+          value={kept}
+          disabled={disabled}
+          options={KEPT_CHOICES}
+          onChange={(choice) => {
+            setSome(choice === "some");
+            if (choice === "everyone") keep("everyone");
+            else if (choice === "none" || h.keptFrom === "everyone") keep(undefined);
+          }}
+        />
+        {kept === "some" ? (
+          <>
+            {named.length > 0 ? (
+              <div class="lre-form-chips">
+                {named.map((id) => (
+                  <Chip key={id} removeLabel={`Remove ${nameOf(id)}`} disabled={disabled} onRemove={() => keep(named.length > 1 ? named.filter((x) => x !== id) : undefined)}>
+                    {nameOf(id)}
+                  </Chip>
+                ))}
+              </div>
+            ) : null}
+            <AddPicker label="Keep it from" options={others} placeholder="Keep it from…" disabled={disabled} onAdd={(id) => keep([...named, id])} />
+          </>
+        ) : null}
+        <Issues issues={props.lint} />
+      </div>
+      <IconButton icon="trash" label={`Remove ${props.label}`} disabled={disabled} onClick={() => props.onChange(null)} />
+    </div>
+  );
+}
+
+/**
+ * What each person knows from the start (DESIGN §24.11): per person, the facts they hold (lore, a
+ * track's stage, someone's field), what they make of each, how sure they are and whom they keep it
+ * from. They seed every chat's holdings, the player character's too; what they learn in play goes
+ * on from there.
+ */
+function StartHoldings(props: { doc: WorldDoc; value: AuthoredHoldings; lint: readonly LintIssue[]; disabled: boolean; onChange(next: AuthoredHoldings): void }) {
+  const { doc, value, disabled } = props;
+  const facts = useMemo(() => startFacts(doc), [doc]);
+  const people = useMemo(
+    () =>
+      Object.values(doc.entities)
+        .filter((e) => kindIs(doc, e.kind, "person"))
+        .map((e) => ({ value: e.id, label: e.id === doc.pov ? `${e.name} (the player character)` : e.name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [doc],
+  );
+  const [who, setWho] = useState("");
+  const nameOf = (id: string): string => people.find((p) => p.value === id)?.label ?? id;
+  const factName = (id: string): string => facts.find((f) => f.value === id)?.label ?? id;
+  const heldBy = (id: string): Record<string, AuthoredHolding> => (hasOwn(value, id) ? (value[id] ?? {}) : {});
+  const put = (holder: string, fact: string, next: AuthoredHolding | null): void => {
+    const held = { ...heldBy(holder) };
+    if (next) held[fact] = next;
+    else delete held[fact];
+    const all = { ...value };
+    if (Object.keys(held).length > 0) all[holder] = held;
+    else delete all[holder];
+    props.onChange(all);
+  };
+  return (
+    <FormGroup title="What they know from the start">
+      <p class="lre-minds-note">The lore, the stages of tracks and the people's fields each person holds when a chat starts: what they make of each, how sure they are, and whom they keep it from. It seeds what everyone, the player character included, knows in every chat, and what they learn in play goes on from there. A World Info entry's own secret marks say who holds them.</p>
+      {Object.keys(value)
+        .sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+        .map((holder) => (
+          <div key={holder} class="lre-minds-tpl" data-lre-minds-holder={holder}>
+            <span class="lre-minds-tpl-text">
+              <span class="lre-minds-subhead">{nameOf(holder)}</span>
+              <IdText id={holder} />
+            </span>
+            <Issues issues={props.lint.filter((i) => i.path === `minds.holdings.${holder}`)} />
+            {Object.entries(heldBy(holder)).map(([fact, h]) => (
+              <StartHolding key={fact} people={people} holder={holder} label={factName(fact)} value={h} lint={lintAt(props.lint, `minds.holdings.${holder}.${fact}`)} disabled={disabled} onChange={(next) => put(holder, fact, next)} />
+            ))}
+          </div>
+        ))}
+      <div class="lre-minds-tpl" data-lre-minds-holdings-add="">
+        <span class="lre-minds-subhead">Add something someone knows</span>
+        <RefPicker label="Who knows it" value={who} options={people} placeholder="Choose someone…" disabled={disabled} onChange={setWho} />
+        {who !== "" ? <AddPicker label="What they know" options={facts.filter((f) => !hasOwn(heldBy(who), f.value))} placeholder="Add what they know…" disabled={disabled} onAdd={(fact) => put(who, fact, { belief: "true", confidence: 1 })} /> : null}
+      </div>
+      <Issues issues={props.lint.filter((i) => i.path === "minds.holdings")} />
     </FormGroup>
   );
 }
@@ -261,6 +391,7 @@ export function MindsEditor() {
         </div>
         <Issues issues={lintAt(draft.lint, "minds.memory")} />
       </FormGroup>
+      <StartHoldings doc={draft.doc} value={value.holdings} lint={lintAt(draft.lint, "minds.holdings")} disabled={busy} onChange={(holdings) => setValue({ ...value, holdings })} />
       <MindTemplates doc={draft.doc} worldId={draft.worldId} unsaved={changed} />
       <SaveBar>
         <Button variant="primary" disabled={!changed} busy={busy} onClick={() => save(mindsPartValue(value))}>

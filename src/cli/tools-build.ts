@@ -1,6 +1,6 @@
 // The rest of Build the world tools don't reach (DESIGN §11, §12): the head's lint, the Sheet
-// Designer's preview, a ruleset profile applied to the draft in one write, and a chat's map: how it
-// shows, and what Walk here takes.
+// Designer's preview, a ruleset profile applied to the draft in one write, a chat's map (how it
+// shows, and what Walk here takes), and a chat's own knowledge choices (DESIGN §6.11).
 
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import { ALL_PACKS } from "../packs/index";
@@ -9,6 +9,7 @@ import { hasOwn, isRecord } from "../shared/json";
 import { planProfile, PROFILE_IDS, PROFILES, type ProfileChoice, type ProfileId } from "../shared/profiles/index";
 import type { JsonPatchOp, ResultBodies } from "../shared/protocol";
 import { FIDELITIES } from "../shared/minds";
+import { NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, narratorViewOf, type NarratorView } from "../shared/settings";
 import { DEFAULT_ROUTINE_SETTINGS, ROUTINE_SETTING_VALUES, routineSettingsOf, routineSettingsProblems } from "../shared/routines";
 import type { EditorBody as DraftRead } from "./live";
 import type { Args } from "./args";
@@ -91,6 +92,16 @@ async function sheetTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
   return read.ok ? { text: read.text } : { text: read.text, isError: true };
 }
 
+/** What lre_chat_knowledge sends: the parts given, each checked here so a wrong one is refused naming what it takes. */
+function chatKnowledgeChange(args: Args): { knowledge?: boolean | null; narrator?: NarratorView | null } {
+  const knowledge = args.knowledge;
+  if (knowledge !== undefined && knowledge !== null && typeof knowledge !== "boolean") throw new ToolError("knowledge is true (track what each character knows), false (don't), or null (as Settings has it).");
+  const given = args.narrator;
+  const narrator = given === undefined || given === null ? given : narratorViewOf(given);
+  if (narrator === null && given !== null) throw new ToolError(`narrator is {"knowledge": ${NARRATOR_KNOWLEDGE.map((k) => `"${k}"`).join(" or ")}, "secrets": ${NARRATOR_SECRETS.map((s) => `"${s}"`).join(" or ")}}, both given, or null to follow the world's default, else Settings.`);
+  return { ...(knowledge !== undefined ? { knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}) };
+}
+
 export const BUILD_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_lint",
@@ -143,6 +154,32 @@ export const BUILD_TOOLS: readonly ToolModule[] = [
       return { text: json({ chatId, display: body.display ?? display }) };
     },
     cli: { command: "map-display", section: "Play", usage: "map-display <chatId> <knowledge|fog>", summary: "How a chat's map shows", positionals: ["chatId", "display"], needs: 2 },
+  },
+  {
+    name: "lre_chat_knowledge",
+    description:
+      'This chat\'s own knowledge choices (GM → This chat → Knowledge), over its world\'s default and Settings: knowledge, whether the engine tracks what each character knows (true or false; else Settings → Minds has it); narrator, the narrator\'s knowledge: {"knowledge": "scene" (everyone in the scene\'s, each fact beyond the player character\'s marked) or "pov" (the player character\'s only), "secrets": "marked" (fed, marked as secrets) or "omit" (left out)} (else the world\'s narrator default, else Settings → Narrator). null returns a part to following; a part left out stays; with neither given it only reads. Kept in the chat\'s metadata, never its story: no recorded turn changes, a Branch keeps them, and they apply from the next turn (a reply prepared before is made again). Returns the chat\'s own choices, null where it follows.',
+    inputSchema: object(
+      {
+        chatId: CHAT_ID,
+        knowledge: { type: ["boolean", "null"], description: "Track what each character knows in this chat (true or false), or null to follow Settings." },
+        narrator: {
+          type: ["object", "null"],
+          properties: { knowledge: { type: "string", enum: [...NARRATOR_KNOWLEDGE] }, secrets: { type: "string", enum: [...NARRATOR_SECRETS] } },
+          required: ["knowledge", "secrets"],
+          additionalProperties: false,
+          description: "The narrator's knowledge in this chat, whole, or null to follow the world's default, else Settings.",
+        },
+      },
+      ["chatId"],
+    ),
+    write: { destructive: false, idempotent: true },
+    run: async (args, ctx) => {
+      const chatId = neededText(args, "chatId", "the chat's id");
+      const body = await ctx.live().conn.request("lre.chat.knowledge", { chatId, ...chatKnowledgeChange(args) });
+      return { text: json({ chatId, knowledge: body.knowledge, narrator: body.narrator }) };
+    },
+    cli: { command: "chat-knowledge", section: "Play", usage: "chat-knowledge <chatId> [--knowledge <true|false|null>] [--narrator <json|null>]", summary: "Read or set a chat's own knowledge choices", positionals: ["chatId"], needs: 1, options: { "--knowledge": { arg: "knowledge", as: "json" }, "--narrator": { arg: "narrator", as: "json" } } },
   },
   {
     name: "lre_map_walk",

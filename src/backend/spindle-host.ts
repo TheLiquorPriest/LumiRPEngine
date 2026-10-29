@@ -576,8 +576,9 @@ export function createSpindleHost(): HostPort {
         // Only these three fields: where the entry sits, its outlet and its extension data stay.
         await spindle.world_books.entries.update(entryId, content === null ? { content: "", disabled: true, constant: false } : { content, disabled: false, constant: true }, userId);
       },
-      async setExtensions(entryId, extensions, disabled, userId) {
-        await spindle.world_books.entries.update(entryId, disabled === null ? { extensions } : { extensions, disabled }, userId);
+      async update(entryId, patch, userId) {
+        // Only the parts given: the host keeps every other field of the entry, its outlet included.
+        await spindle.world_books.entries.update(entryId, { ...(patch.content !== undefined ? { content: patch.content } : {}), ...(patch.keys !== undefined ? { key: patch.keys } : {}), ...(patch.disabled !== undefined ? { disabled: patch.disabled } : {}), ...(patch.extensions !== undefined ? { extensions: patch.extensions } : {}) }, userId);
       },
       async deleteEntry(entryId, userId) {
         await spindle.world_books.entries.delete(entryId, userId);

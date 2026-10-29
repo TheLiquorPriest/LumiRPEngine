@@ -1,10 +1,11 @@
 // The tools for lore around a world (DESIGN §4.2, §24.5): the user's World Info books and their
 // entries a pin may name, the pins of a world as they read now, the drift of entries indexed from
-// a book, and Save to lore from a chat. A world's own lore entries and pins are its document's
-// (`/lore`, `/lorePins`), written with lre_edit like the rest of it.
+// a book, Save to lore from a chat, and Build's own edits of a World Info entry: its LRE fields and
+// its secret marks. A world's own lore entries and pins are its document's (`/lore`, `/lorePins`),
+// written with lre_edit like the rest of it.
 
 import type { JsonObject } from "../shared/json";
-import type { BookLoreFields } from "../shared/lore";
+import type { BookFieldsEdit } from "../shared/lore";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, ToolError } from "./args";
 import { readAt } from "./read";
@@ -56,7 +57,7 @@ export const LORE_TOOLS: readonly ToolModule[] = [
   },
   {
     name: "lre_lore_entries",
-    description: 'One World Info book\'s entries (lre_lore_books lists the books): id, title, whether it is switched off in its book (a pin of that entry still reads it), and its length; "twins", the entries of the same text (spacing aside) in any of your books, which its secrecy keeps off with it; and "copyOf" on a twin kept secret with another entry ("kept" while a secret of its text holds it). A pin names one as {"book": "<bookId>", "entry": "<entryId>"} in a world\'s /lorePins, and the whole book as {"book": "<bookId>"}: its switched-on entries, read in the book\'s order whenever a call reads it, so entries added later are read too.',
+    description: 'One World Info book\'s entries (lre_lore_books lists the books): id, title, whether it is switched off in its book (a pin of that entry still reads it), its length, and its LumiRPEngine fields ("lore") when it has any, an earlier build\'s secrecy among them, read as it stands. "marks": the secret marks its text holds ({{// Secret (known to <names>; kept from <names>): <text>}}), in order, each with its text and names as written ("keptFrom": "everyone" when it is kept from everyone but those who know it); "whole" when its whole text is one mark, which makes the whole entry secret; "unreadable": what in its text starts like a mark but can\'t be read as one, with why (left out of every prompt and helper until it is fixed in the entry\'s text); "copyOf": the entry an earlier build switched this one off as a copy of. A pin names one as {"book": "<bookId>", "entry": "<entryId>"} in a world\'s /lorePins, and the whole book as {"book": "<bookId>"}: its switched-on entries, read in the book\'s order whenever a call reads it, so entries added later are read too.',
     inputSchema: object({ bookId: { type: "string", description: "The book's id." }, offset: OFFSET }, ["bookId"]),
     write: false,
     run: async (args, ctx) => {
@@ -98,7 +99,7 @@ export const LORE_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_lore_fields",
     description:
-      'Set LumiRPEngine\'s fields on one of your World Info entries, as Build → Lore → World Info does (DESIGN §4.2): {"secret": true, "gate": "<formula>"} keeps the entry secret (stored switched off; the engine switches it on for a prompt, and its helpers read it, only once the gate holds), "audience" names the helpers that may read it before then, "visibility": "known_by" with "links" shows it once the player knows them, and "aliases" and "holders" are as on a world entry. fields: null takes them off; a secret made public is switched back on. Its twins (entries of the same text, spacing aside, in any of your books, such as the copy a character\'s card brings) go with it: kept secret and switched off with it, and put back as they stood once no secret holds their text; a twin kept secret that way is refused here, since it follows the secret. The entry\'s book is read as lore when it is attached to the chat, global, or in the world\'s /loreBooks. Answers the book\'s entries with their fields.',
+      'Set LumiRPEngine\'s own fields on one of your World Info entries, as Build → Lore → World Info\'s Save does (DESIGN §4.2): "visibility": "known_by" with "links" shows it once the player knows them, and "aliases" are other names it goes by, as on a world entry. Only these are written, each as given (one left out is taken off); fields: null takes them all off. Nothing else of the entry is written. An entry is made secret by a secret mark in its text, which only the user writes, with Build\'s Make secret, not by fields: "secret", "gate", "audience" and "holders" are refused. An earlier build\'s secrecy fields on it stay as they are, and move to marks with the rest of its book\'s secrecy (Build → Lore). The entry\'s book is read as lore when it is attached to the chat, global, or in the world\'s /loreBooks. Answers the book\'s entries.',
     inputSchema: object({ bookId: { type: "string", description: "The entry's book (lre_lore_books lists them)." }, entryId: { type: "string", description: "The entry (lre_lore_entries lists them)." }, fields: { type: ["object", "null"], description: "The fields, or null to take them off." } }, ["bookId", "entryId", "fields"]),
     write: { destructive: false, idempotent: true },
     run: async (args, ctx) => {
@@ -106,7 +107,7 @@ export const LORE_TOOLS: readonly ToolModule[] = [
       const entryId = neededText(args, "entryId", "the entry's id (lre_lore_entries lists them)");
       const fields = args.fields;
       if (fields !== null && (typeof fields !== "object" || Array.isArray(fields))) throw new ToolError("Give fields as an object, or null to take them off.");
-      const body = await ctx.live().conn.request("lre.lore", { op: "fields", bookId, entryId, fields: fields as BookLoreFields | null });
+      const body = await ctx.live().conn.request("lre.lore", { op: "fields", bookId, entryId, fields: fields as BookFieldsEdit | null });
       return { text: json({ bookId, entries: body.entries ?? [] }) };
     },
     cli: { command: "lore-fields", section: "Lore", usage: "lore-fields <bookId> <entryId> --fields <json|null>", summary: "Set LumiRPEngine's fields on a World Info entry", positionals: ["bookId", "entryId"], needs: 2, options: { "--fields": { arg: "fields", as: "json" } } },

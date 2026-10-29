@@ -47,6 +47,7 @@ export const COVERAGE: Coverage = {
     mind_refresh: { tools: ["lre_gm_edit", "lre_mind_edit"] },
     mind_memory: { tools: ["lre_gm_edit", "lre_mind_edit"] },
     mind_intent: { tools: ["lre_gm_edit", "lre_mind_edit"] },
+    mind_knowledge: { tools: ["lre_gm_edit", "lre_mind_edit"] },
     routine_follow: { tools: ["lre_gm_edit", "lre_routine_edit"] },
     routine_block: { tools: ["lre_gm_edit", "lre_routine_edit"] },
     schedule_override: { tools: ["lre_gm_edit", "lre_routine_edit"] },
@@ -91,6 +92,7 @@ export const COVERAGE: Coverage = {
   },
   "lre.ui": { close_drawer: { excluded: "Closes the drawer on the user's screen: the page's own presentation, which nothing an agent does needs." } },
   "lre.map": { display: { tools: ["lre_map_display"] }, walk: { tools: ["lre_map_walk"] } },
+  "lre.chat.knowledge": { tools: ["lre_chat_knowledge"] },
   "lre.job": { start: { tools: ["lre_job_start"] }, cancel: { tools: ["lre_job_cancel"] }, list: { tools: ["lre_jobs", "lre_job", "lre_job_apply"] }, dismiss: { tools: ["lre_job_dismiss"] } },
   "lre.lore": {
     drift: { tools: ["lre_lore_drift"] },
@@ -99,7 +101,7 @@ export const COVERAGE: Coverage = {
     entries: { tools: ["lre_lore_entries"] },
     pins: { tools: ["lre_lore_pins"] },
     fields: { tools: ["lre_lore_fields"] },
-    check: { excluded: "Build's World Info entry form checks a gate as it is typed; an agent's lre_lore_fields answers the same problem when it saves." },
+    mark: { excluded: "Writes a secret mark into the text of one of the user's World Info entries, or takes one out: Build's Make secret, Add a secret line, Make public and Save the names, each the user's own press, never an agent's call." },
   },
   "lre.preset": {
     get: { tools: ["lre_preset", "lre_preset_add_blocks"] },
@@ -113,6 +115,13 @@ export const COVERAGE: Coverage = {
     reconnect: { excluded: "Reconnect in Lumiverse, which ends a Lumiverse-run MCP server's process so Lumiverse connects it again; only the user's press on its line does that, never an agent." },
     dismiss: { excluded: "Dismissing the update notice in the drawer is the user's acknowledgement of it, so no agent tool does it for them." },
     forget: { excluded: "Settings → MCP server's Forget, which drops a server the user no longer runs from the list; the user's call, on the page." },
+  },
+  "lre.secrecy": {
+    books: { excluded: "Build's secrecy page lists the user's books with where each one's move to secret marks stands; lre_lore_books lists the books for an agent, and a move is the user's own go." },
+    preview: { excluded: "What Build's secrecy page shows of a book's move before the user presses Apply; a move writes the user's World Info only on that press, so no agent takes a step of it." },
+    apply: { excluded: "Writes the user's World Info books (each secret's mark, each twin put back as it stood): only the user's own press on Build's secrecy page does that, never an agent." },
+    confirm: { excluded: "Takes LumiRPEngine's old secrecy fields off the user's World Info entries once the user has checked the book reads right: the user's own check and press on the page." },
+    restore: { excluded: "Puts the user's World Info book back exactly as it stood before its move: the user's own press on Build's secrecy page, never an agent's call." },
   },
   "lre.cancel": { excluded: "Cancel on the activity line, the player's own stop for a turn in flight in the chat they watch; a tool's turn is the player's chat too, so the page that shows it stops it." },
 };

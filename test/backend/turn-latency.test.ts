@@ -97,8 +97,8 @@ describe("minds beside the read", () => {
     const reply = await rig.host.start(chatId, { type: "normal" });
     expect(reply.halted).toBeUndefined();
     expect(whileReading).toEqual(["Danny Okafor", "Priya Nair"]);
-    expect(rig.host.section("Minds")).toContain("Danny Okafor: Danny Okafor leans on the counter");
-    expect(rig.host.section("Minds")).toContain("Priya Nair: Priya Nair leans on the counter");
+    expect(rig.host.section("Minds")).toContain("Danny Okafor leans on the counter");
+    expect(rig.host.section("Minds")).toContain("Priya Nair leans on the counter");
   });
 
   test("a message read as a timelapse stops the minds started for it, which fail nothing, and the reply goes ahead", async () => {
@@ -145,8 +145,8 @@ describe("minds beside the read", () => {
     const reply = await rig.host.start(chatId, { type: "regenerate" });
     expect(reply.halted).toBeUndefined();
     expect(asked(MIND, rig.host.quietCalls.slice(before))).toEqual([]);
-    expect(rig.host.section("Minds")).toContain("Danny Okafor: Danny Okafor leans on the counter");
-    expect(rig.host.section("Minds")).toContain("Priya Nair: Priya Nair leans on the counter");
+    expect(rig.host.section("Minds")).toContain("Danny Okafor leans on the counter");
+    expect(rig.host.section("Minds")).toContain("Priya Nair leans on the counter");
   });
 
   test("Cancel on the intent gate stops the minds its held run started", async () => {

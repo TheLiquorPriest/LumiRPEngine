@@ -9,13 +9,13 @@ import type { JsonObject, JsonValue } from "./json";
 import type { AgentsView, HelloClient, KitReport } from "./agents";
 import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
-import type { BookLoreFields, LoreIndexAddition } from "./lore";
+import type { BookFieldsEdit, BookLoreFields, LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
 import type { CharacterResult } from "./character";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
-import type { ExtractionType, UserSettings } from "./settings";
+import type { ExtractionType, NarratorView, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
@@ -155,7 +155,8 @@ export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: En
  *    and `restore` brings it back.
  *  - `mind_pin`, `mind_refresh`, `mind_memory`, `mind_intent`: a character's mind (DESIGN §24.9): pin
  *    their fidelity, ask for a fresh mind next turn, edit or delete a note, commitment or plan, and
- *    set what they mean to do now and how they go about it (`MindEditOp`).
+ *    set what they mean to do now and how they go about it; `mind_knowledge`: one holding of a fact
+ *    the chat knows (§24.11), anyone's, the player character's too, set whole or taken away (`MindEditOp`).
  *  - `routine_follow`, `routine_block`, `schedule_override`: a character's routine and schedules in
  *    this chat (DESIGN §8): how they follow it, one block of it, one of their schedules (`RoutineEditOp`).
  *  - `effect` runs a pack effect registered for GM edits (`EffectDef.gm`) with literal arguments:
@@ -353,6 +354,19 @@ export interface UiRequest extends Request<"lre.ui"> {
  * path-find under fog.
  */
 export type MapRequest = Request<"lre.map"> & { chatId: ChatId } & ({ op?: "display"; display: MapDisplay } | { op: "walk"; x: number; y: number });
+
+/**
+ * GM → This chat → Knowledge (DESIGN §6.11): the chat's own knowledge choices, knowledge tracking
+ * and the narrator's knowledge, kept in its metadata (`backend/chat-knowledge-prefs.ts`) rather
+ * than its ledger, so a Lumiverse Branch keeps them and no recorded turn changes. A part given sets
+ * it, null returns it to what it follows (the world's default, else Settings), and one left out
+ * stays as it is: with neither, it only reads them. A world chat's only.
+ */
+export interface ChatKnowledgeRequest extends Request<"lre.chat.knowledge"> {
+  chatId: ChatId;
+  knowledge?: boolean | null;
+  narrator?: NarratorView | null;
+}
 
 /**
  * Background-lane jobs (DESIGN §13): Import from lore, Build/Refine with AI, Describe a map,
@@ -566,10 +580,11 @@ export interface WorldChatInfo {
  * entry in the draft of the chat's world, its source the message it came from. `books`: the user's
  * World Info books a pin may name an entry of, those attached to `chatId` first (the engine's own
  * books left out). `entries`: one book's entries. `pins`: every pin of the world's draft (with
- * `worldId`) or of the revision the chat plays (with `chatId`), each read now. `fields`: LRE's own
- * fields on one of a book's entries (null takes them off); a secret entry is stored switched off,
- * a secret one made public switched back on; answers the book's entries. `check`: what `fields`
- * would refuse those fields for (a secret's gate missing or not reading), as Build's form is typed.
+ * `worldId`) or of the revision the chat plays (with `chatId`), each read now. `fields`: Build's
+ * Save of one entry's own LRE fields, its visibility, links and aliases (null takes them off); an
+ * earlier build's secrecy fields on it stay as they are, and nothing else of the entry is written.
+ * `mark`: Build's Make secret and Make public, written as secret marks into the entry's text
+ * (`shared/secret-marks.ts`) and nothing else of it. Both answer the book's entries, as read after.
  */
 export type LoreRequest = Request<"lre.lore"> &
   (
@@ -578,9 +593,28 @@ export type LoreRequest = Request<"lre.lore"> &
     | { op: "books"; chatId?: ChatId }
     | { op: "entries"; bookId: string }
     | { op: "pins"; worldId?: WorldId; chatId?: ChatId }
-    | { op: "fields"; bookId: string; entryId: string; fields: BookLoreFields | null }
-    | { op: "check"; fields: BookLoreFields }
+    | { op: "fields"; bookId: string; entryId: string; fields: BookFieldsEdit | null }
+    | { op: "mark"; bookId: string; entryId: string; change: LoreMarkChange }
   );
+
+/**
+ * A change to the secret marks in one World Info entry's text (`lre.lore mark`), names as written:
+ * `secret` makes its whole text one secret; `add` adds a secret line at its end; `names` changes the
+ * names of its mark `mark`, and `public` makes that mark plain text again (marks counted from 0, in
+ * the order its text holds them).
+ */
+export type LoreMarkChange =
+  | { kind: "secret"; knownTo: string[]; keptFrom: string[] | "everyone" }
+  | { kind: "add"; text: string; knownTo: string[]; keptFrom: string[] | "everyone" }
+  | { kind: "names"; mark: number; knownTo: string[]; keptFrom: string[] | "everyone" }
+  | { kind: "public"; mark: number };
+
+/** A secret mark in an entry's text as Build shows it: its text, and its names as written. */
+export interface LoreMarkView {
+  text: string;
+  knownTo: string[];
+  keptFrom: string[] | "everyone";
+}
 
 /** A book-sourced lore entry whose World Info entry changed since it was indexed (with its text now), or is gone. */
 export type LoreDrift = { status: "changed"; content: string; hash: string } | { status: "missing" };
@@ -602,9 +636,10 @@ export interface LoreBookView {
 /**
  * One entry of a World Info book, for a pin picker and the lore editor (`lre.lore entries`);
  * `disabled`: switched off in its book, which a pin still reads; `lore`: its LRE fields, when it has
- * any. `twins`: the entries of the same text in any of the user's books (DESIGN §4.2), which its
- * secrecy keeps off with it. `copyOf`: the entry this one is kept secret with, as a copy of its
- * secret, wherever that entry is now; `kept` while a secret of its text holds it, so this one follows.
+ * any (an earlier build's secrecy among them, read as it stands). `marks`: the secret marks its text
+ * holds, in order; `whole` when its whole text is one, which makes the whole entry secret;
+ * `unreadable`: what in its text starts like a mark but can't be read as one, and why. `copyOf`: the
+ * entry an earlier build switched this one off as a copy of, as its note names it.
  */
 export interface LoreBookEntryView {
   id: string;
@@ -613,8 +648,10 @@ export interface LoreBookEntryView {
   /** Its text's length, in characters. */
   chars: number;
   lore?: BookLoreFields;
-  twins?: { bookId: string; entryId: string }[];
-  copyOf?: { bookId: string; entryId: string; kept: boolean };
+  marks?: LoreMarkView[];
+  whole?: true;
+  unreadable?: { raw: string; problem: string }[];
+  copyOf?: { bookId: string; entryId: string };
 }
 
 /**
@@ -637,6 +674,93 @@ export interface LorePinsView {
   characters: Record<EntityId, LorePinView[]>;
   places: Record<PlaceId, LorePinView[]>;
   steps: Partial<Record<StepPurpose, LorePinView[]>>;
+}
+
+/**
+ * Moving the user's World Info books from LRE's old secrecy fields to secret marks (DESIGN §4.2),
+ * book by book, each step on the user's own press in Build → Lore → Secrecy in your World Info.
+ * `books`: the user's books (the engine's own left out) and where each stands; `preview`: one book
+ * read now, with what Apply would do or what its move did, writing nothing; `apply`, `confirm` and
+ * `restore` act on the book as the preview that gave `version` read it, and are refused as a
+ * conflict once the book or its move changed since. Each answers with the book as it stands after.
+ */
+export type SecrecyRequest = Request<"lre.secrecy"> &
+  (
+    | { op: "books" }
+    | { op: "preview"; bookId: string }
+    | { op: "apply"; bookId: string; version: string }
+    | { op: "confirm"; bookId: string; version: string }
+    | { op: "restore"; bookId: string; version: string }
+  );
+
+/**
+ * Where a book stands in its move to secret marks: never moved, or put back (`legacy`); moved and
+ * waiting for the user's check (`applied`); moved with its old fields taken off (`confirmed`); or put
+ * back only in part, a restore that didn't finish, which Restore finishes (`restoring`).
+ */
+export type SecrecyState = "legacy" | "applied" | "confirmed" | "restoring";
+
+/** A book of the user's on Build's secrecy page (`lre.secrecy books`): when its latest move was applied, and when that move was put back, in Unix ms (null for none). */
+export interface SecrecyBookView extends LoreBookView {
+  state: SecrecyState;
+  applied: number | null;
+  restored: number | null;
+}
+
+/**
+ * One entry a book's move lists (`lre.secrecy preview`), by what LRE left on it:
+ * - `mark`: an LRE secret whose whole text becomes one secret mark, `mark` (the entry's text once
+ *   moved), known to `knownTo` (its holders' ids, as LRE stored them);
+ * - `marked`: an LRE secret whose text holds secret marks already, which it is read by; its text stays;
+ * - `twin`: a copy LRE kept off with the secret `original`, whose text becomes the same mark (`mark`,
+ *   known to `knownTo`), then put back as its note says it stood (`was`: switched off or on, and
+ *   whether it had LRE fields of its own);
+ * - `fields`: LRE fields on an entry that keeps nothing secret, which Confirm takes off (`removes`);
+ * - `refused`: an LRE secret, or a twin (`original`), whose text can't be a mark (`reason`), which
+ *   keeps its old secrecy.
+ * `gate` and `audience`: what no longer applies once a secret is a mark. `switchedOff`: LRE switched
+ * it off and nothing says how it stood before, so the move leaves it off and the page lists it for
+ * the user to switch on. `off`: stored switched off now. Once moved, `now` says whether it stands as
+ * the move left it, was changed since (Restore replaces the change, keeping a copy in the backup), is
+ * gone (Restore can't put it back) or stands as before the move already; `marked`, whether its text
+ * holds a secret mark now; `error`, the last step whose write to it failed, and why.
+ */
+export interface SecrecyEntryView {
+  id: string;
+  title: string;
+  kind: "mark" | "marked" | "twin" | "fields" | "refused";
+  off: boolean;
+  mark?: string;
+  knownTo?: string[];
+  gate?: string;
+  audience?: StepPurpose[];
+  switchedOff?: boolean;
+  original?: { bookId: string; entryId: string };
+  was?: { off: boolean; fields: boolean };
+  removes?: string[];
+  reason?: string;
+  now?: "moved" | "changed" | "gone" | "before";
+  marked?: boolean;
+  error?: { step: "apply" | "confirm" | "restore"; message: string };
+}
+
+/**
+ * A book's move to secret marks (`lre.secrecy preview`, and the answer to Apply, Confirm and
+ * Restore): when its latest move was applied, confirmed and put back (Unix ms, null for none);
+ * `version`, what Apply, Confirm and Restore send back; `entries`, what Apply would do, or what the
+ * move did; `damaged`, where a backup file that couldn't be read was kept aside, when one was (the
+ * book then reads as never moved).
+ */
+export interface SecrecyBookPlan {
+  bookId: string;
+  name: string;
+  state: SecrecyState;
+  applied: number | null;
+  confirmed: number | null;
+  restored: number | null;
+  version: string;
+  entries: SecrecyEntryView[];
+  damaged: string | null;
 }
 
 /**
@@ -706,13 +830,15 @@ export type FrontendToBackend =
   | MapRequest
   | JobRequest
   | LoreRequest
+  | SecrecyRequest
   | PresetRequest
   | DiagRequest
   | MindsRequest
   | RoutineRequest
   | CharacterRequest
   | AgentsRequest
-  | CancelTurnRequest;
+  | CancelTurnRequest
+  | ChatKnowledgeRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -786,14 +912,18 @@ export interface ResultBodies {
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
+  /** The chat's own knowledge choices after the request, null where it follows. */
+  "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /**
    * `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are
    * left out); `save`: the world and the new entry's id; `books`, `entries` and `pins` answer theirs;
-   * `check`: the problem in words (`problem`), null when `fields` would save.
+   * `fields` and `mark`: the book's entries, as read after the write.
    */
   "lre.lore": { drift?: Record<string, LoreDrift>; worldId?: WorldId; id?: string; books?: LoreBookView[]; entries?: LoreBookEntryView[]; pins?: LorePinsView; problem?: string | null };
+  /** `books` answers the user's books; every other op, the book as it stands now. */
+  "lre.secrecy": { books?: SecrecyBookView[]; book?: SecrecyBookPlan };
   "lre.preset": { card: PresetCard };
   /** `get`: the chat's records, oldest first, and its activity line now. */
   "lre.diag": { records: DiagRecord[]; activity: Activity | null };

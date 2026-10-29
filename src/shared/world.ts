@@ -9,6 +9,7 @@
 // types and changes with them; its test checks it against the starters and the preview world.
 
 import type { JsonObject, JsonValue } from "./json";
+import type { NarratorView } from "./settings";
 import { hasOwn, isRecord } from "./json";
 import type {
   ActionId,
@@ -846,8 +847,9 @@ export type SlotPosition =
 
 /**
  * Whose knowledge a section's facts come from (DESIGN §6.11): `player`, what the player character
- * knows (the default); `scene`, also what the characters with him know or plainly see; `gm`,
- * everything. A fact beyond the player character's is marked for the narrator, never for a player surface.
+ * knows; `scene`, also what the characters with him know or plainly see; `gm`, everything. A
+ * section that sets none reads in the narrator's knowledge (`sectionScope`). A fact beyond the player
+ * character's is marked for the narrator, never for a player surface.
  */
 export type FeedScope = "player" | "scene" | "gm";
 export const FEED_SCOPES: readonly FeedScope[] = ["player", "scene", "gm"];
@@ -861,7 +863,7 @@ export const SCOPE_LABEL: Record<FeedScope, string> = {
 
 /**
  * What goes into a section (DESIGN §6.11): the world's defaults on its section, the GM's per chat
- * over them. Every part is optional; a section with none delivers as it always has.
+ * over them. Every part is optional; a section with none delivers whole, in the narrator's knowledge.
  */
 export interface SectionFeed {
   /** False leaves the section out of the prompt. */
@@ -872,6 +874,7 @@ export interface SectionFeed {
   maxLines?: number;
   /** The renderer sources that fill it (`SectionRenderer.source`); absent, the renderers of its own slot. */
   include?: string[];
+  /** Whose knowledge it reads; absent, the narrator's (`sectionScope`). */
   scope?: FeedScope;
 }
 
@@ -924,11 +927,12 @@ export type StepPurpose =
   | "extract"
   | "choices"
   | "judge"
-  /** Character minds (DESIGN §24): each mind, the memory written after a reply, a time skip's beats, and consolidation. */
+  /** Character minds (DESIGN §24): each mind, the memory written after a reply, a time skip's beats, consolidation, and the knowledge step after the reply (who learned what). */
   | "mind"
   | "memory"
   | "skip"
-  | "consolidate";
+  | "consolidate"
+  | "knowledge";
 
 /** A world-authored prompted or decision step template (DESIGN §5.2). */
 export interface StepTemplateDef {
@@ -1297,6 +1301,8 @@ export interface WorldDoc {
   classifications: Record<FacetId, FacetDef>;
   /** Character minds (DESIGN §24.2): secrecy, the fidelity weights and thresholds, the author's pins and memory defaults; absent, the defaults (`worldMindsOf`). */
   minds?: WorldMindsConfig;
+  /** What the narrator knows in the world's chats (DESIGN §6.11), over the player's Settings → Narrator; a chat's own choice wins over it. Absent, none. */
+  narrator?: NarratorView;
   /** The world's tabletop ruleset (DESIGN §11); absent in worlds that have none. */
   ruleset?: RulesetDef;
   /** Action seeds: a fresh seed per Re-run, or `hash(runSeed, parent path, action)` (DESIGN §4.3). */

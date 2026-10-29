@@ -2,6 +2,7 @@
 // a GM edit (`feed` op) with its own Undo. Settings only: what a section holds never shows here.
 
 import { useState } from "preact/hooks";
+import { NARRATOR_KNOWLEDGE_LABEL, type NarratorView } from "../../shared/settings";
 import type { Chip, ControlsView } from "../../shared/state-view";
 import type { SectionFeed } from "../../shared/world";
 import { FEED_SCOPES, SCOPE_LABEL } from "../../shared/world";
@@ -13,18 +14,26 @@ import { editRequest } from "../requests";
 import type { EditNotice } from "./editor";
 import { EditNoticeBar, GmPage, usePages } from "./ui";
 import { PreviewAll, SectionHolds, useSectionsPreview } from "./section-preview";
+import { narratorInForce } from "./chat-knowledge";
 
 type SectionRow = ControlsView["sections"][number];
 type SourceRow = ControlsView["sources"][number];
 
+/** A section's scope unset, in the GM's words: it follows the narrator's knowledge (`sectionScope`). */
+const FOLLOWS_NARRATOR = "The narrator's knowledge";
+
+/** The "Whose knowledge" choice for an unset scope: never a scope's own value. */
+const FOLLOW = "narrator";
+
 /**
- * A feed in the form's own words, for its row: whether it's in the prompt, whose knowledge, its
- * caps and whether it takes sources other than its own. Off says only that, since nothing else applies.
+ * A feed in the form's own words, for its row: whether it's in the prompt, whose knowledge (unset,
+ * the narrator's), its caps and whether it takes sources other than its own. Off says only that,
+ * since nothing else applies.
  */
 export function feedSummary(feed: SectionFeed): string {
   if (feed.enabled === false) return "Left out of the prompt";
   const caps = [feed.maxLines !== undefined ? `${feed.maxLines} lines` : null, feed.maxTokens !== undefined ? `${feed.maxTokens} tokens` : null].filter((c) => c !== null);
-  const parts = ["In the prompt", SCOPE_LABEL[feed.scope ?? "player"], caps.length > 0 ? `at most ${caps.join(", ")}` : "no cap"];
+  const parts = ["In the prompt", feed.scope ? SCOPE_LABEL[feed.scope] : FOLLOWS_NARRATOR, caps.length > 0 ? `at most ${caps.join(", ")}` : "no cap"];
   if (feed.include) parts.push(`${feed.include.length} picked ${feed.include.length === 1 ? "source" : "sources"}`);
   return parts.join(" · ");
 }
@@ -46,13 +55,14 @@ export function sourcesTaken(feed: SectionFeed, sources: readonly SourceRow[], s
 
 /**
  * The settings a save sends: the form's, whole, since the chat's settings replace the world's for
- * the section. A part left plain (on, the player's knowledge, no cap, its own sources) is left out,
- * so a section keeps taking a source a pack adds later unless the GM picked its sources.
+ * the section. A part left plain (on, no cap, its own sources) is left out, so a section keeps
+ * taking a source a pack adds later unless the GM picked its sources. Any scope set is kept, the
+ * player's included: unset follows the narrator's knowledge, which may be wider.
  */
 export function chatFeedOf(draft: SectionFeed, picked: readonly string[], own: readonly string[]): SectionFeed {
   const to: SectionFeed = {};
   if (draft.enabled === false) to.enabled = false;
-  if (draft.scope && draft.scope !== "player") to.scope = draft.scope;
+  if (draft.scope) to.scope = draft.scope;
   if (draft.maxLines !== undefined) to.maxLines = draft.maxLines;
   if (draft.maxTokens !== undefined) to.maxTokens = draft.maxTokens;
   const same = picked.length === own.length && own.every((id) => picked.includes(id));
@@ -73,8 +83,8 @@ export function sourcesMissing(draft: SectionFeed, picked: readonly string[], ow
 /** A cap's default when it is switched on. */
 const CAP_START = { maxLines: 12, maxTokens: 400 } as const;
 
-/** One section's settings in this chat, saved whole as one edit in place of the world's; "Use the world's" clears them. */
-function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: readonly SourceRow[]; onDone(notice: EditNotice | null): void }) {
+/** One section's settings in this chat, saved whole as one edit in place of the world's; "Use the world's" clears them. `narrator` is the narrator's knowledge in force, which an unset scope follows. */
+function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: readonly SourceRow[]; narrator: NarratorView | null; onDone(notice: EditNotice | null): void }) {
   const app = useApp();
   const [busy, run] = useBusy();
   // The settings in force: the chat's when it has its own, else the world's.
@@ -97,7 +107,8 @@ function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: read
     <div class="lre-stack" data-lre-feed-form={props.row.id}>
       <span class="lre-small lre-muted">{props.row.chat ? "This chat has its own settings for this section." : "This chat follows the world's settings for this section."}</span>
       <HostSwitch checked={draft.enabled !== false} label="In the prompt" onChange={(on) => set({ enabled: on })} />
-      <HostSelect label="Whose knowledge" value={draft.scope ?? "player"} options={FEED_SCOPES.map((s) => ({ value: s, label: SCOPE_LABEL[s] }))} onChange={(v) => set({ scope: FEED_SCOPES.find((s) => s === v) ?? "player" })} />
+      <HostSelect label="Whose knowledge" value={draft.scope ?? FOLLOW} options={[{ value: FOLLOW, label: FOLLOWS_NARRATOR }, ...FEED_SCOPES.map((s) => ({ value: s, label: SCOPE_LABEL[s] }))]} onChange={(v) => set({ scope: FEED_SCOPES.find((s) => s === v) })} />
+      {draft.scope === undefined && props.narrator ? <span class="lre-small lre-muted">{`The narrator's knowledge in this chat: ${NARRATOR_KNOWLEDGE_LABEL[props.narrator.knowledge]} (GM → This chat → Knowledge).`}</span> : null}
       <HostSwitch checked={draft.maxLines !== undefined} label="Cap its lines" onChange={(on) => set({ maxLines: on ? (draft.maxLines ?? CAP_START.maxLines) : undefined })} />
       {draft.maxLines !== undefined ? <NumberStepper label="At most lines" value={draft.maxLines} min={1} integer onChange={(v) => set({ maxLines: v })} /> : null}
       <HostSwitch checked={draft.maxTokens !== undefined} label="Cap its tokens" onChange={(on) => set({ maxTokens: on ? (draft.maxTokens ?? CAP_START.maxTokens) : undefined })} />
@@ -189,6 +200,7 @@ export function FeedThisChat(props: { chatId: string; controls: ControlsView | n
             chatId={props.chatId}
             row={row}
             sources={props.controls?.sources ?? []}
+            narrator={props.controls ? narratorInForce(props.controls.knowledge) : null}
             onDone={(made) => {
               setNotice(made);
               pages.back();

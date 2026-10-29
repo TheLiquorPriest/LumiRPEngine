@@ -28,7 +28,9 @@ const STATUS_LABEL: Record<SectionPreview["status"], string> = {
 
 /**
  * The lines that say what a section holds, or why it holds nothing, in the GM's words: its size
- * against the budget, what its caps cut, its marked facts and hints, and what the turn adds itself.
+ * against the budget, whose knowledge it reads (the scope in force: its own, else the narrator's
+ * knowledge's), what its caps cut, its marked facts (a secret's lines among them) and hints, and
+ * what the turn adds itself.
  */
 export function previewNotes(s: SectionPreview, budget: SectionsPreview["budget"]): string[] {
   const notes: string[] = [];
@@ -37,8 +39,8 @@ export function previewNotes(s: SectionPreview, budget: SectionsPreview["budget"
   if (s.status === "empty") notes.push("Nothing to tell right now, so it stays out of the prompt.");
   if (s.status === "clipped") notes.push(s.slot === "minds" ? `Too big for the Minds budget of ${budget.minds} tokens, so it stays out.` : `Too big for what is left of the section budget of ${budget.sections} tokens, so it stays out.`);
   if (s.status === "sent" && s.tokens !== null) notes.push(`About ${s.tokens} tokens, of a section budget of ${budget.sections}.`);
-  if (s.status !== "off" && s.scope !== "player") notes.push(`Whose knowledge: ${SCOPE_LABEL[s.scope].toLowerCase()}.`);
-  if (s.marked > 0) notes.push(`${s.marked} ${s.marked === 1 ? "fact" : "facts"} your character doesn't know, each marked for the narrator.`);
+  if (s.status !== "off") notes.push(`Whose knowledge: ${SCOPE_LABEL[s.scope].toLowerCase()}.`);
+  if (s.marked > 0) notes.push(`${s.marked} ${s.marked === 1 ? "line" : "lines"} marked for the narrator: what your character doesn't know, or a secret.`);
   if (s.hints > 0) notes.push(`${s.hints} background ${s.hints === 1 ? "hint" : "hints"} at the end.`);
   if (s.cut > 0) notes.push(`${s.cut} ${s.cut === 1 ? "line" : "lines"} left out ${s.slot === "minds" ? "over its own budget" : "by its caps or the section budget"}.`);
   const turn = TURN_WRITES[s.slot];

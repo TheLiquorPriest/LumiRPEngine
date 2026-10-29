@@ -39,6 +39,7 @@ import { LookupTableEditor } from "./lookup-editor";
 import { MindsEditor } from "./minds-editor";
 import { NeedsEditor } from "./needs-editor";
 import { LoreEditor, LoreList } from "./lore-editor";
+import { SecrecyPage } from "./lore-secrecy";
 import { RoutineEditor, RoutineList } from "./routine-editor";
 import { RoutineSettingsEditor } from "./routine-settings";
 import { RulesetEditor } from "./ruleset-editor";
@@ -123,6 +124,12 @@ function BuildPage(props: { route: BuildRoute }) {
           <PartView part={route.part} />
         </WithDraft>
       );
+    case "secrecy":
+      return (
+        <WithDraft worldId={route.worldId}>
+          <SecrecyPage />
+        </WithDraft>
+      );
   }
 }
 
@@ -178,7 +185,9 @@ function WithDraft(props: { worldId: WorldId; children: ComponentChildren }) {
       ? { route: { view: "worlds" }, label: "Worlds" }
       : route.view === "item"
         ? { route: { view: "collection", worldId: props.worldId, collection: route.collection }, label: COLLECTION_INFO[route.collection].label }
-        : { route: { view: "world", worldId: props.worldId }, label: draft.doc.name };
+        : route.view === "secrecy"
+          ? { route: { view: "collection", worldId: props.worldId, collection: "lore" }, label: COLLECTION_INFO.lore.label }
+          : { route: { view: "world", worldId: props.worldId }, label: draft.doc.name };
   const blocked = errors > 0 ? `${errors} error${errors === 1 ? "" : "s"} block the commit` : undefined;
   return (
     <div class="lre-build" data-lre-section="build">
@@ -782,7 +791,7 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
       return doc.time as unknown as JsonObject;
     case "meta":
       // Map settings and the spawn cap show as the world plays them: a world without them, with the defaults.
-      return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
+      return { name: doc.name, pov: doc.pov, narrator: doc.narrator ? { ...doc.narrator } : null, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
   }
 }
 

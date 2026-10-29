@@ -54,7 +54,7 @@ export interface GmState {
   focus?: string;
 }
 
-export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "timeouts" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats" | "diagnostics" | "mcp";
+export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "narrator" | "timeouts" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats" | "diagnostics" | "mcp";
 
 export type BuildRoute =
   | { view: "worlds" }
@@ -64,7 +64,9 @@ export type BuildRoute =
   | { view: "item"; worldId: WorldId; collection: WorldCollection; id: string | null; at?: string }
   | { view: "part"; worldId: WorldId; part: WorldPart }
   | { view: "check"; worldId: WorldId }
-  | { view: "job"; worldId: WorldId; kind: JobKind };
+  | { view: "job"; worldId: WorldId; kind: JobKind }
+  /** Build → Lore → Secrecy in your World Info: the user's books moved to secret marks (DESIGN §4.2). */
+  | { view: "secrecy"; worldId: WorldId };
 
 export interface UiState {
   mode: Mode;

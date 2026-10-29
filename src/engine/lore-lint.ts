@@ -2,15 +2,17 @@
 // needs links, since only knowing what it links lets a helper read it); secrets (a `secret` that
 // isn't true or false, which reads as secret; a secret entry needs a gate, and a step whose output
 // reaches the narrator or the player is flagged in its audience, since the lore search never gives
-// it the secret; its holders are people in the world, and only a secret has any); the lookup
-// table: entries it names that don't exist, blank or empty terms, terms not in the form lookups
-// match, and terms that are an entry's alias but lead elsewhere; and the lore pinned to characters,
-// places and steps (DESIGN §24.5, `LORE_PIN_LINTS`).
+// it the secret; its holders are people in the world, and only a secret has any); a secret mark in
+// an entry's text naming no one, or more than one person (`markNameIssues`); the lookup table:
+// entries it names that don't exist, blank or empty terms, terms not in the form lookups match, and
+// terms that are an entry's alias but lead elsewhere; and the lore pinned to characters, places and
+// steps (DESIGN §24.5, `LORE_PIN_LINTS`).
 
 import { hasOwn, isRecord } from "../shared/json";
 import { isLorePin, LORE_AUDIENCE, loreIsSecret, lorePinKey, loreSourceOf, loreTerm, PROSE_STEPS } from "../shared/lore";
 import { STEP_OUTPUTS } from "../shared/steps";
 import type { LintIssue } from "../shared/protocol";
+import { markNameIssues, parseSecretMarks } from "../shared/secret-marks";
 import type { WorldDoc } from "../shared/world";
 import { loreHeldBy } from "./lore";
 
@@ -28,6 +30,7 @@ export function lintLore(world: WorldDoc): LintIssue[] {
     for (const link of l.links) if (!hasOwn(world.entities, link) && !hasOwn(world.places, link)) push("warning", `lore.${id}.links`, "missing_ref", `"${link}" is not an entity or place`);
     const holders: unknown[] = Array.isArray(l.holders) ? l.holders : [];
     for (const holder of holders) if (typeof holder !== "string" || !hasOwn(world.entities, holder)) push("warning", `lore.${id}.holders`, "missing_ref", `"${String(holder)}" is not an entity: the secret is no one's`);
+    if (typeof l.content === "string") for (const mark of parseSecretMarks(l.content)) issues.push(...markNameIssues(world, null, mark, `lore.${id}.content`));
     const visibility: unknown = l.visibility;
     if (visibility !== undefined && visibility !== "public" && visibility !== "known_by") push("warning", `lore.${id}.visibility`, "unknown_visibility", `"${String(visibility)}" isn't a lore visibility: no helper reads the entry`);
     else if (visibility === "known_by" && !loreIsSecret(l) && l.links.length === 0) push("warning", `lore.${id}.visibility`, "no_links", `"${l.title}" is known by whoever knows what it links, and it links nothing: no helper reads it`);

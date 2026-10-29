@@ -117,6 +117,13 @@
     "spawnTier": { "$ref": "#/$defs/id", "description": "The tier a spawned entity gets when it names none." },
     "spawnCap": { "type": "integer", "minimum": 0, "maximum": 500, "description": "Characters replies may introduce in a chat, in total. Absent: 24." },
     "lifeStates": { "type": "object", "description": "The world's own life states besides alive, dying and dead, by id. Absent: only those three.", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/lifeState" } },
+    "narrator": {
+      "type": "object",
+      "description": "What the narrator knows in the world's chats, over each player's Settings → Narrator; a chat's own choice (GM → This chat) wins over it. knowledge: scene, what everyone in the scene knows, each fact the player character doesn't know marked (a section that sets no scope reads in gm), or pov, the player character's knowledge alone (player). secrets: marked, a line carrying a secret's words goes in marked as a secret, or omit, it is left out. Absent: each player's own setting.",
+      "required": ["knowledge", "secrets"],
+      "additionalProperties": false,
+      "properties": { "knowledge": { "enum": ["scene", "pov"] }, "secrets": { "enum": ["marked", "omit"] } }
+    },
     "start": {
       "type": "object",
       "description": "Where and when the POV starts: a place id and an ISO local date-time.",
@@ -162,14 +169,14 @@
     "band": { "enum": ["principal", "supporting", "background"] },
     "visibility": { "enum": ["public", "known_by", "secret"] },
     "fieldType": { "enum": ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] },
-    "stepPurpose": { "enum": ["interpret", "npc.choose", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
+    "stepPurpose": { "enum": ["interpret", "npc.choose", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate", "knowledge"] },
     "minds": {
       "title": "character minds",
       "type": "object",
-      "description": "Character minds: what the narrator gets of a mind, the fidelity ladder's weights and thresholds, the author's pins and the memory defaults. Every part is optional; one left out, or out of range, reads as the default.",
+      "description": "Character minds: what the narrator gets of a mind, the fidelity ladder's weights and thresholds, the author's pins, the memory defaults and what each person knows from the start. Every part is optional; one left out, or out of range, reads as the default.",
       "additionalProperties": false,
       "properties": {
-        "secrecy": { "enum": ["full", "brief"], "description": "full: the narrator gets each mind's monologue and intent, to depict and never state; brief (the default): only a depiction, checked for leaks." },
+        "secrecy": { "enum": ["full", "brief"], "description": "full (the default, as for a world that says nothing): the narrator gets each mind's monologue and intent, to depict and never state; brief: only a depiction, checked for leaks." },
         "weights": {
           "type": "object",
           "description": "Points each input adds to a character's focus score, from -100 to 200.",
@@ -235,6 +242,24 @@
               }
             },
             "consolidate": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean", "description": "Fold faded and surplus notes into the summary. Default true." }, "periodDays": { "type": "number", "minimum": 0.1, "maximum": 365, "description": "At most how often a character's notes are folded, in game days. Default 1." } } }
+          }
+        },
+        "holdings": {
+          "type": "object",
+          "description": "What each person (the player character too) holds from the start, by entity id: each fact by its id, lore:<loreId>, track:<trackId>:<stageId> or field:<entityId>:<fieldId>. They seed every chat's holdings, as authored.",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": {
+            "type": "object",
+            "propertyNames": { "pattern": "^(lore:[^:]+|track:[^:]+:[^:]+|field:[^:]+:[^:]+)$" },
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "belief": { "enum": ["true", "false", "uncertain"], "description": "What they take it to be. Default true." },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "How sure they are, from 0 to 1; under the user's threshold it is a suspicion. Default 1." },
+                "keptFrom": { "anyOf": [{ "enum": ["everyone"] }, { "type": "array", "items": { "type": "string", "minLength": 1 } }], "description": "Whom they keep it from: everyone, or these people. Default no one." }
+              }
+            }
           }
         }
       }
@@ -992,7 +1017,7 @@
         "maxTokens": { "type": "integer", "minimum": 1, "description": "at most this many tokens of the section; lines past it are cut from the end" },
         "maxLines": { "type": "integer", "minimum": 1, "description": "at most this many lines" },
         "include": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "the renderer sources that fill it; absent, the renderers of its own slot" },
-        "scope": { "enum": ["player", "scene", "gm"], "description": "whose knowledge its facts come from: the player character's (default), also the people with him, or everything, each fact beyond his marked for the narrator" },
+        "scope": { "enum": ["player", "scene", "gm"], "description": "whose knowledge its facts come from: the player character's, also the people with him, or everything, each fact beyond his marked for the narrator; absent, the narrator's knowledge (gm for everyone in the scene, player for the player character's alone)" },
         "position": {
           "anyOf": [
             { "title": "{\"type\": \"native\"}", "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "enum": ["native"] } } },

@@ -7,10 +7,10 @@ import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared
 import type { JsonValue } from "../../src/shared/json";
 import type { ExtractionModeView, UpgradePreview } from "../../src/shared/protocol";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
-import { SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
-import { defaultMindsSettings } from "../../src/shared/minds";
+import { NARRATOR_DEFAULTS, SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
+import { claimFactId, defaultMindsSettings, KNOWLEDGE_DEFAULTS, witnessRef } from "../../src/shared/minds";
 import { defaultTimeouts } from "../../src/shared/timeouts";
-import type { MindCommitment, MindNote, MindPlan, MindsGmCharacter, MindsGmView, WitnessEntry } from "../../src/shared/minds";
+import type { Holding, KnowledgeFact, MindCommitment, MindNote, MindPlan, MindsGmCharacter, MindsGmEvidence, MindsGmHolding, MindsGmView, WitnessEntry } from "../../src/shared/minds";
 import { calendarOf, formatClock } from "../../src/engine/calendar";
 import { faded, salienceNow } from "../../src/packs/minds/core/state";
 import type { FieldFixTarget, GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
@@ -230,6 +230,13 @@ export function stateFixture(chatId: string): StateView {
         ],
         done: [{ id: "q_lease", label: "Renew the lease", kind: "quest", stage: "Signed", cue: null, truths: [], objectives: [{ label: "Sign by Oct 1", done: true }], hints: [], opened: 0, status: "done" }],
         failed: [],
+      },
+      // Play → What you know, as the minds pack builds it: Sam's own holdings, newest first (GM → Minds holds the same guess).
+      "minds.known": {
+        tracking: true,
+        items: [
+          { key: "known_offer", claim: "Rosie has an offer for the diner's building, open until the first of November", how: "guessed", byName: null, sinceText: "Tue 07:30", belief: "uncertain", confidence: 0.35, suspicion: true, open: false, keptFrom: null },
+        ],
       },
       "space.map": {
         level: 3,
@@ -462,6 +469,8 @@ export function stateFixture(chatId: string): StateView {
         montage: "key",
         unitCap: { agentDays: 600, events: 5000 },
       },
+      // A world that narrows the narrator, and a chat that keeps its own knowledge switch.
+      knowledge: { tracking: { chat: false, user: true }, narrator: { chat: null, world: { knowledge: "pov", secrets: "marked" }, user: { ...NARRATOR_DEFAULTS } } },
     },
     meter: { turn: { calls: 3, tokens: 2140, ms: 6200, lookups: 1 }, average: { calls: 2.4, tokens: 1890, ms: 5100, lookups: 0.4 }, p95: { calls: 5, tokens: 3900, ms: 11800, lookups: 2 } },
     currency: { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" },
@@ -673,17 +682,35 @@ export function portAlderMoney(party: string): { play: JsonValue; gm: Omit<GmVie
  * Live and Mara the GM's pin; Teo has no mind yet and a refresh asked for; Mr. Pemberton's last mind, at a
  * beat of Monday afternoon's skip, named him (so the narrator got none of it) and interrupted the skip;
  * Vic is out of the world. Notes fade as in a world with a half-day half-life, so a faded one shows.
+ * What they know (§24.11): Dev was told of the party by Mara and keeps it from Sam; Rosie keeps the
+ * offer for the building from everyone; Sam only suspects it.
  */
 function gmMinds(): MindsGmView {
   const now = 1902;
   const cal = calendarOf(worldFixture());
   const clock = (at: number): string => formatClock(cal, at);
   const memory = { salience: { halfLifeDays: 0.5, floor: 0.5 } };
-  const names: Record<string, string> = { pov: "Sam Rivera", npc_rosie: "Rosie Alvarez", npc_dev: "Dev Patel", npc_mara: "Mara Lopez" };
+  const names: Record<string, string> = { pov: "Sam Rivera", npc_rosie: "Rosie Alvarez", npc_dev: "Dev Patel", npc_mara: "Mara Lopez", npc_pemberton: "Mr. Pemberton" };
   const plan = (p: MindPlan): MindsGmCharacter["plans"][number] => ({ ...p, fromText: clock(p.when.from), toText: clock(p.when.to) });
   const note = (n: MindNote): MindsGmCharacter["notes"][number] => ({ ...n, now: Math.round(salienceNow(n, now, memory) * 100) / 100, faded: faded(n, now, memory), clock: clock(n.at) });
   const commitment = (x: MindCommitment): MindsGmCharacter["commitments"][number] => ({ ...x, withNames: x.with.map((w) => names[w] ?? w), dueText: x.due === null ? null : clock(x.due) });
   const witness = (w: WitnessEntry): MindsGmCharacter["witness"][number] => ({ ...w, clock: clock(w.at) });
+  const threshold = 0.7;
+  const party: KnowledgeFact = { id: claimFactId("Mara is throwing Sam a surprise party on Saturday at four", null), kind: "claim", claim: "Mara is throwing Sam a surprise party on Saturday at four", about: ["npc_mara", "pov"], truth: "true", source: { msg: null, at: 1350 } };
+  const sale: KnowledgeFact = { id: "track:s_diner_sale:offer", kind: "track", claim: "Rosie has an offer for the diner's building, open until the first of November", about: ["npc_rosie", "npc_pemberton"], truth: "true" };
+  const partyTold: WitnessEntry = { at: 1350, what: "Mara said the party is at the apartment, Saturday at four.", how: "told", by: "npc_mara", place: "apartment" };
+  const held = (fact: KnowledgeFact, h: Holding, evidence: MindsGmEvidence[] = []): MindsGmHolding => ({
+    ...h,
+    fact: fact.id,
+    claim: fact.claim,
+    kind: fact.kind,
+    truth: fact.truth,
+    byName: h.by === null ? null : (names[h.by] ?? h.by),
+    sinceText: clock(h.since.at),
+    suspicion: h.confidence < threshold,
+    keptFromNames: h.keptFrom === "everyone" ? "everyone" : (h.keptFrom ?? []).map((w) => names[w] ?? w),
+    evidenceShown: evidence,
+  });
   const rosieBroker: MindPlan = { id: "pl_rosie_broker", what: "Call the broker about the listing", kind: "errand", when: { from: 2310, to: 2340 }, where: "back_office", with: [], priority: 4, status: "open", made: 1890, source: "memory", closed: null, reason: null };
   const devBracket: MindPlan = { id: "pl_dev_bracket", what: "Pick up the transom bracket at Kim's Garage", kind: "errand", when: { from: 2460, to: 2490 }, where: "garage", with: [], priority: 3, status: "open", made: 1890, source: "memory", closed: null, reason: null };
   const maraBanner: MindPlan = { id: "pl_mara_banner", what: "Hang the banner and the lights", kind: "other", when: { from: 7800, to: 7920 }, where: "apartment", with: ["npc_dev"], priority: 5, status: "open", made: 1890, source: "memory", closed: null, reason: null };
@@ -751,9 +778,10 @@ function gmMinds(): MindsGmView {
         ],
         witness: [
           witness({ at: 1890, what: "Sam asked Rosie for a raise at the counter.", how: "saw", by: null, place: "diner" }),
-          witness({ at: 1350, what: "Mara said the party is at the apartment, Saturday at four.", how: "told", by: "npc_mara", place: "apartment" }),
+          witness(partyTold),
         ],
         summary: "",
+        holdings: [held(party, { how: "told", by: "npc_mara", evidence: [witnessRef(partyTold)], since: { msg: null, at: 1350 }, belief: "true", confidence: 1, keptFrom: ["pov"] }, [{ ref: witnessRef(partyTold), kind: "witness", text: `${partyTold.what} (told by Mara Lopez, ${clock(1350)})` }])],
       },
       {
         entity: "npc_rosie",
@@ -802,6 +830,7 @@ function gmMinds(): MindsGmView {
           witness({ at: 960, what: "The broker called: the Main Street buyer wants an answer by November.", how: "told", by: null, place: "back_office" }),
         ],
         summary: "Rosie has run the diner for twenty-two years and trusts Sam with the morning rush. She is weighing an offer for the building and has told no one on the crew.",
+        holdings: [held(sale, { how: "authored", by: null, evidence: [], since: { msg: null, at: 0 }, belief: "true", confidence: 1, keptFrom: "everyone" })],
       },
       {
         entity: "npc_mara",
@@ -844,6 +873,7 @@ function gmMinds(): MindsGmView {
         commitments: [commitment({ id: "c_mara_party", kind: "plan", with: ["npc_dev"], text: "Throw Sam a surprise party on Saturday at four", due: 8160, status: "open", made: 1350, closed: null })],
         witness: [witness({ at: 1290, what: "Sam came home early from the diner.", how: "saw", by: null, place: "apartment" })],
         summary: "",
+        holdings: [held(party, { how: "authored", by: null, evidence: [], since: { msg: null, at: 1350 }, belief: "true", confidence: 1, keptFrom: ["pov"] })],
       },
       {
         entity: "npc_teo",
@@ -866,6 +896,7 @@ function gmMinds(): MindsGmView {
         commitments: [],
         witness: [witness({ at: 1890, what: "Sam asked Rosie for a raise at the counter.", how: "saw", by: null, place: "diner" })],
         summary: "",
+        holdings: [],
       },
       {
         entity: "npc_pemberton",
@@ -905,6 +936,7 @@ function gmMinds(): MindsGmView {
         commitments: [],
         witness: [],
         summary: "",
+        holdings: [held(sale, { how: "authored", by: null, evidence: [], since: { msg: null, at: 0 }, belief: "true", confidence: 1 })],
       },
       {
         entity: "npc_vic",
@@ -918,8 +950,17 @@ function gmMinds(): MindsGmView {
         commitments: [],
         witness: [],
         summary: "",
+        holdings: [],
       },
     ],
+    knowledge: {
+      facts: [
+        { ...party, holders: ["npc_dev", "npc_mara"] },
+        { ...sale, holders: ["npc_pemberton", "npc_rosie", "pov"] },
+      ],
+      pov: { entity: "pov", name: "Sam Rivera", holdings: [held(sale, { how: "guessed", by: null, evidence: [], since: { msg: null, at: 1890 }, belief: "uncertain", confidence: 0.35 })] },
+      threshold,
+    },
   };
 }
 
@@ -1328,10 +1369,11 @@ export function settingsFixture(): UserSettings {
     timeouts: { ...defaultTimeouts(), requestMs: 600_000, laneHeartbeatMs: "none" },
     jobs: { routineLoreTokens: 8000 },
     gates: { intent: false, outline: false },
+    narrator: { ...NARRATOR_DEFAULTS, marks: {} },
   };
 }
 
-const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", routine: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm", take: "confirm", drop: "confirm", use_up: "confirm", wear: "confirm", lose: "confirm", item_condition: "confirm" };
+const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", routine: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm", take: "confirm", drop: "confirm", use_up: "confirm", wear: "confirm", lose: "confirm", item_condition: "confirm", learn: "auto", reveal: "confirm" };
 
 /** What the backend would derive: pins first, then learning on the connection, then D4 defaults. */
 export function extractionView(settings: UserSettings): Record<ExtractionType, ExtractionModeView> {

@@ -1,10 +1,11 @@
 // The GM view's minds controls as `lre.edit` operations (DESIGN §24.9). Each form's text is read here
 // and refused (null) when it wouldn't make a valid item, so the Save button can say so before the
 // backend does. A `mind_memory` value carries only the fields the item has; an absent `id` adds one.
+// A holding (`mind_knowledge`, §24.11) goes whole, as the form holds it.
 
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
-import type { CommitmentKind, CommitmentStatus, Fidelity, MindApproach, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsSecrecy, PlanKind, PlanStatus } from "../../../shared/minds";
+import type { CommitmentKind, CommitmentStatus, FactId, FactTruth, Fidelity, Holding, HoldingBelief, HoldingHow, MindApproach, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsSecrecy, PlanKind, PlanStatus } from "../../../shared/minds";
 import { MIND_TEXT_CAPS, PLAN_PRIORITY } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
 
@@ -15,6 +16,9 @@ export const PLAN_STATUS_LABEL: Record<PlanStatus, string> = { open: "Open", don
 export const COMMITMENT_KIND_LABEL: Record<CommitmentKind, string> = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
 export const COMMITMENT_STATUS_LABEL: Record<CommitmentStatus, string> = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
 export const APPROACH_LABEL: Record<MindApproach, string> = { reactive: "Reactive", proactive: "Proactive" };
+export const HOW_LABEL: Record<HoldingHow, string> = { authored: "From the start", witnessed: "Witnessed", told: "Told", inferred: "Inferred", guessed: "Guessed" };
+export const BELIEF_LABEL: Record<HoldingBelief, string> = { true: "Takes it as true", false: "Takes it as false", uncertain: "Unsure" };
+export const TRUTH_LABEL: Record<FactTruth, string> = { true: "True", false: "False", open: "An open question" };
 
 export type MindPart = "mood" | "monologue" | "depiction" | "intent" | "reactions" | "interrupt";
 
@@ -149,4 +153,51 @@ export function planOp(entity: EntityId, id: string | null, draft: PlanFormDraft
   if (what === null || !ok || (money && (draft.cents === null || !Number.isSafeInteger(draft.cents) || draft.cents <= 0 || withIds.length === 0))) return null;
   const value: JsonObject = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: withIds, priority: draft.priority, status: draft.status, ...(money && draft.cents !== null ? { cents: draft.cents } : {}) };
   return { op: "mind_memory", entity, part: "plan", id, value };
+}
+
+/** A holding as its form holds it: the confidence in percent as typed, and whom it is kept from as a choice with its people. */
+export interface HoldingDraft {
+  how: HoldingHow;
+  by: EntityId | null;
+  evidence: string[];
+  belief: HoldingBelief;
+  confidence: string;
+  kept: "none" | "everyone" | "some";
+  keptFrom: EntityId[];
+  since: Holding["since"];
+}
+
+/** A holding's form: as it is held, or a new one witnessed now, taken as true and sure, kept from no one. */
+export function holdingDraft(now: number, h?: Holding): HoldingDraft {
+  const some = h && Array.isArray(h.keptFrom) ? h.keptFrom : [];
+  return {
+    how: h?.how ?? "witnessed",
+    by: h?.by ?? null,
+    evidence: [...(h?.evidence ?? [])],
+    belief: h?.belief ?? "true",
+    confidence: String(Math.round((h?.confidence ?? 1) * 100)),
+    kept: h?.keptFrom === "everyone" ? "everyone" : some.length > 0 ? "some" : "none",
+    keptFrom: [...some],
+    since: h ? { msg: h.since.msg, at: h.since.at } : { msg: null, at: now },
+  };
+}
+
+/**
+ * Sets what `entity` holds of `fact`, whole: refused (null) for a confidence that isn't a whole
+ * percent from 0 to 100, a told one with no teller, a teller who is the holder, or kept from some
+ * people with none named.
+ */
+export function holdingOp(entity: EntityId, fact: FactId, draft: HoldingDraft): EditOp | null {
+  const percent = wholeIn(draft.confidence, 0, 100);
+  if (percent === null || (draft.how === "told" && draft.by === null) || draft.by === entity) return null;
+  const some = [...new Set(draft.keptFrom.filter((id) => id !== entity))];
+  if (draft.kept === "some" && some.length === 0) return null;
+  const keptFrom = draft.kept === "everyone" ? "everyone" : draft.kept === "some" ? some : null;
+  const holding: Holding = { how: draft.how, by: draft.by, evidence: [...new Set(draft.evidence)], since: { msg: draft.since.msg, at: draft.since.at }, belief: draft.belief, confidence: percent / 100, ...(keptFrom ? { keptFrom } : {}) };
+  return { op: "mind_knowledge", entity, fact, holding };
+}
+
+/** Takes away what `entity` holds of `fact`. */
+export function forgetOp(entity: EntityId, fact: FactId): EditOp {
+  return { op: "mind_knowledge", entity, fact, holding: null };
 }

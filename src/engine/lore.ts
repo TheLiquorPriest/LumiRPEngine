@@ -5,7 +5,9 @@
 //     step whose output reaches the narrator or the player (`PROSE_STEPS`, an `effects` template),
 //     whatever its audience says (the secrecy batching rule); once its gate holds it reads as public.
 //     An entry is secret unless `secret` is `false` or absent (`loreIsSecret`), so a malformed
-//     value keeps it hidden;
+//     value keeps it hidden. A secret mark in a World Info entry (`shared/secret-marks.ts`) is such
+//     a secret, read live as an entry of its own with its holders and no gate or audience, so it
+//     reaches its holders' minds, the GM, and no helper;
 //   - read as a character (a mind), a secret entry is read only when it is their own (`loreHeldBy`),
 //     whether or not its gate holds: the POV uncovering a secret tells nobody else of it;
 //   - a `known_by` entry is read only once the POV knows every person and place it links; one with
@@ -19,6 +21,7 @@
 import type { EntityId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
 import { loreIsSecret, loreSourceOf, PROSE_STEPS, topicIdOf } from "../shared/lore";
+import { publicText } from "../shared/secret-marks";
 import type { LoreEntryDef, LoreKeep, StepPurpose, WorldDoc } from "../shared/world";
 import { cuesOf } from "./cues";
 import { namesHidden, playerKnows } from "./player-events";
@@ -202,11 +205,12 @@ export function namesHiddenOrSecretLore(reg: Registry, world: WorldDoc, state: R
  * An entry as `Title: text`, cut at a word to fit `budget` tokens by `tokens`; null when not even its
  * title and a few words fit. World lore and pinned book entries (DESIGN §24.5) are cut alike. With
  * `keep` "end" the cut keeps the text's end (`Title: …words`), so a timeline written oldest first
- * keeps its newest events.
+ * keeps its newest events. A secret mark still in the text is left out (`applyMarks` "omit"): the
+ * text goes to a model, and a mark given on as written would reach it as plain text.
  */
 export function loreSnippet(tokens: (text: string) => number, entry: { readonly title?: unknown; readonly content?: unknown }, budget: number, keep: LoreKeep = "start"): { text: string; tokens: number; cut: boolean } | null {
   const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
-  const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
+  const body = publicText(typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
   const whole = title === "" ? body : `${title}: ${body}`;
   const cost = tokens(whole);
   if (cost <= budget) return { text: whole, tokens: cost, cut: false };

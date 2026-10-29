@@ -15,7 +15,9 @@ import { hashParts } from "../shared/hash";
 import type { LedgerEvent } from "../shared/ledger";
 import type { ActionDef, Expr, LoreEntryDef, PlaceDef, Selector, StageDef, TrackDef, TrackKind, WorldDoc } from "../shared/world";
 import { isHardLock, objectiveLabel, objectiveWhen, requirementExpr } from "../shared/world";
-import { loreIsSecret, lorePhrases } from "../shared/lore";
+import { loreIsSecret, loreParts, lorePhrases, loreSourceOf } from "../shared/lore";
+import type { FactId } from "../shared/minds";
+import { factId, heldSecrets, liveLoreIdOfWiFact, wiFactIdOfLiveLore } from "../shared/minds";
 import { compile, ExprError, identifiers, type ExprEnv, type Node } from "./expr";
 import { readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { Touch } from "./registry";
@@ -178,25 +180,36 @@ export function trackKnown(reg: Registry, world: WorldDoc, state: Readonly<World
   return t.owner === pov || (t.owner !== undefined && knows(state, pov, t.owner)) || granted(reg, world, state, pov, t.knownBy);
 }
 
-/** Whether a track may be named to the POV: public, revealed, or `known_by` and known (`trackKnown`). */
+/**
+ * The stages of a track whose truth `who` may know, oldest first: those its story revealed
+ * (`engine.revealed`, world-wide), then those they hold themselves (DESIGN §24.11: a secret the
+ * player character holds counts as revealed on their screens, while the chat tracks knowledge).
+ */
+export function revealedStages(state: Readonly<WorldState>, who: EntityId, id: TrackId): StageId[] {
+  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  const held = own(heldSecrets(state.packs.minds, who).stages, id) ?? [];
+  return [...revealed, ...held.filter((s) => !revealed.includes(s))];
+}
+
+/** Whether a track may be named to the POV: public, revealed (or a stage truth it holds), or `known_by` and known (`trackKnown`). */
 export function trackShown(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
   const t = own(world.tracks, id);
   if (!t) return false;
   const visibility = visibilityOf(t.visibility);
   if (visibility === "public") return true;
-  if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0) return true;
+  if (revealedStages(state, pov, id).length > 0) return true;
   return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
 }
 
 /**
- * Whether a track still keeps something from the POV: a stage truth not yet revealed, or the track
- * itself, which may not be named to it (`trackShown`). Its cue is a hint the narrator may play while
- * this holds (DESIGN §6.6); after that there is nothing left for the cue to hint at.
+ * Whether a track still keeps something from the POV: a stage truth not yet revealed to it, or the
+ * track itself, which may not be named to it (`trackShown`). Its cue is a hint the narrator may play
+ * while this holds (DESIGN §6.6); after that there is nothing left for the cue to hint at.
  */
 export function trackKeepsSecret(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
   const t = own(world.tracks, id);
   if (!t) return false;
-  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  const revealed = revealedStages(state, pov, id);
   return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
 }
 
@@ -349,7 +362,7 @@ export function playerTrack(reg: Registry, world: WorldDoc, state: Readonly<Worl
   const stageId: StageId = own(state.tracks, id)?.stage ?? t.start;
   const stage = own(t.stages, stageId);
   if (!stage) return null;
-  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  const revealed = revealedStages(state, pov, id);
   const truths = revealed.map((s) => own(t.stages, s)?.truth).filter((x): x is string => typeof x === "string");
   const secret = visibility === "secret";
   const dormant = stageId === t.start && (stage.objectives ?? []).length === 0 && stage.answer === undefined;
@@ -421,12 +434,11 @@ export function storyLocked(env: ExprEnv, action: Pick<ActionDef, "params" | "re
   });
 }
 
-/** Every unrevealed secret truth in the world: text that must never reach a player view. */
+/** Every unrevealed secret truth in the world: text that must never reach a player view. A stage truth the POV holds is revealed to it (`revealedStages`). */
 export function unrevealedTruths(world: WorldDoc, state: Readonly<WorldState>): string[] {
   const out: string[] = [];
-  const slice = readEngineSlice(state);
   for (const [id, t] of Object.entries(world.tracks)) {
-    const revealed = own(slice.revealed, id) ?? [];
+    const revealed = revealedStages(state, world.pov, id);
     for (const [sid, s] of Object.entries(t.stages)) if (s.truth && !revealed.includes(sid)) out.push(s.truth);
   }
   return out;
@@ -449,18 +461,68 @@ export function loreGateReader(reg: Registry, world: WorldDoc, state: Readonly<W
   };
 }
 
-/** The text of every secret lore entry whose gate doesn't hold, as the phrases the leak check looks for (`lorePhrases`). */
-export function secretLorePhrases(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
-  const open = loreGateReader(reg, world, state);
-  const out: string[] = [];
-  for (const l of Object.values(world.lore)) if (loreIsSecret(l) && typeof l.content === "string" && !open(l)) out.push(...lorePhrases(l.content));
-  return out;
+/**
+ * The fact the chat's knowledge records a lore entry's secret as (DESIGN §24.11): a World Info entry's
+ * or mark's by its live id (`wiFactIdOfLiveLore`), a world entry indexed from a book entry as that whole
+ * entry, any other as itself (`lore:<id>`).
+ */
+export function loreFactId(l: Pick<LoreEntryDef, "id" | "source">): FactId {
+  const live = wiFactIdOfLiveLore(l.id);
+  if (live !== null) return live;
+  const source = loreSourceOf(l.source);
+  return source.kind === "book" ? factId({ kind: "wi", book: source.bookId, entry: source.entryId, mark: null }) : factId({ kind: "lore", lore: l.id });
 }
 
-/** The titles of the secret lore entries whose gate doesn't hold: what a model may call them. */
-export function secretLoreTitles(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
+/**
+ * The secret lore entries whose gate doesn't hold and the POV doesn't hold (`heldSecrets`, DESIGN
+ * §24.11): held by its id, or by its fact's live id (`loreFactId`), so a world entry indexed from a
+ * book entry is held as that entry.
+ */
+function unrevealedLore(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): LoreEntryDef[] {
   const open = loreGateReader(reg, world, state);
-  return Object.values(world.lore).flatMap((l) => (loreIsSecret(l) && typeof l.title === "string" && l.title.trim() !== "" && !open(l) ? [l.title] : []));
+  const held = new Set(heldSecrets(state.packs.minds, world.pov).lore);
+  return Object.values(world.lore).filter((l) => loreIsSecret(l) && !open(l) && !held.has(l.id) && !held.has(liveLoreIdOfWiFact(loreFactId(l)) ?? ""));
+}
+
+/** The text of every secret lore entry whose gate doesn't hold and the POV doesn't hold, as the phrases the leak check looks for (`lorePhrases`). */
+export function secretLorePhrases(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
+  return unrevealedLore(reg, world, state).flatMap((l) => (typeof l.content === "string" ? lorePhrases(l.content) : []));
+}
+
+/** The titles of the secret lore entries whose gate doesn't hold and the POV doesn't hold: what a model may call them. */
+export function secretLoreTitles(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
+  return unrevealedLore(reg, world, state).flatMap((l) => (typeof l.title === "string" && l.title.trim() !== "" ? [l.title] : []));
+}
+
+/**
+ * One of the world's secrets the POV hasn't had revealed (`unrevealedSecrets`): the fact the chat's
+ * knowledge records it as, its text, its phrases (`lorePhrases`; one too short for any is its whole
+ * text), which tell that a text carries it, its parts (`loreParts`, short ones included), every one of
+ * which a text must carry to carry the secret whole, and whom or what it is about.
+ */
+export interface UnrevealedSecret {
+  fact: FactId;
+  text: string;
+  phrases: string[];
+  parts: string[];
+  about: string[];
+}
+
+/** Every unrevealed secret a player view must never carry (`unrevealedSecrets`), each as the fact it is: tracks' unrevealed stage truths, then gated secret lore. */
+export function unrevealedSecretFacts(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): UnrevealedSecret[] {
+  const whole = (text: string): string[] => [text.trim().replace(/\s+/g, " ")];
+  const secret = (fact: FactId, text: string, about: string[]): UnrevealedSecret => {
+    const phrases = lorePhrases(text);
+    const parts = loreParts(text);
+    return { fact, text, phrases: phrases.length > 0 ? phrases : whole(text), parts: parts.length > 0 ? parts : whole(text), about };
+  };
+  const out: UnrevealedSecret[] = [];
+  for (const [id, t] of Object.entries(world.tracks)) {
+    const revealed = revealedStages(state, world.pov, id);
+    for (const [stage, s] of Object.entries(t.stages)) if (s.truth && !revealed.includes(stage)) out.push(secret(factId({ kind: "track", track: id, stage }), s.truth, t.owner ? [t.owner] : []));
+  }
+  for (const l of unrevealedLore(reg, world, state)) if (typeof l.content === "string" && l.content.trim() !== "") out.push(secret(loreFactId(l), l.content, [...l.links]));
+  return out;
 }
 
 /** Every unrevealed secret a player view must never carry: tracks' unrevealed truths and gated secret lore. */

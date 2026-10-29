@@ -83,6 +83,10 @@ Both are per chat once the chat has started, and both are recorded with the stor
 - **Time:** **Play → Calendar** changes this chat's ticks per scene type, time scale, Timelapse interrupts, Speed through and Montage. **Pause clock** stops time for the current scene, for a conversation that shouldn't cost the afternoon.
 - Changes apply from the next turn; earlier turns keep the levels and times they were played at.
 
+## What the narrator knows
+
+By default the narrator knows what everyone in the scene knows, with each fact the player's character doesn't know marked, and a secret the player hasn't found goes in marked as a secret. The player sets the default in **Settings → Narrator**, a world can set its own in **Build → World**, and **GM → This chat → Knowledge** sets one chat's: under **What the narrator knows**, switch on **This chat has its own choice**, then **Everyone in the scene** or **Your character's only**, secrets **Marked** or **Left out**; under **Knowledge tracking**, **This chat has its own setting**. It is kept with the chat, not its story: no turn already played changes, there is no Undo, a Branch keeps it, and it applies from the next turn. In **GM → This chat → Sections**, a section's **Whose knowledge** is **The narrator's knowledge** unless you pick a scope for it.
+
 ## Upgrading a chat
 
 A chat stays on the world revision it started on. When you commit a newer revision of the world in Build, **Settings → Pins and upgrade** offers **Upgrade to the latest revision**, and shows what it brings into this chat, entity by entity, before anything changes. (Importing a world makes a new world, so it never upgrades an existing chat.) The world's other definitions, such as places, rules and actions, come with the revision without a pick.

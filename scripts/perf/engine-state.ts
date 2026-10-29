@@ -22,7 +22,6 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HostPort, QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
-import { lastLoreIndex } from "../../src/backend/lore-secrets";
 import { LedgerFold } from "../../src/engine/ledger/fold";
 import { contentId } from "../../src/engine/ledger/path";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
@@ -369,13 +368,12 @@ function teardown(rig: Rig, chats: readonly string[]): { part: string; mb: numbe
     ["world revisions", () => (empty(rt, "pins"), empty(rt.worlds, "revisions", "alive"))],
     ["turn bridges", () => empty(rt, "bridges")],
     ["lore read live", () => empty(rt, "liveLores")],
-    ["lore index", () => empty(lastLoreIndex(rt.host, rig.host.userId), "books", "worlds", "unread", "notes")],
     ["minds kept", () => (empty(rt, "answeredMinds", "keptMinds", "mindTraces"), empty(field<object>(rig.dispatch, "minds"), "runs"))],
     ["inspector", () => empty(rt.inspector, "logs")],
     ["diagnostics", () => empty(rt.diag, "chats", "turns", "activities")],
     ["call meter", () => (empty(rt.meter, "users", "log"))],
     ["chat stores (chips, notes, prefs, staged)", () => (empty(rt.chips, "chips", "lapsed"), empty(rt.planNotes, "notes"), empty(rt.chatPrefs, "prefs"), empty(rt.staged, "staged"), empty(rt, "runs"))],
-    ...["prePhase", "preBudgets", "loreTraces", "runLines", "tokenCounts", "presetWarnings", "caveatRuns", "carriedEntries", "lastPlace"].map((name): [string, () => void] => [`turn state: ${name}`, () => empty(rt, name)]),
+    ...["prePhase", "preBudgets", "loreTraces", "runLines", "tokenCounts", "presetWarnings", "caveatRuns", "lastPlace"].map((name): [string, () => void] => [`turn state: ${name}`, () => empty(rt, name)]),
     // The module's cache of message texts' ids: as many new tiny texts as it keeps push every message text out.
     ["content ids (path.ts)", () => Array.from({ length: 4096 }, (_, i) => contentId(`${i}`))],
   ];

@@ -126,7 +126,7 @@ describe("Run minds now (GM → Minds)", () => {
       rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "rumor", value: { id: "rumor", title: "Harbor rumor", content: text, keys: [], links: [], source: { kind: "book", bookId: book, entryId, hash: bookTextHash(text) } } }));
       rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: { danny_okafor: [{ lore: "rumor" }] }, places: {} } }));
     });
-    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId: book, entryId, fields: { secret: true, gate: "false" } }));
+    rig.body(await rig.send({ type: "lre.lore", op: "mark", bookId: book, entryId, change: { kind: "secret", knownTo: [], keptFrom: "everyone" } }));
     const before = mindCalls(rig).length;
     const run = rig.body(await rig.send({ type: "lre.minds", op: "run", chatId, who: ["danny_okafor"] })).run as MindsRunView;
     expect((await runEnd(rig, run.runId)).status).toBe("done");
@@ -263,7 +263,7 @@ describe("lore pins", () => {
       rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "wall", value: { id: "wall", title: "The harbor wall", content: SECRET, keys: [], links: [], source: { kind: "book", bookId, entryId, hash: bookTextHash(SECRET) } } }));
       rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: {}, places: {}, steps: { memory: [{ lore: "wall" }] } } }));
     });
-    rig.body(await rig.send({ type: "lre.lore", op: "fields", bookId, entryId, fields: { secret: true, gate: "false" } }));
+    rig.body(await rig.send({ type: "lre.lore", op: "mark", bookId, entryId, change: { kind: "secret", knownTo: [], keptFrom: "everyone" } }));
     await rig.turn(chatId, "I walk to the window and wait.", "The kettle clicks off.");
     const MEMORY = /You keep the memory of (.+?) in the roleplay world/;
     const memories = rig.host.quietCalls.filter((c) => MEMORY.test(c.messages[0]?.content ?? ""));

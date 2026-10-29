@@ -16,6 +16,7 @@ import { fixChip } from "./view";
 import { fidelityOf } from "../packs/minds/core/fidelity";
 import { latestTexts } from "./gm";
 import { toChain } from "./ledger-io";
+import { knowledgeOn } from "./chat-knowledge-prefs";
 import { mindsStepConfig, runMinds } from "./minds";
 import { TimeoutFired, within } from "../shared/timeouts";
 import type { Runtime } from "./runtime";
@@ -92,7 +93,8 @@ export class MindsRuns {
     const waiting = last?.isUser === true;
     const reply = waiting ? messages.slice(0, -1).findLast((m) => !m.isUser) : messages.findLast((m) => !m.isUser);
     const moment: MindMoment = { kind: "turn", at: state.clock, reason: waiting ? "" : BETWEEN_TURNS, user: waiting ? text(last) : "", reply: text(reply) };
-    // The minds read lore as a turn's do: World Info live, each entry as secret as its text is.
+    // The minds read lore as a turn's do: World Info live, nothing written to a book; a secret mark in
+    // an entry is a secret of its own, which only those who know it have in mind.
     const live = await this.rt.readLore(chatId, userId, world);
     const view: MindsRunView = { runId: `mr${Date.now().toString(36)}${(++this.seq).toString(36)}`, status: "running", startedAt: Date.now(), entries: picked.map((id) => ({ entity: id, name: own(state.entities, id)?.name ?? id, level: levels[id] ?? "near", status: "waiting" })), message: null, pending: false, undo: null };
     const run: Run = { view, stop: new AbortController(), cancelled: false };
@@ -107,7 +109,9 @@ export class MindsRuns {
     const signal = within(run.stop.signal, "mindsRunMs", settings.timeouts.mindsRunMs);
     void (async () => {
       try {
-        const ran = await runMinds(this.rt.minds, { chatId, userId, world: live, state, who: picked, moment, levels, reasons: Object.fromEntries(picked.map((id) => [id, "gm"])), signal, messages, concurrency: RUN_CONCURRENCY, progress });
+        // Minds read what they hold while the chat tracks knowledge (DESIGN §24.11), as a turn's do.
+        const knowing = knowledgeOn(await this.rt.chatKnowledge.get(chatId, userId), live, settings);
+        const ran = await runMinds(this.rt.minds, { chatId, userId, world: live, state, who: picked, moment, levels, reasons: Object.fromEntries(picked.map((id) => [id, "gm"])), signal, messages, concurrency: RUN_CONCURRENCY, progress, ...(knowing ? { knowledge: settings.minds.knowledge } : {}) });
         for (const entry of ran.report ?? []) progress(run.cancelled && entry.status !== "recorded" ? { ...entry, status: "cancelled", reason: "you cancelled the run" } : entry);
         if (run.cancelled) return this.end(run, "cancelled", "Cancelled: nothing was recorded.");
         if (ran.events.length === 0) return this.end(run, "failed", signal.reason instanceof TimeoutFired ? "The run reached its time limit before any mind came back, so nothing was recorded: raise Minds run on demand in Settings → Timeouts." : "No mind came back, so nothing was recorded; each one says why.");

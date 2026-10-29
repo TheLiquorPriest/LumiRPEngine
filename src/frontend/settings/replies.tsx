@@ -28,6 +28,8 @@ const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   wear: "Putting on or taking off",
   lose: "Losing things, or having them stolen",
   item_condition: "Wear and damage to things",
+  learn: "What you learn (who knows what)",
+  reveal: "Secrets the story reveals to you",
 };
 
 const MODE_OPTIONS: { value: BoundMode; label: string }[] = [

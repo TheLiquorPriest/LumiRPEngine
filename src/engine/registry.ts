@@ -129,14 +129,21 @@ export interface EffectDef {
 /**
  * One fact of a section as a scope beyond the player's gives it (DESIGN §6.11). `known`: who knows
  * it, `pov` (the player character: a plain line), `scene` (only people with him: `who` names them
- * as the narrator may know them) or `gm` (no one there). `source`: the World Info entry the line
- * carries, so that entry can stay out of the prompt that turn.
+ * as the narrator may know them) or `gm` (no one there). `group`: the fact the line tells part of,
+ * when it is told in several lines (Who knows what's: who holds it and who doesn't know it); a
+ * section keeps such lines together and keeps or leaves them out whole.
  */
 export interface FeedLine {
   text: string;
   known: "pov" | "scene" | "gm";
   who?: string;
-  source?: { bookId: string; entryId: string };
+  /**
+   * A secret kept from the player character (DESIGN §24.11): who knows it and whom it is kept from.
+   * The narrator gets it marked so, in the secret mark's wording, or not at all, as its knowledge
+   * says (`secretLineText`); never in the player scope.
+   */
+  secret?: { keptFrom: EntityId[] | "everyone"; known?: EntityId[] };
+  group?: string;
 }
 
 export interface SectionRenderer {
@@ -269,8 +276,8 @@ export interface TableDef {
 export interface ProposalChannelDef {
   /** Proposal type, e.g. `purchase`, `regard`, `time_advance`. */
   type: string;
-  /** The field type whose bound applies. */
-  boundField: FieldType | "spawn" | "knows" | "life" | "routine";
+  /** The field type whose bound applies (`knowledge`: none, the knowledge step's own types). */
+  boundField: FieldType | "spawn" | "knows" | "life" | "routine" | "knowledge";
   validate(proposal: JsonObject, ctx: ReadContext): Rejection | null;
   toEffects(proposal: JsonObject, ctx: ReadContext): EffectSpec[];
   /**

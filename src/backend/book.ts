@@ -14,7 +14,8 @@ import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { SectionTemplate, SlotPosition, WorldDoc, WorldIndex } from "../shared/world";
 import { builtInSectionsOf } from "../shared/sections";
-import { MARKED_FACTS_RULE } from "../engine/feed";
+import { SECRET_MARK_WORDING, type SecretMarkWording } from "../shared/secret-marks";
+import { MARKED_FACTS_RULE, secretMarksRule } from "../engine/feed";
 import type { HostBookEntry, HostEntryPlacement, HostPort } from "./host";
 import { NARRATOR_OUTLET, outletOf } from "./preset-binding";
 import type { WorldStore } from "./worlds";
@@ -43,12 +44,13 @@ export const PRESET_RULES_LEAD = "The player's own rules for the narrator, from 
 /**
  * The narrator rules' entry for a turn (DESIGN §6.8): where they come from, the order of authority,
  * since the player's directives come first, then what marked facts mean (`MARKED_FACTS_RULE`, which
- * keeps each character consistent with what they know), then the preset's own rules, as the
- * player's. Only the preset's rules differ between turns and worlds, so the rules tell nothing of
- * whether a world keeps secrets.
+ * keeps each character consistent with what they know) and what a secret's mark means in the user's
+ * wording (`secretMarksRule`), then the preset's own rules, as the player's. Only the preset's rules
+ * and the user's wording differ between turns, never by world, so the rules tell nothing of whether a
+ * world keeps secrets.
  */
-export function narratorRules(preset: string | null): string {
-  return ["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_AUTHORITY, MARKED_FACTS_RULE, ...(preset ? [PRESET_RULES_LEAD, preset] : [])].join("\n");
+export function narratorRules(preset: string | null, wording: SecretMarkWording = SECRET_MARK_WORDING): string {
+  return ["[Narrator rules]", NARRATOR_SOURCE, NARRATOR_AUTHORITY, MARKED_FACTS_RULE, secretMarksRule(wording), ...(preset ? [PRESET_RULES_LEAD, preset] : [])].join("\n");
 }
 
 /**

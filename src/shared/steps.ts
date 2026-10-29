@@ -66,6 +66,7 @@ export const STEP_LABEL: Record<StepPurpose, string> = {
   memory: "Character memory",
   skip: "Time-skip beats",
   consolidate: "Memory consolidation",
+  knowledge: "Who knows what",
 };
 
 /** What a world step template's `output` means, as Build names it, in the order Build offers them. */
@@ -130,6 +131,7 @@ export const STEP_VARS: Record<StepPurpose | "skip_plan", { phase: "before the r
   mind: { phase: "with the minds", vars: MIND_VARS },
   memory: { phase: "with the minds", vars: MIND_VARS },
   consolidate: { phase: "with the minds", vars: MIND_VARS },
+  knowledge: { phase: "with the minds", vars: MIND_VARS, note: "A scene's call thinks for no one: character is empty." },
   skip: { phase: "as a time skip starts", vars: MIND_VARS, note: "The beats think for no one: character is empty." },
   skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] },
 };
@@ -205,6 +207,7 @@ export const PROMPT_EFFECT: Record<StepPurpose, string> = {
   memory: "Replaces the built-in instructions; the answer format stays.",
   skip: "Replaces the built-in instructions; the answer format stays.",
   consolidate: "Replaces the built-in instructions; the answer format stays.",
+  knowledge: "Replaces the built-in instructions; the answer format stays.",
 };
 
 /**
@@ -233,4 +236,5 @@ export const STEP_OUTPUTS: Record<StepPurpose, readonly StepTemplateDef["output"
   memory: ["text"],
   skip: ["text"],
   consolidate: ["text"],
+  knowledge: ["text"],
 };

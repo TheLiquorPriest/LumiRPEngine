@@ -64,6 +64,8 @@ describe("the section preview", () => {
 
   test("the GM's cap and scope apply: the cut lines are counted, and a fact beyond the player character's shows its mark", async () => {
     const rig = new Rig({ shipped: true });
+    // What the narrator knows as the player character knows it, so only the GM's scope brings in a fact beyond his.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { narrator: { knowledge: "pov", secrets: "omit" } } }));
     const chatId = await alder(rig, { ...lurker, ...crowd });
     const people = (await preview(rig, chatId)).sections.find((s) => s.slot === "people");
     expect(people?.content ?? "").not.toContain(SECRET);

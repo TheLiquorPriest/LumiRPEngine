@@ -1,7 +1,8 @@
 // Build's shell: the sticky world bar under the mode bar, the overflow menu,
 // world cards and template cards, + New, Problems rows (`.lre-lint`, which the form and visual
-// editors use as they are), job progress, proposal review, playtest transcripts and the profile
-// picker. Phone first: one column, 40 px targets, sticky bars that bleed to the drawer's edges.
+// editors use as they are), job progress, proposal review, playtest transcripts, the profile
+// picker, and the secrecy page's steps and groups. Phone first: one column, 40 px targets, sticky
+// bars that bleed to the drawer's edges.
 
 export const BUILD_CSS = `
 .lre-build-root{display:contents}
@@ -107,4 +108,14 @@ textarea.lre-input.lre-build-prose{font-family:inherit;font-size:var(--lre-fs-md
 .lre-build-profile-head{display:flex;align-items:center;gap:var(--lre-s2);font-size:var(--lre-fs-sm);font-weight:500}
 .lre-build-chips{display:flex;flex-wrap:wrap;gap:6px}
 .lre-build-profile-conflict{display:flex;flex-direction:column;gap:var(--lre-s1);font-size:var(--lre-fs-sm)}
+.lre-secrecy-steps{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s3);margin:0;padding:0;list-style:none;font-size:var(--lre-fs-sm);color:var(--lre-muted)}
+.lre-secrecy-steps>li{display:inline-flex;align-items:center;gap:var(--lre-s1);min-width:0}
+.lre-secrecy-steps>li[data-lre-step="now"]{color:var(--lre-fg);font-weight:600}
+.lre-secrecy-steps>li[data-lre-step="done"]{color:var(--lre-pos)}
+.lre-secrecy-step-n{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid currentColor;border-radius:var(--lre-r-pill);font-size:var(--lre-fs-xs);font-variant-numeric:tabular-nums}
+.lre-secrecy-steps>li[data-lre-step="now"]>.lre-secrecy-step-n{border-color:transparent;background:var(--lre-accent-soft);color:var(--lre-accent-text)}
+.lre-secrecy-move{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;padding-top:var(--lre-s2)}
+.lre-secrecy-group{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
+.lre-secrecy-group-title{margin:0;font-size:var(--lre-fs-sm);font-weight:600}
+.lre-secrecy-mark{max-height:12em;overflow:auto;font-family:var(--lre-mono)}
 `;

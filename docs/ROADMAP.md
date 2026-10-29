@@ -76,6 +76,8 @@ On the last turn reviewed:
    - secrets are stored switched off and switched on once their gate holds, and stay off if the hook fails;
    - an entry a section already carries is switched off on the same turn.
 
+   Amended later in October: secrets now live as marks in the entry's own text, and the interceptor marks or leaves them out for each prompt. Nothing is stored switched off, and no entry is switched off for being in a section (see [Secrecy in your own World Info](#secrecy-in-your-own-world-info-october-2026)).
+
 ## Group 1: quick fixes (shipped October 2026)
 
 **The scene rule as built:** two places are together when they're the same place, or one is at most two levels inside the other with nothing spread out on the way up. A place is spread out only if some route inside it needs a mode other than walking, or a walk longer than 10 minutes. Interior walks between rooms never spread a building, and people in sibling rooms are apart.
@@ -170,7 +172,7 @@ On the last turn reviewed:
 **As built:**
 
 - **Lore books:** without the `characters` and `personas` permissions, which LumiRPEngine doesn't take, it can't see which books Lumiverse scans for a chat. The helpers and minds read the world's own list (**Build → Lore → Lore books**), the chat's books and your global books. A character's or persona's book is read only when it's on the list.
-- **Secrets:** an entry a secret world entry was indexed from is stored switched off in its book, so it stays out of every prompt until the gate holds, even if the hook fails. The entry stays off in that book's other chats too: make it public in **Build → Lore → World Info entries**, or remove the secret world entry, to undo it.
+- **Secrets** (as first built; replaced by [Secrecy in your own World Info](#secrecy-in-your-own-world-info-october-2026)): an entry a secret world entry was indexed from was stored switched off in its book, so it stayed out of every prompt until the gate held, even if the hook failed. The entry stayed off in that book's other chats too.
 - **Section order:** the Place and Property sections rank after Stance, so a tight token budget never squeezes out a section that was there before them.
 
 ## Characters as their own model (shipped October 2026)
@@ -218,6 +220,8 @@ A character is read and edited as one thing, over the existing entities, with no
   - a secret's twins are held back too: the same text in any of your books, card-built entries included;
   - a twin's copy follows its original even after either text is edited;
   - a book that can't be read keeps your World Info off in world chats, and Caveats says which.
+
+  The twins' copies and the switch-off while a book can't be read were later removed with the rest of LumiRPEngine's writes to your books (see [Secrecy in your own World Info](#secrecy-in-your-own-world-info-october-2026)).
 - **Needs:** each ordinary turn meets what it lives: company with someone your character knows meets social, and an activity that ends within the turn meets its needs.
 - **Spans:** what your character is doing decides whether a span goes on.
   - Talking keeps a night going.
@@ -268,8 +272,20 @@ A character is read and edited as one thing, over the existing entities, with no
 - **Sheets:** the sheet in the narrator's view, and where XP comes from.
 - **A party with tiers, and an agenda.**
 - **One authority** between the story and the engine, one brief, and a bounded director.
-- **Lore secrecy** without writes to the user's books.
+- **Lore secrecy** without writes to the user's books (since built: see [Secrecy in your own World Info](#secrecy-in-your-own-world-info-october-2026)).
 - **A simpler entities model.**
+
+## Secrecy in your own World Info (October 2026)
+
+LumiRPEngine no longer writes into your World Info unless you press for it in Build.
+
+- **Secret marks:** a secret is a line in the entry's own text: `{{// Secret: …}}`, `{{// Secret (known to Marcus Delgado): …}}`, `{{// Secret (kept from Jordan Ellis): …}}`, or both lists together. Lumiverse strips every mark from every prompt by itself, so a mark stays out even when LumiRPEngine's hook fails or runs out of time, and in chats that play no world.
+- **The narrator gets secrets marked:** in a world chat the hook gives the narrator each mark for that prompt only, as "… [secret; known to Marcus Delgado]", or leaves it out, as the narrator's knowledge says.
+- **Build:** under World Info entries, **Make this entry secret**, **Add a secret line**, **Change names** and **Make public** write the mark into the entry's text when you press them, and a mark naming no one, or more than one person, is flagged on its row; **Save to the book** writes only Known by, links and aliases. For agents, `lre_lore_fields` writes only those three fields, `lre_lore_entries` lists each entry's marks, and no tool writes an entry's text: a mark is yours to write.
+- **Helpers and minds:** a mark is a secret fact held by the people it is known to. Their minds read it; no helper does, and every other reader gets the entry without it.
+- **Removed:** storing a secret entry switched off, keeping a secret world entry's source switched off, switching off a secret's twins as copies, the index of all your books, and keeping all of your World Info off, with its toast and Caveats, while a book couldn't be read. The Place section no longer switches off a World Info entry it tells: the entry still reaches the narrator by its own rules.
+- **Earlier secrets:** an entry an earlier build made secret is read as it stands and works as before until you move its book to marks under **Build → Lore → Secrecy in your World Info**.
+- **The gap:** if the hook runs out of time, an entry kept secret only by something outside its own text goes in as stored: one a secret world entry was indexed from, or one whose text is a secret's text with no mark of its own (an older copy a character's card brought, say). Mark the secret in that entry's own text, or switch the copy off, to have it stay out.
 
 ## Settings for long chats
 

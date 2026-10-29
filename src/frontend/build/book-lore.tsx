@@ -1,27 +1,27 @@
 // Build → Lore, World Info (DESIGN §4.2): the books the world reads lore from live, beside a chat's
-// own books and the user's global ones, and LRE's fields on a book's entries. A secret entry is stored
-// switched off: the engine switches it on for a prompt, and its helpers read it, only once its gate
-// holds; its audience names the helpers that may read it before then. The list of lore books is part
-// of the world (each change goes to the draft at once; a chat uses it once committed and Upgraded);
-// an entry's fields are its book's, written to it at once and read from it every turn. They are
-// edited as a world entry's are: the gate in the formula editor, checked as it is typed (`lre.lore
-// check`, what Save would refuse) with examples made of the world's names, and holders and links
-// picked by name. Books can share a name (a character's card brings its own copy of each book it
-// carries), so every book picker names them by `bookLabels`.
+// own books and the user's global ones, and LRE's say in a book's entries. The list of lore books is
+// part of the world (each change goes to the draft at once; a chat uses it once committed and
+// Upgraded). An entry's own fields (Known by, links, aliases) and its secret marks
+// (`shared/secret-marks.ts`) are its book's: LRE writes them into the book only when the user presses
+// for it here, and reads them from it every turn. A mark's names are picked by name and checked as
+// every writer checks them (`secretMarkProblem`) before they are sent. An earlier build's secrecy
+// fields are shown as they stand, never written: they move to marks with the rest of their book's
+// secrecy on the secrecy page. Books can share a name (a character's card brings its own copy of each
+// book it carries), so every book picker names them by `bookLabels`.
 
-import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import { hasOwn, type JsonValue } from "../../shared/json";
-import { LORE_AUDIENCE, loreBooksOf, loreIsSecret, PROSE_STEPS, type BookLoreFields } from "../../shared/lore";
-import type { LintIssue, LoreBookEntryView, LoreBookView } from "../../shared/protocol";
+import { LORE_AUDIENCE, loreBooksOf, loreIsSecret, OLD_SECRECY_FIELDS, PROSE_STEPS, type BookFieldsEdit, type BookLoreFields } from "../../shared/lore";
+import type { LintIssue, LoreBookEntryView, LoreBookView, LoreMarkChange, LoreMarkView } from "../../shared/protocol";
+import { markNameIssues, resolveMarkNames, secretMarkProblem } from "../../shared/secret-marks";
 import { STEP_LABEL } from "../../shared/steps";
 import type { StepPurpose, TrackDef, WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
-import { Badge, Banner, Button, IconButton, List, ListRow, Section, useBusy } from "../components";
+import { Badge, Banner, Button, IconButton, List, ListRow, Row, Section, useBusy } from "../components";
 import { ActionRow, ActionRows } from "../gm/ui";
 import { useSelect } from "../store";
 import { draftSend } from "./draft";
-import { checkBalance } from "./expr-editor";
-import { CheckField, Issues } from "./form-kit";
+import { CheckField, FormGroup, Issues } from "./form-kit";
 import { COLLECTION_SPECS, type FieldSpec } from "./schema";
 import { FieldInput, lintAt, worldIdentifiers, type FormCtx } from "./schema-form";
 import { kindIs, TagListInput } from "./selector-editor";
@@ -234,37 +234,16 @@ function loreSpec(key: string): FieldSpec {
 }
 /** A secret's gate: shown only for a secret, which needs one, so not marked optional as the stored field is. */
 export const SECRET_GATE_SPEC: FieldSpec = { kind: "expr", key: "gate", label: loreSpec("gate").label };
-const HOLDERS_SPEC = loreSpec("holders");
 const LINKS_SPEC = loreSpec("links");
+/** A mark's holders, picked as a world entry's holders are: the picker answers entity ids, which a mark reads as names. */
+const KNOWN_TO_SPEC: FieldSpec = { kind: "refs", key: "knownTo", label: "Known to", collections: ["entities"] };
+const KEPT_FROM_SPEC: FieldSpec = { kind: "refs", key: "keptFrom", label: "The people it is kept from", collections: ["entities"] };
+const SECRET_LINE_SPEC: FieldSpec = { kind: "text", key: "text", label: "The secret line", multiline: true };
 
-/** A problem the backend words as a clause, as a sentence under its field. */
+/** A problem the shared checks word as a clause, as a sentence under its field. */
 function sentence(text: string): string {
   const said = `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
   return /[.!?]$/.test(said) ? said : `${said}.`;
-}
-
-/**
- * What Save would refuse a secret entry's gate for (`lre.lore check`), asked a moment after each change
- * to it: null while it is fine, or while the entry isn't secret. An answer to an older gate is dropped.
- */
-function useGateProblem(secret: boolean, gate: string): string | null {
-  const app = useApp();
-  const [problem, setProblem] = useState<string | null>(null);
-  const asked = useRef(0);
-  useEffect(() => {
-    const ask = ++asked.current;
-    if (!secret) {
-      setProblem(null);
-      return;
-    }
-    const timer = setTimeout(() => {
-      void app.request({ type: "lre.lore", op: "check", fields: { secret: true, gate } }).then((body) => {
-        if (ask === asked.current) setProblem(body?.problem ?? null);
-      });
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [secret, gate]);
-  return problem;
 }
 
 /** The ids a by-name list picker answers, or none. */
@@ -273,50 +252,229 @@ function idsOf(value: JsonValue | undefined): string[] | undefined {
   return ids.length > 0 ? ids : undefined;
 }
 
+/** A mark's names as Build edits them: whom it is known to, and whom it is kept from: everyone but those who know it, or the people picked. */
+interface MarkNames {
+  knownTo: string[];
+  keptFrom: string[] | "everyone";
+}
+
+const NO_NAMES: MarkNames = { knownTo: [], keptFrom: "everyone" };
+
 /**
- * One entry's LRE fields, edited as a world entry's are until saved to its book. Its twins, entries of
- * the same text anywhere in the user's books, go with its secrecy, and the form names them by their
- * books' `labels`; a twin kept secret as a copy is changed through the secret it follows, and says so.
+ * A mark's names as the pickers hold them: each that names one of the world's people as its id, each
+ * that names no one (or more than one) as written, so changing the names keeps it unless it is removed.
  */
-function EntryFields(props: { entry: LoreBookEntryView; doc: WorldDoc; functions: readonly string[]; labels: Readonly<Record<string, string>>; busy: boolean; onSave(fields: BookLoreFields | null): void }) {
-  const [fields, setFields] = useState<BookLoreFields>(props.entry.lore ?? {});
-  const visibilityId = useId();
-  useEffect(() => setFields(props.entry.lore ?? {}), [props.entry.id, JSON.stringify(props.entry.lore ?? {})]);
-  const secret = loreIsSecret(fields);
-  const gate = fields.gate ?? "";
-  const problem = useGateProblem(secret, gate);
-  // The formula editor says itself when a bracket or a quote is left open; the check would say it again.
-  const balanced = checkBalance(gate).ok;
-  const refused = secret && (!balanced || problem !== null);
-  const identifiers = useMemo(() => worldIdentifiers(props.doc), [props.doc]);
-  const issues: LintIssue[] = secret && balanced && problem !== null ? [{ severity: "error", path: "book.gate", code: "gate", message: sentence(problem) }] : [];
-  const ctx: FormCtx = { doc: props.doc, lint: issues, path: "book", identifiers, functions: props.functions };
-  const set = (patch: Partial<BookLoreFields>): void => setFields({ ...fields, ...patch });
-  const bookOf = (bookId: string): string => `“${props.labels[bookId] ?? "another book"}”`;
-  const copy = props.entry.copyOf;
-  if (copy?.kept) {
-    return (
-      <div class="lre-form-lore-fields" data-lre-book-entry={props.entry.id}>
-        <Banner tone="info">This entry is a copy of a secret entry in {bookOf(copy.bookId)}, so it is kept off with it, even after either is edited: it comes on for a prompt once that one's gate holds, and back on for good when that one is made public. Change its secrecy there.</Banner>
-      </div>
-    );
-  }
-  const twins = [...new Set((props.entry.twins ?? []).map((t) => bookOf(t.bookId)))];
+function pickedNames(doc: WorldDoc, names: readonly string[]): string[] {
+  const resolved = resolveMarkNames(doc, null, { knownTo: [...names], keptFrom: "everyone" });
+  return [...resolved.knownTo, ...resolved.unresolved];
+}
+
+/** A mark's names in words: a person's name for one the world has, any other as written. */
+function namesWords(doc: WorldDoc, names: readonly string[]): string {
+  return listWords(pickedNames(doc, names).map((n) => (hasOwn(doc.entities, n) ? doc.entities[n]?.name || n : n)));
+}
+
+/** Whom a mark is known to and kept from, in words. */
+function markWho(doc: WorldDoc, mark: Pick<LoreMarkView, "knownTo" | "keptFrom">): string {
+  const known = mark.knownTo.length > 0 ? `Known to ${namesWords(doc, mark.knownTo)}` : null;
+  const kept = mark.keptFrom === "everyone" ? [] : mark.keptFrom;
+  const everyone = kept.length === 0;
+  if (known === null) return everyone ? "Kept from everyone" : `Kept from ${namesWords(doc, kept)}`;
+  return `${known}; ${everyone ? "kept from everyone else" : `kept from ${namesWords(doc, kept)}`}`;
+}
+
+/**
+ * Text any mark may hold, to ask `secretMarkProblem` about names alone: Make secret marks the entry's
+ * own text, which Build doesn't hold, so what its text can't be is the backend's to answer.
+ */
+const ANY_TEXT = "secret";
+
+/** Why a mark can't be written with these names and this text, or null. */
+function markProblem(names: MarkNames, text: string): string | null {
+  if (names.keptFrom !== "everyone" && names.keptFrom.length === 0) return "pick whom it is kept from, or keep it from everyone but those who know it";
+  return secretMarkProblem({ text, knownTo: names.knownTo, keptFrom: names.keptFrom });
+}
+
+/** A mark's names, picked: who knows it, and whom it is kept from. */
+function MarkNamesFields(props: { names: MarkNames; ctx: FormCtx; problem: string | null; onChange(next: MarkNames): void }) {
+  const keptId = useId();
+  const { names, ctx } = props;
+  const picked = names.keptFrom !== "everyone";
+  const all = [...names.knownTo, ...(names.keptFrom === "everyone" ? [] : names.keptFrom)];
   return (
-    <div class="lre-form-lore-fields" data-lre-book-entry={props.entry.id}>
-      {copy ? <Banner tone="info">It was kept secret as a copy of an entry in {bookOf(copy.bookId)}, which is no longer secret: make it public here to switch it back on.</Banner> : null}
-      <CheckField label="Make this entry secret" help="It is stored switched off: it reaches no prompt and no helper until its gate holds." checked={secret} onChange={(on) => set({ secret: on })} />
-      {/* Its twins go with it, whichever book a chat scans: say which before and after. */}
-      {twins.length > 0 ? <p class="lre-build-note" data-lre-book-twins>{props.entry.lore && loreIsSecret(props.entry.lore) ? `The same text in ${listWords(twins)} is kept off with it, and comes back on with it.` : `The same text is in ${listWords(twins)}: making this entry secret keeps ${twins.length === 1 ? "that one" : "those"} off too, and making it public again switches them back on.`}</p> : null}
-      {secret ? (
+    <>
+      <FieldInput spec={KNOWN_TO_SPEC} value={names.knownTo} ctx={ctx} path={ctx.path} parent={{}} onChange={(next) => props.onChange({ ...names, knownTo: idsOf(next) ?? [] })} />
+      <div class="lre-field">
+        <label class="label" for={keptId}>
+          Kept from
+        </label>
+        <select id={keptId} class="lre-input" value={picked ? "picked" : "everyone"} onChange={(event) => props.onChange({ ...names, keptFrom: event.currentTarget.value === "picked" ? [] : "everyone" })}>
+          <option value="everyone">Everyone but those who know it</option>
+          <option value="picked">Only the people picked</option>
+        </select>
+      </div>
+      {picked ? <FieldInput spec={KEPT_FROM_SPEC} value={names.keptFrom} ctx={ctx} path={ctx.path} parent={{}} onChange={(next) => props.onChange({ ...names, keptFrom: idsOf(next) ?? [] })} /> : null}
+      {/* A name from the entry's text that names no one in the world is kept as written. */}
+      {all.some((n) => !hasOwn(ctx.doc.entities, n)) ? <p class="lre-build-note">A name marked missing names no one in this world, or more than one person: the mark keeps it as written. Remove it, or leave it for someone the story adds.</p> : null}
+      {props.problem !== null ? <Issues issues={[{ severity: "error", path: "mark", code: "mark", message: sentence(props.problem) }]} /> : null}
+    </>
+  );
+}
+
+/** One mark of an entry: its text and who knows it, with a warning for a name that names no one or more than one person, made public or given other names on the user's press. */
+function MarkRow(props: { mark: LoreMarkView; index: number; ctx: FormCtx; busy: boolean; onMark(change: LoreMarkChange, done: () => void): void }) {
+  const { mark, index, ctx } = props;
+  const [names, setNames] = useState<MarkNames | null>(null);
+  const problem = names ? markProblem(names, mark.text) : null;
+  const issues = markNameIssues(ctx.doc, null, mark, `mark.${index}`);
+  const open = (): void => setNames({ knownTo: pickedNames(ctx.doc, mark.knownTo), keptFrom: mark.keptFrom === "everyone" ? "everyone" : pickedNames(ctx.doc, mark.keptFrom) });
+  return (
+    <ActionRow
+      title={mark.text}
+      subtitle={markWho(ctx.doc, mark)}
+      tone={issues.length > 0 ? "warn" : undefined}
+      value={issues.length > 0 ? <Badge tone="warn">Check its names</Badge> : undefined}
+      actions={
         <>
-          <FieldInput spec={SECRET_GATE_SPEC} value={fields.gate} ctx={ctx} path={ctx.path} parent={{}} onChange={(next) => set({ gate: typeof next === "string" && next !== "" ? next : undefined })} />
-          {/* Examples while there is no gate, or one that doesn't read: the shape to follow. */}
-          {gate.trim() === "" || refused ? <GateExamples doc={props.doc} onPick={(formula) => set({ gate: formula })} /> : null}
-          <FieldInput spec={HOLDERS_SPEC} value={fields.holders} ctx={ctx} path={ctx.path} parent={{}} onChange={(next) => set({ holders: idsOf(next) })} />
-          <SecretAudience audience={fields.audience ?? []} onChange={(next) => set({ audience: next.length > 0 ? next : undefined })} />
+          <Button size="sm" variant="ghost" disabled={props.busy} onClick={() => (names ? setNames(null) : open())}>
+            {names ? "Cancel" : "Change names"}
+          </Button>
+          <Button size="sm" disabled={props.busy} onClick={() => props.onMark({ kind: "public", mark: index }, () => setNames(null))}>
+            Make public
+          </Button>
         </>
+      }
+    >
+      {issues.length > 0 ? <Issues issues={issues} /> : null}
+      {names ? (
+        <div class="lre-stack">
+          <MarkNamesFields names={names} ctx={ctx} problem={problem} onChange={setNames} />
+          <div class="lre-form-pins-actions">
+            <Button variant="primary" disabled={props.busy || problem !== null} onClick={() => props.onMark({ kind: "names", mark: index, knownTo: names.knownTo, keptFrom: names.keptFrom }, () => setNames(null))}>
+              Save the names
+            </Button>
+          </div>
+        </div>
       ) : null}
+    </ActionRow>
+  );
+}
+
+/**
+ * An earlier build's secrecy fields on an entry, as they stand: never written again, and counted only
+ * while the entry's text holds no mark. They move to marks with the rest of the book's secrecy.
+ */
+function OldSecrecy(props: { lore: BookLoreFields; marked: boolean; doc: WorldDoc }) {
+  const { lore, doc } = props;
+  const secret = loreIsSecret(lore);
+  const who = (ids: readonly string[]): string => listWords(ids.map((id) => (hasOwn(doc.entities, id) ? doc.entities[id]?.name || id : id)));
+  const standing = props.marked
+    ? "Its text holds secret marks, so these fields no longer count: its marks say who knows what."
+    : secret
+      ? "An earlier build keeps this entry secret by these fields, stored switched off: it reaches no prompt until its gate holds."
+      : "These fields aren't set to secret, so they keep nothing back.";
+  return (
+    <FormGroup title="Secrecy from an earlier build">
+      <p class="lre-build-note">{standing} They can't be changed here: the book's secrecy moves to secret marks on the secrecy page in Build → Lore.</p>
+      <Row k="Secret" v={secret ? "Yes" : "No"} />
+      {lore.gate !== undefined && lore.gate.trim() !== "" ? <Row k="Gate" v={<span class="lre-expr-token">{lore.gate}</span>} /> : null}
+      {lore.holders && lore.holders.length > 0 ? <Row k="Whose own secret it is" v={who(lore.holders)} /> : null}
+      {lore.audience && lore.audience.length > 0 ? <Row k="Helpers that may read it before the gate holds" v={listWords(lore.audience.map((p) => STEP_LABEL[p]))} /> : null}
+    </FormGroup>
+  );
+}
+
+/** An entry's own fields, the ones Build's Save writes. */
+function ownFields(lore: BookLoreFields | undefined): BookFieldsEdit {
+  return { ...(lore?.visibility ? { visibility: lore.visibility } : {}), ...(lore?.links ? { links: lore.links } : {}), ...(lore?.aliases ? { aliases: lore.aliases } : {}) };
+}
+
+/**
+ * One World Info entry as LRE reads it, each change written to its book on the user's press: its own
+ * fields, edited as a world entry's are until saved; its secret marks, each made public or given other
+ * names; Make secret and Add a secret line. An entry an earlier build keeps secret by its fields, or
+ * switched off as a copy of one, takes no mark until its book's secrecy moves to marks.
+ */
+function EntryFields(props: { entry: LoreBookEntryView; doc: WorldDoc; functions: readonly string[]; labels: Readonly<Record<string, string>>; busy: boolean; onSave(fields: BookFieldsEdit | null): void; onMark(change: LoreMarkChange, done: () => void): void }) {
+  const { entry } = props;
+  const [fields, setFields] = useState<BookFieldsEdit>(ownFields(entry.lore));
+  const [adding, setAdding] = useState<"secret" | "add" | null>(null);
+  const [line, setLine] = useState("");
+  const [names, setNames] = useState<MarkNames>(NO_NAMES);
+  const visibilityId = useId();
+  useEffect(() => setFields(ownFields(entry.lore)), [entry.id, JSON.stringify(entry.lore ?? {})]);
+  const identifiers = useMemo(() => worldIdentifiers(props.doc), [props.doc]);
+  const ctx: FormCtx = { doc: props.doc, lint: [], path: "book", identifiers, functions: props.functions };
+  const set = (patch: Partial<BookFieldsEdit>): void => setFields({ ...fields, ...patch });
+  const marks = entry.marks ?? [];
+  const old = entry.lore && OLD_SECRECY_FIELDS.some((key) => entry.lore?.[key] !== undefined) ? entry.lore : null;
+  // As the backend refuses: an entry kept secret by an earlier build's fields, or as a copy, waits for its book's move.
+  const held = marks.length === 0 && ((entry.lore !== undefined && loreIsSecret(entry.lore)) || entry.copyOf !== undefined);
+  const problem = adding === null ? null : markProblem(names, adding === "secret" ? ANY_TEXT : line);
+  // No error before a line is typed: the button waits for it.
+  const shown = adding === "add" && line.trim() === "" ? null : problem;
+  const start = (kind: "secret" | "add"): void => {
+    setAdding(kind);
+    setLine("");
+    setNames(NO_NAMES);
+  };
+  const send = (): void => props.onMark(adding === "secret" ? { kind: "secret", knownTo: names.knownTo, keptFrom: names.keptFrom } : { kind: "add", text: line, knownTo: names.knownTo, keptFrom: names.keptFrom }, () => setAdding(null));
+  return (
+    <div class="lre-form-lore-fields" data-lre-book-entry={entry.id}>
+      {entry.copyOf ? (
+        <Banner tone="info">
+          An earlier build switched this entry off as a copy of a secret entry in “{props.labels[entry.copyOf.bookId] ?? "another book"}”. It stays as it is until its book's secrecy moves to secret marks on the secrecy page in Build → Lore, which puts it back as it stood.
+        </Banner>
+      ) : null}
+      {entry.unreadable && entry.unreadable.length > 0 ? (
+        <Banner tone="warn" title="A secret mark that can't be read">
+          <p>This text starts like a secret mark but can't be read as one, so it is left out of every prompt and helper. Fix it in the entry's text in World Info:</p>
+          <ul>
+            {entry.unreadable.map((u, i) => (
+              <li key={i}>
+                <span class="lre-expr-token">{u.raw}</span>: {sentence(u.problem)}
+              </li>
+            ))}
+          </ul>
+        </Banner>
+      ) : null}
+      {marks.length > 0 ? (
+        <FormGroup title="Secret marks" aside={entry.whole ? <Badge tone="gm">Whole entry</Badge> : undefined}>
+          {entry.whole ? <p class="lre-build-note">Its whole text is one secret, so the whole entry is: the narrator is told it marked as a secret, or not at all, as the chat's narrator view says, and of the characters only those who know it have it in mind.</p> : null}
+          <ActionRows label="Secret marks">
+            {marks.map((mark, i) => (
+              <MarkRow key={`${i}:${mark.text}`} mark={mark} index={i} ctx={ctx} busy={props.busy} onMark={props.onMark} />
+            ))}
+          </ActionRows>
+        </FormGroup>
+      ) : null}
+      {old ? <OldSecrecy lore={old} marked={marks.length > 0} doc={props.doc} /> : null}
+      {held ? null : adding === null ? (
+        <div class="lre-form-pins-actions">
+          {marks.length === 0 && (entry.unreadable ?? []).length === 0 && entry.chars > 0 ? (
+            <Button disabled={props.busy} onClick={() => start("secret")}>
+              Make this entry secret
+            </Button>
+          ) : null}
+          <Button disabled={props.busy} onClick={() => start("add")}>
+            Add a secret line
+          </Button>
+        </div>
+      ) : (
+        <FormGroup title={adding === "secret" ? "Make this entry secret" : "Add a secret line"}>
+          <p class="lre-build-note">{adding === "secret" ? "Its whole text becomes one secret mark, written into the entry in its book." : "The line goes at the end of the entry's text as a secret mark, written into its book."} The narrator is told a secret marked as one, or not at all, as the chat's narrator view says; of the characters, only those who know it have it in mind.</p>
+          {adding === "add" ? <FieldInput spec={SECRET_LINE_SPEC} value={line} ctx={ctx} path={ctx.path} parent={{}} onChange={(next) => setLine(typeof next === "string" ? next : "")} /> : null}
+          <MarkNamesFields names={names} ctx={ctx} problem={shown} onChange={setNames} />
+          <div class="lre-form-pins-actions">
+            <Button variant="primary" disabled={props.busy || problem !== null} onClick={send}>
+              {adding === "secret" ? "Make it secret" : "Add the line"}
+            </Button>
+            <Button variant="ghost" disabled={props.busy} onClick={() => setAdding(null)}>
+              Cancel
+            </Button>
+          </div>
+        </FormGroup>
+      )}
       <div class="lre-field">
         <label class="label" for={visibilityId}>
           Who may read it
@@ -331,10 +489,10 @@ function EntryFields(props: { entry: LoreBookEntryView; doc: WorldDoc; functions
         <span class="lre-field-help">Other names it goes by</span>
       </TagListInput>
       <div class="lre-form-pins-actions">
-        <Button variant="primary" disabled={props.busy || refused} onClick={() => props.onSave(fields)}>
+        <Button variant="primary" disabled={props.busy} onClick={() => props.onSave(fields)}>
           Save to the book
         </Button>
-        {props.entry.lore ? (
+        {Object.keys(ownFields(entry.lore)).length > 0 ? (
           <Button variant="ghost" disabled={props.busy} onClick={() => props.onSave(null)}>
             Take the fields off
           </Button>
@@ -344,7 +502,7 @@ function EntryFields(props: { entry: LoreBookEntryView; doc: WorldDoc; functions
   );
 }
 
-/** LRE's fields on one book's entries, written to the book at once. */
+/** LRE's say in one book's entries: their own fields and their secret marks, each written to the book on the user's press. */
 export function BookEntriesSection() {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
@@ -362,16 +520,30 @@ export function BookEntriesSection() {
     void app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
   }, [book]);
   if (!draft) return null;
-  const save = (entryId: string, fields: BookLoreFields | null) =>
+  const save = (entryId: string, fields: BookFieldsEdit | null) =>
     run(async () => {
       const body = await app.request({ type: "lre.lore", op: "fields", bookId: book, entryId, fields });
       if (body?.entries) setEntries(body.entries);
     });
+  const mark = (entryId: string, change: LoreMarkChange, done: () => void) =>
+    run(async () => {
+      const body = await app.request({ type: "lre.lore", op: "mark", bookId: book, entryId, change });
+      if (!body?.entries) return;
+      setEntries(body.entries);
+      done();
+    });
+  const badge = (e: LoreBookEntryView) => {
+    if (e.whole) return <Badge tone="gm">Whole entry secret</Badge>;
+    if (e.marks) return <Badge tone="gm">{e.marks.length === 1 ? "1 secret line" : `${e.marks.length} secret lines`}</Badge>;
+    if (e.lore && loreIsSecret(e.lore)) return <Badge tone="gm">Secret, earlier build</Badge>;
+    if (e.lore) return <Badge>Lore fields</Badge>;
+    return e.disabled ? <Badge>Off in its book</Badge> : undefined;
+  };
   return (
     <div data-lre-book-entries>
       <Section title="World Info entries">
         <div class="lre-stack">
-          <p class="lre-build-note">An entry of a book the chat reads is lore as it is. Give it the fields a world entry has, or make it secret: it stays switched off, out of every prompt and helper, until its gate holds.</p>
+          <p class="lre-build-note">An entry of a book the chat reads is lore as it is. Give it the fields a world entry has, or keep some or all of it secret: a secret mark in its text says who knows it. LRE writes into a book only when you press for it here.</p>
           <label for={bookId}>Book</label>
           <select id={bookId} class="lre-input" value={book} onChange={(event) => setBook(event.currentTarget.value)}>
             <option value="">{books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"}</option>
@@ -387,12 +559,12 @@ export function BookEntriesSection() {
                 <ActionRow
                   key={e.id}
                   title={e.title}
-                  subtitle={e.copyOf?.kept ? `Kept off with a secret in “${labels[e.copyOf.bookId] ?? "another book"}”` : undefined}
-                  value={e.lore && loreIsSecret(e.lore) ? <Badge tone="gm">Secret</Badge> : e.lore ? <Badge>Lore fields</Badge> : e.disabled ? <Badge>Off in its book</Badge> : undefined}
-                  actions={<IconButton icon={open === e.id ? "close" : "edit"} label={open === e.id ? `Close ${e.title}` : `Edit ${e.title}'s lore fields`} onClick={() => setOpen(open === e.id ? null : e.id)} />}
+                  subtitle={e.unreadable ? "Holds a secret mark that can't be read" : e.copyOf ? `Switched off by an earlier build as a copy of a secret in “${labels[e.copyOf.bookId] ?? "another book"}”` : undefined}
+                  value={badge(e)}
+                  actions={<IconButton icon={open === e.id ? "close" : "edit"} label={open === e.id ? `Close ${e.title}` : `Edit ${e.title}'s lore and secrets`} onClick={() => setOpen(open === e.id ? null : e.id)} />}
                 >
                   {/* Open under its own row, so a long book's entry is edited where it was tapped. */}
-                  {open === e.id ? <EntryFields entry={e} doc={draft.doc} functions={draft.functions} labels={labels} busy={busy} onSave={(fields) => save(e.id, fields)} /> : null}
+                  {open === e.id ? <EntryFields entry={e} doc={draft.doc} functions={draft.functions} labels={labels} busy={busy} onSave={(fields) => save(e.id, fields)} onMark={(change, done) => mark(e.id, change, done)} /> : null}
                 </ActionRow>
               ))}
             </ActionRows>

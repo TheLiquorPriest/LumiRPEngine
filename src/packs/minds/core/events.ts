@@ -1,6 +1,8 @@
 // The minds pack's events (DESIGN §24): every model answer and every GM control is one, so a fold,
 // a Re-narrate and the background lane never call a model. Each apply reads only its own data, the
 // minds slice and the clock, never an entity's fields, so a coarsened skip record (L21) folds alike.
+// Knowledge (§24.11) folds the same way: facts and holdings come whole in their events, and a limit
+// (a claim's length, how many) is the producer's, checked before an event is made, never here.
 // Player lines: none. A mind is private, so every describer words nothing for a viewer and the
 // Journal never shows one; the GM's and the author's lines name what changed, never a monologue.
 
@@ -8,13 +10,13 @@ import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
-import type { CommitmentStatus, Fidelity, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsCharacter, PlanStatus, WitnessEntry } from "../../../shared/minds";
-import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_APPROACHES, MINDS_EVENTS, MINDS_KEEP, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
+import type { CommitmentStatus, FactId, FactTruth, Fidelity, Holding, KnowledgeFact, LearnEventData, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsCharacter, PlanStatus, WitnessEntry } from "../../../shared/minds";
+import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FACT_KINDS, FACT_TRUTHS, FIDELITIES, HOLDING_BELIEFS, HOLDING_HOWS, isConfidence, isWitnessRef, keptFromOf, MIND_APPROACHES, MINDS_EVENTS, MINDS_KEEP, parseFactId, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
 import { listWords } from "../../../shared/words";
 import { own } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
-import { addWitness, dropPlan, putCommitment, putNote, putPlan, readCharacter, readSlice, sharePlan, writeCharacter, writeSlice } from "./state";
+import { addWitness, dropPlan, putCommitment, putNote, putPlan, readCharacter, readKnowledge, readSlice, sharePlan, writeCharacter, writeKnowledge, writeSlice } from "./state";
 
 const str = (v: JsonValue | undefined): v is string => typeof v === "string";
 const finite = (v: JsonValue | undefined): v is number => typeof v === "number" && Number.isFinite(v);
@@ -430,7 +432,259 @@ const skip: EventTypeDef<PackEvent> = {
   describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `The time skip stopped at ${Array.isArray(e.data.beats) ? e.data.beats.length : 0} beats for the minds`),
 };
 
-export const MINDS_EVENT_DEFS: readonly EventTypeDef<PackEvent>[] = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, intent, skip];
+// ---------------------------------------------------------------- knowledge (DESIGN §24.11)
+
+/** Ids, each a non-empty string. */
+const someIds = (v: JsonValue | undefined): v is string[] => ids(v) && v.every((id) => id !== "");
+
+/** A fact as recorded: an id in its kind's form, a claim, the ids it is about, its truth, and any source and text hash well formed. */
+export function isFact(v: JsonValue | undefined): v is KnowledgeFact & JsonObject {
+  if (!isRecord(v) || !str(v.id) || typeof v.kind !== "string" || !(FACT_KINDS as readonly string[]).includes(v.kind) || parseFactId(v.id)?.kind !== v.kind) return false;
+  const source = v.source;
+  return (
+    str(v.claim) &&
+    v.claim.trim() !== "" &&
+    someIds(v.about) &&
+    typeof v.truth === "string" &&
+    (FACT_TRUTHS as readonly string[]).includes(v.truth) &&
+    (source === undefined || (isRecord(source) && (source.msg === null || str(source.msg)) && finite(source.at))) &&
+    (v.textHash === undefined || (str(v.textHash) && v.textHash !== ""))
+  );
+}
+
+/**
+ * A holding's shape: how it's held and by whom (one told names its teller), its evidence (fact ids
+ * and witness refs), since when, the belief, a confidence from 0 to 1 (§16, a fixed range), and
+ * whom it is kept from, if anyone. Whom and what it names are checked against the state apart.
+ */
+export function isHolding(v: JsonValue | undefined): v is Holding & JsonObject {
+  if (!isRecord(v) || typeof v.how !== "string" || !(HOLDING_HOWS as readonly string[]).includes(v.how)) return false;
+  const since = v.since;
+  return (
+    (v.by === null || (str(v.by) && v.by !== "")) &&
+    (v.how !== "told" || v.by !== null) &&
+    texts(v.evidence) &&
+    v.evidence.every((ref) => isWitnessRef(ref) || parseFactId(ref) !== null) &&
+    isRecord(since) &&
+    (since.msg === null || str(since.msg)) &&
+    finite(since.at) &&
+    typeof v.belief === "string" &&
+    (HOLDING_BELIEFS as readonly string[]).includes(v.belief) &&
+    isConfidence(v.confidence) &&
+    (v.keptFrom === undefined || v.keptFrom === "everyone" || someIds(v.keptFrom))
+  );
+}
+
+/** A holding as `self` keeps it: a copy, its evidence once each, and whom it's kept from once each, never themselves (none at all is no `keptFrom`). */
+export function holdingOf(v: Holding, self: EntityId): Holding {
+  const keptFrom = keptFromOf(v.keptFrom, self);
+  return { how: v.how, by: v.by, evidence: [...new Set(v.evidence)], since: { msg: v.since.msg, at: v.since.at }, belief: v.belief, confidence: v.confidence, ...(keptFrom ? { keptFrom } : {}) };
+}
+
+function factOf(v: KnowledgeFact): KnowledgeFact {
+  return { id: v.id, kind: v.kind, claim: v.claim, about: [...v.about], truth: v.truth, ...(v.source ? { source: { msg: v.source.msg, at: v.source.at } } : {}), ...(v.textHash !== undefined ? { textHash: v.textHash } : {}) };
+}
+
+/** The holding a learning gives each learner, as its data carries it (`since` is its message and clock). */
+function learnedHolding(d: JsonObject): JsonObject {
+  return { how: d.how ?? null, by: d.by ?? null, evidence: d.evidence ?? null, since: { msg: d.msg ?? null, at: d.at ?? null }, belief: d.belief ?? null, confidence: d.confidence ?? null, ...(d.keptFrom !== undefined ? { keptFrom: d.keptFrom } : {}) };
+}
+
+/** Who a knowledge event names: some people, each once, each in the world. */
+function knowers(ctx: ReadContext, v: JsonValue | undefined): EntityId[] | Rejection {
+  if (!someIds(v) || v.length === 0 || new Set(v).size !== v.length) return bad("a knowledge event names who, each once");
+  return v.every((id) => own(ctx.state.entities, id) !== undefined) ? v : { code: "missing_entity", reason: "a knowledge event names someone who isn't in the world" };
+}
+
+/** Whether `who` holds `fact` in the state. */
+function holds(state: Readonly<WorldState>, who: EntityId, fact: FactId): boolean {
+  return own(own(readKnowledge(state).holdings, who) ?? {}, fact) !== undefined;
+}
+
+/** A fact's claim for the GM's lines. */
+function claimOf(ctx: ReadContext, fact: JsonValue | undefined): string {
+  const f = str(fact) ? own(readKnowledge(ctx.state).facts, fact) : undefined;
+  return f ? `“${f.claim}”` : "a fact";
+}
+
+/** Names for the GM's lines, in a list. */
+function namesOf(ctx: ReadContext, who: JsonValue | undefined): string {
+  return listWords(ids(who) ? who.map((id) => nameOf(ctx, id)) : []);
+}
+
+const HOW_WORDS: Record<Holding["how"], string> = { authored: "from the start", witnessed: "witnessed", told: "told", inferred: "inferred", guessed: "a guess" };
+const BELIEF_WORDS: Record<Holding["belief"], string> = { true: "taken as true", false: "taken as false", uncertain: "unsure" };
+
+/** `minds.fact`: a fact the minds can hold, recorded whole; one already held is replaced whole, and whoever holds it still does. */
+const knowledgeFact: EventTypeDef<PackEvent> = {
+  type: MINDS_EVENTS.fact,
+  validate: (e) => (isFact(e.data.fact) ? null : bad("a fact needs an id in its kind's form, a claim, what it's about and its truth, and any source and text hash well formed")),
+  apply: (e, state) => {
+    const v = e.data.fact;
+    if (isFact(v)) writeKnowledge(state).facts[v.id] = factOf(v);
+  },
+  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : isFact(e.data.fact) ? `A fact for the minds: “${e.data.fact.claim}”` : "A fact for the minds"),
+};
+
+/**
+ * The witness entry a learning adds to each learner's log (`LearnEventData.witness`): what they saw
+ * (`witnessed`) or were told (`told`, by the teller), at the learning's clock and the place it gives.
+ * Its producer names it in the holding's evidence (`witnessRef`); null for a learning without one, or
+ * of another kind.
+ */
+export function learnedWitness(d: Pick<LearnEventData, "how" | "by" | "at"> & { witness?: LearnEventData["witness"] }): WitnessEntry | null {
+  if (!d.witness || (d.how !== "witnessed" && d.how !== "told")) return null;
+  return { at: d.at, what: d.witness.what, how: d.how === "told" ? "told" : "saw", by: d.how === "told" ? d.by : null, place: d.witness.place };
+}
+
+function isLearnedWitness(v: JsonValue | undefined): v is LearnEventData["witness"] & JsonObject {
+  return isRecord(v) && str(v.what) && v.what.trim() !== "" && (v.place === null || str(v.place));
+}
+
+/**
+ * `minds.learn`: each person named holds a fact the chat holds, as the event gives it, in place of
+ * any holding of it they had. Whom it names (a teller, those it's kept from) is in the world and
+ * none of the learners, and each fact it rests on is held by the chat; whether the teller holds what
+ * they told, and the learners could perceive it, the producer checks before it is made. A learning
+ * the knowledge step recorded, witnessed or told, adds its line to each learner's witness log
+ * (`learnedWitness`), as presence and memory add theirs.
+ */
+const learning: EventTypeDef<PackEvent> = {
+  type: MINDS_EVENTS.learn,
+  validate: (e, ctx) => {
+    const d = e.data;
+    const who = knowers(ctx, d.who);
+    if (!Array.isArray(who)) return who;
+    const k = readKnowledge(ctx.state);
+    if (!str(d.fact) || !own(k.facts, d.fact)) return { code: "missing_fact", reason: "a learning names a fact the minds don't hold" };
+    const h = learnedHolding(d);
+    if (d.by === undefined || d.msg === undefined || !isHolding(h)) return bad("a learning needs how and by whom (one told names its teller), its evidence, its message and clock, the belief, a confidence from 0 to 1 and whom it's kept from, if anyone");
+    if (h.by !== null && (own(ctx.state.entities, h.by) === undefined || who.includes(h.by))) return { code: "missing_entity", reason: "a learning's teller is in the world, and isn't one who learns it" };
+    if (Array.isArray(h.keptFrom) && h.keptFrom.some((id) => own(ctx.state.entities, id) === undefined || who.includes(id))) return { code: "missing_entity", reason: "those a learning is kept from are in the world, and aren't those who learn it" };
+    if (h.evidence.some((ref) => ref === d.fact || (!isWitnessRef(ref) && own(k.facts, ref) === undefined))) return { code: "missing_fact", reason: "a learning rests on facts the minds hold, never on itself" };
+    if (d.witness !== undefined && (!isLearnedWitness(d.witness) || (h.how !== "witnessed" && h.how !== "told"))) return bad("a learning's witness line is what was seen or told, and where, for one witnessed or told");
+    return null;
+  },
+  apply: (e, state) => {
+    const d = e.data;
+    const h = learnedHolding(d);
+    if (!str(d.fact) || !ids(d.who) || !isHolding(h) || own(readKnowledge(state).facts, d.fact) === undefined) return;
+    const k = writeKnowledge(state);
+    const line = isLearnedWitness(d.witness) ? learnedWitness({ how: h.how, by: h.by, at: h.since.at, witness: { what: d.witness.what, place: d.witness.place } }) : null;
+    for (const who of d.who) {
+      if (own(state.entities, who) === undefined) continue;
+      const held = own(k.holdings, who) ?? {};
+      held[d.fact] = holdingOf(h, who);
+      k.holdings[who] = held;
+      if (line) addWitness(writeCharacter(state, who), { ...line });
+    }
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined) return "";
+    const d = e.data;
+    const h = learnedHolding(d);
+    const who = ids(d.who) ? d.who : [];
+    if (!isHolding(h)) return `${namesOf(ctx, who)} learned ${claimOf(ctx, d.fact)}`;
+    const kept = h.keptFrom === "everyone" ? "kept from everyone" : h.keptFrom && h.keptFrom.length > 0 ? `kept from ${namesOf(ctx, h.keptFrom)}` : null;
+    const how = h.how === "told" && h.by !== null ? `told by ${nameOf(ctx, h.by)}` : HOW_WORDS[h.how];
+    const parts = [how, BELIEF_WORDS[h.belief], `${Math.round(h.confidence * 100)}% sure`, kept].filter((p): p is string => p !== null);
+    return `${namesOf(ctx, who)} ${who.length === 1 ? "holds" : "hold"} ${claimOf(ctx, d.fact)} (${parts.join(", ")})`;
+  },
+};
+
+/** `minds.forget`: none of those named holds the fact any more; each of them held it. */
+const forgetting: EventTypeDef<PackEvent> = {
+  type: MINDS_EVENTS.forget,
+  validate: (e, ctx) => {
+    const d = e.data;
+    if (!someIds(d.who) || d.who.length === 0 || new Set(d.who).size !== d.who.length || !str(d.fact)) return bad("forgetting names the fact and who forgets it, each once");
+    const fact = d.fact;
+    return d.who.every((who) => holds(ctx.state, who, fact)) ? null : { code: "missing_holding", reason: "someone it names doesn't hold that fact" };
+  },
+  apply: (e, state) => {
+    const d = e.data;
+    if (!ids(d.who) || !str(d.fact) || readSlice(state).knowledge === undefined) return;
+    const k = writeKnowledge(state);
+    for (const who of d.who) {
+      const held = own(k.holdings, who);
+      if (!held || own(held, d.fact) === undefined) continue;
+      delete held[d.fact];
+      // Someone who holds nothing has no entry, as if they never held anything.
+      if (Object.keys(held).length === 0) delete k.holdings[who];
+    }
+  },
+  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${namesOf(ctx, e.data.who)} no longer ${ids(e.data.who) && e.data.who.length === 1 ? "holds" : "hold"} ${claimOf(ctx, e.data.fact)}`),
+};
+
+/** `minds.keep`: whom someone keeps a fact they hold from: some people (never themselves), everyone, or (an empty list) no one. */
+const keeping: EventTypeDef<PackEvent> = {
+  type: MINDS_EVENTS.keep,
+  validate: (e, ctx) => {
+    const { who, fact, keptFrom } = e.data;
+    if (!str(who) || !str(fact) || !(keptFrom === "everyone" || someIds(keptFrom))) return bad("keeping names who keeps the fact, the fact, and whom it's kept from: some people or everyone");
+    if (!holds(ctx.state, who, fact)) return { code: "missing_holding", reason: "they don't hold that fact" };
+    return keptFrom !== "everyone" && keptFrom.some((id) => id === who || own(ctx.state.entities, id) === undefined) ? { code: "missing_entity", reason: "those a fact is kept from are in the world, and never the one who keeps it" } : null;
+  },
+  apply: (e, state) => {
+    const d = e.data;
+    if (!str(d.who) || !str(d.fact) || !holds(state, d.who, d.fact)) return;
+    const h = own(own(writeKnowledge(state).holdings, d.who) ?? {}, d.fact);
+    if (!h) return;
+    const keptFrom = keptFromOf(d.keptFrom, d.who);
+    if (keptFrom) h.keptFrom = keptFrom;
+    else delete h.keptFrom;
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined) return "";
+    const d = e.data;
+    const name = nameOf(ctx, String(d.who));
+    const keptFrom = keptFromOf(d.keptFrom, String(d.who));
+    if (keptFrom === null) return `${name} no longer keeps ${claimOf(ctx, d.fact)} from anyone`;
+    return `${name} keeps ${claimOf(ctx, d.fact)} from ${keptFrom === "everyone" ? "everyone" : namesOf(ctx, keptFrom)}`;
+  },
+};
+
+function isTruth(v: JsonValue | undefined): v is FactTruth {
+  return typeof v === "string" && (FACT_TRUTHS as readonly string[]).includes(v);
+}
+
+/** `minds.settle`: a fact's truth as the GM holds it: true, false, or an open question. */
+const settling: EventTypeDef<PackEvent> = {
+  type: MINDS_EVENTS.settle,
+  validate: (e, ctx) => {
+    if (!str(e.data.fact) || own(readKnowledge(ctx.state).facts, e.data.fact) === undefined) return { code: "missing_fact", reason: "that fact isn't one the minds hold" };
+    return isTruth(e.data.truth) ? null : bad("a fact's truth is true, false or open");
+  },
+  apply: (e, state) => {
+    const d = e.data;
+    if (!str(d.fact) || !isTruth(d.truth) || own(readKnowledge(state).facts, d.fact) === undefined) return;
+    const f = own(writeKnowledge(state).facts, d.fact);
+    if (f) f.truth = d.truth;
+  },
+  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${claimOf(ctx, e.data.fact)} is now ${e.data.truth === "open" ? "an open question" : String(e.data.truth)}`),
+};
+
+/**
+ * `minds.knowledge`: whether the chat tracks knowledge from this turn on, and the user's threshold
+ * when it changed (DESIGN §24.11): how sure the player character's holding must be to reveal its fact
+ * on their screens (`revealsFact`). The pre phase records it only when either changes in a chat that
+ * holds knowledge, so a chat with none folds as it always did. Switched off, every reader of
+ * knowledge reads as if there were none, and what was recorded stays for when it is switched on again.
+ */
+const tracking: EventTypeDef<PackEvent> = {
+  type: MINDS_EVENTS.knowledge,
+  validate: (e) => (typeof e.data.on === "boolean" && (e.data.threshold === undefined || isConfidence(e.data.threshold)) ? null : bad("knowledge tracking is on or off, and a threshold runs from 0 to 1")),
+  apply: (e, state) => {
+    if (typeof e.data.on !== "boolean") return;
+    if (e.data.on) {
+      if (readSlice(state).knowledge?.off) delete writeKnowledge(state).off;
+    } else writeKnowledge(state).off = true;
+    if (isConfidence(e.data.threshold)) writeKnowledge(state).threshold = e.data.threshold;
+  },
+  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `${e.data.on === true ? "Knowledge tracking is on" : "Knowledge tracking is off"}${isConfidence(e.data.threshold) ? `, a holding revealing its fact from ${Math.round(e.data.threshold * 100)}% sure` : ""}`),
+};
+
+export const MINDS_EVENT_DEFS: readonly EventTypeDef<PackEvent>[] = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, intent, skip, knowledgeFact, learning, forgetting, keeping, settling, tracking];
 
 /** Whether minds are on at the chat's latest round. */
 export function mindsOn(ctx: Pick<ReadContext, "state">): boolean {

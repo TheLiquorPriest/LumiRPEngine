@@ -22,7 +22,7 @@ import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
 import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, UpgradePreview, WorldChatInfo } from "../shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
-import { EXTRACTION_TYPES, helperCallOf } from "../shared/settings";
+import { EXTRACTION_TYPES, helperCallOf, narratorViewOf } from "../shared/settings";
 import { formatMs, TimeoutFired, timerMs } from "../shared/timeouts";
 import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
@@ -48,9 +48,8 @@ import { toChain } from "./ledger-io";
 import { JobError, type JobRunner } from "./jobs";
 import { bookDrift, saveFromChat } from "./lore";
 import { pinBooks, pinEntries, pinViews } from "./lore-pins";
-import { bookLoreProblem, secureIndexedSecrets, writeBookLore } from "./book-lore";
-import { copyKeepers, lorePass, noteEntry, secretCopyOf, secureCopies, withSecretCopy } from "./lore-secrets";
-import { bookLoreFieldsOf, engineWroteEntry } from "../shared/lore";
+import { markBookEntry, MarkChangeError, markChangeOf, writeBookFields } from "./book-lore";
+import { bookLoreFieldsOf, engineWroteEntry, OLD_SECRECY_FIELDS } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, playerReason, readRun, Runtime, unpricedChip } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
@@ -61,6 +60,7 @@ import { buildGmView } from "./gm";
 import { buildCharacter } from "../engine/character";
 import type { CharacterResult } from "../shared/character";
 import { type DraftNotice, newChatRun, WorldError } from "./worlds";
+import { SecrecyError, SecrecyMoves } from "./secrecy-migration";
 
 export class RequestError extends Error {
   constructor(
@@ -96,12 +96,15 @@ export class Dispatcher {
   private readonly clients = new Map<string, { name: string; version: string }>();
   /** GM → Minds' runs on demand (DESIGN §24.9). */
   private readonly minds: MindsRuns;
+  /** Build's moves of the user's World Info books to secret marks (DESIGN §4.2). */
+  private readonly secrecy: SecrecyMoves;
 
   constructor(
     private readonly rt: Runtime,
     private readonly jobs: JobRunner,
   ) {
     this.minds = new MindsRuns(rt);
+    this.secrecy = new SecrecyMoves(rt.host);
   }
 
   start(): void {
@@ -136,8 +139,6 @@ export class Dispatcher {
     const what = `${raw.type}${isRecord(raw) && typeof raw.op === "string" ? ` ${raw.op}` : ""}`;
     const t0 = performance.now();
     try {
-      // The World Info secrets are read from each user's first request on, so the first prompt that needs them finds them (§6.1).
-      this.rt.warmLore(userId);
       await this.route(raw, userId, session, reply, noted);
     } catch (error) {
       const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
@@ -607,6 +608,20 @@ export class Dispatcher {
         reply("lre.map", { display: r.display });
         return;
       }
+      case "lre.chat.knowledge": {
+        // This chat's own knowledge choices (DESIGN §6.11): kept in its metadata, never its ledger,
+        // so no recorded turn changes and a Branch keeps them; they apply from the next turn.
+        await this.requireWorldChat(r.chatId, userId);
+        if (r.knowledge !== undefined && r.knowledge !== null && typeof r.knowledge !== "boolean") throw new RequestError("bad_request", "knowledge tracking is on (true), off (false) or as Settings has it (null)");
+        const narrator = r.narrator === undefined || r.narrator === null ? r.narrator : narratorViewOf(r.narrator);
+        if (narrator === null && r.narrator !== null) throw new RequestError("bad_request", 'the narrator\'s knowledge is {"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}, or null to follow the world\'s default, else Settings');
+        const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}) };
+        const changes = Object.keys(change).length > 0;
+        const prefs = changes ? await this.rt.chatKnowledge.set(r.chatId, userId, change) : await this.rt.chatKnowledge.get(r.chatId, userId);
+        if (changes) this.rt.push.changed(r.chatId, userId);
+        reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null });
+        return;
+      }
       case "lre.job": {
         if (r.op === "start") reply("lre.job", { jobId: await this.jobs.start(r.kind, r.worldId, r.input, userId, session) });
         else if (r.op === "list") reply("lre.job", { jobs: await this.jobs.list(r.worldId, userId) });
@@ -642,34 +657,26 @@ export class Dispatcher {
           reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
           return;
         }
-        if (r.op === "check") {
-          const fields = bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: r.fields } });
-          if (fields === null) throw new RequestError("bad_request", "give the fields as an object");
-          // Build's form asks as it is typed, so it says what Save would refuse before Save is pressed.
-          reply("lre.lore", { problem: bookLoreProblem(fields) });
-          return;
-        }
-        if (r.op === "fields") {
+        if (r.op === "fields" || r.op === "mark") {
+          // Build's own edits of one of the user's entries, each on the user's press (DESIGN §4.2).
           const { bookId, entryId } = r;
           if (typeof bookId !== "string" || bookId === "" || typeof entryId !== "string" || entryId === "") throw new RequestError("bad_request", "name the book and its entry");
-          const fields = r.fields === null ? null : bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: r.fields } });
-          if (r.fields !== null && fields === null) throw new RequestError("bad_request", "give the fields as an object, or null to take them off");
-          const problem = fields ? bookLoreProblem(fields) : null;
-          if (problem) throw new RequestError("bad_request", problem);
           const host = this.rt.host;
-          // One pass with every other of the user's: no twin pass reads the entry between this write and its twins' (DESIGN §4.2).
-          await lorePass(host, userId, async (index) => {
-            const entry = await host.books.entry(entryId, userId);
-            if (!entry || entry.bookId !== bookId) throw new RequestError("not_found", "that book has no such entry");
-            if (engineWroteEntry(entry.extensions)) throw new RequestError("bad_request", "the engine wrote that entry; a world's own lore is its document's");
-            // A twin kept secret as a copy follows the secrets of its text: its secrecy is changed there, and comes back with them.
-            const copy = secretCopyOf(entry.extensions);
-            if (copy && (await copyKeepers(host, index, entry, userId)).length > 0) throw new RequestError("bad_request", "that entry is kept secret as a twin of a secret entry with the same text: change that one, and this one follows");
-            // A copy no secret keeps now is the author's own entry: the note goes.
-            noteEntry(index, await writeBookLore(host, copy ? { ...entry, extensions: withSecretCopy(entry.extensions, null) } : entry, fields, userId));
-            // Its twins in any book go with it: kept secret with it, or put back as they stood.
-            await secureCopies(host, index, userId);
-          });
+          const fields = r.op === "fields" && r.fields !== null ? bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: r.fields } }) : null;
+          if (r.op === "fields" && r.fields !== null && fields === null) throw new RequestError("bad_request", "give the fields as an object, or null to take them off");
+          if (fields && OLD_SECRECY_FIELDS.some((key) => fields[key] !== undefined)) throw new RequestError("bad_request", "an entry is made secret by a secret mark in its text, not by fields: use Make secret (the mark op)");
+          const change = r.op === "mark" ? markChangeOf(r.change) : null;
+          if (r.op === "mark" && change === null) throw new RequestError("bad_request", 'give the change: {"kind": "secret" | "add" | "names" | "public", …}');
+          const entry = await host.books.entry(entryId, userId);
+          if (!entry || entry.bookId !== bookId) throw new RequestError("not_found", "that book has no such entry");
+          if (engineWroteEntry(entry.extensions)) throw new RequestError("bad_request", "the engine wrote that entry; a world's own lore is its document's");
+          try {
+            if (change) await markBookEntry(host, entry, change, userId);
+            else await writeBookFields(host, entry, fields, userId);
+          } catch (error) {
+            if (error instanceof MarkChangeError) throw new RequestError("bad_request", error.message);
+            throw error;
+          }
           reply("lre.lore", { entries: await pinEntries(host, bookId, userId) });
           return;
         }
@@ -695,6 +702,29 @@ export class Dispatcher {
           reply("lre.minds", { run });
         } catch (error) {
           if (error instanceof RunError) throw new RequestError(error.code, error.message);
+          throw error;
+        }
+        return;
+      }
+      case "lre.secrecy": {
+        // Build → Lore → Secrecy in your World Info (DESIGN §4.2): only these requests write a book here, each the user's own press.
+        try {
+          if (r.op === "books") {
+            reply("lre.secrecy", { books: await this.secrecy.books(userId) });
+            return;
+          }
+          if (typeof r.bookId !== "string" || r.bookId === "") throw new RequestError("bad_request", "name the book");
+          if (r.op === "preview") {
+            reply("lre.secrecy", { book: await this.secrecy.preview(r.bookId, userId) });
+            return;
+          }
+          if (typeof r.version !== "string") throw new RequestError("bad_request", "send the version the page read the book at");
+          if (r.op === "apply") reply("lre.secrecy", { book: await this.secrecy.apply(r.bookId, r.version, userId) });
+          else if (r.op === "confirm") reply("lre.secrecy", { book: await this.secrecy.confirm(r.bookId, r.version, userId) });
+          else if (r.op === "restore") reply("lre.secrecy", { book: await this.secrecy.restore(r.bookId, r.version, userId) });
+          else throw new RequestError("bad_request", "not a step of a book's move");
+        } catch (error) {
+          if (error instanceof SecrecyError) throw new RequestError(error.code, error.message);
           throw error;
         }
         return;
@@ -771,8 +801,6 @@ export class Dispatcher {
         if (!body) throw new RequestError("bad_request", "not a valid Upgrade");
         const result = await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body });
         await this.syncBook(before.worldId, userId);
-        // The revision the chat moves to keeps its secrets indexed from World Info off in their books (DESIGN §4.2).
-        await secureIndexedSecrets(this.rt.host, (await this.rt.worlds.get(before.worldId, userId, r.to)).world, userId);
         // Mid-turn, the marker is held and lands when the turn ends (P2).
         return { revision: r.to, pending: result.pending };
       }

@@ -3,7 +3,7 @@
 
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
-import type { Fidelity, FidelityScore, FidelityTexts, MindEditOp, MindPlan } from "../../../shared/minds";
+import type { Fidelity, FidelityScore, FidelityTexts, KnowledgeSettings, MindEditOp, MindPlan } from "../../../shared/minds";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 
 declare module "../../../engine/registry" {
@@ -28,5 +28,11 @@ declare module "../../../engine/registry" {
     "minds.intent": (ctx: ReadContext, who: EntityId) => boolean;
     /** Every character's fidelity now, best score first (DESIGN §24.1); texts empty inside `advance` and at a beat. */
     "minds.fidelity": (ctx: ReadContext, texts: FidelityTexts) => FidelityScore[];
+    /**
+     * The user's knowledge settings (DESIGN §24.11, Settings → Minds → Knowledge): the Who knows what
+     * section's limits and wording. The pack answers the defaults; the engine run gives the user's
+     * own in the context it builds the sections with (`buildSections`).
+     */
+    "minds.knowing": (ctx: ReadContext) => KnowledgeSettings;
   }
 }

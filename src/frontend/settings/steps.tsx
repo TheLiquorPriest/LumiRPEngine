@@ -77,6 +77,7 @@ const STEP_PLAIN: Record<StepPurpose, string> = {
   memory: "After the reply: the notes, commitments and plans each character who heard your message takes from it, at the levels you pick.",
   skip: "Before a time skip, once you turn it on: further moments in it worth stopping at.",
   consolidate: "Folds a character's faded and surplus notes into their summary.",
+  knowledge: "After the reply: who learned what, what they worked out and what they now doubt, one call per scene or per character as set in Settings → Minds → Knowledge.",
 };
 
 const PHASES = ["pre", "post"] as const;
@@ -379,18 +380,18 @@ export function stepPromptPatch(purpose: StepPurpose, text: string | null, built
 export function stepBuiltIn(purpose: StepPurpose): { use: "replaced" | "added"; text: string } {
   if (purpose === "interpret" || purpose === "extract") return { use: "added", text: ADDED_BEFORE[purpose] };
   if (purpose === "skip") return { use: "replaced", text: SKIP_PLAN_PROMPT };
-  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate") return { use: "replaced", text: MIND_PROMPT_DEFAULTS[purpose] };
+  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate" || purpose === "knowledge") return { use: "replaced", text: MIND_PROMPT_DEFAULTS[purpose] };
   return { use: "replaced", text: purpose === "brief" || purpose === "outline" || purpose === "choices" ? PROSE_PROMPTS[purpose] : DECISION_PROMPTS[purpose] };
 }
 
 /**
  * A step card's prompts (DESIGN §5.2): the user's own, which wins over the world's template and that
- * over the built-in. A mind's, a memory's and consolidation's are Settings → Minds' (the same
+ * over the built-in. A mind's, a memory's, consolidation's and the knowledge step's are Settings → Minds' (the same
  * prompt); the time-skip step has its beats' (Settings → Minds' too) and the skip plan's.
  */
 function StepPrompts(props: { purpose: StepPurpose; config: StepConfig; prompts: MindsSettings["prompts"]; busy: boolean; patch(patch: JsonObject): void }) {
   const { purpose, busy } = props;
-  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate") return <MindPromptEditor purpose={purpose} value={props.prompts[purpose]} busy={busy} patch={props.patch} />;
+  if (purpose === "mind" || purpose === "memory" || purpose === "consolidate" || purpose === "knowledge") return <MindPromptEditor purpose={purpose} value={props.prompts[purpose]} busy={busy} patch={props.patch} />;
   const built = stepBuiltIn(purpose);
   const builtIn = built.use === "replaced" ? built.text : undefined;
   const adds = built.use === "added" ? built.text : undefined;

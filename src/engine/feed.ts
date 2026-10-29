@@ -1,11 +1,15 @@
 // The engine feed (DESIGN §6.11): what goes into each section and whose knowledge it comes from.
 // A section's feed is its world defaults (`SectionTemplate`'s `enabled`, `maxTokens`, `maxLines`,
 // `include`, `scope`), or the GM's settings for it in this chat in their place, held in the
-// engine's state slice by an `engine.feed` event, so the override is a GM edit with its own Undo. Pure.
+// engine's state slice by an `engine.feed` event, so the override is a GM edit with its own Undo.
+// A section that sets no scope reads in the narrator's knowledge (`sectionScope`). Pure.
 
-import type { SlotId } from "../shared/ids";
+import type { EntityId, SlotId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import type { PackEvent } from "../shared/ledger";
+import { neutralizeMacros } from "../shared/macros";
+import { SECRET_MARK_WORDING, secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
+import type { NarratorView } from "../shared/settings";
 import { readSectionFeed, SECTION_FEED_KEYS, type FeedScope, type SectionFeed, type SectionTemplate } from "../shared/world";
 import { feedSentence } from "../shared/words";
 import type { EventTypeDef, FeedLine, ReadContext, SectionRenderer } from "./registry";
@@ -45,6 +49,27 @@ export function feedOf(section: SectionTemplate, state: Readonly<WorldState>): S
   return chatFeed(state)[section.id] ?? worldFeed(section);
 }
 
+/** The scope a narrator's knowledge stands for (DESIGN §6.11): everyone in the scene's is everything, each fact beyond the player character's marked (`gm`); the player character's is `player`. */
+export function viewScope(view: NarratorView): FeedScope {
+  return view.knowledge === "scene" ? "gm" : "player";
+}
+
+/**
+ * A section's scope in this chat (DESIGN §6.11): the nearest choice, in the order the narrator's
+ * knowledge falls back (this chat, its world, the user), the section's own before the narrator's at
+ * each level. The GM's settings for the section in this chat stand whole: their scope, else the
+ * narrator's knowledge in force. Without them, this chat's own narrator knowledge comes before a
+ * scope the world set on its section, and that scope before the world's or the user's narrator
+ * knowledge. `narrator.chat` is the chat's own choice (null when it follows), `narrator.view` the
+ * knowledge in force.
+ */
+export function sectionScope(section: SectionTemplate, state: Readonly<WorldState>, narrator: { chat: NarratorView | null; view: NarratorView }): FeedScope {
+  const gm = chatFeed(state)[section.id];
+  if (gm) return gm.scope ?? viewScope(narrator.view);
+  if (narrator.chat) return viewScope(narrator.chat);
+  return worldFeed(section).scope ?? viewScope(narrator.view);
+}
+
 /** A renderer's name for `include`. */
 export function sourceOf(r: SectionRenderer): string {
   return r.source ?? r.slot;
@@ -69,6 +94,17 @@ export function markedText(line: FeedLine): string {
 }
 
 /**
+ * A secret line (`FeedLine.secret`, DESIGN §24.11) as the narrator's knowledge gives it: under
+ * "marked", its text with whom it is known to and kept from, by name, in the secret mark's wording
+ * (Settings → Narrator); under "omit", nothing. Null for a line that isn't a secret.
+ */
+export function secretLineText(line: FeedLine, secrets: "marked" | "omit", wording: SecretMarkWording, nameOf: (id: EntityId) => string): string | null {
+  if (!line.secret || secrets === "omit") return null;
+  const kept = line.secret.keptFrom;
+  return secretMarkText(line.text, (line.secret.known ?? []).map(nameOf), kept === "everyone" ? "everyone" : kept.map(nameOf), wording);
+}
+
+/**
  * What the narrator is told of marked facts (DESIGN §6.8, §6.11), the one source of it: knowledge
  * guidance under the order of authority, since the player's own directives come first. The marks
  * `markedText` writes say who knows a fact, so every character stays consistent with what they know
@@ -79,6 +115,32 @@ export function markedText(line: FeedLine): string {
  */
 export const MARKED_FACTS_RULE =
   "What each person knows, under that order: a fact marked [unknown to you; known to …] or [unknown to you; GM only] is one the player character doesn't know, and the mark says who does. Keep every character consistent with what they know: no one says, acts on or is narrated as knowing a fact they don't, until the story reveals it to them or the player's own instructions make it known. Unless the player's own instructions say otherwise, don't tell a marked fact in the narration or have the reply reveal it; it becomes known only through what the story has already established or what the player character does or finds. Marked facts are for steering the story and the people who do know them.";
+
+/**
+ * Every form a secret's mark takes in a wording, "…" standing for its text and names: each case
+ * `secretMarkText` writes for the sections and the interceptor (holders or none, kept from some or
+ * from everyone), as a section shows it.
+ */
+export function secretMarkForms(wording: SecretMarkWording = SECRET_MARK_WORDING): string[] {
+  const cases: [string[], string[] | "everyone"][] = [[["…"], "everyone"], [[], ["…"]], [[], "everyone"], [["…"], ["…"]]];
+  return [...new Set(cases.map(([known, kept]) => neutralizeMacros(secretMarkText("…", known, kept, wording))))];
+}
+
+/**
+ * What the narrator is told of a secret's mark (C5, Settings → Narrator), beside `MARKED_FACTS_RULE`
+ * and under the same order: the user's rule (`SecretMarkWording.rule`, the shipped one by default),
+ * `{{forms}}` filled with each form their wording writes, so an edited wording is still explained, and
+ * `{{everyone}}` with their word for everyone, in one pass. The rule's own text is neutralized as the
+ * forms are (§6.3): a macro in it is told as written, never run. It depends only on that wording,
+ * never on the world or the turn.
+ */
+export function secretMarksRule(wording: SecretMarkWording = SECRET_MARK_WORDING): string {
+  const values: Readonly<Record<string, string>> = { forms: secretMarkForms(wording).join(" or "), everyone: neutralizeMacros(wording.everyone) };
+  return wording.rule
+    .split(/(\{\{(?:forms|everyone)\}\})/)
+    .map((part, i) => (i % 2 === 1 ? (values[part.slice(2, -2)] ?? "") : neutralizeMacros(part)))
+    .join("");
+}
 
 /** The `engine.feed` event: one section's override in this chat, replaced whole (`to: null` clears it). */
 export const feedEvent: EventTypeDef<PackEvent> = {

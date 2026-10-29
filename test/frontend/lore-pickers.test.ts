@@ -1,9 +1,9 @@
 // Build's lore pickers (DESIGN §4.2, §24.5): books that share a name read apart, a secret's helpers
-// leave out those that write for the player, and the gates offered as examples are ones Save takes,
-// made of the world's own names.
+// leave out those that write for the player, and the gates offered as examples compile, made of the
+// world's own names.
 
 import { describe, expect, test } from "bun:test";
-import { bookLoreProblem } from "../../src/backend/book-lore";
+import { compile } from "../../src/engine/expr";
 import { loreGateReader } from "../../src/engine/visibility";
 import { audienceChoices, bookLabels, gateExamples } from "../../src/frontend/build/book-lore";
 import { exprReads } from "../../src/frontend/build/expr-editor";
@@ -47,10 +47,10 @@ describe.each(Object.keys(STARTER_WORLDS))("%s's example gates", (starter) => {
   const play = new Play(starter);
   const examples = gateExamples(play.world);
 
-  test("each is a gate Save takes, reading only what the world has", () => {
+  test("each is a gate that compiles, reading only what the world has", () => {
     expect(examples.length).toBeGreaterThan(0);
     for (const x of examples) {
-      expect(bookLoreProblem({ secret: true, gate: x.formula })).toBeNull();
+      expect(() => compile(x.formula)).not.toThrow();
       expect(exprReads(x.formula, play.world).reads.filter((r) => r.what === "param")).toEqual([]);
     }
   });

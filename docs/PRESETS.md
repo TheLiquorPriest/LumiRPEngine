@@ -21,6 +21,7 @@ Each section the engine fills has an outlet named `lre_` and its slot. Put `{{ou
 | `outline` | Outline: the engine's beats for the reply, with the brief and prose outline | `{{outlet::lre_outline}}` |
 | `stance` | Stance: how the people here behave, with the cues their secrets give | `{{outlet::lre_stance}}` |
 | `minds` | Minds: each character's mind this turn, scoped to what they know (under `brief` secrecy, only how they come across). It has its own token budget (Settings → Minds), apart from the section budget | `{{outlet::lre_minds}}` |
+| `knowledge` | Who knows what: what the player character knows and, as the narrator's knowledge allows, what the people with them know, while the chat tracks who knows what. Settings → Minds → Knowledge caps its tokens | `{{outlet::lre_knowledge}}` |
 | — | The narrator rules (below) | `{{outlet::lre_narrator}}` |
 
 A world may list sections of its own (Build → Sections); each one's outlet is `lre_` and its id, so a section `stance` goes to `{{outlet::lre_stance}}`. A section is filled only by a pack that renders one with its id (weather, for example, goes into Scene, not a section of its own); one nothing fills is a lint warning (`section_unfed`) and never goes in. Outlet names are matched without regard to case, as Lumiverse matches them.
@@ -57,6 +58,7 @@ The engine makes small model calls of its own around each turn. A switched-off b
 | `RPEngine · memory` | Writes down, as each character present, what they'll remember of the reply: notes, promises and debts, plans | What your preset's characters hold on to: slights, kindnesses, money, promises |
 | `RPEngine · skip` | Finds the moments worth stopping at inside a time skip | How often your preset wants a skip interrupted |
 | `RPEngine · consolidate` | Folds a character's older notes into their summary | What a summary should keep in your preset's story |
+| `RPEngine · knowledge` | Works out after each reply who learned what, what they worked out and what they now doubt | How your preset's people take things in: how quickly they guess, how readily they believe what they're told |
 
 How the engine reads a guidance block:
 

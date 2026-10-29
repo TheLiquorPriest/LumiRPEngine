@@ -63,6 +63,8 @@ export type FieldSpec =
   | { kind: "bandCaps"; key: string; label: string }
   /** A player-claims policy (`shared/claims.ts`), or none: unset, a new chat takes the player's own. */
   | { kind: "claims"; key: string; label: string }
+  /** The narrator's knowledge (`shared/settings.ts` `NarratorView`), or none: unset, each chat follows its own choice, else the player's Settings → Narrator. */
+  | { kind: "narrator"; key: string; label: string }
   /** Game minutes, typed as a span ("1 h 30 min"). */
   | { kind: "duration"; key: string; label: string; optional?: boolean; hint?: string }
   /** A moment of the world's clock (game minutes since its calendar's epoch), typed as a date and time. */
@@ -486,7 +488,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
     // The section's feed (DESIGN §6.11): the world's defaults, which the GM can set per chat.
     { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v) => v !== false },
-    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: SCOPE_LABEL, optional: true, hint: "Unset, it's what your character knows. The wider choices also tell the narrator what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
+    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: SCOPE_LABEL, optional: true, hint: "Unset, it follows the narrator's knowledge: a chat's own choice, else the world's (World → The narrator's knowledge), else the player's Settings → Narrator. Set, it reads what your character knows, also what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
     { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
     { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
     { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" },
@@ -595,6 +597,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
   meta: [
     { kind: "text", key: "name", label: "World name" },
     { kind: "ref", key: "pov", label: "Point of view", collection: "entities" },
+    { kind: "narrator", key: "narrator", label: "The narrator's knowledge" },
     {
       kind: "object",
       key: "start",

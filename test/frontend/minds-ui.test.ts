@@ -3,16 +3,19 @@
 
 import { describe, expect, test } from "bun:test";
 import { commitmentDraft, commitmentOp, narratorGets, noteOp, planDraft, planLasts, planOp, startPlanIn, type MindPart } from "../../src/packs/minds/ui/ops";
-import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, mindsPolicyPatch, mindsPromptPatch, withMemoryLevel } from "../../src/frontend/settings/minds-patch";
+import { knowledgeLimitPatch, knowledgePatch, knowledgeTextPatch, MEMORY_FIELDS, memoryOverride, memoryOverridePatch, mindsPolicyPatch, mindsPromptPatch, withMemoryLevel } from "../../src/frontend/settings/minds-patch";
 import { LimitField, ReadRow, ReadSources } from "../../src/frontend/settings/minds";
-import { HostSwitch } from "../../src/frontend/components";
+import { Badge, Empty, HostSwitch } from "../../src/frontend/components";
+import { ActionRow } from "../../src/frontend/gm/ui";
+import type { PanelProps } from "../../src/frontend/registry";
+import { decodeKnownView, KnownPanel } from "../../src/packs/minds/ui/known";
 import { expand, press, propsOf } from "../support/tree";
 import { mindsPartValue } from "../../src/frontend/build/minds-editor";
 import { decodeContextView, sectionNote } from "../../src/frontend/play/context";
 import { mindTracesOf } from "../../src/backend/inspector-log";
 import type { JsonObject } from "../../src/shared/json";
-import type { MindCallTrace, MindSource, MindsSettings, WorldMindsConfig } from "../../src/shared/minds";
-import { DEFAULT_WORLD_MINDS, defaultMindsSettings, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_SOURCES, MINDS_PRESETS, worldMindsOf, worldMindTemplate } from "../../src/shared/minds";
+import type { KnownItem, MindCallTrace, MindSource, MindsSettings, WorldMindsConfig } from "../../src/shared/minds";
+import { DEFAULT_WORLD_MINDS, defaultMindsSettings, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_SOURCES, MINDS_PRESETS, worldMindsOf, worldMindTemplate } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 import { stepUpdatePatch } from "../../src/frontend/settings/steps";
@@ -115,7 +118,7 @@ describe("Settings → Minds patches", () => {
     let minds = defaultMindsSettings();
     let sent: JsonObject | null = null;
     const row = (source: MindSource) => {
-      const rows = propsOf(ReadSources({ reads: minds.reads, memory: minds.memory, busy: false, patch: (p) => void (sent = p) }), ReadRow).filter((p) => p.source === source);
+      const rows = propsOf(ReadSources({ reads: minds.reads, memory: minds.memory, knowledge: minds.knowledge, busy: false, patch: (p) => void (sent = p) }), ReadRow).filter((p) => p.source === source);
       const [only] = rows;
       if (rows.length !== 1 || !only) throw new Error(`${rows.length} rows for ${source}`);
       return expand({ type: ReadRow, props: only });
@@ -133,7 +136,53 @@ describe("Settings → Minds patches", () => {
     expect(minds.reads.routine).toEqual({ on: false, tokens: 800 });
     expect(propsOf(row("routine"), LimitField)).toEqual([]);
     // Every source still has its one row.
-    expect(propsOf(ReadSources({ reads: minds.reads, memory: minds.memory, busy: false, patch: () => undefined }), ReadRow).map((p) => p.source).sort()).toEqual([...MIND_SOURCES].sort());
+    expect(propsOf(ReadSources({ reads: minds.reads, memory: minds.memory, knowledge: minds.knowledge, busy: false, patch: () => undefined }), ReadRow).map((p) => p.source).sort()).toEqual([...MIND_SOURCES].sort());
+  });
+
+  test("Knowledge's settings reach the settings store, leave the preset alone, and a text goes back to the shipped one on reset", async () => {
+    const rig = new Rig();
+    let s = await settingsAfter(rig, knowledgePatch({ enabled: false, threshold: 0.55, batch: "character" }));
+    expect([s.minds.knowledge.enabled, s.minds.knowledge.threshold, s.minds.knowledge.batch]).toEqual([false, 0.55, "character"]);
+    expect(s.preset).toBe("standard");
+    s = await settingsAfter(rig, knowledgeLimitPatch("mindTokens", 900));
+    expect(s.minds.knowledge.mindTokens).toBe(900);
+    expect(s.minds.knowledge.perPerson).toBe(KNOWLEDGE_DEFAULTS.perPerson);
+    // A wording must keep the shipped placeholders; the shipped text, or none, saves no wording.
+    expect(knowledgeTextPatch("known", "{{claim}}")).toBeNull();
+    expect(knowledgeTextPatch("known", ` ${KNOWLEDGE_TEXTS.known} `)).toEqual({ minds: { knowledge: { prompts: { known: null } } } });
+    s = await settingsAfter(rig, knowledgeTextPatch("known", "{{claim}}, as {{how}}"));
+    expect(s.minds.knowledge.prompts).toEqual({ known: "{{claim}}, as {{how}}" });
+    s = await settingsAfter(rig, knowledgeTextPatch("known", null));
+    expect(s.minds.knowledge.prompts).toEqual({});
+    expect(s.minds.knowledge.mindTokens).toBe(900);
+  });
+
+  test("What a mind reads has a What they know row, on by default, whose switch reaches the settings store", async () => {
+    const rig = new Rig();
+    const minds = defaultMindsSettings();
+    let sent: JsonObject | null = null;
+    const [props] = propsOf(ReadSources({ reads: minds.reads, memory: minds.memory, knowledge: minds.knowledge, busy: false, patch: (p) => void (sent = p) }), ReadRow).filter((p) => p.source === "knowledge");
+    if (!props) throw new Error("no What they know row");
+    const [toggle] = propsOf(expand({ type: ReadRow, props }), HostSwitch);
+    if (!toggle) throw new Error("no switch");
+    expect(toggle.checked).toBe(true);
+    press(toggle, false);
+    expect((await settingsAfter(rig, sent)).minds.reads.knowledge).toEqual({ on: false });
+  });
+});
+
+describe("Play → What you know", () => {
+  const item = { key: "known_marina", claim: "Marcus Delgado owes the marina three months' rent", how: "told", byName: "Priya Nair", sinceText: "Tue 07:42", belief: "uncertain", confidence: 0.4, suspicion: true, open: false, keptFrom: ["Danny Okafor"] } satisfies KnownItem;
+  const panel = (view: PanelProps["view"]) => KnownPanel({ chatId: "chat", view } as PanelProps);
+
+  test("it shows the view's holdings as given, and says so when the chat doesn't track knowledge", () => {
+    expect(decodeKnownView({ tracking: true, items: [item] })).toEqual({ tracking: true, items: [item] });
+    const off = panel({ tracking: false, items: [] });
+    expect(propsOf(off, Empty).map((p) => p.title)).toEqual(["Knowledge tracking is off for this chat"]);
+    expect(propsOf(panel({ tracking: true, items: [] }), Empty).map((p) => p.children)).toEqual(["You haven't learned anything the story tracks yet."]);
+    const on = panel({ tracking: true, items: [item] });
+    expect(propsOf(on, ActionRow).map((p) => [p.title, p.subtitle])).toEqual([[item.claim, "Told by Priya Nair · Tue 07:42"]]);
+    expect(propsOf(on, Badge).map((p) => p.children)).toEqual(["Suspicion", "Unsure"]);
   });
 });
 
@@ -143,7 +192,7 @@ describe("Settings → Steps with the minds steps", () => {
     type Read = { minds: MindsSettings; modelUse: ModelUseSettings };
     const set = async (patch: JsonObject): Promise<Read> => rig.body(await rig.send({ type: "lre.settings.set", patch })).settings as Read;
     const lean = await set({ modelUse: { preset: "lean" } });
-    for (const purpose of ["mind", "memory", "skip", "consolidate"] as const) {
+    for (const purpose of ["mind", "memory", "skip", "consolidate", "knowledge"] as const) {
       expect(lean.modelUse.steps[purpose]).toBeUndefined();
       // The skip step is off until the user turns it on (DESIGN §24.7); the others run, with the helper
       // model's max tokens, and all but a mind's without reasoning (§5.3).
@@ -180,23 +229,24 @@ describe("Build → World → Minds", () => {
 
   test("the defaults save as no config; anything else saves whole, an unset selector left out", () => {
     expect(mindsPartValue(structuredClone(DEFAULT_WORLD_MINDS) as WorldMindsConfig)).toEqual({});
-    const edited: WorldMindsConfig = { ...structuredClone(DEFAULT_WORLD_MINDS), secrecy: "full", always: { tag: ["lead"] } } as WorldMindsConfig;
+    const edited: WorldMindsConfig = { ...structuredClone(DEFAULT_WORLD_MINDS), secrecy: "brief", always: { tag: ["lead"] } } as WorldMindsConfig;
     const value = mindsPartValue(edited);
-    expect(value.secrecy).toBe("full");
+    expect(value.secrecy).toBe("brief");
     expect(value.always).toEqual({ tag: ["lead"] });
     expect("never" in value).toBe(false);
   });
 
-  test("secrecy, weights, thresholds, selectors and memory reach the draft and read back; Use the defaults removes them", async () => {
+  test("secrecy, weights, thresholds, selectors, memory and holdings from the start reach the draft and read back; Use the defaults removes them", async () => {
     const rig = new Rig();
     const worldId = await rig.newWorld();
     const config = structuredClone(DEFAULT_WORLD_MINDS) as WorldMindsConfig;
-    config.secrecy = "full";
+    config.secrecy = "brief";
     config.weights = { ...config.weights, here: 70, roles: { villain: 35 }, band: { ...config.weights.band, supporting: 12 } };
     config.thresholds = { live: 80, near: 40, far: 10 };
     config.always = { tag: ["lead"] };
     config.never = { kind: ["animal"] };
     config.memory = { ...config.memory, notes: { show: 3, keep: 12 }, salience: { halfLifeDays: 2.5, floor: 1 }, consolidate: { enabled: false, periodDays: 3 } };
+    config.holdings = { dev: { "field:dev:cash": { belief: "uncertain", confidence: 0.4, keptFrom: "everyone" } } };
     const set = rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "set", part: "minds", value: mindsPartValue(config) }));
     expect(worldMindsOf(set.draft as WorldDoc)).toEqual(config);
     const got = rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "get" }));

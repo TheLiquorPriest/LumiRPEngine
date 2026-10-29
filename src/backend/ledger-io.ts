@@ -354,6 +354,7 @@ export type PreOutcome = { waiting: string };
 const TURN_INPUTS = {
   revision: "the chat's world revision changed",
   settings: "your RPEngine settings changed",
+  chat: "this chat's knowledge settings changed",
 } as const satisfies Record<string, string>;
 
 /** Each of a turn's other inputs (`TURN_INPUTS`), as one comparable value. */
@@ -440,11 +441,6 @@ export interface Delivered {
   bookId: string;
   fills: ReadonlyMap<string, string>;
   placed: string;
-  /**
-   * The World Info entries the turn's sections carried (DESIGN §6.11): a section line that tells an
-   * entry's text names it, so that entry can stay out of the same prompt. Empty when none did.
-   */
-  sources: readonly { bookId: string; entryId: string }[];
 }
 
 /** One message as the chat's events last showed it: what the guard checks a prepared turn's chain against. */

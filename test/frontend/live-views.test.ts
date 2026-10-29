@@ -7,6 +7,7 @@ import { decodeCalendarView } from "../../src/packs/calendar/ui/panel";
 import { decodeCastView } from "../../src/packs/castlife/ui/panel";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { decodeGearView } from "../../src/packs/gear/ui/panel";
+import { decodeKnownView } from "../../src/packs/minds/ui/known";
 import { decodeYouView } from "../../src/packs/sheets/ui/panel";
 import { decodeQuestsView } from "../../src/packs/story/ui/panel";
 import { decodeGarageView } from "../../src/packs/vehicles/ui/panel";
@@ -18,10 +19,14 @@ const DECODERS: Record<string, (value: unknown) => unknown> = {
   "castlife.cast": decodeCastView,
   "economy.money": decodeFinanceView,
   "gear.gear": decodeGearView,
+  "minds.known": decodeKnownView,
   "sheets.you": decodeYouView,
   "story.quests": decodeQuestsView,
   "vehicles.garage": decodeGarageView,
 };
+
+/** A chat's view preferences as a new user has them: the world's own map display. */
+const PREFS = { mapDisplay: null };
 
 describe.each(Object.keys(STARTER_WORLDS))("%s views", (starter) => {
   const play = new Play(starter);
@@ -33,7 +38,7 @@ describe.each(Object.keys(STARTER_WORLDS))("%s views", (starter) => {
   });
 
   test.each(views.map((def) => [def.panel, def] as const))("%s decodes", (panel, def) => {
-    const view: unknown = JSON.parse(JSON.stringify(def.build(ctx, { mapDisplay: null })));
+    const view: unknown = JSON.parse(JSON.stringify(def.build(ctx, PREFS)));
     if (view === null) return;
     expect(DECODERS[panel]?.(view)).not.toBeNull();
   });
@@ -44,7 +49,7 @@ test("every starter's quest log decodes track for track: status, label, stage an
   let seen = 0;
   for (const starter of Object.keys(STARTER_WORLDS)) {
     const play = new Play(starter);
-    const raw: unknown = JSON.parse(JSON.stringify(def?.build(registry.context(play.world, play.state), { mapDisplay: null })));
+    const raw: unknown = JSON.parse(JSON.stringify(def?.build(registry.context(play.world, play.state), PREFS)));
     const decoded = decodeQuestsView(raw);
     const expected = isRecord(raw) ? (["active", "done", "failed"] as const).flatMap((status) => (Array.isArray(raw[status]) ? raw[status].filter(isRecord).map((t) => ({ id: t.id, status, label: t.label, stage: t.stage, cue: t.cue ?? undefined })) : [])) : [];
     const actual: unknown = decoded?.tracks.map((t) => ({ id: t.id, status: t.status, label: t.label, stage: t.stage, cue: t.cue }));

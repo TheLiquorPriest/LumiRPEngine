@@ -11,7 +11,8 @@ import { isRecord } from "../../src/shared/json";
 import { applyPatch } from "../../src/shared/json-patch";
 import type { MindsRunView } from "../../src/shared/minds";
 import type { LoreBookEntryView, LorePinView } from "../../src/shared/protocol";
-import type { BookLoreFields } from "../../src/shared/lore";
+import { editedBookFields, OLD_SECRECY_FIELDS, withBookLoreFields, type BookLoreFields } from "../../src/shared/lore";
+import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../../src/shared/secret-marks";
 import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LoreDrift, PresetCard, ResultBodies } from "../../src/shared/protocol";
 import { AGENT_API } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
@@ -21,7 +22,7 @@ import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
 import { findPath, gridMinutes } from "../../src/shared/grid";
 import { decodeMapView } from "../../src/packs/space/ui/view";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { bookLoreProblem } from "../../src/backend/book-lore";
+import { MarkChangeError, markedContent } from "../../src/backend/book-lore";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
 import { extractionView, freshFixture, gmFixture, OVERDRAWN_PURCHASE, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
@@ -33,6 +34,7 @@ import { formulaFunctions } from "../../src/engine/scope";
 import { buildCharacter } from "../../src/engine/character";
 import { initialState } from "../../src/engine/world-state";
 import { buildSections } from "../../src/backend/sections-build";
+import { secretMarkWording } from "../../src/backend/chat-knowledge-prefs";
 import { sectionsOf, sectionTokens } from "../../src/backend/book";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import { unrevealedSecrets } from "../../src/engine/visibility";
@@ -105,8 +107,13 @@ const LORE_PROPOSALS: JobProposal[] = [
 export class MockBackend {
   /** The chat's latest minds run (`lre.minds`): the preview runs it one mind at a time, and the third fails as a cut-off call does. */
   private mindsRun: MindsRunView | null = null;
-  /** LRE's fields on the preview's World Info entries, by entry id (Build → Lore → World Info). */
+  /** LRE's own fields on the preview's World Info entries, by entry id (Build → Lore → World Info). */
   private readonly bookLore: Record<string, BookLoreFields> = {};
+  /** The preview's World Info entries' text, by entry id: Build's Make secret writes its marks into it, as the backend does into a book. */
+  private readonly bookText: Record<string, string> = {
+    e1: "The town council meets on the first Monday of each month, in the library basement.",
+    e2: "The harbor opens at dawn and closes at dusk. {{// Secret (known to npc_dev): Dev keeps a spare key to the bait shop under the third crate.}}",
+  };
   private view: StateView | null = null;
   private rev = 0;
   private settings: UserSettings = settingsFixture();
@@ -446,8 +453,26 @@ export class MockBackend {
           return [[s.id, { ...plain, ...(row.chat ?? row.world) }]];
         }));
         const settings = settingsFixture();
-        const built = buildSections({ registry: REGISTRY, world, state, secrets: unrevealedSecrets(REGISTRY, world, state), budget: settings.modelUse.tokens.sections, mindsBudget: settings.minds.tokens, said: "", planned: { outcome: [], montage: [] }, outline: [], elapsed: null, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
-        return this.result(reqId, "lre.sections", { sections: built.sections.map((s) => ({ slot: s.slot, label: s.label, status: s.status, scope: s.feed.scope ?? "player", content: s.content, tokens: s.tokens, cut: s.cut, marked: s.marked, hints: s.hints })), budget: { sections: settings.modelUse.tokens.sections, used: built.used, minds: settings.minds.tokens } });
+        // The narrator's knowledge as This chat → Knowledge shows it: the chat's own, else the world's, else the user's.
+        const knowledge = this.view?.controls?.knowledge.narrator;
+        const narrator = { chat: knowledge?.chat ?? null, view: knowledge?.chat ?? knowledge?.world ?? knowledge?.user ?? settings.narrator };
+        const built = buildSections({ registry: REGISTRY, world, state, secrets: unrevealedSecrets(REGISTRY, world, state), narrator, wording: secretMarkWording(settings), budget: settings.modelUse.tokens.sections, mindsBudget: settings.minds.tokens, said: "", planned: { outcome: [], montage: [] }, outline: [], elapsed: null, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
+        return this.result(reqId, "lre.sections", { sections: built.sections.map((s) => ({ slot: s.slot, label: s.label, status: s.status, scope: s.scope, content: s.content, tokens: s.tokens, cut: s.cut, marked: s.marked, hints: s.hints })), budget: { sections: settings.modelUse.tokens.sections, used: built.used, minds: settings.minds.tokens } });
+      }
+      case "lre.chat.knowledge": {
+        // The chat's own choices, as the backend keeps them in its metadata: a part given sets it, null follows again.
+        const knowledge = this.view?.controls?.knowledge;
+        if (!knowledge) return this.error(reqId, "not_world_chat", "not a world chat");
+        const tracking = message.knowledge !== undefined ? message.knowledge : knowledge.tracking.chat;
+        const narrator = message.narrator !== undefined ? message.narrator : knowledge.narrator.chat;
+        this.result(reqId, "lre.chat.knowledge", { knowledge: tracking, narrator });
+        this.mutate((view) => {
+          const k = view.controls?.knowledge;
+          if (!k) return;
+          k.tracking.chat = tracking;
+          k.narrator.chat = narrator ? { ...narrator } : null;
+        }, 40);
+        return;
       }
       case "lre.character": {
         // The real builder: Build's from the draft; GM's from the preview world as a chat starts it,
@@ -764,17 +789,32 @@ export class MockBackend {
               { id: "book_lost", name: "Lost cities", attached: false, character: false, added: 1792511630 },
             ],
           });
-        // As the backend does: what Save would refuse the fields for.
-        if (message.op === "check") return this.result(reqId, "lre.lore", { problem: bookLoreProblem(message.fields) });
         const entriesOf = (bookId: string): LoreBookEntryView[] =>
-          (bookId === "book_town" ? [ { id: "e1", title: "Town notice", disabled: true, chars: 120 }, { id: "e2", title: "Harbor hours", disabled: false, chars: 300 } ] : []).map((e) => {
+          (bookId === "book_town" ? [ { id: "e1", title: "Town notice", disabled: true }, { id: "e2", title: "Harbor hours", disabled: false } ] : []).map((e) => {
+            // As the backend reads an entry: its own fields, and the marks its text holds.
+            const content = this.bookText[e.id] ?? "";
             const lore = this.bookLore[e.id];
-            return lore ? { ...e, lore, disabled: lore.secret === true ? true : e.disabled } : e;
+            const marks = parseSecretMarks(content).map((m) => ({ text: m.text, knownTo: m.knownTo, keptFrom: m.keptFrom }));
+            const unreadable = unreadableMarks(content).map((u) => ({ raw: u.raw, problem: u.problem }));
+            return { ...e, chars: content.length, ...(lore ? { lore } : {}), ...(marks.length > 0 ? { marks } : {}), ...(wholeEntrySecret(content) ? { whole: true as const } : {}), ...(unreadable.length > 0 ? { unreadable } : {}) };
           });
         if (message.op === "entries") return this.result(reqId, "lre.lore", { entries: entriesOf(message.bookId) });
         if (message.op === "fields") {
-          if (message.fields === null) delete this.bookLore[message.entryId];
-          else this.bookLore[message.entryId] = structuredClone(message.fields);
+          const edit = message.fields;
+          if (edit !== null && OLD_SECRECY_FIELDS.some((key) => key in edit)) return this.error(reqId, "bad_request", "an entry is made secret by a secret mark in its text, not by fields: use Make secret (the mark op)");
+          const next = editedBookFields(this.bookLore[message.entryId] ?? null, edit);
+          if (next) this.bookLore[message.entryId] = next;
+          else delete this.bookLore[message.entryId];
+          return this.result(reqId, "lre.lore", { entries: entriesOf(message.bookId) });
+        }
+        if (message.op === "mark") {
+          const lore = this.bookLore[message.entryId] ?? null;
+          try {
+            this.bookText[message.entryId] = markedContent({ content: this.bookText[message.entryId] ?? "", extensions: withBookLoreFields({}, lore) }, message.change);
+          } catch (error) {
+            if (error instanceof MarkChangeError) return this.error(reqId, "bad_request", error.message);
+            throw error;
+          }
           return this.result(reqId, "lre.lore", { entries: entriesOf(message.bookId) });
         }
         if (message.op === "pins") {

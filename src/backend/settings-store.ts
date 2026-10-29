@@ -10,7 +10,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
 import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, GateSettings, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { ASK_BEYOND_DEFAULT, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES, UNREASONED_ROUTE, UNREASONED_STEPS } from "../shared/settings";
+import { ASK_BEYOND_DEFAULT, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, NARRATOR_DEFAULTS, narratorSettingsOf, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES, UNREASONED_ROUTE, UNREASONED_STEPS } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
@@ -65,7 +65,7 @@ const NO_LOOKUPS: LookupLimits = { calls: 0 };
  * and never looks up; Standard and Full let their decision and JSON steps look lore up on a budget
  * per phase, apart from the phase's calls; prose steps prefetch only. The tokens and lore are sized
  * for reasoning models on long chats with large lorebooks, where a call takes tens of seconds and
- * thinks before it answers; memory, consolidation and the time skip's steps don't reason
+ * thinks before it answers; memory, consolidation, the knowledge step and the time skip's steps don't reason
  * (`UNREASONED_STEPS`). No preset sets a time limit: those are the user's (`UserSettings.timeouts`).
  */
 export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit<ModelUseSettings, "preset">> = {
@@ -90,6 +90,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       memory: step(true, ["reply"], UNREASONED_ROUTE),
       skip: step(false, ["timelapse"], UNREASONED_ROUTE),
       consolidate: step(true, ["reply"], UNREASONED_ROUTE),
+      knowledge: step(true, ["reply"], UNREASONED_ROUTE),
     },
     budgets: { pre: { calls: 2, lookup: { calls: 4 } }, post: { calls: 2, lookup: { calls: 3 } } },
     // Detailed sections on a busy scene: a starter's busiest place is about 2,300 tokens, and a room whose lore is told whole (8 to 10 entries, about 3,000) beside a full garage and the rest comes to about 6,000; Lean trims to its 2,000.
@@ -107,6 +108,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       memory: step(true, ["reply"], UNREASONED_ROUTE),
       skip: step(false, ["timelapse"], UNREASONED_ROUTE),
       consolidate: step(true, ["reply"], UNREASONED_ROUTE),
+      knowledge: step(true, ["reply"], UNREASONED_ROUTE),
     },
     budgets: { pre: { calls: 8, lookup: { calls: 6 } }, post: { calls: 4, lookup: { calls: 4 } } },
     tokens: { sections: 12000 },
@@ -235,6 +237,8 @@ export function defaultSettings(): UserSettings {
     jobs: { ...JOB_SETTINGS_DEFAULTS },
     // A turn plays as soon as it is read until the player asks to see it first.
     gates: { intent: false, outline: false },
+    // The narrator knows what everyone in the scene knows, secrets marked, in every chat that sets nothing of its own.
+    narrator: { ...NARRATOR_DEFAULTS, marks: {} },
   };
 }
 
@@ -292,7 +296,7 @@ function normalize(raw: unknown): UserSettings {
 
 // ---------------------------------------------------------------- the settings schema
 
-const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"];
+const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate", "knowledge"];
 
 const int = (v: unknown, lo: number, hi: number): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined);
 /** A token or call budget: a whole number from `lo` (below it the budget can't work), with no ceiling. */
@@ -365,7 +369,7 @@ function loreOf(v: unknown): StepLore | undefined {
 }
 
 /** The steps whose own prompt is Settings → Minds' (`minds.prompts`), not their card's `template`. */
-const OWN_PROMPT_ELSEWHERE: Partial<Record<StepPurpose, true>> = { mind: true, memory: true, consolidate: true };
+const OWN_PROMPT_ELSEWHERE: Partial<Record<StepPurpose, true>> = { mind: true, memory: true, consolidate: true, knowledge: true };
 
 /**
  * A step's settings, checked; a signal an earlier build had reads as the one that stands for it now
@@ -373,7 +377,7 @@ const OWN_PROMPT_ELSEWHERE: Partial<Record<StepPurpose, true>> = { mind: true, m
  * user chose stays. A minds step keeps no lore and no recent history of its own: what a mind reads is
  * Settings → Minds' (`minds.reads`, which an older mind card's lore moved into), the lore pinned to
  * the other minds steps aside, and the recent chat they read is its Recent chat. `template` is the
- * user's own prompt for the step; a mind's, a memory's and consolidation's are Settings → Minds'
+ * user's own prompt for the step; a mind's, a memory's, consolidation's and the knowledge step's are Settings → Minds'
  * (`minds.prompts`), so theirs isn't kept, and the time-skip step's is the skip plan's (its beats'
  * is Settings → Minds' too).
  */
@@ -498,6 +502,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     timeouts: timeoutsOf(v.timeouts, d.timeouts),
     jobs: jobSettingsOf(v.jobs, d.jobs),
     gates: gatesOf(v.gates, d.gates),
+    narrator: narratorSettingsOf(v.narrator, d.narrator),
   };
 }
 
@@ -528,8 +533,8 @@ function expandPresets(settings: UserSettings, patch: JsonObject): UserSettings 
       const template = before[purpose]?.template;
       if (template !== undefined) out.modelUse.steps[purpose] = { ...stepConfigOf(out.modelUse.steps, purpose), template };
     }
-    // A preset is a whole policy for minds too; what a mind reads, the user's own prompts and memory overrides stay.
-    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), reads: out.minds.reads, memory: out.minds.memory, prompts: out.minds.prompts };
+    // A preset is a whole policy for minds too; what a mind reads, the user's own prompts, memory overrides and knowledge stay.
+    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), reads: out.minds.reads, memory: out.minds.memory, prompts: out.minds.prompts, knowledge: out.minds.knowledge };
   }
   return out;
 }

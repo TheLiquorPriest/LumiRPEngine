@@ -237,6 +237,14 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "minds.refresh", data: { entity: "dev" } },
   { type: "minds.intent", data: { entity: "dev", intent: { text: "t", approach: null } } },
   { type: "minds.skip", data: { from: 0, to: 60, beats: [{ at: 30, reason: "r", source: "scan" }] } },
+  // What anyone knows (DESIGN §24.11) is the minds slice's too: a fact, who holds it and how, never an entity's definition.
+  { type: "minds.fact", data: { fact: { id: "track:heist:on", kind: "track", claim: "The heist is on", about: ["dev"], truth: "true" } } },
+  { type: "minds.learn", data: { who: ["dev", "you"], fact: "track:heist:on", how: "told", by: "rat", evidence: [], belief: "true", confidence: 0.9, msg: null, at: 0, witness: { what: "The heist is on", place: "taproom" } } },
+  { type: "minds.keep", data: { who: "dev", fact: "track:heist:on", keptFrom: ["rat"] } },
+  { type: "minds.settle", data: { fact: "track:heist:on", truth: "open" } },
+  { type: "minds.forget", data: { who: ["you"], fact: "track:heist:on" } },
+  // Whether the chat tracks knowledge at all is the slice's own switch.
+  { type: "minds.knowledge", data: { on: false } },
 ];
 
 /** What an event wrote of entities' definitions: each field, relation (by type and target), tier, agent flag, level overrides, classes and tags and life state that changed, each new entity and each own account's balance. */

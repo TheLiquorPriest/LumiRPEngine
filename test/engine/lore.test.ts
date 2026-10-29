@@ -45,6 +45,11 @@ describe("world lore lint", () => {
     expect(loreIssues(world([entry("rumor", { content: `People say: ${TRUTH}` })]))).toEqual([{ severity: "error", path: "lore.rumor.content", code: "secret_truth" }]);
   });
 
+  test('a secret mark in an entry\'s text naming no one is flagged; one kept from "you", the player character, is not', () => {
+    const marked = entry("harbor", { content: "The pier is old.\n{{// Secret (kept from you): The pier is sinking.}}\n{{// Secret (known to Jordan Elis): The keeper had a boat.}}" });
+    expect(loreIssues(world([marked]))).toEqual([{ severity: "warning", path: "lore.harbor.content", code: "mark_name_unresolved" }]);
+  });
+
   test("a helper that writes prose in a secret entry's audience is flagged; decision helpers are not", () => {
     const gate = "stage.keeper == 'hidden'";
     expect(loreIssues(world([entry("keeper_note", { secret: true, gate, audience: ["npc.choose", "judge"] })]))).toEqual([]);

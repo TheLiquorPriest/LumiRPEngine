@@ -42,6 +42,7 @@ const MIND_STEP_HINT: Record<MindPurpose, string> = {
   memory: "Each character's memory after the reply reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
   skip: "The call that looks for a time skip's beats reads these, and so does every mind at a beat, after what is pinned to them and to every mind; within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
   consolidate: "Each memory consolidation reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+  knowledge: "The knowledge step after the reply reads these, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
 };
 
 /** The picker's choice of a whole book rather than one of its entries; no host entry id looks like it. */

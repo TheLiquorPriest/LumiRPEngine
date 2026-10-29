@@ -92,7 +92,7 @@ describe("minds around a turn", () => {
   test("two characters with the POV: two separate mind calls, a brief Minds section, notes after the reply, recall by presence", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
-    const chatId = await alderChat(rig);
+    const chatId = await alderChat(rig, { secrecy: "brief" });
     await rig.turn(chatId, "Hello.", "Danny nods. Priya smiles at you.");
     const calls = mindCalls(rig);
     expect(calls.map((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1]).sort()).toEqual(["Danny Okafor", "Priya Nair"]);
@@ -102,7 +102,7 @@ describe("minds around a turn", () => {
       expect(c.messages[1]?.content ?? "").not.toContain("PRIVATE thoughts of");
       expect(c.messages[1]?.content ?? "").toContain(`You are ${me}.`);
     }
-    // Brief (the default): the narrator gets the depictions, never a monologue.
+    // Brief: the narrator gets the depictions, never a monologue.
     const minds = section(rig, "Minds");
     expect(minds).toContain("Danny Okafor: Danny Okafor leans on the counter, watchful.");
     expect(minds).toContain("Priya Nair: Priya Nair leans on the counter, watchful.");
@@ -202,12 +202,14 @@ describe("minds around a turn", () => {
     expect(helen).not.toContain("recipe book");
   });
 
-  test("what a memory says they told reaches only someone who was with them for the turn", async () => {
+  test("while the chat doesn't track knowledge, what a memory says they told reaches only someone who was with them for the turn", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const minds = rig.host.quietReply;
     rig.host.quietReply = (req) => (MEMORY.exec(req.messages[0]?.content ?? "")?.[1] === "Danny Okafor" ? JSON.stringify({ notes: [], commitments: [], resolved: [], plans: [], told: [{ to: ["Priya Nair", "Dale Whitcomb", "Jordan Ellis"], what: "DANNY-TOLD the boat is sold" }] }) : (minds?.(req) ?? "{}"));
     const chatId = await alderChat(rig);
+    // With knowledge tracked, telling is the knowledge step's alone and a memory's goes nowhere (DESIGN §24.11).
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { enabled: false } } } }));
     await rig.turn(chatId, "Hello.", "They look up.");
     const { state } = await stateOf(rig, chatId);
     expect(readCharacter(state, "priya_nair").witness.filter((w) => w.how === "told").map((w) => [w.by, w.what])).toEqual([["danny_okafor", "DANNY-TOLD the boat is sold"]]);
@@ -217,10 +219,10 @@ describe("minds around a turn", () => {
     expect(readCharacter(state, "pov").witness).toEqual([]);
   });
 
-  test("full secrecy gives the narrator each monologue and intent", async () => {
+  test("full secrecy, which a world that says nothing plays, gives the narrator each monologue and intent", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
-    const chatId = await alderChat(rig, { secrecy: "full" });
+    const chatId = await alderChat(rig);
     await rig.turn(chatId, "Hello.", "They look up.");
     const minds = section(rig, "Minds");
     expect(minds).toContain("Danny Okafor's mind: PRIVATE thoughts of Danny Okafor");
@@ -369,6 +371,8 @@ describe("minds around a turn", () => {
     expect(traces.map((t) => [t.who, t.purpose, t.phase, t.outcome, t.prompt])).toEqual([
       ["Danny Okafor", "mind", "pre", "recorded", "default"],
       ["Danny Okafor", "memory", "post", "recorded", "default"],
+      // The knowledge step's one call for the scene thinks for no one, so it names no one.
+      ["", "knowledge", "post", "recorded", "default"],
     ]);
     for (const word of ["Someone", "Lurker", "Drift", "PRIVATE"]) expect(JSON.stringify(traces)).not.toContain(word);
   });
@@ -382,7 +386,7 @@ describe("minds around a turn", () => {
     const secret = unrevealedSecrets(probe.rt.registry, world, state)[0] ?? "";
     expect(secret).not.toBe("");
     fakeModels(rig, { monologue: secret, depiction: `lets slip that ${secret}` });
-    const chatId = await alderChat(rig);
+    const chatId = await alderChat(rig, { secrecy: "brief" });
     await rig.turn(chatId, "Hello.", "They look up.");
     expect(section(rig, "Minds")).not.toContain(secret);
     expect(section(rig, "Minds")).toContain("Priya Nair:");

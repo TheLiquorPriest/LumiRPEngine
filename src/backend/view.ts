@@ -12,6 +12,7 @@ import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
 import type { GenerateAs } from "../shared/protocol";
+import { narratorViewOf, type NarratorView } from "../shared/settings";
 import { chatFeed, sourceOf, worldFeed } from "../engine/feed";
 import { compactSpan, paramLabel, spanText } from "../engine/action-words";
 import { sectionsOf } from "./book";
@@ -41,6 +42,7 @@ import { definitionsLag } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, storyLocked, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
 import { knownPlaceRefs } from "../engine/character";
 import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
+import type { ChatKnowledgePrefs } from "./chat-knowledge-prefs";
 import type { StoredChip } from "./chips";
 import type { ReplyFailure } from "./ledger-io";
 
@@ -296,7 +298,7 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
   return { entries, timelapse, ...(encounter ? { encounter } : {}) };
 }
 
-function controls(world: WorldDoc, state: WorldState, sceneType: string, registry: Registry): ControlsView {
+function controls(world: WorldDoc, state: WorldState, sceneType: string, registry: Registry, knowledge: ViewInput["knowledge"]): ControlsView {
   return {
     // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
     realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world), claims: claimsOf(world, state) },
@@ -315,6 +317,10 @@ function controls(world: WorldDoc, state: WorldState, sceneType: string, registr
       speedThrough: structuredClone(state.time.speedThrough),
       montage: state.time.montage,
       unitCap: { ...state.time.unitCap },
+    },
+    knowledge: {
+      tracking: { chat: knowledge.chat.knowledge ?? null, user: knowledge.tracking },
+      narrator: { chat: knowledge.chat.narrator ?? null, world: narratorViewOf(world.narrator), user: knowledge.narrator },
     },
   };
 }
@@ -664,6 +670,8 @@ export interface ViewInput {
   meter: CallMeterView | null;
   /** How the player chose to see the chat's map (`ChatPrefs`); null or absent follows the world. The map panel is built for it. */
   mapDisplay?: MapDisplay | null;
+  /** The chat's own knowledge choices (`ChatKnowledge`), beside the user's: knowledge tracking and the narrator's knowledge. */
+  knowledge: { chat: ChatKnowledgePrefs; tracking: boolean; narrator: NarratorView };
 }
 
 export function buildView(input: ViewInput): StateView {
@@ -719,7 +727,7 @@ export function buildView(input: ViewInput): StateView {
       pending,
       panels,
       palette: palette(world, next, registry),
-      controls: controls(world, next, sceneView.sceneType, registry),
+      controls: controls(world, next, sceneView.sceneType, registry, input.knowledge),
       meter: input.meter,
       packs,
       currency: world.currency,

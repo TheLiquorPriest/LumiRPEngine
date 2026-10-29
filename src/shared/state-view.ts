@@ -31,7 +31,7 @@ import type { FinanceView } from "./finance";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
 import type { RoutineRole } from "./routines";
 import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, SectionFeed, StepPurpose, WorldCurrency } from "./world";
-import type { LorePolicy } from "./settings";
+import type { LorePolicy, NarratorView } from "./settings";
 import type { PlaceRef } from "./character";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
@@ -350,6 +350,16 @@ export interface ControlsView {
   sections: { id: string; label: string; world: SectionFeed; chat: SectionFeed | null }[];
   /** Every renderer source a section can take (`include`), with the section it fills by itself and what it tells in plain words. */
   sources: { id: string; slot: string; label: string }[];
+  /**
+   * This chat's knowledge choices (DESIGN §6.11, GM → This chat → Knowledge), each as the chat sets
+   * it (null where it follows) beside what it follows: knowledge tracking, the user's switch
+   * (Settings → Minds → Knowledge); the narrator's knowledge, the world's default (null when it sets
+   * none), else the user's (Settings → Narrator). The chat's wins, then the world's.
+   */
+  knowledge: {
+    tracking: { chat: boolean | null; user: boolean };
+    narrator: { chat: NarratorView | null; world: NarratorView | null; user: NarratorView };
+  };
 }
 
 export interface StateView {

@@ -40,6 +40,7 @@ const SECTIONS: Readonly<Record<string, string>> = {
   extraction: 'Changes from the reply: a pinned mode per change type ("auto", "confirm", "never", maxDelta); null unpins one, so learning decides it again.',
   swipeDefault: 'Swipes: what a swipe does ("rerun" or "renarrate").',
   hideJsonBlocks: "Preset: hide each reply's <json> block in world chats.",
+  narrator: `Narrator: the narrator's knowledge in every chat that sets none and whose world sets none (knowledge "scene", everyone in the scene's with each fact beyond the player character's marked, or "pov", the player character's only; secrets "marked", fed marked as secrets, or "omit", left out), and marks: your own wording of a secret's mark (known, kept, both, everyone; a part left out, or null, is the shipped text). lre_chat_knowledge sets one chat's own.`,
   gates: "Steps and connections → Preview before playing: intent shows a typed message's read action before it plays, outline the turn's outline before the reply is written; each waits on Play, Edit or Cancel.",
 };
 
@@ -186,7 +187,7 @@ export const CONFIG_TOOLS: readonly ToolModule[] = [
     name: "lre_settings_set",
     description:
       'Change your LumiRPEngine settings with a JSON merge patch (RFC 7386) over them, as the Settings pages do: objects merge, a list or a value replaces, null deletes (unpin a change type with {"extraction": {"purchase": null}}). A named preset (realism.preset, modelUse.preset) expands into its levels and caps, or its steps, budgets and minds policy; a change to what a named preset sets makes it "custom", as Settings does. LumiRPEngine keeps every setting within what it takes: the answer lists the sections that changed with their values now, anything that came out other than sent (adjusted), and the caveats (Settings → Caveats) as they read now. Realism, checks and time seed new chats only.',
-    inputSchema: object({ patch: { type: "object", description: 'The merge patch: {"swipeDefault": "renarrate"}, {"modelUse": {"preset": "standard"}}, {"modelUse": {"steps": {"judge": {"enabled": true}}}}, {"timeouts": {"requestMs": 60000}}.' } }, ["patch"]),
+    inputSchema: object({ patch: { type: "object", description: 'The merge patch: {"swipeDefault": "renarrate"}, {"modelUse": {"preset": "standard"}}, {"modelUse": {"steps": {"judge": {"enabled": true}}}}, {"timeouts": {"requestMs": 60000}}, {"narrator": {"knowledge": "pov"}}, {"narrator": {"marks": {"known": null}}} (back to the shipped wording).' } }, ["patch"]),
     write: { destructive: true, idempotent: true },
     run: settingsSet,
     cli: { command: "settings-set", section: "Settings and presets", usage: "settings-set --patch <file|json>", summary: "Change settings with a JSON merge patch", options: { "--patch": { arg: "patch", as: "json" } } },

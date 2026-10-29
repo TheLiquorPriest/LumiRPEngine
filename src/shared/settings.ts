@@ -8,8 +8,9 @@ import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks } from "./inferred";
 import type { AdjudicationDef, StepPurpose } from "./world";
 import type { Limit, MindsSettings } from "./minds";
-import { isMindPurpose, limitIn } from "./minds";
+import { isMindPurpose, limitIn, MIND_PROMPT_MAX } from "./minds";
 import { isRecord } from "./json";
+import type { SecretMarkWording } from "./secret-marks";
 import type { TimeoutSettings } from "./timeouts";
 
 /**
@@ -101,11 +102,12 @@ export function helperCallOf(config: Pick<StepConfig, "route" | "maxTokens"> | n
 
 /**
  * The steps that don't reason unless the user sets an effort on their cards (DESIGN §5.3): a
- * character's memory of the turn, the consolidation that folds their notes into a summary, and a
- * time skip's plan and beats. Their answers are short records of what happened or is due; a
- * reasoning model spent its whole max tokens thinking through them and wrote nothing.
+ * character's memory of the turn, the consolidation that folds their notes into a summary, the
+ * knowledge step's record of who learned what, and a time skip's plan and beats. Their answers are
+ * short records of what happened or is due; a reasoning model spent its whole max tokens thinking
+ * through them and wrote nothing.
  */
-export const UNREASONED_STEPS: readonly StepPurpose[] = ["memory", "consolidate", "skip"];
+export const UNREASONED_STEPS: readonly StepPurpose[] = ["memory", "consolidate", "knowledge", "skip"];
 
 /** Those steps' route while unsaved, and in the presets: the helper model, reasoning off. */
 export const UNREASONED_ROUTE: Readonly<StepRoute> = Object.freeze({ provider: "helper", connectionId: null, model: null, effort: "off" });
@@ -241,8 +243,12 @@ export interface TimeSettings {
   askBeyondMinutes: number;
 }
 
-/** Extraction proposal types with a per-type mode (DESIGN §9.4, §11). */
-export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition"] as const;
+/**
+ * Extraction proposal types with a per-type mode (DESIGN §9.4, §11). `learn` and `reveal` are the
+ * knowledge step's (DESIGN §24.11): what the player character learns, and a secret the story reveals
+ * to them; the reply's read never proposes them.
+ */
+export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition", "learn", "reveal"] as const;
 export type ExtractionType = (typeof EXTRACTION_TYPES)[number];
 
 /**
@@ -270,6 +276,9 @@ export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundM
   wear: "confirm",
   lose: "confirm",
   item_condition: "confirm",
+  // Knowledge (DESIGN §24.11): what the player character learns applies, with its Undo; a secret's reveal asks first.
+  learn: "auto",
+  reveal: "confirm",
 });
 
 /**
@@ -327,6 +336,77 @@ export interface GateSettings {
   outline: boolean;
 }
 
+/** Whose knowledge the narrator gets (DESIGN §6.11): everyone's in the scene, or the player character's alone. */
+export type NarratorKnowledge = "scene" | "pov";
+export const NARRATOR_KNOWLEDGE: readonly NarratorKnowledge[] = ["scene", "pov"];
+
+/** What the narrator gets of a secret: the secret, marked as one, or none of it. */
+export type NarratorSecrets = "marked" | "omit";
+export const NARRATOR_SECRETS: readonly NarratorSecrets[] = ["marked", "omit"];
+
+/**
+ * The narrator's knowledge (DESIGN §6.11). The user's default (Settings → Narrator), a world's
+ * default (`WorldDoc.narrator`) and a chat's own choice (`backend/chat-knowledge-prefs.ts`) all
+ * take this shape; the chat's wins, then the world's.
+ */
+export interface NarratorView {
+  knowledge: NarratorKnowledge;
+  secrets: NarratorSecrets;
+}
+
+/** Settings → Narrator: the user's default view, and the wording of a secret's mark where they rewrote it. */
+export interface NarratorSettings extends NarratorView {
+  /** The user's own wording of a secret's mark, part by part; a part left out is the shipped text (`SECRET_MARK_WORDING`). */
+  marks: Partial<SecretMarkWording>;
+}
+
+/** The ruling's default (OPEN-DECISIONS core 3): what everyone in the scene knows, secrets included and marked. */
+export const NARRATOR_DEFAULTS: Readonly<NarratorView> = Object.freeze({ knowledge: "scene", secrets: "marked" });
+
+/** Each choice in the words Settings, Build and GM mode show. */
+export const NARRATOR_KNOWLEDGE_LABEL: Readonly<Record<NarratorKnowledge, string>> = { scene: "Everyone in the scene", pov: "Your character's only" };
+export const NARRATOR_SECRETS_LABEL: Readonly<Record<NarratorSecrets, string>> = { marked: "Marked", omit: "Left out" };
+
+/**
+ * The placeholders each part of a secret's mark must hold (`secretMarkText`): the secret's text, and
+ * the names it is known to or kept from. `everyone` is the word for "kept from everyone", with none.
+ * `rule`, the narrator rules' sentence on marks (`secretMarksRule`), needs the forms it explains, and
+ * may hold `{{everyone}}`.
+ */
+export const SECRET_MARK_NEEDS: Readonly<Record<keyof SecretMarkWording, readonly string[]>> = { known: ["{{text}}", "{{known}}"], kept: ["{{text}}", "{{kept}}"], both: ["{{text}}", "{{known}}", "{{kept}}"], everyone: [], rule: ["{{forms}}"] };
+
+/**
+ * Why a wording of one part of a secret's mark can't be kept, or null: some text, with the
+ * placeholders the part needs, no longer than any text of the user's own (`MIND_PROMPT_MAX`).
+ */
+export function secretMarkProblem(part: keyof SecretMarkWording, text: string): string | null {
+  if (text.trim() === "") return "It can't be empty.";
+  if (text.length > MIND_PROMPT_MAX) return `At most ${MIND_PROMPT_MAX.toLocaleString("en-US")} characters.`;
+  const missing = SECRET_MARK_NEEDS[part].filter((p) => !text.includes(p));
+  return missing.length > 0 ? `It needs ${missing.join(" and ")}.` : null;
+}
+
+/** A narrator view read from outside data (a settings file, a world document, a chat's metadata): null unless both parts are ones it takes. */
+export function narratorViewOf(raw: unknown): NarratorView | null {
+  if (!isRecord(raw)) return null;
+  const knowledge = NARRATOR_KNOWLEDGE.find((k) => k === raw.knowledge);
+  const secrets = NARRATOR_SECRETS.find((s) => s === raw.secrets);
+  return knowledge && secrets ? { knowledge, secrets } : null;
+}
+
+/** `UserSettings.narrator` as the engine reads it: each part checked, else `base`'s; a wording that can't be kept (`secretMarkProblem`) is left out, so the shipped one stands. */
+export function narratorSettingsOf(raw: unknown, base: Readonly<NarratorSettings>): NarratorSettings {
+  const n = isRecord(raw) ? raw : {};
+  const marks: Partial<SecretMarkWording> = {};
+  if (isRecord(n.marks)) {
+    for (const part of Object.keys(SECRET_MARK_NEEDS) as (keyof SecretMarkWording)[]) {
+      const text = n.marks[part];
+      if (typeof text === "string" && secretMarkProblem(part, text) === null) marks[part] = text;
+    }
+  } else Object.assign(marks, base.marks);
+  return { knowledge: NARRATOR_KNOWLEDGE.find((k) => k === n.knowledge) ?? base.knowledge, secrets: NARRATOR_SECRETS.find((s) => s === n.secrets) ?? base.secrets, marks };
+}
+
 export interface UserSettings {
   v: 1;
   /**
@@ -367,6 +447,8 @@ export interface UserSettings {
   jobs: JobSettings;
   /** Preview gates (Settings → Steps and connections → Preview before playing, DESIGN §5.1): off, a turn plays as soon as it is read. */
   gates: GateSettings;
+  /** The narrator's knowledge (Settings → Narrator, DESIGN §6.11): the user's default, which a world's default and a chat's own choice override, and the wording of a secret's mark. */
+  narrator: NarratorSettings;
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */

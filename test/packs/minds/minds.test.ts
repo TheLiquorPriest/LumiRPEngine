@@ -239,17 +239,20 @@ describe("which minds run", () => {
 });
 
 describe("the Minds section", () => {
-  test("full gives the monologue; brief only a depiction that carries no secret; Stance is told who has one", () => {
+  test("full gives the monologue, and a world that says nothing plays full; brief only a depiction that carries no secret; Stance is told who has one", () => {
     const full = world((x) => {
       x.minds = { secrecy: "full" } as WorldDoc["minds"];
     });
-    const brief = world();
-    for (const w of [full, brief]) {
+    const unset = world();
+    const brief = world((x) => {
+      x.minds = { secrecy: "brief" } as WorldDoc["minds"];
+    });
+    for (const w of [full, unset, brief]) {
       const s0 = at(w, startState(w), "maya", "apartment");
       expect(unrevealedSecrets(reg, w, s0)).toContain(SECRET);
       const s = fold(reg, w, s0, [round(s0), mind(s0, "maya", { monologue: `${SECRET}, and nobody can know.`, place: "apartment" })]);
       const lines = mindLines(reg.context(w, s)).map((l) => l.line).join("\n");
-      if (w === full) {
+      if (w !== brief) {
         expect(lines).toContain(SECRET);
         expect(lines).toContain("Intends:");
       } else {

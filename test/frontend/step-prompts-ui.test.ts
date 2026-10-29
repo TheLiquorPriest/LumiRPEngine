@@ -19,7 +19,7 @@ describe("each step's built-in prompt in Settings", () => {
   });
 
   test("saving a replaced built-in unchanged keeps the step on its default", () => {
-    for (const purpose of PURPOSES.filter((p) => stepBuiltIn(p).use === "replaced" && p !== "mind" && p !== "memory" && p !== "consolidate")) {
+    for (const purpose of PURPOSES.filter((p) => stepBuiltIn(p).use === "replaced" && p !== "mind" && p !== "memory" && p !== "consolidate" && p !== "knowledge")) {
       const { text } = stepBuiltIn(purpose);
       expect(stepPromptPatch(purpose, text, text)).toEqual({ modelUse: { steps: { [purpose]: { template: null } } } });
     }

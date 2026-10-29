@@ -78,18 +78,25 @@ export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Why a step whose last call went wrong failed, or null when its last call was fine. */
+/**
+ * Why a step failed: the first of its purposes whose last call went wrong (a step that makes calls of
+ * several purposes, as the minds' post phase does, fails when any one of them does, whichever ran
+ * last), or null when each purpose's last call was fine.
+ */
 function callFailure(calls: readonly DiagCall[]): { reason: string; fix?: string } | null {
   // A spared call's failure is shown on its step's line, but the run goes on without it.
-  const last = calls.findLast((c) => c.spared !== true);
-  if (!last) return null;
-  let reason: string | null = null;
-  if (!last.ok) reason = `${last.purpose} call failed: ${last.error ?? "no reason given"}`;
-  else if (last.finishReason === "length") reason = `${last.purpose} answer cut off at ${last.maxTokens ?? "max"} tokens (finish_reason length)`;
-  else if (last.tokensOut === 0) reason = `${last.purpose} answer was empty`;
-  if (reason === null) return null;
-  const fix = suggestFix(reason, last);
-  return { reason, ...(fix ? { fix } : {}) };
+  const lasts = new Map<string, DiagCall>();
+  for (const c of calls) if (c.spared !== true) lasts.set(c.purpose, c);
+  for (const last of lasts.values()) {
+    let reason: string | null = null;
+    if (!last.ok) reason = `${last.purpose} call failed: ${last.error ?? "no reason given"}`;
+    else if (last.finishReason === "length") reason = `${last.purpose} answer cut off at ${last.maxTokens ?? "max"} tokens (finish_reason length)`;
+    else if (last.tokensOut === 0) reason = `${last.purpose} answer was empty`;
+    if (reason === null) continue;
+    const fix = suggestFix(reason, last);
+    return { reason, ...(fix ? { fix } : {}) };
+  }
+  return null;
 }
 
 export class Diagnostics {

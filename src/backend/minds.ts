@@ -14,10 +14,10 @@ import type { ChatId, EntityId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { CommitmentKind, Fidelity, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
-import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, MINDS_SLOT, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
-import type { ModelUseSettings, StepConfig } from "../shared/settings";
-import { stepConfigOf } from "../shared/settings";
+import type { CommitmentKind, FactId, Fidelity, KnowledgeProposal, KnowledgeSettings, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
+import { COMMITMENT_KINDS, effectiveMemory, knowledgeAnswerFormat, knowledgeThreshold, knowledgeTracked, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, MINDS_SLOT, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
+import type { ModelUseSettings, StepConfig, UserSettings } from "../shared/settings";
+import { helperCallOf, stepConfigOf } from "../shared/settings";
 import type { StepPurpose, WorldDoc } from "../shared/world";
 import { parseMoneyInput } from "../shared/money";
 import { calendarOf, clockOfStamp, formatClock, nextTimeOfDay } from "../engine/calendar";
@@ -39,8 +39,10 @@ import { fidelityOf, pickMinds } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import { sectionsOf } from "./book";
 import type { HostMessage, HostPort } from "./host";
+import { seedKnowledge } from "./knowledge-seed";
+import { checkKnowledge, knowledgeBatches, knowledgeContext, type KnowledgeTurn } from "./knowledge-step";
 import { pinReader, readPins } from "./lore-pins";
-import { consolidateContext, memoryContext, mindContext, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
+import { consolidateContext, memoryContext, mindContext, pinnedLines, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
 import type { SettingsStore } from "./settings-store";
 import { NotNeeded, type Steps } from "./steps";
@@ -92,6 +94,8 @@ export interface RunMindsInput {
    * didn't answer from `report`. The pre phase's start before the turn knows it will take them.
    */
   spared?: boolean;
+  /** The user's knowledge settings, while the chat tracks knowledge (DESIGN §24.11): each mind reads what it holds. */
+  knowledge?: KnowledgeSettings;
 }
 
 export interface RunMindsResult {
@@ -99,6 +103,12 @@ export interface RunMindsResult {
   traces: MindCallTrace[];
   /** How each mind went, in `who`'s order: GM data, for a GM's run (DESIGN §24.9); absent where nothing ran. */
   report?: MindsRunEntry[];
+  /**
+   * The post phase's knowledge step (DESIGN §24.11): the player character's own changes (C4), whose
+   * modes decide them; everyone else's learnings, which follow the `learn` mode (none under never);
+   * and the connection the step ran on, whose learning counts them (null: the default one).
+   */
+  knowledge?: { proposals: KnowledgeProposal[]; events: LedgerEvent[]; connection: string | null };
 }
 
 /** The step card a minds purpose runs with (`stepConfigOf`: on with the helper's tokens while unsaved); null when the user saved it off. */
@@ -115,14 +125,16 @@ export function mindsOn(settings: { minds: MindsSettings; modelUse: ModelUseSett
 /**
  * A minds step's instructions (DESIGN §24.5): the user's own prompt, else the world's template for the
  * purpose (`worldMindTemplate`: the first by id with any text), else the built-in; then the answer
- * format, which no prompt replaces.
+ * format, which no prompt replaces. While the chat tracks knowledge (`knowing`), the memory step's
+ * is the one without `told` (`MEMORY_ANSWER_V2`, DESIGN §24.11): telling is the knowledge step's.
  */
-export function mindPrompt(purpose: MindPurpose, world: WorldDoc, settings: MindsSettings, vars: Readonly<Record<string, string>>): { text: string; source: MindCallTrace["prompt"] } {
+export function mindPrompt(purpose: MindPurpose, world: WorldDoc, settings: MindsSettings, vars: Readonly<Record<string, string>>, knowing = false): { text: string; source: MindCallTrace["prompt"] } {
   const own = settings.prompts[purpose]?.trim() ? settings.prompts[purpose] : undefined;
   const template = own === undefined ? worldMindTemplate(world, purpose) : undefined;
   const source: MindCallTrace["prompt"] = own !== undefined ? "override" : template ? "world" : "default";
   const text = own ?? template?.template ?? MIND_PROMPT_DEFAULTS[purpose];
-  return { text: `${renderTemplate(text, vars)}\n\n${MIND_ANSWER_FORMATS[purpose]}`, source };
+  const format = purpose === "memory" && knowing ? MEMORY_ANSWER_V2 : purpose === "knowledge" ? knowledgeAnswerFormat(settings.knowledge) : MIND_ANSWER_FORMATS[purpose];
+  return { text: `${renderTemplate(text, vars)}\n\n${format}`, source };
 }
 
 function varsFor(world: WorldDoc, state: Readonly<WorldState>, who: EntityId): Record<string, string> {
@@ -351,7 +363,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     if (kept) return { data: kept, trace: { ...base, outcome: "recorded", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "recorded", ms: 0, tokens: 0 } };
     input.progress?.({ entity: who, name, level, status: "thinking" });
     const pinned = pinsOf(refs.get(who) ?? []);
-    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, reads, moment: input.moment, pinned, ...(history ? { history } : {}) };
+    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, reads, moment: input.moment, pinned, ...(history ? { history } : {}), ...(input.knowledge ? { knowledge: input.knowledge } : {}) };
     const report: MindContextReport = { pinned: [], activated: [] };
     const usage = { tokens: 0 };
     const failure = { reason: "" };
@@ -434,23 +446,44 @@ export interface PreMindsInput {
   kept?: ReadonlyMap<EntityId, MindEventData>;
   /** The reply the turn replaces, a Regenerate's or a swipe's target (`RunMindsInput.replaces`). */
   replaces?: MessageId;
+  /** Whether the chat tracks knowledge (`knowledgeOn`): recorded when it changes, and each mind reads what it holds. */
+  knowledge?: boolean;
 }
 
 /**
- * The pre phase (DESIGN §24.1): the round (every turn with minds on, and once with them off after
- * they were on), then, unless the turn is a timelapse, the minds the scene, the ladder and the
- * cadence call. A mind due but not called is recorded on the round with the level it was due at.
- * While nothing would read them (§24.3: the chat's feed switches the Minds section off and no mind
- * reads its last thoughts), only a GM's request is called; the rest are recorded as due. Their calls
- * fail no step (`RunMindsInput.spared`): the run tells from `report` which minds didn't answer.
+ * Whether the chat tracks knowledge, recorded when it changes (`minds.knowledge`, DESIGN §24.11):
+ * only in a chat that holds some, so a chat that never tracked any folds as it did. Null when the
+ * state already says so.
+ */
+export function knowledgeSwitch(state: Readonly<WorldState>, on: boolean, threshold: number): LedgerEvent | null {
+  const slice = readSlice(state);
+  if (slice.knowledge === undefined) return null;
+  // The user's threshold, when it changed: the player screens read it from the chat's state, as they read everything.
+  const sure = on && knowledgeThreshold(slice) !== threshold;
+  return knowledgeTracked(slice) !== on || sure ? { type: MINDS_EVENTS.knowledge, data: { on, ...(sure ? { threshold } : {}) } } : null;
+}
+
+/**
+ * The pre phase (DESIGN §24.1): whether the chat tracks knowledge, when that changed (§24.11), so
+ * the turn's sections and screens read it as the user set it; then the round (every turn with minds
+ * on, and once with them off after they were on), then, unless the turn is a timelapse, the minds the
+ * scene, the ladder and the cadence call. A mind due but not called is recorded on the round with the
+ * level it was due at. While nothing would read them (§24.3: the chat's feed switches the Minds
+ * section off and no mind reads its last thoughts), only a GM's request is called; the rest are
+ * recorded as due. Their calls fail no step (`RunMindsInput.spared`): the run tells from `report`
+ * which minds didn't answer. While the chat tracks knowledge, each mind reads what it holds.
  */
 export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<RunMindsResult> {
   const settings = await deps.settings.get(input.userId);
   const on = mindsOn(settings);
-  if (!on) return { events: readSlice(input.state).on ? [{ type: MINDS_EVENTS.round, data: { at: input.state.clock, on: false } }] : [], traces: [] };
+  const switched = knowledgeSwitch(input.state, input.knowledge === true, settings.minds.knowledge.threshold);
+  const tracking: LedgerEvent[] = switched ? [switched] : [];
+  if (!on) return { events: [...tracking, ...(readSlice(input.state).on ? [{ type: MINDS_EVENTS.round, data: { at: input.state.clock, on: false } }] : [])], traces: [] };
   const round: LedgerEvent = { type: MINDS_EVENTS.round, data: { at: input.state.clock, on: true } };
-  if (input.timelapse) return { events: [round], traces: [] };
-  const w = new Working(deps.registry, input.world, input.state);
+  if (input.timelapse) return { events: [...tracking, round], traces: [] };
+  const start = new Working(deps.registry, input.world, input.state);
+  start.applyAll(tracking);
+  const w = new Working(deps.registry, input.world, start.state);
   w.apply(round);
   const ctx = deps.registry.context(input.world, w.state);
   const texts = { user: input.user, reply: input.reply };
@@ -462,7 +495,7 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
   // The round keeps where each passed mind stood and the level it was due at, as a mind recorded now
   // would, and the minds called think on the state that holds it.
   const opened: LedgerEvent = passed.length === 0 ? round : { type: MINDS_EVENTS.round, data: { at: input.state.clock, on: true, levels: Object.fromEntries(passed.map((p) => [p.entity, { level: p.level, place: placeOfEntity(w.state, p.entity) }])) } };
-  const thinking = opened === round ? w : new Working(deps.registry, input.world, input.state);
+  const thinking = opened === round ? w : new Working(deps.registry, input.world, start.state);
   if (thinking !== w) thinking.apply(opened);
   const levels: Record<EntityId, Fidelity> = {};
   const reasons: Record<EntityId, string> = {};
@@ -472,8 +505,8 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
   }
   // Each thinks for their own refresh reason; the moment itself is the player's message.
   const moment: MindMoment = { kind: "turn", at: thinking.state.clock, reason: "", user: input.user, reply: input.reply };
-  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), ...(input.replaces !== undefined ? { replaces: input.replaces } : {}), phase: "pre", spared: true });
-  return { events: [opened, ...ran.events], traces: ran.traces, ...(ran.report ? { report: ran.report } : {}) };
+  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), ...(input.replaces !== undefined ? { replaces: input.replaces } : {}), ...(input.knowledge === true ? { knowledge: settings.minds.knowledge } : {}), phase: "pre", spared: true });
+  return { events: [...tracking, opened, ...ran.events], traces: ran.traces, ...(ran.report ? { report: ran.report } : {}) };
 }
 
 export interface PostMindsInput {
@@ -492,7 +525,11 @@ export interface PostMindsInput {
   /** The reply as the engine reads it. */
   reply: string;
   signal: AbortSignal;
-  guidance?: { memory?: string; consolidate?: string };
+  guidance?: { memory?: string; consolidate?: string; knowledge?: string };
+  /** Whether the chat tracks knowledge (`knowledgeOn`: its own switch, else the user's): its seeding and knowledge step run, and telling is the knowledge step's alone. */
+  knowledge?: boolean;
+  /** What the reply's read found in it, in words, once it has: the knowledge step reads it, so it runs after the read. */
+  read?: Promise<readonly string[]>;
 }
 
 /** Who is in the POV's scene in `state` (`together`): everyone acting there but the POV, whether it sees them or not. */
@@ -546,7 +583,7 @@ export function turnPresence(reg: Registry, world: WorldDoc, input: Pick<PostMin
   };
 }
 
-/** The `memory` step's answer as event data; what they told reaches only `listeners`, who were with them for the turn. */
+/** The `memory` step's answer as event data; what they told reaches only `listeners`, who were with them for the turn (none while the chat tracks knowledge, whose step is telling's only writer). */
 function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, listeners: readonly EntityId[]): MemoryEventData | null {
   if (!isRecord(raw)) return null;
   const now = state.clock;
@@ -579,29 +616,91 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
 /** How many characters' notes one turn folds at most: consolidation is upkeep, never the turn's work. */
 const CONSOLIDATIONS_PER_TURN = 2;
 
+/** What the knowledge step gives a turn: everyone else's learnings as events, the player character's own as changes, its calls' traces, and the connection it ran on. */
+interface KnowledgeRan {
+  events: LedgerEvent[];
+  proposals: KnowledgeProposal[];
+  traces: MindCallTrace[];
+  connection: string | null;
+}
+
 /**
- * The post phase (DESIGN §24.4): who heard the turn and who the POV met in it (and what each saw
- * happen), then the `memory` step for each who heard it at a level the user chose, from what was
+ * The knowledge step (DESIGN §24.11) for a turn, on `state` (the reply's, with the turn's presence and
+ * seeding in it), once the read is in: its calls, one per batch (`knowledgeBatches`), side by side,
+ * each on the same state; then each answer checked in turn (`checkKnowledge`), on what the ones
+ * before it left. A learning that doesn't fit the state is dropped, and the log says why each was.
+ */
+async function knowledgeStep(deps: MindsDeps, input: PostMindsInput, settings: UserSettings, state: Readonly<WorldState>, presence: KnowledgeTurn["presence"]): Promise<KnowledgeRan | null> {
+  const config = mindsStepConfig(settings.modelUse, "knowledge");
+  if (!config) return null;
+  const { registry: reg } = deps;
+  const { world, userId } = input;
+  const read = input.read ? await input.read.catch((): readonly string[] => []) : [];
+  const happened = [...witnessLines(reg, world, state, world.pov, input.pre, Number.POSITIVE_INFINITY), ...read];
+  // The lore pinned to the knowledge step (DESIGN §24.5), read once for its calls.
+  const pinned = pinnedLines({ reg, world, state, reads: settings.minds.reads, pinned: await readPins(deps.host, world, pinsFor(world, null, undefined, ["knowledge"]), userId) }, "knowledge");
+  const turn: KnowledgeTurn = { reg, world, state, before: input.state, messageId: input.messageId, user: input.user, reply: input.reply, presence, happened, settings: settings.minds.knowledge, memory: effectiveMemory(world, settings.minds), hideJson: settings.hideJsonBlocks, pinned, named: (name) => personNamed(reg, world, state, name) };
+  const guidance = input.guidance?.knowledge ?? deps.presets.last(userId).guidance.knowledge ?? "";
+  const scene = settings.minds.knowledge.batch === "scene";
+  const asked = knowledgeBatches(turn).map(async (batch) => {
+    const who = scene ? "" : (own(state.entities, batch[0] ?? "")?.name ?? batch[0] ?? "");
+    const prompt = mindPrompt("knowledge", world, settings.minds, { ...varsFor(world, state, world.pov), character: who });
+    const usage = { tokens: 0 };
+    const t0 = performance.now();
+    const raw = input.signal.aborted ? null : await deps.steps.helperJson("knowledge", prompt.text, knowledgeContext(turn, batch), config, userId, input.signal, { guidance, usage });
+    return { batch, raw, who, ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source };
+  });
+  const w = new Working(reg, world, state);
+  const out: KnowledgeRan = { events: [], proposals: [], traces: [], connection: helperCallOf(config, settings.helper).connectionId ?? null };
+  // The turn's limits hold across its calls: new facts and learnings are counted for the turn, not each call.
+  const spent = { facts: new Set<FactId>(), learnings: 0 };
+  for (const call of await Promise.all(asked)) {
+    const checked = call.raw === null ? null : checkKnowledge({ ...turn, state: w.state }, call.batch, call.raw, spent);
+    for (const why of checked?.refused ?? []) deps.host.log("info", `[LumiRPEngine] knowledge ${input.messageId.slice(0, 8)}: refused ${why}`, userId);
+    for (const event of checked?.events ?? []) {
+      const rejection = w.apply(event);
+      if (rejection) deps.host.log("info", `[LumiRPEngine] knowledge ${input.messageId.slice(0, 8)}: dropped a learning (${rejection.code}: ${rejection.reason})`, userId);
+      else out.events.push(event);
+    }
+    out.proposals.push(...(checked?.proposals ?? []));
+    // A scene's call thinks for no one; one person's is listed only when the player may know of them.
+    const id = call.batch[0] ?? "";
+    if (scene || traced(reg, world, state, id)) out.traces.push({ purpose: "knowledge", phase: "post", who: call.who, level: null, outcome: checked ? "recorded" : "failed", ms: call.ms, tokens: call.tokens, prompt: call.prompt });
+  }
+  return out;
+}
+
+/**
+ * The post phase (DESIGN §24.4, §24.11): who heard the turn and who the POV met in it (and what each
+ * saw happen), then the `memory` step for each who heard it at a level the user chose, from what was
  * written, and beside it `consolidate` for those whose notes overflow or fade, at most once per
- * period each, while something reads what it folds.
+ * period each, while something reads what it folds. While the chat tracks knowledge, whether or not
+ * minds think: what the world authors that the chat doesn't hold yet is seeded (`seedKnowledge`),
+ * and the knowledge step works out who learned what once the read is in; the memory step then
+ * records no telling.
  */
 export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise<RunMindsResult> {
   const { registry: reg } = deps;
   const { world, state, userId } = input;
   const settings = await deps.settings.get(userId);
-  if (!mindsOn(settings)) return { events: [], traces: [] };
+  const minds = mindsOn(settings);
+  const knowing = input.knowledge === true;
+  if (!minds && !knowing) return { events: [], traces: [] };
   const { said, met, left } = turnPresence(reg, world, input);
   const w = new Working(reg, world, state);
   const events: LedgerEvent[] = [];
-  for (const data of met ? [said, met] : [said]) {
-    const presence: LedgerEvent = { type: MINDS_EVENTS.presence, data };
-    if (!w.apply(presence)) events.push(presence);
-  }
+  const record = (event: LedgerEvent): void => {
+    if (!w.apply(event)) events.push(event);
+  };
+  if (minds) for (const data of met ? [said, met] : [said]) record({ type: MINDS_EVENTS.presence, data });
+  if (knowing) for (const event of await seedKnowledge(deps.host, { reg, world, state: w.state, settings: settings.minds.knowledge, userId })) record(event);
+  // On the state as the seeding left it, apart from what the memories and consolidation add while it waits for the read.
+  const knowledge = knowing ? knowledgeStep(deps, input, settings, structuredClone(w.state), { said, met, left }) : Promise.resolve(null);
   const traces: MindCallTrace[] = [];
   const memory = effectiveMemory(world, settings.minds);
   // Their level as they heard it: where the message was said.
   const levels = new Map(fidelityOf(reg.context(world, input.start), { user: input.user, reply: input.reply }).map((s) => [s.entity, s.level]));
-  const memoryConfig = mindsStepConfig(settings.modelUse, "memory");
+  const memoryConfig = minds ? mindsStepConfig(settings.modelUse, "memory") : null;
   const remembering = memoryConfig ? said.who.filter((id) => settings.minds.memoryLevels.includes(levels.get(id) ?? "background")) : [];
   const reads = settings.minds.reads;
   const messages = remembering.length > 0 ? await chatMessages(deps, input.chatId, userId) : [];
@@ -614,13 +713,14 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   const remembered = new Map(
     remembering.map((id) => {
       const task = (async (): Promise<MemoryEventData | null> => {
-        const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
+        const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id), knowing);
         const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, reads, moment, pinned: memoryPins, ...(history ? { history } : {}) };
         const usage = { tokens: 0 };
         const t0 = performance.now();
         const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
-        // Their listeners: who heard the turn with them, and, unless the POV left them, whoever it met.
-        const listeners = left.includes(id) ? said.who : [...said.who, ...(met?.who ?? [])];
+        // Their listeners: who heard the turn with them, and, unless the POV left them, whoever it met;
+        // no one while the chat tracks knowledge, whose step records telling.
+        const listeners = knowing ? [] : left.includes(id) ? said.who : [...said.who, ...(met?.who ?? [])];
         const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners);
         if (traced(reg, world, state, id)) traces.push({ purpose: "memory", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
         return data;
@@ -633,7 +733,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   // some level) or a mind (its summary or notes), and beside the memories, on the notes and summary
   // each had before this turn. Someone whose memory rewrites their summary has theirs asked again
   // once it has, so it folds into that summary.
-  const consolidateConfig = memory.consolidate.enabled ? mindsStepConfig(settings.modelUse, "consolidate") : null;
+  const consolidateConfig = minds && memory.consolidate.enabled ? mindsStepConfig(settings.modelUse, "consolidate") : null;
   const folding = consolidateConfig !== null && ((memoryConfig !== null && settings.minds.memoryLevels.length > 0) || reads.summary.on || reads.memory.on);
   const now = w.state.clock;
   const foldOf = (at: Readonly<WorldState>, id: EntityId): MindNote[] => {
@@ -679,8 +779,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   for (const data of await Promise.all(remembered.values())) {
     if (!data) continue;
     // Applied in turn, so a shared plan the first memory recorded is already the others' when theirs records.
-    const event: LedgerEvent = { type: MINDS_EVENTS.memory, data: { ...data, plans: unheldPlans(w.state, data.entity, data.plans) } as unknown as JsonObject };
-    if (!w.apply(event)) events.push(event);
+    record({ type: MINDS_EVENTS.memory, data: { ...data, plans: unheldPlans(w.state, data.entity, data.plans) } as unknown as JsonObject });
   }
   const folded = await Promise.all(
     consolidations.map(async ({ id, asked, rewritten }) => {
@@ -692,7 +791,14 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   );
   for (const done of folded) {
     if (done?.trace) traces.push(done.trace);
-    if (done?.event && !w.apply(done.event)) events.push(done.event);
+    if (done?.event) record(done.event);
   }
-  return { events, traces };
+  // What everyone but the player character learned, checked after the turn's memories: kept apart, as
+  // a change the reply made, which the user's `learn` mode may refuse; the player character's own
+  // learning comes back as changes.
+  const knew = await knowledge;
+  if (!knew) return { events, traces };
+  traces.push(...knew.traces);
+  const learned = knew.events.filter((event) => !w.apply(event));
+  return { events, traces, knowledge: { proposals: knew.proposals, events: learned, connection: knew.connection } };
 }

@@ -134,8 +134,8 @@ describe("engine first", () => {
     const reply = await rig.host.start(chatId, { type: "regenerate" });
     expect(reply.halted).toBeUndefined();
     expect(mindsAsked(rig.host.quietCalls.slice(before))).toEqual(["Priya Nair"]);
-    expect(rig.host.section("Minds")).toContain("Danny Okafor: Danny Okafor leans on the counter");
-    expect(rig.host.section("Minds")).toContain("Priya Nair: Priya Nair leans on the counter");
+    expect(rig.host.section("Minds")).toContain("Danny Okafor leans on the counter");
+    expect(rig.host.section("Minds")).toContain("Priya Nair leans on the counter");
     expect(await flagOf(rig, chatId)).toBeUndefined();
   });
 
@@ -163,7 +163,7 @@ describe("engine first", () => {
     const asked = rig.host.quietCalls.slice(before);
     expect(asked.filter((c) => (c.messages[0]?.content ?? "").includes("You map a player's typed input"))).toHaveLength(1);
     expect(mindsAsked(asked)).toEqual([]);
-    expect(rig.host.section("Minds")).toContain("Danny Okafor: Danny Okafor leans on the counter");
+    expect(rig.host.section("Minds")).toContain("Danny Okafor leans on the counter");
   });
 
   test("a transient provider error is asked again before the step fails, and the reply goes ahead", async () => {

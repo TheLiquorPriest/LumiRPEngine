@@ -1,5 +1,5 @@
-// Lore, jobs, the rest of Build and a chat's map through the agent's tools,
-// against the real backend.
+// Lore, jobs, the rest of Build, a chat's map and a chat's own knowledge choices through the
+// agent's tools, against the real backend.
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
@@ -153,10 +153,28 @@ describe("a chat's map through the tools", () => {
   });
 });
 
+describe("a chat's own knowledge choices through the tools", () => {
+  test("read, set part by part and returned to following; the chat's controls show them", async () => {
+    const { rig, call, raw } = await cliRig();
+    const chatId = await rig.worldChat();
+    expect(await call("lre_chat_knowledge", { chatId })).toEqual({ chatId, knowledge: null, narrator: null });
+    const narrator = { knowledge: "pov", secrets: "omit" } as const;
+    expect(await call("lre_chat_knowledge", { chatId, narrator })).toEqual({ chatId, knowledge: null, narrator });
+    expect(await call("lre_chat_knowledge", { chatId, knowledge: false })).toEqual({ chatId, knowledge: false, narrator });
+    const controls = (await rig.rt.view(chatId, rig.host.userId)).controls;
+    expect(controls?.knowledge.narrator.chat).toEqual(narrator);
+    expect(controls?.knowledge.tracking.chat).toBe(false);
+    expect(await call("lre_chat_knowledge", { chatId, narrator: null })).toEqual({ chatId, knowledge: false, narrator: null });
+    expect((await raw("lre_chat_knowledge", { chatId, narrator: { knowledge: "pov" } })).isError).toBe(true);
+    expect((await raw("lre_chat_knowledge", { chatId, knowledge: "yes" })).isError).toBe(true);
+    expect(await call("lre_chat_knowledge", { chatId })).toEqual({ chatId, knowledge: false, narrator: null });
+  });
+});
+
 describe("read-only mode", () => {
-  test("hides the lore, job, Build and map tools that write, and keeps the ones that read", () => {
+  test("hides the lore, job, Build, map and chat knowledge tools that write, and keeps the ones that read", () => {
     const listed = toolsFor(true).map((t) => t.name);
-    for (const name of ["lre_lore_save", "lre_job_start", "lre_job_apply", "lre_job_cancel", "lre_job_dismiss", "lre_profile", "lre_map_display"]) expect(listed).not.toContain(name);
+    for (const name of ["lre_lore_save", "lre_job_start", "lre_job_apply", "lre_job_cancel", "lre_job_dismiss", "lre_profile", "lre_map_display", "lre_chat_knowledge"]) expect(listed).not.toContain(name);
     for (const name of ["lre_lore_books", "lre_lore_entries", "lre_lore_pins", "lre_lore_drift", "lre_jobs", "lre_job", "lre_lint", "lre_sheet", "lre_map_walk"]) expect(listed).toContain(name);
   });
 

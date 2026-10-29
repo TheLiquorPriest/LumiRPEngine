@@ -8,7 +8,7 @@
 import type { JsonObject, JsonValue } from "./json";
 import { hashParts } from "./hash";
 import { hasOwn, isRecord, safeKey } from "./json";
-import type { EntityId, MessageId, PlaceId } from "./ids";
+import type { EntityId, FieldId, MessageId, PlaceId, StageId, TrackId } from "./ids";
 import type { Selector, StepPurpose, StepTemplateDef, WorldDoc } from "./world";
 
 // ---------------------------------------------------------------- fidelity
@@ -108,10 +108,12 @@ export interface WorldMindsConfig {
   /** People who never get a mind: always Background (null: no one). Wins over `always`. */
   never: Selector | null;
   memory: MindsMemoryConfig;
+  /** What each person holds from the start (Build → World → Minds, DESIGN §24.11), which seeds their holdings in every chat. */
+  holdings: AuthoredHoldings;
 }
 
 /** `world.minds`'s keys, in the order its editor shows them. */
-export const WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory"] as const;
+export const WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory", "holdings"] as const;
 
 export const DEFAULT_FIDELITY_WEIGHTS: Readonly<FidelityWeights> = Object.freeze({
   here: 45,
@@ -139,13 +141,15 @@ export const DEFAULT_MINDS_MEMORY: Readonly<MindsMemoryConfig> = Object.freeze({
   consolidate: { enabled: true, periodDays: 1 },
 });
 
+/** A world that says nothing of secrecy plays `full`; one that says `brief` stays brief (DESIGN §24.3). */
 export const DEFAULT_WORLD_MINDS: Readonly<WorldMindsConfig> = Object.freeze({
-  secrecy: "brief",
+  secrecy: "full",
   weights: DEFAULT_FIDELITY_WEIGHTS,
   thresholds: DEFAULT_FIDELITY_THRESHOLDS,
   always: null,
   never: null,
   memory: DEFAULT_MINDS_MEMORY,
+  holdings: {},
 });
 
 /** The ranges a number in the minds config is read within (lint names them; a value outside reads as the default). */
@@ -213,7 +217,8 @@ export function memoryConfigOf(raw: unknown, base: Readonly<MindsMemoryConfig> =
 
 /**
  * `world.minds` as the engine plays it (DESIGN §24.2): every part the world leaves out, or gets
- * wrong, reads as the default; thresholds out of order are put in order.
+ * wrong, reads as the default; thresholds out of order are put in order. Secrecy is `full` unless
+ * the world says `brief`.
  */
 export function worldMindsOf(world: { readonly minds?: unknown }): WorldMindsConfig {
   const raw = obj(world.minds);
@@ -229,7 +234,7 @@ export function worldMindsOf(world: { readonly minds?: unknown }): WorldMindsCon
   const near = Math.max(far, num(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
   const live = Math.max(near, num(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
   return {
-    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    secrecy: raw.secrecy === "brief" ? "brief" : "full",
     weights: {
       here: weight(w.here, d.here),
       nearby: weight(w.nearby, d.nearby),
@@ -248,7 +253,47 @@ export function worldMindsOf(world: { readonly minds?: unknown }): WorldMindsCon
     always: selectorOrNull(raw.always),
     never: selectorOrNull(raw.never),
     memory: memoryConfigOf(raw.memory),
+    holdings: authoredHoldingsOf(raw.holdings),
   };
+}
+
+/** The fact kinds an author gives someone from the start: world lore, a track's stage, an entity's field. A book's marks name their own holders, and a claim arises in play. */
+export const AUTHORED_FACT_KINDS: readonly FactKind[] = ["lore", "track", "field"];
+
+/** Whom someone keeps a fact from, as stored: "everyone", or the people named, once each and never themselves; none (an empty list, or anything else) is null. */
+export function keptFromOf(v: unknown, self: EntityId | null = null): KeptFrom | null {
+  if (v === "everyone") return "everyone";
+  if (!Array.isArray(v)) return null;
+  const ids = [...new Set(v.filter((id): id is string => typeof id === "string" && id !== "" && id !== self))];
+  return ids.length > 0 ? ids : null;
+}
+
+/** A confidence (DESIGN §24.11, a fixed range): a finite number from 0 to 1. */
+export function isConfidence(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+}
+
+/**
+ * `world.minds.holdings` as the engine reads it: per person, each fact they hold from the start by
+ * its id, with their belief (true when unset), their confidence (1 when unset) and whom they keep it
+ * from (no one when unset). A fact of a kind an author can't give or an id not in its kind's form
+ * is left out, as is anyone left holding nothing; lint names each, and anything named that the
+ * world doesn't have.
+ */
+export function authoredHoldingsOf(raw: unknown): AuthoredHoldings {
+  const out: AuthoredHoldings = {};
+  for (const [who, facts] of Object.entries(obj(raw))) {
+    if (!safeKey(who) || who === "" || !isRecord(facts)) continue;
+    const held: Record<FactId, AuthoredHolding> = {};
+    for (const [fact, v] of Object.entries(facts)) {
+      const ref = safeKey(fact) ? parseFactId(fact) : null;
+      if (!ref || !AUTHORED_FACT_KINDS.includes(ref.kind) || !isRecord(v)) continue;
+      const keptFrom = keptFromOf(v.keptFrom, who);
+      held[fact] = { belief: (HOLDING_BELIEFS as readonly unknown[]).includes(v.belief) ? (v.belief as HoldingBelief) : "true", confidence: isConfidence(v.confidence) ? v.confidence : 1, ...(keptFrom ? { keptFrom } : {}) };
+    }
+    if (Object.keys(held).length > 0) out[who] = held;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- the user's minds settings
@@ -279,9 +324,12 @@ export const NEAR_REFRESH_TRIGGERS = ["scene", "mention", "turns", "minutes"] as
 /** Why a mind ran: the GM asked, it had none, a Near trigger, a Far period, a rise on the ladder, or it's Live. */
 export type RefreshReason = "live" | "gm" | "first" | "scene" | "mention" | "turns" | "minutes" | "period" | "promoted";
 
-/** The model steps minds use (DESIGN §24.5): each mind, the memory written after a turn, a time skip's beats, and consolidation. */
-export type MindPurpose = "mind" | "memory" | "skip" | "consolidate";
-export const MIND_PURPOSES: readonly MindPurpose[] = ["mind", "memory", "skip", "consolidate"];
+/**
+ * The model steps minds use (DESIGN §24.5, §24.11): each mind, the memory written after a turn, a
+ * time skip's beats, consolidation, and the knowledge step after the reply (who learned what).
+ */
+export type MindPurpose = "mind" | "memory" | "skip" | "consolidate" | "knowledge";
+export const MIND_PURPOSES: readonly MindPurpose[] = ["mind", "memory", "skip", "consolidate", "knowledge"];
 
 /** Whether a step purpose is one of the minds'. */
 export function isMindPurpose(purpose: StepPurpose): purpose is MindPurpose {
@@ -310,12 +358,13 @@ export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<Mi
  * they saw, last thoughts, recall of the turns they were there for, their usual routine (their
  * routine blocks and schedules while their routine is informative or enforced, a private block only
  * when it is their own, never social life the planner made up: `RoutineRole`), their plans (the
- * plans in force the story and the GM gave them, never the day the planner lays), and their life
- * (money, the day and commitments). Who they are, where they are and what they mean to do are in
- * every context, outside these.
+ * plans in force the story and the GM gave them, never the day the planner lays), their life
+ * (money, the day and commitments), and what they know (their own holdings, DESIGN §24.11, while
+ * knowledge is tracked). Who they are, where they are and what they mean to do are in every
+ * context, outside these.
  */
-export type MindSource = "pinned" | "activated" | "reply" | "message" | "history" | "summary" | "memory" | "thoughts" | "recall" | "routine" | "plans" | "life";
-export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life"];
+export type MindSource = "pinned" | "activated" | "reply" | "message" | "history" | "summary" | "memory" | "thoughts" | "recall" | "routine" | "plans" | "life" | "knowledge";
+export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life", "knowledge"];
 
 /** One source as the user sets it: whether a mind reads it, and the most it may take, in tokens ("none": no limit). */
 export interface MindRead {
@@ -328,10 +377,11 @@ export type MindHistoryRead = MindRead & { messages: Limit };
 
 /**
  * What a mind reads: each source on or off with its own limit. Recall's limit is the memory setting
- * it always had (`recall.tokens`: the world's, or the user's override), so its entry is the switch;
- * the recent chat has a messages limit beside its tokens.
+ * it always had (`recall.tokens`: the world's, or the user's override), and what they know has the
+ * knowledge setting's (`knowledge.mindTokens`), so each of their entries is the switch; the recent
+ * chat has a messages limit beside its tokens.
  */
-export type MindsReads = Record<Exclude<MindSource, "recall" | "history">, MindRead> & { recall: Pick<MindRead, "on">; history: MindHistoryRead };
+export type MindsReads = Record<Exclude<MindSource, "recall" | "history" | "knowledge">, MindRead> & { recall: Pick<MindRead, "on">; history: MindHistoryRead; knowledge: Pick<MindRead, "on"> };
 
 /**
  * What a mind reads unless the user says otherwise: the story as it stands, their usual routine as
@@ -355,9 +405,130 @@ export const DEFAULT_MIND_READS: Readonly<MindsReads> = Object.freeze({
   routine: { on: true, tokens: 400 },
   plans: { on: true, tokens: 400 },
   life: { on: false, tokens: "none" },
+  // On: while the chat tracks knowledge, their own holdings in place of the secrets in who they are.
+  knowledge: { on: true },
 });
 
-/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `reads`, `memory` and `prompts`. */
+/** How the knowledge step asks (DESIGN §24.11): one batched call per scene, or one per character. */
+export type KnowledgeBatch = "scene" | "character";
+export const KNOWLEDGE_BATCHES: readonly KnowledgeBatch[] = ["scene", "character"];
+
+/**
+ * `UserSettings.minds.knowledge` (DESIGN §24.11, Settings → Minds → Knowledge): whether knowledge
+ * is tracked, the confidence under which a holding is a suspicion, how the knowledge step asks, the
+ * longest claim a fact keeps, the tokens a mind's own holdings, the narrator's Who knows what and
+ * the step's own context may take, and the user's own wording of its texts. Each limit applies when
+ * a proposal is checked or a call is made, never in the fold, so changing one never changes a past
+ * turn. A chat's own switch (GM → This chat) wins over `enabled`. No Model use preset sets any of it.
+ */
+export interface KnowledgeSettings {
+  enabled: boolean;
+  /** From 0 to 1: a holding whose confidence is under it is a suspicion (`isSuspicion`). */
+  threshold: number;
+  batch: KnowledgeBatch;
+  /** The longest claim a fact is recorded with, in characters. */
+  claimChars: number;
+  /** What a mind reads of its own holdings, in tokens. */
+  mindTokens: number;
+  /** The narrator's Who knows what section, in tokens. */
+  narratorTokens: number;
+  /** The knowledge step's context (what happened, who could perceive it, each person's holdings, witness log and traits), in tokens. */
+  stepTokens: number;
+  /** Facts made in play a chat holds at most (claims): past it, the knowledge step makes no new one. */
+  factsPerChat: number;
+  /** Holders a fact has at most: past it, no one else learns it from the knowledge step. */
+  holdersPerFact: number;
+  /** New facts and learnings one turn's knowledge step records at most. */
+  factsPerTurn: number;
+  learningsPerTurn: number;
+  /** A fact is in play while it was learned within this many of the latest turns (beside being about someone or somewhere here). */
+  inPlayTurns: number;
+  /** The narrator's Who knows what gives each person at most this many facts, the most relevant first. */
+  perPerson: number;
+  /** The user's own wording of each text knowledge sends a model, by the text's id (`KNOWLEDGE_TEXTS`); one left out reads as the shipped text, so clearing it resets it. */
+  prompts: Record<string, string>;
+}
+
+export const KNOWLEDGE_DEFAULTS: Readonly<KnowledgeSettings> = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 6, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+
+/** The ranges knowledge settings are read within: only what keeps each meaningful (a threshold is a confidence, a claim has a character, no count is negative). */
+export const KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER] } as const;
+
+/** The knowledge settings that are whole numbers within a range, as Settings → Minds → Knowledge lists its limits. */
+export const KNOWLEDGE_LIMITS = ["claimChars", "mindTokens", "narratorTokens", "stepTokens", "factsPerChat", "holdersPerFact", "factsPerTurn", "learningsPerTurn", "inPlayTurns", "perPerson"] as const satisfies readonly (keyof KnowledgeSettings)[];
+export type KnowledgeLimit = (typeof KNOWLEDGE_LIMITS)[number];
+
+/** Each limit's range: a claim has at least a character; the rest are tokens or counts, none negative. */
+export function knowledgeLimitRange(limit: KnowledgeLimit): readonly [number, number] {
+  return limit === "claimChars" ? KNOWLEDGE_RANGES.claimChars : limit.endsWith("Tokens") ? KNOWLEDGE_RANGES.tokens : KNOWLEDGE_RANGES.count;
+}
+
+/**
+ * Every text knowledge sends a model besides the knowledge step's own prompt (which is
+ * `minds.prompts.knowledge`, as each minds step's), by id, with its shipped wording: what a mind is
+ * told of its own holdings, the words a holding reads in (for a mind, the narrator's Who knows what
+ * and the knowledge step alike), and the knowledge step's context headings. The user's own wording
+ * (`KnowledgeSettings.prompts`) wins; one left out, or emptied, reads as shipped (`knowledgeText`).
+ * `{{…}}` are the placeholders each fills.
+ */
+export const KNOWLEDGE_TEXTS = Object.freeze({
+  mindTitle: "What you know",
+  mindLead: "The facts you hold and how you came by them. You know only these and what is in front of you: never act on, hint at or guess anything that isn't here.",
+  known: "{{claim}} ({{how}})",
+  suspected: "Suspects: {{claim}} ({{how}}, about {{percent}}% sure)",
+  disbelieved: "Doesn't believe: {{claim}} ({{how}})",
+  unsure: "Unsure whether: {{claim}} ({{how}})",
+  keeps: "keeps it from {{whom}}",
+  everyone: "everyone",
+  authored: "from the start",
+  witnessed: "saw it",
+  told: "told by {{by}}",
+  inferred: "worked it out",
+  guessed: "a guess",
+  person: "{{name}}: {{line}}",
+  notKnown: "{{name}} doesn't know: {{claim}}",
+  stepHappened: "What happened this turn",
+  stepPresent: "Who could perceive it",
+  stepPeople: "What each of them already knows, and has witnessed lately",
+  stepFacts: "Facts in play (reuse these by id)",
+  stepPerson: "{{name}} (id: {{id}})",
+  stepYou: '{{name}} (id: {{id}}; the player character, "you")',
+  stepSaid: "{{name}} said or did: {{text}}",
+  stepStory: "The story, as written: {{text}}",
+  stepThroughout: "there throughout",
+  stepLeft: "there from the start, then left behind partway",
+  stepCame: "came in during the turn, or was met at its end: perceived only what came after",
+  stepOpen: "(an open question)",
+  stepFalse: "(false)",
+  stepPinned: "Pinned lore",
+  stepTraits: "Is like:",
+  stepHolds: "Holds:",
+  stepNothing: "nothing the story tracks yet",
+  stepWitnessed: "Witnessed lately:",
+  stepSomeone: "someone",
+  stepAnswer: [
+    "- facts: the new facts this turn establishes or raises, each one short sentence, with a ref of your own (n1, n2…) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
+    '- learned: who came to know a fact this turn, and how: witnessed (they saw it, heard it said aloud or read it themselves, so they were there for it) or told (by: who told them, who must already know it). Name the player character "you". keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.',
+    "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
+    "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
+    "Use empty lists for anything the turn didn't give.",
+  ].join("\n"),
+} as const);
+export type KnowledgeTextId = keyof typeof KNOWLEDGE_TEXTS;
+export const KNOWLEDGE_TEXT_IDS = Object.keys(KNOWLEDGE_TEXTS) as KnowledgeTextId[];
+
+/** A knowledge text as this user has it: their own wording, else the shipped one. */
+export function knowledgeText(settings: Pick<KnowledgeSettings, "prompts">, id: KnowledgeTextId): string {
+  const own = settings.prompts[id];
+  return own !== undefined && own.trim() !== "" ? own : KNOWLEDGE_TEXTS[id];
+}
+
+/** A text with its `{{name}}` placeholders filled in one pass; a placeholder with no value is left as written. */
+export function fillText(text: string, values: Readonly<Record<string, string>>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (whole, key: string) => (hasOwn(values, key) ? (values[key] ?? whole) : whole));
+}
+
+/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `reads`, `memory`, `prompts` and `knowledge`. */
 export interface MindsSettings {
   enabled: boolean;
   /** How many Live minds run a turn, best score first; the rest wait for Near's triggers. */
@@ -378,9 +549,11 @@ export interface MindsSettings {
   prompts: Partial<Record<MindPurpose, string>>;
   /** A time skip's caps (DESIGN §24.7): beats per skip and minds per beat. */
   skip: { maxBeats: Limit; maxMindsPerBeat: Limit };
+  /** Knowledge (DESIGN §24.11): the user's own, so no preset sets it. */
+  knowledge: KnowledgeSettings;
 }
 
-type PresetMinds = Omit<MindsSettings, "prompts" | "memory" | "reads">;
+type PresetMinds = Omit<MindsSettings, "prompts" | "memory" | "reads" | "knowledge">;
 
 /** The minds part of each Model use preset (D25): Lean off; Standard 3 Live with notes for Live; Full no limit with notes for Live and Near. */
 export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readonly<PresetMinds>>> = Object.freeze({
@@ -391,7 +564,7 @@ export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readon
 
 /** A new user's minds settings: Standard's, reading what minds read by default. */
 export function defaultMindsSettings(preset: keyof typeof MINDS_PRESETS = "standard"): MindsSettings {
-  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS) };
 }
 
 /** Kept equal to `defaultMindsSettings()`: what Settings shows as the defaults. */
@@ -445,6 +618,7 @@ function readsOf(raw: unknown, base: Readonly<MindsReads>): MindsReads {
     // A file saved before minds read their plans on their own takes the default: on.
     plans: readOf(r.plans, base.plans),
     life: readOf(r.life, base.life),
+    knowledge: { on: typeof obj(r.knowledge).on === "boolean" ? (obj(r.knowledge).on as boolean) : base.knowledge.on },
   };
 }
 
@@ -477,6 +651,23 @@ export function migrateMindReads(raw: JsonObject): JsonObject {
   return { ...raw, minds: { ...rest, reads } };
 }
 
+/** `UserSettings.minds.knowledge` as the engine reads it: each field checked, else `base`'s; a wording for a text knowledge doesn't send is dropped. */
+export function knowledgeSettingsOf(raw: unknown, base: Readonly<KnowledgeSettings> = KNOWLEDGE_DEFAULTS): KnowledgeSettings {
+  const k = obj(raw);
+  const whole = (v: unknown, [lo, hi]: readonly [number, number], fallback: number): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= lo && v <= hi ? v : fallback);
+  const prompts: Record<string, string> = {};
+  for (const [id, text] of Object.entries(obj(k.prompts))) if ((KNOWLEDGE_TEXT_IDS as readonly string[]).includes(id) && typeof text === "string" && text.trim() !== "") prompts[id] = text.slice(0, MIND_PROMPT_MAX);
+  const [lo, hi] = KNOWLEDGE_RANGES.threshold;
+  const limits = Object.fromEntries(KNOWLEDGE_LIMITS.map((limit) => [limit, whole(k[limit], knowledgeLimitRange(limit), base[limit])])) as Record<KnowledgeLimit, number>;
+  return {
+    enabled: typeof k.enabled === "boolean" ? k.enabled : base.enabled,
+    threshold: typeof k.threshold === "number" && Number.isFinite(k.threshold) && k.threshold >= lo && k.threshold <= hi ? k.threshold : base.threshold,
+    batch: k.batch === "scene" || k.batch === "character" ? k.batch : base.batch,
+    ...limits,
+    prompts: isRecord(k.prompts) ? prompts : { ...base.prompts },
+  };
+}
+
 /** `UserSettings.minds` as the engine reads it: each field checked, else `base`'s (the preset's). */
 export function mindsSettingsOf(raw: unknown, base: Readonly<MindsSettings> = MINDS_DEFAULTS): MindsSettings {
   const m = obj(raw);
@@ -506,6 +697,7 @@ export function mindsSettingsOf(raw: unknown, base: Readonly<MindsSettings> = MI
     memory: isRecord(m.memory) ? memoryOverridesOf(m.memory) : structuredClone(base.memory),
     prompts: isRecord(m.prompts) ? prompts : { ...base.prompts },
     skip: { maxBeats: limitIn(skip.maxBeats, 0, 200, base.skip.maxBeats), maxMindsPerBeat: limitIn(skip.maxMindsPerBeat, 0, 64, base.skip.maxMindsPerBeat) },
+    knowledge: knowledgeSettingsOf(m.knowledge, base.knowledge),
   };
 }
 
@@ -723,6 +915,8 @@ export type MindsSlice = {
   chars: Record<EntityId, MindsCharacter>;
   /** The latest turns' presence, oldest first. */
   presence: PresenceRecord[];
+  /** What everyone knows (DESIGN §24.11), the player character included: absent until a knowledge event, so a chat with none folds as it always did. */
+  knowledge?: MindsKnowledge;
 };
 
 /** The most the state keeps; beyond, the oldest go first (the fold's hard bounds, whatever the settings show). */
@@ -796,6 +990,230 @@ export interface SkipOutput {
   beats: { at: string; reason: string }[];
 }
 
+// ---------------------------------------------------------------- knowledge
+
+/**
+ * A fact's id (DESIGN §24.11): one per thing anyone can know, the same in every mind. `lore:<loreId>`
+ * for world lore; `wi:<bookId>:<entryId>` for a whole World Info entry, `wi:<bookId>:<entryId>:<n>`
+ * for its mark at index n (from 0, in the entry's order); `track:<trackId>:<stageId>`;
+ * `field:<entityId>:<fieldId>`; `claim:<hash>` for a claim made in play (`claimFactId`). A `%` or a
+ * `:` inside an id is written `%25` or `%3A` (`factId`), so each part reads back whole (`parseFactId`).
+ */
+export type FactId = string;
+
+/** What a fact refers to. */
+export type FactKind = "lore" | "wi" | "track" | "field" | "claim";
+export const FACT_KINDS: readonly FactKind[] = ["lore", "wi", "track", "field", "claim"];
+
+/** A fact's truth as the GM holds it: true, false (a wrong belief, a false rumour), or an open question. */
+export type FactTruth = "true" | "false" | "open";
+export const FACT_TRUTHS: readonly FactTruth[] = ["true", "false", "open"];
+
+/**
+ * One thing someone can know, held once in the minds slice (`minds.fact`): its id says where it
+ * lives, never copying it; a short claim the narrator can read; the ids it is about (relevance only,
+ * never who knows); and its truth. A claim made in play keeps its source; a book entry's keeps the
+ * hash of the text it was read from (`textHash`), so a change to the entry shows. How long a claim
+ * may be is a setting (`KnowledgeSettings.claimChars`), applied when one is proposed, never here.
+ */
+export type KnowledgeFact = {
+  id: FactId;
+  kind: FactKind;
+  claim: string;
+  about: EntityId[];
+  truth: FactTruth;
+  source?: { msg: MessageId | null; at: number };
+  textHash?: string;
+};
+
+/** How someone came to hold a fact. */
+export type HoldingHow = "authored" | "witnessed" | "told" | "inferred" | "guessed";
+export const HOLDING_HOWS: readonly HoldingHow[] = ["authored", "witnessed", "told", "inferred", "guessed"];
+
+/** What they take a fact to be. */
+export type HoldingBelief = "true" | "false" | "uncertain";
+export const HOLDING_BELIEFS: readonly HoldingBelief[] = ["true", "false", "uncertain"];
+
+/** Whom someone keeps a fact from: the people named, or everyone. */
+export type KeptFrom = EntityId[] | "everyone";
+
+/**
+ * One person's hold on one fact (DESIGN §24.11): how they came by it and from whom (`by`: who told
+ * them, for one told), the evidence it rests on (fact ids, and refs to their witness entries:
+ * `witnessRef`), since when, what they take it to be and how sure they are, from 0 to 1 (under the
+ * threshold it is a suspicion), and whom they keep it from. No holding is not knowing. It keeps its
+ * own source, so it outlives the witness log's bound.
+ */
+export type Holding = {
+  how: HoldingHow;
+  by: EntityId | null;
+  evidence: string[];
+  since: { msg: MessageId | null; at: number };
+  belief: HoldingBelief;
+  confidence: number;
+  keptFrom?: KeptFrom;
+};
+
+/**
+ * The knowledge part of the minds slice: every fact once, and each person's holdings by fact. `off`:
+ * the chat stopped tracking knowledge (`minds.knowledge`), so every reader of it reads as before it
+ * (DESIGN §24.11); absent, it tracks.
+ */
+export type MindsKnowledge = {
+  facts: Record<FactId, KnowledgeFact>;
+  holdings: Record<EntityId, Record<FactId, Holding>>;
+  off?: true;
+  /** The user's threshold as the chat's turns last recorded it (`minds.knowledge`), when it isn't the default: how sure a holding must be to reveal its fact (`revealsFact`). */
+  threshold?: number;
+};
+
+/**
+ * Whether a chat's state tracks knowledge (DESIGN §24.11): a chat that switched it off recorded so
+ * (`minds.knowledge`), and every other one tracks what it holds (a chat that never learned anything
+ * holds nothing). Reads the minds slice as it is stored, so the engine's own readers (the player
+ * screens, `engine/visibility.ts`) and the pack's agree.
+ */
+export function knowledgeTracked(slice: unknown): boolean {
+  const k = isRecord(slice) ? slice.knowledge : undefined;
+  return !(isRecord(k) && k.off === true);
+}
+
+/** How sure a holding must be to reveal its fact, as the chat last recorded the user's threshold (`minds.knowledge`); the default when it never did. */
+export function knowledgeThreshold(slice: unknown): number {
+  const k = isRecord(slice) ? slice.knowledge : undefined;
+  return isRecord(k) && isConfidence(k.threshold) ? k.threshold : KNOWLEDGE_DEFAULTS.threshold;
+}
+
+/**
+ * Whether a holding reveals its fact to whoever holds it, as the player screens count the player
+ * character's (DESIGN §24.11): believed true and at least as sure as the threshold, so a suspicion
+ * or a disbelief reveals nothing; and never a track's stage or a world lore entry someone holds from
+ * the start (`authored`: an owner's or a holder's, by the world's design), which the world's own
+ * visibility shows or keeps. A World Info mark's holder from the start reads it as the mark says.
+ */
+export function revealsFact(fact: FactId, h: Pick<Holding, "how" | "belief" | "confidence">, threshold: number): boolean {
+  if (h.belief !== "true" || !(h.confidence >= threshold)) return false;
+  const kind = parseFactId(fact)?.kind;
+  return !(h.how === "authored" && (kind === "track" || kind === "lore"));
+}
+
+/**
+ * The secrets `who` holds as the player screens count them revealed (DESIGN §24.11, `revealsFact`):
+ * each track stage (`track:<track>:<stage>`), each world lore entry (`lore:<id>`), and each World Info
+ * entry or mark by its live lore id (`liveLoreIdOfWiFact`), while the chat tracks knowledge; none once
+ * it stopped. Reads the minds slice as stored (`state.packs.minds`).
+ */
+export function heldSecrets(slice: unknown, who: EntityId): { stages: Record<TrackId, StageId[]>; lore: string[] } {
+  const out: { stages: Record<TrackId, StageId[]>; lore: string[] } = { stages: {}, lore: [] };
+  if (!knowledgeTracked(slice) || !isRecord(slice) || !isRecord(slice.knowledge)) return out;
+  const holdings = isRecord(slice.knowledge.holdings) && hasOwn(slice.knowledge.holdings, who) ? slice.knowledge.holdings[who] : undefined;
+  if (!isRecord(holdings)) return out;
+  const threshold = knowledgeThreshold(slice);
+  for (const [fact, h] of Object.entries(holdings)) {
+    if (!isRecord(h) || typeof h.how !== "string" || typeof h.belief !== "string" || typeof h.confidence !== "number" || !revealsFact(fact, h as unknown as Holding, threshold)) continue;
+    const ref = parseFactId(fact);
+    if (ref?.kind === "track") out.stages[ref.track] = [...(hasOwn(out.stages, ref.track) ? (out.stages[ref.track] ?? []) : []), ref.stage];
+    else if (ref?.kind === "lore") out.lore.push(ref.lore);
+    else if (ref?.kind === "wi") out.lore.push(liveLoreIdOfWiFact(fact) ?? fact);
+  }
+  return out;
+}
+
+/** What an author gives someone from the start (`world.minds.holdings`): it seeds an `authored` holding. */
+export type AuthoredHolding = Pick<Holding, "belief" | "confidence" | "keptFrom">;
+/** Per person, each fact they hold from the start, by its id. */
+export type AuthoredHoldings = Record<EntityId, Record<FactId, AuthoredHolding>>;
+
+/** A fact id's parts (`parseFactId`, `factId`); a World Info entry's `mark` is null for the whole entry. */
+export type FactRef =
+  | { kind: "lore"; lore: string }
+  | { kind: "wi"; book: string; entry: string; mark: number | null }
+  | { kind: "track"; track: TrackId; stage: StageId }
+  | { kind: "field"; entity: EntityId; field: FieldId }
+  | { kind: "claim"; hash: string };
+
+const escapePart = (s: string): string => s.replace(/%/g, "%25").replace(/:/g, "%3A");
+const unescapePart = (s: string): string => s.replace(/%(25|3A)/gi, (m) => (m === "%25" ? "%" : ":"));
+
+/** The id of the fact a reference names. */
+export function factId(ref: FactRef): FactId {
+  switch (ref.kind) {
+    case "lore":
+      return `lore:${escapePart(ref.lore)}`;
+    case "wi":
+      return `wi:${escapePart(ref.book)}:${escapePart(ref.entry)}${ref.mark === null ? "" : `:${ref.mark}`}`;
+    case "track":
+      return `track:${escapePart(ref.track)}:${escapePart(ref.stage)}`;
+    case "field":
+      return `field:${escapePart(ref.entity)}:${escapePart(ref.field)}`;
+    case "claim":
+      return `claim:${escapePart(ref.hash)}`;
+  }
+}
+
+/** A fact id's parts, or null when it isn't in one of the five forms. */
+export function parseFactId(id: string): FactRef | null {
+  const [kind = "", ...raw] = id.split(":");
+  if (raw.length === 0 || raw.some((p) => p === "")) return null;
+  const [a = "", b = "", c = ""] = raw.map(unescapePart);
+  switch (kind) {
+    case "lore":
+      return raw.length === 1 ? { kind: "lore", lore: a } : null;
+    case "wi":
+      if (raw.length === 2) return { kind: "wi", book: a, entry: b, mark: null };
+      return raw.length === 3 && /^\d+$/.test(c) && Number.isSafeInteger(Number(c)) ? { kind: "wi", book: a, entry: b, mark: Number(c) } : null;
+    case "track":
+      return raw.length === 2 ? { kind: "track", track: a, stage: b } : null;
+    case "field":
+      return raw.length === 2 ? { kind: "field", entity: a, field: b } : null;
+    case "claim":
+      return raw.length === 1 ? { kind: "claim", hash: a } : null;
+    default:
+      return null;
+  }
+}
+
+/** A book entry's or mark's live lore id (`book:<book>/<entry>`, a mark's `#<n>` from 1, as `backend/book-lore.ts` reads them), in its parts. */
+const LIVE_BOOK_LORE = /^book:(.+)\/([^/#]+)(?:#(\d+))?$/;
+
+/**
+ * The World Info fact a live lore entry is (DESIGN §24.11): a book entry's own, `book:<book>/<entry>`,
+ * is the whole entry `wi:<book>:<entry>`; its `n`th mark, `book:<book>/<entry>#<n>` from 1, is
+ * `wi:<book>:<entry>:<n - 1>`, marks counting from 0. Null for any other lore id.
+ */
+export function wiFactIdOfLiveLore(loreId: string): FactId | null {
+  const m = LIVE_BOOK_LORE.exec(loreId);
+  if (!m) return null;
+  const n = m[3] === undefined ? null : Number(m[3]);
+  if (n !== null && (!Number.isSafeInteger(n) || n < 1)) return null;
+  return factId({ kind: "wi", book: m[1] ?? "", entry: m[2] ?? "", mark: n === null ? null : n - 1 });
+}
+
+/** The live lore id of a World Info fact (`wiFactIdOfLiveLore`'s inverse), or null when the id isn't one. */
+export function liveLoreIdOfWiFact(factIdText: FactId): string | null {
+  const ref = parseFactId(factIdText);
+  return ref?.kind === "wi" ? `book:${ref.book}/${ref.entry}${ref.mark === null ? "" : `#${ref.mark + 1}`}` : null;
+}
+
+/**
+ * The fact a claim made in play is: its words (case, spacing and closing punctuation aside) and the
+ * message it was made in, so the same claim from the same message is one fact whoever records it.
+ */
+export function claimFactId(claim: string, msg: MessageId | null): FactId {
+  const words = claim.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim().replace(/[\s.!?;:,]+$/u, "");
+  return factId({ kind: "claim", hash: hashParts("minds.claim", words, msg ?? "").slice(0, 10) });
+}
+
+/** A witness entry as a holding's evidence names it: the entry whole, hashed, so it reads back from the log that keeps it. */
+export function witnessRef(entry: Pick<WitnessEntry, "at" | "what" | "how" | "by" | "place">): string {
+  return `witness:${hashParts("minds.witness", String(entry.at), entry.how, entry.by ?? "", entry.place ?? "", entry.what).slice(0, 10)}`;
+}
+
+/** Whether a piece of evidence names a witness entry (`witnessRef`) rather than a fact. */
+export function isWitnessRef(ref: string): boolean {
+  return /^witness:[0-9a-f]{10}$/.test(ref);
+}
+
 // ---------------------------------------------------------------- events
 
 /** The minds pack's events. Every model answer is one, so a fold never calls a model. */
@@ -815,6 +1233,14 @@ export const MINDS_EVENTS = {
   refresh: "minds.refresh",
   intent: "minds.intent",
   skip: "minds.skip",
+  /** Knowledge (DESIGN §24.11): a fact recorded whole; people learning it, forgetting it, keeping it from others; its truth settled. */
+  fact: "minds.fact",
+  learn: "minds.learn",
+  forget: "minds.forget",
+  keep: "minds.keep",
+  settle: "minds.settle",
+  /** Whether the chat tracks knowledge from this turn on: recorded only when that changes in a chat that holds some. */
+  knowledge: "minds.knowledge",
 } as const;
 
 export type RoundEventData = { at: number; on: boolean };
@@ -883,12 +1309,96 @@ export type RefreshEventData = { entity: EntityId };
 export type IntentEventData = { entity: EntityId; intent: MindIntent | null };
 /** `minds.skip`: a time skip's beats, as scanned and as the `skip` step proposed them. */
 export type SkipEventData = { from: number; to: number; beats: { at: number; reason: string; source: "scan" | "model" }[] };
+/** `minds.fact`: a fact, recorded whole; one already held is replaced whole, and who holds it still does. */
+export type FactEventData = { fact: KnowledgeFact };
+/**
+ * `minds.learn`: each of `who` holds the fact as given, since `msg` and `at`, in place of any holding
+ * of it they had. `witness`, on a learning the knowledge step recorded: the line it adds to each
+ * learner's witness log at `at`, what they saw (`witnessed`) or were told (`told`, by `by`), the
+ * evidence the holding rests on (`witnessRef`), as `minds.presence` and `minds.memory` add theirs.
+ */
+export type LearnEventData = { who: EntityId[]; fact: FactId; how: HoldingHow; by: EntityId | null; evidence: string[]; belief: HoldingBelief; confidence: number; keptFrom?: KeptFrom; msg: MessageId | null; at: number; witness?: { what: string; place: PlaceId | null } };
+/** `minds.forget`: none of `who` holds the fact any more. */
+export type ForgetEventData = { who: EntityId[]; fact: FactId };
+/** `minds.keep`: whom someone keeps a fact they hold from; an empty list keeps it from no one. */
+export type KeepEventData = { who: EntityId; fact: FactId; keptFrom: KeptFrom };
+/** `minds.settle`: a fact's truth as the GM holds it. */
+export type SettleEventData = { fact: FactId; truth: FactTruth };
+/** `minds.knowledge`: whether the chat tracks knowledge from this turn on (DESIGN §24.11). */
+export type KnowledgeEventData = { on: boolean; threshold?: number };
+
+/**
+ * The knowledge step's answer (DESIGN §24.11), JSON, names as the model wrote them: new facts (a ref
+ * of its own the lists use, the claim, whom it is about, its truth), who learned which fact and how
+ * (witnessed, or told by someone), what someone worked out with how sure they are and what it rests
+ * on, and what someone now doubts.
+ */
+export interface KnowledgeOutput {
+  facts: { ref: string; claim: string; about?: string[]; truth?: FactTruth }[];
+  learned: { who: string[]; fact: string; how: "witnessed" | "told"; by?: string; keptFrom?: string[] | "everyone" }[];
+  inferred: { who: string; fact: string; confidence: number; evidence: string[]; belief?: HoldingBelief }[];
+  doubted: { who: string; fact: string; confidence: number; belief?: HoldingBelief }[];
+}
+
+/**
+ * The change types the knowledge step proposes for the player character (C4, Settings → Changes from
+ * the reply, with learning as every type has): `learn`, a fact they learned (automatic by default);
+ * `reveal`, the story revealing a secret to them (a world lore entry, a track's stage, a World Info
+ * mark they didn't hold), which opens it on the player's screens (confirm by default).
+ */
+export const KNOWLEDGE_CHANGES = ["learn", "reveal"] as const;
+export type KnowledgeChange = (typeof KNOWLEDGE_CHANGES)[number];
+
+/**
+ * A knowledge change as a proposal (C4): the player character's learning whole, with every fact it
+ * names that the turn's start didn't hold (so it applies on its own, wherever it lands among the
+ * read's changes), the fact's claim and who told them for the chip, and who learned it with them.
+ */
+export type KnowledgeProposal = {
+  type: KnowledgeChange;
+  facts: KnowledgeFact[];
+  learn: LearnEventData;
+  claim: string;
+  with: EntityId[];
+};
 
 // ---------------------------------------------------------------- the narrator's section
 
 /** The Minds section's slot and its preset outlet (DESIGN §6.8, §24.3). */
 export const MINDS_SLOT = "minds";
 export const MINDS_OUTLET = "lre_minds";
+
+/** The Who knows what section's slot and its preset outlet (DESIGN §24.11, C5). */
+export const KNOWLEDGE_SLOT = "knowledge";
+export const KNOWLEDGE_OUTLET = "lre_knowledge";
+
+// ---------------------------------------------------------------- Play → What you know
+
+/** Play's What you know panel (DESIGN §24.11). */
+export const KNOWN_PANEL = "minds.known";
+
+/** One fact the player character holds, as What you know shows it: its claim, how and since when, what they make of it, and whom they keep it from, by name. */
+export interface KnownItem {
+  /** The row's key: opaque, never the fact's id, which may name a secret track or lore entry (DESIGN §7). */
+  key: string;
+  claim: string;
+  how: HoldingHow;
+  byName: string | null;
+  sinceText: string;
+  belief: HoldingBelief;
+  confidence: number;
+  /** Held less surely than the user's threshold. */
+  suspicion: boolean;
+  /** The fact is an open question. */
+  open: boolean;
+  keptFrom: string[] | "everyone" | null;
+}
+
+/** What you know: whether the chat tracks knowledge, and the player character's holdings, newest first. */
+export interface KnownView {
+  tracking: boolean;
+  items: KnownItem[];
+}
 
 // ---------------------------------------------------------------- the GM view and its controls
 
@@ -911,6 +1421,35 @@ export interface MindsGmCharacter {
   commitments: (MindCommitment & { withNames: string[]; dueText: string | null })[];
   witness: (WitnessEntry & { clock: string })[];
   summary: string;
+  /** What they know (DESIGN §24.11), newest first. */
+  holdings: MindsGmHolding[];
+}
+
+/**
+ * One holding as GM → Minds shows it (DESIGN §24.11): the fact's claim, kind and truth, who told
+ * them by name, since when in words, whether it is a suspicion (under the threshold), whom it is
+ * kept from by name, and its evidence, each fact by its claim and each witness entry by its line.
+ */
+export type MindsGmHolding = Holding & {
+  fact: FactId;
+  claim: string;
+  kind: FactKind;
+  truth: FactTruth;
+  byName: string | null;
+  sinceText: string;
+  suspicion: boolean;
+  keptFromNames: string[] | "everyone";
+  evidenceShown: MindsGmEvidence[];
+};
+
+/** One piece of a holding's evidence: a fact by its claim, a witness entry still in their log by its line, or one the log no longer keeps. */
+export type MindsGmEvidence = { ref: string; kind: "fact" | "witness" | "gone"; text: string };
+
+/** The chat's knowledge as the GM sees it: every fact with who holds it, the player character's own holdings, and the threshold a suspicion is under. */
+export interface MindsGmKnowledge {
+  facts: (KnowledgeFact & { holders: EntityId[] })[];
+  pov: { entity: EntityId; name: string; holdings: MindsGmHolding[] } | null;
+  threshold: number;
 }
 
 /** `GmView.minds`: the chat's minds as the GM sees them; `enabled` is the user's setting. */
@@ -922,6 +1461,7 @@ export interface MindsGmView {
   nowText: string;
   /** Every person but the POV, closest on the ladder first. */
   characters: MindsGmCharacter[];
+  knowledge: MindsGmKnowledge;
 }
 
 /**
@@ -930,13 +1470,16 @@ export interface MindsGmView {
  * delete (`value` null) a note, commitment or plan, and set what they mean to do now. A `value` is
  * the item's fields to change; an added one needs its text (and for a plan its `what` and `when`).
  * An intent names only what changes, at least one part: `text` "" empties it and `approach` null
- * leaves it to their mind; with both empty the intent is cleared.
+ * leaves it to their mind; with both empty the intent is cleared. `mind_knowledge` sets one holding
+ * of a fact the chat holds, whole (anyone's, the player character's too), or with `holding` null
+ * takes it away (DESIGN §24.11).
  */
 export type MindEditOp =
   | { op: "mind_pin"; entity: EntityId; level: Fidelity | null }
   | { op: "mind_refresh"; entity: EntityId }
   | { op: "mind_memory"; entity: EntityId; part: "note" | "commitment" | "plan"; id: string | null; value: JsonObject | null }
-  | { op: "mind_intent"; entity: EntityId; text?: string; approach?: MindApproach | null };
+  | { op: "mind_intent"; entity: EntityId; text?: string; approach?: MindApproach | null }
+  | { op: "mind_knowledge"; entity: EntityId; fact: FactId; holding: Holding | null };
 
 /**
  * A lore entry a call was given (DESIGN §24.5), as a player surface may show it: its title (or "A
@@ -1051,7 +1594,16 @@ export const MIND_PROMPT_DEFAULTS: Readonly<Record<MindPurpose, string>> = Objec
   ].join("\n"),
   consolidate:
     "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
+  knowledge: [
+    "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
+    "Record only what the turn as written gives each person. Someone learns by witnessing what happens in front of them (seeing it, hearing it said aloud, reading it) or by being told it; whoever wasn't there witnessed nothing, and whoever tells something must already know it. Someone may also work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
+    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it; make a new one only for what the turn establishes or raises. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold.",
+  ].join("\n"),
 });
+
+/** The knowledge step's answer shape (DESIGN §24.11, a fixed output contract, §16): the engine reads these keys whatever its instructions say. */
+export const KNOWLEDGE_ANSWER_SHAPE =
+  'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"who": ["a name"], "fact": "a fact id or n1", "how": "witnessed", "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
 
 /** Each minds step's answer: the JSON the engine reads, appended after the instructions whoever wrote them. */
 export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object.freeze({
@@ -1076,4 +1628,21 @@ export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object
   ].join("\n"),
   skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
   consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
+  knowledge: `${KNOWLEDGE_ANSWER_SHAPE}\n${KNOWLEDGE_TEXTS.stepAnswer}`,
 });
+
+/** The knowledge step's answer format as this user has it: its JSON shape, which is fixed (§16), then their own wording of what each list holds (`stepAnswer`). */
+export function knowledgeAnswerFormat(settings: Pick<KnowledgeSettings, "prompts">): string {
+  return `${KNOWLEDGE_ANSWER_SHAPE}\n${knowledgeText(settings, "stepAnswer")}`;
+}
+
+/**
+ * The memory step's answer once the chat tracks knowledge (DESIGN §24.11, a fixed output contract
+ * read beside the first, §16): the same, without `told`. The knowledge step is then telling's only
+ * writer, as the listener's holding and `told` witness entry.
+ */
+export const MEMORY_ANSWER_V2: string = MIND_ANSWER_FORMATS.memory
+  .replace(', "told": [{"to": ["a name"], "what": "..."}]', "")
+  .split("\n")
+  .filter((line) => !line.startsWith("- told:"))
+  .join("\n");

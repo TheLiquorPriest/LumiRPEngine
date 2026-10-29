@@ -5,7 +5,7 @@
 // reasons.
 
 import type { GmView } from "../shared/state-view";
-import { effectiveMemory, type MindsSettings } from "../shared/minds";
+import { effectiveMemory, knowledgeThreshold, type MindsSettings } from "../shared/minds";
 import { buildGmWorld } from "../engine/gm-view";
 import { buildMindsGm } from "../packs/minds/core/gm";
 import type { ChainMessage } from "../engine/ledger/chain";
@@ -42,8 +42,8 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
       ...buildGmWorld(registry, render.world, render.state),
       edits: edits.reverse().slice(0, GM_EDITS),
       refused: (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason })),
-      // Fidelity reads the chat's latest message and reply, as the next turn's would.
-      minds: buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds)),
+      // Fidelity reads the chat's latest message and reply, as the next turn's would; a holding under the threshold the chat recorded reads as a suspicion, as on the player's screens.
+      minds: buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds), knowledgeThreshold(render.state.packs.minds)),
     };
   });
 }

@@ -15,6 +15,7 @@ import { DOMAINS } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
 import type { FixDirective, LedgerEvent, PostEntry } from "../shared/ledger";
+import type { Holding } from "../shared/minds";
 import type { EditOp } from "../shared/protocol";
 import { EDIT_OPS_MAX } from "../shared/protocol";
 import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
@@ -413,8 +414,9 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
     case "mind_pin":
     case "mind_refresh":
     case "mind_memory":
-    case "mind_intent": {
-      // A character's mind is the minds pack's (DESIGN §24.9): it words the control as its events.
+    case "mind_intent":
+    case "mind_knowledge": {
+      // A character's mind, and what anyone knows, is the minds pack's (DESIGN §24.9, §24.11): it words the control as its events.
       const edit = optionalService(w.ctx, "minds.edit");
       if (!edit) return reject("no_minds", "this world has no character minds");
       const out = edit(w.ctx, op);
@@ -555,6 +557,10 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
           // Each part is optional (absent keeps it), but one of them must be there.
           if (!str(o.entity) || (o.text !== undefined && !str(o.text)) || (o.approach !== undefined && o.approach !== null && o.approach !== "reactive" && o.approach !== "proactive") || (o.text === undefined && o.approach === undefined)) return null;
           return { op: "mind_intent", entity: o.entity, ...(str(o.text) ? { text: o.text } : {}), ...(o.approach !== undefined ? { approach: o.approach } : {}) };
+        case "mind_knowledge":
+          // The holding's shape is checked when it resolves, against what the chat knows then.
+          if (!str(o.entity) || !str(o.fact) || !(o.holding === null || isRecord(o.holding))) return null;
+          return { op: "mind_knowledge", entity: o.entity, fact: o.fact, holding: o.holding as unknown as Holding | null };
         case "routine_follow": {
           // Each part is optional (absent keeps it), but one of them must be there; null returns it to the world's (the role and the skip life to their level's).
           const mode = o.mode === undefined || o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);

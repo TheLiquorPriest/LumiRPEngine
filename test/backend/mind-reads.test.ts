@@ -173,12 +173,17 @@ describe("a mind reads the story as it stands, and nothing of another mind", () 
     for (const mark of ["Today ", "Time out", "Commitment (", "COMMIT-MARK", "NOTE-MARK", "SUMMARY-MARK", "THOUGHT-MARK", "## Your last thoughts", "## Turns you were there for", "You have $"]) expect(danny).not.toContain(mark);
     // Nothing of another mind: what Priya's memory says she told him isn't his.
     expect(danny).not.toContain("TOLD-MARK");
-    // Secrecy: a secret the turn names that isn't his stays out; his own is in who he is.
+    // Secrecy: a secret the turn names that isn't his stays out. His own, which the chat records as
+    // his from the start now that it tracks knowledge (DESIGN §24.11), is in what he knows, in place
+    // of a secret line in who he is.
     expect(danny).not.toContain("SECRET-MARK");
-    expect(danny).toContain("- Your secret, Danny's debt: HELD-MARK: Danny owes the lighthouse keeper money.");
-    // The state still holds what the planner and the memories made, for the GM and the planner.
+    expect(danny).toContain("## What you know\n");
+    expect(danny).toContain("- HELD-MARK: Danny owes the lighthouse keeper money. (from the start); keeps it from everyone");
+    expect(danny).not.toContain("- Your secret, Danny's debt");
+    // The state still holds what the planner and the memories made, for the GM and the planner; what a
+    // memory says was told isn't among it, since telling is the knowledge step's alone.
     const c = readCharacter((await stateOf(rig, chatId)).state, DANNY);
-    expect(c.witness.some((w) => w.how === "told" && w.what.startsWith("TOLD-MARK"))).toBe(true);
+    expect(c.witness.some((w) => w.how === "told" && w.what.startsWith("TOLD-MARK"))).toBe(false);
     expect(c.plans.some((p) => p.what.startsWith("PLAN-MARK"))).toBe(true);
     // The lore trace lists what the mind was given that the player may know of, and no secret.
     const records = rig.rt.inspectorRecords(chatId) ?? [];
@@ -192,8 +197,12 @@ describe("a mind reads the story as it stands, and nothing of another mind", () 
 
   test("with every source of their own switched on, what another character's memory says they were told still reaches neither their mind nor their memory", async () => {
     const rig = new Rig({ shipped: true, minds: true });
+    // A memory records what they told only while the chat doesn't track knowledge (DESIGN §24.11).
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { enabled: false } } } }));
     const all = Object.fromEntries(["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "life"].map((s) => [s, { on: true }]));
-    const { seen } = await storyChat(rig, all);
+    const { chatId, seen } = await storyChat(rig, all);
+    // His log holds what Priya's memory says she told him, and none of it reaches him.
+    expect(readCharacter((await stateOf(rig, chatId)).state, DANNY).witness.some((w) => w.how === "told" && w.what.startsWith("TOLD-MARK"))).toBe(true);
     const danny = secondTurn(seen);
     for (const mark of ["NOTE-MARK", "COMMIT-MARK", "PLAN-MARK", "SUMMARY-MARK", "## Your last thoughts", "## Turns you were there for", "Today "]) expect(danny).toContain(mark);
     expect(danny).not.toContain("TOLD-MARK");

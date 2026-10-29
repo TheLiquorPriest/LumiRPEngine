@@ -2,13 +2,14 @@
 // tiers, classifications and selectors, relation kinds, cardinality and one-sided kinship,
 // overlapping schedules, expressions that don't parse, unbalanced authored postings, predicates
 // frozen at the world's current realism, player claims (its default policy and the params a claim
-// may fill), and the ruleset primitives' own lint (engine/ruleset-lint).
+// may fill), the narrator's knowledge default, and the ruleset primitives' own lint (engine/ruleset-lint).
 // Pure; the authoring lint runs it with the registry (pack kinds, fields and relation types).
 
 import { CLAIM_MODE_LABEL, CLAIM_MODES, readClaims } from "../shared/claims";
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
+import { narratorViewOf } from "../shared/settings";
 import { DOMAINS } from "../shared/ids";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, KindDef, WorldDoc } from "../shared/world";
@@ -220,6 +221,10 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   if (world.spawnTier !== undefined && !tierOf(world, world.spawnTier)) err("spawnTier", "unknown_tier", `New people would join tier "${world.spawnTier}", which isn't one of the world's tiers.`);
   const cap: unknown = world.spawnCap;
   if (cap !== undefined && !(typeof cap === "number" && Number.isInteger(cap) && cap >= 0 && cap <= MAX_SPAWN_CAP)) err("spawnCap", "spawn_cap", `The number of people replies may introduce must be a whole number from 0 to ${MAX_SPAWN_CAP}.`);
+  // The narrator's knowledge in the world's chats (DESIGN §6.11): a whole view, or none at all.
+  const narrator: unknown = world.narrator;
+  if (narrator !== undefined && narratorViewOf(narrator) === null) err("narrator", "narrator", 'The narrator\'s knowledge needs both parts: knowledge "scene" or "pov", and secrets "marked" or "omit". As it is, the world\'s chats follow each player\'s Settings.');
+  if (isRecord(narrator)) for (const key of Object.keys(narrator)) if (key !== "knowledge" && key !== "secrets") warn(`narrator.${key}`, "narrator_key", `The narrator's knowledge has no part "${key}", only knowledge and secrets; it is ignored.`);
   for (const { path, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       if (spec.type !== "spawn") return;

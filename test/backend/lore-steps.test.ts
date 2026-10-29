@@ -96,8 +96,9 @@ describe("the prefetch", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
     const counts: Record<string, number> = {};
     for (const c of rig.rt.meter.log.slice(start)) if (c.lookup !== true) counts[c.purpose] = (counts[c.purpose] ?? 0) + 1;
-    // The calls Full makes on this turn without lore (DESIGN §5.3); lookups are counted apart.
-    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1 });
+    // The calls Full makes on this turn without lore (DESIGN §5.3), the knowledge step's among them
+    // with minds off (knowledge is on by default); lookups are counted apart.
+    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, knowledge: 1 });
     expect(systemOf(rig, "interpret")).toContain("The ferry: The ferry crosses to Gull Island");
     expect(systemOf(rig, "extract")).toContain("The ferry: The ferry crosses to Gull Island");
     expect(systemOf(rig, "brief")).toContain("The ferry: The ferry crosses to Gull Island");
@@ -241,7 +242,8 @@ describe("lookups", () => {
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     const counts: Record<string, number> = {};
     for (const c of rig.rt.meter.log.slice(start)) counts[c.purpose] = (counts[c.purpose] ?? 0) + 1;
-    expect(counts).toEqual({ interpret: 1, extract: 1 });
+    // The knowledge step runs with minds off, as knowledge is on by default.
+    expect(counts).toEqual({ interpret: 1, extract: 1, knowledge: 1 });
     for (const r of rig.host.quietCalls) {
       expect(r.tools).toBeUndefined();
       expect(r.messages[0]?.content).not.toContain('{"need"');

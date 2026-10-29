@@ -1,16 +1,17 @@
 // GM → Minds (DESIGN §24.9): every character's place on the fidelity ladder and why,
-// their latest mind (monologue, depiction, intent, reactions), the intent you set for them, plans,
-// commitments, notes, what they witnessed and their summary. It lives in GM mode behind the gate, and
-// its data comes with `lre.gm` only. A character opens as a page over the list, and each change opens
-// as its own page over theirs: the pin, a refresh, their intent, and adding, editing or deleting a
-// plan, commitment or note. Every change is one `lre.edit` (one GM edit chip with its Undo), and
-// success goes back to the character's page.
+// their latest mind (monologue, depiction, intent, reactions), the intent you set for them, what they
+// know (§24.11), plans, commitments, notes, what they witnessed and their summary, and what the player
+// character knows. It lives in GM mode behind the gate, and its data comes with `lre.gm` only. A
+// character opens as a page over the list, and each change opens as its own page over theirs: the
+// pin, a refresh, their intent, a holding, and adding, editing or deleting a plan, commitment or
+// note. Every change is one `lre.edit` (one GM edit chip with its Undo), and success goes back to the
+// character's page.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { EntityId, PlaceId } from "../../../shared/ids";
-import type { CommitmentKind, CommitmentStatus, Fidelity, MindApproach, MindIntent, MindsGmCharacter, MindsGmView, PlanKind, PlanStatus, RefreshReason } from "../../../shared/minds";
-import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_APPROACHES, MIND_TEXT_CAPS, PLAN_KINDS, PLAN_PRIORITY, planInForce } from "../../../shared/minds";
+import type { CommitmentKind, CommitmentStatus, FactId, Fidelity, HoldingBelief, HoldingHow, MindApproach, MindIntent, MindsGmCharacter, MindsGmHolding, MindsGmView, PlanKind, PlanStatus, RefreshReason } from "../../../shared/minds";
+import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, HOLDING_BELIEFS, HOLDING_HOWS, MIND_APPROACHES, MIND_TEXT_CAPS, PLAN_KINDS, PLAN_PRIORITY, planInForce, witnessRef } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
 import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
@@ -18,14 +19,14 @@ import { Chip } from "../../../frontend/build/form-kit";
 import { Badge, Banner, Button, Empty, Field, IdText, List, ListRow, Section, Seg, Stat } from "../../../frontend/components";
 import { formatMinutes } from "../../../frontend/format";
 import { GmPage, SheetLink, useGmFocus, usePages } from "../../../frontend/gm/ui";
-import { Icon } from "../../../frontend/icons";
+import { Icon, type IconName } from "../../../frontend/icons";
 import { fidelityGroups } from "../../../frontend/batch";
 import { PickBox, SelectBar, useSelection } from "../../../frontend/multi-select";
 import { MoneyInput } from "../../../frontend/money-input";
 import type { GmSectionProps, Send } from "../../../frontend/registry";
 import type { GmView } from "../../../shared/state-view";
-import type { PlanFormDraft } from "./ops";
-import { APPROACH_LABEL, COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, intentOp, isMoneyPlan, narratorGets, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
+import type { HoldingDraft, PlanFormDraft } from "./ops";
+import { APPROACH_LABEL, BELIEF_LABEL, COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, forgetOp, holdingDraft, holdingOp, HOW_LABEL, intentOp, isMoneyPlan, narratorGets, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn, TRUTH_LABEL } from "./ops";
 import { PinnedLore, RunCard, useMindsRun, type MindsRun } from "./run";
 
 type Tone = "neutral" | "accent" | "pos" | "neg";
@@ -34,8 +35,8 @@ type Plan = MindsGmCharacter["plans"][number];
 type Commitment = MindsGmCharacter["commitments"][number];
 type Note = MindsGmCharacter["notes"][number];
 
-/** A change to one character, each its own page over theirs; an item's `id` is null while adding one. */
-type Change = { kind: "pin" } | { kind: "refresh" } | { kind: "intent" } | { kind: "plan" | "commitment" | "note"; id: string | null };
+/** A change to one character, each its own page over theirs; an item's `id` (a holding's `fact`) is null while adding one. */
+type Change = { kind: "pin" } | { kind: "refresh" } | { kind: "intent" } | { kind: "plan" | "commitment" | "note"; id: string | null } | { kind: "holding"; fact: FactId | null };
 
 const LEVEL_TONE: Record<Fidelity, Tone> = { live: "accent", near: "neutral", far: "neutral", background: "neutral" };
 const PLAN_TONE: Record<PlanStatus, Tone> = { open: "neutral", done: "pos", dropped: "neutral" };
@@ -184,9 +185,12 @@ export function GmMindsSection(props: GmSectionProps) {
   const liveNear = view.characters.filter((c) => c.fidelity.level === "live" || c.fidelity.level === "near").length;
   const page = pages.page;
   const selected = page === null ? undefined : view.characters.find((c) => c.entity === page);
+  // The player character has no mind, but holds what they know: a page of their own.
+  const knower = view.knowledge.pov;
+  const povKnows = knower !== null && page === knower.entity ? knower : undefined;
   // Someone no longer among the characters (an Undo took back a spawn) gives way to the list.
   useEffect(() => {
-    if (page !== null && selected === undefined) pages.back();
+    if (page !== null && selected === undefined && povKnows === undefined) pages.back();
   });
   const q = query.trim().toLowerCase();
   const list = view.characters.filter((c) => (level === "" || c.fidelity.level === level) && (q === "" || c.name.toLowerCase().includes(q)));
@@ -195,7 +199,7 @@ export function GmMindsSection(props: GmSectionProps) {
   const secrecy = SECRECY[view.secrecy];
   return (
     <div ref={pages.host.ref} class="lre-gm-pages" onKeyDown={pages.host.onKeyDown} data-lre-gm-section="minds">
-      <div class="lre-stack lre-gm-list" hidden={selected !== undefined}>
+      <div class="lre-stack lre-gm-list" hidden={selected !== undefined || povKnows !== undefined}>
         {view.enabled ? null : (
           <Banner tone="info" title="Character minds are off in Settings → Minds">
             What they recorded before stays here, and edits still apply.
@@ -209,6 +213,13 @@ export function GmMindsSection(props: GmSectionProps) {
             </List>
           </Section>
         </div>
+        {knower && !picking.on ? (
+          <Section title="The player character" flush>
+            <List>
+              <ListRow icon="user" title={knower.name} subtitle="What they know; the player decides for them, so they have no mind" value={`${knower.holdings.length} held`} chevron onClick={() => pages.open(knower.entity)} />
+            </List>
+          </Section>
+        ) : null}
         <RunCard minds={minds} busy={props.busy} />
         <RunEveryone count={liveNear} disabled={props.busy || running} picking={picking.on} onRun={() => void minds.start()} onPick={() => (picking.on ? picking.stop() : picking.start())} />
         <div class="lre-gm-tools">
@@ -271,6 +282,7 @@ export function GmMindsSection(props: GmSectionProps) {
         ) : null}
       </div>
       {selected ? <CharacterPages ctx={ctx} c={selected} onBack={pages.back} /> : null}
+      {povKnows ? <KnowerPages ctx={ctx} who={{ ...povKnows, witness: [] }} onBack={pages.back} /> : null}
     </div>
   );
 }
@@ -289,8 +301,9 @@ function CharacterPages(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }
   const plan = change?.kind === "plan" && change.id !== null ? c.plans.find((p) => p.id === change.id) : undefined;
   const commitment = change?.kind === "commitment" && change.id !== null ? c.commitments.find((x) => x.id === change.id) : undefined;
   const note = change?.kind === "note" && change.id !== null ? c.notes.find((n) => n.id === change.id) : undefined;
+  const holding = change?.kind === "holding" && change.fact !== null ? c.holdings.find((h) => h.fact === change.fact) : undefined;
   // An item they no longer hold (an Undo took it back, a note folded into their summary) takes its page with it.
-  const gone = change !== null && "id" in change && change.id !== null && plan === undefined && commitment === undefined && note === undefined;
+  const gone = change !== null && (("id" in change && change.id !== null && plan === undefined && commitment === undefined && note === undefined) || (change.kind === "holding" && change.fact !== null && holding === undefined));
   useEffect(() => {
     if (gone) changes.back();
   });
@@ -330,6 +343,7 @@ function CharacterPages(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }
             <Ladder c={c} busy={ctx.busy} open={changes.open} />
             <Intent c={c} busy={ctx.busy} open={changes.open} />
             <LatestMind ctx={ctx} c={c} />
+            <Holdings ctx={ctx} who={c} open={changes.open} />
             <PinnedLore gm={ctx.gm} chatId={ctx.chatId} who={c.entity} send={ctx.send} />
             <Plans ctx={ctx} c={c} open={changes.open} />
             <Commitments c={c} busy={ctx.busy} open={changes.open} />
@@ -345,6 +359,7 @@ function CharacterPages(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }
       {change?.kind === "plan" && (change.id === null || plan) ? <PlanPage key={change.id ?? ""} ctx={ctx} c={c} plan={plan ?? null} onBack={changes.back} /> : null}
       {change?.kind === "commitment" && (change.id === null || commitment) ? <CommitmentPage key={change.id ?? ""} ctx={ctx} c={c} commitment={commitment ?? null} onBack={changes.back} /> : null}
       {change?.kind === "note" && (change.id === null || note) ? <NotePage key={change.id ?? ""} ctx={ctx} c={c} note={note ?? null} onBack={changes.back} /> : null}
+      {change?.kind === "holding" && (change.fact === null || holding) ? <HoldingPage key={change.fact ?? ""} ctx={ctx} who={c} holding={holding ?? null} onBack={changes.back} /> : null}
     </div>
   );
 }
@@ -603,7 +618,7 @@ function Witnessed(props: { ctx: Ctx; c: MindsGmCharacter }) {
 // ---------------------------------------------------------------- the change pages
 
 /** A change's page over the character's: their name under its title, Back to them. */
-function ChangePage(props: { name: string; title: string; c: MindsGmCharacter; onBack(): void; children: ComponentChildren }) {
+function ChangePage(props: { name: string; title: string; c: Pick<MindsGmCharacter, "name">; onBack(): void; children: ComponentChildren }) {
   return (
     <GmPage name={props.name} title={props.title} subtitle={props.c.name} backLabel={props.c.name} onBack={props.onBack}>
       {props.children}
@@ -1024,5 +1039,226 @@ function PlanPage(props: { ctx: Ctx; c: MindsGmCharacter; plan: Plan | null; onB
       </form>
       {plan ? <DeleteItem ctx={ctx} op={deleteOp(c.entity, "plan", plan.id)} noun="plan" onDone={props.onBack} /> : null}
     </ChangePage>
+  );
+}
+
+// ---------------------------------------------------------------- what they know
+
+/** Someone who holds facts: a character, or the player character, with the witness log a holding can rest on (none for the player character). */
+type Knower = Pick<MindsGmCharacter, "entity" | "name" | "holdings" | "witness">;
+
+const HOW_ICON: Record<HoldingHow, IconName> = { authored: "scroll", witnessed: "eye", told: "message", inferred: "sparkle", guessed: "help" };
+
+/** How they came by it, in words: "Told by Marcus Delgado", "Witnessed". */
+function howWords(h: MindsGmHolding): string {
+  if (h.byName === null) return HOW_LABEL[h.how];
+  return h.how === "told" ? `Told by ${h.byName}` : `${HOW_LABEL[h.how]}, from ${h.byName}`;
+}
+
+/** What they make of it, how sure they are, and whom they keep it from. */
+function beliefWords(h: MindsGmHolding): string {
+  const kept = h.keptFromNames === "everyone" ? " · kept from everyone" : h.keptFromNames.length > 0 ? ` · kept from ${h.keptFromNames.join(", ")}` : "";
+  return `${BELIEF_LABEL[h.belief]}, ${Math.round(h.confidence * 100)}% sure${kept}`;
+}
+
+/**
+ * What they know (DESIGN §24.11): each holding with how and since when they hold it, how sure they
+ * are and whom they keep it from, and what it rests on (a fact, or the witness entry itself), marked
+ * when it is a suspicion or the fact isn't true. Each opens its own page; Add holds a fact the chat
+ * has that they don't.
+ */
+function Holdings(props: { ctx: Ctx; who: Knower; open(change: Change): void }) {
+  const { ctx, who } = props;
+  const facts = ctx.view.knowledge.facts;
+  const unheld = facts.filter((f) => !who.holdings.some((h) => h.fact === f.id)).length;
+  return (
+    <Section title="What they know" aside={<Badge>{`${who.holdings.length} held`}</Badge>} flush>
+      {who.holdings.length === 0 ? <None>Nothing recorded.</None> : null}
+      <List>
+        {who.holdings.map((h) => (
+          <ListRow
+            key={h.fact}
+            id={h.fact}
+            icon={HOW_ICON[h.how]}
+            title={h.claim}
+            subtitle={
+              <span class="lre-gm-minds-lines">
+                <span>{`${howWords(h)} · since ${h.sinceText}`}</span>
+                <span>{beliefWords(h)}</span>
+                {h.evidenceShown.length > 0 ? <span>{`Rests on: ${h.evidenceShown.map((e) => e.text).join("; ")}`}</span> : null}
+              </span>
+            }
+            badge={h.suspicion ? <Badge tone="warn">Suspicion</Badge> : h.truth !== "true" ? <Badge>{TRUTH_LABEL[h.truth]}</Badge> : undefined}
+            chevron
+            disabled={ctx.busy}
+            onClick={() => props.open({ kind: "holding", fact: h.fact })}
+          />
+        ))}
+        <ListRow icon="plus" title="Add a holding" subtitle={unheld > 0 ? undefined : facts.length === 0 ? "The chat holds no facts yet" : "They hold every fact the chat has"} disabled={ctx.busy || unheld === 0} onClick={() => props.open({ kind: "holding", fact: null })} />
+      </List>
+    </Section>
+  );
+}
+
+/**
+ * One holding's page: the fact (picked when adding), how they came by it and from whom, what they
+ * make of it and how sure (under the threshold it is a suspicion), whom they keep it from and what
+ * it rests on, saved whole; and taking it away, which the edit's Undo brings back.
+ */
+function HoldingPage(props: { ctx: Ctx; who: Knower; holding: MindsGmHolding | null; onBack(): void }) {
+  const { ctx, who, holding } = props;
+  const knowledge = ctx.view.knowledge;
+  const choices = knowledge.facts.filter((f) => f.id === holding?.fact || !who.holdings.some((h) => h.fact === f.id));
+  const [fact, setFact] = useState<FactId>(() => holding?.fact ?? choices[0]?.id ?? "");
+  const [draft, setDraft] = useState<HoldingDraft>(() => holdingDraft(ctx.view.now, holding ?? undefined));
+  const ids = { fact: useId(), how: useId(), by: useId(), confidence: useId(), grounds: useId() };
+  const chosen = knowledge.facts.find((f) => f.id === fact);
+  const op = chosen ? holdingOp(who.entity, fact, draft) : null;
+  // What it can rest on: the other facts they hold, and their own witness entries.
+  const grounds = [...who.holdings.filter((h) => h.fact !== fact).map((h) => ({ ref: h.fact, text: h.claim })), ...who.witness.map((w) => ({ ref: witnessRef(w), text: `${w.what} (${w.clock})` }))];
+  const groundText = (ref: string): string => grounds.find((g) => g.ref === ref)?.text ?? holding?.evidenceShown.find((e) => e.ref === ref)?.text ?? ref;
+  const left = grounds.filter((g) => !draft.evidence.includes(g.ref));
+  const percent = Number(draft.confidence);
+  const sureOff = draft.confidence.trim() === "" || !Number.isInteger(percent) || percent < 0 || percent > 100;
+  const threshold = Math.round(knowledge.threshold * 100);
+  return (
+    <ChangePage name="mind-holding" title={holding ? "Edit holding" : "Add a holding"} c={who} onBack={props.onBack}>
+      <form
+        class="lre-stack"
+        data-lre-minds-form="holding"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (op) send(ctx, op, props.onBack);
+        }}
+      >
+        <Section>
+          {holding ? (
+            <p class="lre-gm-minds-prose">{holding.claim}</p>
+          ) : (
+            <Field label="What they hold" for={ids.fact} help={chosen ? `${TRUTH_LABEL[chosen.truth]}, as you hold it.` : "The chat holds no fact they don't."}>
+              <select id={ids.fact} class="lre-input" value={fact} disabled={ctx.busy || choices.length === 0} onChange={(event) => setFact(event.currentTarget.value)}>
+                {choices.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.claim}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field label="How they came by it" for={ids.how}>
+            <select id={ids.how} class="lre-input" value={draft.how} disabled={ctx.busy} onChange={(event) => setDraft({ ...draft, how: event.currentTarget.value as HoldingHow })}>
+              {HOLDING_HOWS.map((h) => (
+                <option key={h} value={h}>
+                  {HOW_LABEL[h]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Who told them" for={ids.by} help={draft.how === "told" ? "A told holding names who told them." : "No one, unless someone gave it to them."}>
+            <select id={ids.by} class="lre-input" value={draft.by ?? ""} disabled={ctx.busy} onChange={(event) => setDraft({ ...draft, by: event.currentTarget.value || null })}>
+              <option value="">No one</option>
+              {ctx.people
+                .filter((p) => p.id !== who.entity)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+            </select>
+          </Field>
+          <Field label="What they make of it">
+            <Seg<HoldingBelief> label="What they make of it" value={draft.belief} options={HOLDING_BELIEFS.map((b) => ({ value: b, label: BELIEF_LABEL[b] }))} onChange={(belief) => setDraft({ ...draft, belief })} />
+          </Field>
+          <Field label="How sure (percent)" for={ids.confidence} help={`Under ${threshold}% it is a suspicion (Settings → Minds → Knowledge).${!sureOff && percent < threshold ? " This one is." : ""}`} error={sureOff ? "A whole number from 0 to 100." : null}>
+            <input id={ids.confidence} class={sureOff ? "lre-input invalid" : "lre-input"} inputMode="numeric" value={draft.confidence} onInput={(event) => setDraft({ ...draft, confidence: event.currentTarget.value })} />
+          </Field>
+          <Field label="Whom they keep it from">
+            <Seg<HoldingDraft["kept"]>
+              label="Whom they keep it from"
+              value={draft.kept}
+              options={[
+                { value: "none", label: "No one" },
+                { value: "everyone", label: "Everyone" },
+                { value: "some", label: "Some people" },
+              ]}
+              onChange={(kept) => setDraft({ ...draft, kept })}
+            />
+          </Field>
+          {draft.kept === "some" ? <PeopleField label="Kept from" value={draft.keptFrom} people={ctx.people} exclude={who.entity} disabled={ctx.busy} onChange={(keptFrom) => setDraft({ ...draft, keptFrom })} /> : null}
+          <Field label="What it rests on" for={left.length > 0 ? ids.grounds : undefined} help="Other facts they hold, and what they witnessed or were told.">
+            {draft.evidence.length > 0 ? (
+              <div class="lre-form-chips">
+                {draft.evidence.map((ref) => (
+                  <Chip key={ref} removeLabel={`Remove ${groundText(ref)}`} disabled={ctx.busy} onRemove={() => setDraft({ ...draft, evidence: draft.evidence.filter((r) => r !== ref) })}>
+                    {groundText(ref)}
+                  </Chip>
+                ))}
+              </div>
+            ) : null}
+            {left.length > 0 ? (
+              <select id={ids.grounds} class="lre-input" value="" disabled={ctx.busy} onChange={(event) => event.currentTarget.value && setDraft({ ...draft, evidence: [...draft.evidence, event.currentTarget.value] })}>
+                <option value="">Add what it rests on…</option>
+                {left.map((g) => (
+                  <option key={g.ref} value={g.ref}>
+                    {g.text}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </Field>
+        </Section>
+        <Submit ctx={ctx} ready={op !== null} icon={holding ? "check" : "plus"} invalid={chosen ? "A told holding names who told them, never themselves; how sure is a whole percent; keeping it from some people names them." : "Pick a fact they don't hold yet."}>
+          {holding ? "Save" : "Add holding"}
+        </Submit>
+      </form>
+      {holding ? <DeleteItem ctx={ctx} op={forgetOp(who.entity, holding.fact)} noun="holding" onDone={props.onBack} /> : null}
+    </ChangePage>
+  );
+}
+
+/** The player character's page: they have no mind (the player decides for them), but they hold what they know, each holding its own page over it. */
+function KnowerPages(props: { ctx: Ctx; who: Knower; onBack(): void }) {
+  const { ctx, who } = props;
+  const changes = usePages<Change>();
+  const change = changes.page;
+  const holding = change?.kind === "holding" && change.fact !== null ? who.holdings.find((h) => h.fact === change.fact) : undefined;
+  // A holding taken back (an Undo) takes its page with it.
+  const gone = change?.kind === "holding" && change.fact !== null && holding === undefined;
+  useEffect(() => {
+    if (gone) changes.back();
+  });
+  // A holding taken away leaves no row to take focus back: keep it on this page rather than lose it.
+  const was = useRef(change);
+  useEffect(() => {
+    const before = was.current;
+    was.current = change;
+    const root = changes.host.ref.current;
+    if (before === null || change !== null || !root || root.contains(document.activeElement)) return;
+    root.querySelector<HTMLElement>(".lre-page-header button")?.focus();
+  }, [change]);
+  return (
+    <div ref={changes.host.ref} class="lre-gm-page lre-gm-pages lre-gm-minds-pages" onKeyDown={changes.host.onKeyDown}>
+      <div class="lre-gm-list" hidden={change !== null}>
+        <GmPage
+          name="mind-knower"
+          title={who.name}
+          subtitle={
+            <>
+              The player character
+              <IdText id={who.entity} />
+            </>
+          }
+          backLabel="Minds"
+          actions={<SheetLink entity={who.entity} />}
+          onBack={props.onBack}
+        >
+          <div class="lre-gm-minds" data-lre-gm-minds={who.entity}>
+            <p class="lre-gm-note">The player decides for them, so they have no mind. What they know is what the story, the world's author and you have given them; nothing here reaches Play until the story tells them.</p>
+            <Holdings ctx={ctx} who={who} open={changes.open} />
+          </div>
+        </GmPage>
+      </div>
+      {change?.kind === "holding" && (change.fact === null || holding) ? <HoldingPage key={change.fact ?? ""} ctx={ctx} who={who} holding={holding ?? null} onBack={changes.back} /> : null}
+    </div>
   );
 }

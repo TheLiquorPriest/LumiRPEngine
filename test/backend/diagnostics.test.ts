@@ -195,6 +195,8 @@ describe("the minds' memory beside the reply's read", () => {
     expect(read?.status).toBe("ok");
     expect((read?.calls ?? []).map((c) => c.purpose)).not.toContain("memory");
     expect(minds).toMatchObject({ phase: "memory", status: "failed", reason: expect.stringContaining("memory answer cut off") });
+    // The knowledge step's call answered after the memory's, and the memory's cut-off still fails the step.
+    expect((minds?.calls ?? []).at(-1)).toMatchObject({ purpose: "knowledge", ok: true });
     expect(activities(rig.host).filter((m) => m.chatId === chatId).at(-1)?.activity).toMatchObject({ state: "failed", label: "Failed: Updating the characters' memories" });
   });
 });

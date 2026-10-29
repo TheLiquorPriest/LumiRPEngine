@@ -121,6 +121,7 @@ export const STEP_LABEL: Record<string, string> = {
   choices: "Writing choices…",
   memory: "Updating memory…",
   consolidate: "Updating memory…",
+  knowledge: "Working out who knows what…",
   minds: "Updating the characters' memories…",
 };
 

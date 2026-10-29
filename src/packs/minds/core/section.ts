@@ -4,7 +4,9 @@
 // decides what goes: `full` gives each monologue and intent, to be depicted and never stated;
 // `brief` gives only the depiction, written as behaviour, and only when it carries no unrevealed
 // secret and names no one the POV can't see (the screens Stance uses), checked again here whatever
-// was checked when it was recorded. Whoever gets a line here is left out of Stance (`minds.minded`);
+// was checked when it was recorded. The engine run then marks a line that still carries a secret's
+// words or a hidden name as a secret, or leaves it out, as the narrator's knowledge says
+// (`backend/sections-build.ts`). Whoever gets a line here is left out of Stance (`minds.minded`);
 // on the section's own budget the engine run keeps the best on the ladder (`fitMindLines`), and
 // Stance tells of the rest.
 
@@ -19,9 +21,10 @@ import { isGone, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { readSlice } from "./state";
 
-/** One line of the Minds section, and whose mind it tells. */
+/** One line of the Minds section, and whose mind it tells: their id, and their name as the line gives it (by name, or "Someone"). */
 export interface MindLine {
   entity: EntityId;
+  name: string;
   line: string;
 }
 
@@ -65,12 +68,12 @@ export function mindLines(ctx: ReadContext): MindLine[] {
       if (m.mood) parts.push(`Mood: ${clause(m.mood)}.`);
       if (m.depiction !== "") parts.push(`Shows: ${clause(m.depiction)}.`);
       if (m.interrupt) parts.push(`Interrupts the skip: ${clause(m.interrupt)}.`);
-      out.push({ entity: id, line: parts.join(" ") });
+      out.push({ entity: id, name, line: parts.join(" ") });
       continue;
     }
     if (m.withheld || m.depiction.trim() === "" || !safe(m.depiction)) continue;
     const interrupt = m.interrupt && safe(m.interrupt) ? ` Interrupts the skip: ${clause(m.interrupt)}.` : "";
-    out.push({ entity: id, line: `${name}: ${clause(m.depiction)}.${interrupt}` });
+    out.push({ entity: id, name, line: `${name}: ${clause(m.depiction)}.${interrupt}` });
   }
   return out;
 }

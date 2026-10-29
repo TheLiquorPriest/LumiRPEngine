@@ -126,9 +126,9 @@ const PARTS = ["pins", "calendar", "realism", "time", "start"] as const;
 /**
  * Parts a document may leave out: `migrateWorld` fills the currency (Modern US) and the lore lookup
  * table (empty), and a world without a ruleset, map settings, minds config, lore pins, routine
- * settings or section wording plays by the defaults.
+ * settings, section wording or narrator default plays by the defaults.
  */
-const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins", "routineSettings", "sectionTemplates"] as const;
+const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins", "routineSettings", "sectionTemplates", "narrator"] as const;
 
 /**
  * Shape checks for an untrusted document, before `migrateWorld` and `lintWorld` read it: every

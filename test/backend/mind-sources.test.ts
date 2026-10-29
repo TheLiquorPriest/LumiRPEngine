@@ -17,7 +17,7 @@ import { placeOfEntity } from "../../src/engine/scope";
 import { ASK, DANNY, fakeModels, lastFor, stateOf, storyChat, alderChat } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 
-/** What shows each source is in Danny's context on the story's second turn. */
+/** What shows each source is in Danny's context on the story's second turn (what he knows: the secret the chat seeded him with). */
 const MARKS: Record<MindSource, string> = {
   pinned: "PIN-MARK",
   activated: "ACTIVE-MARK",
@@ -31,6 +31,7 @@ const MARKS: Record<MindSource, string> = {
   routine: "ROUTINE-MARK",
   plans: "PLAN-MARK",
   life: "COMMIT-MARK",
+  knowledge: "## What you know\n",
 };
 
 describe("each source of what a mind reads, on or off, within its own limit", () => {
@@ -46,7 +47,8 @@ describe("each source of what a mind reads, on or off, within its own limit", ()
     const pinned = pinsFor(world, placeOfEntity(state, DANNY), DANNY).flatMap((r) => worldPinText(world, r) ?? []);
     const moment: MindMoment = { kind: "turn", at: state.clock, reason: "", user: ASK, reply: messages.findLast((m) => !m.isUser)?.content ?? "" };
     const every = Object.fromEntries(MIND_SOURCES.map((s) => [s, s === "recall" ? { on: true } : s === "history" ? { on: true, messages: "none", tokens: "none" } : { on: true, tokens: "none" }])) as unknown as MindsReads;
-    const contextWith = (reads: MindsReads, report?: MindContextReport): string => mindContext({ reg: rig.rt.registry, world, state, who: DANNY, memory: effectiveMemory(world, settings.minds), messages, hideJson: true, moment, reads, pinned, history: messages }, report);
+    // The chat tracks knowledge, as every chat does by default, so Danny reads what he holds.
+    const contextWith = (reads: MindsReads, report?: MindContextReport): string => mindContext({ reg: rig.rt.registry, world, state, who: DANNY, memory: effectiveMemory(world, settings.minds), messages, hideJson: true, moment, reads, pinned, history: messages, knowledge: settings.minds.knowledge }, report);
     for (const source of MIND_SOURCES) {
       expect({ source, on: contextWith(every).includes(MARKS[source]) }).toEqual({ source, on: true });
       expect({ source, off: contextWith({ ...every, [source]: { ...every[source], on: false } }).includes(MARKS[source]) }).toEqual({ source, off: false });

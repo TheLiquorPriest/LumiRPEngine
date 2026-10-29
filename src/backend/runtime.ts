@@ -17,7 +17,7 @@ import type { ActionDef, AdjudicationDef, LoreEntryDef, ParamDef, SectionTemplat
 import { formatMoney, offersAction } from "../shared/world";
 import { fieldNoun } from "../shared/words";
 import { LORE_AUDIENCE } from "../shared/lore";
-import { isMindPurpose, MINDS_EVENTS, MINDS_SLOT, type MindCallTrace, type MindEventData } from "../shared/minds";
+import { isMindPurpose, KNOWLEDGE_CHANGES, MINDS_EVENTS, MINDS_SLOT, type MindCallTrace, type MindEventData } from "../shared/minds";
 import { firedTimeout, TimeoutFired, TIMEOUTS, timerMs } from "../shared/timeouts";
 import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type PreMindsInput, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
@@ -68,6 +68,7 @@ import { Agents, type BuildInfo, thisBuild } from "./agents";
 import { EngineBook, narratorRules, sectionsOf, sectionTokens } from "./book";
 import { DEFAULT_SECTIONS } from "../shared/sections";
 import { ChatPrefs } from "./chat-prefs";
+import { ChatKnowledge, knowledgeOn, narratorView, secretMarkWording } from "./chat-knowledge-prefs";
 import { ChipStore, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
 import { LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks, type TurnInputs } from "./ledger-io";
@@ -79,8 +80,7 @@ import { startMarkersFrom } from "./start-markers";
 import { claimFor, outOfHand } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { pinReader } from "./lore-pins";
-import { liveLore, secureIndexedSecrets } from "./book-lore";
-import { lastLoreIndex, readyLoreIndex, unreadBooks, untold, warmLoreIndex, type LoreIndex } from "./lore-secrets";
+import { liveLore } from "./book-lore";
 import { worldInfoVerdict, type WorldInfoGate } from "./wi-interceptor";
 import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
 import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
@@ -141,7 +141,7 @@ interface LorePhase {
 }
 
 /** The model calls of the minds' post phase (`postMinds`): their diagnostics step takes them as its own, beside the read's. */
-const MINDS_POST_CALLS: readonly StepPurpose[] = ["memory", "consolidate"];
+const MINDS_POST_CALLS: readonly StepPurpose[] = ["memory", "consolidate", "knowledge"];
 
 
 /** Refusals of a change the state already holds (a fact already known, a life state already so): nothing to show or tell. */
@@ -708,6 +708,8 @@ export class Runtime implements TurnHooks {
   readonly inspector: InspectorLog;
   /** How the player chose to see each chat (the map's display mode): presentation, beside the chat. */
   readonly chatPrefs: ChatPrefs;
+  /** What each chat chose for knowledge tracking and the narrator's knowledge, from its metadata (`chat-knowledge-prefs.ts`). */
+  readonly chatKnowledge: ChatKnowledge;
   readonly steps: Steps;
   /** Connections seen refusing the lore tools (DESIGN §5.4). */
   readonly toolSupport: ToolSupport;
@@ -761,8 +763,6 @@ export class Runtime implements TurnHooks {
   private readonly loreTraces = new Map<string, LoreStepTrace[]>();
   /** Each engine run's lore with World Info read live, by its turn id: one read for its phases (DESIGN §4.2). */
   private readonly liveLores = new Map<string, Record<string, LoreEntryDef>>();
-  /** The World Info entries the sections the guard wrote for a chat's prompt carried, as `bookId/entryId` (DESIGN §6.11): the interceptor switches them off for it. */
-  private readonly carriedEntries = new Map<ChatId, ReadonlySet<string>>();
   /** Each generation's minds calls, with no text (the inspector shows them, DESIGN §24.5). */
   private readonly mindTraces = new Map<string, MindCallTrace[]>();
   /** What minds answered in each engine run, by its turn id; a run that fails keeps them for its Retry (`keptMinds`). */
@@ -779,8 +779,15 @@ export class Runtime implements TurnHooks {
   private readonly runLines = new Map<string, { seed: string; prose: PlanProse; lines: PlanLines }>();
   /** What the minds need of the backend: the runner, the pre and post phases and the time skip read it (`backend/minds.ts`). */
   readonly minds: MindsDeps;
-  /** The minds a time skip runs at its beats (DESIGN §24.7): `runMinds` on this runtime's deps, which tests replace with a fake. */
-  beatMinds: BeatMinds = (input) => runMinds(this.minds, input);
+  /**
+   * The minds a time skip runs at its beats (DESIGN §24.7): `runMinds` on this runtime's deps, which
+   * tests replace with a fake; they read what they hold while the chat tracks knowledge (DESIGN §24.11).
+   */
+  beatMinds: BeatMinds = async (input) => {
+    const settings = await this.settings.get(input.userId);
+    const knowing = knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), input.world, settings);
+    return runMinds(this.minds, knowing ? { ...input, knowledge: settings.minds.knowledge } : input);
+  };
 
   constructor(options: RuntimeOptions) {
     // Chat reads come from a copy the host's message events keep current (DESIGN §9.6).
@@ -802,6 +809,7 @@ export class Runtime implements TurnHooks {
     this.staged = new StagedActions(this.host);
     this.inspector = new InspectorLog(this.host);
     this.chatPrefs = new ChatPrefs(this.host);
+    this.chatKnowledge = new ChatKnowledge(this.host);
     this.book = new EngineBook(this.host, this.worlds);
     this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks, async (worldId, userId) => (await this.worlds.index(worldId, userId)) !== null);
     this.presets = new PresetBinding(this.host);
@@ -849,8 +857,11 @@ export class Runtime implements TurnHooks {
   async runOf(chatId: ChatId, userId: UserId): Promise<ChatRun | null> {
     const key = `${userId}\u0000${chatId}`;
     if (this.runs.has(key)) return this.runs.get(key) ?? null;
-    const run = readRun(await this.host.chats.chatMetadata(chatId, userId));
+    const meta = await this.host.chats.chatMetadata(chatId, userId);
+    const run = readRun(meta);
     lruSet(this.runs, key, run, 512);
+    // The chat's own knowledge choices sit in the same bag: kept with its run, so a prepared turn's inputs know them.
+    this.chatKnowledge.seen(chatId, userId, meta);
     return run;
   }
 
@@ -876,6 +887,7 @@ export class Runtime implements TurnHooks {
   forgetChat(chatId: ChatId): void {
     for (const key of [...this.runs.keys()]) if (key.endsWith(`\u0000${chatId}`)) this.runs.delete(key);
     this.bridges.delete(chatId);
+    this.chatKnowledge.forget(chatId);
     this.ledger.forget(chatId);
   }
 
@@ -1032,13 +1044,15 @@ export class Runtime implements TurnHooks {
     // is unchanged: the chain and journal, the world revision, the player's message, the minds
     // settings, the mind step and the preset's mind block. Fixing another step's connection keeps them.
     const runAt: DiagAt = { chatId: input.chatId, userId: input.userId, turn: p.generationId };
-    const mindsKey = [input.runKey, render.state.revision, text, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\u0000");
+    // Whether the chat tracks knowledge (DESIGN §24.11): its own switch, else the user's; the turn records a change, and minds read what they hold.
+    const knowing = knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings);
+    const mindsKey = [input.runKey, render.state.revision, text, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, knowing, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\u0000");
     const kept = this.keptMinds.get(input.chatId);
     this.keptMinds.delete(input.chatId);
     if (kept && kept.key !== mindsKey) kept.stop?.abort(new NotNeeded("the turn they were thinking for changed"));
     const same = kept?.key === mindsKey ? kept : undefined;
     // A Regenerate's or swipe's minds read the chat up to the reply it replaces, never that reply again.
-    const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", guidance: preset.guidance.mind ?? "", ...(p.messageId ? { replaces: p.messageId } : {}) };
+    const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", guidance: preset.guidance.mind ?? "", knowledge: knowing, ...(p.messageId ? { replaces: p.messageId } : {}) };
     const readTimelapse = (): boolean => bridge.intentOf(text)?.action === TIMELAPSE_ACTION;
     const known = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text);
     let thinking = shown ? null : this.thinkMinds(asking, known ? readTimelapse() : facts.timelapse, budget.signal, same);
@@ -1934,6 +1948,8 @@ export class Runtime implements TurnHooks {
     if (!bridge) return;
     const input = { chatId, userId, messageId, generationId: key, content };
     const pre = this.prePhase.get(key);
+    // Whether the chat tracks knowledge (DESIGN §24.11), read before the read's tasks start, so none waits unhandled on it.
+    const knowing = knowledgeOn(await this.chatKnowledge.get(chatId, userId), context.world, settings);
     // A read without a pre phase (a Continue, Re-read edit, Retry read) takes the user's latest read
     // of the preset: the read itself asks the host for nothing more.
     const guidance = (pre?.preset ?? this.presets.last(userId)).guidance;
@@ -1967,7 +1983,7 @@ export class Runtime implements TurnHooks {
     const places = extractRun ? placeMenu(this.registry, context.world, context.state, [text, pre?.text ?? ""], prefixEntities(this.registry, context.world, context.state).flatMap(({ e }) => (typeof e.fields.place === "string" ? [e.fields.place] : []))) : [];
     const personKinds = [...new Set([...Object.keys(context.world.kinds), ...this.registry.kinds.keys()])].filter((k) => kindIs(this.registry, context.world, k, "person"));
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "", places, personKinds)
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(t) && (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent, pre?.text ?? "", places, personKinds)
       : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
@@ -1979,12 +1995,16 @@ export class Runtime implements TurnHooks {
     const heard = choiceRuns.length > 0 ? [read.text, ...Object.values(vars)].join("\n") : "";
     const unshown = (line: string): boolean => findLeaks(line, secrets).length > 0 || hidden(line, heard);
     const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, unshown, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([])));
-    // The minds' post phase (DESIGN §24.4): who was present, their memory of what was written, and
-    // consolidation, beside the reply's other steps, on the phase's wall clock.
-    // Their memory and consolidation read pinned lore as the run read it, World Info's secrecy included (DESIGN §4.2).
-    // Its calls are a step of their own in diagnostics (DESIGN §6.9): one cut off is the minds'
-    // failure there, never the read's, which commits without what it would have kept either way.
-    const mindsTask = post ? this.diag.step({ chatId, userId, turn: key }, "memory", "minds", () => postMinds(this.minds, { chatId, userId, world: live, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }), undefined, MINDS_POST_CALLS) : Promise.resolve({ events: [], traces: [] });
+    // The minds' post phase (DESIGN §24.4, §24.11): who was present, their memory of what was written,
+    // consolidation, and while the chat tracks knowledge, its seeding and the knowledge step, which
+    // reads what the read found, so runs once it is in; beside the reply's other steps, on the phase's
+    // wall clock. Their memory and consolidation read pinned lore as the run read it, World Info's
+    // secrecy included (DESIGN §4.2). Its calls are a step of their own in diagnostics (DESIGN §6.9):
+    // one cut off is the minds' failure there, never the read's, which commits without what it would
+    // have kept either way.
+    // What the read found, for the knowledge step: nothing when extract failed, which the read reports itself.
+    const found = extractTask.then((r) => r.proposals.map((p) => describeProposal(p, ctx)), (): string[] => []);
+    const mindsTask = post ? this.diag.step({ chatId, userId, turn: key }, "memory", "minds", () => postMinds(this.minds, { chatId, userId, world: live, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "", knowledge: guidance.knowledge ?? "" }, knowledge: knowing, read: found }), undefined, MINDS_POST_CALLS) : Promise.resolve<RunMindsResult>({ events: [], traces: [] });
     const [extracted, effects, decisions, choices, minded] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, Promise.all(choiceTasks), mindsTask]);
     this.timeLimits({ chatId, userId, turn: key }, "read", budget);
     this.addMindTraces(chatId, key, minded.traces);
@@ -2010,7 +2030,8 @@ export class Runtime implements TurnHooks {
     const unsure = new Set<JsonObject>();
     // A move to someone's usual place ("usual") goes where their routine has them now, as the POV may
     // know it; one that resolves to none is left out (DESIGN §9.4).
-    const narrated = [...resolveUsualMoves(ctx, extracted.proposals), ...effects.flat()];
+    // The knowledge step's own change types (DESIGN §24.11) come only from it, never from a read.
+    const narrated = [...resolveUsualMoves(ctx, extracted.proposals), ...effects.flat()].filter((p) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(String(p.type)));
     // Where the reply leaves the POV when no move says so is a guess (a flashback, a phone call, a look
     // across the street read as being there): whatever the location mode it waits for Apply, and its
     // chip is no outcome for the type's learning (DESIGN §9.4). `never` still ignores it.
@@ -2080,7 +2101,24 @@ export class Runtime implements TurnHooks {
       if (bounded.mode === "auto" && !unsure.has(p) && !guessed.has(p)) auto.push(fitted);
       else confirm.push(fitted);
     }
-    const reading: PreparedRead = { auto, post, events: decisions, minds: minded.events, askBeyond: settings.time.askBeyondMinutes };
+    // The knowledge step's changes (DESIGN §24.11, C4), on the connection it ran on: the player
+    // character's learnings and reveals by their own modes, as the read's chips; everyone else's with
+    // the minds' events, unless the user's `learn` is never.
+    const knew = minded.knowledge;
+    const via = new Map<JsonObject, string>();
+    let mindsEvents = minded.events;
+    if (knew) {
+      const knowledgeConnection = knew.connection ?? connection;
+      if (effectiveMode(settings, learning, knowledgeConnection, "learn").mode !== "never") mindsEvents = [...minded.events, ...knew.events];
+      for (const change of knew.proposals) {
+        const p = change as unknown as JsonObject;
+        const { mode } = effectiveMode(settings, learning, knowledgeConnection, change.type);
+        if (mode === "never") continue;
+        via.set(p, knowledgeConnection);
+        (mode === "auto" ? auto : confirm).push(p);
+      }
+    }
+    const reading: PreparedRead = { auto, post, events: decisions, minds: mindsEvents, askBeyond: settings.time.askBeyondMinutes };
     bridge.prepareRead(input.content, reading);
     // `choices` become chips below, with the read's others.
     // The state follows the story (DESIGN §11): each automatic proposal applies, with an undo chip,
@@ -2132,7 +2170,7 @@ export class Runtime implements TurnHooks {
         detail: ["Applied automatically.", money.detail].filter((s) => s !== "").join(" "),
         actions: [...(money.over ? [{ ...PAY_ANOTHER_WAY, style: "primary" as const }] : []), { id: "undo", label: "Undo", style: "danger" }, ...(quote?.limited ? [{ id: "amount", label: "Edit amount", input: { type: "money" as const, label: "Amount", value: quote.cents } }] : [])],
         expires: "next_send",
-        payload: { type, connection, events: JSON.parse(JSON.stringify(o.events)) as JsonValue },
+        payload: { type, connection: via.get(o.proposal) ?? connection, events: JSON.parse(JSON.stringify(o.events)) as JsonValue },
       });
     });
     // The reply's confirm changes as told, one after another, after its automatic ones: each is
@@ -2222,10 +2260,10 @@ export class Runtime implements TurnHooks {
         messageId: input.messageId,
         swipeId,
         label: also ? `Also bought ${describeItem(proposal)}?${quote?.text ?? ""}${money.label}` : `${describeProposal(proposal, ctx)}${quote?.text ?? ""}${money.label}`,
-        detail: [money.detail, also ? "The reply may be telling your purchase again. Apply it only if this was bought too." : guess ? `The reply has you there, but the engine still has you ${here?.id ? `at ${here.name}` : "elsewhere"}. Apply the move?` : "The narration says this happened. Apply it?"].filter((s) => s !== "").join(" "),
+        detail: [money.detail, also ? "The reply may be telling your purchase again. Apply it only if this was bought too." : guess ? `The reply has you there, but the engine still has you ${here?.id ? `at ${here.name}` : "elsewhere"}. Apply the move?` : proposal.type === "reveal" ? "The story revealed a secret to you. Apply opens it in What you know and on your other screens; No keeps it from you." : "The narration says this happened. Apply it?"].filter((s) => s !== "").join(" "),
         actions: [{ id: "confirm", label: "Apply", style: "primary" }, ...(money.over ? [PAY_ANOTHER_WAY] : []), ...(quote?.limited ? [{ id: "amount", label: "Edit amount", input: { type: "money" as const, label: "Amount", value: quote.cents } }] : []), { id: "reject", label: "No" }],
         expires: "next_send",
-        payload: { ...(guess ? {} : { type: String(proposal.type), connection }), proposal, seed },
+        payload: { ...(guess ? {} : { type: String(proposal.type), connection: via.get(proposal) ?? connection }), proposal, seed },
       });
     });
     declines.forEach((d, i) => {
@@ -2742,14 +2780,15 @@ export class Runtime implements TurnHooks {
 
   /**
    * What a chat's sections are made from besides its messages and journal, read from memory for the
-   * guard (DESIGN §5.1): the chat's world revision and the settings the turn reads
-   * (`turnSettingsKey`). The preset isn't one: the reply's guard checks the one that reply is
-   * assembled with (`fill`).
+   * guard (DESIGN §5.1): the chat's world revision, the settings the turn reads (`turnSettingsKey`)
+   * and the chat's own knowledge choices, read with its run (`chat-knowledge-prefs.ts`). The preset
+   * isn't one: the reply's guard checks the one that reply is assembled with (`fill`).
    */
   inputs(chatId: ChatId, userId: UserId): TurnInputs {
     return {
       revision: this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "",
       settings: this.turnSettingsKey(userId),
+      chat: this.chatKnowledge.key(chatId, userId),
     };
   }
 
@@ -2758,8 +2797,9 @@ export class Runtime implements TurnHooks {
    * chat's realism or time, the check rules, the swipe default, Build's jobs, a reply-read setting)
    * keeps the turn: the helper model, which every step without a connection of its own runs on; Model
    * use (each step, the phase budgets, the section budget); the minds; whether JSON blocks are hidden
-   * from what the steps read of the chat; and the run's own clocks (the engine run, its lore window,
-   * the skip plan). They are known by the time a turn starts, since its core was read with them.
+   * from what the steps read of the chat; the run's own clocks (the engine run, its lore window, the
+   * skip plan); and the narrator's knowledge with the wording of a secret's mark. They are known by
+   * the time a turn starts, since its core was read with them.
    */
   private turnSettingsKey(userId: UserId): string {
     const settings = this.settings.known(userId);
@@ -2767,8 +2807,8 @@ export class Runtime implements TurnHooks {
     const revision = this.settings.revision(userId);
     const kept = this.turnSettings.get(userId);
     if (kept?.revision === revision) return kept.key;
-    const { helper, modelUse, minds, hideJsonBlocks, timeouts } = settings;
-    const key = hashParts("lre.turn-settings", JSON.stringify({ helper, modelUse, minds, hideJsonBlocks, timeouts: { engineRunMs: timeouts.engineRunMs, preLookupMs: timeouts.preLookupMs, skipPlanMs: timeouts.skipPlanMs } }));
+    const { helper, modelUse, minds, hideJsonBlocks, timeouts, narrator } = settings;
+    const key = hashParts("lre.turn-settings", JSON.stringify({ helper, modelUse, minds, hideJsonBlocks, timeouts: { engineRunMs: timeouts.engineRunMs, preLookupMs: timeouts.preLookupMs, skipPlanMs: timeouts.skipPlanMs }, narrator }));
     lruSet(this.turnSettings, userId, { revision, key }, 256);
     return key;
   }
@@ -2791,6 +2831,8 @@ export class Runtime implements TurnHooks {
     const world = await this.readLore(chatId, userId, render.world);
     const { state } = render;
     const settings = await this.settings.get(userId);
+    // What the narrator knows here (this chat's choice, else the world's, else the user's), as a turn reads it.
+    const chat = await this.chatKnowledge.get(chatId, userId);
     const built = buildSections({
       registry: this.registry,
       world,
@@ -2798,6 +2840,9 @@ export class Runtime implements TurnHooks {
       secrets: unrevealedSecrets(this.registry, world, state),
       budget: settings.modelUse.tokens.sections,
       mindsBudget: settings.minds.tokens,
+      narrator: { chat: chat.narrator ?? null, view: narratorView(chat, world, settings) },
+      wording: secretMarkWording(settings),
+      knowledge: settings.minds.knowledge,
       said: "",
       planned: { outcome: [], montage: [] },
       outline: [],
@@ -2809,7 +2854,7 @@ export class Runtime implements TurnHooks {
       warn: (message) => this.host.log("warn", `[LumiRPEngine] preview ${message}`, userId),
     });
     return {
-      sections: built.sections.map((s) => ({ slot: s.slot, label: s.label, status: s.status, scope: s.feed.scope ?? "player", content: s.content, tokens: s.tokens, cut: s.cut, marked: s.marked, hints: s.hints })),
+      sections: built.sections.map((s) => ({ slot: s.slot, label: s.label, status: s.status, scope: s.scope, content: s.content, tokens: s.tokens, cut: s.cut, marked: s.marked, hints: s.hints })),
       budget: { sections: settings.modelUse.tokens.sections, used: built.used, minds: settings.minds.tokens },
     };
   }
@@ -2870,6 +2915,7 @@ export class Runtime implements TurnHooks {
       const twin = entries.twins.get(section.id);
       return twin !== undefined && preset.outlets.has(outletOf(section.id)) ? twin : (entries.slots.get(section.id) ?? null);
     };
+    const chat = await this.chatKnowledge.get(input.chatId, input.userId);
     // The sections as the GM's preview builds them too (`buildSections`), on this turn's budgets.
     const built = buildSections({
       registry: this.registry,
@@ -2878,6 +2924,10 @@ export class Runtime implements TurnHooks {
       secrets,
       budget: settings.modelUse.tokens.sections,
       mindsBudget: settings.minds.tokens,
+      // What the narrator knows in this chat (C3): its own choice, else its world's default, else the user's.
+      narrator: { chat: chat.narrator ?? null, view: narratorView(chat, world, settings) },
+      wording: secretMarkWording(settings),
+      knowledge: settings.minds.knowledge,
       said: this.prePhase.get(input.generationId)?.text ?? "",
       planned,
       outline,
@@ -2905,14 +2955,13 @@ export class Runtime implements TurnHooks {
       const id = entryAt(slot);
       if (id) (record.entries ??= {})[slot] = id;
     }
-    // The World Info entries the delivered lines carry (§6.11): that entry can stay out of the prompt.
-    const sources = built.sources;
     // The narrator rules, for world chats only: at the preset's `{{outlet::lre_narrator}}`, else
     // before the character, apart from the section budget. Every turn has them: the order of
-    // authority first (DESIGN D36), then what marked facts mean, one text in every world whether or
-    // not the turn carries marked facts (§6.8, §6.11), then the preset's own rules, as the player's.
+    // authority first (DESIGN D36), then what marked facts and secret marks mean, in the user's mark
+    // wording, one text in every world whether or not the turn carries marked facts (§6.8, §6.11),
+    // then the preset's own rules, as the player's.
     const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
-    if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null) });
+    if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, secretMarkWording(settings)) });
     this.countLater(input.userId, uncounted);
     // Activation is confirmed from the entries the player's record shows (a section's row) and the
     // preset's own narrator rules: an entry filled only for marked facts, or rules filled only with the
@@ -2926,7 +2975,7 @@ export class Runtime implements TurnHooks {
     const sent = new Set(record.sections.filter((s) => !s.clipped).map((s) => s.slot));
     this.diag.sections({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, `${pending?.kind ?? "continue"} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent.has(s.id) })), started);
     // Nothing goes into the book yet: the guard of the generation that takes the turn writes it (`fill`).
-    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}`, sources };
+    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}` };
   }
 
   /**
@@ -2939,13 +2988,11 @@ export class Runtime implements TurnHooks {
     const now = (await this.presets.current(chatId, userId)).placed;
     if (`${now}\u0000${this.book.placedAs(delivered.bookId)}` !== delivered.placed) return "moved";
     await this.book.write(delivered.bookId, delivered.fills, userId);
-    this.carriedEntries.set(chatId, new Set(delivered.sources.map((s) => `${s.bookId}/${s.entryId}`)));
     return "filled";
   }
 
   /** Once the prompt that took them is assembled (DESIGN §6.4): the turn's entries emptied and off, so no later prompt holds them. */
   async clear(chatId: ChatId, userId: UserId, delivered: Delivered): Promise<void> {
-    this.carriedEntries.delete(chatId);
     await this.book.clear(delivered.bookId, [...delivered.fills.keys()], userId);
   }
 
@@ -2956,7 +3003,6 @@ export class Runtime implements TurnHooks {
   async vacate(chatId: ChatId, userId: UserId): Promise<void> {
     const run = await this.runOf(chatId, userId);
     const bookId = run ? (await this.worlds.index(run.worldId, userId))?.loreBookId : null;
-    this.carriedEntries.delete(chatId);
     if (bookId) await this.book.vacate(bookId, userId);
   }
 
@@ -2995,50 +3041,10 @@ export class Runtime implements TurnHooks {
 
   /**
    * `world` with the lore its World Info books hold now, as its helpers and minds read it (`liveLore`):
-   * a turn's, and GM → Minds → Run's. The same read first keeps the World Info entries the world's
-   * secrets were indexed from switched off, a revision committed before that was done included, and
-   * every secret's twins with them (`secureIndexedSecrets`).
+   * a turn's, and GM → Minds → Run's. It reads the books and writes nothing to them.
    */
   async readLore(chatId: ChatId, userId: UserId, world: WorldDoc): Promise<WorldDoc> {
-    await secureIndexedSecrets(this.host, world, userId);
-    const live = await liveLore(this.host, world, chatId, userId);
-    this.tellUnread(lastLoreIndex(this.host, userId), userId);
-    return live;
-  }
-
-  /**
-   * Starts LRE's first read of the user's World Info books (DESIGN §6.1), so the first prompt that
-   * needs their secrets finds them read: from the user's first request on. It neither waits nor throws.
-   */
-  warmLore(userId: UserId): void {
-    warmLoreIndex(this.host, userId);
-  }
-
-  /**
-   * Tells the user, once each, of a World Info book LRE never managed to read, and of their books not
-   * being listed: while either lasts, all of their World Info is off in world chats (DESIGN §6.1).
-   * Settings → Caveats says what to do (`loreCaveats`). Read from the index as it stands, a first read
-   * that never got its list included.
-   */
-  private tellUnread(index: LoreIndex, userId: UserId): void {
-    const { unlisted, books } = untold(index);
-    if (unlisted) this.host.toast("World Info is off in your world chats: LumiRPEngine can't list your World Info books. Settings → Caveats says more.", userId);
-    for (const name of books) this.host.toast(`World Info is off in your world chats: LumiRPEngine can't read your World Info book “${name}”. Settings → Caveats says what to do.`, userId);
-  }
-
-  /**
-   * Settings → Caveats' World Info books LRE can't read (DESIGN §6.1): while one was never read, or the
-   * books were never listed, any entry could be the twin of a secret LRE hasn't read, so all of the
-   * user's World Info is off in world chats. Read now when LRE's first read has finished, else as its
-   * reads so far left the index, a list that failed among them.
-   */
-  private async loreCaveats(userId: UserId): Promise<PresetCaveat[]> {
-    const index = (await readyLoreIndex(this.host, userId)) ?? lastLoreIndex(this.host, userId);
-    const { unlisted, books } = unreadBooks(index);
-    return [
-      ...(unlisted !== null ? [{ code: "lore_books_unlisted" as const, message: `LumiRPEngine can't list your World Info books (${unlisted.slice(0, 200)}), so it keeps all of your World Info off in world chats until it can: any entry could be the twin of a secret it hasn't read. It tries again at the next turn.` }] : []),
-      ...books.map((b) => ({ code: "lore_book_unread" as const, message: `LumiRPEngine can't read your World Info book “${b.name}” (${b.reason.slice(0, 200)}), so it keeps all of your World Info off in world chats until it can: any of your entries could be the twin of a secret in that book. Open the book in Lumiverse's World Info panel to check it, or delete it if you don't need it; LumiRPEngine reads it again at the next turn.` })),
-    ];
+    return liveLore(this.host, world, chatId, userId);
   }
 
   /** What the World Info interceptor reads of the engine (DESIGN §6.1). */
@@ -3047,13 +3053,7 @@ export class Runtime implements TurnHooks {
       registry: this.registry,
       playsWorld: (meta) => readRun(meta) !== null,
       head: (chatId, userId) => this.ledger.narratorState(chatId, userId),
-      carried: (chatId) => this.carriedEntries.get(chatId) ?? new Set(),
-      secrets: async (userId) => {
-        const index = await readyLoreIndex(this.host, userId);
-        this.tellUnread(index ?? lastLoreIndex(this.host, userId), userId);
-        return index;
-      },
-      lastSecrets: (userId) => lastLoreIndex(this.host, userId),
+      settings: (userId) => this.settings.get(userId),
       log: (message, userId) => this.host.log("warn", `[LumiRPEngine] ${message}`, userId),
     };
   }
@@ -3221,9 +3221,8 @@ export class Runtime implements TurnHooks {
     const late = Promise.withResolvers<typeof LATE>();
     const timer = ms === null ? null : setTimeout(() => late.resolve(LATE), ms);
     try {
-      // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1),
-      // and World Info books LRE can't read, which keep all of the user's World Info off (§6.1).
-      const host: PresetCaveat[] = [...(this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop" as const, message: CANNOT_STOP }]), ...(await this.loreCaveats(userId)), ...(await this.stepCaveats(userId, settings, late.promise))];
+      // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1).
+      const host: PresetCaveat[] = [...(this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop" as const, message: CANNOT_STOP }]), ...(await this.stepCaveats(userId, settings, late.promise))];
       const open = await this.host.chats.active(userId).catch(() => null);
       const chatId = open && (await this.runOf(open, userId)) ? open : this.lastWorldChat.get(userId);
       if (!chatId) return host;
@@ -3336,7 +3335,10 @@ export class Runtime implements TurnHooks {
     // The inspector's history and the meter are read from storage the first time the chat is viewed.
     await this.inspector.load(chatId, userId);
     await this.meter.ready(userId);
-    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId) });
+    // GM → This chat shows the chat's knowledge choices beside what each follows: the user's own (no chat, no world).
+    const settings = await this.settings.get(userId);
+    const knowledge = { chat: await this.chatKnowledge.get(chatId, userId), tracking: knowledgeOn(null, null, settings), narrator: narratorView(null, null, settings) };
+    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId), knowledge });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
     // A turn kept from a reply that failed waits on the player (DESIGN §5.1): its card shows while it lasts.
     const kept = this.ledger.keptOf(chatId);
@@ -3427,6 +3429,8 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   wear: "Things put on or off",
   lose: "Things lost or stolen",
   item_condition: "Wear and damage",
+  learn: "Things you learn",
+  reveal: "Secrets the story reveals to you",
 };
 
 /**
@@ -4143,6 +4147,17 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
       const time = typeof p.start === "string" && p.start !== "" ? `${p.start}${typeof p.end === "string" && p.end !== "" ? `–${p.end}` : ""}` : "";
       const when = [days, time].filter((x) => x !== "").join(", ");
       return `${you ? "Your" : `${who}'s`} routine now has “${what}”${when !== "" ? ` (${when})` : ""}`;
+    }
+    // The knowledge step's changes (DESIGN §24.11): what you learned, with who told you and who learned
+    // it with you; a secret's reveal never words the secret, which the reply already told.
+    case "learn":
+    case "reveal": {
+      const learn = isRecord(p.learn) ? p.learn : {};
+      const name = (id: JsonValue | undefined): string => (typeof id === "string" && view && hasOwn(view.state.entities, id) && povMayKnow(view.registry, view.world, view.state, id) ? (own(view.state.entities, id)?.name ?? id) : "someone");
+      const how = learn.how === "told" ? ` · told by ${name(learn.by)}` : learn.how === "witnessed" ? " · you saw it" : "";
+      const others = (Array.isArray(p.with) ? p.with : []).map(name);
+      const too = others.length > 0 ? ` · ${others.join(", ")} ${others.length === 1 ? "knows" : "know"} too` : "";
+      return p.type === "reveal" ? `A secret the story revealed to you${how}` : `Learned: ${typeof p.claim === "string" ? p.claim : "something"}${how}${too}`;
     }
     case "time_advance":
       return `Skip ahead ${s("minutes")} min`;

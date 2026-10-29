@@ -113,6 +113,7 @@ Built in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `re
 | `extract` | `text`, `effects` |
 | `interpret` | `decision`, `text` |
 | `judge` | `decision`, `text` |
+| `knowledge` | `text` |
 | `memory` | `text` |
 | `mind` | `text` |
 | `npc.choose` | `decision`, `text` |
@@ -143,6 +144,7 @@ The slots a world gets when it defines none, kept in rank order on the section b
 | `minds` | Minds | 10 |
 | `place` | Place | 11 |
 | `property` | Property | 12 |
+| `knowledge` | Who knows what | 13 |
 
 ### Realism
 
@@ -822,17 +824,30 @@ Detail on demand: `gear` (version 1).
 
 Version 1 · realism domain none · requires none.
 
+### Effects
+
+| Effect | Arguments |
+|---|---|
+| `minds.know` | `facts`, `learn` |
+
 ### Events
 
-Its own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.intent`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.skip`.
+Its own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`.
+
+### Proposals
+
+| Proposal | Bound by |
+|---|---|
+| `learn` | `knowledge` |
+| `reveal` | `knowledge` |
 
 ### Panels and slots
 
-Panels: none. Slots it writes: `minds`.
+Panels: `minds.known`. Slots it writes: `knowledge`, `minds`.
 
 ### Lint codes
 
-`minds.config`, `minds.steps`.
+`minds.config`, `minds.holdings`, `minds.steps`.
 
 ## Relationships pack (`relationships`)
 

@@ -584,7 +584,7 @@ function templatesFor(world: WorldDoc, purpose: StepPurpose): StepTemplateDef[] 
  * question of a decision step, else text, with the effect a world template of that output has on
  * the purpose.
  */
-const OWN_OUTPUT: Record<StepPurpose, StepTemplateDef["output"]> = { interpret: "text", "npc.choose": "decision", "puzzle.answer": "decision", judge: "decision", brief: "text", outline: "text", extract: "text", choices: "text", mind: "text", memory: "text", skip: "text", consolidate: "text" };
+const OWN_OUTPUT: Record<StepPurpose, StepTemplateDef["output"]> = { interpret: "text", "npc.choose": "decision", "puzzle.answer": "decision", judge: "decision", brief: "text", outline: "text", extract: "text", choices: "text", mind: "text", memory: "text", skip: "text", consolidate: "text", knowledge: "text" };
 
 /** The user's own prompt for a step as the template it runs with; null when it's blank (the world's, else the built-in, prompts). */
 export function ownTemplate(purpose: StepPurpose, config: Pick<StepConfig, "template">): StepTemplateDef | null {

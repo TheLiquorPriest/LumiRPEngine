@@ -1,18 +1,20 @@
 // The GM's minds controls (DESIGN §24.9) as events of one `fix` entry: pin a character's fidelity,
-// ask for a fresh mind next turn, edit, add or delete a note, commitment or plan, and set what they
-// mean to do now. A value names only the fields that change; what it names is checked here, and the
-// event then checks the whole.
+// ask for a fresh mind next turn, edit, add or delete a note, commitment or plan, set what they
+// mean to do now, and set or take away what someone knows of a fact (§24.11), the player
+// character's knowledge included. A value names only the fields that change; what it names is
+// checked here, and the event then checks the whole.
 
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { CommitmentKind, CommitmentStatus, MindCommitment, MindEditOp, MindNote, MindPlan, PlanKind, PlanStatus } from "../../../shared/minds";
-import { COMMITMENT_KINDS, COMMITMENT_STATUSES, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan } from "../../../shared/minds";
+import { COMMITMENT_KINDS, COMMITMENT_STATUSES, isWitnessRef, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan } from "../../../shared/minds";
 import { labelOf, own } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
-import { readCharacter } from "./state";
+import { holdingOf, isHolding } from "./events";
+import { readCharacter, readKnowledge } from "./state";
 
 function reject(code: string, reason: string): Rejection {
   return { code, reason };
@@ -109,11 +111,36 @@ function planFrom(ctx: ReadContext, who: EntityId, id: string | null, v: JsonObj
   };
 }
 
+/**
+ * A holding the GM sets (`mind_knowledge`), whole, of a fact the chat holds: its shape, then whom it
+ * names (a teller, those it's kept from), each a person in the world and never the holder, and each
+ * fact it rests on. One the holder already has, or a holding taken away that they don't have, is no
+ * change, so an edit resolved again where the story already made it so passes it over.
+ */
+function knowledgeEdit(ctx: ReadContext, op: Extract<MindEditOp, { op: "mind_knowledge" }>, name: string): LedgerEvent[] | Rejection {
+  const k = readKnowledge(ctx.state);
+  if (!own(k.facts, op.fact)) return reject("missing_fact", "the minds hold no such fact");
+  const before = own(own(k.holdings, op.entity) ?? {}, op.fact);
+  if (op.holding === null) return before ? [{ type: MINDS_EVENTS.forget, data: { who: [op.entity], fact: op.fact } }] : reject("no_change", `${name} doesn't hold that`);
+  const h = op.holding as unknown as JsonValue;
+  if (!isHolding(h)) return reject("bad_value", "a holding is how it's held and by whom (one told names its teller), its evidence, since when, the belief, a confidence from 0 to 1 and whom it's kept from");
+  const named = peopleIn(ctx, [...(h.by === null ? [] : [h.by]), ...(Array.isArray(h.keptFrom) ? h.keptFrom : [])]);
+  if (!Array.isArray(named)) return named;
+  if (h.by === op.entity) return reject("bad_value", `${name} can't have told themselves`);
+  if (h.evidence.some((ref) => ref === op.fact || (!isWitnessRef(ref) && !own(k.facts, ref)))) return reject("missing_fact", "a holding rests on facts the minds hold, never on itself");
+  const next = holdingOf(h, op.entity);
+  if (before && JSON.stringify(holdingOf(before, op.entity)) === JSON.stringify(next)) return reject("no_change", "nothing to change");
+  // The event carries the holding whole, so a fold reads it without the state it was made on.
+  return [{ type: MINDS_EVENTS.learn, data: { who: [op.entity], fact: op.fact, how: next.how, by: next.by, evidence: next.evidence, belief: next.belief, confidence: next.confidence, ...(next.keptFrom ? { keptFrom: next.keptFrom } : {}), msg: next.since.msg, at: next.since.at } }];
+}
+
 /** A GM minds control as the events of its `fix` entry, or why it can't apply. */
 export function mindEdit(ctx: ReadContext, op: MindEditOp): LedgerEvent[] | Rejection {
   const { world, state, registry } = ctx;
   const e = own(state.entities, op.entity);
   if (!e) return reject("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
+  // What someone knows is anyone's to hold, the player character's too; a mind is everyone's but theirs.
+  if (op.op === "mind_knowledge") return kindIs(registry, world, e.kind, "person") ? knowledgeEdit(ctx, op, e.name) : reject("bad_value", `${e.name} isn't a person`);
   if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person")) return reject("no_mind", `${e.name} doesn't have a mind`);
   if (op.op === "mind_pin") return [{ type: MINDS_EVENTS.pin, data: { entity: op.entity, level: op.level } }];
   if (op.op === "mind_refresh") return [{ type: MINDS_EVENTS.refresh, data: { entity: op.entity } }];

@@ -1,7 +1,7 @@
 // World lore helpers (DESIGN §4.2) shared by the lint, the backend and Build: whether an entry is
-// secret, its source, the helpers a secret entry may reach, the hash a book-sourced entry keeps of
-// the World Info text it was indexed from, and the lookup table's terms, additions and
-// suggestions. Pure.
+// secret, its source, the helpers a secret entry may reach, LRE's fields on a World Info entry (an
+// earlier build's secrecy among them, read as it stands), the hash a book-sourced entry keeps of the
+// World Info text it was indexed from, and the lookup table's terms, additions and suggestions. Pure.
 
 import { hashParts } from "./hash";
 import type { TopicId } from "./ids";
@@ -29,21 +29,25 @@ export function loreIsSecret(entry: { readonly secret?: unknown }): boolean {
   return entry.secret !== undefined && entry.secret !== false;
 }
 
-/**
- * A secret entry's text as the leak check looks for it: each sentence or clause of at least four
- * words, without quotes or end punctuation. A player-facing line carrying one of these word for
- * word is dropped; a paraphrase isn't caught, which is why secret lore never shares a call with a
- * step that writes for the player.
- */
-export function lorePhrases(content: string): string[] {
+/** Every sentence or clause of a text, short ones included, without quotes or end punctuation. */
+export function loreParts(content: string): string[] {
   const out: string[] = [];
   for (const part of content.split(/[.!?…;:\n]+|\s[—–-]\s|—/)) {
     const phrase = part
       .replace(/^[\s"'“”‘’()[\]*_]+|[\s"'“”‘’()[\]*_,]+$/g, "")
       .replace(/\s+/g, " ");
-    if (phrase.length >= 16 && phrase.split(" ").length >= 4 && !out.includes(phrase)) out.push(phrase);
+    if (phrase !== "" && !out.includes(phrase)) out.push(phrase);
   }
   return out;
+}
+
+/**
+ * A secret entry's text as the leak check looks for it: each part (`loreParts`) of at least four
+ * words. A player-facing line carrying one of these word for word is dropped; a paraphrase isn't
+ * caught, which is why secret lore never shares a call with a step that writes for the player.
+ */
+export function lorePhrases(content: string): string[] {
+  return loreParts(content).filter((phrase) => phrase.length >= 16 && phrase.split(" ").length >= 4);
 }
 
 /** An entry's source as stored: a missing one (every entry written before sources existed) or a malformed one counts as authored. */
@@ -58,8 +62,11 @@ export function loreSourceOf(raw: unknown): LoreSource {
 /**
  * LRE's own fields on a World Info entry (DESIGN §4.2), in its extension data under
  * `lumi_rp_engine.lore`: what a world lore entry says beside its text, for an entry read live from a
- * book. With `secret` the entry is stored switched off, and the interceptor turns it on for a prompt
- * only once its gate holds (§6.1).
+ * book. `visibility`, `links` and `aliases` are written by Build's Save, on the user's press, and by
+ * nothing else. `secret`, `gate`, `audience` and `holders` are how an earlier build kept an entry
+ * secret, storing it switched off: they are read as they stand, never written again, and count only
+ * while the entry's text holds no secret mark (`shared/secret-marks.ts`). The move of a book's
+ * secrecy turns them into marks, on the user's go.
  */
 export interface BookLoreFields {
   secret?: boolean;
@@ -69,6 +76,54 @@ export interface BookLoreFields {
   links?: string[];
   aliases?: string[];
   holders?: string[];
+}
+
+/** The fields Build writes onto a World Info entry; the others are read as they stand (`BookLoreFields`). */
+export type BookFieldsEdit = Pick<BookLoreFields, "visibility" | "links" | "aliases">;
+
+/** An earlier build's secrecy fields on a World Info entry, read as they stand and never written (`BookLoreFields`). */
+export const OLD_SECRECY_FIELDS = ["secret", "gate", "audience", "holders"] as const;
+
+/** `fields` without the earlier build's secrecy (`OLD_SECRECY_FIELDS`), or null when nothing else is left: what an entry with secret marks keeps of them. */
+export function withoutOldSecrecy(fields: BookLoreFields | null): BookLoreFields | null {
+  if (!fields) return null;
+  const { secret: _secret, gate: _gate, audience: _audience, holders: _holders, ...rest } = fields;
+  return Object.keys(rest).length > 0 ? rest : null;
+}
+
+/**
+ * The fields an entry is left with by Build's Save of `edit` (null: none of its own): its visibility,
+ * links and aliases as edited, and the earlier build's secrecy exactly as stored; null when no field
+ * is left.
+ */
+export function editedBookFields(stored: BookLoreFields | null, edit: BookFieldsEdit | null): BookLoreFields | null {
+  const { visibility: _visibility, links: _links, aliases: _aliases, ...secrecy }: BookLoreFields = { ...stored };
+  const out: BookLoreFields = secrecy;
+  if (edit?.visibility !== undefined) out.visibility = edit.visibility;
+  if (edit?.links !== undefined) out.links = [...edit.links];
+  if (edit?.aliases !== undefined) out.aliases = [...edit.aliases];
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * The note an earlier build kept beside a twin it switched off as the copy of a secret
+ * (`lumi_rp_engine.secretCopyOf`): the original, as `bookId/entryId`, and how the twin stood before,
+ * whether stored off and with which LRE fields of its own. Read as it stands, never written: the
+ * interceptor reads whether the twin was on before, and the move of a book's secrecy restores the twin
+ * from it exactly.
+ */
+export interface SecretCopy {
+  entry: string;
+  off: boolean;
+  fields: BookLoreFields | null;
+}
+
+/** The note on an entry an earlier build kept switched off as the copy of a secret, or null. */
+export function secretCopyOf(extensions: unknown): SecretCopy | null {
+  const ns = isRecord(extensions) ? extensions[LEDGER_NAMESPACE] : undefined;
+  const raw = isRecord(ns) ? ns.secretCopyOf : undefined;
+  if (!isRecord(raw) || typeof raw.entry !== "string") return null;
+  return { entry: raw.entry, off: raw.off === true, fields: isRecord(raw.fields) ? bookLoreFieldsOf({ [LEDGER_NAMESPACE]: { lore: raw.fields } }) : null };
 }
 
 /**

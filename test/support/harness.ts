@@ -128,7 +128,7 @@ export class Harness {
       beforePlan: async () => undefined,
       afterPlan: async () => undefined,
       // No sections here: the engine run plans, and its reply starts again (DESIGN §5.1).
-      deliver: async () => ({ bookId: "", fills: new Map(), placed: "", sources: [] }),
+      deliver: async () => ({ bookId: "", fills: new Map(), placed: "" }),
       fill: async () => "filled" as const,
       clear: noop,
       vacate: noop,
@@ -140,7 +140,7 @@ export class Harness {
         const raw = (await this.host.chats.chatMetadata(chatId, this.host.userId))[LEDGER_NAMESPACE];
         return isRecord(raw) && typeof raw.worldId === "string" ? raw.worldId : null;
       },
-      inputs: () => ({ revision: "", settings: "", preset: "", presetWrites: "" }),
+      inputs: () => ({ revision: "", settings: "", chat: "", preset: "", presetWrites: "" }),
       beforeCommit: noop,
       afterCommit: noop,
       readStopped: noop,

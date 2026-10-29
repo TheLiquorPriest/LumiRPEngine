@@ -95,6 +95,7 @@ export function LoreList(props: { worldId: string }) {
           />
           <ListRow icon="book" title="Index a World Info book" subtitle="Optional: copy a book into the world's own lore, with aliases, topics and lookup terms, for a world you export" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_book" })} />
           <ListRow icon="scroll" title="Index this text" subtitle="The same, from text you paste" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })} />
+          <ListRow icon="lock" title="Secrecy in your World Info" subtitle="Move your books' secrets from LumiRPEngine's old fields to secret marks in their text, book by book, with a restore" chevron onClick={() => go(app, { view: "secrecy", worldId: draft.worldId })} />
         </List>
       </Section>
       <LoreBooksSection />

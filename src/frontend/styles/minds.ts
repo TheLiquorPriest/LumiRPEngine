@@ -1,5 +1,5 @@
-// Character minds: GM → Minds (the minds pack's tab), Settings → Minds and Build → World → Minds.
-// Built on the tokens only.
+// Character minds: GM → Minds (the minds pack's tab), Play → What you know, Settings → Minds and
+// Build → World → Minds. Built on the tokens only.
 
 export const MINDS_CSS = `
 /* Settings → Minds (settings/minds.tsx) and Build → World → Minds (build/minds-editor.tsx) */
@@ -61,6 +61,11 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-minds-tpl-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-height:var(--lre-tap);min-width:0}
 .lre-minds-tpl-text{flex:1 1 12rem;min-width:0;display:flex;flex-direction:column;gap:2px}
 .lre-minds-tpl-head>.lre-btn{flex:none}
+/* Settings → Minds → Knowledge: a knowledge text's wording (settings/minds.tsx) */
+textarea.lre-input.lre-minds-text-input{min-height:var(--lre-tap);font-family:var(--lre-font);font-size:var(--lre-fs-md);line-height:1.45}
+/* Play → What you know (packs/minds/ui/known.tsx) */
+.lre-known-tags{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s2);min-width:0}
+.lre-known-kept{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
 /* GM → Minds (packs/minds/ui/gm.tsx): the list, a character's page and the change pages over it */
 .lre-gm-minds-pages{animation:none}
 .lre-gm-minds{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}

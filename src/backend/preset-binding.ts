@@ -22,7 +22,7 @@ import type { HostPort, HostPresetBlock } from "./host";
 export type GuidanceTarget = StepPurpose | "narrator";
 
 /** In the order Settings lists them. */
-export const GUIDANCE_TARGETS: readonly GuidanceTarget[] = ["interpret", "extract", "brief", "outline", "choices", "npc.choose", "judge", "puzzle.answer", "mind", "memory", "skip", "consolidate", "narrator"];
+export const GUIDANCE_TARGETS: readonly GuidanceTarget[] = ["interpret", "extract", "brief", "outline", "choices", "npc.choose", "judge", "puzzle.answer", "mind", "memory", "skip", "consolidate", "knowledge", "narrator"];
 
 /** A guidance block's name is this and its target: "RPEngine · extract". */
 export const GUIDANCE_PREFIX = "RPEngine · ";
@@ -134,6 +134,7 @@ const STARTER: Record<GuidanceTarget, string> = {
   memory: "It writes down, as each character, what they will remember of a reply. Say what this preset's characters hold on to: slights, kindnesses, money, promises.",
   skip: "It finds the moments worth stopping at inside a time skip. Say how often this preset wants a skip interrupted.",
   consolidate: "It folds a character's older notes into their summary. Say what a summary should keep in this preset's story.",
+  knowledge: "It works out after each reply who learned what, what they worked out and what they now doubt. Say how this preset's people take things in: how quickly they guess, how readily they believe what they're told.",
   narrator:
     "In world chats the engine gives this to the narrator before the character, or where an enabled block holds {{outlet::lre_narrator}}, after its own rules: the player's instructions first, then what the story has established, then the engine's sections, and what marked facts mean under that order. Write how this preset's narrator uses the sections: what to show of them, what to stress, what to leave in the background.",
 };

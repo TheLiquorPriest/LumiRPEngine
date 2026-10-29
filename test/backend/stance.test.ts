@@ -53,6 +53,8 @@ describe("the Stance section on the section budget", () => {
     const rig = new Rig({ shipped: true });
     // The host can't count: every section is priced by the estimate, so the same text costs the same.
     rig.host.tokenCount = null;
+    // The player character's view: no marked fact rides in what the budget leaves, so the sections as sent cost what it spends.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { narrator: { knowledge: "pov", secrets: "omit" } } }));
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
     // Usual routines are People's hint lines (DESIGN §6.10), whose cost the budget doesn't count: off
     // here, so the sections as sent cost what the budget spends.
@@ -89,7 +91,8 @@ describe("the Stance section on the section budget", () => {
   test("its cues ride in what the budget has left, and the Context panel shows the same whether a cue's secret is kept or out", async () => {
     const rig = new Rig({ shipped: true });
     rig.host.tokenCount = null;
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 100_000 } } } }));
+    // The player character's view: the cue is the only line riding in what the budget leaves.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 100_000 } }, narrator: { knowledge: "pov", secrets: "omit" } } }));
     const kept = await cueChat(rig, "false");
     const out = await cueChat(rig, "true");
     for (const chatId of [kept, out]) await rig.turn(chatId, "I look around.", "Quiet.");

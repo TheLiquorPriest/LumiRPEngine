@@ -22,6 +22,7 @@ import type { EditorRequest, JsonPatchOp, LintIssue, ResultBodies, WorldCollecti
 import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
+import { narratorViewOf } from "../shared/settings";
 import { loreBooksOf, lorePinsOf } from "../shared/lore";
 import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, routineShapeProblems } from "../shared/routines";
 import { needsSettingsOf, needsSettingsProblems, storedNeedsSettings } from "../shared/needs";
@@ -31,7 +32,6 @@ import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
-import { secureIndexedSecrets } from "./book-lore";
 import { applyProfile, profileChoices, profileOf } from "../shared/profiles/index";
 
 interface Draft {
@@ -297,8 +297,6 @@ export class WorldStore {
     }
     await this.writeJson(revisionFile(doc.id, rev), written, userId);
     this.remember(WorldStore.key(userId, doc.id, rev), written);
-    // A committed or imported world's secrets indexed from World Info stay off in their books (DESIGN §4.2).
-    await secureIndexedSecrets(this.host, written, userId);
     const index = await this.index(doc.id, userId);
     const revisions = index ? [...index.revisions.filter((r) => r !== rev), rev] : [rev];
     const moved = index?.head !== rev;
@@ -398,10 +396,6 @@ export class WorldStore {
       return { draft: head, lint: lintWorld(head, this.registry), base: draft.head, stored: false, version: count };
     }
     if (request.base !== null && request.base !== draft.base) throw new WorldError("conflict", "the world changed; reload and retry");
-    // The lore as it stood: a collection write changes the draft's own objects in place, and the
-    // source securing below compares against this. Its entries are replaced, never changed, so a
-    // shallow copy keeps them.
-    const loreBefore = { ...draft.doc.lore };
     let doc = draft.doc;
     let base = draft.base;
     let lint: LintIssue[];
@@ -464,9 +458,6 @@ export class WorldStore {
     }
     const version = draft.version + 1;
     await this.writeJson(`${worldDir(worldId)}draft.json`, { base, doc, version }, userId);
-    // A secret entry the save made or changed keeps the World Info entry it was indexed from off at
-    // once; the draft before the save says which gate on that entry was the world entry's own.
-    await secureIndexedSecrets(this.host, doc, userId, (id) => !jsonEqual(doc.lore[id], loreBefore[id]), { ...draft.doc, lore: loreBefore });
     changed?.(worldId, { version, stored: true, base });
     return { draft: doc, lint, base, stored: true, version };
   }
@@ -714,6 +705,10 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
   if (!hasOwn(WORLD_PARTS, part)) throw new WorldError("bad_request", `unknown part ${String(part)}`);
   if (!isRecord(value)) throw new WorldError("bad_request", `part ${part} must be an object`);
   if (part === "meta") {
+    // The narrator's knowledge for the world's chats (DESIGN §6.11): a whole view, or null for none,
+    // so each chat follows its own choice, else the player's Settings. Checked before anything is set.
+    const narrator = value.narrator === undefined || value.narrator === null ? value.narrator : narratorViewOf(value.narrator);
+    if (narrator === null && value.narrator !== null) throw new WorldError("bad_request", 'narrator is {"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}, or null for none');
     if (typeof value.name === "string") doc.name = value.name;
     if (typeof value.pov === "string") doc.pov = value.pov;
     if (value.seedMode === "fresh" || value.seedMode === "same_roll") doc.seedMode = value.seedMode;
@@ -744,6 +739,8 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
       if (books.length === 0) delete doc.loreBooks;
       else doc.loreBooks = books;
     }
+    if (narrator) doc.narrator = narrator;
+    else if (narrator === null) delete doc.narrator;
     return;
   }
   if (part === "tiers") {

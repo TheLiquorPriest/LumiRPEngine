@@ -1,6 +1,7 @@
 // The Place section's lore (DESIGN §6.11, §4.2): what the world's lore, World Info read live
 // included, says about where the player character is, for the narrator. Pure; the space pack
-// registers it on the `place` slot as the `place_lore` source.
+// registers it on the `place` slot as the `place_lore` source. It reads lore and changes nothing:
+// a World Info entry it tells still reaches the prompt by its own rules, keys and budget included.
 
 import { loreSourceOf } from "../shared/lore";
 import type { FeedScope, LoreEntryDef } from "../shared/world";
@@ -20,9 +21,8 @@ const NARRATOR_READS = "brief";
  * section budget trims whole lines from the section's end (§6.2), so a lore entry that doesn't fit
  * is left out whole, never cut. The player scope, and every scope's plain lines, give only what the
  * narrator may read about a place the player character can see; the GM scope adds the rest, marked.
- * A line holds a World Info entry's whole text, so it names it as its source, and that entry stays
- * out of the same prompt (§6.1); one whose text holds a macro doesn't, since the section can't keep
- * the macro but the entry's own activation runs it.
+ * A World Info entry's line is the entry's lore as read live, its secret marks apart from its text
+ * (each a secret entry of its own, `bookMarkLores`).
  */
 export function placeLoreLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const { registry, world, state } = ctx;
@@ -45,9 +45,7 @@ export function placeLoreLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const lineOf = (entry: LoreEntryDef, known: FeedLine["known"]): FeedLine[] => {
     const title = typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : entry.id;
     const whole = loreSnippet((text) => text.length, { title, content: entry.content }, Number.POSITIVE_INFINITY);
-    if (!whole) return [];
-    const source = loreSourceOf(entry.source);
-    return [{ text: whole.text, known, ...(source.kind === "book" && !entry.content.includes("{{") ? { source: { bookId: source.bookId, entryId: source.entryId } } : {}) }];
+    return whole ? [{ text: whole.text, known }] : [];
   };
   const lines = found.filter((f) => f.read).flatMap((f) => lineOf(f.entry, "pov"));
   if (scope !== "gm") return lines;

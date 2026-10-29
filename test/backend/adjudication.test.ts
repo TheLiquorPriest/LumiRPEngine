@@ -257,8 +257,9 @@ describe("the judge step and people the POV can't see", () => {
     expect(judged?.messages.at(-1)?.content).toContain('"present":["Jo Park"]');
     const brief = rig.host.quietCalls.find((r) => r.messages[0]?.content.includes("You brief a roleplay narrator"));
     expect(brief?.messages.at(-1)?.content).toContain("Present:\nJo Park\n");
-    // Every prompt but a character's own mind and memory, which are private and think as them (DESIGN §24.5).
-    for (const r of rig.host.quietCalls.filter((c) => !/^You (?:are the private mind|keep the memory) of /.test(c.messages[0]?.content ?? ""))) expect(JSON.stringify(r.messages)).not.toContain("Vex Morrow");
+    // Every prompt but a character's own mind and memory, which are private and think as them (DESIGN §24.5),
+    // and the knowledge step's, which works out what everyone who was there learned, seen by the POV or not (DESIGN §24.11).
+    for (const r of rig.host.quietCalls.filter((c) => !/^You (?:(?:are the private mind|keep the memory) of |keep track of who knows what)/.test(c.messages[0]?.content ?? ""))) expect(JSON.stringify(r.messages)).not.toContain("Vex Morrow");
     const roll = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "roll");
     expect(roll?.detail).toContain("Your approach: 1 of 2.");
     expect(roll?.detail ?? "").not.toContain("Vex");

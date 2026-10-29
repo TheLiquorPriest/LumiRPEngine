@@ -1,10 +1,11 @@
 // The minds pack's slice of the state (DESIGN §24.4): each character's latest mind, plans, notes,
-// commitments, witness log and summary, the chat's minds round, and the latest turns' presence.
-// Only this pack's reducers write it, so its shape is the contract's `MindsSlice`; a slice missing
-// a part (a chat that never had minds) reads with that part empty.
+// commitments, witness log and summary, the chat's minds round, the latest turns' presence, and what
+// everyone knows (§24.11). Only this pack's reducers write it, so its shape is the contract's
+// `MindsSlice`; a slice missing a part (a chat that never had minds, or no knowledge) reads with that
+// part empty.
 
 import type { EntityId } from "../../../shared/ids";
-import type { MindCommitment, MindDue, MindNote, MindPlan, MindsCharacter, MindsMemoryConfig, MindsSlice, WitnessEntry } from "../../../shared/minds";
+import type { MindCommitment, MindDue, MindNote, MindPlan, MindsCharacter, MindsKnowledge, MindsMemoryConfig, MindsSlice, WitnessEntry } from "../../../shared/minds";
 import { MINDS_KEEP, planInForce } from "../../../shared/minds";
 import { own } from "../../../engine/pack-kit";
 import type { WorldState } from "../../../engine/state";
@@ -12,6 +13,8 @@ import type { WorldState } from "../../../engine/state";
 export const PACK = "minds";
 
 const EMPTY_SLICE: MindsSlice = { round: 0, on: false, chars: {}, presence: [] };
+
+const EMPTY_KNOWLEDGE: MindsKnowledge = { facts: {}, holdings: {} };
 
 function emptyCharacter(): MindsCharacter {
   return { mind: null, plans: [], notes: [], commitments: [], witness: [], summary: "", pin: null, refresh: false, lastPresent: null, consolidated: null };
@@ -22,7 +25,7 @@ export function readSlice(state: Readonly<WorldState>): MindsSlice {
   const raw = state.packs[PACK];
   if (!raw) return EMPTY_SLICE;
   const s = raw as unknown as Partial<MindsSlice>;
-  return { round: s.round ?? 0, on: s.on ?? false, chars: s.chars ?? {}, presence: s.presence ?? [] };
+  return { round: s.round ?? 0, on: s.on ?? false, chars: s.chars ?? {}, presence: s.presence ?? [], ...(s.knowledge ? { knowledge: s.knowledge } : {}) };
 }
 
 /** One character's minds state (read only); a character with none reads empty. */
@@ -56,6 +59,25 @@ export function writeCharacter(state: WorldState, id: EntityId): MindsCharacter 
   const c = own(s.chars, id) ?? emptyCharacter();
   s.chars[id] = c;
   return c;
+}
+
+/** What everyone knows (read only): facts and holdings, each part present; a chat with none reads empty. */
+export function readKnowledge(state: Readonly<WorldState>): MindsKnowledge {
+  const k = readSlice(state).knowledge;
+  return k ? { facts: k.facts ?? {}, holdings: k.holdings ?? {} } : EMPTY_KNOWLEDGE;
+}
+
+/**
+ * The knowledge part for a reducer, created on first use with both parts. Only the knowledge events
+ * call it, so a chat that never had one keeps the slice it always folded to.
+ */
+export function writeKnowledge(state: WorldState): MindsKnowledge {
+  const s = writeSlice(state);
+  const k = (s.knowledge ?? {}) as Partial<MindsKnowledge>;
+  k.facts ??= {};
+  k.holdings ??= {};
+  s.knowledge = k as MindsKnowledge;
+  return s.knowledge;
 }
 
 /** Puts a plan in a character's list (replacing one with its id), then keeps the lists within their bounds. */
