@@ -4454,8 +4454,8 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   stepSaid: "{{name}} said or did: {{text}}",
   stepStory: "The story, as written: {{text}}",
   stepThroughout: "there throughout",
-  stepLeft: "there from the start, then left behind partway",
-  stepCame: "came in during the turn, or was met at its end: perceived only what came after",
+  stepLeft: "there from the start, but not at its end: witnessed none of it, though they may be told",
+  stepCame: "came in during the turn, or was met at its end: witnessed none of it, though they may be told",
   stepOpen: "(an open question)",
   stepFalse: "(false)",
   stepPinned: "Pinned lore",
@@ -4465,8 +4465,8 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   stepWitnessed: "Witnessed lately:",
   stepSomeone: "someone",
   stepAnswer: [
-    "- facts: the new facts this turn establishes or raises, each one short sentence, with a ref of your own (n1, n2\u2026) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
-    '- learned: who came to know a fact this turn, and how: witnessed (they saw it, heard it said aloud or read it themselves, so they were there for it) or told (by: who told them, who must already know it). Name the player character "you". keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.',
+    "- facts: the new facts this turn establishes or raises that matter to someone: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; what someone now believes about another person, where it changes how they treat them; an open question someone is pursuing. Never small talk, how the scene looks, or plain events the story already shows: the story itself is what everyone there knows of those. Each one short sentence, with a ref of your own (n1, n2\u2026) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
+    `- learned: who came to know a fact this turn, and how. witnessed: it happened, was said aloud or was shown in front of them, so everyone there throughout perceived it, the player character included; missed: only those there who didn't, such as someone out of earshot of a whisper, asleep or looking away ("you" for the player character); leave it out when no one did. told: who: whom they told; by: who told them, who must already know it. keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.`,
     "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
     "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
     "Use empty lists for anything the turn didn't give."
@@ -4791,12 +4791,13 @@ var MIND_PROMPT_DEFAULTS = Object.freeze({
   consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
   knowledge: [
     "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
-    "Record only what the turn as written gives each person. Someone learns by witnessing what happens in front of them (seeing it, hearing it said aloud, reading it) or by being told it; whoever wasn't there witnessed nothing, and whoever tells something must already know it. Someone may also work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
-    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it; make a new one only for what the turn establishes or raises. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold."
+    "The story itself is what everyone who was there knows of the scene: never restate it. Record only what matters to someone: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; what someone now believes about another person, where it changes how they treat them; an open question someone is pursuing. Record nothing of small talk, of how the scene looks, or of plain events the story already shows.",
+    "Everyone there throughout witnessed what happened in front of them (seeing it, hearing it said aloud, reading it), the player character included: name only who missed something, such as a whisper out of earshot, or someone asleep or looking away. Whoever was there for only part of the turn, or wasn't there, witnessed none of it. Someone may also be told something by someone who already knows it, or work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
+    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold."
   ].join(`
 `)
 });
-var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"who": ["a name"], "fact": "a fact id or n1", "how": "witnessed", "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
+var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"fact": "a fact id or n1", "how": "witnessed", "missed": ["a name"], "keptFrom": ["a name"]}, {"fact": "a fact id or n2", "how": "told", "who": ["a name"], "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
@@ -76014,7 +76015,7 @@ ${lines.join(`
 }
 var str16 = (v) => typeof v === "string" ? v.trim() : "";
 var list2 = (v) => Array.isArray(v) ? v : [];
-function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0 }) {
+function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0, witnessed: new Set }) {
   const out = { events: [], proposals: [], refused: [] };
   if (!isRecord(raw))
     return out;
@@ -76082,13 +76083,14 @@ function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0
   const hidden = hiddenNameCheck(turn.reg, world, state2, pov, { stages: false });
   const heard = `${turn.user}
 ${turn.reply}`;
-  const record3 = (data, label2) => {
-    const learners2 = data.who.slice(0, Math.max(0, settings.learningsPerTurn - spent.learnings));
+  const record3 = (data, label2, whole4 = false) => {
+    const learners2 = whole4 ? data.who : data.who.slice(0, Math.max(0, settings.learningsPerTurn - spent.learnings));
     if (learners2.length < data.who.length)
       refuse2(`learnings past the limit a turn: ${label2}`);
     if (learners2.length === 0)
       return;
-    spent.learnings += learners2.length;
+    if (!whole4)
+      spent.learnings += learners2.length;
     const needs = carried([data.fact, ...data.evidence.filter((ref) => !isWitnessRef(ref))]);
     const line2 = learnedWitness(data);
     for (const id of learners2) {
@@ -76148,11 +76150,28 @@ ${turn.reply}`;
     }
     const belief = teller ? teller.belief : facts.get(fact)?.truth === "open" ? "uncertain" : "true";
     const confidence = teller ? teller.confidence : 1;
+    const namesOf3 = (v) => typeof v === "string" ? [v] : list2(v).map(str16);
+    const idsOf2 = (names2) => names2.flatMap((n) => {
+      const id = who(n);
+      return id === null ? [] : [id];
+    });
+    const missedNames = namesOf3(l.missed);
+    const unnamed = (v) => v !== undefined && v !== null && typeof v !== "string" && !Array.isArray(v);
+    if (how === "witnessed" && unnamed(l.who)) {
+      refuse2(`a witnessing whose witnesses aren't names: "${claim2}"`);
+      continue;
+    }
+    if (how === "witnessed" && (unnamed(l.missed) || missedNames.some((n) => who(n) === null))) {
+      refuse2(`a witnessing that says someone missed it whom the world doesn't have, or more than one person goes by: "${claim2}"`);
+      continue;
+    }
+    const missed = new Set(idsOf2(missedNames));
+    const witnesses = namesOf3(l.who);
+    const reached = (how === "told" || witnesses.length > 0 ? idsOf2(witnesses) : perceivers(turn).filter((id) => batch.includes(id) && !partTime(id))).filter((id) => how === "told" || !missed.has(id));
     const learning2 = new Map;
     let mine;
-    for (const n of list2(l.who)) {
-      const id = who(str16(n));
-      if (id === null || id === by || learning2.has(id))
+    for (const id of reached) {
+      if (id === by || learning2.has(id))
         continue;
       if (how === "witnessed" && !present2.has(id)) {
         refuse2(`${nameOf8(id)} wasn't there to witness: "${claim2}"`);
@@ -76188,6 +76207,15 @@ ${turn.reply}`;
     }
     if (learning2.size === 0)
       continue;
+    const whole4 = how === "witnessed";
+    if (whole4 && !spent.witnessed.has(fact)) {
+      if (spent.learnings >= settings.learningsPerTurn) {
+        refuse2(`learnings past the limit a turn: "${claim2}"`);
+        continue;
+      }
+      spent.learnings += 1;
+      spent.witnessed.add(fact);
+    }
     const named = l.keptFrom === "everyone" ? "everyone" : [...new Set(list2(l.keptFrom).flatMap((n) => {
       const id = who(str16(n));
       return id !== null && !learning2.has(id) ? [id] : [];
@@ -76205,7 +76233,7 @@ ${turn.reply}`;
     for (const group of groups.values()) {
       const data = { who: group.who, fact: group.fact, how, by, evidence: [], belief, confidence, ...group.keptFrom ? { keptFrom: group.keptFrom } : {}, msg: turn.messageId, at, witness: line2 };
       const entry = learnedWitness(data);
-      record3({ ...data, evidence: entry ? [witnessRef(entry)] : [] }, `"${claim2}"`);
+      record3({ ...data, evidence: entry ? [witnessRef(entry)] : [] }, `"${claim2}"`, whole4);
     }
   }
   for (const i of list2(raw.inferred)) {
@@ -77539,7 +77567,7 @@ async function knowledgeStep(deps, input, settings, state2, presence2) {
   });
   const w = new Working(reg, world, state2);
   const out = { events: [], proposals: [], traces: [], connection: helperCallOf(config3, settings.helper).connectionId ?? null };
-  const spent = { facts: new Set, learnings: 0 };
+  const spent = { facts: new Set, learnings: 0, witnessed: new Set };
   for (const call of await Promise.all(asked2)) {
     const checked = call.raw === null ? null : checkKnowledge({ ...turn, state: w.state }, call.batch, call.raw, spent);
     for (const why of checked?.refused ?? [])
@@ -77579,7 +77607,9 @@ async function postMinds(deps, input) {
   if (knowing2)
     for (const event of await seedKnowledge(deps.host, { reg, world, state: w.state, settings: settings.minds.knowledge, userId }))
       record3(event);
-  const knowledge = knowing2 ? knowledgeStep(deps, input, settings, structuredClone(w.state), { said: said2, met, left }) : Promise.resolve(null);
+  const there = presentWith(reg, world, state2);
+  const parted = [...new Set([...left, ...said2.who.filter((id) => !there.includes(id))])];
+  const knowledge = knowing2 ? knowledgeStep(deps, input, settings, structuredClone(w.state), { said: said2, met, left: parted }) : Promise.resolve(null);
   const traces = [];
   const memory2 = effectiveMemory(world, settings.minds);
   const levels = new Map(fidelityOf(reg.context(world, input.start), { user: input.user, reply: input.reply }).map((s) => [s.entity, s.level]));
@@ -78742,9 +78772,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "86b6113d4d0eef938b1d86785c74d7a758ea70bf2f4844856a837bcb4d36570e";
+  const sha256 = "719320f529bd5916049a26ec1b65511d912055dfa19a6050a67f2b2951b02be6";
   const tools = ["5ca8a6ecfcb445de79568df75ce1a851", "8cbe8a340efbca329a1053f6c445d270"].filter((f) => f !== undefined);
-  return { id: "f0b471d1", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "3bcf3641", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -83547,7 +83577,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "f0b471d1" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "3bcf3641" }), (chatId) => this.messages.forget(chatId));
     this.sessions = new Sessions(this.blobs, this.ledger);
     this.chatAgents = new ChatAgentMeta(this.host, this.chatMeta);
     this.sweep = new Sweep({ host: this.host, blobs: this.blobs, retention: async (userId) => (await this.settings.get(userId)).retention, turning: (userId) => this.ledger.turning(userId), journals: (userId) => this.ledger.journals(userId), transcripts: (chatId, userId) => this.diag.transcripts(chatId, userId) });
