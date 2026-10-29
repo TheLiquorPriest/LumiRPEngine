@@ -697,6 +697,8 @@ export class Runner {
         if (!target) return;
         const before = structuredClone((await this.h.core(chat)).journal.messages[target.id]?.ledger);
         const tombstones = structuredClone((await this.h.core(chat)).journal.tombstones);
+        // The swipe that shows as the swipe is asked for: the one it is made from.
+        const shown = target.swipeId;
         this.h.renarrateNext = op.renarrate === true;
         const refused = this.refused(target.id);
         const unchanged = this.swipesOf();
@@ -709,8 +711,8 @@ export class Runner {
         }
         await host.finish(g, op.opens !== undefined ? pick(OPENING_REPLIES, op.opens) : op.toll !== undefined ? pick(TOLL_REPLIES, op.toll) : pick(REPLIES, op.reply));
         this.h.renarrateNext = false;
-        if (op.renarrate) await this.checkRenarrate(chat, target.id, g.swipeId, before, tombstones);
-        else await this.checkRerun(chat, target.id, g.swipeId, before, tombstones);
+        if (op.renarrate) await this.checkRenarrate(chat, target.id, g.swipeId, before, tombstones, shown);
+        else await this.checkRerun(chat, target.id, g.swipeId, before, tombstones, shown);
         return;
       }
       case "continue": {
@@ -910,9 +912,10 @@ export class Runner {
         const core = await this.h.core(chat);
         const before = structuredClone(core.journal.messages[head.id]?.ledger);
         const tombstones = structuredClone(core.journal.tombstones);
+        const shown = head.swipeId;
         const g = await host.start(chat, { type: "swipe", messageId: head.id });
         await host.finish(g, op.opens !== undefined ? pick(OPENING_REPLIES, op.opens) : pick([...REPLIES, ...TOLL_REPLIES], op.reply));
-        await this.checkRerun(chat, head.id, g.swipeId, before, tombstones);
+        await this.checkRerun(chat, head.id, g.swipeId, before, tombstones, shown);
         return;
       }
       case "dryRun": {
@@ -967,7 +970,7 @@ export class Runner {
       case "inFlight": {
         const type = op.type < 0.6 ? "normal" : op.type < 0.85 ? "swipe" : "continue";
         let g: Generation;
-        let before: { ledger: MessageLedger | undefined; tombstones: Tombstone[] } | null = null;
+        let before: { ledger: MessageLedger | undefined; tombstones: Tombstone[]; shown: number } | null = null;
         if (type === "normal") {
           host.sendUser(chat, op.life !== undefined ? pick(LIFE_TEXTS, op.life) : pick(USER_TEXTS, op.reply));
           await host.settle();
@@ -976,7 +979,7 @@ export class Runner {
           const head = this.head();
           if (!head) return;
           const core = await this.h.core(chat);
-          if (type === "swipe") before = { ledger: structuredClone(core.journal.messages[head.id]?.ledger), tombstones: structuredClone(core.journal.tombstones) };
+          if (type === "swipe") before = { ledger: structuredClone(core.journal.messages[head.id]?.ledger), tombstones: structuredClone(core.journal.tombstones), shown: head.swipeId };
           g = await host.start(chat, { type, messageId: head.id });
         }
         // L5: the chain the plan saw, as the reference fold hashes it (L1 checks that hash independently).
@@ -1009,7 +1012,7 @@ export class Runner {
         const inForce = await parentOfTarget();
         const onPlan = changed && g.messageId ? await this.onPlannedChain(chat, g.messageId, plan, planned) : null;
         // A Re-run reads on the chain it was planned on while that still leads to its path, else on the one in force.
-        if (before && g.messageId && g.swipeId !== undefined) await this.checkRerun(chat, g.messageId, g.swipeId, before.ledger, before.tombstones, onPlan || !changed ? planned : inForce);
+        if (before && g.messageId && g.swipeId !== undefined) await this.checkRerun(chat, g.messageId, g.swipeId, before.ledger, before.tombstones, before.shown, onPlan || !changed ? planned : inForce);
         if (changed) {
           // An unplanned turn (under a pause) holds nothing made on the old chain; it commits where it lands.
           const target = this.messages().find((m) => m.id === g.messageId);
@@ -1031,7 +1034,7 @@ export class Runner {
         const head = this.head();
         if (type !== "normal" && !head) return;
         const core = await this.h.core(chat);
-        const before = type === "swipe" && head ? { ledger: structuredClone(core.journal.messages[head.id]?.ledger), tombstones: structuredClone(core.journal.tombstones) } : null;
+        const before = type === "swipe" && head ? { ledger: structuredClone(core.journal.messages[head.id]?.ledger), tombstones: structuredClone(core.journal.tombstones), shown: head.swipeId } : null;
         this.h.holdWrites(op.setting);
         // The engine run's pre phase, while the run holds the chat's queue: each write is made then,
         // and waits behind the run, so none is awaited there; and then an earlier reply's edit.
@@ -1077,7 +1080,7 @@ export class Runner {
           const reply = pick(REPLIES, op.reply);
           if (op.stop) await host.stop(g, reply.slice(0, 6));
           else await host.finish(g, reply);
-          if (before && head) await this.checkRerun(chat, head.id, g.swipeId, before.ledger, before.tombstones);
+          if (before && head) await this.checkRerun(chat, head.id, g.swipeId, before.ledger, before.tombstones, before.shown);
         }
         this.h.holdWrites(false);
         return;
@@ -1226,9 +1229,10 @@ export class Runner {
    * back to a Re-run only when the source can't be reproduced (no planned source, a pause, or a
    * `pre` event that no longer validates).
    */
-  private async checkRenarrate(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[]): Promise<void> {
+  private async checkRenarrate(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[], shown: number): Promise<void> {
     let source: Rec | undefined;
-    for (let s = swipeId - 1; s >= 0 && !source; s--) {
+    // Its source: the swipe that showed as its swipe was added, else the nearest before it holding a record.
+    for (let s = Math.min(shown, swipeId - 1); s >= 0 && !source; s--) {
       const rec = before?.swipes[String(s)];
       if (rec && !isTombstoned(tombstones, messageId, rec)) source = rec;
     }
@@ -1292,17 +1296,18 @@ export class Runner {
   }
 
   /**
-   * L43: a Re-run carries the live fixes of the swipe it was made from (the nearest earlier one
-   * holding a record): each is on the new record with its seq, events (less a materialization the new
-   * swipe already made) and undos, anchored at the record's path, or listed in its `dropped`; nothing
-   * else is copied. A GM edit or ✎ fix that keeps its request, none of it undone, is worked out again
-   * after the new turn (DESIGN §7): its copy keeps the request, with whatever events that gives (none
-   * when the new turn already made it so), and so does one that held none, already so on the source.
-   * A turn committed under a pause carries nothing.
+   * L43: a Re-run carries the live fixes of the swipe it was made from (the one that showed as its
+   * swipe was added, `shown`, else the nearest before it holding a record): each is on the new record
+   * with its seq, events (less a materialization the new swipe already made) and undos, anchored at
+   * the record's path, or listed in its `dropped`; nothing else is copied. A GM edit or ✎ fix that
+   * keeps its request, none of it undone, is worked out again after the new turn (DESIGN §7): its copy
+   * keeps the request, with whatever events that gives (none when the new turn already made it so),
+   * and so does one that held none, already so on the source. A turn committed under a pause carries
+   * nothing.
    */
-  private async checkRerun(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[], readOn?: string): Promise<void> {
+  private async checkRerun(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[], shown: number, readOn?: string): Promise<void> {
     let source: Rec | undefined;
-    for (let s = swipeId - 1; s >= 0 && !source; s--) {
+    for (let s = Math.min(shown, swipeId - 1); s >= 0 && !source; s--) {
       const rec = before?.swipes[String(s)];
       if (rec && !isTombstoned(tombstones, messageId, rec)) source = rec;
     }

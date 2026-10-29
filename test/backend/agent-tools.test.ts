@@ -41,17 +41,19 @@ function describes(node: unknown): boolean {
 /**
  * Where a schema holds what a Gemini connection refuses, at any depth: a node with no type of its
  * own (none, or a list of types), a union (`anyOf`, `oneOf`), or an object with no properties of its
- * own (a free-form one, whose keys only `additionalProperties` would name); the tool's own top level
- * may have none, as a tool that takes no argument does. Its nodes are the schema itself and each
- * property's, items' and additional properties' schema. The host's Gemini sanitizer (Lumiverse's
- * `sanitizeGeminiSchema`, outside this repository) only drops keys Gemini doesn't take,
- * `additionalProperties` among them, and keeps `properties`: what is checked here is what it sends.
+ * own (a free-form one, whose keys only `additionalProperties` would name, or one with none at all),
+ * the tool's own top level included: Gemini refuses a function whose parameters are an object of no
+ * properties ("parameters.properties: should be non-empty for OBJECT type"). Its nodes are the
+ * schema itself and each property's, items' and additional properties' schema. The host's Gemini
+ * sanitizer (Lumiverse's `sanitizeGeminiSchema`, outside this repository) only drops keys Gemini
+ * doesn't take, `additionalProperties` among them, and keeps `properties`: what is checked here is
+ * what it sends.
  */
 function geminiRefuses(node: unknown, at = "$"): string[] {
   if (typeof node !== "object" || node === null || Array.isArray(node)) return [`${at}: not a schema`];
   const n = node as JsonObject;
   const props = typeof n.properties === "object" && n.properties !== null && !Array.isArray(n.properties) ? n.properties : null;
-  const bare = n.type === "object" && (props === null || (at !== "$" && Object.keys(props).length === 0));
+  const bare = n.type === "object" && (props === null || Object.keys(props).length === 0);
   const own = [...(typeof n.type === "string" ? [] : [`${at}.type`]), ...["anyOf", "oneOf"].filter((key) => key in n).map((key) => `${at}.${key}`), ...(bare ? [`${at}.properties`] : [])];
   const properties = props !== null ? Object.entries(props).flatMap(([name, p]) => geminiRefuses(p, `${at}.properties.${name}`)) : [];
   const items = n.items !== undefined ? geminiRefuses(n.items, `${at}.items`) : [];
@@ -103,8 +105,8 @@ describe("the GM agent page lists exactly the tools", () => {
       "$.properties.params.properties",
       "$.properties.none.properties",
     ]);
-    // A tool's own top level may take no argument.
-    expect(geminiRefuses({ type: "object", properties: {} })).toEqual([]);
+    // Nor may a tool's own top level take no argument.
+    expect(geminiRefuses({ type: "object", properties: {} })).toEqual(["$.properties"]);
   });
 });
 
@@ -153,6 +155,30 @@ describe("a field's value", () => {
     expect(await set("role", "Owner and mechanic")).toMatchObject({ value: "Owner and mechanic" });
     // An age is a number, written as JSON.
     expect(await set("age", "53")).toMatchObject({ field: "age", value: 53 });
+  });
+});
+
+describe("an optional object argument sent blank", () => {
+  test("is left out, as a model that fills every text argument sends one it means to leave out; text that isn't a JSON object still says what it takes", async () => {
+    const { rig, chatId } = await alderChat();
+    const base = toolEnv(rig, chatId, "gm");
+    const { world } = await base.reader.view();
+    const tools = toolsFor({ world, tiers: ["read", "gm"], texts: {}, env: { ...base, writer: outsideWriter(rig.rt, { ...base, connectionId: null }) } });
+    const run = async (name: string, args: JsonObject) => {
+      const tool = tools.find((t) => t.name === name);
+      if (!tool) throw new Error(`no ${name}`);
+      return tool.run(args, { signal: new AbortController().signal, agentId: "agent_test", role: "assistant", callId: `call_${name}` });
+    };
+    const odds = await run("checks_odds", { action: "accept_fleet_job" });
+    expect(odds.error).toBeUndefined();
+    const effect = await run("gm_effect", { effect: "no_such_effect" });
+    for (const blank of ["", "  "]) {
+      expect(await run("checks_odds", { action: "accept_fleet_job", params: blank })).toEqual(odds);
+      expect(await run("gm_effect", { effect: "no_such_effect", args: blank })).toEqual(effect);
+    }
+    const needs = (tool: string, arg: string) => ({ text: renderPrompt(TOOL_NOTE.missing, {}, { tool, arg, text: promptDef(toolArgTextId(tool, arg))?.text ?? "" }), error: true as const });
+    expect(await run("checks_odds", { action: "accept_fleet_job", params: "the boat" })).toEqual(needs("checks_odds", "params"));
+    expect(await run("gm_effect", { effect: "no_such_effect", args: "[1]" })).toEqual(needs("gm_effect", "args"));
   });
 });
 

@@ -705,15 +705,17 @@ function rekey<V>(map: Map<string, V>, from: string, to: string): void {
 }
 
 /**
- * A Re-run's source (DESIGN §6.12): the swipe of its message it was made in place of, the nearest at
- * or before its own holding a live record, as a Re-narrate's source is found; none for a turn that
- * replaces no recorded one (a retried reply).
+ * A Re-run's source (DESIGN §6.12): the nearest swipe of its message holding a live record, at or
+ * before the one it was made from (`rerunOf`, the one that showed as its swipe was added, record or
+ * not) or, for a turn journaled without one, at or before its own; none for a turn that replaces no
+ * recorded one (a retried reply), and never a later swipe.
  */
 function rerunSource(core: LedgerCore, observed: readonly ChainMessage[], plan: PendingTurn): { messageId: MessageId; swipeId: number } | undefined {
   if (plan.messageId === null || plan.swipeId === null) return undefined;
   const target = core.chain(observed).find((m) => m.id === plan.messageId);
   if (!target) return undefined;
-  for (let s = plan.swipeId; s >= 0; s--) {
+  const from = plan.rerunOf?.messageId === target.id ? Math.min(plan.rerunOf.swipeId, plan.swipeId) : plan.swipeId;
+  for (let s = from; s >= 0; s--) {
     const rec = target.ledger?.swipes[String(s)];
     if (rec && !isTombstoned(core.journal.tombstones, target.id, rec)) return { messageId: target.id, swipeId: s };
   }

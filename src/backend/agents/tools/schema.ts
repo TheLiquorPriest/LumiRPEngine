@@ -113,8 +113,18 @@ export function jsonTextOf(text: string): JsonValue | undefined {
   }
 }
 
-/** An object argument, written as JSON text (`jsonObject`) or sent as itself; else null. */
+/**
+ * Whether an argument was given: one sent as blank text (a model that fills every text argument
+ * sends one it means to leave out so) counts as left out, as `textArg` reads it.
+ */
+export function argGiven(args: JsonObject, key: string): boolean {
+  const v = args[key];
+  return v !== undefined && !(typeof v === "string" && v.trim() === "");
+}
+
+/** An object argument, written as JSON text (`jsonObject`) or sent as itself; null when it is left out (`argGiven`) or isn't one. */
 export function objectArg(args: JsonObject, key: string): JsonObject | null {
+  if (!argGiven(args, key)) return null;
   const raw = args[key];
   const v = typeof raw === "string" ? jsonTextOf(raw) : raw;
   return isRecord(v) ? (v as JsonObject) : null;

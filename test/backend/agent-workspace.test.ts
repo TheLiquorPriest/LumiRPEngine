@@ -132,6 +132,160 @@ describe("a workspace note", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
+  test("follows a Regenerate made from the swipe it was written on even while the chat's queue is busy: the swipe that showed is taken in the order the swipes came", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const user = rig.host.userId;
+    await rig.turn(chatId, "I look around.", "The square is quiet.");
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The square is quiet still.");
+    rig.host.navigate(chatId, reply.id, 0);
+    await rig.host.settle();
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: SQUARE, text: SQUARE_TEXT }));
+    rig.host.navigate(chatId, reply.id, 1);
+    await rig.host.settle();
+    expect(await files(rig, chatId)).toEqual({});
+    // A reply's read and memory steps hold the chat's queue; meanwhile the player shows the first swipe
+    // again and regenerates, and the host's events arrive as they happen.
+    const free = Promise.withResolvers<void>();
+    const busy = rig.rt.ledger.with(chatId, user, () => free.promise);
+    rig.host.navigate(chatId, reply.id, 0);
+    rig.host.deliverNow();
+    // The Regenerate's swipe is added, and its event delivered, before its start waits for the backend.
+    const started = rig.host.start(chatId, { type: "regenerate" });
+    free.resolve();
+    await busy;
+    await rig.host.finish(await started, "The square wakes slowly.");
+    const made = rig.host.message(chatId, reply.id).swipeId;
+    expect(made).toBe(2);
+    expect(await files(rig, chatId)).toEqual({ [SQUARE]: blobHash(SQUARE_TEXT) });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("what the events told of a chat's shown swipes goes with its ledger when that is let go or the chat is deleted, and a Regenerate after the chat opens again is made from the swipe it last synced", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    await rig.turn(chatId, "I look around.", "The square is quiet.");
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The square is quiet still.");
+    rig.host.navigate(chatId, reply.id, 0);
+    await rig.host.settle();
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: SQUARE, text: SQUARE_TEXT }));
+    rig.host.navigate(chatId, reply.id, 1);
+    await rig.host.settle();
+    const shown = (rig.rt.ledger as unknown as { shown: Map<string, unknown> }).shown;
+    expect(shown.has(chatId)).toBe(true);
+    // The memory budget lets the chat's ledger go, and its shown swipes with it.
+    expect(rig.rt.ledger.trim(() => false)).toContain(chatId);
+    expect(shown.has(chatId)).toBe(false);
+    // Opened again by the first swipe's showing, whose event came before it: the Regenerate's source is the swipe the chat's sync saw.
+    rig.host.navigate(chatId, reply.id, 0);
+    await rig.host.settle();
+    await rig.host.finish(await rig.host.start(chatId, { type: "regenerate" }), "The square wakes slowly.");
+    expect(rig.host.message(chatId, reply.id).swipeId).toBe(2);
+    expect(await files(rig, chatId)).toEqual({ [SQUARE]: blobHash(SQUARE_TEXT) });
+    expect(shown.has(chatId)).toBe(true);
+    // A deleted chat's go too.
+    rig.host.deleteChat(chatId);
+    await rig.host.settle();
+    expect(shown.has(chatId)).toBe(false);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("follows a Regenerate made from its swipe however slowly the chat's ledger opens again: a showing that comes while it is let go is taken in order too", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    await rig.turn(chatId, "I look around.", "The square is quiet.");
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The square is quiet still.");
+    rig.host.navigate(chatId, reply.id, 0);
+    await rig.host.settle();
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: SQUARE, text: SQUARE_TEXT }));
+    rig.host.navigate(chatId, reply.id, 1);
+    await rig.host.settle();
+    expect(rig.rt.ledger.trim(() => false)).toContain(chatId);
+    // The chat's journal reads slowly as its ledger opens again; meanwhile the player shows the first
+    // swipe and regenerates, and the host's events arrive as they happen.
+    const read = rig.host.storage.read.bind(rig.host.storage);
+    const journal = Promise.withResolvers<void>();
+    rig.host.storage.read = async (path, userId) => {
+      if (path.includes("journal")) await journal.promise;
+      return read(path, userId);
+    };
+    rig.host.navigate(chatId, reply.id, 0);
+    rig.host.deliverNow();
+    const started = rig.host.start(chatId, { type: "regenerate" });
+    journal.resolve();
+    rig.host.storage.read = read;
+    await rig.host.finish(await started, "The square wakes slowly.");
+    expect(rig.host.message(chatId, reply.id).swipeId).toBe(2);
+    expect(await files(rig, chatId)).toEqual({ [SQUARE]: blobHash(SQUARE_TEXT) });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a Regenerate whose source swipe is deleted while it generates is made from the swipe below it, never from a later one", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    await rig.turn(chatId, "I look around.", "The square is quiet.");
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The square is quiet still.");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The square is very quiet.");
+    // The note is on the third swipe; the player shows the second, regenerates, and deletes the second meanwhile.
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: SQUARE, text: SQUARE_TEXT }));
+    rig.host.navigate(chatId, reply.id, 1);
+    await rig.host.settle();
+    expect(await files(rig, chatId)).toEqual({});
+    const g = await rig.host.start(chatId, { type: "regenerate" });
+    rig.host.deleteSwipe(chatId, reply.id, 1);
+    await rig.host.settle();
+    await rig.host.finish(g, "The square wakes slowly.");
+    // Made from the first swipe now, which has no note: the new swipe's record carries nothing, and the third's note stays there.
+    const shownNow = rig.host.message(chatId, reply.id).swipeId;
+    const made = (await rig.rt.ledger.core(chatId, rig.host.userId))?.journal.messages[reply.id]?.ledger.swipes[String(shownNow)];
+    expect(made?.post.filter((e) => e.agent !== undefined)).toEqual([]);
+    expect(await files(rig, chatId)).toEqual({});
+    rig.host.navigate(chatId, reply.id, 1);
+    await rig.host.settle();
+    expect(await files(rig, chatId)).toEqual({ [SQUARE]: blobHash(SQUARE_TEXT) });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("isn't carried from a later swipe by a Regenerate made from a swipe that holds no record", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld();
+    const chatId = rig.host.createChat("Morning, Sam.");
+    // The first reply is made before the world is attached: its swipe holds no record.
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    await rig.host.finish(await rig.host.start(chatId, { type: "normal" }), "The square is quiet.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    await rig.host.settle();
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The square is quiet still.");
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: SQUARE, text: SQUARE_TEXT }));
+    expect(await files(rig, chatId)).toEqual({ [SQUARE]: blobHash(SQUARE_TEXT) });
+    // Made from the first swipe, which has nothing to carry: the second swipe's note stays there.
+    for (const mode of ["rerun", "renarrate"] as const) {
+      rig.host.navigate(chatId, reply.id, 0);
+      await rig.host.settle();
+      expect(await files(rig, chatId)).toEqual({});
+      rig.rt.setSwipeChoice(chatId, mode);
+      await rig.host.finish(await rig.host.start(chatId, { type: "regenerate" }), `The square wakes (${mode}).`);
+      const message = rig.host.message(chatId, reply.id);
+      expect(message.swipeId).toBe(message.swipes.length - 1);
+      expect(await files(rig, chatId)).toEqual({});
+    }
+    rig.host.navigate(chatId, reply.id, 1);
+    await rig.host.settle();
+    expect(await files(rig, chatId)).toEqual({ [SQUARE]: blobHash(SQUARE_TEXT) });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
   test("is missing from a Branch made from before it, which keeps the chat's learned area as it stood: a file under learned/ lands at once in the chat's metadata, and no swipe changes it", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();

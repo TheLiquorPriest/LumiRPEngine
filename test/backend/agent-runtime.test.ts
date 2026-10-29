@@ -563,6 +563,65 @@ describe("the acceptance guard", () => {
     expect(stored()).toEqual([]);
   });
 
+  test("a damaged guard file, with settings that keep no copy of the guard, leaves it unknown: every agent call is refused, across a restart, until the user sets it again, and classic turns play", async () => {
+    const host = new FakeHost();
+    const { userId } = host;
+    const kept = [{ id: SONNET, only: true, tokensIn: 1000, tokensOut: 100 }];
+    // A build from before the agents wrote the settings; the runs' file is cut short.
+    host.files.set(`${userId}/settings.json`, JSON.stringify({ v: 1, minds: { enabled: false } }));
+    host.files.set(`${userId}/${ACCEPTANCE_PATH}`, JSON.stringify({ v: 1, run: null, last: null, connections: kept }).slice(0, 40));
+    const reserve = async (r: Rig, connection: string) => r.rt.agentAccounts.reserve({ userId, connection, model: "m", tokensIn: 10, tokensOut: 10, settings: (await r.rt.settings.get(userId)).agents, signal: new AbortController().signal });
+    const rig = new Rig({ host });
+    // The settings serve, unkept, so each read tries the guard again; no agent call goes, on any connection.
+    expect((await rig.rt.settings.get(userId)).agents.acceptance.connections).toEqual([]);
+    expect(rig.rt.settings.known(userId)).toBeUndefined();
+    await expect(reserve(rig, MAIN)).rejects.toMatchObject({ code: "acceptance" });
+    expect([...host.files.keys()].some((k) => k.startsWith(`${userId}/${ACCEPTANCE_PATH}.corrupt-`))).toBe(true);
+    const chatId = await rig.worldChat();
+    await rig.turn(chatId, "I look around.", "The street is quiet.");
+    expect((await rig.rt.diag.records(chatId, userId)).filter((r) => r.kind === "turn").at(-1)?.status).toBe("ok");
+    // The fresh file says the guard was lost, so a restart doesn't read it as none.
+    await rig.rt.agentAccounts.flushed(userId);
+    expect(JSON.parse(host.files.get(`${userId}/${ACCEPTANCE_PATH}`) ?? "{}")).toMatchObject({ lost: true });
+    const back = rig.restart();
+    await expect(reserve(back, MAIN)).rejects.toMatchObject({ code: "acceptance" });
+    // A settings change that leaves the guard as it reads writes no copy that would stand for it.
+    back.body(await back.send({ type: "lre.settings.set", patch: { agents: { loopRepeats: 4 } } }));
+    expect(back.rt.settings.known(userId)).toBeUndefined();
+    const again = back.restart();
+    await expect(reserve(again, MAIN)).rejects.toMatchObject({ code: "acceptance" });
+    // The user sets it again: it is known, and kept.
+    again.body(await again.send({ type: "lre.settings.set", patch: { agents: { acceptance: { connections: kept } } } }));
+    expect(again.rt.settings.known(userId)?.agents.acceptance.connections).toEqual(kept);
+    await expect(reserve(again, MAIN)).resolves.toMatchObject({ connection: MAIN });
+    await expect(reserve(again, SONNET)).rejects.toMatchObject({ code: "acceptance" });
+  });
+
+  test("a guard file that can't be read leaves the guard unknown while it can't: a classic turn plays, every agent call is refused, and once it reads the guard holds", async () => {
+    const rig = new Rig();
+    const { userId } = rig.host;
+    const chatId = await rig.worldChat();
+    const kept = [{ id: SONNET, only: true, tokensIn: 1000, tokensOut: 100 }];
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { acceptance: { connections: kept } } } }));
+    const back = rig.restart();
+    const read = back.host.storage.read.bind(back.host.storage);
+    let busy = true;
+    back.host.storage.read = async (path, user) => {
+      if (busy && path.startsWith(ACCEPTANCE_PATH)) throw new Error("storage busy");
+      return read(path, user);
+    };
+    const reserve = async (connection: string) => back.rt.agentAccounts.reserve({ userId, connection, model: "m", tokensIn: 10, tokensOut: 10, settings: (await back.rt.settings.get(userId)).agents, signal: new AbortController().signal });
+    await back.turn(chatId, "I look around.", "The street is quiet.");
+    expect((await back.rt.diag.records(chatId, userId)).filter((r) => r.kind === "turn").at(-1)?.status).toBe("ok");
+    expect(back.rt.settings.known(userId)).toBeUndefined();
+    await expect(reserve(MAIN)).rejects.toMatchObject({ code: "acceptance" });
+    busy = false;
+    expect((await back.rt.settings.get(userId)).agents.acceptance.connections).toEqual(kept);
+    expect(back.rt.settings.known(userId)).toBeDefined();
+    await expect(reserve(MAIN)).resolves.toMatchObject({ connection: MAIN });
+    await expect(reserve(SONNET)).rejects.toMatchObject({ code: "acceptance" });
+  });
+
   test("a Model Roulette is refused while any connection it may send the call on is guarded, and goes once none is", async () => {
     const ROULETTE = "conn-roulette";
     const r = rig(["Fine."], guarded());

@@ -5,7 +5,7 @@
 import { gmEdit, missing, needId, propose } from "../propose";
 import type { ToolDefinition } from "../registry";
 import { resolveEntity } from "../resolve";
-import { integer, intArg, jsonObject, needText, objectArg, objectSchema, text } from "../schema";
+import { argGiven, integer, intArg, jsonObject, needText, objectArg, objectSchema, text } from "../schema";
 
 export const MONEY_WRITES: readonly ToolDefinition[] = [
   {
@@ -32,7 +32,7 @@ export const MONEY_WRITES: readonly ToolDefinition[] = [
       const effect = needText(view, "gm_effect", args, "effect");
       if (typeof effect !== "string") return effect;
       const given = objectArg(args, "args");
-      if (args.args !== undefined && given === null) return missing(view, "gm_effect", "args");
+      if (argGiven(args, "args") && given === null) return missing(view, "gm_effect", "args");
       return propose(view, env.writer, gmEdit({ op: "effect", effect, args: given ?? {} }));
     },
   },

@@ -274,7 +274,7 @@ function isPendingTurn(p: unknown): boolean {
   if (![p.userMessages, p.rerendered].every((m) => isRecord(m) && Object.values(m).every(isContent))) return false;
   if (p.continueHead !== undefined && typeof p.continueHead !== "string") return false;
   if (p.captured !== undefined && !isContent(p.captured)) return false;
-  if (p.renarrateOf !== undefined && !(isRecord(p.renarrateOf) && typeof p.renarrateOf.messageId === "string" && isInt(p.renarrateOf.swipeId))) return false;
+  for (const source of [p.renarrateOf, p.rerunOf]) if (source !== undefined && !(isRecord(source) && typeof source.messageId === "string" && isInt(source.swipeId))) return false;
   if (p.undone !== undefined && !isRefs(p.undone)) return false;
   if (p.prompts !== undefined && typeof p.prompts !== "string") return false;
   return [p.copies, p.dropped].every((list) => list === undefined || (Array.isArray(list) && list.every(isRecord)));
@@ -658,6 +658,17 @@ export class LedgerService {
    */
   private readonly unbumped = new Set<string>();
   private guarding = 0;
+  /**
+   * Each reply's shown swipe as the chat's events told it, in their order, by chat and then message.
+   * When a swipe is added, the one that showed is the one it is made from (P3, L43), handed to the
+   * core with the event's operation: by the time the chat's queue reaches it (a reply's read can hold
+   * the queue for seconds), the chat may already show the new swipe. Kept only for the chats whose
+   * ledger is in memory or opening (an event's operation opens it before its swipe is noted, so one
+   * that comes while it is let go counts too), let go with it (`unload`), when an open ends without it,
+   * or when the chat is deleted: a reply no event has told of since falls back to the swipe the
+   * chat's syncs last saw (`LedgerCore.noteAdded`).
+   */
+  private readonly shown = new Map<ChatId, Map<MessageId, number>>();
 
   constructor(
     private readonly host: HostPort,
@@ -676,20 +687,27 @@ export class LedgerService {
       h.on("MESSAGE_SENT", (e, userId) => {
         this.mirror(e.chatId, e.message);
         this.onMessage(e.chatId, userId, e.message.id, "sent");
+        this.show(e.chatId, e.message);
       }),
       h.on("MESSAGE_EDITED", (e, userId) => {
         this.mirror(e.chatId, e.message);
-        if (this.lateReply(e.chatId, userId, e.message)) return;
-        this.onMessage(e.chatId, userId, e.message.id, "edited");
+        if (!this.lateReply(e.chatId, userId, e.message)) this.onMessage(e.chatId, userId, e.message.id, "edited");
+        this.show(e.chatId, e.message);
       }),
       h.on("MESSAGE_SWIPED", (e, userId) => {
+        const from = e.action === "added" ? this.shown.get(e.chatId)?.get(e.message.id) : undefined;
         this.mirror(e.chatId, e.message);
-        if (e.action === "updated" && e.swipeId === e.message.swipeId && this.lateReply(e.chatId, userId, e.message)) return;
-        this.onSwiped(e.chatId, userId, e.message.id, e.action, e.swipeId);
+        if (!(e.action === "updated" && e.swipeId === e.message.swipeId && this.lateReply(e.chatId, userId, e.message))) this.onSwiped(e.chatId, userId, e.message.id, e.action, e.swipeId, from);
+        // After its operation started: a chat whose ledger was let go is opening again by now.
+        this.show(e.chatId, e.message);
       }),
       h.on("MESSAGE_DELETED", (e, userId) => {
+        this.shown.get(e.chatId)?.delete(e.messageId);
         this.unmirror(e.chatId, e.messageId);
         this.onMessage(e.chatId, userId, e.messageId, "deleted");
+      }),
+      h.on("CHAT_DELETED", (e) => {
+        this.shown.delete(e.chatId);
       }),
       h.on("GENERATION_STARTED", (e, userId) => {
         this.generating.add(e.generationId);
@@ -1434,10 +1452,13 @@ export class LedgerService {
       }
       const target = halt.target ? observed.find((m) => m.id === halt.target) : undefined;
       // A stopped Regenerate or swipe leaves its blank swipe (the frontend that started a swipe
-      // removes it too, the same last swipe); the restart adds the new one in its place.
+      // removes it too, the same last swipe); the restart adds the new one in its place. The swipe
+      // that showed as it was added shows again: the turn is made from it (P3, L43), and the
+      // restart adds its swipe from it as the Regenerate did.
       const blank = target !== undefined && target.swipes.length > 1 && target.swipes.at(-1) === "";
       if (target && blank) {
-        await this.host.chats.setSwipes(chatId, target.id, target.swipes.slice(0, -1), Math.min(target.swipeId, target.swipes.length - 2), userId).catch((error: unknown) => this.diag?.error(at, "restart", error, "the stopped Regenerate's empty swipe stays"));
+        const shown = core.addedSwipeFrom(target.id, target.swipes.length - 1) ?? Math.min(target.swipeId, target.swipes.length - 2);
+        await this.host.chats.setSwipes(chatId, target.id, target.swipes.slice(0, -1), shown, userId).catch((error: unknown) => this.diag?.error(at, "restart", error, "the stopped Regenerate's empty swipe stays"));
       }
       const head = observed.findLast((m) => !m.isUser);
       const swipeId = target ? target.swipes.length - (blank ? 1 : 0) : halt.type === "continue" ? (head?.swipeId ?? null) : 0;
@@ -1563,6 +1584,14 @@ export class LedgerService {
     if (this.inFlight.get(chatId) === flight) this.inFlight.delete(chatId);
   }
 
+  /** A reply event's message: the swipe it shows now, in the events' order (`shown`), for a chat whose ledger is in memory or opening. */
+  private show(chatId: ChatId, message: HostMessage): void {
+    if (message.isUser || !(this.chats.has(chatId) || this.opening.has(chatId))) return;
+    const replies = this.shown.get(chatId) ?? new Map<MessageId, number>();
+    replies.set(message.id, message.swipeId);
+    this.shown.set(chatId, replies);
+  }
+
   /** A message event's message, into the chat's mirror: the guard's chain (DESIGN §5.1). */
   private mirror(chatId: ChatId, message: HostMessage): void {
     const list = this.gates.get(chatId)?.mirror;
@@ -1654,9 +1683,15 @@ export class LedgerService {
     return prepared?.turn && prepared.generationId !== null && !adopted ? core.renderPlanned(observed, prepared.turn) : core.renderState(observed);
   }
 
+  /** Lets a chat's ledger go from memory, with what the events told of its replies' shown swipes (`shown`); it opens again from its journal and snapshots. */
+  private unload(chatId: ChatId): void {
+    this.chats.delete(chatId);
+    this.shown.delete(chatId);
+  }
+
   /** Drops a chat's cached slot, guard state and copy of its messages (after attaching a world, or detaching one); a turn it prepared gives its entries back. */
   forget(chatId: ChatId): void {
-    this.chats.delete(chatId);
+    this.unload(chatId);
     for (const key of [...this.notWorld]) if (key.endsWith(`\u0000${chatId}`)) this.notWorld.delete(key);
     this.forgetMessages(chatId);
     const gate = this.gates.get(chatId);
@@ -1734,7 +1769,7 @@ export class LedgerService {
     const gone: ChatId[] = [];
     for (const id of [...this.chats.keys()]) {
       if (keep(id) || this.busy(id)) continue;
-      this.chats.delete(id);
+      this.unload(id);
       gone.push(id);
     }
     return gone;
@@ -1779,10 +1814,12 @@ export class LedgerService {
     });
   }
 
-  private onSwiped(chatId: ChatId, userId: UserId | null, messageId: MessageId, action: string, swipeId: number): void {
+  /** `from`: on `added`, the swipe that showed as it was added, as the events told it (`shown`); undefined when none had told it since the backend started. */
+  private onSwiped(chatId: ChatId, userId: UserId | null, messageId: MessageId, action: string, swipeId: number, from?: number): void {
     void this.run(chatId, userId, (core, observed) => {
       if (action === "updated") this.markSaved(core, observed, messageId, "edited");
       core.sync(observed, action === "deleted" ? { messageId, swipeId } : undefined);
+      if (action === "added" && from !== undefined) core.swipeAdded(messageId, swipeId, from);
     });
   }
 
@@ -1850,7 +1887,7 @@ export class LedgerService {
       for (const [id, s] of this.chats) {
         if (this.chats.size <= OPEN_CHATS_CAP && chars <= OPEN_CHATS_CHARS) break;
         if (id === chatId || this.busy(id)) continue;
-        this.chats.delete(id);
+        this.unload(id);
         chars -= s.chars.journal + s.chars.snapshots;
       }
       return slot;
@@ -1860,6 +1897,8 @@ export class LedgerService {
       return await open;
     } finally {
       this.opening.delete(chatId);
+      // An open that ends without the chat's ledger (not a world chat, or it failed) lets go of what its events noted meanwhile.
+      if (!this.chats.has(chatId)) this.shown.delete(chatId);
     }
   }
 

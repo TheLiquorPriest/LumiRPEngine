@@ -584,7 +584,8 @@ function marker(rt: Runtime, ctx: Ctx, state: Readonly<WorldState>): (text: stri
 function refused(rt: Runtime, ctx: Ctx, knowledge: AgentKnowledge, rejection: Rejection, key: string): OpRefusal {
   if (knowledge === "gm") return refusal(rejection.code, rejection.gm ?? rejection.reason, key);
   if (knowledge === "everyone") return refusal(rejection.code, marker(rt, ctx, ctx.head.state)(rejection.gm ?? rejection.reason), key);
-  return refusal("refused", ctx.view.text(WRITE_NOTE.povRefused, { pov: ctx.view.name(ctx.view.pov) }), key);
+  // Under `pov` every reason is the same note, and every code `refused`, but a write refused for when it came (`WRITE_REFUSED`), which tells nothing of the world: that one may be applied again.
+  return refusal(rejection.code === WRITE_REFUSED ? WRITE_REFUSED : "refused", ctx.view.text(WRITE_NOTE.povRefused, { pov: ctx.view.name(ctx.view.pov) }), key);
 }
 
 /** What an operation's events change, in plain words, as the agent's knowledge may have them; `after` is the state they leave, which names whom they bring in. A workspace change reads as the GM's line of it under every knowledge: its paths are the agents' own names. */

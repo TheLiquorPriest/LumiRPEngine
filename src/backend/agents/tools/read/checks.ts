@@ -28,7 +28,7 @@ import type { ToolDefinition } from "../registry";
 import type { ToolReadView, ViewRef } from "../read-view";
 import { type Resolved, resolveEntity, resolvePerson, resolvePlace } from "../resolve";
 import { missing } from "../propose";
-import { actionEnum, badValue, jsonObject, needText, objectArg, objectSchema, text, textArg } from "../schema";
+import { actionEnum, argGiven, badValue, jsonObject, needText, objectArg, objectSchema, text, textArg } from "../schema";
 
 const ODDS = "checks_odds";
 
@@ -163,7 +163,7 @@ export const CHECKS_TOOLS: readonly ToolDefinition[] = [
       if (!action) return badValue(view, ODDS, "action", said, actions.map((a) => a.id).sort());
       const params: JsonObject = {};
       const given = objectArg(args, "params");
-      if (args.params !== undefined && given === null) return missing(view, ODDS, "params");
+      if (argGiven(args, "params") && given === null) return missing(view, ODDS, "params");
       for (const [name, value] of Object.entries(given ?? {})) {
         const v = paramValue(view, own(action.params, name), value);
         if ("refused" in v) return v.refused;

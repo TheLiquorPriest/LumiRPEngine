@@ -29,6 +29,7 @@ import type { PromptTexts } from "../../shared/prompts";
 import type { ReasoningChoice } from "../../shared/settings";
 import { tokensOf } from "../book";
 import type { HostConnectionProfile, HostPort, QuietMessage, QuietPart, QuietResult, QuietThinkingBlock, QuietTool } from "../host";
+import type { GuardRead } from "../settings-store";
 import { readStoredJson } from "../stored-json";
 import { isToolRefusal } from "../steps";
 import { renderPrompt } from "../prompts";
@@ -362,7 +363,9 @@ export const SYSTEM_CLOCK: AccountsClock = {
 /**
  * Where each user's acceptance runs are kept (`userStorage/agent-acceptance.json`), and the
  * connections they guard: kept here, not only in the settings file, so a build from before the agents
- * (Increment 0), whose settings writes keep only its own keys, never drops the guard.
+ * (Increment 0), whose settings writes keep only its own keys, never drops the guard. A damaged file
+ * is set aside, and the fresh one says the guard was lost (`lost`) until a list is kept again: till
+ * then which connections are guarded is unknown, and every agent call is refused.
  */
 export const ACCEPTANCE_PATH = "agent-acceptance.json";
 
@@ -381,6 +384,10 @@ interface UserAccounts {
   last: StoredRun | null;
   /** The connections acceptance runs guard, as this file keeps them; undefined until the settings' list moves here. */
   guard: AcceptanceConnection[] | undefined;
+  /** The file was damaged and set aside, and no list was kept since (`lost` in the fresh file, so a restart knows it too): which connections are guarded is unknown, and every agent call is refused. */
+  lost: boolean;
+  /** It was set aside as this extension read it, and no read of the guard has taken that in yet: only then may the settings' own copy of the list stand for it, since one written while the guard was unknown says nothing. */
+  setAside: boolean;
   /** What calls in flight hold, per connection. */
   held: Map<string, { tokensIn: number; tokensOut: number }>;
   /** Each connection's requests in the last minute: when, and their tokens. */
@@ -464,10 +471,13 @@ export class AgentAccounts {
     const pending = this.loading.get(userId);
     if (pending) return pending;
     const load = (async () => {
-      const raw = await readStoredJson(this.host, ACCEPTANCE_PATH, userId, "acceptance runs", (r) => isRecord(r) && r.v === 1);
+      let damaged = false;
+      const raw = await readStoredJson(this.host, ACCEPTANCE_PATH, userId, "acceptance runs", (r) => isRecord(r) && r.v === 1, () => (damaged = true));
       const file = isRecord(raw) ? raw : {};
-      const u: UserAccounts = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, held: new Map(), window: new Map(), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve() };
+      const u: UserAccounts = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map(), window: new Map(), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve() };
       this.users.set(userId, u);
+      // The fresh file says the guard was lost, so a restart doesn't read the missing file as no guard.
+      if (damaged) void this.save(userId, u);
       return u;
     })().finally(() => this.loading.delete(userId));
     this.loading.set(userId, load);
@@ -476,7 +486,7 @@ export class AgentAccounts {
 
   /** Writes the user's file after the writes before it; the promise is this write's, failing when it does, while later writes go on. */
   private save(userId: UserId, u: UserAccounts): Promise<void> {
-    const text = JSON.stringify({ v: 1, run: u.run, last: u.last, ...(u.guard !== undefined ? { connections: u.guard } : {}) });
+    const text = JSON.stringify({ v: 1, run: u.run, last: u.last, ...(u.guard !== undefined ? { connections: u.guard } : {}), ...(u.lost ? { lost: true } : {}) });
     const write = u.writing.then(async () => {
       await this.host.storage.write(`${ACCEPTANCE_PATH}.tmp`, text, userId);
       await this.host.storage.move(`${ACCEPTANCE_PATH}.tmp`, ACCEPTANCE_PATH, userId);
@@ -490,22 +500,43 @@ export class AgentAccounts {
     await (this.users.get(userId)?.writing ?? Promise.resolve());
   }
 
-  /** The connections acceptance runs guard, as this file keeps them (`SettingsStore` reads them from here); undefined until a list was kept. */
-  async guard(userId: UserId): Promise<AcceptanceConnection[] | undefined> {
-    return (await this.user(userId)).guard?.map((c) => ({ ...c }));
+  /**
+   * The connections acceptance runs guard, as this file keeps them (`SettingsStore` reads them from
+   * here): undefined until a list was kept; whether the file was lost, and whether that was found as
+   * it was read, which only the first read is told. Throws when the file can't be read.
+   */
+  async guard(userId: UserId): Promise<GuardRead> {
+    const u = await this.user(userId);
+    const setAside = u.setAside;
+    u.setAside = false;
+    return { connections: u.guard?.map((c) => ({ ...c })), lost: u.lost, setAside };
   }
 
-  /** Keeps the connections acceptance runs guard, beside the runs, once written; a write that fails leaves the list as it was, and says so. */
+  /** Keeps the connections acceptance runs guard, beside the runs, once written, so a lost guard is known again; a write that fails leaves it as it was, and says so. */
   async keepGuard(userId: UserId, connections: readonly AcceptanceConnection[]): Promise<void> {
     const u = await this.user(userId);
-    const was = u.guard;
+    const was = { guard: u.guard, lost: u.lost, setAside: u.setAside };
     u.guard = connections.map((c) => ({ ...c }));
+    u.lost = false;
+    u.setAside = false;
     try {
       await this.save(userId, u);
     } catch (error) {
-      u.guard = was;
+      Object.assign(u, was);
       throw error;
     }
+  }
+
+  /** The user's accounts for a call, refused (`acceptance`) while which connections the runs guard is unknown: the file can't be read, or it was lost. */
+  private async guarded(userId: UserId): Promise<UserAccounts> {
+    let u: UserAccounts;
+    try {
+      u = await this.user(userId);
+    } catch (error) {
+      throw new AgentStop("acceptance", `the acceptance runs' file couldn't be read (${error instanceof Error ? error.message : String(error)}), so which connections they guard isn't known: no agent call goes until it can be read`);
+    }
+    if (u.lost) throw new AgentStop("acceptance", "the acceptance runs' file was damaged and set aside, and your settings kept no copy of the connections they guard, so which they guard isn't known: no agent call goes until you set them again in Settings → Agents → Acceptance runs");
+    return u;
   }
 
   private view(run: StoredRun, u: UserAccounts, settings: Readonly<AgentSettings>): AcceptanceRunView {
@@ -581,16 +612,18 @@ export class AgentAccounts {
 
   /**
    * Holds a call's tokens on its connection (null: the default connection, which couldn't be told)
-   * before it is sent: the acceptance guard, the throttle, then the run's ceilings. A Model Roulette
+   * before it is sent: the acceptance guard, the throttle, then the run's ceilings. While which
+   * connections the runs guard is unknown (`guarded`) every call is refused. A Model Roulette
    * connection sends the call on one of its connections (`targets`), picked by the host at random,
    * so the guard refuses it while any of them is guarded; a connection that couldn't be read (null
    * `targets`) might be one, so while a connection is kept for acceptance runs it is refused too, as
-   * the default one is. Throws an `AgentStop` when it may not go.
+   * the default one is. The guard is the list the runs' file keeps, else the settings'. Throws an
+   * `AgentStop` when it may not go.
    */
   async reserve(input: { userId: UserId; connection: string | null; targets?: readonly string[] | null; model: string; tokensIn: number; tokensOut: number; settings: Readonly<AgentSettings>; signal: AbortSignal }): Promise<Reservation> {
     const { userId, settings } = input;
-    const u = await this.user(userId);
-    const guarded = settings.acceptance.connections;
+    const u = await this.guarded(userId);
+    const guarded = u.guard ?? settings.acceptance.connections;
     if (input.connection === null && guarded.some((c) => c.only)) throw new AgentStop("acceptance", "the call's connection is the default one, which couldn't be read, and a connection is kept for acceptance runs: it might be that one");
     const connection = input.connection ?? "";
     if (input.targets === null && guarded.some((c) => c.only)) throw new AgentStop("acceptance", `connection ${connection} couldn't be read, and a connection is kept for acceptance runs: it might be a Model Roulette that sends the call on that one`);

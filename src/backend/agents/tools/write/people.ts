@@ -11,7 +11,7 @@ import { BOOLEAN, boolArg, fieldValueArg, gmEdit, JSON_VALUE, missing, needId, N
 import type { ToolReadView } from "../read-view";
 import type { ToolDefinition } from "../registry";
 import { type Resolved, resolveEntity, resolvePerson, resolvePlace } from "../resolve";
-import { badValue, fieldEnum, jsonObject, kindEnum, needText, objectArg, objectSchema, schemaWorld, text, textArg } from "../schema";
+import { argGiven, badValue, fieldEnum, jsonObject, kindEnum, needText, objectArg, objectSchema, schemaWorld, text, textArg } from "../schema";
 
 /** The world's tier ids, lowest first. */
 function tierIds(world: Pick<WorldDoc, "tiers">): string[] {
@@ -197,7 +197,7 @@ export const PEOPLE_WRITES: readonly ToolDefinition[] = [
       const to = needId(view, "gm_link", args, "to", relationEnd);
       if (typeof to !== "string") return to;
       const fields = objectArg(args, "fields");
-      if (args.fields !== undefined && fields === null) return missing(view, "gm_link", "fields");
+      if (argGiven(args, "fields") && fields === null) return missing(view, "gm_link", "fields");
       const until = args.until;
       return propose(view, env.writer, gmEdit({ op: "link", rel, from, to, ...(fields !== null ? { fields } : {}), ...(typeof until === "number" ? { until } : {}) }));
     },

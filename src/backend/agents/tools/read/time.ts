@@ -1,11 +1,11 @@
 // The time family (AGENT-LOOP-PLAN §6; INC1-SPEC R3a): the clock, and a person's day.
 //
 // - `time_clock` reads the clock as the HUD and the calendar renderer do: the date and time in the
-//   world's calendar, local to where the player character is, the part of the day, today's
-//   holidays, and whether the clock is paused for the scene (`clockPaused`). Under `pov` only as far
-//   as the player character's Calendar & time level lets Play show it (the calendar renderer's
-//   gate): nothing at 0, the part of the day alone at 1, the date and time from 2, local time from
-//   3, holidays at 4.
+//   world's calendar, local to the place asked about, else to where the player character is, the
+//   part of the day, that day's holidays, and whether the clock is paused for the scene
+//   (`clockPaused`). Under `pov` only as far as the player character's Calendar & time level lets
+//   Play show it (the calendar renderer's gate): nothing at 0, the part of the day alone at 1, the
+//   date and time from 2, local time from 3, holidays at 4; and only of a place it may name.
 // - `time_day` reads a person's day. Under `pov` only as Play's Cast shows it (`routinePlayerView`:
 //   today, of someone with the player character, with no place, company or GM change, a private
 //   block or a restricted agenda's step read as "Busy"); any other day, or someone Cast shows no day
@@ -25,8 +25,8 @@ import type { EntityId } from "../../../../shared/ids";
 import type { BlockOrigin, LaidBlock, PlayerBlock } from "../../../../shared/routines";
 import type { ToolDefinition } from "../registry";
 import type { Secrecy, ToolReadView, ViewRef } from "../read-view";
-import { resolvePerson } from "../resolve";
-import { badValue, intArg, integer, needText, objectSchema, text } from "../schema";
+import { resolvePerson, resolvePlace } from "../resolve";
+import { badValue, intArg, integer, needText, objectSchema, placeEnum, text, textArg } from "../schema";
 
 const CLOCK = "time_clock";
 const DAY = "time_day";
@@ -38,7 +38,7 @@ export function clockWords(view: ToolReadView, at: number): string {
 
 /** The clock as `time_clock` gives it; under `pov` each part only from the Calendar & time level Play shows it at. */
 interface ClockAnswer {
-  /** The date and time, local to where the player character is. */
+  /** The date and time, local to the place asked about (where the player character is, when none was). */
   time?: string;
   /** The clock as the engine counts it: minutes since the world's epoch. */
   minutes?: number;
@@ -50,15 +50,15 @@ interface ClockAnswer {
   paused: boolean;
 }
 
-/** The clock now; null under `pov` when the player character's Calendar & time is off. */
-function clockAnswer(view: ToolReadView): ClockAnswer | null {
+/** The clock now, local to `place`; null under `pov` when the player character's Calendar & time is off. */
+function clockAnswer(view: ToolReadView, place: string | null): ClockAnswer | null {
   const { world, state } = view;
   // Under `pov`, the calendar renderer's gate: what the player character's Calendar & time level shows.
   const level = view.knowledge === "pov" ? view.ctx.levelOf(view.pov, "calendar") : null;
   const shows = (from: number): boolean => level === null || level >= from;
   if (!shows(1)) return null;
   const cal = calendarOf(world);
-  const offset = shows(3) ? placeOffset(world, state.clock, placeOfEntity(state, view.pov)) : 0;
+  const offset = shows(3) ? placeOffset(world, state.clock, place) : 0;
   return {
     time: shows(2) ? formatClock(cal, state.clock, offset) : undefined,
     minutes: shows(2) ? state.clock : undefined,
@@ -140,11 +140,17 @@ export const TIME_TOOLS: readonly ToolDefinition[] = [
     name: CLOCK,
     family: "time",
     tier: "read",
-    parameters: () => objectSchema({}),
-    run: async (_args, env) => {
+    // Under `pov` the world as the agent may name it holds no places (`schemaWorld`): the place is a free name, resolved among those it may name.
+    parameters: (world) => objectSchema({ place: text(placeEnum(world)) }),
+    run: async (args, env) => {
       const view = await env.reader.view();
-      const answer = view.read(() => clockAnswer(view));
-      return answer ? view.answer(answer) : view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
+      const said = textArg(args, "place");
+      return view.read(() => {
+        const r = said === null ? { id: placeOfEntity(view.state, view.pov) } : resolvePlace(view, said);
+        if ("refused" in r) return r.refused;
+        const answer = clockAnswer(view, r.id);
+        return answer ? view.answer(answer) : view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
+      });
     },
   },
   {

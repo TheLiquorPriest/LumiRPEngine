@@ -11,9 +11,10 @@ export const CORRUPT_SUFFIX = ".corrupt-";
 
 /**
  * The parsed file when it exists and `valid` accepts it; `undefined` when it is missing, or when it
- * is damaged (then it has been set aside). `what` names it in the warning.
+ * is damaged (then it has been set aside, and `damaged` is told, for a caller to whom a lost file
+ * isn't a fresh one). `what` names it in the warning. A file that can't be read at all throws.
  */
-export async function readStoredJson(host: Pick<HostPort, "storage" | "log">, path: string, userId: UserId, what: string, valid: (raw: unknown) => boolean): Promise<unknown> {
+export async function readStoredJson(host: Pick<HostPort, "storage" | "log">, path: string, userId: UserId, what: string, valid: (raw: unknown) => boolean, damaged?: () => void): Promise<unknown> {
   const text = await host.storage.read(path, userId);
   if (text === null) return undefined;
   let raw: unknown;
@@ -21,10 +22,12 @@ export async function readStoredJson(host: Pick<HostPort, "storage" | "log">, pa
     raw = JSON.parse(text);
   } catch {
     await setAside(host, path, userId, what, "unreadable");
+    damaged?.();
     return undefined;
   }
   if (valid(raw)) return raw;
   await setAside(host, path, userId, what, "malformed");
+  damaged?.();
   return undefined;
 }
 

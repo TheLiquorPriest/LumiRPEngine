@@ -123,6 +123,15 @@ function contSeed(seed: string, seq: number): string {
 export class LedgerCore {
   /** Whether this open has checked the starting markers against the chain's stored paths (`restoreStartMarkers`). */
   private startsChecked = false;
+  /**
+   * Per reply, the swipe that showed as a new one was added at its end: the swipe a Re-run or a
+   * Re-narrate started then is made from (P3, L43). The host's events tell it in their order
+   * (`swipeAdded`); without them, the syncs do (`noteAdded`). Kept while the chat is open; a turn
+   * keeps its source from its start (`PendingTurn.rerunOf`).
+   */
+  private readonly addedFrom = new Map<MessageId, { swipe: number; from: number }>();
+  /** Each reply's shown swipe and its number of swipes as the last sync saw them, whatever a turn in flight keeps of it in the snapshot (`noteAdded`). */
+  private seen = new Map<MessageId, { swipeId: number; count: number }>();
 
   constructor(
     public journal: Journal,
@@ -211,7 +220,10 @@ export class LedgerCore {
   sync(observed: readonly ChainMessage[], deletedSwipe?: { messageId: MessageId; swipeId: number }): void {
     const j = this.journal;
     if (j.chain.length === 0 && Object.keys(j.messages).length === 0) this.bootstrap(observed);
-    if (deletedSwipe) this.shiftSwipes(deletedSwipe.messageId, deletedSwipe.swipeId);
+    if (deletedSwipe) {
+      this.shiftSwipes(deletedSwipe.messageId, deletedSwipe.swipeId);
+      this.addedFrom.delete(deletedSwipe.messageId);
+    }
     if (!this.startsChecked) {
       this.startsChecked = true;
       this.restoreStartMarkers(observed);
@@ -219,7 +231,39 @@ export class LedgerCore {
     // Removals: live markers move to the nearest surviving earlier assistant message (DESIGN §4.3, L19).
     const now = new Set(observed.map((m) => m.id));
     for (const [index, old] of j.chain.entries()) if (!now.has(old.id)) this.moveMarkersOnDelete(old, index, observed);
+    this.noteAdded(observed);
     this.classify(observed);
+  }
+
+  /**
+   * A swipe added at the end of a reply and shown, against the reply as the last sync saw it (as the
+   * snapshot has it, when this open hasn't seen it yet): the swipe that showed before it is the one a
+   * Re-run or a Re-narrate started now is made from (P3, L43). A Regenerate adds its swipe last
+   * whichever swipe showed, so that needn't be the one before it. A sync reads the chat when the
+   * queue reaches it, so a swipe shown and another added since the last one are read together: the
+   * swipe events, in their own order, say better (`swipeAdded`), and their word stands.
+   */
+  private noteAdded(observed: readonly ChainMessage[]): void {
+    const snapshot = new Map(this.journal.chain.map((e) => [e.id, { swipeId: e.swipeId, count: e.swipeCount }]));
+    const seen = new Map<MessageId, { swipeId: number; count: number }>();
+    for (const m of observed) {
+      if (m.isUser) continue;
+      seen.set(m.id, { swipeId: m.swipeId, count: m.swipes.length });
+      const prev = this.seen.get(m.id) ?? snapshot.get(m.id);
+      if (prev && m.swipes.length === prev.count + 1 && m.swipeId === m.swipes.length - 1 && prev.swipeId < prev.count) this.addedFrom.set(m.id, { swipe: m.swipeId, from: prev.swipeId });
+    }
+    this.seen = seen;
+  }
+
+  /** The host's event added `swipe` to reply `messageId` while `from` showed, as the events told it in their order: the swipe a Re-run or a Re-narrate started now is made from. */
+  swipeAdded(messageId: MessageId, swipe: number, from: number): void {
+    if (from >= 0 && from < swipe) this.addedFrom.set(messageId, { swipe, from });
+  }
+
+  /** The swipe that showed as `swipe`, the last of reply `messageId`, was added; undefined when that isn't known. */
+  addedSwipeFrom(messageId: MessageId, swipe: number): number | undefined {
+    const added = this.addedFrom.get(messageId);
+    return added?.swipe === swipe ? added.from : undefined;
   }
 
   /**
@@ -377,6 +421,12 @@ export class LedgerCore {
         if (source === GONE_SWIPE) delete p.renarrateOf;
         else p.renarrateOf.swipeId = source;
       }
+      // A Re-run whose source is deleted is made from the swipe below it, and from none (-1: it
+      // carries nothing) when that was the first: never from a later swipe.
+      if (p.rerunOf?.messageId === messageId) {
+        const source = shift(p.rerunOf.swipeId);
+        p.rerunOf.swipeId = source === GONE_SWIPE ? deleted - 1 : source;
+      }
     }
     const jm = this.journal.messages[messageId];
     if (!jm) return;
@@ -508,15 +558,22 @@ export class LedgerCore {
         pending.captured = contentId(activeText(head));
       }
     }
-    // P3 source: the nearest earlier swipe of the target holding a live record (the swipe the user
-    // swiped away from; a new swipe is appended after it).
-    if (input.kind === "renarrate" && input.targetMessageId && input.targetSwipeId !== null) {
+    // P3, L43 source: the swipe of the target it was made from, the one that showed as its new swipe
+    // was added (a Regenerate adds it last whichever showed), else the one before the new swipe, kept
+    // whether it holds a record or not: what it carries is searched for from there down, at commit
+    // (`rerunFixes`) and for its texts (the runtime's `rerunSource`), never from a later swipe. A
+    // Re-narrate's source is the nearest at or before it holding a live record; with none, it is a Re-run.
+    if ((input.kind === "renarrate" || input.kind === "swipe" || input.kind === "regenerate") && input.targetMessageId && input.targetSwipeId !== null) {
       const target = this.chain(observed).find((m) => m.id === input.targetMessageId);
-      for (let s = input.targetSwipeId - 1; s >= 0; s--) {
-        const rec = target?.ledger?.swipes[String(s)];
-        if (rec && target && !isTombstoned(j.tombstones, target.id, rec)) {
-          pending.renarrateOf = { messageId: target.id, swipeId: s };
-          break;
+      const from = Math.min(this.addedSwipeFrom(input.targetMessageId, input.targetSwipeId) ?? input.targetSwipeId - 1, input.targetSwipeId - 1);
+      if (target && from >= 0) {
+        pending.rerunOf = { messageId: target.id, swipeId: from };
+        for (let s = from; s >= 0 && input.kind === "renarrate"; s--) {
+          const rec = target.ledger?.swipes[String(s)];
+          if (rec && !isTombstoned(j.tombstones, target.id, rec)) {
+            pending.renarrateOf = { messageId: target.id, swipeId: s };
+            break;
+          }
         }
       }
     }
@@ -611,6 +668,9 @@ export class LedgerCore {
     Object.assign(p, { kind: from.kind, planned: true, chain: from.chain, userMessages: from.userMessages, seed: from.seed, markersApplied: from.markersApplied, parentPath: from.parentPath, events: from.events, startMarkers: from.startMarkers } satisfies Partial<PendingTurn>);
     if (from.renarrateOf) p.renarrateOf = from.renarrateOf;
     else delete p.renarrateOf;
+    // The swipe the prepared turn was made from, as it showed then: the generation that takes it adds its swipe last again.
+    if (from.rerunOf) p.rerunOf = from.rerunOf;
+    else delete p.rerunOf;
     if (from.copies) p.copies = from.copies;
     if (from.undone) p.undone = from.undone;
     if (from.dropped) p.dropped = from.dropped;
@@ -802,29 +862,31 @@ export class LedgerCore {
   }
 
   /**
-   * The swipe a Re-run was made from (the nearest earlier swipe of `target` holding a record) and
-   * its ✎ fixes and GM edits live on any of `parents`; null when it has none.
+   * The swipe a Re-run was made from (`source`, as it started: the one that showed as its swipe was
+   * added; without one, the nearest swipe of `target` before its own) or, that one holding no live
+   * record, the nearest before it that does, and its ✎ fixes and GM edits live on any of `parents`;
+   * null when it has none.
    */
-  private rerunFixes(target: ChainMessage, swipeId: number, parents: readonly PathHash[]): { source: Rec; fixes: PostEntry[] } | null {
-    for (let s = swipeId - 1; s >= 0; s--) {
-      const source = target.ledger?.swipes[String(s)];
-      if (!source || isTombstoned(this.journal.tombstones, target.id, source)) continue;
-      const fixes = source.post.filter((e) => e.kind === "fix" && parents.some((parent) => isLive(e.at, parent, turnPath(source))));
-      return fixes.length > 0 ? { source, fixes } : null;
+  private rerunFixes(target: ChainMessage, source: PendingTurn["rerunOf"], swipeId: number, parents: readonly PathHash[]): { source: Rec; fixes: PostEntry[] } | null {
+    const from = source?.messageId === target.id ? Math.min(source.swipeId, swipeId - 1) : swipeId - 1;
+    for (let s = from; s >= 0; s--) {
+      const rec = target.ledger?.swipes[String(s)];
+      if (!rec || isTombstoned(this.journal.tombstones, target.id, rec)) continue;
+      const fixes = rec.post.filter((e) => e.kind === "fix" && parents.some((parent) => isLive(e.at, parent, turnPath(rec))));
+      return fixes.length > 0 ? { source: rec, fixes } : null;
     }
     return null;
   }
 
   /**
-   * A Re-run carries the live ✎ fixes and GM edits of the swipe it was made from (the nearest
-   * earlier swipe holding a record), and a Re-narrate its copies, the same way: same `seq`s and
-   * undos, anchored at the new record's path, each re-validated after the new turn's events, its
-   * reply's read included, a GM edit or ✎ fix resolved again first (`carry`). One that can't be made
-   * there is dropped with a Journal note.
+   * A Re-run carries the live ✎ fixes and GM edits of the swipe it was made from (`rerunFixes`), and
+   * a Re-narrate its copies, the same way: same `seq`s and undos, anchored at the new record's path,
+   * each re-validated after the new turn's events, its reply's read included, a GM edit or ✎ fix
+   * resolved again first (`carry`). One that can't be made there is dropped with a Journal note.
    */
-  private carryFixes(rec: Rec, target: ChainMessage | undefined, swipeId: number, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }): void {
+  private carryFixes(rec: Rec, target: ChainMessage | undefined, source: PendingTurn["rerunOf"], swipeId: number, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }): void {
     // The fixes in force on the chain the Re-run was read on (the one it was planned on, when it could be rebuilt).
-    const found = target ? this.rerunFixes(target, swipeId, [prefix.parent]) : null;
+    const found = target ? this.rerunFixes(target, source, swipeId, [prefix.parent]) : null;
     if (!target || !found) return;
     this.carryOnto(rec, target, found.fixes, found.source.undone, prefix);
   }
@@ -844,8 +906,8 @@ export class LedgerCore {
    * each it would have carried (live on one of `parents`, and not wholly undone) is dropped with a
    * Journal note (L43), so a GM's correction never just disappears from the new swipe.
    */
-  private leaveFixes(rec: Rec, target: ChainMessage | undefined, swipeId: number, parents: readonly PathHash[]): void {
-    const found = target ? this.rerunFixes(target, swipeId, parents) : null;
+  private leaveFixes(rec: Rec, target: ChainMessage | undefined, source: PendingTurn["rerunOf"], swipeId: number, parents: readonly PathHash[]): void {
+    const found = target ? this.rerunFixes(target, source, swipeId, parents) : null;
     if (!found) return;
     const left = pausedDrops(found.fixes, found.source.undone);
     if (left.length > 0) rec.dropped = left;
@@ -1111,13 +1173,13 @@ export class LedgerCore {
       const prefix = this.prefixState(at.out, target, rec, start);
       if (prefix && read) rec.events.push(...this.read(prefix.state, prefix.world, readSeed(p.seed), content));
       // Starting markers land only on a record that holds events: one left with none folds its carried fixes without them.
-      if (prefix && carries) this.carryFixes(rec, target, swipeId, start.length > 0 && rec.events.length === 0 ? (this.prefixState(at.out, target, rec) ?? prefix) : prefix);
+      if (prefix && carries) this.carryFixes(rec, target, p.rerunOf, swipeId, start.length > 0 && rec.events.length === 0 ? (this.prefixState(at.out, target, rec) ?? prefix) : prefix);
     } else if (rerun && paused) {
       // What it leaves is what was live where it was made or on the chain in force, where it would
       // be read: the edit that paused it changed a user message of the chain it was planned on, or
       // it had no plan and commits where it lands.
       const inForce = (at?.out ?? this.fold(observed.slice(0, index))).messages.at(-1)?.path ?? ROOT_PATH;
-      this.leaveFixes(rec, target, swipeId, [p.parentPath, inForce]);
+      this.leaveFixes(rec, target, p.rerunOf, swipeId, [p.parentPath, inForce]);
     }
     const ledger = this.ledgerFor(messageId, observed[index]);
     ledger.swipes[String(swipeId)] = rec;

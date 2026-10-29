@@ -21,7 +21,8 @@ import { hasOwn, type JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
 import { factId, type KnowledgeFact, MINDS_EVENTS, type MindsGmView } from "../../src/shared/minds";
 import { GM_TEXT, promptDef } from "../../src/shared/prompts";
-import type { AssistantView, BackendToFrontend } from "../../src/shared/protocol";
+import { type AssistantView, type BackendToFrontend, WRITE_REFUSED } from "../../src/shared/protocol";
+import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import type { QuietScript } from "../support/fake-host";
 import { Rig } from "../support/rig";
@@ -426,6 +427,88 @@ describe("its changes", () => {
     // Once is all: nothing is left to apply, and each change counted once.
     expect(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id })).toMatchObject({ type: "lre.error", code: "bad_request" });
     expect(await counts()).toEqual([[2, 0]]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("with your character's knowledge, a change whose write a turn refused between its check and its write applies again, its reason the note every refusal gives", async () => {
+    const { rig, chatId } = await alder({ agents: { assistant: { knowledge: "pov" } } });
+    const path = "notes/harbor.md";
+    const learned = "learned/harbor.md";
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "The harbor wakes early.", readers: "pov" }));
+    model(rig, (req) => (resultsOf(req).length === 0 ? { content: "", toolCalls: [call("workspace_pin", { path, pinned: true }, "c1"), call("workspace_write", { path: learned, text: "The harbor wakes before six." }, "c2")] } : "Pinned, and noted."));
+    const [proposal] = (await ask(rig, chatId, "Pin the harbor note, and keep what you learned.")).proposals;
+    expect(proposal?.status).toBe("open");
+    // A turn lands between the writer's check and its write: the ledger refuses the edit, in words that are the GM's.
+    const write = rig.rt.ledger.write.bind(rig.rt.ledger);
+    let landed = false;
+    rig.rt.ledger.write = async (id, user, w) => {
+      if (landed || w.kind !== "post" || w.entry.agent?.role !== "assistant") return write(id, user, w);
+      landed = true;
+      return { applied: false, pending: false, reason: "GM-REASON: the turn moved the harbor note" };
+    };
+    const refused = (rig.body(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id })) as unknown as AssistantView).proposals[0];
+    // The learned note landed, so the proposal stands applied; the pin says only what any refusal says to your character, under the code Apply again sends.
+    expect(refused?.status).toBe("applied");
+    expect(refused?.ops.map((o) => [o.applied, o.refused])).toEqual([
+      [undefined, { code: WRITE_REFUSED, reason: renderPrompt(WRITE_NOTE.povRefused, {}, { pov: "Jordan Ellis" }) }],
+      [true, undefined],
+    ]);
+    expect(JSON.stringify(rig.host.sent)).not.toContain("GM-REASON");
+    const again = (rig.body(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id })) as unknown as AssistantView).proposals[0];
+    expect(again?.ops.map((o) => [o.applied, o.refused?.code])).toEqual([
+      [true, undefined],
+      [true, undefined],
+    ]);
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).find((f) => f.path === path)?.pinned).toBe(true);
+  });
+
+  test("notes the assistant's Apply and GM → Workspace wrote on an earlier swipe of the head reply follow a Re-run and a Re-narrate made from it, each with its Undo there, and are gone on the swipe made before them", async () => {
+    const { rig, chatId } = await alder();
+    const user = rig.host.userId;
+    await rig.turn(chatId, "I look around.", "The street is quiet.");
+    const reply = rig.host.head(chatId);
+    if (!reply) throw new Error("no reply");
+    // A second swipe, made before the notes; then back on the first, where they are written.
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The street is quiet still.");
+    const shown = async (swipe: number): Promise<void> => {
+      rig.host.navigate(chatId, reply.id, swipe);
+      await rig.host.settle();
+    };
+    await shown(0);
+    const proposed = "notes/acceptance.md";
+    const own = "notes/marina.md";
+    model(rig, (req) => (resultsOf(req).length === 0 ? { content: "", toolCalls: [call("workspace_write", { path: proposed, text: "Marcus opens the shop at seven." })] } : "Noted."));
+    const [proposal] = (await ask(rig, chatId, "Note when Marcus opens the shop.")).proposals;
+    rig.body(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id }));
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: own, text: "Keep an eye on the marina." }));
+    const paths = async (): Promise<string[]> => (await listWorkspace(rig.rt, { userId: user, chatId, knowledge: "gm" })).map((f) => f.path);
+    const both = [proposed, own].sort();
+    expect(await paths()).toEqual(both);
+    await shown(1);
+    expect(await paths()).toEqual([]);
+    for (const mode of ["rerun", "renarrate"] as const) {
+      // Regenerated while the first swipe shows: the new swipe goes last, and is made from the first.
+      await shown(0);
+      rig.rt.setSwipeChoice(chatId, mode);
+      await rig.host.finish(await rig.host.start(chatId, { type: "regenerate" }), `The street wakes (${mode}).`);
+      const message = rig.host.message(chatId, reply.id);
+      const made = message.swipeId;
+      expect(made).toBe(message.swipes.length - 1);
+      const swipes = (await rig.rt.ledger.core(chatId, user))?.journal.messages[reply.id]?.ledger.swipes;
+      expect(swipes?.[String(made)]?.seed === swipes?.["0"]?.seed).toBe(mode === "renarrate");
+      expect(await paths()).toEqual(both);
+      // Each note keeps its entry, its seq, and so its Undo, on the new swipe; an Undo there takes back that note alone.
+      const carried = swipes?.[String(made)]?.post.filter((e) => e.agent !== undefined) ?? [];
+      expect(carried.map((e) => e.seq)).toEqual(swipes?.["0"]?.post.filter((e) => e.agent !== undefined).map((e) => e.seq) ?? []);
+      const theirs = carried.find((e) => e.agent?.role === "assistant");
+      rig.body(await rig.send({ type: "lre.chip", chatId, chip: fixChip(reply.id, made, theirs?.seq ?? -1), choice: "undo" }));
+      expect(await paths()).toEqual([own]);
+    }
+    // The swipe they were written on keeps both, the one made before them neither.
+    await shown(0);
+    expect(await paths()).toEqual(both);
+    await shown(1);
+    expect(await paths()).toEqual([]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

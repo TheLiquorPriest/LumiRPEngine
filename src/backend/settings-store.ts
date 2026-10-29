@@ -774,12 +774,30 @@ export function undoModeChange(learning: ExtractionLearning, change: ModeChange)
 // ---------------------------------------------------------------- the store
 
 /**
+ * What the acceptance runs' file holds of the connections they guard (`AgentAccounts.guard`): its
+ * list, undefined until one was kept there; `lost`, the file was damaged and set aside and no list
+ * was kept since; `setAside`, that was found as this read took it in, when the settings' own copy of
+ * the list may stand for it (one written later, while the guard was unknown, says nothing).
+ */
+export interface GuardRead {
+  connections: readonly AcceptanceConnection[] | undefined;
+  lost: boolean;
+  setAside: boolean;
+}
+
+/**
  * Where the connections acceptance runs guard are kept apart from the settings file (the runs'
- * own, `AgentAccounts`): read over the file's own list, and kept there on each change.
+ * own, `AgentAccounts`): read over the file's own list, and kept there on each change. `get` throws
+ * when that file can't be read.
  */
 export interface AcceptanceGuardStore {
-  get(userId: UserId): Promise<readonly AcceptanceConnection[] | undefined>;
+  get(userId: UserId): Promise<GuardRead>;
   set(userId: UserId, connections: readonly AcceptanceConnection[]): Promise<void>;
+}
+
+/** Whether a settings file holds its own copy of the connections acceptance runs guard: a build from before the agents writes none. */
+function hasGuardCopy(raw: unknown): boolean {
+  return isRecord(raw) && isRecord(raw.agents) && isRecord(raw.agents.acceptance) && Array.isArray(raw.agents.acceptance.connections);
 }
 
 export class SettingsStore {
@@ -795,48 +813,74 @@ export class SettingsStore {
   ) {}
 
   async get(userId: UserId): Promise<UserSettings> {
+    return (await this.read(userId)).settings;
+  }
+
+  /**
+   * The user's settings, and whether they are kept: not while which connections acceptance runs
+   * guard is unknown (`withGuard`), so each read tries the guard again. The rest of them serve all
+   * the same (a classic turn reads them), and `loaded` hears them on each read.
+   */
+  private async read(userId: UserId): Promise<{ settings: UserSettings; kept: boolean }> {
     const known = this.settings.get(userId);
-    if (known) return known;
+    if (known) return { settings: known, kept: true };
     const raw = await readStoredJson(this.host, SETTINGS_PATH, userId, "settings", (r) => isRecord(r) && r.v === 1);
     const settings = normalize(migrateMarkWording(raw ?? null));
-    await this.withGuard(userId, settings);
-    this.settings.set(userId, settings);
+    const kept = await this.withGuard(userId, settings, hasGuardCopy(raw));
+    if (kept) this.settings.set(userId, settings);
     this.loaded(userId, settings);
-    return settings;
+    return { settings, kept };
   }
 
   /**
    * The connections acceptance runs guard, as `guards` keeps them, over the settings file's own
-   * list: a build from before the agents writes the settings without them, and the guard holds all
-   * the same. A list only the settings file holds (kept before the guard was kept apart) moves there;
-   * one that can't be moved yet is read from the settings file, and moved on a later start.
+   * list (`copy`: whether the file holds one): a build from before the agents writes the settings
+   * without them, and the guard holds all the same. A list only the settings file holds (kept before
+   * the guard was kept apart) moves there; one that can't be moved yet is read from the settings
+   * file, and moved on a later start. False while which connections are guarded is unknown: the
+   * runs' file can't be read, or it was lost with no copy here from before to stand for it; every
+   * agent call is refused meanwhile (`AgentAccounts.reserve`).
    */
-  private async withGuard(userId: UserId, settings: UserSettings): Promise<void> {
-    if (!this.guards) return;
-    const kept = await this.guards.get(userId);
-    if (kept !== undefined) settings.agents.acceptance.connections = kept.map((c) => ({ ...c }));
-    else if (settings.agents.acceptance.connections.length > 0) {
-      await this.guards.set(userId, settings.agents.acceptance.connections).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] the connections acceptance runs guard weren't moved beside the runs (${error instanceof Error ? error.message : String(error)}); they are read from the settings until they are`, userId));
+  private async withGuard(userId: UserId, settings: UserSettings, copy: boolean): Promise<boolean> {
+    if (!this.guards) return true;
+    let read: GuardRead;
+    try {
+      read = await this.guards.get(userId);
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] the acceptance runs' file couldn't be read (${error instanceof Error ? error.message : String(error)}): which connections they guard isn't known, and no agent call goes until it can be read`, userId);
+      return false;
     }
+    if (read.connections !== undefined) {
+      settings.agents.acceptance.connections = read.connections.map((c) => ({ ...c }));
+      return true;
+    }
+    // A lost guard is known again only from the copy the settings held as it was lost.
+    if (read.lost && !(read.setAside && copy)) return false;
+    if (read.lost || settings.agents.acceptance.connections.length > 0) {
+      await this.guards.set(userId, settings.agents.acceptance.connections).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] the connections acceptance runs guard weren't kept beside the runs (${error instanceof Error ? error.message : String(error)}); they are read from the settings until they are`, userId));
+    }
+    return true;
   }
 
   /**
    * Sets the user's settings to what `patch` makes of them. `check` sees the settings before and
    * after and may refuse the write by throwing (a guard on what a caller may change, however its
    * patch says it). A change to the acceptance runs' guard is kept apart (`guards`) before the
-   * settings file is written.
+   * settings file is written, and makes a guard that was unknown known again; till then the
+   * settings aren't kept, as `read` keeps none.
    */
   async set(userId: UserId, patch: JsonObject, check?: (current: Readonly<UserSettings>, next: Readonly<UserSettings>) => void): Promise<UserSettings> {
-    const current = await this.get(userId);
+    const { settings: current, kept } = await this.read(userId);
     const merged = normalize(mergePatch(JSON.parse(JSON.stringify(current)) as JsonValue, patch));
     const next = expandPresets(merged, patch);
     // A text of the user's own is stored only as it can be sent: one this write changed that can't be stays as it was.
     next.prompts = promptsWritten(current.prompts, next.prompts);
     check?.(current, next);
-    if (this.guards && JSON.stringify(next.agents.acceptance.connections) !== JSON.stringify(current.agents.acceptance.connections)) await this.guards.set(userId, next.agents.acceptance.connections);
+    const guard = JSON.stringify(next.agents.acceptance.connections) !== JSON.stringify(current.agents.acceptance.connections);
+    if (this.guards && guard) await this.guards.set(userId, next.agents.acceptance.connections);
     await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(storedForm(next)), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
-    this.settings.set(userId, next);
+    if (kept || guard) this.settings.set(userId, next);
     this.revisions.set(userId, this.revision(userId) + 1);
     this.loaded(userId, next);
     return next;

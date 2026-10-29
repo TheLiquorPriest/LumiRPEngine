@@ -1,6 +1,7 @@
-// The time family (INC1-SPEC R3a) on Port Alder: the clock at the start under every knowledge, and
-// under the player character's only as far as its Calendar & time level shows it; a person's day as
-// Play's Cast shows it, as the planner lays it with a secret place marked, and as the GM reads it.
+// The time family (INC1-SPEC R3a) on Port Alder: the clock at the start under every knowledge, local
+// to a place asked about, and under the player character's only as far as its Calendar & time level
+// shows it; a person's day as Play's Cast shows it, as the planner lays it with a secret place
+// marked, and as the GM reads it.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
@@ -55,6 +56,16 @@ describe("time_clock", () => {
     const off = await callTool(rig, chatId, "pov", "time_clock");
     expect(off.error).toBe(true);
     expect(off.text).toContain(HIDDEN);
+  });
+
+  test("local to a place asked about: Chicago is an hour behind Port Alder; one the player character can't know of reads as one that doesn't exist", async () => {
+    const { rig, chatId } = await alderChat();
+    for (const knowledge of KNOWLEDGE) expect(await answerOf<Clock>(rig, chatId, knowledge, "time_clock", { place: "Chicago, Illinois" })).toMatchObject({ time: "Mon 14 Sep 2026, 5:15 AM", minutes: 375 });
+    // Left out or blank: where the player character is.
+    expect(await answerOf<Clock>(rig, chatId, "gm", "time_clock", { place: " " })).toMatchObject({ time: START });
+    expect(await answerOf<Clock>(rig, chatId, "gm", "time_clock", { place: "12 Birch Lane" })).toMatchObject({ time: START });
+    expect(await callTool(rig, chatId, "pov", "time_clock", { place: "12 Birch Lane" })).toEqual({ text: "No such place here: 12 Birch Lane.", error: true });
+    expect(await callTool(rig, chatId, "pov", "time_clock", { place: "Nowhere Street" })).toEqual({ text: "No such place here: Nowhere Street.", error: true });
   });
 });
 

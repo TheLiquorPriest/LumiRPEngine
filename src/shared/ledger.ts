@@ -550,6 +550,14 @@ export interface PendingTurn {
   captured?: ContentId;
   /** Re-narrate source (P3). */
   renarrateOf?: { messageId: MessageId; swipeId: number };
+  /**
+   * A swipe's or Regenerate's source (P3, L43), a Re-narrate's too: the swipe of its target it was
+   * made from, the one shown as its new swipe was added (a Regenerate adds it last, whichever showed),
+   * whether it holds a record or not; deleted while the turn is in flight, the swipe below it, or -1
+   * (nothing) when it was the first. What a Re-run carries, and the texts it is sent, are those of the
+   * nearest swipe at or before it holding a live record, never a later one.
+   */
+  rerunOf?: { messageId: MessageId; swipeId: number };
   /** Re-narrate: the source's live fixes and materializations, with their `seq`s and the new parent path as `at`, carried at commit after the reply's read (P3). */
   copies?: PostEntry[];
   /** Re-narrate: the source's undos of the copies' events, which stay undone. */
