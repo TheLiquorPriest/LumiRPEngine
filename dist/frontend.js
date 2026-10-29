@@ -4884,7 +4884,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   knowledge: { on: true }
 });
 var KNOWLEDGE_BATCHES = ["scene", "character"];
-var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 6, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
 var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER] };
 var KNOWLEDGE_LIMITS = ["claimChars", "mindTokens", "narratorTokens", "stepTokens", "factsPerChat", "holdersPerFact", "factsPerTurn", "learningsPerTurn", "inPlayTurns", "perPerson"];
 function knowledgeLimitRange(limit) {
@@ -4906,6 +4906,7 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   guessed: "a guess",
   person: "{{name}}: {{line}}",
   notKnown: "{{name}} doesn't know: {{claim}}",
+  everyoneHere: "Everyone here: {{line}}",
   stepHappened: "What happened this turn",
   stepPresent: "Who could perceive it",
   stepPeople: "What each of them already knows, and has witnessed lately",
@@ -4926,7 +4927,7 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   stepWitnessed: "Witnessed lately:",
   stepSomeone: "someone",
   stepAnswer: [
-    "- facts: the new facts this turn establishes or raises that matter to someone: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; what someone now believes about another person, where it changes how they treat them; an open question someone is pursuing. Never small talk, how the scene looks, or plain events the story already shows: the story itself is what everyone there knows of those. Each one short sentence, with a ref of your own (n1, n2…) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
+    "- facts: only the few new facts, usually none and at most one or two, that would change what someone does, says, hides, or believes about another person: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; an open question someone is pursuing. Something said or done in plain view is a fact only when it is one of these; the rest the story holds. Small talk, advice and description are never facts. Each one short sentence, with a ref of your own (n1, n2…) the lists below use; matters: why it matters and to whom, in a few words (a fact without it is dropped); about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
     `- learned: who came to know a fact this turn, and how. witnessed: it happened, was said aloud or was shown in front of them, so everyone there throughout perceived it, the player character included; missed: only those there who didn't, such as someone out of earshot of a whisper, asleep or looking away ("you" for the player character); leave it out when no one did. told: who: whom they told; by: who told them, who must already know it. keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.`,
     "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
     "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
@@ -5034,13 +5035,13 @@ var MIND_PROMPT_DEFAULTS = Object.freeze({
   consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
   knowledge: [
     "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
-    "The story itself is what everyone who was there knows of the scene: never restate it. Record only what matters to someone: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; what someone now believes about another person, where it changes how they treat them; an open question someone is pursuing. Record nothing of small talk, of how the scene looks, or of plain events the story already shows.",
+    "The story itself is what everyone who was there knows of the scene: never restate it. Record only the few facts, usually none and at most one or two, that would change what someone does, says, hides, or believes about another person: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; an open question someone is pursuing. Something said or done in plain view is a fact only when it is one of these; the rest the story holds. Small talk, advice and description are never facts. Say of each fact why it matters and to whom.",
     "Everyone there throughout witnessed what happened in front of them (seeing it, hearing it said aloud, reading it), the player character included: name only who missed something, such as a whisper out of earshot, or someone asleep or looking away. Whoever was there for only part of the turn, or wasn't there, witnessed none of it. Someone may also be told something by someone who already knows it, or work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
     "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold."
   ].join(`
 `)
 });
-var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"fact": "a fact id or n1", "how": "witnessed", "missed": ["a name"], "keptFrom": ["a name"]}, {"fact": "a fact id or n2", "how": "told", "who": ["a name"], "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
+var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "matters": "why it matters, and to whom", "about": ["a name"], "truth": "true"}], "learned": [{"fact": "a fact id or n1", "how": "witnessed", "missed": ["a name"], "keptFrom": ["a name"]}, {"fact": "a fact id or n2", "how": "told", "who": ["a name"], "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
@@ -30959,7 +30960,7 @@ var LIMIT_FIELD = {
   claimChars: { label: "A fact's claim (characters)", note: "The longest claim the knowledge step records; a longer one is cut.", step: 10 },
   factsPerChat: { label: "Facts made in play, per chat", note: "Past it, the knowledge step makes no new fact; people still learn the ones there are.", step: 1 },
   holdersPerFact: { label: "People who may hold one fact", note: "Past it, no one else learns that fact from the knowledge step.", step: 1 },
-  factsPerTurn: { label: "New facts a turn", note: "The most new facts one turn's knowledge step records.", step: 1 },
+  factsPerTurn: { label: "New facts a turn", note: "The most new facts one turn's knowledge step records, each saying why it matters and to whom; most turns need none.", step: 1 },
   learningsPerTurn: { label: "Learnings a turn", note: "The most learnings one turn's knowledge step records: each person told something counts one, and each fact seen or heard counts one however many were there.", step: 1 },
   inPlayTurns: { label: "A fact stays in play for (turns)", note: "A fact is in play while someone learned it within this many of the latest turns, or while it's about someone or somewhere here.", step: 1 }
 };
@@ -31005,7 +31006,7 @@ var TEXT_GROUP_TITLE = {
 var TEXT_GROUP_NOTE = {
   mind: "The heading and lead over the facts a mind holds.",
   holding: "Each line a mind, the narrator and the knowledge step read for a fact someone holds, and the words for how they came by it.",
-  narrator: "How Who knows what names a person's facts, and what they don't know.",
+  narrator: "How Who knows what names a person's facts, what everyone here holds alike, and what someone doesn't know.",
   step: "The headings of what the knowledge step is given."
 };
 var TEXT_FIELD = {
@@ -31024,6 +31025,7 @@ var TEXT_FIELD = {
   guessed: { group: "holding", label: "How: a guess" },
   person: { group: "narrator", label: "A person's line" },
   notKnown: { group: "narrator", label: "What someone doesn't know" },
+  everyoneHere: { group: "narrator", label: "What everyone here holds alike" },
   stepHappened: { group: "step", label: "What happened" },
   stepPresent: { group: "step", label: "Who could perceive it" },
   stepPeople: { group: "step", label: "What each already knows" },
@@ -51420,6 +51422,9 @@ function Holdings(props) {
                 /* @__PURE__ */ u3("span", {
                   children: `${howWords(h3)} · since ${h3.sinceText}`
                 }, undefined, false, undefined, this),
+                h3.matters !== undefined ? /* @__PURE__ */ u3("span", {
+                  children: `Matters: ${h3.matters}`
+                }, undefined, false, undefined, this) : null,
                 /* @__PURE__ */ u3("span", {
                   children: beliefWords(h3)
                 }, undefined, false, undefined, this),
@@ -51482,10 +51487,18 @@ function HoldingPage2(props) {
         children: [
           /* @__PURE__ */ u3(Section, {
             children: [
-              holding2 ? /* @__PURE__ */ u3("p", {
-                class: "lre-gm-minds-prose",
-                children: holding2.claim
-              }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Field, {
+              holding2 ? /* @__PURE__ */ u3(M, {
+                children: [
+                  /* @__PURE__ */ u3("p", {
+                    class: "lre-gm-minds-prose",
+                    children: holding2.claim
+                  }, undefined, false, undefined, this),
+                  holding2.matters !== undefined ? /* @__PURE__ */ u3("p", {
+                    class: "lre-gm-minds-prose",
+                    children: `Matters: ${holding2.matters}`
+                  }, undefined, false, undefined, this) : null
+                ]
+              }, undefined, true, undefined, this) : /* @__PURE__ */ u3(Field, {
                 label: "What they hold",
                 for: ids.fact,
                 help: chosen ? `${TRUTH_LABEL[chosen.truth]}, as you hold it.` : "The chat holds no fact they don't.",

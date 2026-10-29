@@ -553,7 +553,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   life: { on: false, tokens: "none" },
   knowledge: { on: true }
 });
-var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 6, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
 var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER] };
 var KNOWLEDGE_TEXTS = Object.freeze({
   mindTitle: "What you know",
@@ -571,6 +571,7 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   guessed: "a guess",
   person: "{{name}}: {{line}}",
   notKnown: "{{name}} doesn't know: {{claim}}",
+  everyoneHere: "Everyone here: {{line}}",
   stepHappened: "What happened this turn",
   stepPresent: "Who could perceive it",
   stepPeople: "What each of them already knows, and has witnessed lately",
@@ -591,7 +592,7 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   stepWitnessed: "Witnessed lately:",
   stepSomeone: "someone",
   stepAnswer: [
-    "- facts: the new facts this turn establishes or raises that matter to someone: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; what someone now believes about another person, where it changes how they treat them; an open question someone is pursuing. Never small talk, how the scene looks, or plain events the story already shows: the story itself is what everyone there knows of those. Each one short sentence, with a ref of your own (n1, n2\u2026) the lists below use; about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
+    "- facts: only the few new facts, usually none and at most one or two, that would change what someone does, says, hides, or believes about another person: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; an open question someone is pursuing. Something said or done in plain view is a fact only when it is one of these; the rest the story holds. Small talk, advice and description are never facts. Each one short sentence, with a ref of your own (n1, n2\u2026) the lists below use; matters: why it matters and to whom, in a few words (a fact without it is dropped); about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
     `- learned: who came to know a fact this turn, and how. witnessed: it happened, was said aloud or was shown in front of them, so everyone there throughout perceived it, the player character included; missed: only those there who didn't, such as someone out of earshot of a whisper, asleep or looking away ("you" for the player character); leave it out when no one did. told: who: whom they told; by: who told them, who must already know it. keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.`,
     "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
     "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
@@ -786,13 +787,13 @@ var MIND_PROMPT_DEFAULTS = Object.freeze({
   consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
   knowledge: [
     "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
-    "The story itself is what everyone who was there knows of the scene: never restate it. Record only what matters to someone: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; what someone now believes about another person, where it changes how they treat them; an open question someone is pursuing. Record nothing of small talk, of how the scene looks, or of plain events the story already shows.",
+    "The story itself is what everyone who was there knows of the scene: never restate it. Record only the few facts, usually none and at most one or two, that would change what someone does, says, hides, or believes about another person: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; an open question someone is pursuing. Something said or done in plain view is a fact only when it is one of these; the rest the story holds. Small talk, advice and description are never facts. Say of each fact why it matters and to whom.",
     "Everyone there throughout witnessed what happened in front of them (seeing it, hearing it said aloud, reading it), the player character included: name only who missed something, such as a whisper out of earshot, or someone asleep or looking away. Whoever was there for only part of the turn, or wasn't there, witnessed none of it. Someone may also be told something by someone who already knows it, or work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
     "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold."
   ].join(`
 `)
 });
-var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "about": ["a name"], "truth": "true"}], "learned": [{"fact": "a fact id or n1", "how": "witnessed", "missed": ["a name"], "keptFrom": ["a name"]}, {"fact": "a fact id or n2", "how": "told", "who": ["a name"], "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
+var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "matters": "why it matters, and to whom", "about": ["a name"], "truth": "true"}], "learned": [{"fact": "a fact id or n1", "how": "witnessed", "missed": ["a name"], "keptFrom": ["a name"]}, {"fact": "a fact id or n2", "how": "told", "who": ["a name"], "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
@@ -34649,7 +34650,7 @@ function isFact(v) {
   if (!isRecord(v) || !str13(v.id) || typeof v.kind !== "string" || !FACT_KINDS.includes(v.kind) || parseFactId(v.id)?.kind !== v.kind)
     return false;
   const source = v.source;
-  return str13(v.claim) && v.claim.trim() !== "" && someIds(v.about) && typeof v.truth === "string" && FACT_TRUTHS.includes(v.truth) && (source === undefined || isRecord(source) && (source.msg === null || str13(source.msg)) && finite2(source.at)) && (v.textHash === undefined || str13(v.textHash) && v.textHash !== "");
+  return str13(v.claim) && v.claim.trim() !== "" && someIds(v.about) && typeof v.truth === "string" && FACT_TRUTHS.includes(v.truth) && (source === undefined || isRecord(source) && (source.msg === null || str13(source.msg)) && finite2(source.at)) && (v.textHash === undefined || str13(v.textHash) && v.textHash !== "") && (v.matters === undefined || str13(v.matters) && v.matters.trim() !== "");
 }
 function isHolding(v) {
   if (!isRecord(v) || typeof v.how !== "string" || !HOLDING_HOWS.includes(v.how))
@@ -34662,7 +34663,7 @@ function holdingOf(v, self) {
   return { how: v.how, by: v.by, evidence: [...new Set(v.evidence)], since: { msg: v.since.msg, at: v.since.at }, belief: v.belief, confidence: v.confidence, ...keptFrom ? { keptFrom } : {} };
 }
 function factOf2(v) {
-  return { id: v.id, kind: v.kind, claim: v.claim, about: [...v.about], truth: v.truth, ...v.source ? { source: { msg: v.source.msg, at: v.source.at } } : {}, ...v.textHash !== undefined ? { textHash: v.textHash } : {} };
+  return { id: v.id, kind: v.kind, claim: v.claim, about: [...v.about], truth: v.truth, ...v.source ? { source: { msg: v.source.msg, at: v.source.at } } : {}, ...v.textHash !== undefined ? { textHash: v.textHash } : {}, ...v.matters !== undefined ? { matters: v.matters } : {} };
 }
 function learnedHolding(d) {
   return { how: d.how ?? null, by: d.by ?? null, evidence: d.evidence ?? null, since: { msg: d.msg ?? null, at: d.at ?? null }, belief: d.belief ?? null, confidence: d.confidence ?? null, ...d.keptFrom !== undefined ? { keptFrom: d.keptFrom } : {} };
@@ -35301,12 +35302,16 @@ function rankedHoldings(slice2, who, play) {
 }
 
 // src/packs/minds/core/knowledge-section.ts
-function presentPeople(ctx) {
+function peopleThere(ctx) {
   const { registry: reg, world, state: state2 } = ctx;
   const here = placeOfEntity(state2, world.pov);
   if (here === null)
     return [];
-  return Object.keys(state2.entities).sort().filter((id) => id !== world.pov && together(world, here, placeOfEntity(state2, id)) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id) && acts(world, state2, id) && canSeeEntity(reg, world, state2, world.pov, id));
+  return Object.keys(state2.entities).sort().filter((id) => id !== world.pov && together(world, here, placeOfEntity(state2, id)) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id));
+}
+function presentPeople(ctx) {
+  const { registry: reg, world, state: state2 } = ctx;
+  return peopleThere(ctx).filter((id) => acts(world, state2, id) && canSeeEntity(reg, world, state2, world.pov, id));
 }
 function worldSecrets(ctx) {
   const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
@@ -35340,6 +35345,7 @@ function knowledgeLines(ctx, scope) {
   const play = { here: [pov, ...people, ...place2 ? [place2] : []], recent: latestTurns(slice2, settings.inPlayTurns), secret };
   const claim2 = (fact, id) => applyMarks(fact?.claim ?? id, { world, state: state2 }, "omit");
   const others = scope === "player" ? [] : people;
+  const there = others.length > 0 ? peopleThere(ctx) : [];
   const listed2 = [pov, ...others].flatMap((who) => rankedHoldings(slice2, who, play).slice(0, settings.perPerson).map((h) => ({ who, h })));
   const povHolds = holdingsOf(slice2, pov);
   const out = [];
@@ -35348,6 +35354,17 @@ function knowledgeLines(ctx, scope) {
     const yours = own(povHolds, id);
     const fact = holders[0]?.h.fact;
     const kept2 = yours !== undefined && secret(id, fact) && !revealsFact(id, yours, threshold2) ? { keptFrom: yours.keptFrom ?? "everyone", known: [pov] } : null;
+    if (yours !== undefined && kept2 === null && others.length > 0) {
+      const line2 = holdingLine(claim2(fact, id), yours, words5);
+      const alike = [pov, ...there].every((who) => {
+        const h = own(holdingsOf(slice2, who), id);
+        return h !== undefined && h.keptFrom === undefined && holdingLine(claim2(fact, id), h, words5) === line2;
+      });
+      if (alike) {
+        out.push({ text: fillText(knowledgeText(settings, "everyoneHere"), { line: line2 }), known: "pov", group: id });
+        continue;
+      }
+    }
     for (const { who, h } of holders) {
       const text5 = fillText(knowledgeText(settings, "person"), { name: who === pov ? "You" : name(who), line: holdingLine(claim2(h.fact, id), h.holding, words5) });
       if (yours !== undefined)
