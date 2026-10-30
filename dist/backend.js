@@ -80250,9 +80250,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "b5a9b6e2bbb1163ee2fe88b6783340f5136d567663ce8777300900c51bf9a23f";
+  const sha256 = "26c1349e740ac7d60df226f5e41fde61b9e2fe3a1040dcc00527c571002f2b97";
   const tools = ["5ca8a6ecfcb445de79568df75ce1a851", "8cbe8a340efbca329a1053f6c445d270"].filter((f) => f !== undefined);
-  return { id: "9c580f04", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "9f1937dd", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -91213,7 +91213,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "9c580f04" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "9f1937dd" }), (chatId) => this.messages.forget(chatId));
     this.sessions = new Sessions(this.blobs, this.ledger);
     this.chatAgents = new ChatAgentMeta(this.host, this.chatMeta);
     this.sweep = new Sweep({ host: this.host, blobs: this.blobs, retention: async (userId) => (await this.settings.get(userId)).retention, turning: (userId) => this.ledger.turning(userId), journals: (userId) => this.ledger.journals(userId), transcripts: (chatId, userId) => this.diag.transcripts(chatId, userId) });
@@ -91565,6 +91565,9 @@ class Runtime {
       const input = { ...asking, timelapse, ...kept2 && !timelapse ? { kept: await kept2.minds } : {} };
       return calls.minds({ input, classic: (s) => preMinds(this.minds, { ...input, signal: s }) }, AbortSignal.any([signal2, stop2.signal]));
     })();
+    task.catch(() => {
+      return;
+    });
     return { timelapse, task, stop: stop2 };
   }
   keepMinds(chatId, key, thinking) {
