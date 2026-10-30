@@ -1377,6 +1377,10 @@ export class Runtime implements TurnHooks {
       const input = { ...asking, timelapse, ...(kept && !timelapse ? { kept: await kept.minds } : {}) };
       return calls.minds({ input, classic: (s) => preMinds(this.minds, { ...input, signal: s }) }, AbortSignal.any([signal, stop.signal]));
     })();
+    // A run that stops these minds (a timelapse found after they started, a halted turn) may never
+    // await them, and agent-backed minds reject on that abort: unhandled, that rejection would end
+    // the extension's runtime. Whoever awaits `task` still gets its rejection.
+    task.catch(() => undefined);
     return { timelapse, task, stop };
   }
 
